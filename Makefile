@@ -62,7 +62,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         test test-rust test-rust-doc test-nginx-unit test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
         test-nginx-integration test-e2e test-e2e-rust test-all test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
-        harness-check harness-check-full harness-security-checks test-harness regex-security-check e2e-streaming-config-check sonar-encoding-check release-supply-chain-check public-surface-drift-check \
+        harness-check harness-check-full harness-security-checks test-harness regex-security-check e2e-streaming-config-check sonar-encoding-check release-supply-chain-check public-surface-drift-check schema-drift-check \
         security-static security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny \
         supply-chain supply-chain-trivy supply-chain-sbom \
         complexity-check \
@@ -76,6 +76,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         verify-streaming-failure-cache-e2e-plan \
         verify-metrics-endpoint-e2e verify-conditional-requests-e2e verify-config-merge-e2e \
         verify-auth-cache-e2e verify-status-codes-e2e \
+        verify-diagnostics-access-phase-e2e \
         test-rust-streaming \
         coverage-c coverage-rust coverage-sonar-xml coverage-all coverage-gate \
         clean help
@@ -239,6 +240,9 @@ harness-check:
 public-surface-drift-check:
 	python3 tools/harness/detect_public_surface_drift.py
 
+schema-drift-check:
+	python3 tools/release/gates/validate_schema_drift.py
+
 harness-check-full:
 	$(MAKE) docs-check-base
 	python3 tools/harness/check_harness_sync.py --full
@@ -267,6 +271,11 @@ e2e-streaming-config-check:
 	python3 -m pytest tools/harness/tests/test_detect_e2e_streaming_config.py -q --tb=short
 	bash tools/harness/tests/test_detect_e2e_streaming_config.sh
 	@echo "  E2E Streaming Config Check: PASSED"
+
+reason-codegen-check:
+	@echo "=== Reason Registry Code Generation Drift Check ==="
+	python3 tools/reason-codegen/generate.py --check
+	@echo "  Reason Code Generation Drift Check: PASSED"
 
 harness-security-checks:
 	bash tools/harness/detect_cwe190_casts.sh
@@ -1027,6 +1036,9 @@ verify-auth-cache-e2e:
 verify-status-codes-e2e:
 	./tools/e2e/verify_status_codes_e2e.sh
 
+verify-diagnostics-access-phase-e2e:
+	./tools/e2e/verify_diagnostics_access_phase_e2e.sh
+
 # ── Coverage targets ────────────────────────────────────────────────
 # Generate lcov reports consumed by SonarCloud.  Output lands in
 # coverage/ at the repo root so sonar.coverageReportPaths can find it.
@@ -1118,6 +1130,7 @@ help:
 	@echo "  verify-config-merge-e2e     - Run config-merge e2e tests (http/server/location)"
 	@echo "  verify-auth-cache-e2e       - Run auth/cache interaction e2e tests"
 	@echo "  verify-status-codes-e2e     - Run upstream status-code passthrough e2e tests"
+	@echo "  verify-diagnostics-access-phase-e2e - Verify native NGINX access-phase restricts diagnostics/metrics handlers"
 	@echo "  test-all                 - Run build + rust + unit tests"
 	@echo "  sonar-compile-db         - Generate compile_commands.json for SonarQube for VS Code C/C++ analysis"
 	@echo "  test-benchmark           - Run corpus benchmark and produce Unified Report"

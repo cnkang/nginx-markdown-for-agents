@@ -1,0 +1,918 @@
+#!/usr/bin/env python3
+"""Reason code generator — reads reason_registry.toml and produces artifacts.
+
+This standalone tool is the single code-generation entry point for all
+reason-code-derived artifacts. It reads the declarative registry and writes:
+  - Rust enum + metadata (reason_code.rs)
+  - C header with #define constants (ngx_http_markdown_reason_generated.h)
+  - C accessor implementations (ngx_http_markdown_reason_generated.c)
+  - Count/hash manifest JSON (reason-registry-report.json)
+  - Generated-artifacts listing (generated-reason-artifacts.json)
+
+Usage:
+  python3 tools/reason-codegen/generate.py [--check]
+
+Flags:
+  --check   Compare generated output with checked-in files; exit 1 on drift.
+"""
+
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib  # type: ignore[no-redef]
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+REGISTRY_PATH = REPO_ROOT / "components" / "rust-converter" / "reason_registry.toml"
+
+# Output paths
+RUST_OUTPUT = (
+    REPO_ROOT / "components" / "rust-converter" / "src" / "decision" / "reason_code.rs"
+)
+C_HEADER_OUTPUT = (
+    REPO_ROOT
+    / "components"
+    / "nginx-module"
+    / "src"
+    / "ngx_http_markdown_reason_generated.h"
+)
+C_SOURCE_OUTPUT = (
+    REPO_ROOT
+    / "components"
+    / "nginx-module"
+    / "src"
+    / "ngx_http_markdown_reason_generated.c"
+)
+MANIFEST_OUTPUT = (
+    REPO_ROOT / "artifacts" / "spec62" / "wave2" / "reason-registry-report.json"
+)
+LISTING_OUTPUT = (
+    REPO_ROOT / "artifacts" / "spec62" / "wave2" / "generated-reason-artifacts.json"
+)
+
+
+def load_registry():
+    """Load and validate the reason registry TOML."""
+    raw_bytes = REGISTRY_PATH.read_bytes()
+    data = tomllib.loads(raw_bytes.decode("utf-8"))
+    reasons = data.get("reasons", [])
+    if not reasons:
+        print("ERROR: No [[reasons]] entries found in registry", file=sys.stderr)
+        sys.exit(1)
+    # Sort by discriminant for deterministic output
+    reasons.sort(key=lambda r: r["discriminant"])
+    return data, reasons, raw_bytes
+
+
+def source_hash(raw_bytes: bytes) -> str:
+    """Compute SHA-256 hex digest of the TOML source bytes."""
+    return hashlib.sha256(raw_bytes).hexdigest()
+
+
+def snake_to_pascal(s: str) -> str:
+    """Convert snake_case to PascalCase for Rust enum variant names."""
+    return "".join(word.capitalize() for word in s.split("_"))
+
+
+def snake_to_upper(s: str) -> str:
+    """Convert snake_case key to UPPER_SNAKE for C #define constants."""
+    return s.upper()
+
+
+# Metric family classification: maps keys to metric families
+METRIC_FAMILIES = {
+    "markdown_conversions_total": ["converted"],
+    "markdown_skipped_total": [
+        "skipped_accept",
+        "skipped_no_accept",
+        "skipped_conditional",
+        "skipped_accept_reject",
+        "not_eligible",
+        "disabled",
+        "bypass_no_transform",
+    ],
+    "markdown_errors_total": [
+        "decompression_error",
+        "decompression_budget_exceeded",
+        "decompression_format_error",
+        "decompression_truncated_input",
+        "decompression_io_error",
+        "timeout",
+        "budget_exceeded",
+        "replay_error",
+        "ffi_panic",
+        "conversion_error",
+        "memory_budget_exceeded",
+        "header_plan_apply_error",
+        "streaming_mid_flight_error",
+        "invalid_dynconf",
+        "degraded_snapshot",
+        "overload",
+        "encoding_header_invalid",
+    ],
+    "markdown_failed_open_total": ["failed_open"],
+    "markdown_failed_closed_total": ["failed_closed"],
+}
+
+
+def get_metric_family(key: str) -> str:
+    """Return the Prometheus metric family for a given reason key."""
+    for family, members in METRIC_FAMILIES.items():
+        if key in members:
+            return family
+    # Default fallback for unknown keys
+    return "markdown_errors_total"
+
+
+# Log callsite descriptions (from the existing reason_code.rs)
+LOG_CALLSITES = {
+    "converted": "body_filter: after successful conversion and downstream NGX_OK",
+    "skipped_accept": "header_filter: Accept negotiation determined text/html preferred",
+    "skipped_no_accept": "header_filter: no Accept header present",
+    "skipped_conditional": "header_filter: conditional request matched (304)",
+    "decompression_error": "body_filter: decompression error",
+    "decompression_budget_exceeded": "body_filter: decompression output exceeded budget",
+    "decompression_format_error": "body_filter: invalid compression format",
+    "decompression_truncated_input": "body_filter: truncated compressed input",
+    "decompression_io_error": "body_filter: decompression I/O error",
+    "timeout": "body_filter: timeout",
+    "budget_exceeded": "body_filter: budget exceeded",
+    "replay_error": "body_filter: replay error",
+    "skipped_accept_reject": "header_filter: Accept explicitly rejects text/markdown (q=0)",
+    "ffi_panic": "body_filter: FFI panic",
+    "not_eligible": "header_filter: response not eligible (method/status/content-type)",
+    "disabled": "header_filter: module disabled for this location",
+    "failed_open": "body_filter: fail-open path triggered",
+    "failed_closed": "body_filter: fail-closed path triggered",
+    "conversion_error": "body_filter: conversion error",
+    "memory_budget_exceeded": "body_filter: memory budget exceeded",
+    "overload": "header_filter: inflight guard overload",
+    "invalid_dynconf": "header_filter: invalid dynconf",
+    "degraded_snapshot": "header_filter: degraded dynconf snapshot",
+    "header_plan_apply_error": "header_filter: header plan apply error",
+    "streaming_mid_flight_error": "body_filter: streaming mid-flight error",
+    "bypass_no_transform": "header_filter: no-transform bypass",
+    "encoding_header_invalid": "body_filter: malformed Content-Encoding grammar",
+}
+
+
+def generate_do_not_edit_header(source_hash_hex: str, lang: str = "rust") -> str:
+    """Generate a DO NOT EDIT header comment."""
+    if lang == "rust":
+        return (
+            f"// DO NOT EDIT — generated by tools/reason-codegen/generate.py\n"
+            f"// Source: components/rust-converter/reason_registry.toml\n"
+            f"// Source SHA-256: {source_hash_hex}\n"
+            f"//\n"
+            f"// Regenerate with: python3 tools/reason-codegen/generate.py\n"
+        )
+    else:  # C
+        return (
+            f"/*\n"
+            f" * DO NOT EDIT — generated by tools/reason-codegen/generate.py\n"
+            f" * Source: components/rust-converter/reason_registry.toml\n"
+            f" * Source SHA-256: {source_hash_hex}\n"
+            f" *\n"
+            f" * Regenerate with: python3 tools/reason-codegen/generate.py\n"
+            f" */\n"
+        )
+
+
+def generate_rust(reasons, hash_hex: str) -> str:
+    """Generate the Rust reason_code.rs content."""
+    count = len(reasons)
+    lines = []
+    lines.append(generate_do_not_edit_header(hash_hex, "rust"))
+    lines.append("")
+    lines.append("//! Reason code enum — single source of truth for all decision reason codes.")
+    lines.append("//!")
+    lines.append("//! This module defines the canonical [`ReasonCode`] enum that represents")
+    lines.append("//! every possible outcome of the module's conversion decision chain. It is")
+    lines.append("//! the **single source of truth** for reason codes across the entire system:")
+    lines.append("//! C code accesses these values through FFI, and all metrics, logging, and")
+    lines.append("//! documentation derive from this enum.")
+    lines.append("//!")
+    lines.append("//! # FFI Boundary")
+    lines.append("//!")
+    lines.append("//! The enum uses `#[repr(u8)]` so the compiler guarantees all discriminants")
+    lines.append("//! fit in a single byte, matching the C reason-code accessors.")
+    lines.append("//! Each variant has a stable numeric discriminant that must not change once")
+    lines.append("//! assigned.")
+    lines.append("")
+
+    # Count constant
+    lines.append(f"/// Total number of reason code variants.")
+    lines.append("///")
+    lines.append("/// This constant is used by the closure test to verify that all variants")
+    lines.append("/// are accounted for in the `ALL` array. Update this when adding variants.")
+    lines.append(f"pub const REASON_CODE_COUNT: usize = {count};")
+    lines.append("")
+
+    # Compile-time guard
+    lines.append("/// Compile-time guard: all discriminants must fit in a `u8` because the")
+    lines.append("/// FFI boundary transports reason-code discriminants as `u8`.")
+    lines.append("/// If the enum grows beyond 256 variants this assertion will fail the build.")
+    lines.append("const _: () = assert!(")
+    lines.append('    REASON_CODE_COUNT <= 256,')
+    lines.append('    "ReasonCode discriminant range exceeds the u8 FFI transport"')
+    lines.append(");")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def generate_rust_enum(reasons) -> str:
+    """Generate the enum definition portion."""
+    lines = []
+    lines.append("/// Comprehensive reason code enum — single source of truth.")
+    lines.append("///")
+    lines.append("/// Every conversion decision path produces exactly one `ReasonCode`.")
+    lines.append("/// The numeric discriminants are stable and must not be reordered.")
+    lines.append("///")
+    lines.append("/// # Repr")
+    lines.append("///")
+    lines.append("/// Uses `#[repr(u8)]` so the compiler guarantees all discriminants fit in")
+    lines.append("/// a single byte. The enum is never passed directly across FFI; only its")
+    lines.append("/// discriminant value is transported as `u8`.")
+    lines.append("#[repr(u8)]")
+    lines.append("#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]")
+    lines.append("pub enum ReasonCode {")
+
+    for r in reasons:
+        variant = snake_to_pascal(r["key"])
+        disc = r["discriminant"]
+        lines.append(f"    /// Reason: {r['key']} (stage: {r['default_stage']})")
+        lines.append(f"    {variant} = {disc},")
+        lines.append("")
+
+    lines.append("}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def generate_rust_test_module() -> str:
+    """Generate the test module include."""
+    lines = []
+    lines.append("#[cfg(test)]")
+    lines.append('#[path = "reason_code_complexity_tests.rs"]')
+    lines.append("mod reason_code_complexity_tests;")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def generate_rust_all_array(reasons) -> str:
+    """Generate the ALL constant array."""
+    count = len(reasons)
+    lines = []
+    lines.append("/// Array of all reason code variants for exhaustive iteration.")
+    lines.append("///")
+    lines.append("/// This array must contain every variant of [`ReasonCode`] exactly once.")
+    lines.append("/// The closure test verifies this invariant.")
+    lines.append("///")
+    lines.append("/// cbindgen:ignore")
+    lines.append(f"pub const ALL: [ReasonCode; REASON_CODE_COUNT] = [")
+    for r in reasons:
+        variant = snake_to_pascal(r["key"])
+        lines.append(f"    ReasonCode::{variant},")
+    lines.append("];")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def generate_rust_impl(reasons) -> str:
+    """Generate the impl ReasonCode block with as_str, metric_key, etc."""
+    lines = []
+    lines.append("impl ReasonCode {")
+
+    # as_str
+    lines.append("    /// Return the lowercase snake_case string representation.")
+    lines.append("    ///")
+    lines.append("    /// This string is used in structured logs, diagnostics endpoints,")
+    lines.append("    /// and as the label value in Prometheus metrics.")
+    lines.append("    ///")
+    lines.append("    /// # Examples")
+    lines.append("    ///")
+    lines.append("    /// ```")
+    lines.append("    /// use nginx_markdown_converter::decision::reason_code::ReasonCode;")
+    lines.append("    ///")
+    lines.append('    /// assert_eq!(ReasonCode::Converted.as_str(), "converted");')
+    lines.append('    /// assert_eq!(ReasonCode::Timeout.as_str(), "timeout");')
+    lines.append("    /// ```")
+    lines.append("    pub fn as_str(self) -> &'static str {")
+    lines.append("        match self {")
+    for r in reasons:
+        variant = snake_to_pascal(r["key"])
+        lines.append(f'            ReasonCode::{variant} => "{r["key"]}",')
+    lines.append("        }")
+    lines.append("    }")
+    lines.append("")
+
+    # metric_key
+    lines.append("    /// Return the Prometheus metric key name for this reason code.")
+    lines.append("    ///")
+    lines.append("    /// # Examples")
+    lines.append("    ///")
+    lines.append("    /// ```")
+    lines.append("    /// use nginx_markdown_converter::decision::reason_code::ReasonCode;")
+    lines.append("    ///")
+    lines.append("    /// assert_eq!(")
+    lines.append('    ///     ReasonCode::Converted.metric_key(),')
+    lines.append('    ///     "markdown_conversions_total"')
+    lines.append("    /// );")
+    lines.append("    /// ```")
+    lines.append("    pub fn metric_key(self) -> &'static str {")
+    lines.append("        match self {")
+
+    # Group by metric family
+    for family, members in METRIC_FAMILIES.items():
+        # Find which reasons belong to this family
+        matching = [r for r in reasons if r["key"] in members]
+        if not matching:
+            continue
+        if len(matching) == 1:
+            variant = snake_to_pascal(matching[0]["key"])
+            lines.append(f'            ReasonCode::{variant} => "{family}",')
+        else:
+            for i, r in enumerate(matching):
+                variant = snake_to_pascal(r["key"])
+                if i == 0:
+                    lines.append(f"            ReasonCode::{variant}")
+                elif i < len(matching) - 1:
+                    lines.append(f"            | ReasonCode::{variant}")
+                else:
+                    lines.append(f'            | ReasonCode::{variant} => "{family}",')
+
+    lines.append("        }")
+    lines.append("    }")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def generate_rust_impl_continued(reasons) -> str:
+    """Generate log_callsite, discriminant, from_discriminant methods."""
+    lines = []
+
+    # log_callsite
+    lines.append("    /// Return the expected `log_decision()` callsite description.")
+    lines.append("    ///")
+    lines.append("    /// # Examples")
+    lines.append("    ///")
+    lines.append("    /// ```")
+    lines.append("    /// use nginx_markdown_converter::decision::reason_code::ReasonCode;")
+    lines.append("    ///")
+    lines.append("    /// assert_eq!(")
+    lines.append("    ///     ReasonCode::Converted.log_callsite(),")
+    lines.append('    ///     "body_filter: after successful conversion and downstream NGX_OK"')
+    lines.append("    /// );")
+    lines.append("    /// ```")
+    lines.append("    pub fn log_callsite(self) -> &'static str {")
+    lines.append("        match self {")
+    for r in reasons:
+        variant = snake_to_pascal(r["key"])
+        callsite = LOG_CALLSITES.get(r["key"], f"body_filter: {r['key']}")
+        lines.append(f'            ReasonCode::{variant} => {{')
+        lines.append(f'                "{callsite}"')
+        lines.append(f"            }}")
+    lines.append("        }")
+    lines.append("    }")
+    lines.append("")
+
+    # discriminant
+    lines.append("    /// Return the numeric discriminant value for FFI transport.")
+    lines.append("    ///")
+    lines.append("    /// # Examples")
+    lines.append("    ///")
+    lines.append("    /// ```")
+    lines.append("    /// use nginx_markdown_converter::decision::reason_code::ReasonCode;")
+    lines.append("    ///")
+    lines.append("    /// assert_eq!(ReasonCode::Converted.discriminant(), 0);")
+    lines.append("    /// assert_eq!(ReasonCode::Timeout.discriminant(), 9);")
+    lines.append("    /// ```")
+    lines.append("    pub fn discriminant(self) -> u32 {")
+    lines.append("        self as u32")
+    lines.append("    }")
+    lines.append("")
+
+    # from_discriminant
+    lines.append("    /// Attempt to construct a `ReasonCode` from its numeric discriminant.")
+    lines.append("    ///")
+    lines.append("    /// Returns `None` if the value does not correspond to a known variant.")
+    lines.append("    ///")
+    lines.append("    /// # Examples")
+    lines.append("    ///")
+    lines.append("    /// ```")
+    lines.append("    /// use nginx_markdown_converter::decision::reason_code::ReasonCode;")
+    lines.append("    ///")
+    lines.append("    /// assert_eq!(ReasonCode::from_discriminant(0), Some(ReasonCode::Converted));")
+    lines.append("    /// assert_eq!(ReasonCode::from_discriminant(255), None);")
+    lines.append("    /// ```")
+    lines.append("    pub fn from_discriminant(value: u32) -> Option<Self> {")
+    lines.append("        match value {")
+    for r in reasons:
+        variant = snake_to_pascal(r["key"])
+        lines.append(f"            {r['discriminant']} => Some(ReasonCode::{variant}),")
+    lines.append("            _ => None,")
+    lines.append("        }")
+    lines.append("    }")
+    lines.append("}")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def generate_rust_ffi(reasons) -> str:
+    """Generate the FFI functions at the end of the Rust file."""
+    count = len(reasons)
+    lines = []
+
+    # markdown_reason_code_str
+    lines.append("/// Get the string representation of a reason code by its numeric value.")
+    lines.append("///")
+    lines.append("/// Returns a pointer to a static string and writes the length to `out_len`.")
+    lines.append("/// Returns NULL if the discriminant is invalid.")
+    lines.append("///")
+    lines.append("/// # Safety")
+    lines.append("///")
+    lines.append("/// The caller must ensure that `out_len` either is NULL or points to")
+    lines.append("/// writable storage for a `usize`.")
+    lines.append("#[unsafe(no_mangle)]")
+    lines.append("pub unsafe extern \"C\" fn markdown_reason_code_str(code: u32, out_len: *mut usize) -> *const u8 {")
+    lines.append("    match ReasonCode::from_discriminant(code) {")
+    lines.append("        Some(rc) => {")
+    lines.append("            let s = rc.as_str();")
+    lines.append("            if !out_len.is_null() {")
+    lines.append("                unsafe { *out_len = s.len() };")
+    lines.append("            }")
+    lines.append("            s.as_ptr()")
+    lines.append("        }")
+    lines.append("        None => {")
+    lines.append("            if !out_len.is_null() {")
+    lines.append("                unsafe { *out_len = 0 };")
+    lines.append("            }")
+    lines.append("            std::ptr::null()")
+    lines.append("        }")
+    lines.append("    }")
+    lines.append("}")
+    lines.append("")
+
+    # markdown_reason_code_metric_key
+    lines.append("/// Get the Prometheus metric key for a reason code by its numeric value.")
+    lines.append("///")
+    lines.append("/// Returns a pointer to a static string and writes the length to `out_len`.")
+    lines.append("/// Returns NULL if the discriminant is invalid.")
+    lines.append("///")
+    lines.append("/// # Safety")
+    lines.append("///")
+    lines.append("/// The caller must ensure that `out_len` either is NULL or points to")
+    lines.append("/// writable storage for a `usize`.")
+    lines.append("#[unsafe(no_mangle)]")
+    lines.append("pub unsafe extern \"C\" fn markdown_reason_code_metric_key(")
+    lines.append("    code: u32,")
+    lines.append("    out_len: *mut usize,")
+    lines.append(") -> *const u8 {")
+    lines.append("    match ReasonCode::from_discriminant(code) {")
+    lines.append("        Some(rc) => {")
+    lines.append("            let s = rc.metric_key();")
+    lines.append("            if !out_len.is_null() {")
+    lines.append("                unsafe { *out_len = s.len() };")
+    lines.append("            }")
+    lines.append("            s.as_ptr()")
+    lines.append("        }")
+    lines.append("        None => {")
+    lines.append("            if !out_len.is_null() {")
+    lines.append("                unsafe { *out_len = 0 };")
+    lines.append("            }")
+    lines.append("            std::ptr::null()")
+    lines.append("        }")
+    lines.append("    }")
+    lines.append("}")
+    lines.append("")
+
+    # markdown_reason_code_count
+    lines.append("/// Return the total number of defined reason codes.")
+    lines.append("///")
+    lines.append("/// C callers can use this to verify they handle all variants.")
+    lines.append("#[unsafe(no_mangle)]")
+    lines.append("pub extern \"C\" fn markdown_reason_code_count() -> u32 {")
+    lines.append("    REASON_CODE_COUNT as u32")
+    lines.append("}")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def generate_rust_tests(reasons) -> str:
+    """Generate the test module for the Rust file."""
+    lines = []
+    lines.append("#[cfg(test)]")
+    lines.append("mod tests {")
+    lines.append("    use super::*;")
+    lines.append("    use std::collections::HashSet;")
+    lines.append("")
+    lines.append("    /// Verify that ALL array length matches REASON_CODE_COUNT.")
+    lines.append("    #[test]")
+    lines.append("    fn test_all_array_length_matches_count() {")
+    lines.append("        assert_eq!(")
+    lines.append("            ALL.len(),")
+    lines.append("            REASON_CODE_COUNT,")
+    lines.append('            "ALL array length ({}) must equal REASON_CODE_COUNT ({})",')
+    lines.append("            ALL.len(),")
+    lines.append("            REASON_CODE_COUNT")
+    lines.append("        );")
+    lines.append("    }")
+    lines.append("")
+    lines.append("    /// Verify that every variant in ALL has a unique discriminant.")
+    lines.append("    #[test]")
+    lines.append("    fn test_discriminants_unique() {")
+    lines.append("        let mut seen = HashSet::new();")
+    lines.append("        for rc in &ALL {")
+    lines.append("            let d = rc.discriminant();")
+    lines.append('            assert!(seen.insert(d), "Duplicate discriminant {} for {:?}", d, rc);')
+    lines.append("        }")
+    lines.append("    }")
+    lines.append("")
+    lines.append("    /// Verify that every variant in ALL has a unique string representation.")
+    lines.append("    #[test]")
+    lines.append("    fn test_strings_unique() {")
+    lines.append("        let mut seen = HashSet::new();")
+    lines.append("        for rc in &ALL {")
+    lines.append("            let s = rc.as_str();")
+    lines.append('            assert!(seen.insert(s), "Duplicate string \'{}\' for {:?}", s, rc);')
+    lines.append("        }")
+    lines.append("    }")
+    lines.append("")
+    lines.append("    /// Verify that all string representations are lowercase snake_case.")
+    lines.append("    #[test]")
+    lines.append("    fn test_strings_are_lowercase_snake_case() {")
+    lines.append('        let re = regex::Regex::new(r"^[a-z][a-z0-9_]*$").unwrap();')
+    lines.append("        for rc in &ALL {")
+    lines.append("            let s = rc.as_str();")
+    lines.append('            assert!(!s.is_empty(), "{:?} has empty string", rc);')
+    lines.append("            assert!(")
+    lines.append("                re.is_match(s),")
+    lines.append('                "String \'{}\' for {:?} does not match lowercase snake_case pattern",')
+    lines.append("                s,")
+    lines.append("                rc")
+    lines.append("            );")
+    lines.append("        }")
+    lines.append("    }")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def generate_rust_tests_continued(reasons) -> str:
+    """Generate remaining test functions."""
+    lines = []
+    lines.append("    /// Verify that exactly 5 unified metric families are used.")
+    lines.append("    #[test]")
+    lines.append("    fn test_metric_keys_unified_families() {")
+    lines.append("        let mut families: HashSet<&str> = HashSet::new();")
+    lines.append("        for rc in &ALL {")
+    lines.append("            families.insert(rc.metric_key());")
+    lines.append("        }")
+    lines.append("        assert_eq!(")
+    lines.append("            families.len(),")
+    lines.append("            5,")
+    lines.append('            "Expected exactly 5 unified metric families, got {:?}",')
+    lines.append("            families")
+    lines.append("        );")
+    lines.append("    }")
+    lines.append("")
+    lines.append("    /// Verify round-trip: discriminant -> from_discriminant -> same variant.")
+    lines.append("    #[test]")
+    lines.append("    fn test_from_discriminant_roundtrip() {")
+    lines.append("        for rc in &ALL {")
+    lines.append("            let d = rc.discriminant();")
+    lines.append("            let recovered = ReasonCode::from_discriminant(d);")
+    lines.append("            assert_eq!(recovered, Some(*rc));")
+    lines.append("        }")
+    lines.append("    }")
+    lines.append("")
+    lines.append("    /// Verify that from_discriminant returns None for invalid values.")
+    lines.append("    #[test]")
+    lines.append("    fn test_from_discriminant_invalid() {")
+    lines.append("        assert_eq!(ReasonCode::from_discriminant(255), None);")
+    lines.append("        assert_eq!(ReasonCode::from_discriminant(u32::MAX), None);")
+    lines.append("    }")
+    lines.append("")
+    lines.append("    /// Closure test: verify discriminant range is contiguous 0..COUNT-1.")
+    lines.append("    #[test]")
+    lines.append("    fn test_discriminant_range_contiguous() {")
+    lines.append("        let mut discriminants: Vec<u32> = ALL.iter().map(|rc| rc.discriminant()).collect();")
+    lines.append("        discriminants.sort();")
+    lines.append("        for (i, d) in discriminants.iter().enumerate() {")
+    lines.append('            assert_eq!(*d, i as u32, "Expected discriminant {} at index {}", i, i);')
+    lines.append("        }")
+    lines.append("    }")
+    lines.append("")
+    lines.append("    /// FFI function test: markdown_reason_code_str returns correct data.")
+    lines.append("    #[test]")
+    lines.append("    fn test_ffi_reason_code_str() {")
+    lines.append("        for rc in &ALL {")
+    lines.append("            let mut len: usize = 0;")
+    lines.append("            let ptr = unsafe { markdown_reason_code_str(rc.discriminant(), &mut len) };")
+    lines.append('            assert!(!ptr.is_null(), "NULL returned for {:?}", rc);')
+    lines.append("            assert_eq!(len, rc.as_str().len());")
+    lines.append("            let slice = unsafe { std::slice::from_raw_parts(ptr, len) };")
+    lines.append("            let s = std::str::from_utf8(slice).unwrap();")
+    lines.append("            assert_eq!(s, rc.as_str());")
+    lines.append("        }")
+    lines.append("    }")
+    lines.append("")
+    lines.append("    /// FFI function test: markdown_reason_code_count returns correct value.")
+    lines.append("    #[test]")
+    lines.append("    fn test_ffi_reason_code_count() {")
+    lines.append("        assert_eq!(markdown_reason_code_count(), REASON_CODE_COUNT as u32);")
+    lines.append("    }")
+    lines.append("")
+    lines.append("    /// Verify the enum size is suitable for FFI (repr(u8) single-byte).")
+    lines.append("    #[test]")
+    lines.append("    fn test_enum_size_for_ffi() {")
+    lines.append("        assert_eq!(std::mem::size_of::<ReasonCode>(), 1);")
+    lines.append("        assert_eq!(std::mem::align_of::<ReasonCode>(), 1);")
+    lines.append("    }")
+    lines.append("")
+    lines.append("    /// Verify that every variant has a non-empty log_callsite().")
+    lines.append("    #[test]")
+    lines.append("    fn test_log_callsite_non_empty() {")
+    lines.append("        for rc in &ALL {")
+    lines.append('            assert!(!rc.log_callsite().is_empty(), "{:?} has empty log_callsite", rc);')
+    lines.append("        }")
+    lines.append("    }")
+    lines.append("")
+    lines.append("    /// Verify that log_callsite() descriptions indicate a valid filter phase.")
+    lines.append("    #[test]")
+    lines.append("    fn test_log_callsite_has_valid_phase() {")
+    lines.append("        for rc in &ALL {")
+    lines.append("            let callsite = rc.log_callsite();")
+    lines.append("            assert!(")
+    lines.append('                callsite.starts_with("header_filter:") || callsite.starts_with("body_filter:"),')
+    lines.append('                "{:?} log_callsite must start with header_filter: or body_filter:", rc')
+    lines.append("            );")
+    lines.append("        }")
+    lines.append("    }")
+    lines.append("}")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def generate_c_header(reasons, hash_hex: str) -> str:
+    """Generate the C header with #define REASON_* constants."""
+    lines = []
+    lines.append(generate_do_not_edit_header(hash_hex, "c"))
+    lines.append("")
+    lines.append("#ifndef _NGX_HTTP_MARKDOWN_REASON_GENERATED_H_INCLUDED_")
+    lines.append("#define _NGX_HTTP_MARKDOWN_REASON_GENERATED_H_INCLUDED_")
+    lines.append("")
+    lines.append("")
+    lines.append("/*")
+    lines.append(" * Reason code discriminant constants matching the Rust ReasonCode enum.")
+    lines.append(" *")
+    lines.append(" * These are generated from components/rust-converter/reason_registry.toml")
+    lines.append(" * and must not be edited manually.")
+    lines.append(" */")
+    lines.append("")
+
+    # Find max key length for alignment
+    max_name_len = max(len("REASON_" + snake_to_upper(r["key"])) for r in reasons)
+
+    for r in reasons:
+        name = "REASON_" + snake_to_upper(r["key"])
+        padding = " " * (max_name_len - len(name) + 1)
+        lines.append(f"#define {name}{padding}{r['discriminant']}")
+
+    lines.append("")
+    lines.append(f"#define REASON_CODE_COUNT  {len(reasons)}")
+    lines.append("")
+    lines.append("")
+    lines.append("/*")
+    lines.append(" * Accessor function declarations.")
+    lines.append(" *")
+    lines.append(" * reason_code_str() returns the snake_case string for a discriminant.")
+    lines.append(" * reason_code_metric_key() returns the Prometheus metric family name.")
+    lines.append(" */")
+    lines.append("const char *reason_code_str(unsigned int code);")
+    lines.append("const char *reason_code_metric_key(unsigned int code);")
+    lines.append("")
+    lines.append("")
+    lines.append("#endif /* _NGX_HTTP_MARKDOWN_REASON_GENERATED_H_INCLUDED_ */")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def generate_c_source(reasons, hash_hex: str) -> str:
+    """Generate the C accessor implementation file."""
+    lines = []
+    lines.append(generate_do_not_edit_header(hash_hex, "c"))
+    lines.append("")
+    lines.append('#include "ngx_http_markdown_reason_generated.h"')
+    lines.append("")
+    lines.append("#include <stddef.h>")
+    lines.append("")
+    lines.append("")
+    lines.append("/*")
+    lines.append(" * Static string table for reason code snake_case names.")
+    lines.append(" */")
+    lines.append("static const char *reason_code_strings[] = {")
+    for r in reasons:
+        lines.append(f'    "{r["key"]}",')
+    lines.append("};")
+    lines.append("")
+    lines.append("")
+    lines.append("/*")
+    lines.append(" * Static string table for reason code metric family names.")
+    lines.append(" */")
+    lines.append("static const char *reason_code_metric_keys[] = {")
+    for r in reasons:
+        family = get_metric_family(r["key"])
+        lines.append(f'    "{family}",')
+    lines.append("};")
+    lines.append("")
+    lines.append("")
+    lines.append("/*")
+    lines.append(" * Return the snake_case string for a reason code discriminant.")
+    lines.append(" *")
+    lines.append(" * Returns NULL if code is out of range.")
+    lines.append(" */")
+    lines.append("const char *")
+    lines.append("reason_code_str(unsigned int code)")
+    lines.append("{")
+    lines.append("    if (code >= REASON_CODE_COUNT) {")
+    lines.append("        return NULL;")
+    lines.append("    }")
+    lines.append("    return reason_code_strings[code];")
+    lines.append("}")
+    lines.append("")
+    lines.append("")
+    lines.append("/*")
+    lines.append(" * Return the Prometheus metric family name for a reason code discriminant.")
+    lines.append(" *")
+    lines.append(" * Returns NULL if code is out of range.")
+    lines.append(" */")
+    lines.append("const char *")
+    lines.append("reason_code_metric_key(unsigned int code)")
+    lines.append("{")
+    lines.append("    if (code >= REASON_CODE_COUNT) {")
+    lines.append("        return NULL;")
+    lines.append("    }")
+    lines.append("    return reason_code_metric_keys[code];")
+    lines.append("}")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def generate_manifest(reasons, hash_hex: str) -> dict:
+    """Generate the count/hash manifest."""
+    min_disc = min(r["discriminant"] for r in reasons)
+    max_disc = max(r["discriminant"] for r in reasons)
+    return {
+        "schema_version": 1,
+        "generator": "tools/reason-codegen/generate.py",
+        "source": "components/rust-converter/reason_registry.toml",
+        "source_sha256": hash_hex,
+        "total_count": len(reasons),
+        "discriminant_range": {"min": min_disc, "max": max_disc},
+        "metric_families": sorted(METRIC_FAMILIES.keys()),
+        "stages": sorted(set(r["default_stage"] for r in reasons)),
+    }
+
+
+def generate_listing(hash_hex: str) -> dict:
+    """Generate the listing of generated artifacts."""
+    return {
+        "schema_version": 1,
+        "generator": "tools/reason-codegen/generate.py",
+        "source": "components/rust-converter/reason_registry.toml",
+        "source_sha256": hash_hex,
+        "generated_artifacts": [
+            {
+                "path": "components/rust-converter/src/decision/reason_code.rs",
+                "description": "Rust enum with all metadata and FFI exports",
+            },
+            {
+                "path": "components/nginx-module/src/ngx_http_markdown_reason_generated.h",
+                "description": "C header with #define REASON_* constants and accessor decls",
+            },
+            {
+                "path": "components/nginx-module/src/ngx_http_markdown_reason_generated.c",
+                "description": "C accessor function implementations",
+            },
+            {
+                "path": "artifacts/spec62/wave2/reason-registry-report.json",
+                "description": "Count/hash manifest for drift detection",
+            },
+        ],
+    }
+
+
+def build_full_rust(reasons, hash_hex: str) -> str:
+    """Assemble the complete Rust file content."""
+    parts = []
+    parts.append(generate_rust(reasons, hash_hex))
+    parts.append(generate_rust_enum(reasons))
+    parts.append(generate_rust_test_module())
+    parts.append(generate_rust_all_array(reasons))
+    parts.append(generate_rust_impl(reasons))
+    parts.append(generate_rust_impl_continued(reasons))
+    parts.append(generate_rust_ffi(reasons))
+    parts.append(generate_rust_tests(reasons))
+    parts.append(generate_rust_tests_continued(reasons))
+    return "\n".join(parts)
+
+
+def write_if_changed(path: Path, content: str) -> bool:
+    """Write content to path only if it differs from existing. Returns True if written."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        existing = path.read_text(encoding="utf-8")
+        if existing == content:
+            return False
+    path.write_text(content, encoding="utf-8")
+    return True
+
+
+def check_drift(path: Path, content: str) -> bool:
+    """Check if generated content matches checked-in file. Returns True if OK."""
+    if not path.exists():
+        print(f"  MISSING: {path.relative_to(REPO_ROOT)}", file=sys.stderr)
+        return False
+    existing = path.read_text(encoding="utf-8")
+    if existing != content:
+        print(f"  DRIFT: {path.relative_to(REPO_ROOT)}", file=sys.stderr)
+        return False
+    print(f"  OK: {path.relative_to(REPO_ROOT)}")
+    return True
+
+
+def main():
+    """Main entry point."""
+    check_mode = "--check" in sys.argv
+
+    # Load registry
+    data, reasons, raw_bytes = load_registry()
+    hash_hex = source_hash(raw_bytes)
+
+    print(f"Reason registry: {len(reasons)} entries, SHA-256: {hash_hex[:16]}...")
+
+    # Generate all content
+    rust_content = build_full_rust(reasons, hash_hex)
+    c_header_content = generate_c_header(reasons, hash_hex)
+    c_source_content = generate_c_source(reasons, hash_hex)
+    manifest = generate_manifest(reasons, hash_hex)
+    listing = generate_listing(hash_hex)
+
+    manifest_content = json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
+    listing_content = json.dumps(listing, indent=2, ensure_ascii=False) + "\n"
+
+    if check_mode:
+        print("\nDrift check mode:")
+        all_ok = True
+        all_ok &= check_drift(RUST_OUTPUT, rust_content)
+        all_ok &= check_drift(C_HEADER_OUTPUT, c_header_content)
+        all_ok &= check_drift(C_SOURCE_OUTPUT, c_source_content)
+        all_ok &= check_drift(MANIFEST_OUTPUT, manifest_content)
+        all_ok &= check_drift(LISTING_OUTPUT, listing_content)
+
+        if not all_ok:
+            print(
+                "\nERROR: Generated files are out of date. "
+                "Run: python3 tools/reason-codegen/generate.py",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        else:
+            print("\nAll generated files are up to date.")
+            sys.exit(0)
+    else:
+        # Write mode
+        files_written = []
+        if write_if_changed(RUST_OUTPUT, rust_content):
+            files_written.append(str(RUST_OUTPUT.relative_to(REPO_ROOT)))
+        if write_if_changed(C_HEADER_OUTPUT, c_header_content):
+            files_written.append(str(C_HEADER_OUTPUT.relative_to(REPO_ROOT)))
+        if write_if_changed(C_SOURCE_OUTPUT, c_source_content):
+            files_written.append(str(C_SOURCE_OUTPUT.relative_to(REPO_ROOT)))
+        if write_if_changed(MANIFEST_OUTPUT, manifest_content):
+            files_written.append(str(MANIFEST_OUTPUT.relative_to(REPO_ROOT)))
+        if write_if_changed(LISTING_OUTPUT, listing_content):
+            files_written.append(str(LISTING_OUTPUT.relative_to(REPO_ROOT)))
+
+        if files_written:
+            print(f"\nWrote {len(files_written)} file(s):")
+            for f in files_written:
+                print(f"  {f}")
+        else:
+            print("\nAll files already up to date.")
+
+
+if __name__ == "__main__":
+    main()

@@ -27,14 +27,6 @@ static ngx_command_t commands[] = {
         0,
         NULL
     },
-    {
-        ngx_string("markdown_streaming_engine"),
-        NGX_CONF_TAKE1,
-        ngx_http_markdown_reject_streaming_engine,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        0,
-        NULL
-    },
 };
 """,
     )
@@ -85,12 +77,11 @@ ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         root,
         detector.PUBLIC_INVENTORY_PATH,
         """
-There are 2 `markdown_*` command-table entries: 1 active parser entries and
-1 reject-only migration entries.
+There are 1 `markdown_*` command-table entries: 1 active parser entries and
+0 reject-only migration entries.
 
 ### Reject-only migration directives
 
-| `markdown_streaming_engine` | `markdown_streaming` |
 """,
     )
     _write(root, detector.STREAMING_TROUBLESHOOTING_PATH, "canonical example\n")
@@ -118,23 +109,6 @@ def test_public_config_contract_accepts_canonical_fixture(tmp_path: Path) -> Non
     _write_valid_fixture(tmp_path)
 
     assert detector.check_public_config_contract(tmp_path) == []
-
-
-def test_reject_only_directive_cannot_bind_enum_slot(tmp_path: Path) -> None:
-    _write_valid_fixture(tmp_path)
-    path = tmp_path / detector.DIRECTIVES_PATH
-    content = path.read_text(encoding="utf-8").replace(
-        "ngx_http_markdown_reject_streaming_engine,\n"
-        "        NGX_HTTP_LOC_CONF_OFFSET,\n        0,\n        NULL",
-        "ngx_conf_set_enum_slot,\n        NGX_HTTP_LOC_CONF_OFFSET,\n"
-        "        offsetof(conf_t, stream_engine),\n        stream_engine_values",
-    )
-    path.write_text(content, encoding="utf-8")
-
-    errors = detector.check_public_config_contract(tmp_path)
-
-    assert any("must bind only" in error for error in errors)
-    assert any("must not bind an enum table" in error for error in errors)
 
 
 def test_removed_production_symbol_is_blocked_in_untracked_file(tmp_path: Path) -> None:
@@ -210,7 +184,7 @@ def test_public_inventory_counts_must_match_directive_table(tmp_path: Path) -> N
     path = tmp_path / detector.PUBLIC_INVENTORY_PATH
     path.write_text(
         path.read_text(encoding="utf-8").replace(
-            "2 `markdown_*`", "3 `markdown_*`"
+            "1 `markdown_*`", "3 `markdown_*`"
         ),
         encoding="utf-8",
     )

@@ -190,33 +190,21 @@ def _extract_directive_entry(content: str, directive: str) -> str | None:
 
 
 def _check_directive_table(content: str) -> List[str]:
-    """Validate active and reject-only streaming directive registrations."""
+    """Validate active streaming directive registration."""
     errors: List[str] = []
     active = _extract_directive_entry(content, "markdown_streaming")
-    removed = _extract_directive_entry(content, "markdown_streaming_engine")
     if active is None or "ngx_http_markdown_streaming," not in active:
         errors.append(
             f"{DIRECTIVES_PATH}: markdown_streaming must use the active "
             "ngx_http_markdown_streaming handler"
         )
-    if removed is None:
+    # markdown_streaming_engine reject-only stub has been removed in 0.9.2;
+    # NGINX's built-in "unknown directive" error is sufficient.
+    removed = _extract_directive_entry(content, "markdown_streaming_engine")
+    if removed is not None:
         errors.append(
-            f"{DIRECTIVES_PATH}: markdown_streaming_engine must remain registered "
-            "as a reject-only migration stub"
-        )
-        return errors
-    if "ngx_http_markdown_reject_streaming_engine," not in removed:
-        errors.append(
-            f"{DIRECTIVES_PATH}: markdown_streaming_engine must bind only to "
-            "ngx_http_markdown_reject_streaming_engine"
-        )
-    forbidden_slots = ("ngx_conf_set_enum_slot", "offsetof(")
-    if any(token in removed for token in forbidden_slots) or not re.search(
-        r"\n[ \t]*0,[ \t]*\n[ \t]*NULL[ \t]*$", removed
-    ):
-        errors.append(
-            f"{DIRECTIVES_PATH}: reject-only markdown_streaming_engine must not "
-            "bind an enum table or configuration slot"
+            f"{DIRECTIVES_PATH}: markdown_streaming_engine reject-only stub "
+            "must be removed (0.9.2 surface reset)"
         )
     return errors
 

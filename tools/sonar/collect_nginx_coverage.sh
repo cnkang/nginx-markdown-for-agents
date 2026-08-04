@@ -355,14 +355,15 @@ http {
 
         location /diagnostics {
             markdown_diagnostics on;
-            markdown_diagnostics_allow 127.0.0.1;
-            markdown_diagnostics_allow 127.0.0.1/24;
-            markdown_diagnostics_allow ::1;
+            allow 127.0.0.1;
+            allow ::1;
+            deny all;
         }
 
         location /diagnostics-forbidden {
             markdown_diagnostics on;
-            markdown_diagnostics_allow 10.0.0.0/8;
+            allow 10.0.0.0/8;
+            deny all;
         }
 
         location /metrics-prometheus {
