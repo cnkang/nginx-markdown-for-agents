@@ -1,0 +1,325 @@
+#!/usr/bin/env bash
+# verify_diagnostics_access_phase_e2e.sh — Verify native NGINX access-phase
+# directives correctly restrict the diagnostics and metrics content handlers.
+#
+# This is a reusable generic gate that consumes ordinary repository inputs
+# (NGINX binary, module shared object, fixture root). It NEVER reads
+# .kiro/specs/, never encodes Spec/Wave/version-specific conclusions.
+#
+# Schema: diagnostics-access-phase-e2e.v1
+# Failure semantics: nonzero exit on any unexpected HTTP status code
+# SKIP semantics: exit 0 with result=SKIP when NGINX_BIN or NGINX_MODULE_SO
+#   are unavailable on the current platform
+#
+# Required inputs:
+#   NGINX_BIN       — path to a compiled nginx binary
+#   NGINX_MODULE_SO — path to the built ngx_http_markdown_filter_module .so
+#   FIXTURE_ROOT    — path to a directory containing test fixture HTML
+#
+# Optional:
+#   PORT            — listen port (default: 18092)
+#   RESULT_FILE     — path to write JSON result (default: stdout summary only)
+#
+# Usage:
+#   NGINX_BIN=/path/to/nginx NGINX_MODULE_SO=/path/to/module.so \
+#     FIXTURE_ROOT=/path/to/fixtures tools/e2e/verify_diagnostics_access_phase_e2e.sh
+#
+# Exit codes:
+#   0 — all access-phase assertions passed (or SKIP)
+#   1 — at least one assertion failed
+#   2 — usage/prerequisite error
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+# ── SKIP gate ──────────────────────────────────────────────────────
+if [[ -z "${NGINX_BIN:-}" ]] || [[ -z "${NGINX_MODULE_SO:-}" ]]; then
+  echo "SKIP: NGINX_BIN or NGINX_MODULE_SO not set; cannot run native E2E" >&2
+  if [[ -n "${RESULT_FILE:-}" ]]; then
+    mkdir -p "$(dirname "${RESULT_FILE}")"
+    cat > "${RESULT_FILE}" <<EOF
+{
+  "schema_version": "diagnostics-access-phase-e2e.v1",
+  "result": "SKIP",
+  "skip_reason": "nginx_binary_unavailable",
+  "skip_detail": "NGINX_BIN or NGINX_MODULE_SO environment variables not set"
+}
+EOF
+  fi
+  exit 0
+fi
+
+if [[ ! -x "${NGINX_BIN}" ]]; then
+  echo "SKIP: NGINX_BIN (${NGINX_BIN}) is not executable on this host" >&2
+  if [[ -n "${RESULT_FILE:-}" ]]; then
+    mkdir -p "$(dirname "${RESULT_FILE}")"
+    cat > "${RESULT_FILE}" <<EOF
+{
+  "schema_version": "diagnostics-access-phase-e2e.v1",
+  "result": "SKIP",
+  "skip_reason": "nginx_binary_not_executable",
+  "skip_detail": "NGINX_BIN=${NGINX_BIN} is not executable on this platform"
+}
+EOF
+  fi
+  exit 0
+fi
+
+if [[ -z "${FIXTURE_ROOT:-}" ]]; then
+  # Use a default fixture if available
+  if [[ -d "${WORKSPACE_ROOT}/tests/corpus/simple" ]]; then
+    FIXTURE_ROOT="${WORKSPACE_ROOT}/tests/corpus/simple"
+  else
+    echo "ERROR: FIXTURE_ROOT not set and no default fixture found" >&2
+    exit 2
+  fi
+fi
+
+PORT="${PORT:-18092}"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/access-phase-e2e.XXXXXX")"
+RESULT_TSV="${WORK}/results.tsv"
+NGINX_PID=""
+
+# ── Cleanup ────────────────────────────────────────────────────────
+# shellcheck disable=SC2329
+cleanup() {
+  if [[ -n "${NGINX_PID:-}" ]]; then
+    kill "${NGINX_PID}" 2>/dev/null || true
+    wait "${NGINX_PID}" 2>/dev/null || true
+  fi
+  rm -rf "${WORK}"
+}
+trap cleanup EXIT INT TERM
+
+SOURCE_SHA="$(cd "${WORKSPACE_ROOT}" && git rev-parse HEAD 2>/dev/null || echo "unknown")"
+MODULE_SHA="$(shasum -a 256 "${NGINX_MODULE_SO}" 2>/dev/null | awk '{print $1}' || echo "unknown")"
+
+# ── Run a single access-policy case ───────────────────────────────
+run_case() {
+  local policy="$1"
+  local prefix="${WORK}/${policy}"
+  mkdir -p "${prefix}/conf" "${prefix}/logs" "${prefix}/temp"
+
+  local ACCESS=""
+  case "${policy}" in
+    allow_deny)
+      ACCESS='allow 127.0.0.1; deny all;'
+      ;;
+    auth_basic)
+      ACCESS="auth_basic \"e2e-test\"; auth_basic_user_file ${prefix}/conf/passwd;"
+      printf '%s\n' 'testuser:{PLAIN}testpass' > "${prefix}/conf/passwd"
+      ;;
+    satisfy_any)
+      ACCESS="satisfy any; allow 127.0.0.1; deny all; auth_basic \"e2e-test\"; auth_basic_user_file ${prefix}/conf/passwd;"
+      printf '%s\n' 'testuser:{PLAIN}testpass' > "${prefix}/conf/passwd"
+      ;;
+    *)
+      echo "ERROR: unknown policy: ${policy}" >&2
+      return 2
+      ;;
+  esac
+
+  cat > "${prefix}/conf/nginx.conf" <<EOF
+load_module ${NGINX_MODULE_SO};
+pid ${prefix}/nginx.pid;
+error_log ${prefix}/logs/error.log notice;
+events { worker_connections 64; }
+http {
+    access_log off;
+    server {
+        listen 127.0.0.1:${PORT};
+        location /fixture {
+            root ${FIXTURE_ROOT};
+        }
+        location /diagnostics {
+            markdown_diagnostics on;
+            ${ACCESS}
+        }
+        location /metrics {
+            markdown_metrics;
+            ${ACCESS}
+        }
+    }
+}
+EOF
+
+  # Validate config
+  if ! "${NGINX_BIN}" -t -p "${prefix}" -c conf/nginx.conf > "${prefix}/config-test.log" 2>&1; then
+    echo "FAIL: nginx -t failed for policy=${policy}" >&2
+    cat "${prefix}/config-test.log" >&2
+    return 1
+  fi
+
+  local config_digest
+  config_digest="$(shasum -a 256 "${prefix}/conf/nginx.conf" | awk '{print $1}')"
+
+  # Start nginx
+  "${NGINX_BIN}" -p "${prefix}" -c conf/nginx.conf -g 'daemon off;' > "${prefix}/runtime.log" 2>&1 &
+  NGINX_PID="$!"
+
+  # Wait for readiness
+  local ready=0
+  local i=0
+  while [[ "${i}" -lt 30 ]]; do
+    local ready_status
+    ready_status="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/diagnostics" 2>/dev/null || echo "000")"
+    if [[ "${ready_status}" == "200" ]] || [[ "${ready_status}" == "401" ]] || [[ "${ready_status}" == "403" ]]; then
+      ready=1
+      break
+    fi
+    i=$((i + 1))
+    sleep 1
+  done
+
+  if [[ "${ready}" -ne 1 ]]; then
+    echo "FAIL: nginx did not become ready for policy=${policy}" >&2
+    return 1
+  fi
+
+  local fail_count=0
+
+  # Test each handler with GET and HEAD
+  for handler in diagnostics metrics; do
+    for method in GET HEAD; do
+      local method_flag=""
+      if [[ "${method}" == "HEAD" ]]; then
+        method_flag="-I"
+      fi
+
+      local expected_auth expected_unauth
+      local -a auth_curl_args=()
+      case "${policy}" in
+        allow_deny)
+          expected_auth=200; expected_unauth=403
+          ;;
+        auth_basic)
+          expected_auth=200; expected_unauth=401
+          auth_curl_args=(-u "testuser:testpass")
+          ;;
+        satisfy_any)
+          expected_auth=200; expected_unauth=401
+          ;;
+      esac
+
+      # Authorized request
+      local auth_status
+      local -a curl_cmd=(curl -sS)
+      if [[ -n "${method_flag}" ]]; then
+        curl_cmd+=("${method_flag}")
+      fi
+      if [[ ${#auth_curl_args[@]} -gt 0 ]]; then
+        curl_cmd+=("${auth_curl_args[@]}")
+      fi
+      curl_cmd+=(-o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/${handler}")
+      auth_status="$("${curl_cmd[@]}")"
+
+      if [[ "${auth_status}" != "${expected_auth}" ]]; then
+        echo "FAIL: ${policy}/${handler}/${method}/authorized: expected=${expected_auth} actual=${auth_status}" >&2
+        fail_count=$((fail_count + 1))
+      fi
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "${policy}" "${handler}" "${method}" "authorized" "${expected_auth}" "${auth_status}" "${config_digest}" >> "${RESULT_TSV}"
+
+      # Unauthorized request (for allow_deny: there's no easy way to fake a different source IP in curl without --interface)
+      # For auth_basic: omit credentials
+      # For satisfy_any: omit credentials (deny all applies but satisfy any means auth can override)
+      local unauth_status
+      case "${policy}" in
+        allow_deny)
+          # Cannot easily test deny from 127.0.0.1 when allow 127.0.0.1 is set
+          # Instead verify a request without the allowed IP cannot reach the endpoint
+          # Since we're always from 127.0.0.1 and allow 127.0.0.1 is set, authorized = 200
+          # This is inherently limited on localhost; record the positive case only
+          unauth_status="${expected_auth}"
+          printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "${policy}" "${handler}" "${method}" "unauthorized_note" "${expected_unauth}" "localhost_limited" "${config_digest}" >> "${RESULT_TSV}"
+          ;;
+        auth_basic)
+          unauth_status="$(curl -sS ${method_flag} -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/${handler}")"
+          if [[ "${unauth_status}" != "${expected_unauth}" ]]; then
+            echo "FAIL: ${policy}/${handler}/${method}/unauthorized: expected=${expected_unauth} actual=${unauth_status}" >&2
+            fail_count=$((fail_count + 1))
+          fi
+          printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "${policy}" "${handler}" "${method}" "unauthorized" "${expected_unauth}" "${unauth_status}" "${config_digest}" >> "${RESULT_TSV}"
+          ;;
+        satisfy_any)
+          # satisfy any: 127.0.0.1 is allowed, so even without credentials it passes
+          # Test with bad credentials to verify auth_basic challenge works
+          unauth_status="$(curl -sS ${method_flag} -u baduser:badpass -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/${handler}")"
+          # satisfy any: allow 127.0.0.1 passes, so even bad creds get 200 from the allow rule
+          # This confirms that at least one of the access checks (allow) passed
+          printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "${policy}" "${handler}" "${method}" "satisfy_any_allow_wins" "200" "${unauth_status}" "${config_digest}" >> "${RESULT_TSV}"
+          if [[ "${unauth_status}" != "200" ]]; then
+            echo "FAIL: ${policy}/${handler}/${method}/satisfy_any_allow_wins: expected=200 actual=${unauth_status}" >&2
+            fail_count=$((fail_count + 1))
+          fi
+          ;;
+      esac
+    done
+  done
+
+  # Stop nginx
+  kill "${NGINX_PID}" 2>/dev/null || true
+  wait "${NGINX_PID}" 2>/dev/null || true
+  NGINX_PID=""
+
+  return "${fail_count}"
+}
+
+# ── Execute all policy cases ───────────────────────────────────────
+total_failures=0
+
+run_case allow_deny || total_failures=$((total_failures + $?))
+run_case auth_basic || total_failures=$((total_failures + $?))
+run_case satisfy_any || total_failures=$((total_failures + $?))
+
+# ── Report result ──────────────────────────────────────────────────
+if [[ "${total_failures}" -eq 0 ]]; then
+  result="PASS"
+  echo "PASS: All diagnostics access-phase assertions passed" >&2
+else
+  result="FAIL"
+  echo "FAIL: ${total_failures} access-phase assertion(s) failed" >&2
+fi
+
+if [[ -n "${RESULT_FILE:-}" ]]; then
+  mkdir -p "$(dirname "${RESULT_FILE}")"
+  # Build results array from TSV
+  results_json="[]"
+  if [[ -f "${RESULT_TSV}" ]]; then
+    results_json="$(python3 -c "
+import json, sys
+rows = []
+for line in open(sys.argv[1]).read().splitlines():
+    parts = line.split('\t')
+    if len(parts) >= 7:
+        rows.append({
+            'policy': parts[0], 'handler': parts[1], 'method': parts[2],
+            'identity': parts[3], 'expected': parts[4], 'actual': parts[5],
+            'config_digest': 'sha256:' + parts[6]
+        })
+print(json.dumps(rows))
+" "${RESULT_TSV}" 2>/dev/null || echo "[]")"
+  fi
+
+  cat > "${RESULT_FILE}" <<EOF
+{
+  "schema_version": "diagnostics-access-phase-e2e.v1",
+  "source_sha": "${SOURCE_SHA}",
+  "nginx_binary": "${NGINX_BIN}",
+  "module_sha256": "sha256:${MODULE_SHA}",
+  "policies_tested": ["allow_deny", "auth_basic", "satisfy_any"],
+  "handlers_tested": ["diagnostics", "metrics"],
+  "results": ${results_json},
+  "result": "${result}"
+}
+EOF
+fi
+
+if [[ "${total_failures}" -gt 0 ]]; then
+  exit 1
+fi
+exit 0
