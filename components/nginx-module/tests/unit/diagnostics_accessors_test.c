@@ -25,8 +25,14 @@ struct ngx_http_markdown_conf_s {
 
 #define NGX_OK         0
 #define NGX_ERROR     -1
+#define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED       0
+#define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE    1
+#define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE 2
+#define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR     3
+#define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL 5
 
 #define ngx_memzero(buf, n) memset(buf, 0, n)
+#define ngx_memcpy(dst, src, n) memcpy((dst), (src), (n))
 
 /* ── Metrics struct (mirrors production SHM layout) ───────────── */
 
@@ -95,6 +101,14 @@ typedef struct {
     ngx_flag_t  lkg_valid;
     time_t      lkg_mtime;
     ngx_http_markdown_conf_t *conf;
+    u_char      source_digest[72];
+    u_char      active_digest[72];
+    u_char      lkg_digest[72];
+    ngx_uint_t  generation;
+    ngx_uint_t  last_result;
+    time_t      last_success;
+    u_char      last_error[513];
+    size_t      last_error_len;
 } ngx_http_markdown_dynconf_watcher_t;
 
 static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher;
@@ -102,6 +116,12 @@ static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher;
 /* ── Inflight overload stub ────────────────────────────────────── */
 
 static ngx_atomic_int_t g_inflight_overload_total;
+
+static ngx_inline ngx_atomic_int_t
+ngx_http_markdown_inflight_current(void)
+{
+    return 0;
+}
 
 static ngx_inline ngx_atomic_int_t
 ngx_http_markdown_inflight_overload_total(void)

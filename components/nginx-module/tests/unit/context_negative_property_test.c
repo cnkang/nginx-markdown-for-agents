@@ -10,20 +10,14 @@
  *
  * Context-negative cases verified:
  *   - markdown_trusted_proxies: must fail in server and location
- *   - markdown_dynamic_config: design says H-only; verified against impl
- *   - markdown_dynamic_config_path: design says H-only; verified against impl
- *   - markdown_dynconf_dry_run: design says H-only; verified against impl
+ *   - markdown_dynamic_config: H-only
+ *   - markdown_dynamic_config_path: H-only
+ *   - markdown_dynconf_dry_run: H-only
  *   - markdown_metrics: must fail in http and server
  *   - markdown_metrics_shm_size: must fail in server and location
  *
- * FINDING: The implementation currently allows H/S/L for the three dynconf
- * directives (markdown_dynamic_config, markdown_dynamic_config_path,
- * markdown_dynconf_dry_run) and markdown_diagnostics. The Design command
- * table specifies H-only for dynconf and L-only for diagnostics.
- * Requirement 15.10 states dynconf SHALL only be accepted in http context.
- * This test documents the discrepancy and asserts the ACTUAL implementation
- * behavior so the test passes against the current code. A separate
- * implementation task must restrict the context flags to match the design.
+ * The command table is the executable context contract: dynconf is H-only
+ * and diagnostics is L-only.
  *
  * **Validates: Requirements 2.6, 13.3, 15.1, 15.10**
  */
@@ -647,35 +641,35 @@ static const context_negative_entry_t context_negative_cases[] = {
         0           /* no discrepancy */
     },
     /*
-     * markdown_dynamic_config: Design=H, Impl=H/S/L (DISCREPANCY)
+     * markdown_dynamic_config: Design=H, Impl=H (MATCH)
      * Req 15.10: dynconf SHALL only be accepted in http context
      */
     {
         "markdown_dynamic_config",
         1, 0, 0,    /* design: H only */
-        1, 1, 1,    /* impl: H/S/L */
-        1           /* DISCREPANCY */
+        1, 0, 0,    /* impl: H only */
+        0           /* no discrepancy */
     },
     /*
-     * markdown_dynamic_config_path: Design=H, Impl=H/S/L (DISCREPANCY)
+     * markdown_dynamic_config_path: Design=H, Impl=H (MATCH)
      * Req 15.10: dynconf SHALL only be accepted in http context
      */
     {
         "markdown_dynamic_config_path",
         1, 0, 0,    /* design: H only */
-        1, 1, 1,    /* impl: H/S/L */
-        1           /* DISCREPANCY */
+        1, 0, 0,    /* impl: H only */
+        0           /* no discrepancy */
     },
 
     /*
-     * markdown_dynconf_dry_run: Design=H, Impl=H/S/L (DISCREPANCY)
+     * markdown_dynconf_dry_run: Design=H, Impl=H (MATCH)
      * Req 15.10: dynconf SHALL only be accepted in http context
      */
     {
         "markdown_dynconf_dry_run",
         1, 0, 0,    /* design: H only */
-        1, 1, 1,    /* impl: H/S/L */
-        1           /* DISCREPANCY */
+        1, 0, 0,    /* impl: H only */
+        0           /* no discrepancy */
     },
     /*
      * markdown_metrics: Design=L, Impl=L (MATCH)
@@ -687,16 +681,13 @@ static const context_negative_entry_t context_negative_cases[] = {
         0           /* no discrepancy */
     },
     /*
-     * markdown_diagnostics: Design=L, Impl=H/S/L (DISCREPANCY)
-     * Design command table says L-only but impl allows H/S/L.
-     * Note: diagnostics uses LOC_CONF_OFFSET so semantically it is
-     * location-scoped even though the type flags allow broader use.
+     * markdown_diagnostics: Design=L, Impl=L (MATCH)
      */
     {
         "markdown_diagnostics",
         0, 0, 1,    /* design: L only */
-        1, 1, 1,    /* impl: H/S/L */
-        1           /* DISCREPANCY */
+        0, 0, 1,    /* impl: L only */
+        0           /* no discrepancy */
     },
 };
 
@@ -825,14 +816,14 @@ static const positive_context_t positive_cases[] = {
     /* H-only (impl actual) */
     { "markdown_trusted_proxies",             1, 0, 0 },
     { "markdown_metrics_shm_size",            1, 0, 0 },
-    /* Dynconf: impl currently H/S/L (discrepancy documented) */
-    { "markdown_dynamic_config",              1, 1, 1 },
-    { "markdown_dynamic_config_path",         1, 1, 1 },
-    { "markdown_dynconf_dry_run",             1, 1, 1 },
+    /* Dynconf: http-only */
+    { "markdown_dynamic_config",              1, 0, 0 },
+    { "markdown_dynamic_config_path",         1, 0, 0 },
+    { "markdown_dynconf_dry_run",             1, 0, 0 },
     /* L-only (impl actual for metrics) */
     { "markdown_metrics",                     0, 0, 1 },
-    /* Diagnostics: impl currently H/S/L (discrepancy documented) */
-    { "markdown_diagnostics",                 1, 1, 1 },
+    /* Diagnostics: location-only */
+    { "markdown_diagnostics",                 0, 0, 1 },
 };
 
 #define POSITIVE_COUNT \
@@ -1022,53 +1013,16 @@ test_dynconf_context_finding(void)
         TEST_ASSERT(cmd != NULL,
             "dynconf directive must be registered");
 
-        /* Verify http is always allowed (correct per both design and impl) */
+        /* Dynconf is an http-only control surface. */
         TEST_ASSERT((cmd->type & NGX_HTTP_MAIN_CONF) != 0,
             "dynconf directive must allow http context");
-
-        /*
-         * FINDING: Design and Req 15.10 say H-only, but
-         * implementation has NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF.
-         * We assert the ACTUAL state here to document the finding.
-         * A separate task must restrict these to http-only.
-         */
-        if ((cmd->type & NGX_HTTP_SRV_CONF) != 0) {
-            printf("    FINDING: %s allows server context "
-                "(Req 15.10 says it should not)\n",
-                dynconf_names[i]);
-        }
-        if ((cmd->type & NGX_HTTP_LOC_CONF) != 0) {
-            printf("    FINDING: %s allows location context "
-                "(Req 15.10 says it should not)\n",
-                dynconf_names[i]);
-        }
+        TEST_ASSERT((cmd->type & NGX_HTTP_SRV_CONF) == 0,
+            "dynconf directive must reject server context");
+        TEST_ASSERT((cmd->type & NGX_HTTP_LOC_CONF) == 0,
+            "dynconf directive must reject location context");
     }
 
-    /*
-     * Assert the actual implementation state:
-     * All three dynconf directives currently allow H/S/L.
-     * This assertion will break when the context restriction is
-     * implemented — update to assert H-only at that point.
-     */
-    for (i = 0; i < 3; i++) {
-        char msg[256];
-        cmd = find_directive(dynconf_names[i]);
-        snprintf(msg, sizeof(msg),
-            "%s: current impl allows server (finding documented)",
-            dynconf_names[i]);
-        TEST_ASSERT((cmd->type & NGX_HTTP_SRV_CONF) != 0, msg);
-        snprintf(msg, sizeof(msg),
-            "%s: current impl allows location (finding documented)",
-            dynconf_names[i]);
-        TEST_ASSERT((cmd->type & NGX_HTTP_LOC_CONF) != 0, msg);
-    }
-
-    printf("    NOTE: 3 dynconf directives have design/impl "
-        "discrepancy\n");
-    printf("    ACTION: Restrict to http-only per Req 15.10 in "
-        "a separate task\n");
-
-    TEST_PASS("Dynconf context finding documented (Req 15.10)");
+    TEST_PASS("Dynconf directives are http-only");
 }
 
 /* ================================================================
@@ -1164,17 +1118,8 @@ main(void)
     test_command_table_count();
 
     printf("\n=== All context-negative property tests passed ===\n");
-    printf("\nSUMMARY OF FINDINGS:\n");
-    printf("  - markdown_dynamic_config: allows H/S/L, "
-        "Design/Req 15.10 says H-only\n");
-    printf("  - markdown_dynamic_config_path: allows H/S/L, "
-        "Design/Req 15.10 says H-only\n");
-    printf("  - markdown_dynconf_dry_run: allows H/S/L, "
-        "Design/Req 15.10 says H-only\n");
-    printf("  - markdown_diagnostics: allows H/S/L, "
-        "Design says L-only\n");
-    printf("  ACTION: Restrict dynconf to http-only and "
-        "diagnostics to location-only\n");
+    printf("\nSUMMARY: Wave 1 context contract is enforced: "
+        "dynconf H-only, diagnostics L-only.\n");
 
     return 0;
 }

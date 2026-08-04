@@ -110,6 +110,41 @@ while IFS= read -r match; do
         func_start=1
     fi
     context_lines="$(sed -n "${func_start},${line}p" "$file" 2>/dev/null)"
+
+    # The diagnostics static_config_manifest_v1 digest is intentionally
+    # computed from the compiled location configuration, including fields
+    # that are also dynconf-mutable.  This is the frozen static identity
+    # contract, not a request conversion decision; its source symbol is
+    # checked explicitly so the exception cannot broaden to other paths.
+    manifest_start="$(grep -n '^ngx_http_markdown_manifest_digest(' "$file" \
+        2>/dev/null | head -1 | cut -d: -f1 || true)"
+    manifest_end=""
+    if [[ -n "$manifest_start" ]]; then
+        manifest_end_offset="$(sed -n "$((manifest_start + 1)),\$p" "$file" \
+            2>/dev/null | grep -n '^}' | head -1 | cut -d: -f1 || true)"
+        if [[ -n "$manifest_end_offset" ]]; then
+            manifest_end=$((manifest_start + manifest_end_offset))
+        fi
+    fi
+    if [[ -n "$manifest_start" && -n "$manifest_end"
+          && "$line" -ge "$manifest_start"
+          && "$line" -le "$manifest_end" ]]; then
+        echo "  OK      ${file}:${line} — static_config_manifest_v1 reads compiled static conf: ${content}" >&2
+        hits=$((hits + 1))
+        continue
+    fi
+
+    # The digest serializer is split into helpers to keep the production
+    # function below the complexity gate.  These helpers are still part of
+    # the static_config_manifest_v1 call chain and must not be mistaken for
+    # request conversion code.
+    if echo "$context_lines" | grep -qE \
+        'ngx_http_markdown_manifest_append_(policy|runtime|limit|prune|trusted_proxies)_fields|ngx_http_markdown_manifest_append_trusted_proxies'; then
+        echo "  OK      ${file}:${line} — static_config_manifest_v1 helper reads compiled static conf: ${content}" >&2
+        hits=$((hits + 1))
+        continue
+    fi
+
     if echo "$context_lines" | grep -q 'ngx_http_markdown_is_enabled'; then
         echo "  ERROR   ${file}:${line} — is_enabled() regression: reads live conf->: ${content}" >&2
         errors=$((errors + 1))

@@ -313,8 +313,8 @@ def _evaluate_d01(metrics: Dict[str, Any]) -> RuleResult:
                 ),
                 advice=(
                     "High fallback rate suggests streaming eligibility issues. "
-                    "Check response sizes, Content-Type patterns, and "
-                    "markdown_stream_threshold thresholds."
+                    "Check response sizes, Content-Type patterns, and the "
+                    "markdown_streaming policy; the size heuristic is internal."
                 ),
                 metrics_used={
                     "fallback_total": fallback,
@@ -586,8 +586,8 @@ def _evaluate_d07(metrics: Dict[str, Any]) -> RuleResult:
                 ),
                 advice=(
                     "Most output uses buffer copies instead of zero-copy. "
-                    "Verify markdown_streaming_zero_copy is enabled and that "
-                    "chunks are eligible (non-terminal, no backpressure)."
+                    "Review response eligibility, terminal-buffer ownership, "
+                    "and downstream backpressure; zero-copy selection is internal."
                 ),
                 metrics_used={
                     "copied_output_total": copied,

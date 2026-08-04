@@ -49,7 +49,7 @@ STREAMING_TROUBLESHOOTING_PATH = Path(
 )
 PROFILE_INVENTORY_PATH = Path("docs/architecture/profile-inventory.md")
 PROMETHEUS_RENDERER_PATH = Path(
-    "components/nginx-module/src/ngx_http_markdown_prometheus_impl.h"
+    "components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h"
 )
 PROMETHEUS_GUIDE_PATH = Path("docs/guides/prometheus-metrics.md")
 PRODUCTION_SYMBOL_SURFACES = (
@@ -121,7 +121,7 @@ def check_readme_mentions_key_features(project_root: Path) -> List[str]:
         key_directives = [
             'markdown_filter',
             'markdown_limits',
-            'markdown_profile',
+            'markdown_streaming',
         ]
         warnings.extend(
             f"{readme_name}: Key directive '{directive}' not mentioned"
@@ -327,20 +327,20 @@ def _check_chart_contract(template: str, values: str) -> List[str]:
 
 
 def _check_migration_table(content: str) -> List[str]:
-    """Require the exact legacy-to-policy migration mappings in active docs."""
+    """Require the frozen explicit replacement surface in active docs."""
     normalized = content.replace("`", "")
     errors: List[str] = []
-    for legacy, replacement in (("off", "off"), ("auto", "auto"), ("on", "force")):
-        mapping_present = any(
-            f"markdown_streaming_engine {legacy};" in line
-            and f"markdown_streaming {replacement};" in line
-            for line in normalized.splitlines()
-        )
-        if not mapping_present:
-            errors.append(
-                f"{CONFIGURATION_GUIDE_PATH}: missing exact migration mapping "
-                f"markdown_streaming_engine {legacy} -> markdown_streaming {replacement}"
-            )
+    required_fragments = (
+        "markdown_streaming off | auto | force",
+        "markdown_limits conversion_memory=",
+        "markdown_limits streaming_buffer=",
+    )
+    errors.extend(
+        f"{CONFIGURATION_GUIDE_PATH}: missing frozen explicit contract fragment "
+        f"{fragment}"
+        for fragment in required_fragments
+        if fragment not in normalized
+    )
     return errors
 
 
@@ -419,7 +419,6 @@ def _check_observability_examples(troubleshooting: str) -> List[str]:
         '"ttfb_last_seconds"': "diagnostics ttfb_last_seconds field",
         '"peak_memory_last_bytes"': "diagnostics peak_memory_last_bytes field",
         "nginx_markdown_streaming_choice_total": "retired streaming metric name",
-        "nginx_markdown_conversion_duration_seconds": "retired latency metric name",
     }
     errors: List[str] = [
         f"{STREAMING_TROUBLESHOOTING_PATH}: forbidden {label} is present"
@@ -451,10 +450,18 @@ def _check_active_directive_inventory(
 
 def _check_prometheus_catalog(renderer: str, guide: str) -> List[str]:
     """Require every production renderer family to appear in the guide."""
-    families = sorted(set(re.findall(r"nginx_markdown_[a-z0-9_]+", renderer)))
+    raw_families = set(re.findall(r"nginx_markdown_[a-z0-9_]+", renderer))
+    histogram_suffixes = ("_bucket", "_sum", "_count")
+    families = set()
+    for name in raw_families:
+        for suffix in histogram_suffixes:
+            if name.endswith(suffix):
+                name = name[: -len(suffix)]
+                break
+        families.add(name)
     return [
         f"{PROMETHEUS_GUIDE_PATH}: production metric family {name} is missing"
-        for name in families
+        for name in sorted(families)
         if f"`{name}`" not in guide
     ]
 
@@ -466,7 +473,6 @@ def _check_retired_metrics(project_root: Path) -> List[str]:
         (Path("docs/guides"), Path("docs/features"), Path("docs/architecture")),
         re.compile(
             r"nginx_markdown_streaming_choice_total|"
-            r"nginx_markdown_conversion_duration_seconds|"
             r"nginx_markdown_failures_total\{reason=\\?\""
             r"(?:memory_budget_exceeded|ffi_panic)\\?\"\}"
         ),

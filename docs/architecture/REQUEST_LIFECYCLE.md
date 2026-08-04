@@ -1,357 +1,84 @@
-# Request Lifecycle
+# Request Lifecycle (0.9.2)
 
-This document explains how a request moves through the NGINX module at runtime, from header evaluation to final response delivery.
+This document describes the request path at the Wave 0–2 freeze boundary.
+The important invariant is that eligibility, engine selection, streaming
+backpressure, and terminal metrics describe one request exactly once.
 
-It focuses on control flow, decision points, and the major branches that affect behavior:
+## Lifecycle
 
-- normal Markdown conversion
-- passthrough and bypass paths
-- decompression
-- conditional requests
-- fail-open and fail-closed behavior
-- the dedicated metrics endpoint
-- the streaming processing path for large responses (default `auto`)
-
-## Two Runtime Modes
-
-At a high level, the module runs in one of two modes:
-
-- normal filter-chain mode for application responses
-- dedicated handler mode for the `markdown_metrics` location
-
-The metrics endpoint does not go through the normal conversion path. It is served directly by a location handler.
-
-## Main Conversion Flow
-
-For a normal request, the lifecycle is split across the NGINX header filter and body filter.
-
-```mermaid
-flowchart TD
-    A["Response headers reach header filter"]
-    B["Resolve markdown_filter once"]
-    C["Check Accept negotiation"]
-    D["Check eligibility"]
-    E["Create request context"]
-    F["Optional compression detection"]
-    G["Body filter buffers response"]
-    H["Optional decompression"]
-    TR{"Threshold Router<br/>(deferred re-evaluation<br/>if enabled)"}
-    I["Conditional request resolution"]
-    J["Rust conversion (full-buffer)"]
-    JI["Rust conversion (incremental)"]
-    K["Update headers and send Markdown"]
-    L["Passthrough original response"]
-    M["Fail-open original HTML"]
-    N["Fail-closed error"]
-
-    A --> B
-    B -->|disabled| L
-    B --> C
-    C -->|client did not request Markdown| L
-    C --> D
-    D -->|not eligible| L
-    D --> E
-    E --> F
-    F --> G
-    G -->|body incomplete| G
-    G --> H
-    H --> TR
-    TR -->|threshold off, or<br/>size < threshold,<br/>or HEAD/304/fail-open| I
-    TR -->|size >= threshold| I
-    I -->|304 via If-None-Match| K
-    I -->|need conversion,<br/>incremental path| JI
-    I -->|need conversion,<br/>full-buffer path| J
-    J -->|success| K
-    JI -->|success| K
-    I -->|error + pass| M
-    J -->|error + pass| M
-    JI -->|error + pass| M
-    I -->|error + reject| N
-    J -->|error + reject| N
-    JI -->|error + reject| N
+```text
+request
+  -> header filter: method/status/type/Accept/cache gates
+  -> bind one effective dynconf snapshot
+  -> select passthrough, full-buffer, or streaming
+  -> body filter: bounded input and conversion
+  -> commit headers before converted body
+  -> deliver with NGX_OK / NGX_AGAIN / NGX_DONE semantics
+  -> one terminal outcome and request cleanup
 ```
 
-## Phase 1: Header Filter
+## Header filter
 
-The header filter decides whether the module should even attempt conversion for this request.
+The header filter rejects ineligible methods, statuses, ranges, content types,
+authentication cases, and `Accept` values before allocating conversion state.
+It also captures the active dynamic-configuration snapshot once and builds the
+request's effective view. Later timer reloads cannot change that request's
+policy midway through processing.
 
-### 1. Resolve `markdown_filter`
+The effective view includes `markdown_filter`, `prune_noise`,
+`log_verbosity`, `error_policy`, and `streaming_buffer` as runtime-overridable
+fields. Static-only limits and structural directives remain owned by the
+NGINX configuration lifecycle.
 
-The module evaluates `markdown_filter` in the header phase and caches that decision in the request context. This matters when `markdown_filter` is driven by a variable or complex value.
+## Engine selection
 
-The body phase does not re-evaluate it. That avoids header/body inconsistencies for dynamic expressions.
+`markdown_streaming off` selects bounded full-buffer conversion. `auto` uses a
+bounded internal response-shape heuristic; it does not expose a threshold
+directive. `force` requests streaming after the hard eligibility gates pass.
 
-### 2. Check whether the client asked for Markdown
+Full cache validation, unsupported encodings, excluded content types, and
+build-disabled streaming features can still select full-buffer or passthrough.
+The selected engine is latched before the first conversion attempt, and the
+attempt metric increments at most once per request.
 
-If negotiation does not indicate a Markdown response should be attempted, the module passes the response through untouched.
+## Body filter and decompression
 
-This decision is driven by the configured negotiation behavior, including:
-
-- explicit `Accept: text/markdown`
-- optional wildcard handling
-- other eligibility rules controlled by configuration
-
-### 3. Check response eligibility
-
-Even when Markdown is requested, the response may still be bypassed. Eligibility checks cover module policy and response shape, such as:
-
-- request method
-- response status
-- response content type
-- authenticated-request policy
-- stream-type exclusions
-- other conditions that make conversion unsafe or inappropriate
-
-If the response is not eligible, the module stays out of the way and the original response continues through NGINX.
-
-### 4. Create the conversion context
-
-If the response is eligible, the module creates a request-scoped context and
-selects either streaming or full-buffer processing from the effective profile,
-cache requirements, response shape, and content coding.
-
-That context carries the per-request state used by the body filter, including:
-
-- whether conversion is still eligible
-- the selected streaming/full-buffer path and pending input/output state
-- whether headers have already been forwarded
-- whether decompression is needed
-- whether conversion has already been attempted
-
-### 5. Detect compression if auto-decompression is enabled
-
-Before the body arrives, the module inspects response headers to determine whether the upstream payload is compressed.
-
-Possible outcomes:
-
-- no compression detected: continue on the fast path
-- gzip, deflate, or Brotli detected with streaming selected and cache
-  validation not `full`: use incremental decompression before streaming
-  - Brotli requires a build with Brotli streaming enabled (`NGX_MARKDOWN_BROTLI_STREAMING=auto` probes and enables if available; `=on` forces it)
-- a supported coding whose build or validation requirements force buffering:
-  use bounded full-buffer decompression
-- unsupported compression detected: mark the request ineligible and fall back to passthrough behavior
-
-At this point the module does not emit converted headers yet. It waits until the body phase has enough information to produce a correct response.
-
-## Phase 2: Body Filter
-
-The body filter performs the actual runtime work once body chunks begin arriving.
-
-### 1. Fast exits
-
-Before doing anything expensive, the body filter checks a few short-circuit paths:
-
-- no module config: pass through
-- no request context: pass through
-- filter disabled for this request: pass through
-- already marked ineligible: forward original headers and pass through
-- conversion already attempted: do not run conversion twice
-
-These exits keep the non-conversion path cheap.
-
-### 2. Process the selected path
-
-For the streaming path, each upstream chunk is incrementally decompressed when
-it uses gzip, deflate, or a build-enabled Brotli decoder, then fed to the
-streaming converter. Pending input and output remain request-owned across
-downstream `NGX_AGAIN`; source positions are advanced only after actual
-consumption. Gzip member boundaries may occur inside a chunk or between
-chunks, Brotli is enforced as one complete stream with no trailing data, and
-decompression budgets remain cumulative.
-
-For the full-buffer path, the module buffers the upstream body until the full
-response has arrived. This path remains required for full cache validation and
-for Brotli when streaming decoder support is not compiled in.
-
-Full-buffer details:
-
-- buffering is initialized lazily on first body chunk
-- the module may pre-reserve capacity using `Content-Length`
-- if the last buffer has not arrived yet, the filter returns and waits for more input
-- buffering remains bounded by the configured memory limits
-
-If buffering fails because of allocation or size-limit conditions, the next branch depends on `markdown_error_policy`:
-
-- `pass`: fail open and return original HTML
-- `fail_closed`: fail closed and return an error to the client
-
-## Phase 3: Optional Full-Buffer Decompression
-
-If the full-buffer request was marked as compressed in header phase, the body
-filter decompresses the buffered payload before conversion. Streaming gzip,
-deflate, and build-enabled Brotli have already been decompressed incrementally
-in Phase 2.
-
-This step only runs when needed.
-
-On success, the module:
-
-- replaces the buffered payload with decompressed bytes
-- records decompression metrics
-- removes `Content-Encoding` from the outgoing response metadata
-
-On failure, behavior again follows the configured error policy:
-
-- fail open to original HTML when configured to pass
-- fail closed when configured to reject
-
-## Phase 4: Conditional Request Resolution
-
-Before invoking the Rust converter for a normal 200 Markdown response, the module checks whether the request can be satisfied as `304 Not Modified`.
-
-This is the Markdown-variant conditional-request path.
-
-Possible outcomes:
-
-- Markdown variant matches `If-None-Match`: send `304 Not Modified`
-- no match, but the conditional path already produced a conversion result: reuse it
-- error during conditional handling: fail open or fail closed based on policy
-- no conditional shortcut available: continue to full conversion
-
-This keeps cache-aware behavior inside the Markdown variant rather than relying only on the upstream HTML representation.
-
-## Phase 5: Rust Conversion
-
-If no conditional shortcut applies, the module prepares a `MarkdownOptions` structure and calls the Rust converter through FFI.
-
-Options passed across the boundary include current configuration such as:
-
-- Markdown flavor
-- timeout
-- ETag generation
-- token estimation
-- front matter
-- content type
-- base URL used for resolving relative links
-
-The module also constructs a request-specific base URL before the FFI call. When `markdown_trusted_proxies` is configured with trusted CIDR blocks, forwarded headers from those proxies are preferred; otherwise the module uses the NGINX request scheme and host information.
-
-### Success path
-
-On success, the module:
-
-- records conversion metrics
-- updates response headers for the Markdown variant
-- forwards headers downstream
-- sends the Markdown body, or no body for `HEAD`
-
-### Failure path
-
-If the converter returns an error, the module classifies it into a failure category such as:
-
-- conversion failure
-- resource-limit failure
-- system failure
-
-It then records the relevant counters and applies `markdown_error_policy`:
-
-- `pass`: send original HTML
-- `reject`: fail the request
-
-## Streaming Processing Path
-
-The module supports a streaming conversion path for eligible responses. The
-sole public selector is `markdown_streaming`: `off` requires full-buffer,
-`auto` (default) uses response size and shape, and `force` selects streaming
-after hard request, content-type, and cache-validation blocks.
-
-### Threshold Router
-After the body filter has buffered the response (or while buffering), a threshold router decides which conversion path to use. The decision is controlled by the `markdown_stream_threshold` configuration directive:
+The body filter retains input ownership across downstream `NGX_AGAIN` and
+feeds the selected conversion path without unbounded growth. Compressed
+responses use the decoder selected by `markdown_auto_decompress` and the
+encoding. Decompression limits are configured under `markdown_limits`:
 
 ```nginx
-# Default: 1m
-markdown_stream_threshold 1m;
+markdown_limits conversion_memory=64m conversion_timeout=10s
+    parser_memory=32m parser_timeout=5s streaming_buffer=2m
+    decompressed_size=20m decompression_ratio=100 max_inflight=64;
 ```
 
-The router evaluates in this order:
-1. If `markdown_streaming` is `off`: all requests use the full-buffer path.
-2. If `markdown_streaming` is `force`: all eligible responses use the streaming path.
-3. If `markdown_streaming` is `auto` (default):
-   - If the request is HEAD, 304, or a fail-open replay: always use the full-buffer path.
-   - If `Content-Length` is present and meets or exceeds `markdown_stream_threshold`: use the streaming path.
-   - If `Content-Length` is absent: buffer the response. Once the buffered size exceeds the threshold, switch to the streaming path. Otherwise, continue on the full-buffer path.
+Decoder accounting is response-wide. Gzip member completion does not reset
+the decompressed-size or expansion-ratio budgets, and a truncated final
+member is a failure.
 
-The selected path is recorded in the request context and tracked through path-hit metrics.
+## Commit and delivery
 
-### Streaming Conversion
-When the streaming path is selected, the module feeds response data to the Rust `IncrementalConverter` through FFI:
-1. Create a converter instance with the current conversion options.
-2. Feed input data in chunks as they arrive.
-3. Finalize the conversion and obtain the result.
+Headers are committed before the first converted body buffer. A pre-commit
+failure can use the configured fail-open policy and replay the original
+buffered response. After commit, the module cannot replay the original body;
+it enters safe-finish or abort handling.
 
-Error handling on the streaming path follows the same `markdown_error_policy` as the full-buffer path: fail-open returns original HTML, fail-closed returns an error to the client.
+Downstream return codes have strict meanings:
 
-## Header Updates on Successful Conversion
+- `NGX_OK`: the submitted chain was accepted;
+- `NGX_AGAIN`: suspend and retain the correct pending-chain owner;
+- `NGX_DONE`: terminal finalize path; return immediately after finalization;
+- `NGX_ERROR`: terminal failure path.
 
-When conversion succeeds, the module updates the response so it is a correct Markdown variant rather than a mutated HTML response.
+Delivery counters advance only after successful terminal delivery. A request
+produces one terminal request outcome, while streaming transitions and
+decompression events are recorded at their own bounded event points.
 
-That includes behavior such as:
+## Verification surfaces
 
-- setting `Content-Type: text/markdown; charset=utf-8`
-- ensuring `Vary: Accept`
-- generating or clearing variant `ETag` according to configuration
-- setting token-estimate headers when enabled
-- removing headers that no longer apply to the transformed body
-- adjusting cache behavior for authenticated responses when policy allows conversion
-
-## Fail-Open Behavior
-
-Fail-open is important enough to call out separately because it has more than one runtime form.
-
-### Fail open before full conversion
-
-If the module decides not to convert before consuming the full body, it can usually forward the original response through the normal chain.
-
-### Fail open after partial or full buffering
-
-If the module has already consumed body data into its own buffer, it must replay the original buffered HTML itself. That is why the implementation contains the following dedicated helpers:
-
-- sending the fully buffered original response
-- replaying a buffered prefix and then forwarding the remaining upstream chain
-
-This preserves correctness when the module abandons conversion after it has already intercepted body chunks.
-
-## Metrics Endpoint Lifecycle
-
-The `markdown_metrics` location is handled separately from normal conversion.
-
-Its lifecycle is:
-
-1. request matches a location configured with `markdown_metrics`
-2. the location handler runs directly
-3. method is checked (`GET` and `HEAD` only)
-e.g. the la
-4. client address is restricted to localhost by the handler
-5. output format is selected and from `Accept`
-6. metrics are rendered as plain text or JSON
-7. response headers and body are sent directly
-
-This path does not use the response conversion filters.
-
-## What This Means for Readers of the Code
-
-If you are debugging a behavior, the module's runtime behavior is:
-
-- header filter decides intent
-- body filter executes the expensive path
-- the threshold router selects full-buffer or streaming conversion based on response size when `markdown_streaming auto` is used
-- helper functions handle branching details for decompression, conditionals, and failure policy
-- the Rust converter is called only after the module has enough buffered state to do so safely
-
-## Related Documents
-
-- Runtime structure: [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md)
-- Code layout: [REPOSITORY_STRUCTURE.md](REPOSITORY_STRUCTURE.md)
-- Why Rust: [ADR/0001-use-rust-for-conversion.md](ADR/0001-use-rust-for-conversion.md)
-- Why full buffering: [ADR/0002-full-buffering-approach.md](ADR/0002-full-buffering-approach.md)
-- Large response optimization: [LARGE_RESPONSE_DESIGN.md](LARGE_RESPONSE_DESIGN.md)
-- Operator-facing behavior: [../guides/CONFIGURATION.md](../guides/CONFIGURATION.md)
-
-## Document Updates
-
-| Version | Date | Author | Changes |
-|---------|------|--------|---------|
-| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
-| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
-| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
+Use diagnostics JSON to inspect the effective configuration and provenance.
+Use the Prometheus endpoint with `Accept: text/plain; version=0.0.4` to inspect
+the eleven frozen metric families. The Wave 2 schema, renderer, reason-code,
+and conservation gates are the authoritative compatibility checks.

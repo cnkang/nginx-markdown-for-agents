@@ -9,7 +9,8 @@ set -euo pipefail
 #  3) Malformed HTML input does not crash
 #  4) Upstream 5xx errors are not converted
 #  5) 206 Partial Content is not converted
-#  6) markdown_limits memory= boundary: exactly at limit converts, over limit fail-opens
+#  6) markdown_limits conversion_memory= boundary: exactly at limit converts,
+#     over limit fail-opens
 #  7) Metrics endpoint is reachable
 
 NGINX_VERSION="${NGINX_VERSION:-1.28.2}"
@@ -293,7 +294,7 @@ http {
         location /md/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_limits memory=10m timeout=120s;
+            markdown_limits conversion_memory=10m parser_memory=10m conversion_timeout=120s;
             markdown_error_policy pass;
 
             proxy_http_version 1.1;
@@ -304,7 +305,7 @@ http {
         location /md-reject/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_limits memory=10m timeout=120s;
+            markdown_limits conversion_memory=10m parser_memory=10m conversion_timeout=120s;
             markdown_error_policy fail_closed;
 
             proxy_http_version 1.1;
@@ -315,7 +316,7 @@ http {
         location /md-small/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_limits memory=1k timeout=120s;
+            markdown_limits conversion_memory=64k parser_memory=64k streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
 
             proxy_http_version 1.1;
@@ -412,28 +413,28 @@ else
 fi
 
 # --- Case 7: Small max_size allows small response ---
-echo "==> Case 7: Small max_size (1k) allows small response" >&2
+echo "==> Case 7: Small conversion_memory (64k) allows small response" >&2
 curl -sS -D "${RAW_DIR}/case7.hdr" -o "${RAW_DIR}/case7.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md-small/small" >/dev/null
 grep -qi "${PATTERN_CT_MARKDOWN}" "${RAW_DIR}/case7.hdr" || {
-  echo "FAIL: Case 7 - small response should convert with 1k max_size" >&2
+  echo "FAIL: Case 7 - small response should convert with 64k conversion_memory" >&2
   exit 1
 }
-echo "  PASS: Small response converts with 1k max_size" >&2
+echo "  PASS: Small response converts with 64k conversion_memory" >&2
 
 # --- Case 8: Small max_size fail-opens for larger response ---
-echo "==> Case 8: Small max_size (1k) fail-opens for larger response" >&2
+echo "==> Case 8: Small conversion_memory (64k) fail-opens for larger response" >&2
 oversize_bytes="$(curl -sS --max-time 30 \
   "http://127.0.0.1:${UPSTREAM_PORT}/large" | wc -c | tr -d ' ')"
 if [[ "${oversize_bytes}" -le 1024 ]]; then
-  echo "FAIL: Case 8 - /md-small/large fixture must be >1024 bytes, got ${oversize_bytes}" >&2
+  echo "FAIL: Case 8 - /md-small/large fixture must be >64KiB, got ${oversize_bytes}" >&2
   exit 1
 fi
 curl -sS -D "${RAW_DIR}/case8.hdr" -o "${RAW_DIR}/case8.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md-small/large" >/dev/null
-# The large HTML is bigger than 1k, so it should fail-open to HTML.
+# The large HTML is bigger than 64KiB, so it should fail-open to HTML.
 grep -qi "${PATTERN_CT_HTML}" "${RAW_DIR}/case8.hdr" || {
   echo "FAIL: Case 8 - expected text/html for oversize response" >&2
   exit 1

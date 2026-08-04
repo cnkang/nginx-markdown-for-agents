@@ -803,6 +803,34 @@ test_property1b_duplicate_keys_rejected(void)
     TEST_PASS("Property 1b: all duplicate key cases rejected");
 }
 
+/* A second directive in one block must fail even when it names a different
+ * key.  The parser's per-invocation duplicate set cannot enforce this alone. */
+static void
+test_property1b_duplicate_directive_rejected(void)
+{
+    ngx_http_markdown_conf_t mcf;
+    char *rc;
+    static u_char first[] = "conversion_timeout=5s";
+    static u_char second[] = "parser_timeout=2s";
+
+    TEST_SUBSECTION("Property 1b: repeated markdown_limits is rejected");
+
+    init_limits_unset(&mcf);
+    setup_conf_context(2);
+    g_args[1].data = first;
+    g_args[1].len = sizeof(first) - 1;
+    rc = ngx_http_markdown_limits(&g_cf, &g_cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+        "first markdown_limits directive must be accepted");
+
+    setup_conf_context(2);
+    g_args[1].data = second;
+    g_args[1].len = sizeof(second) - 1;
+    rc = ngx_http_markdown_limits(&g_cf, &g_cmd, &mcf);
+    TEST_ASSERT(strcmp(rc, "is duplicate") == 0,
+        "second markdown_limits directive must be rejected");
+}
+
 /* ----------------------------------------------------------------
  * Property 1c: Unknown keys are rejected.
  *
@@ -1068,6 +1096,7 @@ main(void)
 
     test_property1a_valid_combinations_roundtrip();
     test_property1b_duplicate_keys_rejected();
+    test_property1b_duplicate_directive_rejected();
     test_property1c_unknown_keys_rejected();
     test_property1d_zero_values_rejected();
     test_property1e_overflow_values_rejected();

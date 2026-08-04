@@ -320,7 +320,7 @@ class TestRealisticRustOutputCompatibility:
                 "small": {
                     **REALISTIC_STREAMING_REPORT["streaming_metrics"]["small"],
                     "etag_computed": 1,
-                    "metrics_formats_tested": ["json", "text", "prometheus"],
+                    "metrics_formats_tested": ["prometheus"],
                 },
                 "medium": {
                     **REALISTIC_STREAMING_REPORT["streaming_metrics"]["medium"],

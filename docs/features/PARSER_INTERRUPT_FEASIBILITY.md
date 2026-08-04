@@ -43,12 +43,12 @@ The Rust conversion engine uses html5ever 0.38 in two modes:
 
 Since mid-parse interruption is not feasible, v0.7.0 uses:
 
-1. **Input size bounding** (`markdown_limits memory=<size>`): Prevents unbounded input
+1. **Input size bounding** (`markdown_limits conversion_memory=<size>`): Prevents unbounded input
    from reaching the parser.
-2. **Cooperative timeout** (`markdown_parse_timeout`, default 30s): Checked
+2. **Cooperative timeout** (`markdown_limits parser_timeout=<time>`, default 10s): Checked
    at checkpoints during DOM traversal (every 100 nodes) and at pipeline
    boundaries. The uninterruptible parse phase is bounded by input size.
-3. **Memory budget** (`markdown_parser_budget`, default 64m): Enforced via
+3. **Memory budget** (`markdown_limits parser_memory=<size>`, default 32m): Enforced via
    `MemoryBudget` stage checks in the streaming path; input-size proxy in
    the full-buffer path.
 4. **Implicit depth limit**: State stack budget (64 KiB) bounds nesting to

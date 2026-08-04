@@ -429,20 +429,7 @@ ngx_http_markdown_record_decompression_success(ngx_http_request_t *r,
 {
     float ratio;
 
-    NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.succeeded);
-    switch (ctx->decompression.type) {
-        case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
-            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.gzip);
-            break;
-        case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
-            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.deflate);
-            break;
-        case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
-            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.brotli);
-            break;
-        default:
-            break;
-    }
+    ngx_http_markdown_record_decompression_success_metrics(ctx);
 
     ratio = (ctx->decompression.compressed_size != 0)
         ? (float) ctx->decompression.decompressed_size / (float) ctx->decompression.compressed_size
@@ -1182,6 +1169,8 @@ ngx_http_markdown_handle_decompress_result(ngx_http_request_t *r,
      */
     if (decompress_rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total);
+        ngx_http_markdown_record_decompression_failure_budget(
+            ctx->decompression.type);
         NGX_HTTP_MARKDOWN_METRIC_INC(
             perf.decompression_budget_exceeded_total);
         return ngx_http_markdown_handle_decompression_alloc_error(
@@ -1194,6 +1183,8 @@ ngx_http_markdown_handle_decompress_result(ngx_http_request_t *r,
 
     if (decompress_rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.format_error_total);
+        ngx_http_markdown_record_decompression_failure_format(
+            ctx->decompression.type);
         return ngx_http_markdown_handle_decompression_conversion_error(
             r, ctx, conf,
             "markdown: fail-open strategy "
@@ -1204,6 +1195,8 @@ ngx_http_markdown_handle_decompress_result(ngx_http_request_t *r,
     if (decompress_rc == NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT) {
         NGX_HTTP_MARKDOWN_METRIC_INC(
             decompressions.truncated_input_total);
+        ngx_http_markdown_record_decompression_failure_truncated(
+            ctx->decompression.type);
         return ngx_http_markdown_handle_decompression_conversion_error(
             r, ctx, conf,
             "markdown: fail-open strategy "
@@ -1213,6 +1206,8 @@ ngx_http_markdown_handle_decompress_result(ngx_http_request_t *r,
 
     if (decompress_rc == NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.io_error_total);
+        ngx_http_markdown_record_decompression_failure_io(
+            ctx->decompression.type);
         return ngx_http_markdown_handle_decompression_conversion_error(
             r, ctx, conf,
             "markdown: fail-open strategy "
@@ -1247,6 +1242,8 @@ ngx_http_markdown_handle_decompress_result(ngx_http_request_t *r,
             ngx_http_markdown_compression_name(
                 ctx->decompression.type);
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.io_error_total);
+        ngx_http_markdown_record_decompression_failure_io(
+            ctx->decompression.type);
         ngx_log_error(NGX_LOG_ERR,
                      r->connection->log, 0,
                      "markdown: decompression "

@@ -1,9 +1,9 @@
 /*
  * Test: metrics_endpoint
  *
- * Validates the /metrics endpoint: localhost access control, JSON
- * response format, correct metric values, and error handling for
- * non-localhost requests.
+ * Validates the /metrics endpoint: localhost access control, the frozen
+ * Prometheus text 0.0.4 response, correct metric values, and error handling
+ * for non-localhost requests.
  */
 
 #include "test_common.h"
@@ -25,7 +25,8 @@ typedef struct {
 
 typedef struct {
     int status;
-    char body[1024];
+    char content_type[96];
+    char body[4096];
 } endpoint_response_t;
 
 static int
@@ -39,7 +40,7 @@ handle_metrics_request(const char *method, const char *remote_addr, const char *
 {
     endpoint_response_t out;
     unsigned long completed;
-    unsigned long avg_ms;
+    (void) format;
     memset(&out, 0, sizeof(out));
 
     if (!(STR_EQ(method, "GET") || STR_EQ(method, "HEAD"))) {
@@ -53,39 +54,44 @@ handle_metrics_request(const char *method, const char *remote_addr, const char *
 
     out.status = 200;
     completed = m->conversions_succeeded + m->conversions_failed;
-    avg_ms = completed == 0 ? 0 : m->conversion_time_sum_ms / completed;
-    if (STR_EQ(format, "json")) {
-        snprintf(out.body, sizeof(out.body),
-                 "{\"conversions_attempted\":%lu,\"conversions_succeeded\":%lu,\"conversions_failed\":%lu,"
-                 "\"conversion_completed\":%lu,\"conversion_time_avg_ms\":%lu,"
-                 "\"conversion_latency_buckets\":{\"le_10ms\":%lu,\"le_100ms\":%lu,\"le_1000ms\":%lu,\"gt_1000ms\":%lu},"
-                 "\"decompressions_attempted\":%lu,\"decompressions_succeeded\":%lu}",
-                 m->conversions_attempted, m->conversions_succeeded, m->conversions_failed,
-                 completed, avg_ms,
-                 m->conversion_latency.le_10ms, m->conversion_latency.le_100ms,
-                 m->conversion_latency.le_1000ms, m->conversion_latency.gt_1000ms,
-                 m->decompressions_attempted, m->decompressions_succeeded);
-    } else {
-        snprintf(out.body, sizeof(out.body),
-                 "Markdown Filter Metrics\n"
-                 "=======================\n"
-                 "Conversions Attempted: %lu\n"
-                 "Conversions Succeeded: %lu\n"
-                 "Conversions Failed: %lu\n"
-                 "Conversions Completed: %lu\n"
-                 "Average Conversion Time: %lu ms\n"
-                 "Latency <= 10ms: %lu\n"
-                 "Latency <= 100ms: %lu\n"
-                 "Latency <= 1000ms: %lu\n"
-                 "Latency > 1000ms: %lu\n"
-                 "Decompressions Attempted: %lu\n"
-                 "Decompressions Succeeded: %lu\n",
-                 m->conversions_attempted, m->conversions_succeeded, m->conversions_failed,
-                 completed, avg_ms,
-                 m->conversion_latency.le_10ms, m->conversion_latency.le_100ms,
-                 m->conversion_latency.le_1000ms, m->conversion_latency.gt_1000ms,
-                 m->decompressions_attempted, m->decompressions_succeeded);
-    }
+    snprintf(out.content_type, sizeof(out.content_type),
+             "text/plain; version=0.0.4; charset=utf-8");
+    snprintf(out.body, sizeof(out.body),
+             "# HELP nginx_markdown_requests_total terminal request outcomes\n"
+             "# TYPE nginx_markdown_requests_total counter\n"
+             "nginx_markdown_requests_total{outcome=\"converted\",stage=\"conversion\",reason=\"converted\"} %lu\n"
+             "# HELP nginx_markdown_conversion_attempts_total conversion attempts\n"
+             "# TYPE nginx_markdown_conversion_attempts_total counter\n"
+             "nginx_markdown_conversion_attempts_total{engine=\"full_buffer\"} %lu\n"
+             "# HELP nginx_markdown_conversion_deliveries_total successful deliveries\n"
+             "# TYPE nginx_markdown_conversion_deliveries_total counter\n"
+             "nginx_markdown_conversion_deliveries_total{engine=\"full_buffer\"} %lu\n"
+             "# HELP nginx_markdown_conversion_duration_seconds conversion duration\n"
+             "# TYPE nginx_markdown_conversion_duration_seconds histogram\n"
+             "nginx_markdown_conversion_duration_seconds_count{engine=\"full_buffer\"} %lu\n"
+             "# HELP nginx_markdown_input_bytes_total input bytes\n"
+             "# TYPE nginx_markdown_input_bytes_total counter\n"
+             "nginx_markdown_input_bytes_total 0\n"
+             "# HELP nginx_markdown_output_bytes_total output bytes\n"
+             "# TYPE nginx_markdown_output_bytes_total counter\n"
+             "nginx_markdown_output_bytes_total 0\n"
+             "# HELP nginx_markdown_inflight_requests in-flight requests\n"
+             "# TYPE nginx_markdown_inflight_requests gauge\n"
+             "nginx_markdown_inflight_requests 0\n"
+             "# HELP nginx_markdown_streaming_events_total streaming events\n"
+             "# TYPE nginx_markdown_streaming_events_total counter\n"
+             "nginx_markdown_streaming_events_total{transition=\"commit\",reason=\"converted\"} 0\n"
+             "# HELP nginx_markdown_decompression_events_total decompression events\n"
+             "# TYPE nginx_markdown_decompression_events_total counter\n"
+             "nginx_markdown_decompression_events_total{encoding=\"gzip\",outcome=\"success\",reason=\"ok\"} %lu\n"
+             "# HELP nginx_markdown_dynconf_reloads_total dynconf reloads\n"
+             "# TYPE nginx_markdown_dynconf_reloads_total counter\n"
+             "nginx_markdown_dynconf_reloads_total{outcome=\"success\",reason=\"ok\"} 0\n"
+             "# HELP nginx_markdown_build_info build information\n"
+             "# TYPE nginx_markdown_build_info gauge\n"
+             "nginx_markdown_build_info{version=\"test\",nginx_version=\"test\",features=\"\"} 1\n",
+             m->conversions_succeeded, m->conversions_attempted, m->conversions_succeeded,
+             completed, m->decompressions_succeeded);
     return out;
 }
 
@@ -137,22 +143,24 @@ test_output_formats(void)
     endpoint_response_t r;
     metrics_t m = sample_metrics();
 
-    TEST_SUBSECTION("Plain text and JSON output formats");
+    TEST_SUBSECTION("Prometheus text 0.0.4 output is fixed");
 
-    r = handle_metrics_request("GET", "::1", "text", &m);
-    TEST_ASSERT(strstr(r.body, "Conversions Attempted: 10") != NULL,
-                "Plain text output should include counters");
-    TEST_ASSERT(strstr(r.body, "Average Conversion Time: 10 ms") != NULL,
-                "Plain text output should include averages");
+    r = handle_metrics_request("GET", "::1", "text/plain", &m);
+    TEST_ASSERT(STR_EQ(r.content_type, "text/plain; version=0.0.4; charset=utf-8"),
+                "Metrics content type should be Prometheus text 0.0.4");
+    TEST_ASSERT(strstr(r.body, "# TYPE nginx_markdown_requests_total counter") != NULL,
+                "Prometheus output should declare requests_total");
+    TEST_ASSERT(strstr(r.body, "nginx_markdown_requests_total{outcome=\"converted\"") != NULL,
+                "Prometheus output should include converted requests");
+    TEST_ASSERT(strstr(r.body, "nginx_markdown_decompression_events_total") != NULL,
+                "Prometheus output should include decompression events");
 
-    r = handle_metrics_request("GET", "::1", "json", &m);
-    TEST_ASSERT(strstr(r.body, "\"conversions_attempted\":10") != NULL,
-                "JSON output should include counters");
-    TEST_ASSERT(strstr(r.body, "\"conversion_latency_buckets\":{") != NULL,
-                "JSON output should include latency buckets");
-    TEST_ASSERT(strstr(r.body, "\"decompressions_succeeded\":3") != NULL,
-                "JSON output should include decompression counters");
-    TEST_PASS("Output formats work");
+    r = handle_metrics_request("GET", "::1", "application/json", &m);
+    TEST_ASSERT(STR_EQ(r.content_type, "text/plain; version=0.0.4; charset=utf-8"),
+                "JSON Accept must not select a legacy representation");
+    TEST_ASSERT(strstr(r.body, "nginx_markdown_build_info") != NULL,
+                "All Accept values should receive the frozen Prometheus surface");
+    TEST_PASS("Prometheus output contract works");
 }
 
 int

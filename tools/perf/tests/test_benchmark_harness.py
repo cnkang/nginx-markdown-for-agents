@@ -42,6 +42,7 @@ from tools.perf.benchmark_validation import (
     parse_ab_result,
     parse_curl_header_artifact,
     parse_hey_result,
+    parse_prometheus_metrics,
     validate_response_probe,
 )
 
@@ -68,6 +69,26 @@ VALID_HEY_OUTPUT = """response-time,DNS+dialup,DNS,Request-write,Response-delay,
 0.010,0,0,0,0,0,200,0,
 0.020,0,0,0,0,0,200,0,
 """
+
+
+def test_parse_prometheus_v1_metrics_for_benchmark_adapter():
+    metrics = parse_prometheus_metrics(
+        """# TYPE nginx_markdown_conversion_attempts_total counter
+nginx_markdown_conversion_attempts_total{engine="streaming"} 3
+nginx_markdown_conversion_attempts_total{engine="full_buffer"} 2
+nginx_markdown_conversion_deliveries_total{engine="streaming"} 3
+nginx_markdown_streaming_events_total{transition="fallback",reason="bypass_no_transform"} 1
+nginx_markdown_decompression_events_total{encoding="brotli",outcome="success",reason="ok"} 4
+nginx_markdown_decompression_events_total{encoding="brotli",outcome="failure",reason="budget_exceeded"} 1
+"""
+    )
+
+    assert metrics["streaming_path_hits"] == 3.0
+    assert metrics["fullbuffer_path_hits"] == 2.0
+    assert metrics["streaming"]["fallback_total"] == 1.0
+    assert metrics["perf"]["decompression_events_total"] == 5.0
+    assert metrics["perf"]["decompression_budget_exceeded_total"] == 1.0
+    assert metrics["perf"]["zero_copy_output_total"] == 3.0
 
 
 def test_ab_requires_all_requests_and_zero_failures():
@@ -1364,8 +1385,11 @@ class TestNginxConfigGeneration:
         # 2. Verification of local mime.types removal and static types block addition
         assert "include       mime.types;" not in script_content, "Relative 'include mime.types;' should not be used in benchmark config"
         assert "types {" in script_content, "Explicit 'types' definition block is missing from benchmark config"
-        assert "markdown_streaming_zero_copy on;" in script_content, (
-            "streaming_first benchmark config should enable zero-copy"
+        assert "markdown_streaming force;" in script_content, (
+            "streaming_first benchmark config should explicitly enable streaming"
+        )
+        assert "markdown_streaming_zero_copy" not in script_content, (
+            "zero-copy must remain an internal implementation choice"
         )
         assert '"$NGINX_BIN" -t -c "$conf_path" -p "$NGINX_WORKDIR"' in script_content, (
             "generated benchmark nginx.conf should be validated with nginx -t"

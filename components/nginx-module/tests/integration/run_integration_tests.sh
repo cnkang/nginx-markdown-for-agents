@@ -182,19 +182,25 @@ write_static_html() {
     return 0
 }
 
-extract_json_number_field() {
-    local json="$1"
-    local field="$2"
-    local compact match
+extract_prometheus_sum() {
+    local metrics="$1"
+    local family="$2"
+    local label_fragment="${3:-}"
 
-    compact=$(printf "%s" "$json" | tr -d '\n')
-    match=$(printf "%s" "$compact" | grep -oE "\"${field}\"[[:space:]]*:[[:space:]]*[0-9]+" | head -n1 || true)
-    if [[ -z "$match" ]]; then
-        return 1
-    fi
-
-    printf '%s\n' "$match" | sed -E 's/.*:[[:space:]]*//'
-    return 0
+    printf '%s\n' "$metrics" | awk -v family="$family" \
+        -v label_fragment="$label_fragment" '
+        index($0, family) == 1 && substr($0, 1, 1) != "#" \
+            && (label_fragment == "" || index($0, label_fragment) > 0) {
+            sum += $NF
+            found = 1
+        }
+        END {
+            if (!found) {
+                exit 1
+            }
+            printf "%.0f\n", sum
+        }'
+    return $?
 }
 
 # Start NGINX with given configuration
@@ -438,7 +444,7 @@ events { worker_connections 1024; }
 http {
     access_log '"$NGINX_ACCESS_LOG"';
     markdown_filter on;
-    markdown_limits memory=10m timeout=120s;
+    markdown_limits conversion_memory=10m conversion_timeout=120s;
     
     server {
         listen '"$TEST_PORT"';
@@ -839,15 +845,17 @@ EOF
     seq "$total_requests" | xargs -I{} -P 8 sh -c \
         "curl -s -H 'Accept: ${MEDIA_TYPE_MARKDOWN}' 'http://localhost:${TEST_PORT}/test?req={}' > /dev/null" || true
 
-    metrics=$(curl -s -H "Accept: application/json" "http://localhost:${TEST_PORT}${METRICS_ENDPOINT}")
-    if ! attempted=$(extract_json_number_field "$metrics" "conversions_attempted"); then
-        log_fail "Failed to parse conversions_attempted from metrics JSON"
+    metrics=$(curl -s -H "Accept: text/plain; version=0.0.4" "http://localhost:${TEST_PORT}${METRICS_ENDPOINT}")
+    if ! attempted=$(extract_prometheus_sum \
+        "$metrics" "nginx_markdown_conversion_attempts_total"); then
+        log_fail "Failed to parse conversion attempts from Prometheus metrics"
         log_info "Metrics: $metrics"
         stop_nginx
         return 1
     fi
-    if ! completed=$(extract_json_number_field "$metrics" "conversion_completed"); then
-        log_fail "Failed to parse conversion_completed from metrics JSON"
+    if ! completed=$(extract_prometheus_sum \
+        "$metrics" "nginx_markdown_conversion_duration_seconds_count"); then
+        log_fail "Failed to parse conversion duration count from Prometheus metrics"
         log_info "Metrics: $metrics"
         stop_nginx
         return 1
@@ -856,21 +864,21 @@ EOF
     if [[ "$attempted" == "$total_requests" ]]; then
         log_pass "Shared metrics aggregate all worker attempts (${attempted})"
     else
-        log_fail "Expected conversions_attempted=${total_requests}, got ${attempted}"
+        log_fail "Expected conversion attempts=${total_requests}, got ${attempted}"
         log_info "Metrics: $metrics"
     fi
 
     if [[ "$completed" == "$total_requests" ]]; then
         log_pass "Shared metrics report completed conversions (${completed})"
     else
-        log_fail "Expected conversion_completed=${total_requests}, got ${completed}"
+        log_fail "Expected conversion duration count=${total_requests}, got ${completed}"
         log_info "Metrics: $metrics"
     fi
 
-    if echo "$metrics" | grep -q '"conversion_latency_buckets"'; then
-        log_pass "Metrics JSON exposes latency buckets"
+    if echo "$metrics" | grep -q '^nginx_markdown_conversion_duration_seconds_bucket'; then
+        log_pass "Prometheus metrics expose conversion duration buckets"
     else
-        log_fail "Metrics JSON missing conversion_latency_buckets"
+        log_fail "Prometheus metrics missing conversion duration buckets"
         log_info "Metrics: $metrics"
     fi
 
@@ -956,7 +964,6 @@ http {
         }
         location ${METRICS_ENDPOINT} {
             markdown_metrics;
-            markdown_metrics_format prometheus;
         }
     }
 }
@@ -1020,8 +1027,7 @@ EOF
     fi
 
     #
-    # Sub-test C: application/json should still return JSON even
-    # when markdown_metrics_format is prometheus.
+    # Sub-test C: the endpoint is Prometheus-only regardless of Accept.
     #
     response=$(make_request "GET" "${METRICS_ENDPOINT}" "application/json")
     status=$(get_status "$response")
@@ -1029,29 +1035,22 @@ EOF
     body=$(get_body "$response")
 
     if [[ "$status" == "200" ]]; then
-        log_pass "application/json override: $STATUS_CODE_OK_MESSAGE"
+        log_pass "application/json Accept: $STATUS_CODE_OK_MESSAGE"
     else
-        log_fail "application/json override: Expected 200, got $status"
+        log_fail "application/json Accept: Expected 200, got $status"
     fi
 
-    if echo "$content_type" | grep -qE '^application/json$'; then
-        log_pass "application/json override: Content-Type is application/json"
-    else
-        log_fail "application/json override: Expected application/json, got $content_type"
-    fi
+    assert_prometheus_content_type "$content_type" "application/json Accept"
 
-    if echo "$body" | grep -q '"conversions_attempted"'; then
-        log_pass "application/json override: Body is JSON"
+    if echo "$body" | grep -q "^# HELP"; then
+        log_pass "application/json Accept: Body is Prometheus text"
     else
-        log_fail "application/json override: Body is not JSON"
+        log_fail "application/json Accept: Body is not Prometheus text"
         log_info "Body (first 200 chars): $(echo "$body" | head -c 200)"
     fi
 
     #
-    # Sub-test D: Accept: text/plain (without version=0.0.4)
-    # should return legacy plain-text format, NOT Prometheus.
-    # This is the negative case that guards against negotiation
-    # regression — bare text/plain must not trigger Prometheus.
+    # Sub-test D: bare text/plain remains Prometheus text.
     #
     response=$(make_request "GET" "${METRICS_ENDPOINT}" "text/plain")
     status=$(get_status "$response")
@@ -1064,23 +1063,13 @@ EOF
         log_fail "text/plain (no version): Expected 200, got $status"
     fi
 
-    if echo "$content_type" | grep -qE '^text/plain$'; then
-        log_pass "text/plain (no version): Content-Type is bare text/plain (legacy)"
-    else
-        log_fail "text/plain (no version): Expected text/plain, got $content_type"
-    fi
+    assert_prometheus_content_type "$content_type" "text/plain (no version)"
 
-    if echo "$body" | grep -q "^Markdown Filter Metrics"; then
-        log_pass "text/plain (no version): Body is legacy text format"
+    if echo "$body" | grep -q "^# HELP"; then
+        log_pass "text/plain (no version): Body is Prometheus text"
     else
-        log_fail "text/plain (no version): Body is not legacy text format"
+        log_fail "text/plain (no version): Body is not Prometheus text"
         log_info "Body (first 200 chars): $(echo "$body" | head -c 200)"
-    fi
-
-    if echo "$body" | grep -q "^# HELP\|^# TYPE"; then
-        log_fail "text/plain (no version): Body unexpectedly contains Prometheus markers"
-    else
-        log_pass "text/plain (no version): Body does not contain Prometheus markers"
     fi
 
     #

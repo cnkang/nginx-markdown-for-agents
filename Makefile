@@ -1125,7 +1125,7 @@ help:
 	@echo "  test-e2e-rust            - Build and run Rust e2e-harness migrated scenarios"
 	@echo "  verify-streaming-failure-cache-e2e - Run streaming failure/cache e2e tests"
 	@echo "  verify-streaming-failure-cache-e2e-plan - Print test plan only (no NGINX_BIN required)"
-	@echo "  verify-metrics-endpoint-e2e  - Run metrics endpoint e2e tests (JSON/text/Prometheus)"
+	@echo "  verify-metrics-endpoint-e2e  - Run Prometheus text 0.0.4 metrics E2E tests"
 	@echo "  verify-conditional-requests-e2e - Run conditional-request e2e tests (ETag/304)"
 	@echo "  verify-config-merge-e2e     - Run config-merge e2e tests (http/server/location)"
 	@echo "  verify-auth-cache-e2e       - Run auth/cache interaction e2e tests"

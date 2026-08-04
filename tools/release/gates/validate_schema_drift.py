@@ -29,6 +29,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+if str(REPO_ROOT / "tools") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "tools"))
+from lib.path_validation import validate_read_path  # noqa: E402
 
 # Wave 2 artifact paths
 W2_DIR = REPO_ROOT / "artifacts" / "spec62" / "wave2"
@@ -60,7 +63,8 @@ W2_ARTIFACTS = [
 
 def _load_json(path: Path) -> dict:
     """Load and return parsed JSON from the given path."""
-    with open(path, encoding="utf-8") as f:
+    validated_path = validate_read_path(path, purpose="schema drift artifact")
+    with open(validated_path, encoding="utf-8") as f:
         return json.load(f)
 
 

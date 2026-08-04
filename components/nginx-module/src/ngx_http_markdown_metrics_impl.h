@@ -25,11 +25,10 @@
  * ngx_atomic_uint_t values instead of ngx_atomic_t, since the snapshot
  * is only read from a single thread after collection.
  *
- * The latency histogram, decompression counters, path-hit counters,
- * skip counters, and per-path counters are each grouped into
- * anonymous sub-structs to keep the top-level field count within
- * SonarCloud's 20-field limit while preserving a flat JSON output
- * format.
+ * The latency histogram, decompression counters, path-hit counters, skip
+ * counters, and debug per-path counters are each grouped into anonymous
+ * sub-structs to keep the top-level field count within SonarCloud's 20-field
+ * limit while preserving the bounded internal test renderers.
  */
 typedef struct {
     /* Conversion attempt tracking */
@@ -56,6 +55,26 @@ typedef struct {
         ngx_atomic_uint_t gt_1000ms;
     } conversion_latency;
 
+    /* Per-engine v1 histogram bands and totals. */
+    struct {
+        struct {
+            ngx_atomic_uint_t le_10ms;
+            ngx_atomic_uint_t le_100ms;
+            ngx_atomic_uint_t le_1000ms;
+            ngx_atomic_uint_t gt_1000ms;
+            ngx_atomic_uint_t sum_ms;
+            ngx_atomic_uint_t count;
+        } full_buffer;
+        struct {
+            ngx_atomic_uint_t le_10ms;
+            ngx_atomic_uint_t le_100ms;
+            ngx_atomic_uint_t le_1000ms;
+            ngx_atomic_uint_t gt_1000ms;
+            ngx_atomic_uint_t sum_ms;
+            ngx_atomic_uint_t count;
+        } streaming;
+    } conversion_latency_v1;
+
     /* Decompression metrics (grouped to keep top-level field count <= 20) */
     struct {
         ngx_atomic_uint_t attempted;
@@ -68,6 +87,24 @@ typedef struct {
         ngx_atomic_uint_t format_error_total;
         ngx_atomic_uint_t truncated_input_total;
         ngx_atomic_uint_t io_error_total;
+        struct {
+            ngx_atomic_uint_t budget;
+            ngx_atomic_uint_t format;
+            ngx_atomic_uint_t truncated;
+            ngx_atomic_uint_t io;
+        } gzip_failures;
+        struct {
+            ngx_atomic_uint_t budget;
+            ngx_atomic_uint_t format;
+            ngx_atomic_uint_t truncated;
+            ngx_atomic_uint_t io;
+        } deflate_failures;
+        struct {
+            ngx_atomic_uint_t budget;
+            ngx_atomic_uint_t format;
+            ngx_atomic_uint_t truncated;
+            ngx_atomic_uint_t io;
+        } brotli_failures;
     } decompressions;
 
     /* Path hit metrics (threshold router, grouped to keep field count <= 20) */
@@ -105,6 +142,18 @@ typedef struct {
         ngx_atomic_uint_t decision_count;
         ngx_atomic_uint_t estimated_token_savings;
         ngx_atomic_uint_t replay_buffer_errors_total;
+
+        struct {
+            ngx_atomic_uint_t success;
+            ngx_atomic_uint_t failure_schema_version;
+            ngx_atomic_uint_t failure_unknown_key;
+            ngx_atomic_uint_t failure_duplicate_key;
+            ngx_atomic_uint_t failure_invalid_type;
+            ngx_atomic_uint_t failure_out_of_range;
+            ngx_atomic_uint_t failure_size_exceeded;
+            ngx_atomic_uint_t failure_parse_error;
+            ngx_atomic_uint_t failure_file_error;
+        } dynconf_reloads;
 
         /* Parse interrupt metrics (v0.7.0) */
         struct {
@@ -192,40 +241,27 @@ void ngx_memzero(void *buf, size_t n);
 #endif
 u_char *ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...);
 ngx_int_t ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *out);
-ngx_int_t ngx_strncasecmp(u_char *s1, u_char *s2, size_t n);
 
 /*
  * Response buffer size for the metrics endpoint.
  *
- * Estimated current output per format (without per-path entries):
- *   JSON:       ~2.0 KiB
- *   Plain text: ~1.5 KiB
- *   Prometheus: ~3.8 KiB (most verbose due to HELP/TYPE lines)
+ * Estimated current Prometheus output (without debug per-path entries):
+ *   ~3.8 KiB (most verbose due to HELP/TYPE lines)
  *
  * Per-path entries add variable output depending on the number of
  * tracked paths and their URI lengths.  Each path entry is roughly
- * 80-120 bytes across formats.  With a default cardinality limit
+ * 80-120 bytes.  With a default cardinality limit
  * of 100 paths at ~100 bytes each, per-path output can reach
  * ~10 KiB.
  *
- * The 128 KiB buffer accommodates aggregate output plus per-path
- * entries for typical deployments.  If the buffer is exhausted
+ * The 128 KiB buffer accommodates aggregate output plus debug per-path
+ * entries for typical test deployments. If the buffer is exhausted
  * during per-path detail rendering, paths that do not fit are
  * aggregated into an "__other__" entry so the response remains
  * syntactically complete and the endpoint always returns HTTP 200.
  */
 #define NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE  131072
 
-/*
- * Forward declaration: the Prometheus renderer is defined in
- * ngx_http_markdown_prometheus_impl.h but called from the
- * metrics handler below.  Declared here so the call site
- * compiles before the definition is included.
- */
-static u_char *
-ngx_http_markdown_metrics_write_prometheus(
-    u_char *p, u_char *end,
-    const ngx_http_markdown_metrics_snapshot_t *snapshot);
 static u_char *
 ngx_http_markdown_metrics_render_response_body(
     ngx_http_request_t *r,
@@ -396,6 +432,82 @@ ngx_http_markdown_metrics_write_json_routing(
         snapshot->results.parse_interrupts.parse_budget_exceeded_total);
 }
 
+static void
+ngx_http_markdown_collect_v1_latency_snapshot(
+    ngx_http_markdown_metrics_snapshot_t *snapshot,
+    const ngx_http_markdown_metrics_t *metrics)
+{
+    snapshot->conversion_latency_v1.full_buffer.le_10ms =
+        metrics->conversion_latency_v1.full_buffer.le_10ms;
+    snapshot->conversion_latency_v1.full_buffer.le_100ms =
+        metrics->conversion_latency_v1.full_buffer.le_100ms;
+    snapshot->conversion_latency_v1.full_buffer.le_1000ms =
+        metrics->conversion_latency_v1.full_buffer.le_1000ms;
+    snapshot->conversion_latency_v1.full_buffer.gt_1000ms =
+        metrics->conversion_latency_v1.full_buffer.gt_1000ms;
+    snapshot->conversion_latency_v1.full_buffer.sum_ms =
+        metrics->conversion_latency_v1.full_buffer.sum_ms;
+    snapshot->conversion_latency_v1.full_buffer.count =
+        metrics->conversion_latency_v1.full_buffer.count;
+    snapshot->conversion_latency_v1.streaming.le_10ms =
+        metrics->conversion_latency_v1.streaming.le_10ms;
+    snapshot->conversion_latency_v1.streaming.le_100ms =
+        metrics->conversion_latency_v1.streaming.le_100ms;
+    snapshot->conversion_latency_v1.streaming.le_1000ms =
+        metrics->conversion_latency_v1.streaming.le_1000ms;
+    snapshot->conversion_latency_v1.streaming.gt_1000ms =
+        metrics->conversion_latency_v1.streaming.gt_1000ms;
+    snapshot->conversion_latency_v1.streaming.sum_ms =
+        metrics->conversion_latency_v1.streaming.sum_ms;
+    snapshot->conversion_latency_v1.streaming.count =
+        metrics->conversion_latency_v1.streaming.count;
+}
+
+static void
+ngx_http_markdown_collect_decompression_snapshot(
+    ngx_http_markdown_metrics_snapshot_t *snapshot,
+    const ngx_http_markdown_metrics_t *metrics)
+{
+    snapshot->decompressions.attempted = metrics->decompressions.attempted;
+    snapshot->decompressions.succeeded = metrics->decompressions.succeeded;
+    snapshot->decompressions.failed = metrics->decompressions.failed;
+    snapshot->decompressions.gzip = metrics->decompressions.gzip;
+    snapshot->decompressions.deflate = metrics->decompressions.deflate;
+    snapshot->decompressions.brotli = metrics->decompressions.brotli;
+    snapshot->decompressions.budget_exceeded_total =
+        metrics->decompressions.budget_exceeded_total;
+    snapshot->decompressions.format_error_total =
+        metrics->decompressions.format_error_total;
+    snapshot->decompressions.truncated_input_total =
+        metrics->decompressions.truncated_input_total;
+    snapshot->decompressions.io_error_total =
+        metrics->decompressions.io_error_total;
+    snapshot->decompressions.gzip_failures.budget =
+        metrics->decompressions.gzip_failures.budget;
+    snapshot->decompressions.gzip_failures.format =
+        metrics->decompressions.gzip_failures.format;
+    snapshot->decompressions.gzip_failures.truncated =
+        metrics->decompressions.gzip_failures.truncated;
+    snapshot->decompressions.gzip_failures.io =
+        metrics->decompressions.gzip_failures.io;
+    snapshot->decompressions.deflate_failures.budget =
+        metrics->decompressions.deflate_failures.budget;
+    snapshot->decompressions.deflate_failures.format =
+        metrics->decompressions.deflate_failures.format;
+    snapshot->decompressions.deflate_failures.truncated =
+        metrics->decompressions.deflate_failures.truncated;
+    snapshot->decompressions.deflate_failures.io =
+        metrics->decompressions.deflate_failures.io;
+    snapshot->decompressions.brotli_failures.budget =
+        metrics->decompressions.brotli_failures.budget;
+    snapshot->decompressions.brotli_failures.format =
+        metrics->decompressions.brotli_failures.format;
+    snapshot->decompressions.brotli_failures.truncated =
+        metrics->decompressions.brotli_failures.truncated;
+    snapshot->decompressions.brotli_failures.io =
+        metrics->decompressions.brotli_failures.io;
+}
+
 /**
  * Capture a best-effort snapshot of the global metrics counters into the
  * provided snapshot structure.
@@ -445,12 +557,8 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
         metrics->conversion_latency.le_1000ms;
     snapshot->conversion_latency.gt_1000ms =
         metrics->conversion_latency.gt_1000ms;
-    snapshot->decompressions.attempted = metrics->decompressions.attempted;
-    snapshot->decompressions.succeeded = metrics->decompressions.succeeded;
-    snapshot->decompressions.failed = metrics->decompressions.failed;
-    snapshot->decompressions.gzip = metrics->decompressions.gzip;
-    snapshot->decompressions.deflate = metrics->decompressions.deflate;
-    snapshot->decompressions.brotli = metrics->decompressions.brotli;
+    ngx_http_markdown_collect_v1_latency_snapshot(snapshot, metrics);
+    ngx_http_markdown_collect_decompression_snapshot(snapshot, metrics);
     snapshot->path_hits.fullbuffer = metrics->path_hits.fullbuffer;
     snapshot->path_hits.incremental = metrics->path_hits.incremental;
 #ifdef MARKDOWN_STREAMING_ENABLED
@@ -532,17 +640,26 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
     snapshot->results.parse_interrupts.parse_budget_exceeded_total =
         metrics->results.parse_interrupts.parse_budget_exceeded_total;
 
-    snapshot->decompressions.budget_exceeded_total =
-        metrics->decompressions.budget_exceeded_total;
-    snapshot->decompressions.format_error_total =
-        metrics->decompressions.format_error_total;
-    snapshot->decompressions.truncated_input_total =
-        metrics->decompressions.truncated_input_total;
-    snapshot->decompressions.io_error_total =
-        metrics->decompressions.io_error_total;
-
     snapshot->results.replay_buffer_errors_total =
         metrics->results.replay_buffer_errors_total;
+    snapshot->results.dynconf_reloads.success =
+        metrics->results.dynconf_reloads.success;
+    snapshot->results.dynconf_reloads.failure_schema_version =
+        metrics->results.dynconf_reloads.failure_schema_version;
+    snapshot->results.dynconf_reloads.failure_unknown_key =
+        metrics->results.dynconf_reloads.failure_unknown_key;
+    snapshot->results.dynconf_reloads.failure_duplicate_key =
+        metrics->results.dynconf_reloads.failure_duplicate_key;
+    snapshot->results.dynconf_reloads.failure_invalid_type =
+        metrics->results.dynconf_reloads.failure_invalid_type;
+    snapshot->results.dynconf_reloads.failure_out_of_range =
+        metrics->results.dynconf_reloads.failure_out_of_range;
+    snapshot->results.dynconf_reloads.failure_size_exceeded =
+        metrics->results.dynconf_reloads.failure_size_exceeded;
+    snapshot->results.dynconf_reloads.failure_parse_error =
+        metrics->results.dynconf_reloads.failure_parse_error;
+    snapshot->results.dynconf_reloads.failure_file_error =
+        metrics->results.dynconf_reloads.failure_file_error;
 
 #ifdef MARKDOWN_METRICS_PER_PATH_DEBUG
     snapshot->per_path.path_entries =
@@ -589,16 +706,172 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
         metrics->perf.copied_output_total;
 }
 
-static ngx_flag_t ngx_http_markdown_metrics_value_contains(
-    ngx_str_t *value, u_char *needle, size_t needle_len);
 
-static u_char  ngx_http_markdown_metrics_accept_json[] = "application/json";
-static u_char  ngx_http_markdown_metrics_accept_openmetrics[] =
-    "application/openmetrics-text";
-static u_char  ngx_http_markdown_metrics_accept_prom_ver[] =
-    "version=0.0.4";
-static u_char  ngx_http_markdown_metrics_accept_text_plain[] =
-    "text/plain";
+/* Translate the legacy storage snapshot into the frozen v1 metric contract. */
+static void
+ngx_http_markdown_metrics_to_v1(
+    const ngx_http_markdown_metrics_snapshot_t *snapshot,
+    ngx_http_markdown_metrics_v1_snapshot_t *v1)
+{
+    ngx_atomic_uint_t  failed_closed;
+    ngx_atomic_uint_t  latency_count;
+
+    if (v1 == NULL) {
+        return;
+    }
+    ngx_memzero(v1, sizeof(ngx_http_markdown_metrics_v1_snapshot_t));
+    if (snapshot == NULL) {
+        return;
+    }
+
+    v1->requests.converted = snapshot->conversions_succeeded;
+    v1->requests.skipped_not_eligible = snapshot->skips.method
+        + snapshot->skips.status
+        + snapshot->skips.content_type
+        + snapshot->skips.size
+        + snapshot->skips.streaming
+        + snapshot->skips.auth
+        + snapshot->skips.range;
+    v1->requests.skipped_accept = snapshot->skips.accept;
+    v1->requests.skipped_no_accept = snapshot->skips.no_accept;
+    v1->requests.skipped_conditional = snapshot->skips.conditional;
+    v1->requests.skipped_disabled = snapshot->skips.config;
+    v1->requests.skipped_bypass_no_transform =
+        snapshot->skips.compression_passthrough;
+    v1->requests.failed_open = snapshot->results.failopen_count;
+    failed_closed = snapshot->conversions_failed >= snapshot->results.failopen_count
+        ? snapshot->conversions_failed - snapshot->results.failopen_count : 0;
+    v1->requests.failed_closed = failed_closed;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    v1->requests.aborted =
+        snapshot->streaming.streaming_failure_postcommit_abort;
+#endif
+
+    v1->attempts.full_buffer = snapshot->path_hits.fullbuffer
+        + snapshot->path_hits.incremental;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    v1->attempts.streaming = snapshot->path_hits.streaming;
+#endif
+    v1->deliveries.full_buffer = snapshot->results.delivery_count;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    v1->deliveries.streaming = snapshot->streaming.succeeded_total;
+    if (v1->deliveries.full_buffer >= v1->deliveries.streaming) {
+        v1->deliveries.full_buffer -= v1->deliveries.streaming;
+    } else {
+        v1->deliveries.full_buffer = 0;
+    }
+#endif
+
+    /* Existing C buckets are exclusive bands; map them to v1 boundaries. */
+    v1->duration_full_buffer.buckets[2] =
+        snapshot->conversion_latency_v1.full_buffer.le_10ms;
+    v1->duration_full_buffer.buckets[5] =
+        snapshot->conversion_latency_v1.full_buffer.le_100ms;
+    v1->duration_full_buffer.buckets[8] =
+        snapshot->conversion_latency_v1.full_buffer.le_1000ms;
+    v1->duration_full_buffer.buckets[9] =
+        snapshot->conversion_latency_v1.full_buffer.gt_1000ms;
+    v1->duration_full_buffer.sum_us =
+        snapshot->conversion_latency_v1.full_buffer.sum_ms * 1000;
+    v1->duration_full_buffer.count =
+        snapshot->conversion_latency_v1.full_buffer.count;
+    v1->duration_streaming.buckets[2] =
+        snapshot->conversion_latency_v1.streaming.le_10ms;
+    v1->duration_streaming.buckets[5] =
+        snapshot->conversion_latency_v1.streaming.le_100ms;
+    v1->duration_streaming.buckets[8] =
+        snapshot->conversion_latency_v1.streaming.le_1000ms;
+    v1->duration_streaming.buckets[9] =
+        snapshot->conversion_latency_v1.streaming.gt_1000ms;
+    v1->duration_streaming.sum_us =
+        snapshot->conversion_latency_v1.streaming.sum_ms * 1000;
+    v1->duration_streaming.count =
+        snapshot->conversion_latency_v1.streaming.count;
+    latency_count = v1->duration_full_buffer.count
+        + v1->duration_streaming.count;
+    if (latency_count == 0) {
+        v1->duration_full_buffer.buckets[2] =
+            snapshot->conversion_latency.le_10ms;
+        v1->duration_full_buffer.buckets[5] =
+            snapshot->conversion_latency.le_100ms;
+        v1->duration_full_buffer.buckets[8] =
+            snapshot->conversion_latency.le_1000ms;
+        v1->duration_full_buffer.buckets[9] =
+            snapshot->conversion_latency.gt_1000ms;
+        v1->duration_full_buffer.sum_us =
+            snapshot->conversion_time_sum_ms * 1000;
+        v1->duration_full_buffer.count = snapshot->conversions_succeeded
+            + snapshot->conversions_failed;
+    }
+    v1->input_bytes = snapshot->input_bytes;
+    v1->output_bytes = snapshot->output_bytes;
+    v1->inflight = snapshot->perf.inflight.current;
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    v1->streaming_events.commit = snapshot->streaming.succeeded_total;
+    v1->streaming_events.fallback = snapshot->streaming.fallback_total;
+    v1->streaming_events.safe_finish_start =
+        snapshot->streaming.streaming_failure_postcommit_safe_finish;
+    v1->streaming_events.abort_start =
+        snapshot->streaming.streaming_failure_postcommit_abort;
+    v1->streaming_events.resume_success = snapshot->streaming.succeeded_total;
+    v1->streaming_events.resume_failure = snapshot->streaming.failed_total;
+#endif
+
+    v1->decompression.gzip_success = snapshot->decompressions.gzip;
+    v1->decompression.gzip_failure_budget =
+        snapshot->decompressions.gzip_failures.budget;
+    v1->decompression.gzip_failure_format =
+        snapshot->decompressions.gzip_failures.format;
+    v1->decompression.gzip_failure_truncated =
+        snapshot->decompressions.gzip_failures.truncated;
+    v1->decompression.gzip_failure_io =
+        snapshot->decompressions.gzip_failures.io;
+    v1->decompression.deflate_success = snapshot->decompressions.deflate;
+    v1->decompression.deflate_failure_budget =
+        snapshot->decompressions.deflate_failures.budget;
+    v1->decompression.deflate_failure_format =
+        snapshot->decompressions.deflate_failures.format;
+    v1->decompression.deflate_failure_truncated =
+        snapshot->decompressions.deflate_failures.truncated;
+    v1->decompression.deflate_failure_io =
+        snapshot->decompressions.deflate_failures.io;
+    v1->decompression.brotli_success = snapshot->decompressions.brotli;
+    v1->decompression.brotli_failure_budget =
+        snapshot->decompressions.brotli_failures.budget;
+    v1->decompression.brotli_failure_format =
+        snapshot->decompressions.brotli_failures.format;
+    v1->decompression.brotli_failure_truncated =
+        snapshot->decompressions.brotli_failures.truncated;
+    v1->decompression.brotli_failure_io =
+        snapshot->decompressions.brotli_failures.io;
+
+    v1->dynconf_reloads.success = snapshot->results.dynconf_reloads.success;
+    v1->dynconf_reloads.failure_schema_version =
+        snapshot->results.dynconf_reloads.failure_schema_version;
+    v1->dynconf_reloads.failure_unknown_key =
+        snapshot->results.dynconf_reloads.failure_unknown_key;
+    v1->dynconf_reloads.failure_duplicate_key =
+        snapshot->results.dynconf_reloads.failure_duplicate_key;
+    v1->dynconf_reloads.failure_invalid_type =
+        snapshot->results.dynconf_reloads.failure_invalid_type;
+    v1->dynconf_reloads.failure_out_of_range =
+        snapshot->results.dynconf_reloads.failure_out_of_range;
+    v1->dynconf_reloads.failure_size_exceeded =
+        snapshot->results.dynconf_reloads.failure_size_exceeded;
+    v1->dynconf_reloads.failure_parse_error =
+        snapshot->results.dynconf_reloads.failure_parse_error;
+    v1->dynconf_reloads.failure_file_error =
+        snapshot->results.dynconf_reloads.failure_file_error;
+
+    v1->build_info.version = (u_char *) "0.9.2";
+    v1->build_info.nginx_version_text = (u_char *) NGINX_VERSION;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    v1->build_info.features = (u_char *) "streaming";
+#else
+    v1->build_info.features = (u_char *) "";
+#endif
+}
 
 /*
  * Validate method and shared-state availability for the metrics handler.
@@ -650,189 +923,24 @@ ngx_http_markdown_metrics_validate_request(ngx_http_request_t *r)
 }
 
 /*
- * Content negotiation is intentionally simple: if the client advertises
- * application/json anywhere in Accept, emit the JSON form; otherwise use the
- * plain-text operator-friendly view.
- */
-static ngx_flag_t
-ngx_http_markdown_metrics_prefers_json(ngx_http_request_t *r)
-{
-    ngx_table_elt_t *accept_header;
-
-    accept_header = NULL;
-
-#if (NGX_HTTP_HEADERS)
-    accept_header = r->headers_in.accept;
-#else
-    static ngx_str_t accept_name = ngx_string("Accept");
-
-    accept_header = ngx_http_markdown_find_request_header(r, &accept_name);
-#endif
-
-    if (accept_header != NULL
-        && ngx_http_markdown_metrics_value_contains(
-            &accept_header->value,
-            ngx_http_markdown_metrics_accept_json,
-            sizeof(ngx_http_markdown_metrics_accept_json) - 1))
-    {
-        return 1;
-    }
-
-    return 0;
-}
-
-/*
- * Check whether the Accept header explicitly requests
- * Prometheus exposition format.
- *
- * Matches:
- *   application/openmetrics-text
- *   text/plain; version=0.0.4  (both "text/plain" AND
- *       "version=0.0.4" must be present)
- *
- * Does NOT match:
- *   text/plain  (without version — legacy plain text)
- *   application/xml; version=0.0.4  (wrong media type)
- *   version=0.0.4  (no media type at all)
- */
-static ngx_flag_t
-ngx_http_markdown_metrics_prefers_prometheus(
-    ngx_http_request_t *r)
-{
-    ngx_table_elt_t  *accept_header;
-
-    accept_header = NULL;
-
-#if (NGX_HTTP_HEADERS)
-    accept_header = r->headers_in.accept;
-#else
-    static ngx_str_t accept_name = ngx_string("Accept");
-
-    accept_header =
-        ngx_http_markdown_find_request_header(
-            r, &accept_name);
-#endif
-
-    if (accept_header == NULL) {
-        return 0;
-    }
-
-    if (ngx_http_markdown_metrics_value_contains(
-            &accept_header->value,
-            ngx_http_markdown_metrics_accept_openmetrics,
-            sizeof(ngx_http_markdown_metrics_accept_openmetrics) - 1))
-    {
-        return 1;
-    }
-
-    /*
-     * Match "text/plain; version=0.0.4" — both substrings
-     * must be present to avoid false positives from
-     * unrelated media types carrying version=0.0.4.
-     */
-    if (ngx_http_markdown_metrics_value_contains(
-            &accept_header->value,
-            ngx_http_markdown_metrics_accept_text_plain,
-            sizeof(ngx_http_markdown_metrics_accept_text_plain) - 1)
-        && ngx_http_markdown_metrics_value_contains(
-            &accept_header->value,
-            ngx_http_markdown_metrics_accept_prom_ver,
-            sizeof(ngx_http_markdown_metrics_accept_prom_ver) - 1))
-    {
-        return 1;
-    }
-
-    return 0;
-}
-
-/*
- * Case-insensitive substring search within an ngx_str_t.
- *
- * Scans `value` for the first occurrence of `needle` using
- * ngx_strncasecmp for each candidate position.  Returns 1 if
- * found, 0 otherwise.
- *
- * Parameters:
- *   value       - string to search within (may be NULL)
- *   needle      - substring to find (may be NULL)
- *   needle_len  - length of needle in bytes
- *
- * Returns:
- *   1 if needle occurs in value, 0 otherwise.
- */
-static ngx_flag_t
-ngx_http_markdown_metrics_value_contains(ngx_str_t *value,
-    u_char *needle,
-    size_t needle_len)
-{
-    if (value == NULL || needle == NULL || needle_len == 0
-        || value->len < needle_len)
-    {
-        return 0;
-    }
-
-    for (size_t i = 0; i + needle_len <= value->len; i++) {
-        if (ngx_strncasecmp(value->data + i, needle, needle_len)
-            == 0)
-        {
-            return 1;
-        }
-    }
-
-    return 0;
-}
-
-/*
- * Output format constants for the metrics handler.
- *
- * Used by ngx_http_markdown_metrics_select_format() and the
- * three-way dispatch switch in the handler.
+ * Output format constants retained for bounded-renderer unit tests. The
+ * public handler always selects Prometheus v1.
  */
 #define NGX_HTTP_MARKDOWN_METRICS_OUTPUT_TEXT        0
 #define NGX_HTTP_MARKDOWN_METRICS_OUTPUT_JSON        1
 #define NGX_HTTP_MARKDOWN_METRICS_OUTPUT_PROMETHEUS  2
 
 /*
- * Select metrics output format based on Accept header and
- * markdown_metrics_format configuration.
- *
- * Content negotiation state machine:
- *
- *   auto       + Accept: application/json     -> JSON
- *   auto       + (any other / none)           -> plain text
- *   prometheus + Accept: application/json     -> JSON
- *   prometheus + Accept: openmetrics-text     -> Prometheus
- *   prometheus + Accept: text/plain; v=0.0.4  -> Prometheus
- *   prometheus + (any other / none)           -> plain text
- *
- * When metrics_format is prometheus, Prometheus format is
- * served only for explicit Prometheus-aware Accept values.
- * Plain "text/plain" without version=0.0.4 falls back to
- * the legacy human-readable text format, preserving
- * backward compatibility for operators who curl without
- * a specific Accept header.
- *
- * Returns one of the NGX_HTTP_MARKDOWN_METRICS_OUTPUT_*
- * constants.
+ * Return the frozen public output format. The Accept header is deliberately
+ * ignored: 0.9.2 has one wire format and does not retain compatibility
+ * negotiation for removed JSON or legacy text responses.
  */
 static ngx_uint_t
 ngx_http_markdown_metrics_select_format(
     ngx_http_request_t *r)
 {
-    const ngx_http_markdown_conf_t  *conf;
-
-    conf = ngx_http_get_module_loc_conf(
-        r, ngx_http_markdown_filter_module);
-
-    if (ngx_http_markdown_metrics_prefers_json(r)) {
-        return NGX_HTTP_MARKDOWN_METRICS_OUTPUT_JSON;
-    }
-
-    if (ngx_http_markdown_metrics_prefers_prometheus(r)) {
-        return NGX_HTTP_MARKDOWN_METRICS_OUTPUT_PROMETHEUS;
-    }
-
-    return NGX_HTTP_MARKDOWN_METRICS_OUTPUT_TEXT;
+    (void) r;
+    return NGX_HTTP_MARKDOWN_METRICS_OUTPUT_PROMETHEUS;
 }
 
 /*
@@ -920,6 +1028,7 @@ static size_t ngx_http_markdown_text_tail_reserve(void);
 #endif
 
 
+#if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
 static ngx_atomic_uint_t
 ngx_http_markdown_metrics_saturating_add(
     ngx_atomic_uint_t left, ngx_atomic_uint_t right)
@@ -940,6 +1049,7 @@ ngx_http_markdown_metrics_saturating_size_add(size_t left, size_t right)
 
     return left + right;
 }
+#endif
 
 /**
  * Render the collected metrics snapshot as a JSON object into the provided buffer.
@@ -1885,15 +1995,12 @@ ngx_http_markdown_text_write_path_details(
 
 
 /*
- * Render the metrics response body for the negotiated format and set the
- * matching Content-Type header on the request.
+ * Render the metrics response body and set the matching Content-Type header.
  *
  * Returns the end pointer for the rendered body on success.
- * All three formats (JSON, plain-text, Prometheus) implement bounded
- * per-path rendering that degrades gracefully: when the buffer cannot
- * accommodate all per-path entries, omitted entries are aggregated into
- * an __other__ pseudo-entry so the response remains syntactically
- * complete and the endpoint returns HTTP 200.
+ * The public handler passes the frozen Prometheus format. The JSON and
+ * human-readable branches remain only for bounded internal renderer tests;
+ * they are not reachable through the 0.9.2 endpoint.
  *
  * NULL is returned only when the aggregate section itself does not fit
  * (indicating the buffer is far too small for any useful output).
@@ -1931,8 +2038,12 @@ ngx_http_markdown_metrics_render_response_body(
         return p;
 
     case NGX_HTTP_MARKDOWN_METRICS_OUTPUT_PROMETHEUS:
-        p = ngx_http_markdown_metrics_write_prometheus(
-                p, b->end, snapshot);
+        {
+            ngx_http_markdown_metrics_v1_snapshot_t  v1;
+
+            ngx_http_markdown_metrics_to_v1(snapshot, &v1);
+            p = ngx_http_markdown_metrics_v1_render(p, b->end, &v1);
+        }
         if (p == NULL) {
             ngx_log_error(NGX_LOG_ERR,
                 r->connection->log, 0,
@@ -2013,9 +2124,8 @@ ngx_http_markdown_metrics_send_response(
  * - Collects a best-effort snapshot of the shared markdown metrics counters
  *   via ngx_http_markdown_collect_metrics_snapshot() and derives aggregate
  *   values (such as averages) from that snapshot.
- * - Serializes the resulting metrics into an in-memory buffer in either a
- *   plain-text or JSON format, depending on the request, and sends the data
- *   as the response body.
+ * - Serializes the resulting metrics into an in-memory Prometheus text
+ *   buffer and sends the data as the response body.
  *
  * The function is intentionally self-contained so that metrics formatting and
  * access-control policy can evolve without impacting the main filter logic.

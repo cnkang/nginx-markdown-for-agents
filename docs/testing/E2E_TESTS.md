@@ -75,7 +75,7 @@ The canonical E2E suite is intentionally focused on runtime paths that benefit f
 - `HEAD` requests through a proxy path
 - chunked buffering behavior
 - large-response handling and fail-open size protection
-- metrics endpoint format negotiation (JSON, plain-text, Prometheus exposition)
+- metrics endpoint Prometheus text 0.0.4 output and frozen family set
 - conditional request semantics (ETag, If-None-Match, If-Modified-Since, 304, HEAD parity)
 - directive merge precedence and override behavior
 - auth cookie detection, Cache-Control/ETag/Vary header handling
@@ -93,7 +93,7 @@ The coverage script (`tools/sonar/collect_nginx_coverage.sh`) runs expanded E2E 
 | **Conditional requests** | `If-None-Match: *`, quoted ETag, multi-ETag, `If-Modified-Since`, IMS-only bypass, disabled conditional bypass |
 | **Error paths** | 404 passthrough, reject-error, POST method ineligibility, Range header skip |
 | **Accept header diversity** | Exact match, subtype wildcard (`text/*`), all wildcard (`*/*`), q-value sorting, q=0 rejection, no markdown match, multi-entry tie-break, wildcard-disabled rejection |
-| **Metrics formats** | Prometheus format, auto format (text/plain), auto format (application/json), default metrics endpoint |
+| **Metrics endpoint** | Prometheus text 0.0.4 family catalog, content type, and post-conversion counter behavior |
 | **Body filter / headers** | Small file (single-buffer), large file (chain accumulation), HEAD request, GFM flavor, CommonMark flavor, size-limit rejection, auth Cache-Control modification |
 
 These checks complement, rather than replace, `make test-nginx-integration`.

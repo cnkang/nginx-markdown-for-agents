@@ -63,7 +63,12 @@ fn valid_dynconf_document() -> impl Strategy<Value = String> {
         prop_oneof![Just("on"), Just("off")],
         prop_oneof![Just("on"), Just("off")],
         prop_oneof![Just("error"), Just("warn"), Just("info"), Just("debug")],
-        prop_oneof![Just("pass"), Just("fail_closed"), Just("status 429"), Just("status 503")],
+        prop_oneof![
+            Just("pass"),
+            Just("fail_closed"),
+            Just("status 429"),
+            Just("status 503")
+        ],
         (65536u64..=1_073_741_824u64),
         // Include subsets of fields
         any::<[bool; 5]>(),

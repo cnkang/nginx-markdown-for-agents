@@ -67,7 +67,7 @@ itself.
 Use **full-buffer** when:
 
 - You need ETag-based caching and conditional requests
-- Response sizes are moderate (within `markdown_limits memory=<size>`)
+- Response sizes are moderate (within `markdown_limits conversion_memory=<size>`)
 - Token estimation headers are required by downstream consumers
 
 Use **streaming** when:

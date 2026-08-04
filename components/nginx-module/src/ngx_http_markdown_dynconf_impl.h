@@ -34,6 +34,10 @@
 #include <stdlib.h>
 #include <sys/types.h>
 
+/* NGINX defines this in ngx_config.h; keep standalone unit builds portable. */
+#ifndef NGX_MAX_SIZE_T_VALUE
+#define NGX_MAX_SIZE_T_VALUE  ((size_t) -1)
+#endif
 
 /*
  * Dynamic config state constants.
@@ -64,7 +68,11 @@
 /*
  * SHA-256 hex digest length (64 hex chars + NUL terminator).
  */
-#define NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_LEN  65
+#define NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_LEN  72
+
+/* Rust returns a 64-byte hex digest; diagnostics exposes the typed prefix. */
+#define NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_PREFIX  "sha256:"
+#define NGX_HTTP_MARKDOWN_DYNCONF_MAX_FILE_SIZE  (1024 * 1024)
 
 /*
  * Reload result codes for observability and logging.
@@ -158,6 +166,7 @@ typedef struct ngx_http_markdown_dynconf_snapshot_s {
     ngx_flag_t   prune_noise;
     ngx_uint_t   log_verbosity;
     ngx_uint_t   error_policy;
+    ngx_uint_t   error_status;
 #ifdef MARKDOWN_STREAMING_ENABLED
     size_t       streaming_budget;
 #endif
@@ -269,6 +278,12 @@ typedef struct {
      * is active and a reload attempt occurs.  Available for the
      * diagnostics endpoint to report validation failures. */
     ngx_http_markdown_dynconf_validation_result_t  last_validation;
+
+    /* Bounded lifecycle metadata consumed by diagnostics and metrics. */
+    ngx_uint_t    last_result;
+    time_t        last_success;
+    u_char        last_error[513];
+    size_t        last_error_len;
 } ngx_http_markdown_dynconf_watcher_t;
 
 static ngx_int_t ngx_http_markdown_dynconf_reload(
@@ -300,6 +315,7 @@ ngx_http_markdown_dynconf_snapshot_from_conf(
     snapshot->prune_noise = conf->advanced.prune_noise;
     snapshot->log_verbosity = conf->policy.log_verbosity;
     snapshot->error_policy = conf->on_error;
+    snapshot->error_status = conf->error_status;
 #ifdef MARKDOWN_STREAMING_ENABLED
     snapshot->streaming_budget = conf->stream.budget;
 #endif
@@ -333,6 +349,7 @@ ngx_http_markdown_dynconf_apply_snapshot(
     conf->advanced.prune_noise = snapshot->prune_noise;
     conf->policy.log_verbosity = snapshot->log_verbosity;
     conf->on_error = snapshot->error_policy;
+    conf->error_status = snapshot->error_status;
 #ifdef MARKDOWN_STREAMING_ENABLED
         conf->stream.budget = snapshot->streaming_budget;
 #endif
@@ -450,14 +467,17 @@ ngx_http_markdown_build_effective_conf(
      */
     if (mask & NGX_HTTP_MARKDOWN_BLOCK_ERROR_POLICY) {
         eff->error_policy = conf->on_error;
+        eff->error_status = conf->error_status;
         eff->error_policy_provenance =
             NGX_HTTP_MARKDOWN_PROVENANCE_STATIC;
     } else if (snap_valid) {
         eff->error_policy = snap->error_policy;
+        eff->error_status = snap->error_status;
         eff->error_policy_provenance =
             NGX_HTTP_MARKDOWN_PROVENANCE_DYNCONF;
     } else {
         eff->error_policy = conf->on_error;
+        eff->error_status = conf->error_status;
         eff->error_policy_provenance =
             NGX_HTTP_MARKDOWN_PROVENANCE_STATIC;
     }
@@ -483,17 +503,22 @@ ngx_http_markdown_build_effective_conf(
      */
     if (mask & NGX_HTTP_MARKDOWN_BLOCK_STREAMING_BUFFER) {
         eff->streaming_budget = conf->stream.budget;
+        eff->streaming_buffer = conf->stream.budget;
         eff->streaming_buffer_provenance =
             NGX_HTTP_MARKDOWN_PROVENANCE_STATIC;
     } else if (snap_valid) {
         eff->streaming_budget = snap->streaming_budget;
+        eff->streaming_buffer = snap->streaming_budget;
         eff->streaming_buffer_provenance =
             NGX_HTTP_MARKDOWN_PROVENANCE_DYNCONF;
     } else {
         eff->streaming_budget = conf->stream.budget;
+        eff->streaming_buffer = conf->stream.budget;
         eff->streaming_buffer_provenance =
             NGX_HTTP_MARKDOWN_PROVENANCE_STATIC;
     }
+#else
+    eff->streaming_buffer = conf->stream.budget;
 #endif
 }
 
@@ -665,7 +690,7 @@ ngx_http_markdown_dynconf_check(ngx_http_markdown_dynconf_watcher_t *watcher,
     cur_mtime_nsec = fi.st_mtimespec.tv_nsec;
 #elif defined(__linux__) && defined(_POSIX_C_SOURCE) && _POSIX_C_SOURCE >= 200809L
     cur_mtime_nsec = fi.st_mtim.tv_nsec;
-#elif defined(__linux__)
+#elif defined(__linux__) && defined(_GNU_SOURCE)
     cur_mtime_nsec = fi.st_mtim.tv_nsec;
 #else
     cur_mtime_nsec = 0;
@@ -956,7 +981,7 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
         watcher->file_mtime_sec = ngx_file_mtime(&fi);
 #if defined(__APPLE__)
         watcher->file_mtime_nsec = fi.st_mtimespec.tv_nsec;
-#elif defined(__linux__)
+#elif defined(__linux__) && defined(_GNU_SOURCE)
         watcher->file_mtime_nsec = fi.st_mtim.tv_nsec;
 #else
         watcher->file_mtime_nsec = 0;
@@ -984,6 +1009,10 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
     watcher->source_digest[0] = '\0';
     watcher->active_digest[0] = '\0';
     watcher->lkg_digest[0] = '\0';
+    watcher->last_result = NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE;
+    watcher->last_success = 0;
+    watcher->last_error_len = 0;
+    watcher->last_error[0] = '\0';
 
     /* Initialize active snapshot from current configuration. */
     ngx_http_markdown_dynconf_snapshot_from_conf(&watcher->active_snapshot,
@@ -1075,6 +1104,10 @@ ngx_http_markdown_dynconf_stop(ngx_http_markdown_dynconf_watcher_t *watcher,
                   &watcher->path);
 }
 
+
+/* The line-oriented parser remains only for its legacy unit-test contract.
+ * Production reloads use the bounded Rust JSON/FFI parser below. */
+#if defined(NGX_HTTP_MARKDOWN_DYNCONF_LEGACY_TEST)
 
 /*
  * Maximum line length in the dynamic config file.
@@ -1257,15 +1290,6 @@ ngx_http_markdown_dynconf_parse_line(u_char *line, size_t line_len,
     return NGX_OK;
 }
 
-
-/*
- * Fallback definition for NGX_MAX_SIZE_T_VALUE when building
- * outside the NGINX compilation environment (e.g. unit tests).
- * NGINX core defines this in ngx_config.h.
- */
-#ifndef NGX_MAX_SIZE_T_VALUE
-#define NGX_MAX_SIZE_T_VALUE  ((size_t) -1)
-#endif
 
 /**
  * Safely parse a size value string and validate for assignment to a size_t field.
@@ -2395,12 +2419,12 @@ ngx_http_markdown_dynconf_reload_normal(
 #ifdef MARKDOWN_STREAMING_ENABLED
         _Static_assert(
             sizeof(ngx_http_markdown_dynconf_snapshot_t)
-                == 9 * sizeof(void *),
+                == 10 * sizeof(void *),
             "dynconf_snapshot_t layout changed, review shallow copy");
 #else
         _Static_assert(
             sizeof(ngx_http_markdown_dynconf_snapshot_t)
-                == 8 * sizeof(void *),
+                == 9 * sizeof(void *),
             "dynconf_snapshot_t layout changed, review shallow copy");
 #endif
 
@@ -2432,34 +2456,6 @@ ngx_http_markdown_dynconf_reload_normal(
 }
 
 
-/**
- * Perform a two-phase reload of dynamic configuration from the watcher's file.
- *
- * Reads the entire file into a staging snapshot, parses and applies every line
- * into that staging snapshot, and on complete success atomically replaces the
- * watcher's active snapshot and applies it to the provided live configuration.
- *
- * When conf->advanced.dynconf_dry_run is enabled (on), the reload performs
- * full validation (syntax and semantic checks) but does NOT replace the
- * active_snapshot, does NOT update applied_mtime, does NOT update
- * last_known_good.  In dry-run mode, ALL errors are collected (up to
- * NGX_HTTP_MARKDOWN_DYNCONF_MAX_ERRORS) with line numbers, field names,
- * and reasons, then logged at WARN level.  Returns DRY_RUN_OK on success
- * or DRY_RUN_FAIL when errors are found.
- *
- * @param watcher Dynamic config watcher containing the file path and snapshots.
- * @param conf Current module location configuration to update when commit succeeds.
- * @param log Logger used for warnings and informational messages.
- *
- * @returns NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED      if one or more settings were applied and committed
- * @returns NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE    if the file contained no effective keys to apply
- * @returns NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE if any line failed to parse or a line was too long
- * @returns NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR     on file open/read failures or invalid inputs
- * @returns NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_OK   if validation passed
- *          but dry-run mode prevented application
- * @returns NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL if dry-run validation
- *          found errors (details in watcher->last_validation)
- */
 static ngx_int_t
 ngx_http_markdown_dynconf_reload(
     ngx_http_markdown_dynconf_watcher_t *watcher,
@@ -2505,6 +2501,288 @@ ngx_http_markdown_dynconf_reload(
 
     return ngx_http_markdown_dynconf_reload_normal(watcher, conf, fd, buf, log);
 }
+
+#else /* NGX_HTTP_MARKDOWN_DYNCONF_LEGACY_TEST */
+
+static ngx_int_t
+ngx_http_markdown_dynconf_read_file(
+    ngx_http_markdown_dynconf_watcher_t *watcher, ngx_log_t *log,
+    u_char **data, size_t *file_size)
+{
+    u_char             path_buf[NGX_MAX_PATH + 1];
+    ngx_fd_t           fd;
+    ngx_file_info_t    file_info;
+    size_t             offset;
+    size_t             bytes_read;
+    ssize_t            nread;
+
+    if (watcher == NULL || log == NULL || data == NULL || file_size == NULL
+        || watcher->path.data == NULL || watcher->path.len > NGX_MAX_PATH)
+    {
+        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
+    }
+
+    ngx_memcpy(path_buf, watcher->path.data, watcher->path.len);
+    path_buf[watcher->path.len] = '\0';
+
+    if (ngx_file_info(path_buf, &file_info) == NGX_FILE_ERROR) {
+        ngx_http_markdown_record_dynconf_reload(DYNCONF_ERR_INTERNAL);
+        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
+    }
+    if (file_info.st_size < 0
+        || (uint64_t) file_info.st_size > NGX_HTTP_MARKDOWN_DYNCONF_MAX_FILE_SIZE
+        || (uint64_t) file_info.st_size > NGX_MAX_SIZE_T_VALUE)
+    {
+        ngx_http_markdown_record_dynconf_reload(DYNCONF_ERR_TOO_LARGE);
+        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
+    }
+
+    *file_size = (size_t) file_info.st_size;
+    *data = ngx_alloc(*file_size == 0 ? 1 : *file_size, log);
+    if (*data == NULL) {
+        ngx_http_markdown_record_dynconf_reload(DYNCONF_ERR_INTERNAL);
+        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
+    }
+
+    fd = ngx_open_file(path_buf, NGX_FILE_RDONLY, NGX_FILE_OPEN, 0);
+    if (fd == NGX_INVALID_FILE) {
+        ngx_free(*data);
+        *data = NULL;
+        ngx_http_markdown_record_dynconf_reload(DYNCONF_ERR_INTERNAL);
+        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
+    }
+
+    offset = 0;
+    while (offset < *file_size) {
+        nread = ngx_read_fd(fd, *data + offset, *file_size - offset);
+        if (nread < 0 || nread == 0
+            || (uint64_t) nread > (uint64_t) (*file_size - offset))
+        {
+            ngx_close_file(fd);
+            ngx_free(*data);
+            *data = NULL;
+            ngx_http_markdown_record_dynconf_reload(DYNCONF_ERR_INTERNAL);
+            return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
+        }
+        bytes_read = (size_t) nread; /* CWE-190:guarded */
+        offset += bytes_read;
+    }
+    ngx_close_file(fd);
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_dynconf_copy_digest(
+    u_char *dst, size_t dst_size, const uint8_t *src, size_t src_len)
+{
+    static const u_char prefix[] = NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_PREFIX;
+    size_t prefix_len = sizeof(prefix) - 1;
+
+    if (dst == NULL || src == NULL || src_len != 64
+        || dst_size < prefix_len + src_len + 1)
+    {
+        return NGX_ERROR;
+    }
+
+    ngx_memcpy(dst, prefix, prefix_len);
+    ngx_memcpy(dst + prefix_len, src, src_len);
+    dst[prefix_len + src_len] = '\0';
+    return NGX_OK;
+}
+
+
+static void
+ngx_http_markdown_dynconf_record_error(
+    ngx_http_markdown_dynconf_watcher_t *watcher,
+    const FFIDynconfResult *result)
+{
+    size_t length;
+
+    if (watcher == NULL || result == NULL) {
+        return;
+    }
+
+    watcher->last_error_len = 0;
+    watcher->last_error[0] = '\0';
+    if (result->error_message == NULL || result->error_message_len == 0) {
+        return;
+    }
+
+    length = result->error_message_len;
+    if (length > sizeof(watcher->last_error) - 1) {
+        length = sizeof(watcher->last_error) - 1;
+    }
+    ngx_memcpy(watcher->last_error, result->error_message, length);
+    watcher->last_error[length] = '\0';
+    watcher->last_error_len = length;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_dynconf_apply_ffi_result(
+    ngx_http_markdown_dynconf_snapshot_t *snapshot,
+    const FFIDynconfResult *result)
+{
+    if (snapshot == NULL || result == NULL || result->error_code != DYNCONF_OK) {
+        return NGX_ERROR;
+    }
+
+    if (result->filter != DYNCONF_NOT_SET_U8) {
+        snapshot->enabled = result->filter == DYNCONF_FILTER_ON;
+        snapshot->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
+        snapshot->enabled_complex = NULL;
+    }
+    if (result->prune_noise != DYNCONF_NOT_SET_U8) {
+        snapshot->prune_noise = result->prune_noise == DYNCONF_PRUNE_NOISE_ON;
+    }
+    if (result->log_verbosity != DYNCONF_NOT_SET_U8) {
+        snapshot->log_verbosity = result->log_verbosity;
+    }
+    if (result->error_policy != DYNCONF_NOT_SET_U8) {
+        switch (result->error_policy) {
+        case DYNCONF_POLICY_PASS:
+            snapshot->error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+            snapshot->error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+            break;
+        case DYNCONF_POLICY_FAIL_CLOSED:
+            snapshot->error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+            snapshot->error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+            break;
+        case DYNCONF_POLICY_STATUS_429:
+            snapshot->error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+            snapshot->error_status = NGX_HTTP_TOO_MANY_REQUESTS;
+            break;
+        case DYNCONF_POLICY_STATUS_503:
+            snapshot->error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+            snapshot->error_status = NGX_HTTP_SERVICE_UNAVAILABLE;
+            break;
+        default:
+            return NGX_ERROR;
+        }
+    }
+#ifdef MARKDOWN_STREAMING_ENABLED
+    if (result->streaming_buffer != DYNCONF_NOT_SET_U64) {
+        if (result->streaming_buffer > NGX_MAX_SIZE_T_VALUE) {
+            return NGX_ERROR;
+        }
+        snapshot->streaming_budget = (size_t) result->streaming_buffer;
+    }
+#else
+    if (result->streaming_buffer != DYNCONF_NOT_SET_U64) {
+        return NGX_ERROR;
+    }
+#endif
+    snapshot->valid = 1;
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_dynconf_reload(
+    ngx_http_markdown_dynconf_watcher_t *watcher,
+    ngx_http_markdown_conf_t *conf,
+    ngx_log_t *log)
+{
+    u_char             *data;
+    size_t              file_size;
+    ngx_int_t            rc;
+    u_char               next_source_digest[
+        NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_LEN];
+    u_char               next_active_digest[
+        NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_LEN];
+    FFIDynconfResult    result;
+
+    if (watcher == NULL || conf == NULL || log == NULL)
+    {
+        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
+    }
+
+    rc = ngx_http_markdown_dynconf_read_file(watcher, log, &data, &file_size);
+    if (rc != NGX_OK) {
+        watcher->last_result = rc;
+        return rc;
+    }
+
+    markdown_dynconf_result_init(&result);
+    markdown_dynconf_parse(data, file_size, &result);
+    ngx_free(data);
+
+    if (result.error_code != DYNCONF_OK) {
+        ngx_http_markdown_record_dynconf_reload(result.error_code);
+        ngx_http_markdown_dynconf_record_error(watcher, &result);
+        watcher->last_result = conf->advanced.dynconf_dry_run
+            ? NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL
+            : NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
+        rc = conf->advanced.dynconf_dry_run
+            ? NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL
+            : NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
+        markdown_dynconf_result_free(&result);
+        return rc;
+    }
+
+    watcher->staging_snapshot = watcher->active_snapshot;
+    if (ngx_http_markdown_dynconf_apply_ffi_result(
+            &watcher->staging_snapshot, &result) != NGX_OK)
+    {
+        ngx_http_markdown_record_dynconf_reload(DYNCONF_ERR_INVALID_TYPE);
+        watcher->last_result = NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
+        markdown_dynconf_result_free(&result);
+        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
+    }
+
+    if (ngx_http_markdown_dynconf_copy_digest(
+            next_source_digest, sizeof(next_source_digest),
+            result.source_digest, result.source_digest_len) != NGX_OK
+        || ngx_http_markdown_dynconf_copy_digest(
+            next_active_digest, sizeof(next_active_digest),
+            result.active_digest, result.active_digest_len) != NGX_OK)
+    {
+        ngx_http_markdown_record_dynconf_reload(DYNCONF_ERR_INTERNAL);
+        watcher->last_result = NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
+        markdown_dynconf_result_free(&result);
+        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
+    }
+
+    if (conf->advanced.dynconf_dry_run) {
+        ngx_http_markdown_record_dynconf_reload(DYNCONF_OK);
+        watcher->last_result = NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_OK;
+        watcher->last_error_len = 0;
+        watcher->last_error[0] = '\0';
+        markdown_dynconf_result_free(&result);
+        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_OK;
+    }
+
+    if (watcher->generation > 0) {
+        watcher->last_known_good = watcher->active_snapshot;
+        watcher->lkg_valid = 1;
+        ngx_memcpy(watcher->lkg_digest, watcher->active_digest,
+                   sizeof(watcher->lkg_digest));
+        watcher->lkg_mtime = watcher->applied_mtime;
+    }
+    ngx_memcpy(watcher->source_digest, next_source_digest,
+               sizeof(watcher->source_digest));
+    ngx_memcpy(watcher->active_digest, next_active_digest,
+               sizeof(watcher->active_digest));
+    watcher->active_snapshot = watcher->staging_snapshot;
+    ngx_http_markdown_dynconf_apply_snapshot(conf, &watcher->active_snapshot);
+    watcher->generation++;
+    watcher->version++;
+    watcher->applied_mtime = watcher->last_mtime;
+    watcher->last_success = ngx_time();
+    watcher->last_result = NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED;
+    ngx_http_markdown_record_dynconf_reload(DYNCONF_OK);
+    watcher->last_error_len = 0;
+    watcher->last_error[0] = '\0';
+    if (!watcher->lkg_valid) {
+        ngx_memcpy(watcher->lkg_digest, watcher->active_digest,
+                   sizeof(watcher->lkg_digest));
+    }
+    markdown_dynconf_result_free(&result);
+    return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED;
+}
+
+#endif /* NGX_HTTP_MARKDOWN_DYNCONF_LEGACY_TEST */
 
 
 #endif /* NGX_HTTP_MARKDOWN_DYNCONF_IMPL_H */

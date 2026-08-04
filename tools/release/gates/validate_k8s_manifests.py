@@ -67,7 +67,6 @@ HELM_CONFIG_REQUIRED_SNIPPETS = [
     "markdown_metrics_shm_size {{ .Values.metrics.shmSize }};",
     "location = {{ .Values.metrics.uri }} {",
     "markdown_metrics;",
-    "markdown_metrics_format {{ .Values.metrics.format }};",
 ]
 HELM_CONFIG_FORBIDDEN_SNIPPETS = [
     "markdown_metrics on;",
@@ -603,7 +602,6 @@ def _metrics_config_errors(rendered: str) -> list[str]:
         for name in (
             "markdown_metrics_shm_size",
             "markdown_metrics",
-            "markdown_metrics_format",
         )
     }
     errors = _removed_metrics_directive_errors(directives)
@@ -616,19 +614,6 @@ def _metrics_config_errors(rendered: str) -> list[str]:
     )
     errors.extend(
         _metrics_handler_errors(entries_by_name["markdown_metrics"])
-    )
-    errors.extend(
-        _single_metrics_scope_errors(
-            entries_by_name["markdown_metrics_format"],
-            "markdown_metrics_format",
-            "location",
-        )
-    )
-    errors.extend(
-        _metrics_location_pair_errors(
-            entries_by_name["markdown_metrics"],
-            entries_by_name["markdown_metrics_format"],
-        )
     )
     return errors
 
@@ -690,18 +675,6 @@ def _metrics_handler_errors(
     if _scope_kind(handler_entries[0][2]) != "location":
         return ["markdown_metrics must be in location scope"]
     return []
-
-
-def _metrics_location_pair_errors(
-    handler_entries: list[tuple[str, str, tuple[str, ...]]],
-    format_entries: list[tuple[str, str, tuple[str, ...]]],
-) -> list[str]:
-    """Require handler and format directives to share the same location."""
-    if len(handler_entries) != 1 or len(format_entries) != 1:
-        return []
-    if handler_entries[0][2] == format_entries[0][2]:
-        return []
-    return ["markdown_metrics and markdown_metrics_format must share a location"]
 
 
 def _scope_kind(scopes: tuple[str, ...]) -> str:

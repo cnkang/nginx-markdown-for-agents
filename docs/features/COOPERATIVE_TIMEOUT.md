@@ -142,7 +142,7 @@ If `timeout_ms = 0`, no timeout is enforced.
 
 ## Public Configuration Surface
 
-At the NGINX layer, this mechanism is exercised through `markdown_limits timeout=<time>`. The converter receives that value through the FFI boundary as `timeout_ms`.
+At the NGINX layer, this mechanism is exercised through `markdown_limits conversion_timeout=<time>`. The converter receives that value through the FFI boundary as `timeout_ms`.
 
 Keep directive syntax, examples, and rollout choices in:
 

@@ -275,6 +275,8 @@ typedef struct {
     ngx_atomic_uint_t  failopen_total;
     ngx_atomic_uint_t  overload_total;
     ngx_atomic_uint_t  backpressure_total;
+    ngx_atomic_uint_t  inflight;
+    ngx_atomic_uint_t  pending_output;
 #ifdef MARKDOWN_STREAMING_ENABLED
     /* Streaming metrics (streaming observability) */
     ngx_atomic_uint_t  streaming_requests_total;
@@ -310,11 +312,27 @@ void ngx_http_markdown_diagnostics_collect_metrics(
  * response.  Populated by ngx_http_markdown_diagnostics_get_dynconf_state().
  */
 typedef struct {
+#define NGX_HTTP_MARKDOWN_DIAG_DIGEST_LEN  72
+    ngx_uint_t  state;
+    ngx_uint_t  generation;
+    u_char      source_digest[NGX_HTTP_MARKDOWN_DIAG_DIGEST_LEN];
+    u_char      active_digest[NGX_HTTP_MARKDOWN_DIAG_DIGEST_LEN];
+    u_char      lkg_digest[NGX_HTTP_MARKDOWN_DIAG_DIGEST_LEN];
+    time_t      last_success;
+    ngx_flag_t  has_last_success;
+    u_char      last_error[513];
+    size_t      last_error_len;
     time_t      active_mtime;
     ngx_uint_t  config_version;
     time_t      last_known_good_mtime;
     ngx_flag_t  lkg_valid;
 } ngx_http_markdown_diag_dynconf_t;
+
+#define NGX_HTTP_MARKDOWN_DIAG_DYNCONF_DISABLED          0
+#define NGX_HTTP_MARKDOWN_DIAG_DYNCONF_NO_FILE           1
+#define NGX_HTTP_MARKDOWN_DIAG_DYNCONF_INVALID_NO_LKG    2
+#define NGX_HTTP_MARKDOWN_DIAG_DYNCONF_ACTIVE            3
+#define NGX_HTTP_MARKDOWN_DIAG_DYNCONF_LKG_PRESERVED     4
 
 
 /*
@@ -329,6 +347,32 @@ typedef struct {
  */
 void ngx_http_markdown_diagnostics_get_dynconf_state(
     ngx_http_markdown_diag_dynconf_t *out);
+
+typedef struct {
+    ngx_flag_t  filter;
+    ngx_flag_t  prune_noise;
+    ngx_uint_t  log_verbosity;
+    ngx_uint_t  error_policy;
+    ngx_uint_t  error_status;
+    size_t      streaming_buffer;
+    ngx_uint_t  filter_source;
+    ngx_uint_t  prune_noise_source;
+    ngx_uint_t  log_verbosity_source;
+    ngx_uint_t  error_policy_source;
+    ngx_uint_t  streaming_buffer_source;
+} ngx_http_markdown_diag_effective_t;
+
+void ngx_http_markdown_diagnostics_get_effective(
+    const void *conf,
+    ngx_http_markdown_diag_effective_t *out);
+
+/*
+ * Compute the location-specific SHA-256 over static_config_manifest_v1.
+ * The request pointer lets the production accessor read the merged location
+ * and http-level configuration without exposing NGINX internals here.
+ */
+ngx_int_t ngx_http_markdown_diagnostics_get_static_digest(
+    const void *request, ngx_pool_t *pool, u_char *out, size_t out_len);
 
 /*
  * Decision path component string constants.

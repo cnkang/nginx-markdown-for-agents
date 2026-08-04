@@ -294,7 +294,7 @@ def test_method_check_is_first_guard():
     )
 
 
-def test_allow_header_uses_hash_1():
+def test_allow_header_uses_visible_hash():
     """
     The Allow header must have hash = 1 to be included in the response.
 

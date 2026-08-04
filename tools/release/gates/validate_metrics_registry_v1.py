@@ -15,7 +15,7 @@ This gate validates:
   - input_bytes_total and output_bytes_total are counters (NOT histograms)
   - streaming_events_total uses label name 'transition' (NOT 'event')
   - build_info is a gauge (always 1)
-  - The renderer header emits exactly these 11 family names
+  - The renderer header emits exactly these 11 family names and label keys
 
 Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.7, 5.8
 """
@@ -24,6 +24,9 @@ import json
 import re
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from lib.path_validation import validate_read_path  # noqa: E402
 
 
 def find_repo_root():
@@ -48,7 +51,10 @@ def load_registry(repo_root):
         )
         sys.exit(1)
 
-    with open(registry_path, encoding="utf-8") as f:
+    validated_path = validate_read_path(
+        registry_path, purpose="metrics registry artifact"
+    )
+    with open(validated_path, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -235,7 +241,45 @@ def validate_renderer_matches_registry(repo_root, registry):
             f"{sorted(missing)}"
         )
 
+    for family in registry.get("families", []):
+        name = family["name"]
+        expected_labels = {
+            label.get("name") for label in family.get("labels", [])
+        }
+        actual_labels = extract_renderer_label_names(renderer_content, name)
+        if actual_labels != expected_labels:
+            errors.append(
+                f"Renderer labels for {name} mismatch: expected "
+                f"{sorted(expected_labels)}, got {sorted(actual_labels)}"
+            )
+
     return errors
+
+
+def extract_renderer_label_names(renderer_content, family):
+    """Extract label keys from the source strings for one metric family."""
+    if family == "nginx_markdown_conversion_duration_seconds":
+        label_sources = re.findall(
+            r'\{engine=\\"%s\\"[^}]*\}', renderer_content
+        )
+    else:
+        marker = f"# HELP {family}"
+        start = renderer_content.find(marker)
+        if start < 0:
+            return set()
+        end = renderer_content.find(
+            "/* ================================================================",
+            start + len(marker),
+        )
+        block = renderer_content[start:] if end < 0 else renderer_content[start:end]
+        label_sources = re.findall(r"\{([^{}]*)\}", block)
+
+    labels = set()
+    for source in label_sources:
+        labels.update(re.findall(r"([A-Za-z_][A-Za-z0-9_]*)=\\\"", source))
+    if family == "nginx_markdown_conversion_duration_seconds":
+        labels.discard("le")
+    return labels
 
 
 def validate_no_synonym_duplicates(registry):

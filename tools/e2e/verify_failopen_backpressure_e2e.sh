@@ -22,7 +22,7 @@ PORT="${PORT:-18097}"
 UPSTREAM_PORT="${UPSTREAM_PORT:-19097}"
 KEEP_ARTIFACTS=0
 NGINX_BIN="${NGINX_BIN:-}"
-MARKDOWN_MAX_SIZE="${MARKDOWN_MAX_SIZE:-512}"
+MARKDOWN_MAX_SIZE="${MARKDOWN_MAX_SIZE:-64k}"
 
 WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 NATIVE_BUILD_HELPER="${WORKSPACE_ROOT}/tools/lib/nginx_markdown_native_build.sh"
@@ -61,7 +61,7 @@ Options:
   --plan                   Print test plan and exit 0 (no NGINX_BIN required)
   --port PORT              NGINX listen port (default: ${PORT})
   --upstream-port PORT     Upstream server port (default: ${UPSTREAM_PORT})
-  --markdown-max-size SIZE markdown_limits memory value (default: ${MARKDOWN_MAX_SIZE})
+  --markdown-max-size SIZE markdown_limits conversion_memory value (default: ${MARKDOWN_MAX_SIZE})
   -h, --help               Show this help
 EOF
     return 0
@@ -193,8 +193,8 @@ NGINX_EXECUTABLE="${NGINX_BIN}"
 RUNTIME="$(mktemp -d "${TMPDIR:-/tmp}/failopen-e2e.XXXXXXXX")"
 mkdir -p "${RUNTIME}/logs" "${RUNTIME}/html" "${RUNTIME}/conf"
 
-# Generate a large HTML file that exceeds markdown_limits memory to trigger fail-open
-LARGE_HTML_SIZE=2048
+# Generate a large HTML file that exceeds markdown_limits conversion_memory to trigger fail-open
+LARGE_HTML_SIZE=131072
 python3 -c "
 import sys
 body = '<h1>Title</h1>' + '<p>' + 'x' * 200 + '</p>\n' * 20
@@ -203,14 +203,15 @@ while len(body) < ${LARGE_HTML_SIZE}:
 sys.stdout.write(body)
 " > "${RUNTIME}/html/large.html"
 
-# Small HTML for basic fail-open test (still exceeds our tiny max_size of 512)
+# Small HTML for basic fail-open test; padding below keeps it above the 64 KiB
+# minimum conversion-memory contract used by this test.
 cat > "${RUNTIME}/html/failopen.html" <<'HTML'
 <!DOCTYPE html>
 <html>
 <head><title>Fail-open Test</title></head>
 <body>
 <h1>Fail-open Test Page</h1>
-<p>This page has enough content to exceed the configured markdown_limits memory
+<p>This page has enough content to exceed the configured markdown_limits conversion_memory
 limit, which will trigger the fail-open passthrough path in the streaming
 engine. The module should deliver the original HTML unchanged.</p>
 <p>Additional paragraph to ensure we exceed the budget limit configured
@@ -218,12 +219,25 @@ for this test scenario. More content follows to pad the response.</p>
 <p>Third paragraph with more padding content to ensure the response body
 is large enough to trigger the budget-exceeded pre-commit error path.</p>
 <p>Fourth paragraph. The streaming engine should detect that the response
-exceeds markdown_limits memory and fall back to passthrough mode.</p>
+exceeds markdown_limits conversion_memory and fall back to passthrough mode.</p>
 <p>Fifth paragraph. After fail-open, the original HTML must be delivered
 intact without any truncation or data corruption.</p>
 </body>
 </html>
 HTML
+
+python3 - "${RUNTIME}/html/failopen.html" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+target = 128 * 1024
+data = path.read_bytes()
+padding = b"<p>padding for the bounded fail-open fixture</p>\n"
+while len(data) < target:
+    data += padding
+path.write_bytes(data[:target])
+PY
 
 FAILOPEN_SIZE="$(wc -c < "${RUNTIME}/html/failopen.html" | tr -d ' ')"
 
@@ -271,7 +285,7 @@ fi
 
 LOAD_MODULE_LINE="load_module ${MODULE_PATH};"
 
-# Write NGINX config with small markdown_limits memory to force fail-open
+# Write NGINX config with small markdown_limits conversion_memory to force fail-open
 cat > "${RUNTIME}/conf/nginx.conf" <<EOF
 worker_processes 1;
 error_log ${RUNTIME}/logs/error.log debug;
@@ -295,7 +309,7 @@ http {
             proxy_http_version 1.1;
 
             markdown_filter on;
-            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
+            markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_memory=${MARKDOWN_MAX_SIZE} streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_streaming force;
         }

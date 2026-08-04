@@ -203,6 +203,37 @@ static ngx_uint_t g_slab_alloc_fail_after = 0;
 static ngx_uint_t g_shmtx_lock_calls = 0;
 static ngx_uint_t g_shmtx_unlock_calls = 0;
 
+/* Decompression failure helpers are owned by module_state_impl.h in the
+ * production translation unit.  Keep this direct conversion-header test
+ * independent of that implementation-only include. */
+static void
+ngx_http_markdown_record_decompression_failure_budget(
+    ngx_http_markdown_compression_type_e type)
+{
+    UNUSED(type);
+}
+
+static void
+ngx_http_markdown_record_decompression_failure_format(
+    ngx_http_markdown_compression_type_e type)
+{
+    UNUSED(type);
+}
+
+static void
+ngx_http_markdown_record_decompression_failure_truncated(
+    ngx_http_markdown_compression_type_e type)
+{
+    UNUSED(type);
+}
+
+static void
+ngx_http_markdown_record_decompression_failure_io(
+    ngx_http_markdown_compression_type_e type)
+{
+    UNUSED(type);
+}
+
 /* FFI stub constants and functions used by conversion_impl.h */
 #define ERROR_SUCCESS 0
 #ifndef ERROR_PARSE

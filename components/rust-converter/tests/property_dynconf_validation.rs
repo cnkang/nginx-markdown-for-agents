@@ -9,8 +9,7 @@
 //! the module SHALL reject the file and preserve the LKG snapshot unchanged.
 
 use nginx_markdown_converter::dynconf::{
-    parse_dynconf, DynconfParseErrorKind, DynconfResult,
-    MAX_DOCUMENT_SIZE,
+    DynconfParseErrorKind, DynconfResult, MAX_DOCUMENT_SIZE, parse_dynconf,
 };
 use proptest::prelude::*;
 
@@ -44,7 +43,8 @@ fn assert_rejected_with(input: &[u8], expected_kind: DynconfParseErrorKind) {
             String::from_utf8_lossy(&input[..input.len().min(200)])
         ),
         Err(err) => assert_eq!(
-            err.kind, expected_kind,
+            err.kind,
+            expected_kind,
             "wrong error kind for: {:?}",
             String::from_utf8_lossy(&input[..input.len().min(200)])
         ),
@@ -117,8 +117,15 @@ fn unknown_key() -> impl Strategy<Value = String> {
         Just("debug".to_string()),
         // Random alphabetic key
         "[a-z]{3,20}".prop_filter("not a known key", |s| {
-            !["schema_version", "filter", "prune_noise", "log_verbosity",
-              "error_policy", "streaming_buffer"].contains(&s.as_str())
+            ![
+                "schema_version",
+                "filter",
+                "prune_noise",
+                "log_verbosity",
+                "error_policy",
+                "streaming_buffer",
+            ]
+            .contains(&s.as_str())
         }),
     ]
 }
@@ -281,7 +288,7 @@ proptest! {
         doc.extend_from_slice(b"{\"schema_version\": 1, \"filter\": \"");
         // Pad with 'a' characters
         let needed = padding_size.saturating_sub(doc.len() + 2);
-        doc.extend(std::iter::repeat(b'a').take(needed));
+        doc.extend(std::iter::repeat_n(b'a', needed));
         doc.extend_from_slice(b"\"}");
 
         // Ensure we're actually over the limit
@@ -526,18 +533,18 @@ proptest! {
 fn test_property4_malformed_json_examples() {
     // Various malformed JSON inputs
     let cases: &[&[u8]] = &[
-        b"",                              // empty
-        b"   ",                           // whitespace only
-        b"{",                             // unterminated object
-        b"{\"a\"",                        // unterminated key
-        b"{\"a\":}",                      // missing value
-        b"{\"a\": 1,}",                   // trailing comma
-        b"{'schema_version': 1}",         // single quotes
-        b"{schema_version: 1}",           // unquoted key
-        b"\xEF\xBB\xBF{\"schema_version\": 1}", // BOM prefix
-        b"{\"schema_version\": 1} extra", // trailing content
+        b"",                                      // empty
+        b"   ",                                   // whitespace only
+        b"{",                                     // unterminated object
+        b"{\"a\"",                                // unterminated key
+        b"{\"a\":}",                              // missing value
+        b"{\"a\": 1,}",                           // trailing comma
+        b"{'schema_version': 1}",                 // single quotes
+        b"{schema_version: 1}",                   // unquoted key
+        b"\xEF\xBB\xBF{\"schema_version\": 1}",   // BOM prefix
+        b"{\"schema_version\": 1} extra",         // trailing content
         b"/* comment */ {\"schema_version\": 1}", // comment prefix
-        b"{\"schema_version\": 01}",      // leading zero in number
+        b"{\"schema_version\": 01}",              // leading zero in number
     ];
 
     for case in cases {
@@ -554,8 +561,8 @@ fn test_property4_malformed_json_examples() {
 fn test_property4_invalid_utf8_rejected() {
     // Invalid UTF-8 sequences
     let cases: &[&[u8]] = &[
-        &[0xFF, 0xFE],                     // BOM-like invalid
-        &[0x7B, 0x80, 0x7D],              // {<invalid>}
+        &[0xFF, 0xFE],                                     // BOM-like invalid
+        &[0x7B, 0x80, 0x7D],                               // {<invalid>}
         &[0x7B, 0x22, 0xC0, 0xAF, 0x22, 0x3A, 0x31, 0x7D], // overlong encoding
     ];
 
@@ -630,9 +637,18 @@ fn test_property4_absent_keys_semantic() {
     // ALL optional fields must be None when absent
     assert_eq!(result.filter, None, "absent filter must be None");
     assert_eq!(result.prune_noise, None, "absent prune_noise must be None");
-    assert_eq!(result.log_verbosity, None, "absent log_verbosity must be None");
-    assert_eq!(result.error_policy, None, "absent error_policy must be None");
-    assert_eq!(result.streaming_buffer, None, "absent streaming_buffer must be None");
+    assert_eq!(
+        result.log_verbosity, None,
+        "absent log_verbosity must be None"
+    );
+    assert_eq!(
+        result.error_policy, None,
+        "absent error_policy must be None"
+    );
+    assert_eq!(
+        result.streaming_buffer, None,
+        "absent streaming_buffer must be None"
+    );
 
     // With only one key present, others must still be None
     let partial = br#"{"schema_version": 1, "filter": "on"}"#;

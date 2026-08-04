@@ -1353,6 +1353,25 @@ const uint8_t *markdown_reason_code_metric_key(uint32_t code, uintptr_t *out_len
 uint32_t markdown_reason_code_count(void);
 
 /**
+ * Compute a SHA-256 digest for a C-owned canonical manifest.
+ *
+ * The diagnostics endpoint uses this entry point after C has serialized the
+ * location-specific `static_config_manifest_v1` in canonical JSON order.
+ * Keeping the hash implementation on the Rust side avoids a second, subtly
+ * different SHA-256 implementation in the NGINX module.
+ *
+ * # Safety
+ *
+ * `data` must point to `data_len` readable bytes unless `data_len` is zero.
+ * `output` must point to at least 64 writable bytes and must not overlap the
+ * input range while the digest is being computed.
+ */
+uint32_t markdown_sha256_hex(const uint8_t *data,
+                             uintptr_t data_len,
+                             uint8_t *output,
+                             uintptr_t output_len);
+
+/**
  * Initialize an FFIDynconfResult to safe defaults.
  *
  * # Safety

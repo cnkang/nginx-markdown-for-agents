@@ -78,7 +78,8 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
 
     let mut assertions = Vec::new();
     let base_url = format!("http://127.0.0.1:{}", ctx.port);
-    let metrics_before = metric_value(&base_url, "decompression_streaming_total")?;
+    let metrics_before = metric_value(&base_url, "decompression_brotli_success")?;
+    let streaming_attempts_before = metric_value(&base_url, "conversion_attempts_streaming")?;
     let small = request_markdown(&base_url, "/streaming/small-brotli")?;
     append_converted_assertions(
         &mut assertions,
@@ -115,13 +116,21 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         LARGE_END,
         100_000,
     );
-    let metrics_after = metric_value(&base_url, "decompression_streaming_total")?;
+    let metrics_after = metric_value(&base_url, "decompression_brotli_success")?;
     push_assertion(
         &mut assertions,
         "streaming_metric_delta",
         metrics_after >= metrics_before + 3,
-        "at least three streaming decompressions",
+        "at least three successful Brotli decompressions",
         format!("before={metrics_before} after={metrics_after}"),
+    );
+    let streaming_attempts_after = metric_value(&base_url, "conversion_attempts_streaming")?;
+    push_assertion(
+        &mut assertions,
+        "streaming_attempt_metric_delta",
+        streaming_attempts_after >= streaming_attempts_before + 3,
+        "at least three streaming conversion attempts",
+        format!("before={streaming_attempts_before} after={streaming_attempts_after}"),
     );
 
     append_fullbuffer_assertions(&base_url, &mut assertions)?;
@@ -205,7 +214,8 @@ fn append_fullbuffer_assertions(
     base_url: &str,
     assertions: &mut Vec<AssertionResult>,
 ) -> Result<()> {
-    let before = metric_value(base_url, "decompression_fullbuffer_total")?;
+    let before = metric_value(base_url, "decompression_brotli_success")?;
+    let attempts_before = metric_value(base_url, "conversion_attempts_full_buffer")?;
     for (name, path) in [
         ("cache_full", "/cache-full/small-brotli"),
         ("streaming_off", "/non-streaming/small-brotli"),
@@ -213,13 +223,21 @@ fn append_fullbuffer_assertions(
         let response = request_markdown(base_url, path)?;
         append_converted_assertions(assertions, name, &response, "# Brotli Small", SMALL_END, 20);
     }
-    let after = metric_value(base_url, "decompression_fullbuffer_total")?;
+    let after = metric_value(base_url, "decompression_brotli_success")?;
     push_assertion(
         assertions,
         "fullbuffer_metric_delta",
         after >= before + 2,
-        "two Brotli full-buffer decompressions",
+        "two additional successful Brotli decompressions",
         format!("before={before} after={after}"),
+    );
+    let attempts_after = metric_value(base_url, "conversion_attempts_full_buffer")?;
+    push_assertion(
+        assertions,
+        "fullbuffer_attempt_metric_delta",
+        attempts_after >= attempts_before + 2,
+        "two full-buffer conversion attempts",
+        format!("before={attempts_before} after={attempts_after}"),
     );
     Ok(())
 }
@@ -262,9 +280,9 @@ fn append_backpressure_assertions(
     base_url: &str,
     assertions: &mut Vec<AssertionResult>,
 ) -> Result<()> {
-    let before = metric_value(base_url, "backpressure_total")?;
+    let before = metric_value(base_url, "streaming_events")?;
     let raw = slow_read_response(ctx.port, ctx.timeout)?;
-    let after = metric_value(base_url, "backpressure_total")?;
+    let after = metric_value(base_url, "streaming_events")?;
     push_assertion(
         assertions,
         "slow_reader_body_complete",
@@ -277,7 +295,7 @@ fn append_backpressure_assertions(
         assertions,
         "backpressure_metric_delta",
         after > before,
-        "backpressure_total increases",
+        "streaming lifecycle events increase",
         format!("before={before} after={after}"),
     );
     Ok(())
@@ -325,16 +343,43 @@ Connection: close\r\n\r\n",
 
 fn metric_value(base_url: &str, name: &str) -> Result<u64> {
     let mut headers = HashMap::new();
-    headers.insert("Accept".to_string(), "application/json".to_string());
+    headers.insert(
+        "Accept".to_string(),
+        "text/plain; version=0.0.4".to_string(),
+    );
     let response =
         crate::http::get_with_headers(&format!("{base_url}/markdown-metrics"), &headers)?;
-    let document: serde_json::Value = serde_json::from_str(&response.body)
-        .with_context(|| format!("invalid metrics JSON: {}", response.body))?;
-    document
-        .get("perf")
-        .and_then(|perf| perf.get(name))
-        .and_then(serde_json::Value::as_u64)
-        .with_context(|| format!("metrics field perf.{name} is missing"))
+    let (family, label) = match name {
+        "decompression_brotli_success" => (
+            "nginx_markdown_decompression_events_total",
+            Some("encoding=\"brotli\",outcome=\"success\""),
+        ),
+        "conversion_attempts_streaming" => (
+            "nginx_markdown_conversion_attempts_total",
+            Some("engine=\"streaming\""),
+        ),
+        "conversion_attempts_full_buffer" => (
+            "nginx_markdown_conversion_attempts_total",
+            Some("engine=\"full_buffer\""),
+        ),
+        "streaming_events" => ("nginx_markdown_streaming_events_total", None),
+        other => (other, None),
+    };
+    let value = response
+        .body
+        .lines()
+        .filter(|line| line.starts_with(family) && !line.starts_with('#'))
+        .filter(|line| label.map_or(true, |required| line.contains(required)))
+        .filter_map(|line| line.split_whitespace().last())
+        .filter_map(|sample| sample.parse::<f64>().ok())
+        .sum::<f64>();
+    if value.is_finite() && value >= 0.0 {
+        Ok(value as u64)
+    } else {
+        Err(anyhow::anyhow!(
+            "metrics family {family} is missing or invalid"
+        ))
+    }
 }
 
 fn push_assertion(

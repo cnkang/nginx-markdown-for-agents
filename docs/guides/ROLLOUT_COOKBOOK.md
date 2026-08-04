@@ -78,7 +78,8 @@ sudo tail -20 /var/log/nginx/error.log | grep markdown
 Confirm the metrics endpoint responds:
 
 ```bash
-curl -s -H "Accept: text/plain" http://localhost/markdown-metrics | head -5
+curl -s -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics | head -5
 ```
 
 ### Record Baseline Metrics
@@ -86,8 +87,8 @@ curl -s -H "Accept: text/plain" http://localhost/markdown-metrics | head -5
 Capture current metrics before enabling conversion:
 
 ```bash
-curl -s -H "Accept: application/json" \
-  http://localhost/markdown-metrics > /tmp/baseline-metrics.json
+curl -s -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics > /tmp/baseline-metrics.prom
 ```
 
 ### Back Up Configuration
@@ -130,8 +131,8 @@ http {
     markdown_error_policy pass;
     markdown_accept strict;
     markdown_log_verbosity info;
-    markdown_limits memory=10m;
-    markdown_limits timeout=5s;
+    markdown_limits conversion_memory=10m;
+    markdown_limits conversion_timeout=5s parser_timeout=5s;
 
     server {
         listen 80;
@@ -161,8 +162,9 @@ Wait at least 30 minutes, then verify:
 
 ```bash
 # Check for conversion activity
-curl -s -H "Accept: text/plain" http://localhost/markdown-metrics | \
-  grep -E "conversions_(succeeded|failed|bypassed)"
+curl -s -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics | \
+  grep -E "nginx_markdown_(requests_total|conversion_attempts_total)"
 
 # Check decision log entries
 grep "markdown decision:" /var/log/nginx/error.log | tail -10
@@ -208,8 +210,8 @@ http {
     markdown_error_policy pass;
     markdown_accept strict;
     markdown_log_verbosity info;
-    markdown_limits memory=10m;
-    markdown_limits timeout=5s;
+    markdown_limits conversion_memory=10m;
+    markdown_limits conversion_timeout=5s parser_timeout=5s;
 
     server {
         listen 80;
@@ -254,8 +256,9 @@ Wait at least 1 hour, then verify:
 
 ```bash
 # Check overall conversion metrics
-curl -s -H "Accept: application/json" \
-  http://localhost/markdown-metrics
+curl -s -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics | \
+  grep -E "nginx_markdown_(requests_total|conversion_deliveries_total)"
 
 # Check reason code distribution
 grep "markdown decision:" /var/log/nginx/error.log | \
@@ -293,8 +296,8 @@ http {
     markdown_error_policy pass;
     markdown_accept strict;
     markdown_log_verbosity info;
-    markdown_limits memory=10m;
-    markdown_limits timeout=5s;
+    markdown_limits conversion_memory=10m;
+    markdown_limits conversion_timeout=5s parser_timeout=5s;
 
     # Staging server (already enabled from Stage 2)
     server {
@@ -350,8 +353,9 @@ Wait at least 24 hours to cover a full traffic cycle, then verify:
 
 ```bash
 # Check production conversion metrics
-curl -s -H "Accept: text/plain" http://localhost/markdown-metrics | \
-  grep -E "conversions_(succeeded|failed|bypassed)"
+curl -s -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics | \
+  grep -E "nginx_markdown_(requests_total|conversion_deliveries_total)"
 
 # Check for failure reason codes in the last 24 hours
 grep "markdown decision:" /var/log/nginx/error.log | \
@@ -361,20 +365,10 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 grep "markdown decision:" /var/log/nginx/error.log | \
   grep -oP 'reason=\K[a-z_]+' | sort | uniq -c
 
-# Verify conversion latency is within bounds
-curl -s -H "Accept: application/json" \
+# Verify conversion latency samples are present; use histogram_quantile in PromQL
+curl -s -H "Accept: text/plain; version=0.0.4" \
   http://localhost/markdown-metrics | \
-  python3 -c "
-import sys, json
-m = json.load(sys.stdin)
-b = m.get('conversion_latency_buckets', {})
-total = sum(b.values()) if b else 0
-if total > 0:
-    for k, v in b.items():
-        print(f'{k}: {v} ({v*100//total}%)')
-else:
-    print('No conversions recorded yet')
-"
+  grep 'nginx_markdown_conversion_duration_seconds_bucket'
 ```
 
 #### Safe to Continue
@@ -416,8 +410,8 @@ http {
     markdown_error_policy pass;
     markdown_accept strict;
     markdown_log_verbosity info;
-    markdown_limits memory=10m;
-    markdown_limits timeout=5s;
+    markdown_limits conversion_memory=10m;
+    markdown_limits conversion_timeout=5s parser_timeout=5s;
 
     server {
         listen 80;
@@ -454,7 +448,7 @@ Wait at least 24 hours per expansion step, then verify:
 
 ```bash
 # Full metrics snapshot
-curl -s -H "Accept: application/json" \
+curl -s -H "Accept: text/plain; version=0.0.4" \
   http://localhost/markdown-metrics
 
 # Reason code distribution
@@ -1139,33 +1133,22 @@ Use this guidance at every observation checkpoint and whenever you need to asses
 
 ### Metrics to Monitor
 
-The module exposes metrics at the `/markdown-metrics` endpoint in JSON (when `Accept: application/json` is sent) or plain-text format. The endpoint is restricted to localhost access.
+The module exposes `/markdown-metrics` as a localhost-only Prometheus text
+0.0.4 endpoint. It always emits the exact eleven families listed in the
+[Prometheus Metrics Guide](prometheus-metrics.md); the `Accept` header cannot
+select a legacy JSON or human-readable representation.
 
-> **Note on metric names:** The metrics endpoint uses flat counter names (e.g., `conversions_succeeded`). The table below shows the actual endpoint field names.
-
-| Endpoint Field | Latency bucket | Type | What It Tells You |
-|---------------|----------------|------|-------------------|
-| `conversions_succeeded` | N/A | Counter | Successful HTML-to-Markdown conversions |
-| `conversions_failed` | N/A | Counter | Conversion attempts that failed |
-| `conversions_bypassed` | N/A | Counter | Requests that intentionally bypassed conversion (ineligible or explicit skip after context creation); does not include fail-open errors, which are recorded under `conversions_failed` |
-| `failures_conversion` | N/A | Counter | HTML parse or conversion errors |
-| `failures_resource_limit` | N/A | Counter | Timeout or memory limit failures |
-| `failures_system` | N/A | Counter | Internal or system errors |
-| `conversion_latency_le_10ms` | ≤ 10ms | Counter | Conversions completing in ≤ 10ms |
-| `conversion_latency_le_100ms` | 10–100ms | Counter | Conversions completing in 10–100ms |
-| `conversion_latency_le_1000ms` | 100–1000ms | Counter | Conversions completing in 100–1000ms |
-| `conversion_latency_gt_1000ms` | > 1000ms | Counter | Conversions completing in > 1000ms |
-
-> **Skip reason codes** (`not_eligible`, etc.) are not currently exposed as individual metric counters. Use decision log entries (`grep "reason=not_eligible"`) to determine skip reason distribution. Failure sub-classification is available via the `failures_conversion`, `failures_resource_limit`, and `failures_system` counters.
-
-The key ratio to track is the conversion success rate:
+The primary rollout ratios are derived from the frozen families:
 
 ```text
-success_rate = conversions_succeeded /
-               (conversions_succeeded + conversions_failed)
+conversion_delivery_rate = sum(nginx_markdown_conversion_deliveries_total)
+                            / sum(nginx_markdown_conversion_attempts_total)
+failure_rate = sum(nginx_markdown_requests_total{outcome=~"failed_.*"})
+               / sum(nginx_markdown_requests_total)
 ```
 
-A healthy rollout maintains a success rate above 95%.
+A healthy rollout keeps `failure_rate` within the pre-rollout baseline and
+keeps the delivery rate stable. Use decision logs for reason distributions.
 
 ### Log Patterns to Check
 
@@ -1241,34 +1224,33 @@ Use these `curl` commands to query the metrics endpoint directly. These are copy
 #### Quick health check
 
 ```bash
-# Fetch metrics in JSON format for easy parsing
-curl -s -H "Accept: application/json" \
-  http://localhost/markdown-metrics | python3 -m json.tool
+# Fetch the frozen Prometheus text format
+curl -s -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics
 ```
 
-#### Full metrics snapshot (JSON)
+#### Full metrics snapshot
 
 ```bash
 # Save a full snapshot for comparison
-curl -s -H "Accept: application/json" \
-  http://localhost/markdown-metrics > /tmp/metrics-$(date +%s).json
+curl -s -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics > /tmp/metrics-$(date +%s).prom
 ```
 
 #### Compare metrics over time
 
 ```bash
 # Take a before snapshot
-curl -s -H "Accept: application/json" \
-  http://localhost/markdown-metrics > /tmp/metrics-before.json
+curl -s -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics > /tmp/metrics-before.prom
 
 # ... wait for observation period ...
 
 # Take an after snapshot and compare
-curl -s -H "Accept: application/json" \
-  http://localhost/markdown-metrics > /tmp/metrics-after.json
+curl -s -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics > /tmp/metrics-after.prom
 
-diff <(python3 -m json.tool /tmp/metrics-before.json) \
-     <(python3 -m json.tool /tmp/metrics-after.json)
+diff -u /tmp/metrics-before.prom /tmp/metrics-after.prom
 ```
 
 #### Check skip reason distribution from metrics
@@ -1285,37 +1267,30 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 #### Check failure stage distribution from metrics
 
 ```bash
-# Show failure counters from the metrics endpoint
-curl -s -H "Accept: text/plain" http://localhost/markdown-metrics | \
-  grep -E "failures_(conversion|resource_limit|system)"
+# Show failure outcomes from the metrics endpoint
+curl -s -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics | \
+  grep 'nginx_markdown_requests_total{outcome="failed_'
 ```
 
 #### Check conversion latency buckets
 
 ```bash
-# Show latency distribution from the metrics endpoint
-curl -s -H "Accept: text/plain" http://localhost/markdown-metrics | \
-  grep "conversion_latency"
+# Show histogram samples from the metrics endpoint
+curl -s -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics | \
+  grep 'nginx_markdown_conversion_duration_seconds_'
 ```
 
 #### Check latency with human-readable summary
 
 ```bash
-# Parse latency buckets and show percentages
-curl -s -H "Accept: application/json" \
+# Prometheus can calculate a percentile from the frozen histogram directly:
+# histogram_quantile(0.95, sum by (le) (
+#   rate(nginx_markdown_conversion_duration_seconds_bucket[5m])))
+curl -s -H "Accept: text/plain; version=0.0.4" \
   http://localhost/markdown-metrics | \
-  python3 -c "
-import sys, json
-m = json.load(sys.stdin)
-b = m.get('conversion_latency_buckets', {})
-total = sum(b.values()) if b else 0
-if total > 0:
-    for k, v in sorted(b.items(), key=lambda x: int(''.join(c for c in x[0] if c.isdigit()) or '9999')):
-        print(f'  {k}: {v} ({v*100//total}%)')
-    print(f'  total: {total}')
-else:
-    print('  No conversions recorded yet')
-"
+  grep 'nginx_markdown_conversion_duration_seconds_bucket'
 ```
 
 #### Verify a test request converts successfully
@@ -1334,10 +1309,10 @@ A rollout is healthy when all of the following hold true during the observation 
 
 | Indicator | Threshold | How to Check |
 |-----------|-----------|--------------|
-| Conversion success rate | > 95% | `conversions_succeeded / (conversions_succeeded + conversions_failed)` from metrics endpoint |
-| `FAIL_SYSTEM` count | 0 | `grep -c "category=FAIL_SYSTEM"` in logs, or `failures_system` in metrics |
+| Conversion delivery rate | Stable vs baseline | `sum(nginx_markdown_conversion_deliveries_total) / sum(nginx_markdown_conversion_attempts_total)` from Prometheus |
+| Failed request rate | Within baseline | `sum(nginx_markdown_requests_total{outcome=~"failed_.*"}) / sum(nginx_markdown_requests_total)` from Prometheus |
 | Conversion latency | Within configured `markdown_limits` | Latency buckets show the vast majority of conversions completing before the timeout threshold |
-| `conversions_failed` trend | Stable or decreasing | Compare metrics snapshots over the observation period — failure count should not be climbing |
+| Failed request trend | Stable or decreasing | Compare `requests_total{outcome=~"failed_.*"}` snapshots over the observation period |
 | Upstream error rate | No increase correlated with enablement | Compare upstream 5xx rates before and after enabling the module |
 | Unexpected skip reasons | None for traffic you expect to convert | Check decision log `reason=not_eligible` — no unexpected `not_eligible` (content-type/size) for enabled paths |
 
@@ -1349,8 +1324,8 @@ Stop expanding rollout scope and investigate if any of the following occur:
 
 | Trigger | What It Means | How to Detect |
 |---------|---------------|---------------|
-| Sudden increase in failure category codes | Conversion failures are spiking — may indicate upstream HTML changes, resource pressure, or a converter bug | `grep "reason=failed_open\|reason=failed_closed" /var/log/nginx/error.log \| tail -20` or watch `conversions_failed` in metrics |
-| Any `FAIL_SYSTEM` category codes | Internal/system error — this should never happen in normal operation and indicates a bug or severe resource issue | `grep -c "category=FAIL_SYSTEM" /var/log/nginx/error.log` |
+| Sudden increase in failed outcomes | Conversion failures are spiking — may indicate upstream HTML changes, resource pressure, or a converter bug | `grep "reason=failed_open\|reason=failed_closed" /var/log/nginx/error.log \| tail -20` or watch the failed `requests_total` series |
+| Repeated internal failure reasons | Internal/system error — investigate the reason labels and decision logs | Inspect `requests_total{outcome=~"failed_.*"}` reason labels and NGINX logs |
 | Conversion latency exceeding `markdown_limits` | Conversions are taking too long — may indicate large pages, resource contention, or converter performance issues | Check latency buckets; look for conversions in the highest `le` bucket or timeouts in logs |
 | Upstream error rate increase | The module may be causing upstream issues (unlikely but possible with decompression or buffering interactions) | Compare upstream 5xx rates before and after enablement |
 | Unexpected `Content-Type` in responses | Converted responses have wrong Content-Type, or non-HTML responses are being processed | `curl -sD - -H "Accept: text/markdown" http://localhost/your-path/ \| grep Content-Type` |

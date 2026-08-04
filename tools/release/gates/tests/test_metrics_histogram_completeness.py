@@ -29,6 +29,7 @@ sys.path.insert(
 # --- Constants from the frozen metrics registry ---
 
 HISTOGRAM_FAMILY = "nginx_markdown_conversion_duration_seconds"
+HISTOGRAM_ENGINE = "full_buffer"
 
 # Exactly 10 bucket boundaries defined in metrics-registry.json
 BUCKET_BOUNDARIES = [
@@ -66,10 +67,9 @@ def render_histogram(buckets: list[int], sum_us: int, count: int) -> str:
     This produces the same structural output that the C renderer emits:
     - HELP line
     - TYPE line
-    - 10 cumulative _bucket lines with le="<boundary>"
-    - 1 _bucket line with le="+Inf"
-    - 1 _sum line
-    - 1 _count line
+    - 10 cumulative _bucket lines with engine and le labels
+    - 1 _bucket line with engine and le="+Inf"
+    - 1 _sum line and 1 _count line with the engine label
     """
     lines = []
     lines.append(
@@ -83,21 +83,29 @@ def render_histogram(buckets: list[int], sum_us: int, count: int) -> str:
     for i, boundary in enumerate(BUCKET_BOUNDARIES):
         cumulative += buckets[i]
         lines.append(
-            f"{HISTOGRAM_FAMILY}_bucket{{le=\"{boundary}\"}} {cumulative}"
+            f"{HISTOGRAM_FAMILY}_bucket{{engine=\"{HISTOGRAM_ENGINE}\","
+            f"le=\"{boundary}\"}} {cumulative}"
         )
 
     # +Inf bucket equals total count
     lines.append(
-        f"{HISTOGRAM_FAMILY}_bucket{{le=\"+Inf\"}} {count}"
+        f"{HISTOGRAM_FAMILY}_bucket{{engine=\"{HISTOGRAM_ENGINE}\","
+        f"le=\"+Inf\"}} {count}"
     )
 
     # _sum (microseconds to seconds.fraction)
     sum_seconds = sum_us // 1000000
     sum_frac = sum_us % 1000000
-    lines.append(f"{HISTOGRAM_FAMILY}_sum {sum_seconds}.{sum_frac:06d}")
+    lines.append(
+        f"{HISTOGRAM_FAMILY}_sum{{engine=\"{HISTOGRAM_ENGINE}\"}} "
+        f"{sum_seconds}.{sum_frac:06d}"
+    )
 
     # _count
-    lines.append(f"{HISTOGRAM_FAMILY}_count {count}")
+    lines.append(
+        f"{HISTOGRAM_FAMILY}_count{{engine=\"{HISTOGRAM_ENGINE}\"}} "
+        f"{count}"
+    )
 
     return "\n".join(lines) + "\n"
 
@@ -123,13 +131,14 @@ def parse_histogram_output(text: str) -> dict:
     }
 
     bucket_re = re.compile(
-        rf'^{re.escape(HISTOGRAM_FAMILY)}_bucket\{{le="([^"]+)"\}}\s+\S+$'
+        rf'^{re.escape(HISTOGRAM_FAMILY)}_bucket\{{engine="[^"]+",'
+        rf'le="([^"]+)"\}}\s+\S+$'
     )
     sum_re = re.compile(
-        rf'^{re.escape(HISTOGRAM_FAMILY)}_sum\s+\S+$'
+        rf'^{re.escape(HISTOGRAM_FAMILY)}_sum\{{engine="[^"]+"\}}\s+\S+$'
     )
     count_re = re.compile(
-        rf'^{re.escape(HISTOGRAM_FAMILY)}_count\s+\S+$'
+        rf'^{re.escape(HISTOGRAM_FAMILY)}_count\{{engine="[^"]+"\}}\s+\S+$'
     )
     help_re = re.compile(
         rf'^# HELP {re.escape(HISTOGRAM_FAMILY)}\s'
@@ -350,7 +359,8 @@ def test_histogram_cumulative_buckets_non_decreasing(buckets, sum_us):
 
     # Extract bucket values
     bucket_re = re.compile(
-        rf'^{re.escape(HISTOGRAM_FAMILY)}_bucket\{{le="[^"]+"\}}\s+(\S+)$'
+        rf'^{re.escape(HISTOGRAM_FAMILY)}_bucket\{{engine="[^"]+",'
+        rf'le="[^"]+"\}}\s+(\S+)$'
     )
     values = []
     for line in text.splitlines():

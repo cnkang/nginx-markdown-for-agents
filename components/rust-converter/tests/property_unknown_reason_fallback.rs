@@ -6,7 +6,7 @@
 //! verify that `ReasonCode::from_discriminant()` returns `None` and the C
 //! accessor `reason_code_str()` returns NULL for invalid values.
 
-use nginx_markdown_converter::decision::reason_code::{ReasonCode, REASON_CODE_COUNT};
+use nginx_markdown_converter::decision::reason_code::{REASON_CODE_COUNT, ReasonCode};
 use proptest::prelude::*;
 
 /// The maximum valid discriminant in the current registry.

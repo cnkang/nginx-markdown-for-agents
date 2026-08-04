@@ -61,7 +61,9 @@ struct ngx_http_markdown_effective_conf_s {
     ngx_flag_t   prune_noise;
     ngx_uint_t   log_verbosity;
     ngx_uint_t   error_policy;
+    ngx_uint_t   error_status;
     size_t       memory_budget;
+    size_t       streaming_buffer;
 #ifdef MARKDOWN_STREAMING_ENABLED
     size_t       streaming_budget;
 #endif
@@ -360,6 +362,29 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_POLICY     0x0020
 #define NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_BUDGET     0x0080
 
+/* Canonical static-manifest explicitness bits. */
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_FILTER       0x00000100
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_LIMITS       0x00000200
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_FLAVOR       0x00000400
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_TOKEN        0x00000800
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_FRONT_MATTER 0x00001000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_ACCEPT       0x00002000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_AUTH_POLICY  0x00004000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_AUTH_COOKIES 0x00008000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_CACHE         0x00010000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_STREAM       0x00020000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_LOG           0x00040000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_CONTENT      0x00080000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_PRUNE        0x00100000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_SELECTORS    0x00200000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_PROTECTION   0x00400000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DECOMPRESS   0x00800000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DYNCONF      0x01000000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DRY_RUN      0x02000000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DIAGNOSTICS  0x04000000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_EXCLUDED     0x08000000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_METRICS       0x10000000
+
 /*
  * Dynconf block mask bit definitions (0.9.2 precedence model).
  *
@@ -482,6 +507,7 @@ typedef struct {
     size_t        decompressed_size;    /* NGX_CONF_UNSET_SIZE */
     ngx_uint_t    decompression_ratio;  /* NGX_CONF_UNSET_UINT */
     ngx_uint_t    max_inflight;         /* NGX_CONF_UNSET_UINT */
+    ngx_flag_t    configured;            /* directive present in this block */
 } ngx_http_markdown_limits_t;
 
 /*
@@ -637,6 +663,7 @@ typedef struct {
      * An explicit http-block setting does NOT set the bit.
      */
     ngx_uint_t   dynconf_block_mask;
+    ngx_uint_t   static_explicit_mask;
 } ngx_http_markdown_advanced_cfg_t;
 
 /*
@@ -696,6 +723,7 @@ typedef struct {
      */
     struct {
         ngx_flag_t   diagnostics_enabled; /* markdown_diagnostics on|off (default: off) */
+        ngx_flag_t   metrics_enabled;     /* markdown_metrics endpoint enabled */
     } ops;
 
     /*
@@ -817,6 +845,7 @@ typedef struct {
      */
     struct MarkdownTrustedProxies *trusted_proxies;
     ngx_flag_t      trusted_proxies_configured;
+    ngx_array_t    *trusted_proxies_manifest;
 } ngx_http_markdown_main_conf_t;
 
 /* Return the merged config selected to own the per-worker dynconf watcher. */
@@ -1299,6 +1328,31 @@ typedef struct {
     } conversion_latency;
 
     /*
+     * Frozen v1 histogram storage, split by conversion engine.  The
+     * legacy aggregate above remains for the pre-v1 JSON/text helpers;
+     * these bounded fields provide the engine label required by the
+     * Prometheus v1 contract without per-request or per-path state.
+     */
+    struct {
+        struct {
+            ngx_atomic_t  le_10ms;
+            ngx_atomic_t  le_100ms;
+            ngx_atomic_t  le_1000ms;
+            ngx_atomic_t  gt_1000ms;
+            ngx_atomic_t  sum_ms;
+            ngx_atomic_t  count;
+        } full_buffer;
+        struct {
+            ngx_atomic_t  le_10ms;
+            ngx_atomic_t  le_100ms;
+            ngx_atomic_t  le_1000ms;
+            ngx_atomic_t  gt_1000ms;
+            ngx_atomic_t  sum_ms;
+            ngx_atomic_t  count;
+        } streaming;
+    } conversion_latency_v1;
+
+    /*
      * Decompression metrics.
      *
      * Grouped into an anonymous sub-struct so that the parent
@@ -1318,6 +1372,24 @@ typedef struct {
         ngx_atomic_t  format_error_total;     /* Invalid compression format */
         ngx_atomic_t  truncated_input_total;  /* Truncated compressed input */
         ngx_atomic_t  io_error_total;         /* Decompression I/O error */
+        struct {
+            ngx_atomic_t  budget;
+            ngx_atomic_t  format;
+            ngx_atomic_t  truncated;
+            ngx_atomic_t  io;
+        } gzip_failures;
+        struct {
+            ngx_atomic_t  budget;
+            ngx_atomic_t  format;
+            ngx_atomic_t  truncated;
+            ngx_atomic_t  io;
+        } deflate_failures;
+        struct {
+            ngx_atomic_t  budget;
+            ngx_atomic_t  format;
+            ngx_atomic_t  truncated;
+            ngx_atomic_t  io;
+        } brotli_failures;
     } decompressions;
 
     /*
@@ -1432,6 +1504,18 @@ typedef struct {
         ngx_atomic_t  replay_buffer_errors_total;
 
         struct {
+            ngx_atomic_t  success;
+            ngx_atomic_t  failure_schema_version;
+            ngx_atomic_t  failure_unknown_key;
+            ngx_atomic_t  failure_duplicate_key;
+            ngx_atomic_t  failure_invalid_type;
+            ngx_atomic_t  failure_out_of_range;
+            ngx_atomic_t  failure_size_exceeded;
+            ngx_atomic_t  failure_parse_error;
+            ngx_atomic_t  failure_file_error;
+        } dynconf_reloads;
+
+        struct {
             ngx_atomic_t  parse_timeouts_total;
             ngx_atomic_t  parse_budget_exceeded_total;
         } parse_interrupts;
@@ -1477,6 +1561,9 @@ typedef struct {
     } per_path;
 #endif /* MARKDOWN_METRICS_PER_PATH_DEBUG */
 } ngx_http_markdown_metrics_t;
+
+/* Called by the production dynconf watcher after each reload attempt. */
+void ngx_http_markdown_record_dynconf_reload(ngx_uint_t error_code);
 
 /*
  * Cross-translation-unit metric ownership helpers used by postcommit output.

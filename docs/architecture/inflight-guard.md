@@ -76,7 +76,7 @@ markdown_limits max_inflight=64;
 - **Value 0**: Unlimited (no inflight guard)
 
 The default value of 64 is chosen to protect typical deployments where:
-- Each conversion may hold a response buffer up to `markdown_limits memory=<size>` (10 MB built-in default)
+- Each conversion may hold a response buffer up to `markdown_limits conversion_memory=<size>` (10 MB built-in default)
 - 64 × 10 MB = 640 MB peak memory per worker, which fits comfortably in most server configurations
 - Legitimate crawlers rarely exceed 10-20 concurrent requests to a single origin
 
@@ -93,14 +93,15 @@ When `current >= max_inflight`:
 
 ## Metrics
 
+The frozen Prometheus surface exposes the current gauge and request outcome:
+
 | Metric | Type | Description |
 |--------|------|-------------|
-| `nginx_markdown_inflight_current` | gauge | Currently in-flight conversions in this worker |
-| `nginx_markdown_inflight_high_watermark` | gauge | Peak concurrent conversions observed since worker start |
-| `nginx_markdown_overload_total` | counter | Total requests rejected due to inflight limit |
+| `nginx_markdown_inflight_requests` | gauge | Currently in-flight conversions |
+| `nginx_markdown_requests_total{outcome=...,stage=...,reason=...}` | counter | Terminal request outcomes, including inflight-limit decisions |
 
-These metrics have no labels (per-worker global gauges/counters).  Each
-worker reports its own values independently at the `/metrics` endpoint.
+Counters and gauges are aggregated in the module's shared metrics zone and
+are exposed at the configured `markdown_metrics` location.
 
 ## Implementation Files
 

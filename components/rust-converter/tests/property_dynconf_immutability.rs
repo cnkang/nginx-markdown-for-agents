@@ -13,7 +13,7 @@
 //! affect the bound request snapshot.
 
 use nginx_markdown_converter::dynconf::{
-    parse_dynconf, DynconfResult, FilterValue, PruneNoiseValue,
+    DynconfResult, FilterValue, PruneNoiseValue, parse_dynconf,
 };
 use proptest::prelude::*;
 
@@ -59,12 +59,7 @@ fn arbitrary_reload_dynconf() -> impl Strategy<Value = String> {
     (
         prop_oneof![Just("on"), Just("off")],
         prop_oneof![Just("on"), Just("off")],
-        prop_oneof![
-            Just("error"),
-            Just("warn"),
-            Just("info"),
-            Just("debug"),
-        ],
+        prop_oneof![Just("error"), Just("warn"), Just("info"), Just("debug"),],
         prop_oneof![Just("pass"), Just("fail_closed")],
         65536u64..=1_073_741_824u64,
     )
@@ -97,7 +92,10 @@ fn assert_snapshots_equal(a: &DynconfResult, b: &DynconfResult) {
     assert_eq!(a.prune_noise, b.prune_noise, "prune_noise diverged");
     assert_eq!(a.log_verbosity, b.log_verbosity, "log_verbosity diverged");
     assert_eq!(a.error_policy, b.error_policy, "error_policy diverged");
-    assert_eq!(a.streaming_buffer, b.streaming_buffer, "streaming_buffer diverged");
+    assert_eq!(
+        a.streaming_buffer, b.streaming_buffer,
+        "streaming_buffer diverged"
+    );
 }
 
 /// Assert that two DynconfResult instances differ in at least one field.

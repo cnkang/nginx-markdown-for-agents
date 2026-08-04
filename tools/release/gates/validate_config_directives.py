@@ -54,93 +54,48 @@ FILTER_MODULE_H = (
 CONFIGURATION_MD = PROJECT_ROOT / "docs" / "guides" / "CONFIGURATION.md"
 
 
-# ── Active directives (v0.7.0 additions) ──────────────────────────────────
+# ── Current public command registry (0.9.2 freeze) ────────────────────────
 
-V070_DIRECTIVES = [
-    {
-        "name": "markdown_decompress_max_size",
-        "type": "size",
-        "doc_heading": "markdown_decompress_max_size",
-        "merge_pattern": r"conf->decompress\.max_size",
-        "description": "decompression budget (max decompressed output size)",
-    },
-    {
-        "name": "markdown_parse_timeout",
-        "type": "msec",
-        "doc_heading": "markdown_parse_timeout",
-        "merge_pattern": r"conf->decompress\.parse_timeout",
-        "description": "parse phase timeout",
-    },
-    {
-        "name": "markdown_parser_budget",
-        "type": "size",
-        "doc_heading": "markdown_parser_budget",
-        "merge_pattern": r"conf->decompress\.parser_budget",
-        "description": "parser memory budget",
-    },
-    {
-        "name": "markdown_diagnostics",
-        "type": "flag",
-        "doc_heading": "markdown_diagnostics",
-        "merge_pattern": r"diagnostics",
-        "description": "runtime diagnostics endpoint toggle",
-    },
-    {
-        "name": "markdown_dynconf_dry_run",
-        "type": "flag",
-        "doc_heading": "markdown_dynconf_dry_run",
-        "merge_pattern": r"conf->advanced\.dynconf_dry_run",
-        "description": "dynconf dry-run validation mode",
-    },
+# The 0.9.2 freeze deliberately removes the old one-directive-per-limit
+# surface.  Keep this list aligned with the checked-in Wave 1 command table;
+# nested resource limits are validated separately below.
+CURRENT_DIRECTIVES = [
+    "markdown_filter",
+    "markdown_limits",
+    "markdown_error_policy",
+    "markdown_flavor",
+    "markdown_token_estimate",
+    "markdown_front_matter",
+    "markdown_accept",
+    "markdown_auth_policy",
+    "markdown_auth_cookies",
+    "markdown_cache_validation",
+    "markdown_streaming",
+    "markdown_log_verbosity",
+    "markdown_content_types",
+    "markdown_trusted_proxies",
+    "markdown_metrics_shm_size",
+    "markdown_metrics",
+    "markdown_prune_noise",
+    "markdown_prune_selectors",
+    "markdown_prune_protection_selectors",
+    "markdown_auto_decompress",
+    "markdown_dynamic_config",
+    "markdown_dynamic_config_path",
+    "markdown_dynconf_dry_run",
+    "markdown_diagnostics",
+    "markdown_stream_excluded_types",
 ]
 
-# ── Active directives (v0.8.0 additions) ──────────────────────────────────
-
-V080_DIRECTIVES = [
-    {
-        "name": "markdown_stream_threshold",
-        "type": "size",
-        "doc_heading": "markdown_stream_threshold",
-        "merge_pattern": r"conf->stream\.threshold",
-        "default_pattern": (
-            r"NGX_MD_MERGE_STREAM\(\s*threshold\s*,\s*size_t\s*,\s*-1\s*,"
-            r"\s*NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT\s*,\s*0\s*\)"
-        ),
-        "description": "auto-mode streaming threshold (replaces markdown_streaming_auto_threshold)",
-    },
-    {
-        "name": "markdown_stream_precommit_buffer",
-        "type": "size",
-        "doc_heading": "markdown_stream_precommit_buffer",
-        "merge_pattern": r"conf->stream\.precommit_buffer",
-        "default_pattern": (
-            r"NGX_MD_MERGE_STREAM\(\s*precommit_buffer\s*,\s*size_t\s*,"
-            r"\s*-1\s*,\s*262144\s*,\s*0\s*\)"
-        ),
-        "description": "pre-commit replay buffer size",
-    },
-    {
-        "name": "markdown_stream_flush_min",
-        "type": "size",
-        "doc_heading": "markdown_stream_flush_min",
-        "merge_pattern": r"conf->stream\.flush_min",
-        "default_pattern": (
-            r"NGX_MD_MERGE_STREAM\(\s*flush_min\s*,\s*size_t\s*,"
-            r"\s*-1\s*,\s*16384\s*,\s*0\s*\)"
-        ),
-        "description": "minimum Markdown output batch size before flush",
-    },
-    {
-        "name": "markdown_stream_excluded_types",
-        "type": "string_list",
-        "doc_heading": "markdown_stream_excluded_types",
-        "merge_pattern": r"conf->stream\.excluded_types",
-        "default_pattern": (
-            r"conf->stream\.excluded_types\s*=.*\?"
-            r"\s*prev->stream\.excluded_types\s*:\s*NULL\s*;"
-        ),
-        "description": "additional MIME types excluded from streaming",
-    },
+CURRENT_LIMIT_KEYS = [
+    "conversion_timeout",
+    "parser_timeout",
+    "conversion_memory",
+    "parser_memory",
+    "streaming_buffer",
+    "decompressed_size",
+    "decompression_ratio",
+    "max_inflight",
 ]
 
 # ── Removed directives (v0.8.0 cleanup) ────────────────────────────────────
@@ -270,6 +225,23 @@ def check_directive_merge(
         result.fail(check_id, "merge function NOT found in config_core_impl.h")
 
 
+def check_limit_key(
+    key: str, handler_src: str, docs: str, result: ValidationResult
+) -> None:
+    """Verify that a frozen markdown_limits key is implemented and documented."""
+    source_id = f"limits-source:{key}"
+    if re.search(rf'"{re.escape(key)}"', handler_src):
+        result.pass_(source_id, "nested limit key found in handler")
+    else:
+        result.fail(source_id, "nested limit key NOT found in handler")
+
+    docs_id = f"limits-docs:{key}"
+    if re.search(rf"\b{re.escape(key)}\s*=", docs):
+        result.pass_(docs_id, "nested limit key documented")
+    else:
+        result.fail(docs_id, "nested limit key NOT documented in CONFIGURATION.md")
+
+
 def check_directive_default(
     directive_name: str,
     default_pattern: str,
@@ -370,30 +342,24 @@ def validate_all(result: ValidationResult) -> None:
             "source file not found \u2014 cannot validate removed constants",
         )
 
-    default_src = "\n".join([core_src, filter_h])
+    handler_src = read_safe(
+        PROJECT_ROOT
+        / "components"
+        / "nginx-module"
+        / "src"
+        / "ngx_http_markdown_config_handlers_impl.h"
+    )
 
-    # v0.7.0 directives: source + docs + merge + default(merge pattern)
-    for directive in V070_DIRECTIVES:
-        name = directive["name"]
-        doc_heading = directive["doc_heading"]
-        merge_pat = directive["merge_pattern"]
-
+    # Wave 1 freezes the command table as a single 25-entry public surface.
+    # Validate both registration and documentation without reviving the old
+    # one-directive-per-budget assumptions.
+    for name in CURRENT_DIRECTIVES:
         check_directive_in_source(name, directives_src, result)
-        check_directive_in_docs(name, doc_heading, docs, result)
-        check_directive_merge(name, merge_pat, core_src, result)
-        check_directive_default_merge(name, merge_pat, core_src, result)
+        check_directive_in_docs(name, name, docs, result)
 
-    # v0.8.0 directives: source + docs + merge + default(explicit pattern)
-    for directive in V080_DIRECTIVES:
-        name = directive["name"]
-        doc_heading = directive["doc_heading"]
-        merge_pat = directive["merge_pattern"]
-        default_pat = directive["default_pattern"]
-
-        check_directive_in_source(name, directives_src, result)
-        check_directive_in_docs(name, doc_heading, docs, result)
-        check_directive_merge(name, merge_pat, core_src, result)
-        check_directive_default(name, default_pat, default_src, result)
+    # Wave 1/2 freeze the eight nested resource-limit keys.
+    for key in CURRENT_LIMIT_KEYS:
+        check_limit_key(key, handler_src, docs, result)
 
     # Removed directives: absent from source + documented as REMOVED
     for directive in REMOVED_DIRECTIVES:

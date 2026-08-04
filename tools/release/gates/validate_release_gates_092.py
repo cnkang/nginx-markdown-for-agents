@@ -3,7 +3,7 @@
 
 Validates 0.9.2-specific deliverables:
   - Version consistency (all version sources = 0.9.2)
-  - Reason code registry completeness (26 codes)
+  - Reason code registry completeness (27 codes, including encoding_header_invalid)
   - Public surface inventory exists and is parseable
 
 Adds 0.9.2-specific checks to the 0.9.1 Make gate chain; prior checks
@@ -26,7 +26,7 @@ if str(REPO_ROOT) not in sys.path:
 from tools.lib.reason_code import REASON_C_ACCESSOR_ALIASES
 
 EXPECTED_VERSION = "0.9.2"
-EXPECTED_REASON_CODE_COUNT = 26
+EXPECTED_REASON_CODE_COUNT = 27
 CHANGELOG_FILENAME = "CHANGELOG.md"
 REASON_CODE_RELATIVE_PATH = "components/rust-converter/src/decision/reason_code.rs"
 REASON_C_RELATIVE_PATH = "components/nginx-module/src/ngx_http_markdown_reason.c"

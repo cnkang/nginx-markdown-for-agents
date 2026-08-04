@@ -13,9 +13,7 @@
 //! - source_digest = SHA-256 over the raw bytes that produced the served LKG snapshot
 //! - Absent key vs explicitly set default produce different active_digest
 
-use nginx_markdown_converter::dynconf::{
-    compute_source_digest, parse_dynconf, DynconfResult,
-};
+use nginx_markdown_converter::dynconf::{DynconfResult, compute_source_digest, parse_dynconf};
 use proptest::prelude::*;
 
 // ─── Dynconf Watcher State Machine ────────────────────────────────────────────
@@ -117,8 +115,8 @@ impl DynconfWatcher {
 
             // ── NoFile + valid file → Active (generation=1) ──
             (DynconfState::NoFile, FileEvent::ValidFile(raw_bytes)) => {
-                let result = parse_dynconf(raw_bytes)
-                    .expect("ValidFile event must contain parseable bytes");
+                let result =
+                    parse_dynconf(raw_bytes).expect("ValidFile event must contain parseable bytes");
                 self.state = DynconfState::Active;
                 self.generation = Some(1);
                 self.source_digest = Some(result.source_digest.clone());
@@ -139,14 +137,12 @@ impl DynconfWatcher {
             }
 
             // ── NoFile + file disappeared → stays NoFile ──
-            (DynconfState::NoFile, FileEvent::FileDisappeared(_)) => {
-                DynconfState::NoFile
-            }
+            (DynconfState::NoFile, FileEvent::FileDisappeared(_)) => DynconfState::NoFile,
 
             // ── InvalidWithoutLkg + valid → Active (generation=1) ──
             (DynconfState::InvalidWithoutLkg, FileEvent::ValidFile(raw_bytes)) => {
-                let result = parse_dynconf(raw_bytes)
-                    .expect("ValidFile event must contain parseable bytes");
+                let result =
+                    parse_dynconf(raw_bytes).expect("ValidFile event must contain parseable bytes");
                 self.state = DynconfState::Active;
                 self.generation = Some(1);
                 self.source_digest = Some(result.source_digest.clone());
@@ -174,8 +170,8 @@ impl DynconfWatcher {
 
             // ── Active + valid → Active (generation++) ──
             (DynconfState::Active, FileEvent::ValidFile(raw_bytes)) => {
-                let result = parse_dynconf(raw_bytes)
-                    .expect("ValidFile event must contain parseable bytes");
+                let result =
+                    parse_dynconf(raw_bytes).expect("ValidFile event must contain parseable bytes");
                 let current = self.generation.unwrap();
                 self.generation = Some(current + 1);
                 self.source_digest = Some(result.source_digest.clone());
@@ -205,8 +201,8 @@ impl DynconfWatcher {
 
             // ── LkgPreserved + valid → Active (generation++) ──
             (DynconfState::LkgPreserved, FileEvent::ValidFile(raw_bytes)) => {
-                let result = parse_dynconf(raw_bytes)
-                    .expect("ValidFile event must contain parseable bytes");
+                let result =
+                    parse_dynconf(raw_bytes).expect("ValidFile event must contain parseable bytes");
                 let current = self.generation.unwrap();
                 self.state = DynconfState::Active;
                 self.generation = Some(current + 1);
@@ -901,7 +897,9 @@ fn test_full_lifecycle_scenario() {
     assert_eq!(watcher.generation, Some(2));
 
     // Step 6: Permission denied → LkgPreserved (gen still 2)
-    watcher.process_event(&FileEvent::FileDisappeared(DisappearReason::PermissionDenied));
+    watcher.process_event(&FileEvent::FileDisappeared(
+        DisappearReason::PermissionDenied,
+    ));
     assert_eq!(watcher.state, DynconfState::LkgPreserved);
     assert_eq!(watcher.generation, Some(2));
 

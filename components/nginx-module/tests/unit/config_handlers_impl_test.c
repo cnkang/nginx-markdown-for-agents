@@ -105,8 +105,8 @@ typedef struct {
  * These are referenced by the production code but never dereferenced
  * in the unit harness.
  */
-ngx_module_t ngx_http_markdown_filter_module;
-ngx_module_t ngx_http_core_module;
+ngx_module_t ngx_http_markdown_filter_module = { 1 };
+ngx_module_t ngx_http_core_module = { 2 };
 
 /*
  * Test-controlled state for stub return values.
@@ -116,6 +116,7 @@ ngx_module_t ngx_http_core_module;
  *                  tests set it to simulate compilation success or failure.
  */
 static ngx_http_core_loc_conf_t *g_clcf;
+static ngx_http_markdown_conf_t *g_module_loc_conf;
 static ngx_int_t g_compile_complex_rc;
 
 /*
@@ -542,8 +543,8 @@ static void *
 ngx_http_conf_get_module_loc_conf(ngx_conf_t *cf, ngx_module_t module)
 {
     UNUSED(cf);
-    UNUSED(module);
-    return g_clcf;
+    return module.dummy == ngx_http_core_module.dummy
+        ? (void *) g_clcf : (void *) g_module_loc_conf;
 }
 
 /*
@@ -720,6 +721,7 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     mcf->routing.content_types = NGX_CONF_UNSET_PTR;
     mcf->policy.conditional_requests = NGX_CONF_UNSET_UINT;
     mcf->policy.log_verbosity = NGX_CONF_UNSET_UINT;
+    mcf->ops.metrics_enabled = NGX_CONF_UNSET;
     mcf->routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
     mcf->stream.policy = NGX_CONF_UNSET_UINT;
     mcf->stream.policy_explicit = -1;
@@ -1274,8 +1276,7 @@ test_streaming_policy_handler(void)
     TEST_PASS("markdown_streaming policy handler branches covered");
 }
 
-/*
- * Verify stream_types handler: valid types, duplicate detection,
+/* Verify stream_types handler: valid types, duplicate detection. */
 /*
  * Verify the markdown_limits multi-key handler: each key maps to its
  * backing field, plus unknown-key, missing-'=', zero-value, malformed-value,
@@ -1432,6 +1433,7 @@ test_metrics_handlers(void)
     TEST_ASSERT(clcf.handler == ngx_http_markdown_metrics_handler,
         "metrics handler should be registered");
 
+    init_conf(&mcf);
     rc = ngx_http_markdown_metrics_directive(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_ERROR,
         "duplicate content handler should fail");
@@ -1623,7 +1625,7 @@ test_markdown_filter_palloc_failure(void)
 
 /*
  * Verify ngx_http_markdown_set_dynconf_path: normal path,
- * empty value, duplicate rejection, and NULL conf.
+ * empty value, duplicate rejection, and command-context lookup.
  *
  * Semantic contract mirrored: set_dynconf_path sets mcf->advanced.advanced.dynconf_path,
  * records the path in main_conf for duplicate detection, and returns
@@ -1648,6 +1650,7 @@ test_set_dynconf_path(void)
 
     memset(&g_main_conf, 0, sizeof(g_main_conf));
     init_conf(&mcf);
+    g_module_loc_conf = &mcf;
     setup_cf(&cf, &args, values, 2);
     set_arg(&cmd.name, "markdown_dynamic_config_path");
     set_arg(&values[0], "markdown_dynamic_config_path");
@@ -1680,11 +1683,16 @@ test_set_dynconf_path(void)
     TEST_ASSERT(rc == NGX_CONF_OK,
                 "empty value should return OK (no-op)");
 
-    /* NULL conf should fail */
+    /* The H-only command receives main-conf storage; the handler resolves
+     * the location snapshot from the configuration context. */
+    memset(&g_main_conf, 0, sizeof(g_main_conf));
+    init_conf(&mcf);
+    set_arg(&values[1], "/etc/nginx/dynconf.conf");
     rc = ngx_http_markdown_set_dynconf_path(&cf, &cmd, NULL);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-                "NULL conf should return error");
+    TEST_ASSERT(rc == NGX_CONF_OK,
+                "handler should resolve H-only loc conf from context");
 
+    g_module_loc_conf = NULL;
     TEST_PASS("set_dynconf_path branches covered");
 }
 

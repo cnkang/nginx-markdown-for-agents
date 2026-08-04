@@ -486,36 +486,56 @@ fn status_code_response(method: Method, status_code: u16) -> axum::response::Res
 fn metrics_response(
     state: Arc<FixtureState>,
     method: Method,
-    headers: HeaderMap,
+    _headers: HeaderMap,
 ) -> axum::response::Response {
-    let accept = header_value(&headers, "Accept").unwrap_or_default();
     let total = state.total_requests.load(Ordering::Relaxed);
     let converted = state.converted_total.load(Ordering::Relaxed);
     let skipped = total.saturating_sub(converted);
-
-    if accept.contains("application/json") {
-        let body = serde_json::json!({
-            "total_requests": total,
-            "converted_total": converted,
-            "skipped_total": skipped
-        })
-        .to_string();
-        return plain_response(method, 200, "application/json", &body);
-    }
-
     let body = format!(
-        "# HELP nginx_markdown_total_requests Total requests observed\n\
-# TYPE nginx_markdown_total_requests counter\n\
-nginx_markdown_total_requests {}\n\
-# HELP nginx_markdown_converted_total Converted requests observed\n\
-# TYPE nginx_markdown_converted_total counter\n\
-nginx_markdown_converted_total {}\n\
-# HELP nginx_markdown_skipped_total Skipped requests observed\n\
-# TYPE nginx_markdown_skipped_total counter\n\
-nginx_markdown_skipped_total {}\n",
-        total, converted, skipped
+        "# HELP nginx_markdown_requests_total Requests entering the decision chain\n\
+# TYPE nginx_markdown_requests_total counter\n\
+nginx_markdown_requests_total{{outcome=\"converted\",stage=\"delivery\",reason=\"none\"}} {}\n\
+nginx_markdown_requests_total{{outcome=\"skipped\",stage=\"eligibility\",reason=\"not_eligible\"}} {}\n\
+# HELP nginx_markdown_conversion_attempts_total Conversion attempts\n\
+# TYPE nginx_markdown_conversion_attempts_total counter\n\
+nginx_markdown_conversion_attempts_total{{engine=\"full_buffer\"}} {}\n\
+# HELP nginx_markdown_conversion_deliveries_total Successful converted deliveries\n\
+# TYPE nginx_markdown_conversion_deliveries_total counter\n\
+nginx_markdown_conversion_deliveries_total{{engine=\"full_buffer\"}} {}\n\
+# HELP nginx_markdown_conversion_duration_seconds Conversion duration\n\
+# TYPE nginx_markdown_conversion_duration_seconds histogram\n\
+nginx_markdown_conversion_duration_seconds_bucket{{engine=\"full_buffer\",le=\"+Inf\"}} {}\n\
+nginx_markdown_conversion_duration_seconds_sum{{engine=\"full_buffer\"}} 0\n\
+nginx_markdown_conversion_duration_seconds_count{{engine=\"full_buffer\"}} {}\n\
+# HELP nginx_markdown_input_bytes_total Input bytes\n\
+# TYPE nginx_markdown_input_bytes_total counter\n\
+nginx_markdown_input_bytes_total {}\n\
+# HELP nginx_markdown_output_bytes_total Output bytes\n\
+# TYPE nginx_markdown_output_bytes_total counter\n\
+nginx_markdown_output_bytes_total {}\n\
+# HELP nginx_markdown_inflight_requests In-flight conversions\n\
+# TYPE nginx_markdown_inflight_requests gauge\n\
+nginx_markdown_inflight_requests 0\n\
+# HELP nginx_markdown_streaming_events_total Streaming lifecycle events\n\
+# TYPE nginx_markdown_streaming_events_total counter\n\
+nginx_markdown_streaming_events_total{{transition=\"commit\",reason=\"none\"}} 0\n\
+# HELP nginx_markdown_decompression_events_total Decompression events\n\
+# TYPE nginx_markdown_decompression_events_total counter\n\
+nginx_markdown_decompression_events_total{{encoding=\"gzip\",outcome=\"success\",reason=\"none\"}} 0\n\
+# HELP nginx_markdown_dynconf_reloads_total Dynamic configuration reloads\n\
+# TYPE nginx_markdown_dynconf_reloads_total counter\n\
+nginx_markdown_dynconf_reloads_total{{outcome=\"success\",reason=\"none\"}} 0\n\
+# HELP nginx_markdown_build_info Build information\n\
+# TYPE nginx_markdown_build_info gauge\n\
+nginx_markdown_build_info{{version=\"test\",nginx_version=\"test\",features=\"\"}} 1\n",
+        converted, skipped, converted, converted, converted, converted, converted, converted,
     );
-    plain_response(method, 200, "text/plain", &body)
+    plain_response(
+        method,
+        200,
+        "text/plain; version=0.0.4; charset=utf-8",
+        &body,
+    )
 }
 
 fn header_value(headers: &HeaderMap, name: &str) -> Option<String> {

@@ -18,6 +18,7 @@ Flags:
 
 import hashlib
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -829,6 +830,24 @@ def build_full_rust(reasons, hash_hex: str) -> str:
     return "\n".join(parts)
 
 
+def format_rust_source(content: str) -> str:
+    """Canonicalize generated Rust with the repository toolchain formatter."""
+    result = subprocess.run(
+        ["rustfmt", "--emit", "stdout"],
+        input=content,
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=REPO_ROOT,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            "rustfmt failed while formatting generated reason_code.rs: "
+            f"{result.stderr.strip()}"
+        )
+    return result.stdout
+
+
 def write_if_changed(path: Path, content: str) -> bool:
     """Write content to path only if it differs from existing. Returns True if written."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -864,7 +883,7 @@ def main():
     print(f"Reason registry: {len(reasons)} entries, SHA-256: {hash_hex[:16]}...")
 
     # Generate all content
-    rust_content = build_full_rust(reasons, hash_hex)
+    rust_content = format_rust_source(build_full_rust(reasons, hash_hex))
     c_header_content = generate_c_header(reasons, hash_hex)
     c_source_content = generate_c_source(reasons, hash_hex)
     manifest = generate_manifest(reasons, hash_hex)

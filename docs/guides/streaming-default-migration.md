@@ -93,22 +93,12 @@ Use `markdown_stream_threshold` instead.
 
 ### Monitoring Auto Mode Selection
 
-Prometheus metrics:
+The public metrics endpoint is Prometheus text 0.0.4 only. Engine selection
+is represented by the `engine` label on the frozen conversion families:
 
 ```
-nginx_markdown_engine_selection_total{engine="streaming",reason="auto"} 1234
-nginx_markdown_engine_selection_total{engine="full_buffer",reason="auto"} 5678
-```
-
-JSON metrics:
-
-```json
-{
-  "engine_selection": {
-    "streaming_auto": 1234,
-    "fullbuffer_auto": 5678
-  }
-}
+nginx_markdown_conversion_attempts_total{engine="streaming"} 1234
+nginx_markdown_conversion_attempts_total{engine="full_buffer"} 5678
 ```
 
 ## Noise Pruning Configuration

@@ -9,10 +9,11 @@ from tools.release.gates import validate_release_gates_092 as validator
 
 
 def _write_reason_fixture(tmp_path: Path, *, all_names=None, source_edit=None) -> None:
-    """Create a complete 26-entry reason registry fixture."""
-    names = [f"Code{index}" for index in range(26)]
-    strings = [f"code_{index}" for index in range(26)]
-    metrics = ["markdown_errors_total" for _ in range(26)]
+    """Create a complete frozen reason registry fixture."""
+    count = validator.EXPECTED_REASON_CODE_COUNT
+    names = [f"Code{index}" for index in range(count)]
+    strings = [f"code_{index}" for index in range(count)]
+    metrics = ["markdown_errors_total" for _ in range(count)]
     all_names = all_names or names
     enum = "\n".join(
         f"    {name} = {index}," for index, name in enumerate(names))
@@ -23,7 +24,7 @@ def _write_reason_fixture(tmp_path: Path, *, all_names=None, source_edit=None) -
     metric = "\n".join(
         f"            ReasonCode::{name} => \"{metrics[index]}\","
         for index, name in enumerate(names))
-    source = f"""pub const REASON_CODE_COUNT: usize = 26;
+    source = f"""pub const REASON_CODE_COUNT: usize = {count};
 pub enum ReasonCode {{
 {enum}
 }}
@@ -53,13 +54,13 @@ impl ReasonCode {{
     c_path.parent.mkdir(parents=True)
     c_path.write_text(
         "\n".join(f"static ngx_str_t reason_str_code_{index};"
-                  for index in range(26)),
+                  for index in range(count)),
         encoding="utf-8",
     )
     inventory_path = tmp_path / validator.REASON_INVENTORY_RELATIVE_PATH
     inventory_path.parent.mkdir(parents=True)
     inventory_path.write_text(json.dumps({
-        "registry_count": 26,
+        "registry_count": count,
         "reason_codes": [
             {
                 "discriminant": index,

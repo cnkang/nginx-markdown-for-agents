@@ -23,6 +23,9 @@ Required:
   - Configuration/initialization/merge code (`config_core_impl.h`,
     `config_handlers_impl.h`)
   - Dynconf snapshot construction/apply helpers (`dynconf_impl.h`)
+  - `static_config_manifest_v1` serializer helpers, which intentionally read
+    the compiled configuration to produce the immutable static identity digest
+    (the detector allowlists only their exact function names)
   - Fallback paths where `eff` is NULL (early header filter, allocation
     failure) — these must be documented with a comment explaining why
     `eff` is unavailable.

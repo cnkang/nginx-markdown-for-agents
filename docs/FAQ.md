@@ -115,7 +115,7 @@ For the canonical directive behavior, see [Configuration Guide](guides/CONFIGURA
 Use these directives:
 
 ```nginx
-markdown_limits memory=10m timeout=5s;
+markdown_limits conversion_memory=10m conversion_timeout=5s parser_timeout=5s;
 ```
 
 For defaults, examples, and tradeoffs, see [Configuration Guide](guides/CONFIGURATION.md) and [Configuration to Behavior Map](architecture/CONFIG_BEHAVIOR_MAP.md).
@@ -138,7 +138,7 @@ The current design buffers the full eligible response before conversion, so larg
 ### How can I improve performance?
 
 1. **Enable caching**: Cache converted responses
-2. **Reduce limits**: Lower `markdown_limits memory=...` and `markdown_limits timeout=...`
+2. **Reduce limits**: Lower `markdown_limits conversion_memory=...` and `markdown_limits conversion_timeout=...`
 3. **Disable optional features**: Turn off token estimation and front matter if not needed
 4. **Use CommonMark**: Faster than GFM flavor
 
@@ -198,7 +198,7 @@ Yes, but you may need to:
 
 ### What about compressed responses?
 
-The module automatically detects and decompresses supported upstream compressed content (`gzip`, `br`, `deflate`) as part of the conversion path via the `markdown_auto_decompress` directive (default: on). The decompression budget is independently controlled by `markdown_decompress_max_size` (default: same as `markdown_limits memory=<size>`).
+The module automatically detects and decompresses supported upstream compressed content (`gzip`, `br`, `deflate`) as part of the conversion path via the `markdown_auto_decompress` directive (default: on). The decompression budget is controlled by `markdown_limits decompressed_size=<size>` and `decompression_ratio=<N>`.
 
 **Recommended decompression strategies** (in order of preference):
 
@@ -220,7 +220,7 @@ The module automatically detects and decompresses supported upstream compressed 
    ```nginx
    markdown_filter on;
    markdown_auto_decompress on;           # default
-   markdown_decompress_max_size 20m;      # independent budget
+   markdown_limits decompressed_size=20m decompression_ratio=100;
    ```
    Fallback for cases where upstream forces compression and you cannot or do not want to modify proxy configuration. Handles all three formats. Slightly higher overhead than `gunzip` because it operates inside the module's conversion path.
 
@@ -243,7 +243,7 @@ Common causes:
    - Prefer `$uri` over `$request_uri` for extension checks (query strings can break matches)
    - If map includes `text/*`, enable `markdown_accept wildcard;`
 4. **Response not eligible**: Must be 200 status with `text/html` content type
-5. **Size limit exceeded**: Response larger than `markdown_limits memory=...`
+5. **Size limit exceeded**: Response larger than `markdown_limits conversion_memory=...`
 
 If you need to trace the decision path rather than just the checklist, use [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md) and [Configuration to Behavior Map](architecture/CONFIG_BEHAVIOR_MAP.md).
 
@@ -269,7 +269,7 @@ Common issues:
 
 2. **Check metrics**:
    ```bash
-   curl -H "Accept: text/plain" http://localhost/markdown-metrics
+   curl -H "Accept: text/plain; version=0.0.4" http://localhost/markdown-metrics
    ```
 
 3. **Test with curl**:

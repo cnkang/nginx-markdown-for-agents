@@ -27,11 +27,12 @@ DIRECTIVES_PATH = os.path.join(ROOT, "components", "nginx-module", "src", "ngx_h
 REASON_CODE_PATH = os.path.join(ROOT, "components", "rust-converter", "src", "decision", "reason_code.rs")
 REASON_C_PATH = os.path.join(ROOT, "components", "nginx-module", "src", "ngx_http_markdown_reason.c")
 DYNCONF_PATH = os.path.join(ROOT, "components", "nginx-module", "src", "ngx_http_markdown_dynconf_impl.h")
-METRICS_PATH = os.path.join(ROOT, "components", "nginx-module", "src", "ngx_http_markdown_prometheus_impl.h")
+METRICS_PATH = os.path.join(ROOT, "components", "nginx-module", "src", "ngx_http_markdown_metrics_v1_renderer.h")
 FFI_PATHS = (
     os.path.join(ROOT, "components", "rust-converter", "src", "ffi", "exports.rs"),
     os.path.join(ROOT, "components", "rust-converter", "src", "ffi", "incremental.rs"),
     os.path.join(ROOT, "components", "rust-converter", "src", "ffi", "streaming.rs"),
+    os.path.join(ROOT, "components", "rust-converter", "src", "dynconf", "ffi.rs"),
     REASON_CODE_PATH,
 )
 FFI_HEADER_PATH = os.path.join(ROOT, "components", "rust-converter", "include", "markdown_converter.h")
@@ -41,6 +42,10 @@ MIGRATION_PREFIX = "Migration:"
 DIRECTIVE_RE = re.compile(r'ngx_string\("(markdown_[^"\\]+)"\)')
 REASON_CODE_RE = re.compile(r'^\s+(\w+)\s*=\s*(\d+)\s*,', re.MULTILINE)
 DYNCONF_KEY_RE = re.compile(r'static\s+u_char\s+\w+_key\[\]\s*=\s*"([^"]+)"')
+DYNCONF_KEYS = (
+    "schema_version", "filter", "prune_noise", "log_verbosity",
+    "error_policy", "streaming_buffer",
+)
 METRIC_NAME_RE = re.compile(r'\b(nginx_markdown_[a-z0-9_]+)\b')
 FFI_FN_RE = re.compile(
     r'pub\s+(unsafe\s+)?extern\s+"C"\s+fn\s+(markdown_\w+)\s*'
@@ -731,19 +736,35 @@ def extract_reason_contract_from_rust():
 
 
 def extract_dynconf_keys_from_c():
-    """Extract dynamic-configuration keys from the C parser."""
-    return sorted(set(DYNCONF_KEY_RE.findall(read_text(DYNCONF_PATH))))
+    """Return the Rust-owned JSON schema keys exposed through the C bridge.
+
+    The production C path deliberately does not duplicate the JSON key table:
+    Rust owns parsing and validation, while C owns bounded file I/O and the
+    atomic snapshot commit.  Keep this check tied to both sides of that
+    boundary so a stale C-only key scan cannot mistake the legacy test parser
+    for the production contract.
+    """
+    c_text = read_text(DYNCONF_PATH)
+    rust_text = read_text(os.path.join(
+        ROOT, "components", "rust-converter", "src", "dynconf", "schema.rs"))
+    if "ngx_http_markdown_dynconf_apply_ffi_result" not in c_text:
+        raise ValueError("C dynconf path does not apply the typed FFI result")
+    if "KNOWN_KEYS" not in rust_text or "schema_version" not in rust_text:
+        raise ValueError("Rust dynconf schema does not declare KNOWN_KEYS")
+    return sorted(DYNCONF_KEYS)
 
 
 def _dynconf_type_allowed(key):
     """Return the parser-backed type and allowed values for one key."""
-    if key in ("markdown_filter", "prune_noise"):
+    if key in ("filter", "prune_noise"):
         return "flag", ["on", "off"]
     if key == "log_verbosity":
         return "enum", ["error", "warn", "info", "debug"]
-    if key in ("streaming_budget", "memory_budget"):
+    if key == "error_policy":
+        return "enum", ["pass", "fail_closed", "status 429", "status 503"]
+    if key == "streaming_buffer":
         return "size", []
-    return "version", ["0.9"]
+    return "version", ["1"]
 
 
 def _dynconf_contract_entry(key, has_per_key_staging, required, duplicate):
@@ -752,31 +773,36 @@ def _dynconf_contract_entry(key, has_per_key_staging, required, duplicate):
     return {
         "name": key, "type": typ, "allowed_values": allowed,
         "default": "required" if required else "inherited",
-        "inheritance": "per-key" if has_per_key_staging else "unknown",
-        "required": required, "dynamic": True,
+        "inheritance": "none" if key == "schema_version" else (
+            "per-key" if has_per_key_staging else "unknown"),
+        "required": required, "dynamic": key != "schema_version",
         "unknown_key": "reject", "duplicate": duplicate,
     }
 
 
 def extract_dynconf_contract_from_c():
-    """Build the parser's dynamic-configuration contract from live C keys."""
+    """Build the Rust JSON parser/C atomic-apply contract."""
     text = read_text(DYNCONF_PATH)
     keys = extract_dynconf_keys_from_c()
-    if "schema_version" not in keys:
-        raise ValueError("dynconf schema_version key is missing")
-    if "unknown key" not in text:
+    schema = read_text(os.path.join(
+        ROOT, "components", "rust-converter", "src", "dynconf", "schema.rs"))
+    parser = read_text(os.path.join(
+        ROOT, "components", "rust-converter", "src", "dynconf", "parser.rs"))
+    ffi = read_text(os.path.join(
+        ROOT, "components", "rust-converter", "src", "dynconf", "ffi.rs"))
+    if "unknown key" not in schema or "DYNCONF_ERR_UNKNOWN_KEY" not in ffi:
         raise ValueError("dynconf parser does not reject unknown keys")
+    if "required field 'schema_version' is missing" not in schema:
+        raise ValueError("dynconf schema_version is not required")
+    if "DYNCONF_ERR_DUPLICATE_KEY" not in ffi or "DuplicateKey" not in parser:
+        raise ValueError("dynconf parser does not reject duplicate keys")
     has_per_key_staging = (
         "watcher->staging_snapshot = watcher->active_snapshot" in text
         and "snapshot->" in text
         and "ngx_http_markdown_dynconf_apply" in text
     )
-    required = ("missing required" in text and "schema_version" in text
-                and "required field missing" in text)
-    # apply() processes lines in order and assigns each field directly;
-    # there is no per-key duplicate rejection.  This is the executable
-    # last-value-wins behavior, including schema_version validation.
-    duplicate = "last_value_wins" if "switch (key)" in text else "unknown"
+    required = True
+    duplicate = "reject"
     return {
         key: _dynconf_contract_entry(
             key, has_per_key_staging, key == "schema_version" and required,
@@ -791,17 +817,22 @@ def _metric_contract_from_text(text):
     # The C renderer splits long output lines into adjacent string literals;
     # join those literals before inspecting labels and TYPE declarations.
     text = re.sub(r'"\s*"', '', text)
-    names = []
-    for match in METRIC_NAME_RE.finditer(text):
-        if match.group(1) not in names:
-            names.append(match.group(1))
-    types = dict(re.findall(r"# TYPE\s+(nginx_markdown_[a-z0-9_]+)\s+(counter|gauge)", text))
+    types = dict(re.findall(
+        r"# TYPE\s+(nginx_markdown_[a-z0-9_]+)\s+(counter|gauge|histogram)",
+        text))
+    # Histogram _bucket/_sum/_count series are samples of one family; only
+    # TYPE declarations identify the frozen family set.
+    names = list(types)
     result = {}
     for order, name in enumerate(names):
         metric_type = types.get(name, "counter" if name.endswith("_total") else "gauge")
         labels = []
-        for match in re.finditer(re.escape(name) + r"\{([^}]*)\}", text):
+        series_name = re.escape(name)
+        if metric_type == "histogram":
+            series_name += r"(?:_(?:bucket|sum|count))?"
+        for match in re.finditer(series_name + r"\{([^}]*)\}", text):
             labels.extend(re.findall(r"([a-z][a-z0-9_]*)\s*=", match.group(1)))
+        labels = [label for label in labels if label != "le"]
         normalized_labels = sorted(set(labels))
         result[name] = {
             "name": name, "type": metric_type,
@@ -1092,23 +1123,30 @@ def check_directive_contract(inventory, actual_contract):
         name: contract for name, contract in actual_contract.items()
         if contract.get("classification") == "reject_only"
     }
-    return _compare_maps("directive", active_entries, active_actual, active_fields) \
-        + _compare_maps("reject-only directive", reject_entries, reject_actual,
-                         reject_fields)
+    drift = _compare_maps("directive", active_entries, active_actual, active_fields)
+    if reject_actual:
+        drift.append(
+            "removed directives must be absent from the live registry: {}".format(
+                ", ".join(sorted(reject_actual))))
+    # Reject-only entries are a compatibility/documentation contract.  Their
+    # expected runtime behavior is NGINX's standard unknown-directive error,
+    # so they must not be represented by live command-table stubs.
+    return drift
 
 
 def check_directives(inventory, actual_names):
     """Compare the declared directive name set with live source names."""
     inv = set(_names(inventory.get("directives", [])))
-    inv.update(_names(inventory.get("reject_only_directives", [])))
     inv.update(_names(inventory.get("otel", {}).get("directives", [])))
-    inv.update(_names(inventory.get("otel", {}).get("reject_only", [])))
     actual = set(actual_names)
     drift = []
     if actual - inv:
         drift.append("directives in source but not in inventory: {}".format(", ".join(sorted(actual - inv))))
-    if inv - actual:
-        drift.append("directives in inventory but not in source: {}".format(", ".join(sorted(inv - actual))))
+    reject_names = set(_names(inventory.get("reject_only_directives", [])))
+    reject_names.update(_names(inventory.get("otel", {}).get("reject_only", [])))
+    if actual & reject_names:
+        drift.append("reject-only directives present in source: {}".format(
+            ", ".join(sorted(actual & reject_names))))
     return drift
 
 

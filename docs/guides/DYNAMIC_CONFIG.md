@@ -26,7 +26,7 @@ last-known-good rollback form the compatibility contract. See the
 for the production evidence and freeze boundary.
 
 For directive syntax and full parameter reference, see
-[CONFIGURATION.md](CONFIGURATION.md#dynamic-configuration-061).
+[CONFIGURATION.md](CONFIGURATION.md#dynamic-configuration-dynconf).
 
 ---
 
@@ -49,11 +49,11 @@ require hot-reload without restart.
 | Key | Value | Maps to |
 |-----|-------|---------|
 | `schema_version` | `0.9` | **mandatory** — file rejected if missing or unknown |
-| `markdown_filter` | `on` \| `off` | `conf->enabled` |
+| `filter` | `on` \| `off` | `conf->enabled` |
 | `prune_noise` | `on` \| `off` | `conf->advanced.prune_noise` |
 | `log_verbosity` | `error` \| `warn` \| `info` \| `debug` | `conf->policy.log_verbosity` |
-| `streaming_budget` | `<size>` (e.g. `64k`, `4m`) | `conf->stream.budget` |
-| `memory_budget` | `<size>` (e.g. `128k`) | `conf->advanced.memory_budget` |
+| `error_policy` | `pass` \| `fail_closed` \| `status 429` \| `status 503` | `conf->on_error` and `conf->error_status` |
+| `streaming_buffer` | `64k` … `1g` | `conf->stream.budget` |
 
 ### Schema Version (0.9.0+)
 
@@ -65,8 +65,9 @@ versions. Behavior:
 - **Unknown version** (e.g. `1.0`, `0.8`) → entire file rejected
 - **Correct version** (`0.9`) → file parsed normally
 
-Structural directives (`markdown_content_types`, `markdown_stream_types`,
-auth policy, conditional requests) require `nginx -s reload`.
+Structural directives (`markdown_content_types`,
+`markdown_stream_excluded_types`, auth policy, conditional requests) require
+`nginx -s reload`.
 
 ---
 
