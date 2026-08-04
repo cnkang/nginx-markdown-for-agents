@@ -768,6 +768,25 @@ test_metrics_handler_uses_frozen_v1_surface(void)
 }
 
 static void
+test_v1_output_bytes_include_streaming_delivery(void)
+{
+    ngx_http_markdown_metrics_snapshot_t  snapshot;
+    ngx_http_markdown_metrics_v1_snapshot_t  v1;
+
+    TEST_SUBSECTION("v1 output bytes include streaming delivery");
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.output_bytes = 100;
+    snapshot.streaming.selection.output_bytes_total = 250;
+
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+
+    TEST_ASSERT(v1.output_bytes == 350,
+                "v1 output bytes must include full-buffer and streaming bytes");
+    TEST_PASS("v1 output bytes include streaming delivery");
+}
+
+static void
 test_json_single_path_fits(void)
 {
     u_char buf[16384];
@@ -1676,6 +1695,7 @@ main(void)
     test_malformed_path_detail_writers_return_null();
     test_malformed_path_outer_renderers_return_null();
     test_metrics_handler_uses_frozen_v1_surface();
+    test_v1_output_bytes_include_streaming_delivery();
     test_json_single_path_fits();
     test_json_zero_paths();
     test_json_overflow_produces_other();

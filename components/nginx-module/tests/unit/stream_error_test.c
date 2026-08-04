@@ -129,6 +129,11 @@ ngx_http_markdown_metrics_record_postcommit_abort(void)
 {
 }
 
+void
+ngx_http_markdown_metrics_record_postcommit_safe_finish(void)
+{
+}
+
 /* Include the decision engine source directly */
 #include "../../src/ngx_http_markdown_stream_state.h"
 #include "../../src/ngx_http_markdown_stream_state.c"

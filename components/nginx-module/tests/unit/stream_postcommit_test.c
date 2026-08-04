@@ -147,11 +147,18 @@ ngx_http_markdown_metrics_record_postcommit_copied_delivery(size_t bytes)
 
 /* Track postcommit_abort metric invocations */
 static int test_abort_metric_count;
+static int test_safe_finish_metric_count;
 
 void
 ngx_http_markdown_metrics_record_postcommit_abort(void)
 {
     test_abort_metric_count++;
+}
+
+void
+ngx_http_markdown_metrics_record_postcommit_safe_finish(void)
+{
+    test_safe_finish_metric_count++;
 }
 
 /* Include the decision engine source directly */
@@ -352,6 +359,7 @@ static void test_setup(void)
     test_output_free_data = NULL;
     test_output_free_len = 0;
     test_abort_metric_count = 0;
+    test_safe_finish_metric_count = 0;
 }
 
 
@@ -719,6 +727,8 @@ static void test_safe_finish_happy_path(void)
                 "send_terminal bypassed the poison top filter");
     TEST_ASSERT(test_streaming_abort_called == 0,
                 "streaming abort must not be called on success");
+    TEST_ASSERT(test_safe_finish_metric_count == 1,
+                "safe_finish lifecycle metric must record first entry");
     TEST_PASS("safe_finish happy path");
 }
 

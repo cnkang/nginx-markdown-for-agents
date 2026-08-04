@@ -1575,6 +1575,7 @@ void ngx_http_markdown_record_dynconf_reload(ngx_uint_t error_code);
 void ngx_http_markdown_metrics_record_postcommit_pending(size_t bytes);
 void ngx_http_markdown_metrics_record_postcommit_copied_delivery(size_t bytes);
 void ngx_http_markdown_metrics_record_postcommit_abort(void);
+void ngx_http_markdown_metrics_record_postcommit_safe_finish(void);
 
 /*
  * Per-path metric node stored in the shared RB-tree.

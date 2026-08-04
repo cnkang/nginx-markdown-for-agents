@@ -18,6 +18,7 @@ typedef struct {
             ngx_atomic_t  output_bytes_total;
         } selection;
         ngx_atomic_t  streaming_failure_postcommit_abort;
+        ngx_atomic_t  streaming_failure_postcommit_safe_finish;
     } streaming;
     struct {
         ngx_atomic_t  backpressure_total;
@@ -159,6 +160,19 @@ test_null_metrics_pointer_is_noop(void)
     TEST_PASS("NULL metrics pointer is a no-op");
 }
 
+static void
+test_safe_finish_metric_increments(void)
+{
+    ngx_http_markdown_metrics_t  metrics;
+
+    memset(&metrics, 0, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+
+    ngx_http_markdown_metrics_record_postcommit_safe_finish();
+    TEST_ASSERT(metrics.streaming.streaming_failure_postcommit_safe_finish == 1,
+        "safe_finish() must increment its lifecycle counter");
+}
+
 int
 main(void)
 {
@@ -169,6 +183,7 @@ main(void)
     test_copied_delivery_accumulates_bytes_and_events();
     test_zero_copied_delivery_is_noop();
     test_abort_metric_increments_unconditionally();
+    test_safe_finish_metric_increments();
     test_null_metrics_pointer_is_noop();
 
     TEST_PASS("postcommit production metric helper accounting");
