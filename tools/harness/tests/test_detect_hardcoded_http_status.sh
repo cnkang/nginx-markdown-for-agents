@@ -68,7 +68,7 @@ cat >"${src_dir}/reject.c" <<'C'
 ngx_int_t
 ngx_http_markdown_reject_or_fail_open(ngx_conf_t *cf)
 {
-    if (action == REJECT_502) {
+    if (action == REJECT_STATUS) {
         return NGX_HTTP_BAD_GATEWAY;
     }
     return NGX_OK;

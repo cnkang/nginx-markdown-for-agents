@@ -7,14 +7,14 @@
  * Property test: exercises the decision engine from COMMITTED state
  * with every possible event and verifies:
  *   - Decision action is NEVER PASS_HTML
- *   - Decision action is NEVER REJECT_502
+ *   - Decision action is NEVER REJECT_STATUS
  *   - Decision action is always SAFE_FINISH, ABORT, or CONTINUE_STREAMING
  *   - New state is always COMMITTED, POST_COMMIT_SAFE_FINISH,
  *     or POST_COMMIT_ABORT
  *
  * Also tests the postcommit guard function.
  *
- * Validates: post-commit never produces PASS_HTML, post-commit never produces REJECT_502
+ * Validates: post-commit never produces PASS_HTML, post-commit never produces REJECT_STATUS
  */
 
 #include "../include/test_common.h"
@@ -414,9 +414,9 @@ static void test_committed_never_produces_html(void)
             TEST_ASSERT(d.action != NGX_HTTP_MD_ACTION_PASS_HTML,
                         "COMMITTED: action != PASS_HTML");
 
-            /* Safety invariant: NEVER REJECT_502 */
-            TEST_ASSERT(d.action != NGX_HTTP_MD_ACTION_REJECT_502,
-                        "COMMITTED: action != REJECT_502");
+            /* Safety invariant: NEVER REJECT_STATUS */
+            TEST_ASSERT(d.action != NGX_HTTP_MD_ACTION_REJECT_STATUS,
+                        "COMMITTED: action != REJECT_STATUS");
 
             /* Action must be one of valid post-commit actions */
             TEST_ASSERT(
@@ -480,8 +480,8 @@ static void test_post_commit_terminals_never_produce_html(void)
 
             TEST_ASSERT(d.action != NGX_HTTP_MD_ACTION_PASS_HTML,
                         "terminal: action != PASS_HTML");
-            TEST_ASSERT(d.action != NGX_HTTP_MD_ACTION_REJECT_502,
-                        "terminal: action != REJECT_502");
+            TEST_ASSERT(d.action != NGX_HTTP_MD_ACTION_REJECT_STATUS,
+                        "terminal: action != REJECT_STATUS");
             TEST_ASSERT(d.new_state == terminal_states[s],
                         "terminal state stays unchanged");
         }

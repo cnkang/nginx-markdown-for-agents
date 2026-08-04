@@ -542,7 +542,7 @@ static void test_precommit_pass_replay_preserves_existing_pending(void)
 
 /* --- pre-commit reject: return configured error_status --- */
 
-static void test_task_6_2_precommit_reject_502(void)
+static void test_task_6_2_precommit_reject_status(void)
 {
     ngx_http_markdown_ctx_t ctx;
     ngx_http_markdown_conf_t conf;
@@ -895,7 +895,7 @@ int main(void)
     test_precommit_uses_unified_reject_policy();
     test_precommit_pass_replay_html_backpressure();
     test_precommit_pass_replay_preserves_existing_pending();
-    test_task_6_2_precommit_reject_502();
+    test_task_6_2_precommit_reject_status();
     test_precommit_explicit_status_policies();
     test_task_6_3_postcommit_pass_safe_finish();
     test_task_6_3_postcommit_pass_safe_finish_fails();
