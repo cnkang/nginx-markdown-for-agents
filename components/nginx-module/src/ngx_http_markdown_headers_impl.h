@@ -442,52 +442,6 @@ ngx_http_markdown_set_etag(ngx_http_request_t *r, const u_char *etag, size_t eta
 }
 
 /*
- * Add the X-Markdown-Tokens response header with the estimated token count.
- *
- * Skips header creation when token_count is 0. Formats the count
- * as a decimal string using NGX_HTTP_MARKDOWN_SPRINTF_TOKEN.
- *
- * r           - current HTTP request
- * token_count - estimated token count to emit
- *
- * Returns:
- *   NGX_OK    on success or when token_count is 0
- *   NGX_ERROR on allocation failure
- */
-static ngx_int_t
-ngx_http_markdown_add_token_header(ngx_http_request_t *r, uint32_t token_count)
-{
-    ngx_table_elt_t *h;
-    const u_char *p;
-
-    if (token_count == 0) {
-        return NGX_OK;
-    }
-
-    h = ngx_list_push(&r->headers_out.headers);
-    if (h == NULL) {
-        return NGX_ERROR;
-    }
-
-    h->hash = 1;
-    h->key.data = ngx_http_markdown_hdr_token_count;
-    h->key.len = sizeof(ngx_http_markdown_hdr_token_count) - 1;
-
-    h->value.data = ngx_pnalloc(r->pool, NGX_INT32_LEN);
-    if (h->value.data == NULL) {
-        return NGX_ERROR;
-    }
-
-    p = NGX_HTTP_MARKDOWN_SPRINTF_TOKEN(h->value.data, token_count);
-    h->value.len = p - h->value.data;
-
-    NGX_HTTP_MARKDOWN_LOG_DEBUG1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                                 "markdown: added X-Markdown-Tokens: %ui", token_count);
-
-    return NGX_OK;
-}
-
-/*
  * Remove the Content-Encoding response header.
  *
  * Clears r->headers_out.content_encoding and invalidates the
@@ -510,109 +464,336 @@ ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r)
 }
 
 /*
- * Remove the Accept-Ranges response header.
+ * Full-coverage HeaderPlan prepare/commit for full-buffer conversion.
  *
- * Clears r->allow_ranges and r->headers_out.accept_ranges,
- * then invalidates the first Accept-Ranges entry in the output
- * header list. Prevents clients from requesting byte ranges on
- * the converted Markdown response.
+ * 0.9.2 two-phase protocol (Requirement 9, Properties 14–15):
  *
- * r - current HTTP request
- */
-static void
-ngx_http_markdown_remove_accept_ranges(ngx_http_request_t *r)
-{
-    r->allow_ranges = 0;
-    r->headers_out.accept_ranges = NULL;
-
-    ngx_http_markdown_invalidate_headers(r,
-                                         ngx_http_markdown_hdr_accept_ranges,
-                                         sizeof(ngx_http_markdown_hdr_accept_ranges) - 1,
-                                         1,
-                                         "markdown: removed Accept-Ranges header");
-}
-
-/*
- * Update all response headers for a completed full-buffer conversion.
+ *   PREPARE PHASE — performs ALL fallible operations:
+ *     - Rust FFI plan build and atomic apply (Content-Type delete-all,
+ *       Content-Encoding delete-all, Content-Length delete-all, ETag
+ *       placeholder)
+ *     - ETag header allocation and value copy
+ *     - Vary: Accept lookup, dedup, and append allocation
+ *     - X-Markdown-Tokens header allocation and value formatting
+ *     - Cache-Control auth modification allocation
+ *     No pre-existing r->headers_out field is mutated during prepare.
+ *     On ANY failure, response headers remain in their original
+ *     unmodified state, Rust-owned plan resources are freed, and
+ *     `header_plan_apply_error` is logged.
  *
- * Sets Content-Type to text/markdown; charset=utf-8, adds Vary: Accept,
- * replaces Content-Length with the Markdown body length, sets or clears
- * the ETag based on configuration, adds X-Markdown-Tokens if enabled,
- * removes Content-Encoding and Accept-Ranges, and adjusts Cache-Control
- * for authenticated content when auth cache control is enabled.
+ *   COMMIT PHASE — pointer/scalar assignment only, zero allocations,
+ *     unconditional success after successful prepare:
+ *     - Content-Type dedicated field assignment
+ *     - ETag header entry populated from pre-allocated memory
+ *     - Vary header entry populated or value pointer swapped
+ *     - Content-Length numeric field set
+ *     - X-Markdown-Tokens entry populated from pre-allocated memory
+ *     - Accept-Ranges invalidation (hash=0, pointer clear)
+ *     - Cache-Control value pointer swap
+ *     - Content-Encoding pointer clear
  *
- * Atomic plan application with post-plan Content-Length:
+ *   Nothing occurs between commit and ngx_http_send_header.
  *
- *   The header plan (built by Rust) is applied via the two-phase
- *   prepare/commit model in ngx_http_markdown_apply_header_plan().
- *   The prepare phase allocates and validates all operations; on any
- *   failure the plan is aborted before commit — r->headers_out is
- *   unchanged (aborted SET_NEW slots stay inert, hash==0).  The plan
- *   includes:
- *
- *   - Content-Type (set to text/markdown; charset=utf-8)
- *   - Content-Encoding (delete-all)
- *   - Content-Length (delete-all — invalidates stale originals)
- *   - ETag (set-etag-placeholder, if configured)
- *
- *   After successful plan commit, the C side sets:
- *
- *   - Content-Length (new value from result->markdown_len)
- *   - X-Markdown-Tokens (if enabled)
- *   - Accept-Ranges (delete)
- *   - Cache-Control (auth modification, if applicable)
- *
- *   This is safe because the plan already committed — if prepare
- *   had failed, we would not reach the post-plan operations.
- *   The post-plan Content-Length set is guaranteed to execute only
- *   after successful plan application.
- *
- *   Atomicity scope: the *plan* operations are atomic (prepare-all
- *   or abort-all with no mutation).  The post-plan operations (ETag,
- *   Vary, Content-Length, token header, Accept-Ranges removal,
- *   Cache-Control) are NOT covered by the prepare/commit guarantee;
- *   if one of them fails, earlier post-plan mutations remain.  This
- *   is safe in practice because the sole caller
- *   (ngx_http_markdown_execute_conversion) treats any NGX_ERROR from
- *   this function as a hard failure and returns BEFORE forwarding the
- *   response headers downstream — so a partially-mutated header set
- *   is never delivered to the client.  Do NOT call this function from
- *   a path that may forward headers after a non-NGX_OK return.
+ * Exception inventory (<5 entries):
+ *   - Metrics endpoint (full response synthesis)
+ *   - Diagnostics endpoint (full response synthesis)
+ *   No postcommit HeaderPlan exception — postcommit body errors do NOT
+ *   produce new status/header modifications.
  *
  * r      - current HTTP request
  * result - completed MarkdownResult from the Rust converter
  * conf   - location configuration
  *
  * Returns:
- *   NGX_OK    on success
- *   NGX_ERROR on NULL arguments, atomic plan failure, or a post-plan
- *             operation failure (caller must discard the response, not
- *             forward partially-mutated headers)
+ *   NGX_OK    on success (all headers committed)
+ *   NGX_ERROR on prepare failure (headers unchanged, plan freed,
+ *             header_plan_apply_error logged)
  */
+
+/*
+ * Prepared state for the full-coverage commit phase.
+ * All memory referenced here is allocated from r->pool during prepare.
+ * The commit phase consumes these fields via assignment only.
+ */
+typedef struct {
+    /* ETag: pre-allocated header slot and value copy */
+    ngx_flag_t          has_etag;
+    ngx_table_elt_t    *etag_header;       /* pushed inert slot or NULL */
+    u_char             *etag_value_data;    /* pool copy of ETag bytes */
+    size_t              etag_value_len;
+
+    /* Vary: Accept */
+    ngx_flag_t          vary_needs_new;     /* no existing Vary: push new */
+    ngx_flag_t          vary_needs_append;  /* existing Vary: append Accept */
+    ngx_flag_t          vary_already_has;   /* existing Vary already has Accept */
+    ngx_table_elt_t    *vary_header;        /* new slot or existing entry */
+    u_char             *vary_value_data;    /* pool copy of new/appended value */
+    size_t              vary_value_len;
+
+    /* X-Markdown-Tokens */
+    ngx_flag_t          has_token_header;
+    ngx_table_elt_t    *token_header;       /* pushed inert slot */
+    u_char             *token_value_data;   /* pool-formatted decimal */
+    size_t              token_value_len;
+
+} ngx_http_markdown_fullcov_prepared_t;
+
+
+/*
+ * Prepare ETag: invalidate stale entries, push inert slot, copy value.
+ *
+ * Returns NGX_OK on success (or no-op when ETag not needed),
+ * NGX_ERROR on allocation failure.
+ */
+static ngx_int_t
+ngx_http_markdown_fullcov_prepare_etag(ngx_http_request_t *r,
+    const struct MarkdownResult *result,
+    const ngx_http_markdown_conf_t *conf,
+    ngx_http_markdown_fullcov_prepared_t *prep)
+{
+    ngx_table_elt_t  *h;
+
+    ngx_http_markdown_invalidate_headers(r,
+        ngx_http_markdown_hdr_etag,
+        sizeof(ngx_http_markdown_hdr_etag) - 1,
+        0, NULL);
+    r->headers_out.etag = NULL;
+
+    if (!conf->policy.generate_etag
+        || result->etag == NULL
+        || result->etag_len == 0)
+    {
+        return NGX_OK;
+    }
+
+    h = ngx_list_push(&r->headers_out.headers);
+    if (h == NULL) {
+        return NGX_ERROR;
+    }
+
+    /* Inert until commit (Rule 40: hash==0 filtered everywhere) */
+    h->hash = 0;
+    h->key.data = NULL;
+    h->key.len = 0;
+    h->value.data = NULL;
+    h->value.len = 0;
+
+    prep->etag_value_data = ngx_pnalloc(r->pool, result->etag_len);
+    if (prep->etag_value_data == NULL) {
+        return NGX_ERROR;
+    }
+
+    ngx_memcpy(prep->etag_value_data, result->etag, result->etag_len);
+    prep->etag_value_len = result->etag_len;
+    prep->etag_header = h;
+    prep->has_etag = 1;
+
+    return NGX_OK;
+}
+
+
+/*
+ * Prepare Vary: Accept — lookup, dedup, push inert slot or allocate
+ * appended value.
+ *
+ * Returns NGX_OK on success, NGX_ERROR on allocation/overflow failure.
+ */
+static ngx_int_t
+ngx_http_markdown_fullcov_prepare_vary(ngx_http_request_t *r,
+    ngx_http_markdown_fullcov_prepared_t *prep)
+{
+    ngx_table_elt_t  *vary;
+    ngx_table_elt_t  *h;
+    u_char           *p;
+    size_t            len;
+
+    vary = ngx_http_markdown_find_header(r,
+        ngx_http_markdown_hdr_vary,
+        sizeof(ngx_http_markdown_hdr_vary) - 1);
+
+    if (vary == NULL) {
+        h = ngx_list_push(&r->headers_out.headers);
+        if (h == NULL) {
+            return NGX_ERROR;
+        }
+
+        h->hash = 0;
+        h->key.data = NULL;
+        h->key.len = 0;
+        h->value.data = NULL;
+        h->value.len = 0;
+
+        prep->vary_needs_new = 1;
+        prep->vary_header = h;
+        prep->vary_value_data = ngx_http_markdown_hdr_accept;
+        prep->vary_value_len = sizeof(ngx_http_markdown_hdr_accept) - 1;
+        return NGX_OK;
+    }
+
+    if (ngx_http_markdown_contains_csv_token(&vary->value,
+            ngx_http_markdown_hdr_accept,
+            sizeof(ngx_http_markdown_hdr_accept) - 1))
+    {
+        prep->vary_already_has = 1;
+        prep->vary_header = vary;
+        return NGX_OK;
+    }
+
+    /* Append ", Accept" to existing value */
+    if (vary->value.len
+        > ((size_t) -1) - (sizeof(ngx_http_markdown_vary_suffix) - 1))
+    {
+        return NGX_ERROR;
+    }
+
+    len = vary->value.len + sizeof(ngx_http_markdown_vary_suffix) - 1;
+    p = ngx_pnalloc(r->pool, len);
+    if (p == NULL) {
+        return NGX_ERROR;
+    }
+
+    ngx_memcpy(p, vary->value.data, vary->value.len);
+    ngx_memcpy(p + vary->value.len,
+        ngx_http_markdown_vary_suffix,
+        sizeof(ngx_http_markdown_vary_suffix) - 1);
+
+    prep->vary_needs_append = 1;
+    prep->vary_header = vary;
+    prep->vary_value_data = p;
+    prep->vary_value_len = len;
+
+    return NGX_OK;
+}
+
+
+/*
+ * Prepare X-Markdown-Tokens: push inert slot, format decimal value.
+ *
+ * Returns NGX_OK on success (or no-op when tokens disabled/zero),
+ * NGX_ERROR on allocation failure.
+ */
+static ngx_int_t
+ngx_http_markdown_fullcov_prepare_token(ngx_http_request_t *r,
+    const struct MarkdownResult *result,
+    const ngx_http_markdown_conf_t *conf,
+    ngx_http_markdown_fullcov_prepared_t *prep)
+{
+    ngx_table_elt_t  *h;
+    u_char           *p;
+
+    if (!conf->token_estimate || result->token_estimate == 0) {
+        return NGX_OK;
+    }
+
+    h = ngx_list_push(&r->headers_out.headers);
+    if (h == NULL) {
+        return NGX_ERROR;
+    }
+
+    h->hash = 0;
+    h->key.data = NULL;
+    h->key.len = 0;
+    h->value.data = NULL;
+    h->value.len = 0;
+
+    p = ngx_pnalloc(r->pool, NGX_INT32_LEN);
+    if (p == NULL) {
+        return NGX_ERROR;
+    }
+
+    prep->token_value_data = p;
+    prep->token_value_len = (size_t)
+        (NGX_HTTP_MARKDOWN_SPRINTF_TOKEN(p, result->token_estimate) - p);
+    prep->token_header = h;
+    prep->has_token_header = 1;
+
+    return NGX_OK;
+}
+
+
+/*
+ * Commit all prepared header mutations (infallible, zero allocations).
+ */
+static void
+ngx_http_markdown_fullcov_commit(ngx_http_request_t *r,
+    const struct MarkdownResult *result,
+    const ngx_http_markdown_fullcov_prepared_t *prep)
+{
+    /* C1: Content-Type dedicated field */
+    r->headers_out.content_type.data = ngx_http_markdown_content_type;
+    r->headers_out.content_type.len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
+    r->headers_out.content_type_len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
+    r->headers_out.charset.len = 0;
+    r->headers_out.charset.data = NULL;
+    r->headers_out.content_encoding = NULL;
+
+    /* C2: ETag — populate the pre-allocated inert slot */
+    if (prep->has_etag) {
+        prep->etag_header->key.data = ngx_http_markdown_hdr_etag;
+        prep->etag_header->key.len = sizeof(ngx_http_markdown_hdr_etag) - 1;
+        prep->etag_header->value.data = prep->etag_value_data;
+        prep->etag_header->value.len = prep->etag_value_len;
+        prep->etag_header->hash = 1;
+        r->headers_out.etag = prep->etag_header;
+    }
+
+    /* C3: Vary: Accept — populate new slot or swap value pointer */
+    if (prep->vary_needs_new) {
+        prep->vary_header->key.data = ngx_http_markdown_hdr_vary;
+        prep->vary_header->key.len = sizeof(ngx_http_markdown_hdr_vary) - 1;
+        prep->vary_header->value.data = prep->vary_value_data;
+        prep->vary_header->value.len = prep->vary_value_len;
+        prep->vary_header->hash = 1;
+    } else if (prep->vary_needs_append) {
+        prep->vary_header->value.data = prep->vary_value_data;
+        prep->vary_header->value.len = prep->vary_value_len;
+    }
+
+    /* C4: Content-Length — scalar assignment */
+    ngx_http_clear_content_length(r);
+    r->headers_out.content_length_n = result->markdown_len;
+
+    /* C5: X-Markdown-Tokens — populate the pre-allocated inert slot */
+    if (prep->has_token_header) {
+        prep->token_header->key.data = ngx_http_markdown_hdr_token_count;
+        prep->token_header->key.len =
+            sizeof(ngx_http_markdown_hdr_token_count) - 1;
+        prep->token_header->value.data = prep->token_value_data;
+        prep->token_header->value.len = prep->token_value_len;
+        prep->token_header->hash = 1;
+    }
+
+    /* C6: Accept-Ranges removal — scalar assignment */
+    r->allow_ranges = 0;
+    r->headers_out.accept_ranges = NULL;
+    ngx_http_markdown_invalidate_headers(r,
+        ngx_http_markdown_hdr_accept_ranges,
+        sizeof(ngx_http_markdown_hdr_accept_ranges) - 1,
+        1, NULL);
+}
+
+
 ngx_int_t
 ngx_http_markdown_update_headers(ngx_http_request_t *r,
                                  const struct MarkdownResult *result,
                                  const ngx_http_markdown_conf_t *conf)
 {
-    ngx_int_t              rc;
-    struct FFIHeaderPlan   plan;
+    ngx_int_t                             rc;
+    struct FFIHeaderPlan                   plan;
+    ngx_http_markdown_fullcov_prepared_t   prep;
 
     if (r == NULL || result == NULL || conf == NULL) {
         return NGX_ERROR;
     }
 
-    /*
-     * Build header plan from Rust FFI.
-     *
-     * The plan covers the CORE wire-critical mutations:
-     * Content-Type (set), Content-Encoding (delete-all),
-     * Content-Length (delete-all), and ETag (set-etag-placeholder or omit).
-     *
-     * Post-plan operations (ETag set/clear, Vary: Accept, Content-Length
-     * set, X-Markdown-Tokens, Accept-Ranges, auth Cache-Control) are
-     * pre-send best-effort with hard abort — see ADR-0017 "Atomic scope
-     * boundary" for the rationale and failure handling contract.
-     */
+    memset(&prep, 0, sizeof(ngx_http_markdown_fullcov_prepared_t));
+
+    /* ================================================================
+     * PREPARE PHASE: all fallible operations, no r->headers_out mutation
+     * (except inert hash==0 pushes which are observably no-op).
+     * ================================================================ */
+
+    /* P1: FFI plan (Content-Type/Encoding/Length delete-all, ETag placeholder) */
     markdown_header_plan_init(&plan);
     markdown_build_header_plan(
         ngx_http_markdown_content_type,
@@ -622,119 +803,66 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
          && result->etag_len > 0) ? 1 : 0,
         &plan);
 
-    /*
-     * Apply the plan atomically.  On prepare failure, the plan is
-     * aborted before commit — r->headers_out is unchanged.  The plan
-     * is freed by ngx_http_markdown_apply_header_plan() in both
-     * success and failure paths.
-     */
     rc = ngx_http_markdown_apply_header_plan(r, &plan);
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-            "markdown: header plan prepare aborted; "
-            "no mutations applied");
+            "markdown: header_plan_apply_error: "
+            "FFI plan prepare aborted");
         return NGX_ERROR;
     }
 
-    r->headers_out.content_encoding = NULL;
-
-    /*
-     * Post-plan operations.  These execute only after the atomic
-     * plan has committed successfully.
-     *
-     * Content-Type: the plan only invalidates any stale Content-Type
-     * list entry; it never writes one (NGINX emits Content-Type from
-     * the dedicated r->headers_out.content_type field, so a list entry
-     * would duplicate the header on the wire).  Set the dedicated field
-     * here to the well-known Markdown content type.
-     */
-    r->headers_out.content_type.data = ngx_http_markdown_content_type;
-    r->headers_out.content_type.len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
-    r->headers_out.content_type_len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
-    r->headers_out.charset.len = 0;
-    r->headers_out.charset.data = NULL;
-
-    /*
-     * ETag: if the plan included a SetEtagPlaceholder entry, the
-     * atomic applier treated it as a generic SET with empty value.
-     * Apply the real ETag value now.
-     */
-    if (conf->policy.generate_etag
-        && result->etag != NULL
-        && result->etag_len > 0)
-    {
-        rc = ngx_http_markdown_set_etag(r,
-            result->etag, result->etag_len);
-        if (rc != NGX_OK) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                "markdown: failed to set ETag "
-                "after plan commit");
-            return NGX_ERROR;
-        }
-    } else {
-        rc = ngx_http_markdown_set_etag(r, NULL, 0);
-        if (rc != NGX_OK) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                "markdown: failed to clear ETag "
-                "after plan commit");
-            return NGX_ERROR;
-        }
-    }
-
-    /*
-     * Add Vary: Accept header.  This is a post-plan operation
-     * because it uses ngx_list_push which is NGINX-specific
-     * and not part of the Rust plan.
-     */
-    rc = ngx_http_markdown_add_vary_accept(r);
+    /* P2: ETag */
+    rc = ngx_http_markdown_fullcov_prepare_etag(r, result, conf, &prep);
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-            "markdown: failed to add Vary header");
+            "markdown: header_plan_apply_error: "
+            "ETag prepare failed");
         return NGX_ERROR;
     }
 
-    /*
-     * Set the new Content-Length.  The plan deleted the stale
-     * original; now we set the correct post-conversion value.
-     * This is guaranteed to execute only after successful plan
-     * application.
-     */
-    ngx_http_clear_content_length(r);
-    r->headers_out.content_length_n = result->markdown_len;
-
-    NGX_HTTP_MARKDOWN_LOG_DEBUG1(NGX_LOG_DEBUG_HTTP,
-        r->connection->log, 0,
-        "markdown: set Content-Length: %uz",
-        result->markdown_len);
-
-    if (conf->token_estimate && result->token_estimate > 0) {
-        rc = ngx_http_markdown_add_token_header(r,
-            result->token_estimate);
-        if (rc != NGX_OK) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                "markdown: failed to add "
-                "X-Markdown-Tokens header");
-            return NGX_ERROR;
-        }
+    /* P3: Vary: Accept */
+    rc = ngx_http_markdown_fullcov_prepare_vary(r, &prep);
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "markdown: header_plan_apply_error: "
+            "Vary prepare failed");
+        return NGX_ERROR;
     }
 
-    ngx_http_markdown_remove_accept_ranges(r);
+    /* P4: X-Markdown-Tokens */
+    rc = ngx_http_markdown_fullcov_prepare_token(r, result, conf, &prep);
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "markdown: header_plan_apply_error: "
+            "token header prepare failed");
+        return NGX_ERROR;
+    }
 
+    /* P5: Cache-Control auth modification */
 #if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
     if (ngx_http_markdown_is_authenticated(r, conf)) {
         rc = ngx_http_markdown_modify_cache_control_for_auth(r);
         if (rc != NGX_OK) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                "markdown: failed to modify "
-                "Cache-Control for authenticated "
-                "content");
+                "markdown: header_plan_apply_error: "
+                "Cache-Control auth modification failed");
             return NGX_ERROR;
         }
     }
 #endif
 
-    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-        "markdown: headers updated successfully");
+    /* ================================================================
+     * COMMIT PHASE: pointer/scalar assignment only, zero allocations,
+     * unconditional success after successful prepare.
+     * Nothing occurs between this commit and ngx_http_send_header.
+     * ================================================================ */
+    ngx_http_markdown_fullcov_commit(r, result, &prep);
+
+    NGX_HTTP_MARKDOWN_LOG_DEBUG1(NGX_LOG_DEBUG_HTTP,
+        r->connection->log, 0,
+        "markdown: headers committed (full-coverage); "
+        "Content-Length: %uz",
+        result->markdown_len);
 
     return NGX_OK;
 }
