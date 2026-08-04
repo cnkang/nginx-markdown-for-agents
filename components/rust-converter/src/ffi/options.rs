@@ -258,7 +258,8 @@ pub(crate) fn decode_options(
     let raw_cpt = if options.chars_per_token_fixed > 0 {
         options.chars_per_token_fixed as f32 / 10.0
     } else {
-        LlmProvider::from_ffi(options.llm_provider).chars_per_token()
+        /* llm_provider removed in 0.9.2; always use default ratio */
+        LlmProvider::default().chars_per_token()
     };
 
     /* Resolve parse_timeout: prefer parse_timeout_ms, fall back to timeout_ms */
@@ -278,7 +279,7 @@ pub(crate) fn decode_options(
         prune_selectors,
         prune_protection_selectors,
         memory_budget: options.memory_budget,
-        llm_provider: LlmProvider::from_ffi(options.llm_provider),
+        llm_provider: LlmProvider::default(),
         chars_per_token: raw_cpt,
         effective_chars_per_token: clamp_chars_per_token(raw_cpt),
         parse_timeout,
@@ -344,8 +345,9 @@ mod tests {
     fn test_chars_per_token_fixed_decoding_boundaries() {
         let provider_options = test_options(0, 1);
         let provider_default = decode_options(&provider_options).unwrap();
-        assert_f32_eq(provider_default.chars_per_token, 3.8);
-        assert_f32_eq(provider_default.effective_chars_per_token, 3.8);
+        /* markdown_llm_provider removed in 0.9.2; default is 4.0 */
+        assert_f32_eq(provider_default.chars_per_token, 4.0);
+        assert_f32_eq(provider_default.effective_chars_per_token, 4.0);
 
         let min_options = test_options(1, 1);
         let min_non_zero = decode_options(&min_options).unwrap();
