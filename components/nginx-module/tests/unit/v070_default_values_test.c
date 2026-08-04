@@ -328,16 +328,16 @@ test_v070_defaults_both_unset(void)
      * Generous enough for large documents, strict enough to prevent
      * worker stalls from pathological inputs.
      */
-    TEST_ASSERT(child->decompress.parse_timeout == 30000,
-        "parse_timeout should default to 30000ms (30s)");
+    TEST_ASSERT(child->decompress.parse_timeout == 10000,
+        "parse_timeout should default to 10000ms (10s)");
 
     /*
      * parser_budget: 64MB (64 * 1024 * 1024).
      * Allows parsing of large documents while preventing OOM from
      * adversarial inputs with deep nesting or excessive node counts.
      */
-    TEST_ASSERT(child->decompress.parser_budget == 64 * 1024 * 1024,
-        "parser_budget should default to 64MB");
+    TEST_ASSERT(child->decompress.parser_budget == 32 * 1024 * 1024,
+        "parser_budget should default to 32MB");
 
     /*
      * dynconf_dry_run: 0 (off).
@@ -388,9 +388,10 @@ test_decompress_max_size_tracks_memory_budget(void)
     TEST_ASSERT(child->max_size == 20 * 1024 * 1024,
         "max_size should be overridden by memory_budget (20MB)");
 
-    /* decompress_max_size should track the effective max_size */
-    TEST_ASSERT(child->decompress.max_size == 20 * 1024 * 1024,
-        "decompress_max_size should track memory_budget-overridden max_size");
+    /* decompress_max_size should track decompressed_size limit (10m) */
+    TEST_ASSERT(child->decompress.max_size ==
+        NGX_HTTP_MARKDOWN_LIMITS_DECOMPRESSED_SIZE_DEFAULT,
+        "decompress_max_size should be decompressed_size default (10MB)");
 
     TEST_PASS("decompress_max_size correctly tracks memory_budget");
 
@@ -421,8 +422,8 @@ test_explicit_decompress_max_size_preserved(void)
     TEST_ASSERT(parent != NULL, "parent conf allocation");
     TEST_ASSERT(child != NULL, "child conf allocation");
 
-    /* Explicitly set decompress_max_size (simulates markdown_decompress_max_size 20m) */
-    child->decompress.max_size = 20 * 1024 * 1024;
+    /* Explicitly set decompressed_size (simulates markdown_limits decompressed_size=20m) */
+    child->limits.decompressed_size = 20 * 1024 * 1024;
 
     rc = ngx_http_markdown_merge_conf(&cf, parent, child);
     TEST_ASSERT(rc == NGX_CONF_OK, "merge_conf should succeed");
@@ -431,9 +432,10 @@ test_explicit_decompress_max_size_preserved(void)
     TEST_ASSERT(child->decompress.max_size == 20 * 1024 * 1024,
         "explicit decompress_max_size (20MB) should be preserved");
 
-    /* max_size should still be at its default (10MB) */
-    TEST_ASSERT(child->max_size == 10 * 1024 * 1024,
-        "max_size should remain at default (10MB)");
+    /* max_size should be at its 0.9.2 default (64MB) */
+    TEST_ASSERT(child->max_size ==
+        NGX_HTTP_MARKDOWN_LIMITS_CONVERSION_MEMORY_DEFAULT,
+        "max_size should remain at default (64MB)");
 
     TEST_PASS("explicit decompress_max_size not overridden");
 
@@ -464,8 +466,8 @@ test_v070_directives_inherit_from_parent(void)
     TEST_ASSERT(child != NULL, "child conf allocation");
 
     /* Set parent values (simulates http-level config) */
-    parent->decompress.parse_timeout = 10000;              /* 10s */
-    parent->decompress.parser_budget = 32 * 1024 * 1024;   /* 32MB */
+    parent->limits.parser_timeout = 10000;              /* 10s */
+    parent->limits.parser_memory = 32 * 1024 * 1024;   /* 32MB */
     parent->advanced.dynconf_dry_run = 1;       /* on */
 
     rc = ngx_http_markdown_merge_conf(&cf, parent, child);
@@ -509,13 +511,13 @@ test_v070_directives_child_override(void)
     TEST_ASSERT(child != NULL, "child conf allocation");
 
     /* Set parent values */
-    parent->decompress.parse_timeout = 10000;
-    parent->decompress.parser_budget = 32 * 1024 * 1024;
+    parent->limits.parser_timeout = 10000;
+    parent->limits.parser_memory = 32 * 1024 * 1024;
     parent->advanced.dynconf_dry_run = 1;
 
     /* Set child overrides */
-    child->decompress.parse_timeout = 5000;                /* 5s */
-    child->decompress.parser_budget = 16 * 1024 * 1024;    /* 16MB */
+    child->limits.parser_timeout = 5000;                  /* 5s */
+    child->limits.parser_memory = 16 * 1024 * 1024;       /* 16MB */
     child->advanced.dynconf_dry_run = 0;        /* off */
 
     rc = ngx_http_markdown_merge_conf(&cf, parent, child);
@@ -563,10 +565,12 @@ test_06x_defaults_unchanged(void)
     /* Core defaults must remain unchanged */
     TEST_ASSERT(child->enabled == 0,
         "enabled should default to off");
-    TEST_ASSERT(child->max_size == 10 * 1024 * 1024,
-        "max_size should default to 10MB");
-    TEST_ASSERT(child->timeout == 5000,
-        "timeout should default to 5000ms");
+    TEST_ASSERT(child->max_size ==
+        NGX_HTTP_MARKDOWN_LIMITS_CONVERSION_MEMORY_DEFAULT,
+        "max_size should default to 64MB (unified limits)");
+    TEST_ASSERT(child->timeout ==
+        NGX_HTTP_MARKDOWN_LIMITS_CONVERSION_TIMEOUT_DEFAULT,
+        "timeout should default to 30000ms (unified limits)");
     TEST_ASSERT(child->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS,
         "on_error should default to pass");
     TEST_ASSERT(child->flavor == NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK,
@@ -577,8 +581,6 @@ test_06x_defaults_unchanged(void)
         "front_matter should default to off");
     TEST_ASSERT(child->accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_STRICT,
         "accept_policy should default to strict");
-    TEST_ASSERT(child->buffer_chunked == 1,
-        "buffer_chunked should default to on");
     TEST_ASSERT(child->decompress.auto_decompress == 1,
         "auto_decompress should default to on");
     TEST_ASSERT(child->policy.generate_etag == 0,
@@ -596,94 +598,21 @@ test_06x_defaults_unchanged(void)
 
 
 /*
- * Test: v0.8.0 default threshold regression guard.
+ * Test: v0.9.2 stream threshold internalization.
  *
- * Confirms that after full merge_conf() with no directives configured,
- * stream.threshold retains its 0.8.0 default of 1m.
- *
- * Also confirms that when the directive IS explicitly set,
- * the value is preserved correctly.
+ * Confirms that the stream threshold is now a fixed internal constant
+ * (NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT = 1 MiB) and is no longer
+ * configurable via a directive.
  */
 static void
 test_080_threshold_bridge_full_merge(void)
 {
-    ngx_conf_t cf;
-    ngx_http_markdown_conf_t *parent;
-    ngx_http_markdown_conf_t *child;
-    const char *rc;
+    TEST_SUBSECTION("v0.9.2 stream threshold internalization");
 
-    TEST_SUBSECTION("v0.8.0 threshold defaults via full merge_conf");
+    TEST_ASSERT(NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT == 1048576,
+        "internalized stream threshold must be 1 MiB (1048576)");
 
-    /*
-     * Case 1: No threshold directives set.
-     * stream.threshold must remain at 0.8.0 default (1m).
-     */
-    memset(&cf, 0, sizeof(cf));
-    cf.pool = &g_pool;
-
-    parent = ngx_http_markdown_create_conf(&cf);
-    child = ngx_http_markdown_create_conf(&cf);
-
-    TEST_ASSERT(parent != NULL, "parent conf allocation");
-    TEST_ASSERT(child != NULL, "child conf allocation");
-
-    rc = ngx_http_markdown_merge_conf(&cf, parent, child);
-    TEST_ASSERT(rc == NGX_CONF_OK, "merge_conf should succeed");
-
-    TEST_ASSERT(child->stream.threshold
-        == NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT,
-        "stream.threshold must be 1m (1048576) when no "
-        "directive was explicitly set");
-    TEST_ASSERT(child->stream.threshold_explicit == 0,
-        "threshold_explicit must be 0 when unset");
-
-    free(parent);
-    free(child);
-
-    /*
-     * Case 2: markdown_stream_threshold 64k is explicitly set.
-     * The explicit value should be preserved through merge.
-     */
-    memset(&cf, 0, sizeof(cf));
-    cf.pool = &g_pool;
-
-    {
-        ngx_http_markdown_conf_t *grandparent;
-
-        grandparent = ngx_http_markdown_create_conf(&cf);
-        parent = ngx_http_markdown_create_conf(&cf);
-        child = ngx_http_markdown_create_conf(&cf);
-
-        TEST_ASSERT(grandparent != NULL, "grandparent conf allocation");
-        TEST_ASSERT(parent != NULL, "parent conf allocation (case 2)");
-        TEST_ASSERT(child != NULL, "child conf allocation (case 2)");
-
-        /* Simulate: operator set markdown_stream_threshold 64k at parent level */
-        parent->stream.threshold = 64 * 1024;
-
-        /* Merge parent against grandparent (sets threshold_explicit=1) */
-        rc = ngx_http_markdown_merge_conf(&cf, grandparent, parent);
-        TEST_ASSERT(rc == NGX_CONF_OK, "merge parent should succeed");
-
-        TEST_ASSERT(parent->stream.threshold_explicit == 1,
-            "parent threshold_explicit must be 1 after merge");
-
-        /* Merge child against parent */
-        rc = ngx_http_markdown_merge_conf(&cf, parent, child);
-        TEST_ASSERT(rc == NGX_CONF_OK, "merge child should succeed");
-
-        TEST_ASSERT(child->stream.threshold_explicit == 1,
-            "threshold_explicit must be 1 when parent set it");
-        TEST_ASSERT(child->stream.threshold == 64 * 1024,
-            "stream.threshold must be 64k when "
-            "explicitly set");
-
-        free(grandparent);
-        free(parent);
-        free(child);
-    }
-
-    TEST_PASS("v0.8.0 threshold defaults: full merge_conf regression guard");
+    TEST_PASS("stream threshold is internalized at 1 MiB");
 }
 
 /* ── Main ─────────────────────────────────────────────────────────── */

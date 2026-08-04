@@ -58,20 +58,6 @@ struct ngx_rbtree_s {
                                  ngx_rbtree_node_t *sentinel);
 };
 
-typedef struct ngx_http_markdown_otel_span_s {
-    ngx_msec_t    start_ms;
-    ngx_msec_t    end_ms;
-    int64_t       start_epoch_nano;
-    int64_t       end_epoch_nano;
-    ngx_uint_t    attr_count;
-    ngx_uint_t    exported;
-    u_char        trace_id[33];
-    u_char        span_id[17];
-    u_char        parent_span_id[17];
-    ngx_uint_t    trace_flags;
-    ngx_uint_t    has_parent;
-} ngx_http_markdown_otel_span_t;
-
 #define ngx_string(str)     { sizeof(str) - 1, (u_char *) str }
 
 /* NGINX return codes — guarded so per-test overrides still work */

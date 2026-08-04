@@ -228,12 +228,27 @@ static int
 ref_is_streaming(const struct FFIEligibilityInput *in)
 {
     static const uint8_t  text_event_stream[] = "text/event-stream";
+    static const uint8_t  application_x_ndjson[] = "application/x-ndjson";
+    static const uint8_t  application_stream_json[] =
+        "application/stream+json";
 
     if (in->content_type_len == 0) {
         return 0;
     }
     if (ref_match_prefix(in->content_type, in->content_type_len,
                          text_event_stream, sizeof(text_event_stream) - 1))
+    {
+        return 1;
+    }
+    if (ref_match_prefix(in->content_type, in->content_type_len,
+                         application_x_ndjson,
+                         sizeof(application_x_ndjson) - 1))
+    {
+        return 1;
+    }
+    if (ref_match_prefix(in->content_type, in->content_type_len,
+                         application_stream_json,
+                         sizeof(application_stream_json) - 1))
     {
         return 1;
     }
@@ -335,7 +350,6 @@ init_conf(ngx_http_markdown_conf_t *conf)
 {
     memset(conf, 0, sizeof(*conf));
     conf->routing.content_types = NULL;
-    conf->routing.stream_types = NULL;
     conf->max_size = (size_t) -1;
 }
 
@@ -499,8 +513,6 @@ test_parity_streaming_detection(void)
 {
     ngx_http_request_t r;
     ngx_http_markdown_conf_t conf;
-    ngx_array_t st_array;
-    ngx_str_t st_entries[1];
 
     TEST_SUBSECTION("parity: streaming detection");
 
@@ -522,23 +534,15 @@ test_parity_streaming_detection(void)
             == NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING,
         "text/event-stream with charset -> INELIGIBLE_STREAMING");
 
-    /* Configured stream_types exclusion. */
-    set_str(&st_entries[0], "application/x-ndjson");
-    st_array.elts = st_entries;
-    st_array.nelts = 1;
-    st_array.size = sizeof(ngx_str_t);
-    st_array.nalloc = 1;
-    st_array.pool = &g_pool;
-    conf.routing.stream_types = &st_array;
-
+    /* stream_types directive removed in 0.9.2; stream_types always NULL/0 */
     reset_ffi_capture();
     set_str(&r.headers_out.content_type, "application/x-ndjson\t;charset=utf-8");
     TEST_ASSERT(
         ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
             == NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING,
-        "configured stream type -> INELIGIBLE_STREAMING");
-    TEST_ASSERT(g_have_last_input && g_last_input.stream_types_count == 1,
-                "stream_types_count marshalled as 1");
+        "application/x-ndjson -> INELIGIBLE_STREAMING via hard exclusion");
+    TEST_ASSERT(g_have_last_input && g_last_input.stream_types_count == 0,
+                "stream_types_count marshalled as 0 (directive removed)");
 
     set_str(&r.headers_out.content_type, "text/html");
     TEST_ASSERT(

@@ -99,11 +99,28 @@ typedef struct {
 } ngx_cidr_t;
 
 typedef struct {
+    void        *elts;
+    ngx_uint_t   nelts;
+    size_t       size;
+    ngx_uint_t   nalloc;
+    ngx_pool_t  *pool;
+} ngx_list_part_t;
+
+typedef struct {
+    ngx_list_part_t  last_part;
+    ngx_list_part_t *last;
+    ngx_uint_t       nalloc;
+    size_t           size;
+    ngx_pool_t      *pool;
+} ngx_list_t;
+
+typedef struct {
     ngx_uint_t  status;
     size_t      content_type_len;
     ngx_str_t   content_type;
     u_char     *content_type_lowcase;
     off_t       content_length_n;
+    ngx_list_t  headers;
 } ngx_http_headers_out_t;
 
 typedef struct {
@@ -113,6 +130,7 @@ typedef struct {
 
 typedef struct {
     ngx_uint_t  hash;
+    ngx_str_t   key;
     ngx_str_t   value;
 } ngx_table_elt_t;
 
@@ -132,7 +150,7 @@ struct ngx_http_request_s {
 };
 
 typedef struct {
-    ngx_array_t *diagnostics_allow;
+    ngx_flag_t   diagnostics_enabled;
 } ngx_http_markdown_ops_cfg_t;
 
 typedef struct {
@@ -211,6 +229,16 @@ ngx_pcalloc(ngx_pool_t *pool, size_t size)
 {
     UNUSED(pool);
     return test_alloc(size, 1);
+}
+
+void *
+ngx_list_push(ngx_list_t *list)
+{
+    UNUSED(list);
+    /* Return a static element for the Allow header stub */
+    static ngx_table_elt_t stub_elt;
+    memset(&stub_elt, 0, sizeof(stub_elt));
+    return &stub_elt;
 }
 
 void *
@@ -329,6 +357,15 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
 }
 
 #define NGX_HTTP_MARKDOWN_FILTER_MODULE_H
+
+/* Constants needed by diagnostics.c streaming_config formatter */
+#ifndef NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT
+#define NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT  (1024 * 1024)
+#endif
+#ifndef NGX_HTTP_MARKDOWN_STREAM_FLUSH_MIN_FIXED
+#define NGX_HTTP_MARKDOWN_STREAM_FLUSH_MIN_FIXED  16384
+#endif
+
 #include "../src/ngx_http_markdown_diagnostics.c"
 
 void
@@ -579,8 +616,8 @@ test_access_and_json_builder(void)
     TEST_ASSERT(strstr(json, "\"policy_source\": \"configured\"") != NULL,
                 "JSON should expose configured policy source");
     TEST_ASSERT(strstr(json,
-                "\"threshold_explicit\": true") != NULL,
-                "JSON should expose threshold explicit state");
+                "\"threshold_explicit\": true") == NULL,
+                "JSON should not expose internalized threshold_explicit");
     TEST_ASSERT(strstr(json, "\"reason_code\": 11") != NULL,
                 "JSON should include recorded reason");
 
@@ -669,8 +706,6 @@ test_balanced_profile_reports_profile_policy_source(void)
 
     reset_test_state();
     init_request(&r, &c, &conf, &addr);
-    conf.profile.name = NGX_HTTP_MARKDOWN_PROFILE_BALANCED;
-    conf.profile.set = 1;
     conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
     conf.stream.policy_explicit = 0;
     memset(&b, 0, sizeof(b));
@@ -679,12 +714,13 @@ test_balanced_profile_reports_profile_policy_source(void)
     TEST_ASSERT(rc == NGX_OK,
                 "balanced profile diagnostics JSON should succeed");
     json = (const char *) b.pos;
-    TEST_ASSERT(strstr(json, "\"profile\": \"balanced\"") != NULL,
-                "diagnostics should expose the balanced profile");
+    /* Profiles removed in 0.9.2; diagnostics emits "none" for compat */
+    TEST_ASSERT(strstr(json, "\"profile\": \"none\"") != NULL,
+                "diagnostics should expose the none profile (removed)");
     TEST_ASSERT(strstr(json, "\"policy\": \"auto\"") != NULL,
-                "balanced profile should preserve auto streaming policy");
-    TEST_ASSERT(strstr(json, "\"policy_source\": \"profile\"") != NULL,
-                "balanced auto policy should report profile source");
+                "default auto streaming policy preserved");
+    TEST_ASSERT(strstr(json, "\"policy_source\": \"default\"") != NULL,
+                "auto policy with no profile should report default source");
 
     TEST_PASS("Balanced profile streaming source is preserved");
 }
@@ -851,8 +887,9 @@ test_handler_get_head_and_denials(void)
     init_request(&r, &c, &conf, &addr);
     addr.sin_addr.s_addr = htonl(0x0a000001);
     rc = ngx_http_markdown_diagnostics_handler(&r);
-    TEST_ASSERT(rc == NGX_HTTP_FORBIDDEN,
-                "non-loopback should be forbidden");
+    TEST_ASSERT(rc == NGX_OK,
+                "non-loopback with valid sockaddr should be allowed "
+                "(access control delegated to NGINX access phase)");
 
     TEST_PASS("Handler paths covered");
 }

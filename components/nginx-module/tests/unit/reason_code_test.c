@@ -483,9 +483,11 @@ test_streaming_reason_codes(void)
     TEST_ASSERT(ngx_str_eq(rc, "STREAMING_PRECOMMIT_REJECT"),
         "streaming_precommit_reject() -> STREAMING_PRECOMMIT_REJECT");
 
+#ifdef MARKDOWN_STREAMING_SHADOW_DEBUG
     rc = ngx_http_markdown_reason_streaming_shadow();
     TEST_ASSERT(ngx_str_eq(rc, "STREAMING_SHADOW"),
         "streaming_shadow() -> STREAMING_SHADOW");
+#endif
 
     TEST_PASS("All streaming reason codes correct");
 }
