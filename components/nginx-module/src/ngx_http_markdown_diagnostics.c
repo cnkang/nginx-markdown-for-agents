@@ -20,6 +20,11 @@
 #include <ngx_http.h>
 #include <time.h>
 
+/* Unit-test translation units may include system headers before this file. */
+#if !defined(_WIN32)
+extern struct tm *gmtime_r(const time_t *, struct tm *);
+#endif
+
 #include "ngx_http_markdown_diagnostics.h"
 #include "ngx_http_markdown_dynconf_snapshot.h"
 #include "ngx_http_markdown_filter_module.h"

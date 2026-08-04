@@ -2525,7 +2525,15 @@ ngx_http_markdown_dynconf_read_file(
     ngx_memcpy(path_buf, watcher->path.data, watcher->path.len);
     path_buf[watcher->path.len] = '\0';
 
-    if (ngx_file_info(path_buf, &file_info) == NGX_FILE_ERROR) {
+    fd = ngx_open_file(path_buf, NGX_FILE_RDONLY, NGX_FILE_OPEN, 0);
+    if (fd == NGX_INVALID_FILE) {
+        ngx_http_markdown_record_dynconf_reload(DYNCONF_ERR_INTERNAL);
+        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
+    }
+
+    /* Inspect the opened descriptor so the size check cannot race a path swap. */
+    if (ngx_fd_info(fd, &file_info) == NGX_FILE_ERROR) {
+        ngx_close_file(fd);
         ngx_http_markdown_record_dynconf_reload(DYNCONF_ERR_INTERNAL);
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
     }
@@ -2533,6 +2541,7 @@ ngx_http_markdown_dynconf_read_file(
         || (uint64_t) file_info.st_size > NGX_HTTP_MARKDOWN_DYNCONF_MAX_FILE_SIZE
         || (uint64_t) file_info.st_size > NGX_MAX_SIZE_T_VALUE)
     {
+        ngx_close_file(fd);
         ngx_http_markdown_record_dynconf_reload(DYNCONF_ERR_TOO_LARGE);
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
     }
@@ -2540,14 +2549,7 @@ ngx_http_markdown_dynconf_read_file(
     *file_size = (size_t) file_info.st_size;
     *data = ngx_alloc(*file_size == 0 ? 1 : *file_size, log);
     if (*data == NULL) {
-        ngx_http_markdown_record_dynconf_reload(DYNCONF_ERR_INTERNAL);
-        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
-    }
-
-    fd = ngx_open_file(path_buf, NGX_FILE_RDONLY, NGX_FILE_OPEN, 0);
-    if (fd == NGX_INVALID_FILE) {
-        ngx_free(*data);
-        *data = NULL;
+        ngx_close_file(fd);
         ngx_http_markdown_record_dynconf_reload(DYNCONF_ERR_INTERNAL);
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
     }
@@ -2678,6 +2680,7 @@ ngx_http_markdown_dynconf_apply_ffi_result(
 }
 
 
+/* Reload the bounded file, validate its JSON result, and publish it atomically. */
 static ngx_int_t
 ngx_http_markdown_dynconf_reload(
     ngx_http_markdown_dynconf_watcher_t *watcher,

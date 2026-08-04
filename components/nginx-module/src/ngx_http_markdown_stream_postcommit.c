@@ -76,6 +76,7 @@ ngx_http_markdown_stream_postcommit_safe_finish(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx)
 {
+    ngx_flag_t  first_safe_finish;
     ngx_int_t  rc;
 
     if (r == NULL || ctx == NULL) {
@@ -96,6 +97,12 @@ ngx_http_markdown_stream_postcommit_safe_finish(
                       "or POST_COMMIT_SAFE_FINISH",
                       (ngx_uint_t) ctx->stream_sm.state);
         return NGX_ERROR;
+    }
+
+    first_safe_finish =
+        (ctx->stream_sm.state == NGX_HTTP_MD_STATE_COMMITTED);
+    if (first_safe_finish) {
+        ngx_http_markdown_metrics_record_postcommit_safe_finish();
     }
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,

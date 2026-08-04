@@ -707,7 +707,11 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
 }
 
 
-/* Translate the legacy storage snapshot into the frozen v1 metric contract. */
+/*
+ * Translate the legacy storage snapshot into the frozen v1 metric contract.
+ * The mapping keeps public counters stable while preserving streaming-only
+ * fields behind their feature guard and leaves absent snapshots zeroed.
+ */
 static void
 ngx_http_markdown_metrics_to_v1(
     const ngx_http_markdown_metrics_snapshot_t *snapshot,
@@ -805,6 +809,9 @@ ngx_http_markdown_metrics_to_v1(
     }
     v1->input_bytes = snapshot->input_bytes;
     v1->output_bytes = snapshot->output_bytes;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    v1->output_bytes += snapshot->streaming.selection.output_bytes_total;
+#endif
     v1->inflight = snapshot->perf.inflight.current;
 
 #ifdef MARKDOWN_STREAMING_ENABLED

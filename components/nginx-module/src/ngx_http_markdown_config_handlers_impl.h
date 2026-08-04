@@ -351,8 +351,7 @@ ngx_http_markdown_apply_conversion_timeout_limit(ngx_conf_t *cf,
         return NGX_CONF_ERROR;
     }
 
-    if (ms < NGX_HTTP_MARKDOWN_LIMITS_DURATION_MIN
-        || ms > NGX_HTTP_MARKDOWN_LIMITS_DURATION_MAX)
+    if (ms > NGX_HTTP_MARKDOWN_LIMITS_DURATION_MAX)
     {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
             "\"conversion_timeout\" value \"%V\" in \"%V\" "
@@ -386,8 +385,7 @@ ngx_http_markdown_apply_parser_timeout_limit(ngx_conf_t *cf,
         return NGX_CONF_ERROR;
     }
 
-    if (ms < NGX_HTTP_MARKDOWN_LIMITS_DURATION_MIN
-        || ms > NGX_HTTP_MARKDOWN_LIMITS_DURATION_MAX)
+    if (ms > NGX_HTTP_MARKDOWN_LIMITS_DURATION_MAX)
     {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
             "\"parser_timeout\" value \"%V\" in \"%V\" "

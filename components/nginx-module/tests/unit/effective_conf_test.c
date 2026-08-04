@@ -124,6 +124,7 @@ typedef time_t ngx_mtime_t;
 
 #define ngx_file_info_t       struct stat
 #define ngx_file_info(name, fi) stat((const char *)(name), (fi))
+#define ngx_fd_info(fd, fi)   fstat((fd), (fi))
 #define ngx_file_mtime(fi)    ((fi)->st_mtime)
 #define NGX_FILE_ERROR        (-1)
 

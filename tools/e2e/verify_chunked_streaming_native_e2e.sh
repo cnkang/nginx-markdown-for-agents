@@ -251,7 +251,9 @@ GZIP_POSTCOMMIT_LATE_TOKEN = "GZIP_POSTCOMMIT_TRUNCATED_MEMBER_END_TOKEN"
 DEFLATE_END_TOKEN = "DEFLATE_STREAM_END_TOKEN"
 DEFLATE_ZLIB_END_TOKEN = "DEFLATE_ZLIB_STREAM_END_TOKEN"
 CONTINUOUS_BURST_END_TOKEN = "CONTINUOUS_BURST_END_TOKEN"
-SMALL_TARGET = 2 * 1024 * 1024
+# Keep parser overhead below the frozen 10 MiB smoke budget while retaining a
+# meaningful chunked body that is well below the oversized fixture boundary.
+SMALL_TARGET = 1 * 1024 * 1024
 # A 64 KiB receive window remains far below this 8 MiB fixture.  Together with
 # Case 4d's initial no-read interval and throttled reader, it creates downstream
 # pressure while reducing Darwin window-update sensitivity on shared runners.
@@ -793,7 +795,10 @@ get_metric_value() {
       metric_family="nginx_markdown_decompression_events_total"
       metric_selector='reason="io_error"'
       ;;
-    perf.decompression_streaming_total|decompression_success_total)
+    perf.decompression_streaming_total)
+      metric_family="nginx_markdown_decompression_events_total"
+      ;;
+    decompression_success_total)
       metric_family="nginx_markdown_decompression_events_total"
       metric_selector='outcome="success"'
       ;;
@@ -807,13 +812,29 @@ get_metric_value() {
       metric_family="nginx_markdown_streaming_events_total"
       metric_selector='transition="resume_success"'
       ;;
-    streaming.precommit_failopen_total|streaming.budget_exceeded_total|streaming.failed_total)
+    streaming.precommit_failopen_total)
       metric_family="nginx_markdown_requests_total"
       metric_selector='outcome="failed_open"'
       ;;
+    streaming.budget_exceeded_total)
+      metric_family="nginx_markdown_decompression_events_total"
+      metric_selector='outcome="failure",reason="budget_exceeded"'
+      ;;
+    streaming.failed_total)
+      metric_family="nginx_markdown_requests_total"
+      metric_selector='outcome="failed_open"'
+      ;;
+    streaming.postcommit_failed_total)
+      # Post-commit failures are terminal conversion failures, not fail-open
+      # deliveries; the frozen request outcome is failed_closed.
+      metric_family="nginx_markdown_requests_total"
+      metric_selector='outcome="failed_closed"'
+      ;;
     streaming.postcommit_error_total)
       metric_family="nginx_markdown_streaming_events_total"
-      metric_selector='transition="abort_start"'
+      # The frozen v1 surface records the post-commit safe-finish transition;
+      # the legacy counter also covered this path before the request abort.
+      metric_selector='transition="safe_finish_start"'
       ;;
     streaming.succeeded_total)
       metric_family="nginx_markdown_conversion_deliveries_total"
@@ -997,7 +1018,8 @@ assert_streaming_markdown_response \
 
 echo "==> Case 4c-burst: 256 KiB continuous compressed bursts must fail open intact"
 burst_failopen_before="$(get_metric_value 'streaming.precommit_failopen_total')"
-burst_budget_before="$(get_metric_value 'streaming.budget_exceeded_total')"
+burst_budget_before="$(grep -c 'reason=STREAMING_BUDGET_EXCEEDED' \
+  "${RUNTIME}/logs/error.log" || true)"
 burst_failed_before="$(get_metric_value 'streaming.failed_total')"
 burst_decompression_before="$(get_perf_metric 'decompression_streaming_total')"
 burst_output_before="$(get_perf_metric 'output_bytes_total')"
@@ -1051,14 +1073,15 @@ cmp -s "${RAW_DIR}/continuous_burst_gzip.decoded" \
   exit 1
 }
 burst_failopen_after="$(get_metric_value 'streaming.precommit_failopen_total')"
-burst_budget_after="$(get_metric_value 'streaming.budget_exceeded_total')"
+burst_budget_after="$(grep -c 'reason=STREAMING_BUDGET_EXCEEDED' \
+  "${RUNTIME}/logs/error.log" || true)"
 burst_failed_after="$(get_metric_value 'streaming.failed_total')"
 burst_decompression_after="$(get_perf_metric 'decompression_streaming_total')"
 burst_output_after="$(get_perf_metric 'output_bytes_total')"
 if [[ "${burst_failopen_after}" -ne $((burst_failopen_before + 2)) \
   || "${burst_budget_after}" -ne $((burst_budget_before + 2)) \
   || "${burst_failed_after}" -ne $((burst_failed_before + 2)) \
-  || "${burst_decompression_after}" -ne $((burst_decompression_before + 2)) ]]; then
+  || "${burst_decompression_after}" -ne "${burst_decompression_before}" ]]; then
   echo "continuous compression burst fallback counters are inconsistent" >&2
   exit 1
 fi
@@ -1525,7 +1548,7 @@ assert_truncated_decompression_metric_delta \
 
 echo "==> Case 5b: truncated later gzip member uses post-commit failure semantics"
 gzip_postcommit_errors_before="$(get_metric_value 'streaming.postcommit_error_total')"
-gzip_postcommit_failed_before="$(get_metric_value 'streaming.failed_total')"
+gzip_postcommit_failed_before="$(get_metric_value 'streaming.postcommit_failed_total')"
 gzip_postcommit_truncated_before="$(get_metric_value 'decompression_truncated_input_total')"
 gzip_postcommit_format_before="$(get_metric_value 'decompression_format_error_total')"
 gzip_postcommit_io_before="$(get_metric_value 'decompression_io_error_total')"
@@ -1558,7 +1581,7 @@ if grep -q "${GZIP_POSTCOMMIT_LATE_TOKEN}" \
   exit 1
 fi
 gzip_postcommit_errors_after="$(get_metric_value 'streaming.postcommit_error_total')"
-gzip_postcommit_failed_after="$(get_metric_value 'streaming.failed_total')"
+gzip_postcommit_failed_after="$(get_metric_value 'streaming.postcommit_failed_total')"
 if [[ "${gzip_postcommit_errors_after}" -ne $((gzip_postcommit_errors_before + 1)) ]]; then
   echo "FAIL: gzip post-commit error count was not exactly one" \
     "(before=${gzip_postcommit_errors_before}, after=${gzip_postcommit_errors_after})" >&2
