@@ -13,8 +13,8 @@
 use std::panic;
 use std::ptr;
 
-use super::{parse_dynconf, DynconfResult};
-use super::schema::{FilterValue, PruneNoiseValue, LogVerbosity, ErrorPolicy};
+use super::schema::{ErrorPolicy, FilterValue, LogVerbosity, PruneNoiseValue};
+use super::{DynconfResult, parse_dynconf};
 
 /// FFI result code: success.
 pub const DYNCONF_OK: u32 = 0;
@@ -42,6 +42,54 @@ pub const DYNCONF_ERR_VALUE_OUT_OF_RANGE: u32 = 10;
 pub const DYNCONF_ERR_INVALID_UTF8: u32 = 11;
 /// FFI result code: internal panic.
 pub const DYNCONF_ERR_INTERNAL: u32 = 255;
+
+/// Compute a SHA-256 digest for a C-owned canonical manifest.
+///
+/// The diagnostics endpoint uses this entry point after C has serialized the
+/// location-specific `static_config_manifest_v1` in canonical JSON order.
+/// Keeping the hash implementation on the Rust side avoids a second, subtly
+/// different SHA-256 implementation in the NGINX module.
+///
+/// # Safety
+///
+/// `data` must point to `data_len` readable bytes unless `data_len` is zero.
+/// `output` must point to at least 64 writable bytes and must not overlap the
+/// input range while the digest is being computed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_sha256_hex(
+    data: *const u8,
+    data_len: usize,
+    output: *mut u8,
+    output_len: usize,
+) -> u32 {
+    if output.is_null() || output_len < 64 || (data.is_null() && data_len > 0) {
+        return DYNCONF_ERR_INVALID_TYPE;
+    }
+
+    unsafe {
+        ptr::write_bytes(output, b'0', 64);
+    }
+
+    let digest = panic::catch_unwind(|| {
+        let bytes = if data_len == 0 {
+            &[][..]
+        } else {
+            unsafe { std::slice::from_raw_parts(data, data_len) }
+        };
+        super::digest::compute_source_digest(bytes)
+    });
+
+    match digest {
+        Ok(hex) if hex.len() == 64 => {
+            unsafe {
+                ptr::copy_nonoverlapping(hex.as_ptr(), output, 64);
+            }
+            DYNCONF_OK
+        }
+        Ok(_) => DYNCONF_ERR_INTERNAL,
+        Err(_) => DYNCONF_ERR_INTERNAL,
+    }
+}
 
 /// Sentinel value for "not present" in optional u8 fields.
 pub const DYNCONF_NOT_SET_U8: u8 = 255;
@@ -170,7 +218,9 @@ pub unsafe extern "C" fn markdown_dynconf_parse(
     }
 
     // Initialize to safe defaults before any work
-    unsafe { markdown_dynconf_result_init(result); }
+    unsafe {
+        markdown_dynconf_result_init(result);
+    }
 
     let outcome = panic::catch_unwind(|| {
         // Validate input
@@ -194,21 +244,19 @@ pub unsafe extern "C" fn markdown_dynconf_parse(
     });
 
     match outcome {
-        Ok(Ok(dynconf_result)) => {
-            unsafe { write_success(result, &dynconf_result); }
-        }
-        Ok(Err((code, msg))) => {
-            unsafe { write_error(result, code, &msg); }
-        }
-        Err(_panic) => {
-            unsafe {
-                write_error(
-                    result,
-                    DYNCONF_ERR_INTERNAL,
-                    "internal panic during dynconf parsing",
-                );
-            }
-        }
+        Ok(Ok(dynconf_result)) => unsafe {
+            write_success(result, &dynconf_result);
+        },
+        Ok(Err((code, msg))) => unsafe {
+            write_error(result, code, &msg);
+        },
+        Err(_panic) => unsafe {
+            write_error(
+                result,
+                DYNCONF_ERR_INTERNAL,
+                "internal panic during dynconf parsing",
+            );
+        },
     }
 }
 

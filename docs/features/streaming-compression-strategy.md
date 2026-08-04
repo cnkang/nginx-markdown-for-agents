@@ -1,4 +1,4 @@
-# Streaming Compression Strategy (v0.9.1)
+# Streaming Compression Strategy (v0.9.2)
 
 ## Purpose
 
@@ -8,11 +8,11 @@ full-buffer decompression.
 
 ## Summary
 
-In 0.9.1, gzip, deflate, and Brotli responses are eligible for incremental
-decompression when streaming is selected, automatic decompression is enabled,
-and cache validation is not `full`. `streaming_first` prefers streaming where
-the selected codec and validation requirements are supported; it does not
-guarantee that every content encoding streams.
+In 0.9.2, gzip, deflate, and Brotli responses are eligible for incremental
+decompression when `markdown_streaming force` or `auto` selects streaming,
+automatic decompression is enabled, and cache validation is not `full`.
+The `auto` route uses an internal bounded size heuristic; it is not an
+operator-facing threshold directive.
 
 Brotli streaming requires `NGX_HTTP_BROTLI` at compile time (enabled by
 default in official release artifacts via `NGX_MARKDOWN_BROTLI_STREAMING=on`).
@@ -71,8 +71,9 @@ Upstream response
 
 ## Lifecycle and Decompression-Bomb Safety
 
-Both paths enforce `markdown_decompress_max_size`. Streaming accounting is
-response-wide: a gzip member reset does not reset the budget. A gzip
+Both paths enforce `markdown_limits decompressed_size=<size>` and
+`decompression_ratio=<N>`. Streaming accounting is response-wide: a gzip
+member reset does not reset the budget. A gzip
 `Z_STREAM_END` completes one member, so remaining bytes in the same chunk or a
 later chunk begin another member. Finalization succeeds only at a complete
 member boundary; a truncated final member is rejected.
@@ -124,22 +125,25 @@ The 0.9.1 boundary is based on validated decoder lifecycles:
 | Directive | Role in Compression Strategy |
 |-----------|------------------------------|
 | `markdown_auto_decompress` | Controls whether the module attempts decompression at all. Default: `on`. When off, compressed responses pass through unconverted. |
-| `markdown_decompress_max_size` | Maximum decompressed output size. Prevents decompression bombs. Default: inherits `markdown_limits memory=<size>`. |
+| `markdown_limits decompressed_size=<size>` | Maximum decompressed output size. Prevents decompression bombs. |
+| `markdown_limits decompression_ratio=<N>` | Maximum decompression expansion ratio. |
+| `markdown_limits streaming_buffer=<size>` | Bounded streaming working buffer. |
 
 ## Operator Guidance
 
 - **Uncompressed upstreams**: No action needed. Streaming works normally.
-- **Gzip/deflate upstreams, streaming desired**: Use `streaming_first`, keep
-  `markdown_auto_decompress on`, and avoid `markdown_cache_validation full`.
+- **Gzip/deflate upstreams, streaming desired**: Use `markdown_streaming force`,
+  keep `markdown_auto_decompress on`, and avoid
+  `markdown_cache_validation full`.
 - **Brotli upstreams, streaming desired**: Same as gzip/deflate — use
-  `streaming_first` with `markdown_auto_decompress on`. Brotli streaming is
+  `markdown_streaming force` with `markdown_auto_decompress on`. Brotli streaming is
   active in official release artifacts. Custom builds must have `libbrotlidec`
   available (see Build Compatibility below).
 - **Brotli upstreams, Brotli-disabled build**: Responses are routed to bounded
   full-buffer decompression via the Rust FFI path. No streaming TTFB benefit.
-- **Budget tuning**: Set `markdown_decompress_max_size` to a value that
-  accommodates your largest legitimate compressed responses while still
-  protecting against decompression bombs.
+- **Budget tuning**: Set `markdown_limits decompressed_size=<size>` and
+  `decompression_ratio=<N>` to accommodate legitimate compressed responses
+  while still protecting against decompression bombs.
 
 ## Build Compatibility
 

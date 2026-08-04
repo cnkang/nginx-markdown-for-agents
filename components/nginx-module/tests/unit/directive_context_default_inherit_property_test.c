@@ -619,12 +619,12 @@ static const context_contract_t context_contracts[] = {
     /* H-only directives (5 entries) */
     { "markdown_trusted_proxies",             1, 0, 0 },
     { "markdown_metrics_shm_size",            1, 0, 0 },
-    { "markdown_dynamic_config",              1, 1, 1 },
-    { "markdown_dynamic_config_path",         1, 1, 1 },
-    { "markdown_dynconf_dry_run",             1, 1, 1 },
+    { "markdown_dynamic_config",              1, 0, 0 },
+    { "markdown_dynamic_config_path",         1, 0, 0 },
+    { "markdown_dynconf_dry_run",             1, 0, 0 },
     /* L-only directives (2 entries) */
     { "markdown_metrics",                     0, 0, 1 },
-    { "markdown_diagnostics",                 1, 1, 1 },
+    { "markdown_diagnostics",                 0, 0, 1 },
 };
 
 #define CONTEXT_COUNT (sizeof(context_contracts) / sizeof(context_contracts[0]))
@@ -1205,12 +1205,8 @@ test_trusted_proxies_http_only(void)
 /* ================================================================
  * 5. Requirement 15.10: dynconf directives context verification
  *
- * Note: the design document states dynconf directives accept H/S/L
- * (the static config enable/path/dry_run settings inherit to child).
- * Requirement 15.10 specifically states the dynconf directive shall
- * only be accepted in http context; however, the implementation
- * allows H/S/L for the enable flag. We verify the actual command
- * table bits.
+ * Requirement 15.10 specifies that dynconf directives are accepted only
+ * in the http context.  Verify the command-table bits directly.
  * ================================================================ */
 static void
 test_dynconf_context(void)

@@ -208,15 +208,15 @@ fn parse_value(state: &mut ParseState, depth: usize) -> Result<JsonValue, Dyncon
         Some(b'-') | Some(b'0'..=b'9') => parse_number(state),
         Some(c) => Err(DynconfParseError::new(
             DynconfParseErrorKind::InvalidJson,
-            format!("unexpected character '{}' at position {}", c as char, state.pos),
+            format!(
+                "unexpected character '{}' at position {}",
+                c as char, state.pos
+            ),
         )),
     }
 }
 
-fn parse_object(
-    state: &mut ParseState,
-    depth: usize,
-) -> Result<JsonValue, DynconfParseError> {
+fn parse_object(state: &mut ParseState, depth: usize) -> Result<JsonValue, DynconfParseError> {
     // Consume opening '{'
     state.advance();
     state.skip_whitespace();
@@ -288,10 +288,7 @@ fn parse_object(
     }
 }
 
-fn parse_array(
-    state: &mut ParseState,
-    depth: usize,
-) -> Result<JsonValue, DynconfParseError> {
+fn parse_array(state: &mut ParseState, depth: usize) -> Result<JsonValue, DynconfParseError> {
     // Consume opening '['
     state.advance();
     state.skip_whitespace();
@@ -358,8 +355,7 @@ fn parse_string(state: &mut ParseState) -> Result<String, DynconfParseError> {
                         // Handle surrogate pairs
                         if (0xD800..=0xDBFF).contains(&cp) {
                             // High surrogate, expect \uXXXX low surrogate
-                            if state.advance() != Some(b'\\') || state.advance() != Some(b'u')
-                            {
+                            if state.advance() != Some(b'\\') || state.advance() != Some(b'u') {
                                 return Err(DynconfParseError::new(
                                     DynconfParseErrorKind::InvalidJson,
                                     "expected low surrogate after high surrogate".to_string(),
@@ -372,22 +368,19 @@ fn parse_string(state: &mut ParseState) -> Result<String, DynconfParseError> {
                                     "invalid low surrogate".to_string(),
                                 ));
                             }
-                            let combined =
-                                0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
+                            let combined = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
                             if let Some(c) = char::from_u32(combined) {
                                 result.push(c);
                             } else {
                                 return Err(DynconfParseError::new(
                                     DynconfParseErrorKind::InvalidJson,
-                                    "invalid unicode codepoint from surrogate pair"
-                                        .to_string(),
+                                    "invalid unicode codepoint from surrogate pair".to_string(),
                                 ));
                             }
                         } else if (0xDC00..=0xDFFF).contains(&cp) {
                             return Err(DynconfParseError::new(
                                 DynconfParseErrorKind::InvalidJson,
-                                "unexpected low surrogate without high surrogate"
-                                    .to_string(),
+                                "unexpected low surrogate without high surrogate".to_string(),
                             ));
                         } else if let Some(c) = char::from_u32(cp) {
                             result.push(c);
@@ -415,10 +408,7 @@ fn parse_string(state: &mut ParseState) -> Result<String, DynconfParseError> {
             Some(b) if b < 0x20 => {
                 return Err(DynconfParseError::new(
                     DynconfParseErrorKind::InvalidJson,
-                    format!(
-                        "unescaped control character 0x{:02x} in string",
-                        b
-                    ),
+                    format!("unescaped control character 0x{:02x} in string", b),
                 ));
             }
             Some(b) => {

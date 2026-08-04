@@ -842,9 +842,6 @@ test_name_helpers_and_levels(void)
     name = ngx_http_markdown_log_verbosity_name(NGX_HTTP_MARKDOWN_LOG_DEBUG);
     TEST_ASSERT(name->len == strlen("debug"), "verbosity debug name");
 
-    name = ngx_http_markdown_metrics_format_name();
-    TEST_ASSERT(name->len == strlen("prometheus"), "metrics format name");
-
     name = ngx_http_markdown_compression_name(NGX_HTTP_MARKDOWN_COMPRESSION_GZIP);
     TEST_ASSERT(name->len == strlen("gzip"), "compression gzip name");
     name = ngx_http_markdown_compression_name((ngx_http_markdown_compression_type_e) 999);
@@ -1031,7 +1028,6 @@ test_filter_flag_additional_branches(void)
  *  - auth_policy_name with unknown value
  *  - conditional_requests_name with unknown value
  *  - log_verbosity_name with unknown value
- *  - metrics_format_name with unknown value
  *  - compression_name with deflate and unknown type
  *  - enabled_source_name with unknown value
  */
@@ -1053,9 +1049,6 @@ test_name_helpers_unknown_branches(void)
 
     name = ngx_http_markdown_log_verbosity_name(999);
     TEST_ASSERT(name->len == strlen("unknown"), "verbosity unknown name");
-
-    name = ngx_http_markdown_metrics_format_name();
-    TEST_ASSERT(name->len == strlen("prometheus"), "metrics format always prometheus");
 
     name = ngx_http_markdown_compression_name(NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE);
     TEST_ASSERT(name->len == strlen("deflate"), "compression deflate name");

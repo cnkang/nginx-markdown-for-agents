@@ -132,8 +132,12 @@ path=/etc/nginx/markdown-dynamic.conf
 tmp="${path}.tmp.$$"
 umask 077
 cat > "$tmp" <<'EOF'
-schema_version=0.9
-memory_budget=1m
+{
+  "schema_version": 1,
+  "filter": "off",
+  "error_policy": "pass",
+  "streaming_buffer": 1048576
+}
 EOF
 mv -f "$tmp" "$path"
 ```

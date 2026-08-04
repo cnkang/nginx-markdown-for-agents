@@ -1099,7 +1099,7 @@ EOF
 markdown_filter on;
 
 # Optional tuning examples:
-# markdown_limits memory=5m;
+# markdown_limits conversion_memory=64m conversion_timeout=30s;
 # markdown_error_policy pass;
 EOF
       then
@@ -1186,7 +1186,7 @@ rm -f "$NGINX_TEST_LOG" || true
 echo ""
 echo "You can continue fine-tuning later (recommended):"
 echo "- Scope rollout with server/location-level markdown_filter on/off"
-echo "- Adjust markdown_limits memory= / markdown_error_policy by workload"
+echo "- Adjust markdown_limits conversion_memory= / markdown_error_policy by workload"
 echo "$SEPARATOR_LINE"
 
 # Emit JSON output if --json was requested

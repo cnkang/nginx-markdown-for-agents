@@ -59,7 +59,7 @@ The decision chain evaluates checks in a fixed order. The first check that fails
 | 3 | Response status | Is the upstream response status `200 OK`? A `206 Partial Content` status is classified as a range request (same reason code as check 4). Other non-200 responses (redirects, errors, etc.) are not eligible. | `not_eligible` |
 | 4 | Range request | Is this a range request (`Range` header present)? Range requests are not eligible because partial content cannot be converted. | `not_eligible` |
 | 5 | Content-Type | Is the upstream `Content-Type` header `text/html` (with any charset parameter)? Non-HTML content types are not eligible. | `not_eligible` |
-| 6 | Response size | Is the response body size within the configured `markdown_limits memory=` budget? Oversized responses are not eligible. | `not_eligible` |
+| 6 | Response size | Is the response body size within the configured `markdown_limits conversion_memory=` budget? Oversized responses are not eligible. | `not_eligible` |
 | 7 | Auth policy | Is the request authenticated and `markdown_auth_policy` set to `deny`? Authenticated requests are detected through the existing `Authorization` header and auth-cookie checks. | `not_eligible` |
 | 8 | Accept negotiation | Does the `Accept` header indicate the client wants Markdown? Evaluated per `markdown_accept` (`strict` | `wildcard` | `force`). | `skipped_accept_reject` / `skipped_no_accept` / `skipped_accept` (see below) |
 | 9 | Conversion attempt | All checks passed. The module attempts HTML-to-Markdown conversion. | _(see outcome determination below)_ |
@@ -115,7 +115,7 @@ When conversion fails (either `failed_open` or `failed_closed`), the module also
 | Failure Reason Code | Meaning |
 |---------------------|---------|
 | `conversion_error` | HTML parse or conversion error — the input HTML could not be processed |
-| `memory_budget_exceeded` | Memory limit reached (`markdown_limits memory=` or parser budget) |
+| `memory_budget_exceeded` | Memory limit reached (`markdown_limits conversion_memory=` or parser budget) |
 | `timeout` | Parser execution exceeded `markdown_parse_timeout` |
 | `budget_exceeded` | Parser memory exceeded `markdown_parser_budget` |
 | `ffi_panic` | Internal/system error (unexpected Rust↔C panic) |

@@ -99,12 +99,11 @@ def test_module_metrics_render_accepts_http_and_location_scopes(
 ) -> None:
     """The release gate must accept the NGINX metrics directive contract."""
     valid_nginx_config = """
-http {
-    markdown_metrics_shm_size 8m;
-    server {
-        location = /_markdown_metrics {
-            markdown_metrics;
-            markdown_metrics_format auto;
+    http {
+        markdown_metrics_shm_size 8m;
+        server {
+            location = /_markdown_metrics {
+                markdown_metrics;
         }
     }
 }

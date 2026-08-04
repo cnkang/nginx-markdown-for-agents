@@ -2739,6 +2739,9 @@ ngx_http_markdown_streaming_map_feed_decomp_error(
 {
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total);
+        ngx_http_markdown_record_decompression_failure_budget(
+            decomp != NULL ? decomp->type
+                           : NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN);
         NGX_HTTP_MARKDOWN_METRIC_INC(
             perf.decompression_budget_exceeded_total);
         return ERROR_DECOMPRESSION_BUDGET_EXCEEDED;
@@ -2746,16 +2749,25 @@ ngx_http_markdown_streaming_map_feed_decomp_error(
 
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.format_error_total);
+        ngx_http_markdown_record_decompression_failure_format(
+            decomp != NULL ? decomp->type
+                           : NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN);
         return ERROR_DECOMPRESSION_FORMAT_ERROR;
     }
 
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.truncated_input_total);
+        ngx_http_markdown_record_decompression_failure_truncated(
+            decomp != NULL ? decomp->type
+                           : NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN);
         return ERROR_DECOMPRESSION_TRUNCATED_INPUT;
     }
 
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.io_error_total);
+        ngx_http_markdown_record_decompression_failure_io(
+            decomp != NULL ? decomp->type
+                           : NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN);
         return ERROR_DECOMPRESSION_IO_ERROR;
     }
 
@@ -2803,8 +2815,15 @@ ngx_http_markdown_streaming_map_finalize_decomp_error(
     const ngx_http_markdown_streaming_decomp_t *decomp,
     ngx_log_t *log)
 {
+    if (ctx == NULL) {
+        return ERROR_INTERNAL;
+    }
+
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total);
+        ngx_http_markdown_record_decompression_failure_budget(
+            ctx != NULL ? ctx->decompression.type
+                         : NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN);
         NGX_HTTP_MARKDOWN_METRIC_INC(
             perf.decompression_budget_exceeded_total);
         return ERROR_DECOMPRESSION_BUDGET_EXCEEDED;
@@ -2812,6 +2831,9 @@ ngx_http_markdown_streaming_map_finalize_decomp_error(
 
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.format_error_total);
+        ngx_http_markdown_record_decompression_failure_format(
+            ctx != NULL ? ctx->decompression.type
+                         : NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN);
         if (ctx->streaming.commit_state
             == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
         {
@@ -2822,6 +2844,9 @@ ngx_http_markdown_streaming_map_finalize_decomp_error(
 
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.truncated_input_total);
+        ngx_http_markdown_record_decompression_failure_truncated(
+            ctx != NULL ? ctx->decompression.type
+                         : NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN);
         if (ctx->streaming.commit_state
             == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
         {
@@ -2832,6 +2857,9 @@ ngx_http_markdown_streaming_map_finalize_decomp_error(
 
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.io_error_total);
+        ngx_http_markdown_record_decompression_failure_io(
+            ctx != NULL ? ctx->decompression.type
+                         : NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN);
         if (ctx->streaming.commit_state
             == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
         {
@@ -3144,6 +3172,7 @@ ngx_http_markdown_streaming_finalize_decomp(
     ngx_int_t  rc;
 
     if (!ctx->decompression.needed
+        || ctx->decompression.done
         || ctx->streaming.decompressor == NULL)
     {
         return NGX_OK;
@@ -3183,6 +3212,9 @@ ngx_http_markdown_streaming_finalize_decomp(
         return ngx_http_markdown_streaming_precommit_error(
             r, ctx, conf, finish_error_code);
     }
+
+    ctx->decompression.done = 1;
+    ngx_http_markdown_record_decompression_success_metrics(ctx);
 
     if (decomp_data != NULL && decomp_len > 0) {
         u_char    *out_data;
@@ -3482,6 +3514,7 @@ ngx_http_markdown_streaming_init_buffers(
         ngx_http_markdown_decomp_failure_origin_e  create_origin;
         uint32_t                                   create_error;
 
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.attempted);
         ctx->streaming.decompressor =
             ngx_http_markdown_streaming_decomp_create_with_origin(
                 r->pool, ctx->decompression.type,

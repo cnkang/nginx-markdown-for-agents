@@ -53,6 +53,12 @@
 #define NGX_HTTP_MARKDOWN_ON_ERROR_PASS    0
 #define NGX_HTTP_MARKDOWN_ON_ERROR_REJECT  1
 #define NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT  502
+#define NGX_HTTP_MARKDOWN_PROVENANCE_STATIC           0
+#define NGX_HTTP_MARKDOWN_PROVENANCE_DYNCONF          1
+#define NGX_HTTP_MARKDOWN_PROVENANCE_REQUEST_VARIABLE 2
+#define NGINX_VERSION "1.26.3"
+#define ngx_pid 1234
+#define ngx_time() ((time_t) 1700000000)
 
 #define ngx_memcpy(dst, src, n)      memcpy(dst, src, n)
 #define ngx_strcmp(s1, s2)           strcmp((const char *) (s1), (const char *) (s2))
@@ -286,6 +292,13 @@ ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...)
     remaining = sizeof(translated);
 
     for (src = fmt; *src != '\0' && remaining > 1; src++) {
+        if (*src == '%' && src[1] == 'P') {
+            *dst++ = '%';
+            *dst++ = 'd';
+            src++;
+            remaining -= 2;
+            continue;
+        }
         if (*src == '%' && src[1] == 'M') {
             *dst++ = '%';
             *dst++ = 'l';
@@ -382,10 +395,57 @@ void
 ngx_http_markdown_diagnostics_get_dynconf_state(
     ngx_http_markdown_diag_dynconf_t *out)
 {
+    memset(out, 0, sizeof(*out));
+    out->state = NGX_HTTP_MARKDOWN_DIAG_DYNCONF_ACTIVE;
+    strcpy((char *) out->source_digest,
+           "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    strcpy((char *) out->active_digest,
+           "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    strcpy((char *) out->lkg_digest,
+           "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    out->generation = 1;
+    out->has_last_success = 1;
+    out->last_success = 1700000000;
     out->active_mtime = 100;
     out->config_version = 3;
     out->last_known_good_mtime = 90;
     out->lkg_valid = 1;
+}
+
+void
+ngx_http_markdown_diagnostics_get_effective(
+    const void *conf, ngx_http_markdown_diag_effective_t *out)
+{
+    const ngx_http_markdown_conf_t *mcf = conf;
+
+    memset(out, 0, sizeof(*out));
+    out->filter = 1;
+    out->prune_noise = 1;
+    out->log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
+    out->error_policy = mcf->on_error;
+    out->error_status = mcf->error_status;
+    out->streaming_buffer = 2 * 1024 * 1024;
+    out->filter_source = NGX_HTTP_MARKDOWN_PROVENANCE_STATIC;
+    out->prune_noise_source = NGX_HTTP_MARKDOWN_PROVENANCE_STATIC;
+    out->log_verbosity_source = NGX_HTTP_MARKDOWN_PROVENANCE_STATIC;
+    out->error_policy_source = NGX_HTTP_MARKDOWN_PROVENANCE_STATIC;
+    out->streaming_buffer_source = NGX_HTTP_MARKDOWN_PROVENANCE_STATIC;
+}
+
+ngx_int_t
+ngx_http_markdown_diagnostics_get_static_digest(
+    const void *request, ngx_pool_t *pool, u_char *out, size_t out_len)
+{
+    static const u_char digest[] =
+        "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    UNUSED(request);
+    UNUSED(pool);
+    if (out == NULL || out_len < sizeof(digest)) {
+        return NGX_ERROR;
+    }
+    memcpy(out, digest, sizeof(digest));
+    return NGX_OK;
 }
 
 ngx_int_t
@@ -563,7 +623,6 @@ test_access_and_json_builder(void)
     init_request(&r, &c, &conf, &addr);
     conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
     conf.stream.policy_explicit = 1;
-    conf.stream.threshold_explicit = 1;
 
     rc = ngx_http_markdown_diagnostics_init(
         &ngx_http_markdown_g_diag_state, r.pool, 2);
@@ -586,53 +645,23 @@ test_access_and_json_builder(void)
                 "JSON buffer should account for recorded decisions");
 
     json = (const char *) b.pos;
-    TEST_ASSERT(strstr(json, "\"config_snapshot\"") != NULL,
-                "JSON should include config snapshot");
-    TEST_ASSERT(strstr(json, "\"markdown_max_size\"") == NULL
-                && strstr(json, "\"markdown_timeout\"") == NULL
-                && strstr(json, "\"markdown_streaming_budget\"") == NULL
-                && strstr(json, "\"markdown_memory_budget\"") == NULL
-                && strstr(json,
-                    "\"markdown_trust_forwarded_headers\"") == NULL
-                && strstr(json,
-                    "\"markdown_large_body_threshold\"") == NULL
-                && strstr(json,
-                    "\"markdown_decompression_budget\"") == NULL,
-                "config snapshot should not expose removed directive names");
+    TEST_ASSERT(strstr(json, "\"schema_version\":1") != NULL,
+                "JSON should expose diagnostics schema v1");
+    TEST_ASSERT(strstr(json, "\"worker\":{\"pid\":1234") != NULL,
+                "JSON should expose worker identity");
+    TEST_ASSERT(strstr(json, "\"configuration\":") != NULL,
+                "JSON should include configuration");
+    TEST_ASSERT(strstr(json, "\"static_digest\":\"sha256:") != NULL,
+                "JSON should include a static configuration digest");
     TEST_ASSERT(strstr(json, "\"recent_decisions\"") != NULL,
                 "JSON should include recent decisions");
-    TEST_ASSERT(strstr(json, "\"metrics_snapshot\"") != NULL,
-                "JSON should include metrics");
-    TEST_ASSERT(strstr(json, "\"dynconf_state\"") != NULL,
-                "JSON should include dynconf state");
-    TEST_ASSERT(strstr(json, "\"limits_memory_bytes\"") != NULL
-                && strstr(json, "\"limits_timeout_ms\"") != NULL
-                && strstr(json,
-                    "\"limits_streaming_buffer_bytes\"") != NULL
-                && strstr(json, "\"limits_max_inflight\"") != NULL,
-                "effective_config should expose Config V2 limit keys");
-    TEST_ASSERT(strstr(json, "\"policy\": \"force\"") != NULL,
-                "JSON should expose configured streaming policy");
-    TEST_ASSERT(strstr(json, "\"policy_source\": \"configured\"") != NULL,
-                "JSON should expose configured policy source");
-    TEST_ASSERT(strstr(json,
-                "\"threshold_explicit\": true") == NULL,
-                "JSON should not expose internalized threshold_explicit");
-    TEST_ASSERT(strstr(json, "\"reason_code\": 11") != NULL,
-                "JSON should include recorded reason");
-
-    conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
-    conf.stream.policy_explicit = 1;
-    memset(&b, 0, sizeof(b));
-    rc = ngx_http_markdown_diagnostics_build_json(&r, &b);
-    TEST_ASSERT(rc == NGX_OK,
-                "explicit auto diagnostics JSON should succeed");
-    json = (const char *) b.pos;
-    TEST_ASSERT(strstr(json, "\"policy\": \"auto\"") != NULL,
-                "JSON should expose explicit auto streaming policy");
-    TEST_ASSERT(strstr(json,
-                "\"policy_source\": \"configured\"") != NULL,
-                "explicit auto streaming policy should be configured");
+    TEST_ASSERT(strstr(json, "\"profile\"") == NULL
+                && strstr(json, "\"streaming_config\"") == NULL
+                && strstr(json, "\"metrics_snapshot\"") == NULL
+                && strstr(json, "\"streaming_metrics\"") == NULL,
+                "JSON should not expose removed compatibility fields");
+    TEST_ASSERT(strstr(json, "\"reason\":\"converted\"") != NULL,
+                "JSON should include the canonical reason string");
 
     TEST_PASS("Access and JSON builder covered");
 }
@@ -659,7 +688,6 @@ test_json_preserves_unified_error_policy(void)
     struct sockaddr_in       addr;
     ngx_buf_t                b;
     ngx_int_t                rc;
-    char                     streaming_expected[96];
     char                     effective_expected[96];
     ngx_uint_t               i;
 
@@ -677,14 +705,10 @@ test_json_preserves_unified_error_policy(void)
         TEST_ASSERT(rc == NGX_OK,
                     "diagnostics JSON should render each error policy");
 
-        snprintf(streaming_expected, sizeof(streaming_expected),
-                 "\"on_error\": \"%s\"", cases[i].value);
         snprintf(effective_expected, sizeof(effective_expected),
-                 "\"error_policy\": \"%s\"", cases[i].value);
-        TEST_ASSERT(strstr((const char *) b.pos, streaming_expected) != NULL,
-                    "streaming_config should preserve the unified policy");
+                 "\"error_policy\":\"%s\"", cases[i].value);
         TEST_ASSERT(strstr((const char *) b.pos, effective_expected) != NULL,
-                    "effective_config should preserve the unified policy");
+                    "effective should preserve the unified policy");
     }
 
     TEST_PASS("Every unified error policy is preserved in diagnostics JSON");
@@ -692,7 +716,7 @@ test_json_preserves_unified_error_policy(void)
 
 
 static void
-test_balanced_profile_reports_profile_policy_source(void)
+test_diagnostics_has_no_legacy_profile_surface(void)
 {
     ngx_http_request_t       r;
     ngx_connection_t         c;
@@ -702,7 +726,7 @@ test_balanced_profile_reports_profile_policy_source(void)
     ngx_int_t                rc;
     const char              *json;
 
-    TEST_SUBSECTION("balanced profile reports profile streaming source");
+    TEST_SUBSECTION("diagnostics has no legacy profile surface");
 
     reset_test_state();
     init_request(&r, &c, &conf, &addr);
@@ -714,13 +738,12 @@ test_balanced_profile_reports_profile_policy_source(void)
     TEST_ASSERT(rc == NGX_OK,
                 "balanced profile diagnostics JSON should succeed");
     json = (const char *) b.pos;
-    /* Profiles removed in 0.9.2; diagnostics emits "none" for compat */
-    TEST_ASSERT(strstr(json, "\"profile\": \"none\"") != NULL,
-                "diagnostics should expose the none profile (removed)");
-    TEST_ASSERT(strstr(json, "\"policy\": \"auto\"") != NULL,
-                "default auto streaming policy preserved");
-    TEST_ASSERT(strstr(json, "\"policy_source\": \"default\"") != NULL,
-                "auto policy with no profile should report default source");
+    TEST_ASSERT(strstr(json, "\"profile\"") == NULL
+                && strstr(json, "\"streaming_config\"") == NULL,
+                "removed profile and streaming fields must stay absent");
+    TEST_ASSERT(strstr(json, "\"effective\":") != NULL
+                && strstr(json, "\"effective_sources\":") != NULL,
+                "effective configuration must carry the replacement surface");
 
     TEST_PASS("Balanced profile streaming source is preserved");
 }
@@ -760,7 +783,8 @@ test_json_buffer_scales_with_ring_count(void)
                     + (150 * NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE);
     TEST_ASSERT((size_t) (b.end - b.start) == expected_size,
                 "JSON buffer should scale with recorded decisions");
-    TEST_ASSERT(strstr((const char *) b.pos, "\"reason_code\": 149") != NULL,
+    TEST_ASSERT(strstr((const char *) b.pos, "\"reason\":\"converted\"")
+                != NULL,
                 "JSON should include newest high-count decision");
 
     TEST_PASS("Diagnostics JSON buffer scaling covered");
@@ -977,7 +1001,7 @@ main(void)
     test_recording_request_resets_between_config_cycles();
     test_access_and_json_builder();
     test_json_preserves_unified_error_policy();
-    test_balanced_profile_reports_profile_policy_source();
+    test_diagnostics_has_no_legacy_profile_surface();
     test_json_buffer_scales_with_ring_count();
     test_json_builder_rejects_invalid_ring_state();
     test_access_json_and_logging_failure_branches();

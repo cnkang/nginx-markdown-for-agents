@@ -528,6 +528,51 @@ ngx_http_markdown_record_conversion_latency(ngx_msec_t elapsed_ms)
     NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency.gt_1000ms);
 }
 
+/* Record the frozen v1 histogram with the engine selected for this request. */
+static void
+ngx_http_markdown_record_conversion_latency_for_path(ngx_uint_t path,
+                                                     ngx_msec_t elapsed_ms)
+{
+    ngx_http_markdown_record_conversion_latency(elapsed_ms);
+
+    if (path == NGX_HTTP_MARKDOWN_PATH_STREAMING) {
+        NGX_HTTP_MARKDOWN_METRIC_ADD(
+            conversion_latency_v1.streaming.sum_ms, elapsed_ms);
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency_v1.streaming.count);
+        if (elapsed_ms <= 10) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                conversion_latency_v1.streaming.le_10ms);
+        } else if (elapsed_ms <= 100) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                conversion_latency_v1.streaming.le_100ms);
+        } else if (elapsed_ms <= 1000) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                conversion_latency_v1.streaming.le_1000ms);
+        } else {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                conversion_latency_v1.streaming.gt_1000ms);
+        }
+        return;
+    }
+
+    NGX_HTTP_MARKDOWN_METRIC_ADD(
+        conversion_latency_v1.full_buffer.sum_ms, elapsed_ms);
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency_v1.full_buffer.count);
+    if (elapsed_ms <= 10) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            conversion_latency_v1.full_buffer.le_10ms);
+    } else if (elapsed_ms <= 100) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            conversion_latency_v1.full_buffer.le_100ms);
+    } else if (elapsed_ms <= 1000) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            conversion_latency_v1.full_buffer.le_1000ms);
+    } else {
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            conversion_latency_v1.full_buffer.gt_1000ms);
+    }
+}
+
 /*
  * Attempt conditional-request shortcut (If-None-Match / 304).
  *
@@ -837,7 +882,8 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
     ctx->error.last_category = error_category;
     ctx->error.has_category = 1;
 
-    ngx_http_markdown_record_conversion_latency(elapsed_ms);
+    ngx_http_markdown_record_conversion_latency_for_path(
+        ctx->processing_path, elapsed_ms);
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
 
     switch (error_category) {
@@ -855,17 +901,25 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
     switch (result->error_code) {
         case ERROR_DECOMPRESSION_BUDGET_EXCEEDED:
             NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total);
+            ngx_http_markdown_record_decompression_failure_budget(
+                ctx->decompression.type);
             NGX_HTTP_MARKDOWN_METRIC_INC(
                 perf.decompression_budget_exceeded_total);
             break;
         case ERROR_DECOMPRESSION_FORMAT_ERROR:
             NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.format_error_total);
+            ngx_http_markdown_record_decompression_failure_format(
+                ctx->decompression.type);
             break;
         case ERROR_DECOMPRESSION_TRUNCATED_INPUT:
             NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.truncated_input_total);
+            ngx_http_markdown_record_decompression_failure_truncated(
+                ctx->decompression.type);
             break;
         case ERROR_DECOMPRESSION_IO_ERROR:
             NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.io_error_total);
+            ngx_http_markdown_record_decompression_failure_io(
+                ctx->decompression.type);
             break;
         case ERROR_PARSE_TIMEOUT:
             NGX_HTTP_MARKDOWN_METRIC_INC(
@@ -956,7 +1010,8 @@ ngx_http_markdown_record_conversion_success(ngx_http_markdown_ctx_t *ctx,
                                             ngx_msec_t elapsed_ms)
 {
     ctx->conversion.succeeded = 1;
-    ngx_http_markdown_record_conversion_latency(elapsed_ms);
+    ngx_http_markdown_record_conversion_latency_for_path(
+        ctx->processing_path, elapsed_ms);
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
     NGX_HTTP_MARKDOWN_METRIC_ADD(input_bytes, ctx->buffer.size);
     NGX_HTTP_MARKDOWN_METRIC_ADD(output_bytes, result->markdown_len);

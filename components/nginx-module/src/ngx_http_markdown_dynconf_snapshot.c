@@ -58,60 +58,6 @@ ngx_http_markdown_snapshot_flag(u_char *p, u_char *last,
 
 
 /*
- * Helper: append a size_t field as a numeric string.
- *
- * Parameters:
- *   p    - Current write position
- *   last - End of buffer
- *   key  - JSON key name
- *   val  - Size value in bytes
- *   trailing_comma - 1 to append comma, 0 for last field
- *
- * Returns:
- *   Updated write position
- */
-static u_char *
-ngx_http_markdown_snapshot_size(u_char *p, u_char *last,
-    const char *key, size_t val, ngx_uint_t trailing_comma)
-{
-    if (trailing_comma) {
-        p = ngx_slprintf(p, last, "    \"%s\": \"%uz\",\n", key, val);
-    } else {
-        p = ngx_slprintf(p, last, "    \"%s\": \"%uz\"\n", key, val);
-    }
-
-    return p;
-}
-
-
-/*
- * Helper: append a millisecond field as a numeric string.
- *
- * Parameters:
- *   p    - Current write position
- *   last - End of buffer
- *   key  - JSON key name
- *   val  - Millisecond value
- *   trailing_comma - 1 to append comma, 0 for last field
- *
- * Returns:
- *   Updated write position
- */
-static u_char *
-ngx_http_markdown_snapshot_msec(u_char *p, u_char *last,
-    const char *key, ngx_msec_t val, ngx_uint_t trailing_comma)
-{
-    if (trailing_comma) {
-        p = ngx_slprintf(p, last, "    \"%s\": \"%M\",\n", key, val);
-    } else {
-        p = ngx_slprintf(p, last, "    \"%s\": \"%M\"\n", key, val);
-    }
-
-    return p;
-}
-
-
-/*
  * Helper: append a string field as a quoted JSON value.
  *
  * Parameters:

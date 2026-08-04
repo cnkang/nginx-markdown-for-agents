@@ -28,7 +28,7 @@
       "default": "(per-key inheritance)",
       "name": "markdown_limits",
       "status": "active",
-      "syntax": "memory=<size> timeout=<time> streaming_buffer=<size> max_inflight=<N>",
+      "syntax": "key=value ...",
       "classification": "active",
       "handler": "ngx_http_markdown_limits",
       "args": "1_or_more",
@@ -383,7 +383,7 @@
       "status": "active",
       "syntax": "on|off",
       "classification": "active",
-      "handler": "ngx_conf_set_flag_slot",
+      "handler": "ngx_http_markdown_dynconf_flag",
       "args": "flag",
       "conf_offset": "NGX_HTTP_MAIN_CONF_OFFSET",
       "source_flags": "NGX_HTTP_MAIN_CONF|NGX_CONF_FLAG",
@@ -417,7 +417,7 @@
       "status": "active",
       "syntax": "on|off",
       "classification": "active",
-      "handler": "ngx_conf_set_flag_slot",
+      "handler": "ngx_http_markdown_dynconf_flag",
       "args": "flag",
       "conf_offset": "NGX_HTTP_MAIN_CONF_OFFSET",
       "source_flags": "NGX_HTTP_MAIN_CONF|NGX_CONF_FLAG",
@@ -462,53 +462,85 @@
       "migration_target": null
     }
   ],
+  "reject_only_directives": [
+    {"name":"markdown_max_size","migration_target":"markdown_limits memory=<size>","default":"(not applicable)","syntax":"removed","classification":"reject_only","handler":"ngx_http_markdown_reject_removed_directive","args":"any","context":["http","server","location"],"conf_offset":"NGX_HTTP_LOC_CONF_OFFSET","source_flags":"NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY","post":null,"otel_classification":"none","status":"reject_only"},
+    {"name":"markdown_timeout","migration_target":"markdown_limits timeout=<time>","default":"(not applicable)","syntax":"removed","classification":"reject_only","handler":"ngx_http_markdown_reject_removed_directive","args":"any","context":["http","server","location"],"conf_offset":"NGX_HTTP_LOC_CONF_OFFSET","source_flags":"NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY","post":null,"otel_classification":"none","status":"reject_only"},
+    {"name":"markdown_streaming_budget","migration_target":"markdown_limits streaming_buffer=<size>","default":"(not applicable)","syntax":"removed","classification":"reject_only","handler":"ngx_http_markdown_reject_removed_directive","args":"any","context":["http","server","location"],"conf_offset":"NGX_HTTP_LOC_CONF_OFFSET","source_flags":"NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY","post":null,"otel_classification":"none","status":"reject_only"},
+    {"name":"markdown_on_error","migration_target":"markdown_error_policy pass|fail_closed|status <code>","default":"(not applicable)","syntax":"removed","classification":"reject_only","handler":"ngx_http_markdown_reject_removed_directive","args":"any","context":["http","server","location"],"conf_offset":"NGX_HTTP_LOC_CONF_OFFSET","source_flags":"NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY","post":null,"otel_classification":"none","status":"reject_only"},
+    {"name":"markdown_streaming_on_error","migration_target":"markdown_error_policy pass|fail_closed|status <code>","default":"(not applicable)","syntax":"removed","classification":"reject_only","handler":"ngx_http_markdown_reject_removed_directive","args":"any","context":["http","server","location"],"conf_offset":"NGX_HTTP_LOC_CONF_OFFSET","source_flags":"NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY","post":null,"otel_classification":"none","status":"reject_only"},
+    {"name":"markdown_on_wildcard","migration_target":"markdown_accept strict|wildcard|force","default":"(not applicable)","syntax":"removed","classification":"reject_only","handler":"ngx_http_markdown_reject_removed_directive","args":"any","context":["http","server","location"],"conf_offset":"NGX_HTTP_LOC_CONF_OFFSET","source_flags":"NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY","post":null,"otel_classification":"none","status":"reject_only"},
+    {"name":"markdown_etag","migration_target":"markdown_cache_validation off|ims_only|full","default":"(not applicable)","syntax":"removed","classification":"reject_only","handler":"ngx_http_markdown_reject_removed_directive","args":"any","context":["http","server","location"],"conf_offset":"NGX_HTTP_LOC_CONF_OFFSET","source_flags":"NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY","post":null,"otel_classification":"none","status":"reject_only"},
+    {"name":"markdown_etag_policy","migration_target":"markdown_cache_validation off|ims_only|full","default":"(not applicable)","syntax":"removed","classification":"reject_only","handler":"ngx_http_markdown_reject_removed_directive","args":"any","context":["http","server","location"],"conf_offset":"NGX_HTTP_LOC_CONF_OFFSET","source_flags":"NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY","post":null,"otel_classification":"none","status":"reject_only"},
+    {"name":"markdown_conditional_requests","migration_target":"markdown_cache_validation off|ims_only|full","default":"(not applicable)","syntax":"removed","classification":"reject_only","handler":"ngx_http_markdown_reject_removed_directive","args":"any","context":["http","server","location"],"conf_offset":"NGX_HTTP_LOC_CONF_OFFSET","source_flags":"NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY","post":null,"otel_classification":"none","status":"reject_only"},
+    {"name":"markdown_trust_forwarded_headers","migration_target":"markdown_trusted_proxies <CIDR>...","default":"(not applicable)","syntax":"removed","classification":"reject_only","handler":"ngx_http_markdown_reject_removed_directive","args":"any","context":["http","server","location"],"conf_offset":"NGX_HTTP_LOC_CONF_OFFSET","source_flags":"NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY","post":null,"otel_classification":"none","status":"reject_only"},
+    {"name":"markdown_forwarded_headers","migration_target":"markdown_trusted_proxies <CIDR>...","default":"(not applicable)","syntax":"removed","classification":"reject_only","handler":"ngx_http_markdown_reject_removed_directive","args":"any","context":["http","server","location"],"conf_offset":"NGX_HTTP_LOC_CONF_OFFSET","source_flags":"NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY","post":null,"otel_classification":"none","status":"reject_only"},
+    {"name":"markdown_large_body_threshold","migration_target":"(removed, no replacement)","default":"(not applicable)","syntax":"removed","classification":"reject_only","handler":"ngx_http_markdown_reject_removed_directive","args":"any","context":["http","server","location"],"conf_offset":"NGX_HTTP_LOC_CONF_OFFSET","source_flags":"NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY","post":null,"otel_classification":"none","status":"reject_only"},
+    {"name":"markdown_streaming_engine","migration_target":"markdown_streaming","default":"(not applicable)","syntax":"removed","classification":"reject_only","handler":"ngx_http_markdown_reject_streaming_engine","args":"1","context":["http","server","location"],"conf_offset":"NGX_HTTP_LOC_CONF_OFFSET","source_flags":"NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1","post":null,"otel_classification":"none","status":"reject_only"},
+    {"name":"markdown_memory_budget","migration_target":"markdown_limits memory=<size>","default":"(not applicable)","syntax":"removed","classification":"reject_only","handler":"ngx_http_markdown_reject_removed_directive","args":"any","context":["http","server","location"],"conf_offset":"NGX_HTTP_LOC_CONF_OFFSET","source_flags":"NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY","post":null,"otel_classification":"none","status":"reject_only"},
+    {"name":"markdown_otel_tracing","migration_target":"removed (OTel subsystem deleted)","default":"(not applicable)","syntax":"removed","classification":"reject_only","handler":"ngx_http_markdown_reject_removed_directive","args":"any","context":["http","server","location"],"conf_offset":"NGX_HTTP_LOC_CONF_OFFSET","source_flags":"NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY","post":null,"otel_classification":"otel_removed","status":"reject_only"},
+    {"name":"markdown_otel_metrics","migration_target":"removed (OTel subsystem deleted)","default":"(not applicable)","syntax":"removed","classification":"reject_only","handler":"ngx_http_markdown_reject_removed_directive","args":"any","context":["http","server","location"],"conf_offset":"NGX_HTTP_LOC_CONF_OFFSET","source_flags":"NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY","post":null,"otel_classification":"otel_removed","status":"reject_only"},
+    {"name":"markdown_otel_service_name","migration_target":"removed (OTel subsystem deleted)","default":"(not applicable)","syntax":"removed","classification":"reject_only","handler":"ngx_http_markdown_reject_removed_directive","args":"any","context":["http","server","location"],"conf_offset":"NGX_HTTP_LOC_CONF_OFFSET","source_flags":"NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY","post":null,"otel_classification":"otel_removed","status":"reject_only"},
+    {"name":"markdown_otel_span_buffer_size","migration_target":"removed (OTel subsystem deleted)","default":"(not applicable)","syntax":"removed","classification":"reject_only","handler":"ngx_http_markdown_reject_removed_directive","args":"any","context":["http","server","location"],"conf_offset":"NGX_HTTP_LOC_CONF_OFFSET","source_flags":"NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY","post":null,"otel_classification":"otel_removed","status":"reject_only"},
+    {"name":"markdown_otel_export_timeout","migration_target":"removed (OTel subsystem deleted)","default":"(not applicable)","syntax":"removed","classification":"reject_only","handler":"ngx_http_markdown_reject_removed_directive","args":"any","context":["http","server","location"],"conf_offset":"NGX_HTTP_LOC_CONF_OFFSET","source_flags":"NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY","post":null,"otel_classification":"otel_removed","status":"reject_only"}
+  ],
+  "otel": {
+    "directives": [],
+    "reject_only": [
+      {"name":"markdown_otel_tracing","status":"reject_only","otel_classification":"otel_removed","migration_target":"removed (OTel subsystem deleted)"},
+      {"name":"markdown_otel_metrics","status":"reject_only","otel_classification":"otel_removed","migration_target":"removed (OTel subsystem deleted)"},
+      {"name":"markdown_otel_service_name","status":"reject_only","otel_classification":"otel_removed","migration_target":"removed (OTel subsystem deleted)"},
+      {"name":"markdown_otel_span_buffer_size","status":"reject_only","otel_classification":"otel_removed","migration_target":"removed (OTel subsystem deleted)"},
+      {"name":"markdown_otel_export_timeout","status":"reject_only","otel_classification":"otel_removed","migration_target":"removed (OTel subsystem deleted)"}
+    ],
+    "status": "stable"
+  },
   "dynconf_keys": [
     {
-      "name": "markdown_filter",
+      "name": "filter",
       "type": "flag",
-      "allowed_values": [
-        "on",
-        "off"
-      ],
+      "allowed_values": ["on", "off"],
       "default": "inherited",
       "inheritance": "per-key",
       "dynamic": true,
       "unknown_key": "reject",
       "required": false,
-      "duplicate": "last_value_wins"
+      "duplicate": "reject"
     },
     {
       "name": "prune_noise",
       "type": "flag",
-      "allowed_values": [
-        "on",
-        "off"
-      ],
+      "allowed_values": ["on", "off"],
       "default": "inherited",
       "inheritance": "per-key",
       "dynamic": true,
       "unknown_key": "reject",
       "required": false,
-      "duplicate": "last_value_wins"
+      "duplicate": "reject"
     },
     {
       "name": "log_verbosity",
       "type": "enum",
-      "allowed_values": [
-        "error",
-        "warn",
-        "info",
-        "debug"
-      ],
+      "allowed_values": ["error", "warn", "info", "debug"],
       "default": "inherited",
       "inheritance": "per-key",
       "dynamic": true,
       "unknown_key": "reject",
       "required": false,
-      "duplicate": "last_value_wins"
+      "duplicate": "reject"
     },
     {
-      "name": "streaming_budget",
+      "name": "error_policy",
+      "type": "enum",
+      "allowed_values": ["pass", "fail_closed", "status 429", "status 503"],
+      "default": "inherited",
+      "inheritance": "per-key",
+      "dynamic": true,
+      "unknown_key": "reject",
+      "required": false,
+      "duplicate": "reject"
+    },
+    {
+      "name": "streaming_buffer",
       "type": "size",
       "allowed_values": [],
       "default": "inherited",
@@ -516,31 +548,18 @@
       "dynamic": true,
       "unknown_key": "reject",
       "required": false,
-      "duplicate": "last_value_wins"
-    },
-    {
-      "name": "memory_budget",
-      "type": "size",
-      "allowed_values": [],
-      "default": "inherited",
-      "inheritance": "per-key",
-      "dynamic": true,
-      "unknown_key": "reject",
-      "required": false,
-      "duplicate": "last_value_wins"
+      "duplicate": "reject"
     },
     {
       "name": "schema_version",
       "type": "version",
-      "allowed_values": [
-        "0.9"
-      ],
+      "allowed_values": ["1"],
       "default": "required",
-      "inheritance": "per-key",
-      "dynamic": true,
+      "inheritance": "none",
+      "dynamic": false,
       "unknown_key": "reject",
       "required": true,
-      "duplicate": "last_value_wins"
+      "duplicate": "reject"
     }
   ],
   "ffi_exports": [
@@ -669,6 +688,36 @@
       "signature": "markdown_detect_conflicts(profile: u8, explicit: *const FFIExplicitConfig, effective: *const FFIEffectiveConfig) -> FFIConflictList",
       "params": "profile: u8, explicit: *const FFIExplicitConfig, effective: *const FFIEffectiveConfig",
       "return_type": "FFIConflictList",
+      "safety": "unsafe",
+      "abi_version": 1,
+      "generated_header": "components/rust-converter/include/markdown_converter.h",
+      "classification": "INTERNAL_ONLY"
+    },
+    {
+      "name": "markdown_dynconf_parse",
+      "signature": "markdown_dynconf_parse(data: *const u8, data_len: usize, result: *mut FFIDynconfResult) -> ()",
+      "params": "data: *const u8, data_len: usize, result: *mut FFIDynconfResult",
+      "return_type": "()",
+      "safety": "unsafe",
+      "abi_version": 1,
+      "generated_header": "components/rust-converter/include/markdown_converter.h",
+      "classification": "INTERNAL_ONLY"
+    },
+    {
+      "name": "markdown_dynconf_result_free",
+      "signature": "markdown_dynconf_result_free(result: *mut FFIDynconfResult) -> ()",
+      "params": "result: *mut FFIDynconfResult",
+      "return_type": "()",
+      "safety": "unsafe",
+      "abi_version": 1,
+      "generated_header": "components/rust-converter/include/markdown_converter.h",
+      "classification": "INTERNAL_ONLY"
+    },
+    {
+      "name": "markdown_dynconf_result_init",
+      "signature": "markdown_dynconf_result_init(result: *mut FFIDynconfResult) -> ()",
+      "params": "result: *mut FFIDynconfResult",
+      "return_type": "()",
       "safety": "unsafe",
       "abi_version": 1,
       "generated_header": "components/rust-converter/include/markdown_converter.h",
@@ -815,6 +864,16 @@
       "classification": "INTERNAL_ONLY"
     },
     {
+      "name": "markdown_sha256_hex",
+      "signature": "markdown_sha256_hex(data: *const u8, data_len: usize, output: *mut u8, output_len: usize) -> u32",
+      "params": "data: *const u8, data_len: usize, output: *mut u8, output_len: usize",
+      "return_type": "u32",
+      "safety": "unsafe",
+      "abi_version": 1,
+      "generated_header": "components/rust-converter/include/markdown_converter.h",
+      "classification": "INTERNAL_ONLY"
+    },
+    {
       "name": "markdown_streaming_abort",
       "signature": "markdown_streaming_abort(handle: *mut StreamingConverterHandle) -> ()",
       "params": "handle: *mut StreamingConverterHandle",
@@ -906,408 +965,17 @@
     }
   ],
   "metrics": [
-    {
-      "labels": [
-        "path"
-      ],
-      "name": "nginx_markdown_path_conversions_total",
-      "type": "counter",
-      "order": 0,
-      "bounded_cardinality": "bounded"
-    },
-    {
-      "labels": [
-        "path"
-      ],
-      "name": "nginx_markdown_path_conversion_time_ms_total",
-      "type": "counter",
-      "order": 1,
-      "bounded_cardinality": "bounded"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_inflight_current",
-      "type": "gauge",
-      "order": 2,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_inflight_high_watermark",
-      "type": "gauge",
-      "order": 3,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_overload_total",
-      "type": "counter",
-      "order": 4,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_backpressure_total",
-      "type": "counter",
-      "order": 5,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_backpressure_resume_total",
-      "type": "counter",
-      "order": 6,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_pending_output_high_watermark_bytes",
-      "type": "gauge",
-      "order": 7,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_decompression_streaming_total",
-      "type": "counter",
-      "order": 8,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_decompression_fullbuffer_total",
-      "type": "counter",
-      "order": 9,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_perf_decompression_budget_exceeded_total",
-      "type": "counter",
-      "order": 10,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_zero_copy_output_total",
-      "type": "counter",
-      "order": 11,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_copied_output_total",
-      "type": "counter",
-      "order": 12,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_requests_total",
-      "type": "counter",
-      "order": 13,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_conversions_total",
-      "type": "counter",
-      "order": 14,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_passthrough_total",
-      "type": "counter",
-      "order": 15,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [
-        "reason"
-      ],
-      "name": "nginx_markdown_skips_total",
-      "type": "counter",
-      "order": 16,
-      "bounded_cardinality": "bounded"
-    },
-    {
-      "labels": [
-        "reason"
-      ],
-      "name": "nginx_markdown_failures_total",
-      "type": "counter",
-      "order": 17,
-      "bounded_cardinality": "bounded"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_failopen_total",
-      "type": "counter",
-      "order": 18,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_large_response_path_total",
-      "type": "counter",
-      "order": 19,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_streaming_path_total",
-      "type": "counter",
-      "order": 20,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [
-        "result"
-      ],
-      "name": "nginx_markdown_streaming_total",
-      "type": "counter",
-      "order": 21,
-      "bounded_cardinality": "bounded"
-    },
-    {
-      "labels": [
-        "stage"
-      ],
-      "name": "nginx_markdown_streaming_failures_total",
-      "type": "counter",
-      "order": 22,
-      "bounded_cardinality": "bounded"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_streaming_budget_exceeded_total",
-      "type": "counter",
-      "order": 23,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_streaming_shadow_total",
-      "type": "counter",
-      "order": 24,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_streaming_shadow_diff_total",
-      "type": "counter",
-      "order": 25,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_streaming_ttfb_seconds",
-      "type": "gauge",
-      "order": 26,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_streaming_peak_memory_bytes",
-      "type": "gauge",
-      "order": 27,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [
-        "engine"
-      ],
-      "name": "nginx_markdown_streaming_engine_choice_total",
-      "type": "counter",
-      "order": 28,
-      "bounded_cardinality": "bounded"
-    },
-    {
-      "labels": [
-        "action",
-        "phase"
-      ],
-      "name": "nginx_markdown_streaming_fallback_total",
-      "type": "counter",
-      "order": 29,
-      "bounded_cardinality": "bounded"
-    },
-    {
-      "labels": [
-        "action",
-        "phase"
-      ],
-      "name": "nginx_markdown_streaming_failure_total",
-      "type": "counter",
-      "order": 30,
-      "bounded_cardinality": "bounded"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_streaming_candidate_total",
-      "type": "counter",
-      "order": 31,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_true_streaming_selected_total",
-      "type": "counter",
-      "order": 32,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_streaming_output_bytes_total",
-      "type": "counter",
-      "order": 33,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_excluded_content_type_total",
-      "type": "counter",
-      "order": 34,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_input_bytes_total",
-      "type": "counter",
-      "order": 35,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_output_bytes_total",
-      "type": "counter",
-      "order": 36,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_estimated_token_savings_total",
-      "type": "counter",
-      "order": 37,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [
-        "format"
-      ],
-      "name": "nginx_markdown_decompressions_total",
-      "type": "counter",
-      "order": 38,
-      "bounded_cardinality": "bounded"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_decompression_failures_total",
-      "type": "counter",
-      "order": 39,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_decompression_budget_exceeded_total",
-      "type": "counter",
-      "order": 40,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_decompression_format_error_total",
-      "type": "counter",
-      "order": 41,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_decompression_truncated_input_total",
-      "type": "counter",
-      "order": 42,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_decompression_io_error_total",
-      "type": "counter",
-      "order": 43,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_replay_buffer_errors_total",
-      "type": "counter",
-      "order": 44,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_parse_timeouts_total",
-      "type": "counter",
-      "order": 45,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_parse_budget_exceeded_total",
-      "type": "counter",
-      "order": 46,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_delivery_total",
-      "type": "counter",
-      "order": 47,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_decision_total",
-      "type": "counter",
-      "order": 48,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [
-        "le"
-      ],
-      "name": "nginx_markdown_conversion_latency_bucket_total",
-      "type": "counter",
-      "order": 49,
-      "bounded_cardinality": "bounded"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_per_path_entries",
-      "type": "gauge",
-      "order": 50,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_per_path_conversions_total",
-      "type": "counter",
-      "order": 51,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_per_path_conversion_time_ms_total",
-      "type": "counter",
-      "order": 52,
-      "bounded_cardinality": "fixed"
-    },
-    {
-      "labels": [],
-      "name": "nginx_markdown_per_path_overflow_total",
-      "type": "counter",
-      "order": 53,
-      "bounded_cardinality": "fixed"
-    }
+    {"name":"nginx_markdown_requests_total","type":"counter","labels":["outcome","reason","stage"],"order":0,"bounded_cardinality":"bounded"},
+    {"name":"nginx_markdown_conversion_attempts_total","type":"counter","labels":["engine"],"order":1,"bounded_cardinality":"bounded"},
+    {"name":"nginx_markdown_conversion_deliveries_total","type":"counter","labels":["engine"],"order":2,"bounded_cardinality":"bounded"},
+    {"name":"nginx_markdown_conversion_duration_seconds","type":"histogram","labels":["engine"],"order":3,"bounded_cardinality":"bounded"},
+    {"name":"nginx_markdown_input_bytes_total","type":"counter","labels":[],"order":4,"bounded_cardinality":"fixed"},
+    {"name":"nginx_markdown_output_bytes_total","type":"counter","labels":[],"order":5,"bounded_cardinality":"fixed"},
+    {"name":"nginx_markdown_inflight_requests","type":"gauge","labels":[],"order":6,"bounded_cardinality":"fixed"},
+    {"name":"nginx_markdown_streaming_events_total","type":"counter","labels":["reason","transition"],"order":7,"bounded_cardinality":"bounded"},
+    {"name":"nginx_markdown_decompression_events_total","type":"counter","labels":["encoding","outcome","reason"],"order":8,"bounded_cardinality":"bounded"},
+    {"name":"nginx_markdown_dynconf_reloads_total","type":"counter","labels":["outcome","reason"],"order":9,"bounded_cardinality":"bounded"},
+    {"name":"nginx_markdown_build_info","type":"gauge","labels":["features","nginx_version","version"],"order":10,"bounded_cardinality":"bounded"}
   ],
   "reason_codes": [
     {
@@ -1491,12 +1159,19 @@
       "name": "BypassNoTransform",
       "string": "bypass_no_transform",
       "c_accessor": "reason_str_bypass_no_transform"
+    },
+    {
+      "discriminant": 26,
+      "metric_key": "markdown_errors_total",
+      "name": "EncodingHeaderInvalid",
+      "string": "encoding_header_invalid",
+      "c_accessor": "reason_str_encoding_header_invalid"
     }
   ],
   "schema_version": "0.9.2",
-  "contract_version": "2",
+  "contract_version": "1",
   "ffi_abi_version": 1,
   "ffi_classification": "INTERNAL_ONLY",
   "directive_count": 25,
-  "registry_count": 26
+  "registry_count": 27
 }

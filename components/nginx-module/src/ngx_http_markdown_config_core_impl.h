@@ -196,6 +196,7 @@ ngx_http_markdown_create_main_conf(ngx_conf_t *cf)
     conf->dynconf_owner_conf = NULL;
     conf->trusted_proxies = NULL;
     conf->trusted_proxies_configured = 0;
+    conf->trusted_proxies_manifest = NULL;
 
     return conf;
 }
@@ -276,6 +277,111 @@ ngx_http_markdown_check_streaming_cache_conflict(ngx_conf_t *cf,
     return NGX_CONF_OK;
 }
 
+static void
+ngx_http_markdown_mark_static_explicit_fields(
+    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *prev)
+{
+    ngx_uint_t  mask;
+
+    mask = conf->advanced.static_explicit_mask;
+    if (conf->enabled_source != NGX_HTTP_MARKDOWN_ENABLED_UNSET) {
+        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_FILTER;
+    }
+    if (conf->limits.configured) {
+        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_LIMITS;
+    }
+    if (conf->flavor != NGX_CONF_UNSET_UINT) {
+        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_FLAVOR;
+    }
+    if (conf->token_estimate != NGX_CONF_UNSET) {
+        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_TOKEN;
+    }
+    if (conf->front_matter != NGX_CONF_UNSET) {
+        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_FRONT_MATTER;
+    }
+    if (conf->accept_policy != NGX_CONF_UNSET_UINT) {
+        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_ACCEPT;
+    }
+    if (conf->policy.auth_policy != NGX_CONF_UNSET_UINT) {
+        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_AUTH_POLICY;
+    }
+    if (conf->policy.auth_cookies != NGX_CONF_UNSET_PTR) {
+        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_AUTH_COOKIES;
+    }
+    if (conf->policy.conditional_requests != NGX_CONF_UNSET_UINT
+        || conf->policy.generate_etag != NGX_CONF_UNSET)
+    {
+        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_CACHE;
+    }
+    if (conf->stream.policy != NGX_CONF_UNSET_UINT) {
+        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_STREAM;
+    }
+    if (conf->policy.log_verbosity != NGX_CONF_UNSET_UINT) {
+        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_LOG;
+    }
+    if (conf->routing.content_types != NGX_CONF_UNSET_PTR) {
+        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_CONTENT;
+    }
+    if (conf->advanced.prune_noise != NGX_CONF_UNSET) {
+        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_PRUNE;
+    }
+    if (conf->advanced.prune_selectors != NGX_CONF_UNSET_PTR) {
+        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_SELECTORS;
+    }
+    if (conf->advanced.prune_protection_selectors != NGX_CONF_UNSET_PTR) {
+        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_PROTECTION;
+    }
+    if (conf->decompress.auto_decompress != NGX_CONF_UNSET) {
+        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DECOMPRESS;
+    }
+    if (conf->advanced.dynconf_enabled != NGX_CONF_UNSET
+        || conf->advanced.dynconf_path.data != NULL)
+    {
+        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DYNCONF;
+    }
+    if (conf->advanced.dynconf_dry_run != NGX_CONF_UNSET) {
+        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DRY_RUN;
+    }
+    if (conf->ops.diagnostics_enabled != NGX_CONF_UNSET) {
+        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DIAGNOSTICS;
+    }
+    if (conf->stream.excluded_types != NGX_CONF_UNSET_PTR) {
+        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_EXCLUDED;
+    }
+    if (conf->ops.metrics_enabled != NGX_CONF_UNSET) {
+        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_METRICS;
+    }
+    conf->advanced.static_explicit_mask = mask
+        | prev->advanced.static_explicit_mask;
+}
+
+
+static void
+ngx_http_markdown_mark_dynconf_block_fields(
+    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *prev)
+{
+    if (conf->advanced.prune_noise != NGX_CONF_UNSET) {
+        conf->advanced.dynconf_block_mask |=
+            NGX_HTTP_MARKDOWN_BLOCK_PRUNE_NOISE;
+    }
+    if (conf->policy.log_verbosity != NGX_CONF_UNSET_UINT) {
+        conf->advanced.dynconf_block_mask |=
+            NGX_HTTP_MARKDOWN_BLOCK_LOG_VERBOSITY;
+    }
+    if (conf->on_error != NGX_CONF_UNSET_UINT) {
+        conf->advanced.dynconf_block_mask |=
+            NGX_HTTP_MARKDOWN_BLOCK_ERROR_POLICY;
+    }
+    if (conf->limits.streaming_buffer != NGX_CONF_UNSET_SIZE) {
+        conf->advanced.dynconf_block_mask |=
+            NGX_HTTP_MARKDOWN_BLOCK_STREAMING_BUFFER;
+    }
+    conf->advanced.dynconf_block_mask |= prev->advanced.dynconf_block_mask;
+}
+
+
 /**
  * Create and initialize a per-location Markdown filter configuration structure.
  *
@@ -320,6 +426,7 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
     conf->routing.max_inflight = NGX_CONF_UNSET_UINT;
     conf->ops.diagnostics_enabled = NGX_CONF_UNSET;
+    conf->ops.metrics_enabled = NGX_CONF_UNSET;
 
     /* v0.8.0 streaming config */
     conf->stream.policy = NGX_CONF_UNSET_UINT;
@@ -349,6 +456,7 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
 
     /* 0.9.2 dynconf precedence model: block mask starts at 0 (no fields blocked) */
     conf->advanced.dynconf_block_mask = 0;
+    conf->advanced.static_explicit_mask = 0;
 
     return conf;
 }
@@ -473,6 +581,8 @@ ngx_http_markdown_merge_core_ops_values(ngx_http_markdown_conf_t *conf,
 {
     ngx_conf_merge_value(conf->ops.diagnostics_enabled,
                          prev->ops.diagnostics_enabled, 0);
+    ngx_conf_merge_value(conf->ops.metrics_enabled,
+                         prev->ops.metrics_enabled, 0);
 }
 
 static void
@@ -531,20 +641,6 @@ ngx_http_markdown_merge_advanced_values(ngx_http_markdown_conf_t *conf,
  * Returns:
  *   FFI cache_validation discriminant (0=off, 1=ims_only, 2=full)
  */
-static uint8_t
-ngx_http_markdown_conditional_to_ffi_cache_validation(ngx_uint_t cond)
-{
-    switch (cond) {
-    case NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED:
-        return 0;  /* Off */
-    case NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT:
-        return 2;  /* Full */
-    case NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE:
-    default:
-        return 1;  /* ImsOnly (safe default) */
-    }
-}
-
 /**
  * Merge per-location markdown filter configuration with inheritance from parent.
  *
@@ -563,53 +659,8 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     const ngx_http_markdown_conf_t      *prev = parent;
     ngx_http_markdown_conf_t            *conf = child;
 
-    /*
-     * Dynconf block mask propagation (0.9.2 precedence model).
-     *
-     * Step 1: Detect fields explicitly set at this level BEFORE merge
-     * replaces NGX_CONF_UNSET with inherited values.  In NGINX's merge
-     * model, conf (child) is always a server or location block — never
-     * the http-level conf.  If the child's field is not UNSET, it was
-     * explicitly set at this server/location level, so we set the
-     * block bit.
-     *
-     * An explicit setting in the http block does NOT set the bit
-     * (the http conf's fields flow through prev, not conf).
-     */
-
-    /* filter: block bit set during parsing in the filter handler */
-
-    /* prune_noise: set block bit if explicitly configured at this level */
-    if (conf->advanced.prune_noise != NGX_CONF_UNSET) {
-        conf->advanced.dynconf_block_mask |=
-            NGX_HTTP_MARKDOWN_BLOCK_PRUNE_NOISE;
-    }
-
-    /* log_verbosity: set block bit if explicitly configured */
-    if (conf->policy.log_verbosity != NGX_CONF_UNSET_UINT) {
-        conf->advanced.dynconf_block_mask |=
-            NGX_HTTP_MARKDOWN_BLOCK_LOG_VERBOSITY;
-    }
-
-    /* error_policy: set block bit if explicitly configured */
-    if (conf->on_error != NGX_CONF_UNSET_UINT) {
-        conf->advanced.dynconf_block_mask |=
-            NGX_HTTP_MARKDOWN_BLOCK_ERROR_POLICY;
-    }
-
-    /* streaming_buffer: set block bit if explicitly configured */
-    if (conf->limits.streaming_buffer != NGX_CONF_UNSET_SIZE) {
-        conf->advanced.dynconf_block_mask |=
-            NGX_HTTP_MARKDOWN_BLOCK_STREAMING_BUFFER;
-    }
-
-    /*
-     * Step 2: Inherit parent's block bits via OR.  This ensures a
-     * server block that blocks a field propagates to all child
-     * locations.  The child's own bits (set above or during parsing)
-     * are preserved.
-     */
-    conf->advanced.dynconf_block_mask |= prev->advanced.dynconf_block_mask;
+    ngx_http_markdown_mark_static_explicit_fields(conf, prev);
+    ngx_http_markdown_mark_dynconf_block_fields(conf, prev);
 
     ngx_http_markdown_merge_enabled(conf, prev);
 
@@ -979,18 +1030,6 @@ ngx_http_markdown_log_verbosity_name(ngx_uint_t value)
 }
 
 /*
- * Return human-readable name for metrics format (hardcoded to prometheus
- * after metrics_format directive removal in 0.9.2).
- */
-static const ngx_str_t *
-ngx_http_markdown_metrics_format_name(void)
-{
-    static ngx_str_t prometheus = ngx_string("prometheus");
-
-    return &prometheus;
-}
-
-/*
  * Return human-readable name for a compression type enum value.
  *
  * Parameters:
@@ -1288,8 +1327,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                        "conditional_requests=%V "
                        "log_verbosity=%V "
                         "content_types=%ui "
-                       "large_body_threshold=%uz "
-                        "metrics_format=%V"
+                       "large_body_threshold=%uz"
 #ifdef MARKDOWN_STREAMING_ENABLED
                         " streaming_policy=%s"
                         " streaming_budget=%uz"
@@ -1311,8 +1349,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                        ngx_http_markdown_conditional_requests_name(conf->policy.conditional_requests),
                        ngx_http_markdown_log_verbosity_name(conf->policy.log_verbosity),
                         content_type_count,
-                       conf->routing.large_body_threshold,
-                        ngx_http_markdown_metrics_format_name()
+                       conf->routing.large_body_threshold
 #ifdef MARKDOWN_STREAMING_ENABLED
                         , streaming_policy_str
                         , conf->stream.budget

@@ -1,31 +1,36 @@
-# Profile Inventory — Config V2 Field Mapping (Profiles, Wave 0)
+# Profile Inventory — Historical Config V2 Field Mapping (Wave 0 archive)
 
 | Field | Value |
 |-------|-------|
-| Version | 0.9.1 |
-| Feature | Profiles Production Defaults |
-| Status | Inventory |
+| Version | 0.9.1 (historical input) |
+| Feature | Retired profile bundles |
+| Status | Archive; not an active 0.9.2 contract |
 | Created | 2026-06-28 |
 
 ---
 
-This file is a profile-field map, not the 1.0 compatibility inventory. For
-active versus reject-only command-table state and evidence-backed stability
-classification, use
+This file preserves the pre-freeze profile-field map as Wave 0 evidence. The
+`markdown_profile` directive and every opaque profile bundle described below
+are removed from 0.9.2 and must not appear in an active configuration. For the
+current command-table state and evidence-backed stability classification, use
 [PUBLIC_SURFACE_INVENTORY.md](PUBLIC_SURFACE_INVENTORY.md). In particular,
-parser-stored OTel placeholders are not proof of production behavior.
+parser-stored OTel placeholders are not proof of production behavior. For
+current explicit replacement snippets, use the
+[configuration guide](../guides/CONFIGURATION.md#minimal-configuration)
+and [migration guide](../guides/MIGRATION-0.9.2.md).
 
-## 1. Active Config V2 Directives with Defaults
+## 1. Historical Config V2 Directives with Defaults
 
-Directives below are the **active** Config V2 directives registered in
+Directives below were the **active** Config V2 directives registered in
 `ngx_http_markdown_config_directives_impl.h`. Legacy reject-only stubs
 (markdown_max_size, markdown_timeout, markdown_streaming_budget,
 markdown_on_error, markdown_streaming_on_error, markdown_etag,
 markdown_etag_policy, markdown_conditional_requests, markdown_on_wildcard,
 markdown_trust_forwarded_headers, markdown_forwarded_headers,
 markdown_large_body_threshold, markdown_streaming_engine,
-markdown_memory_budget) are excluded — they emit
-`NGX_CONF_ERROR` with a migration hint and execute no behavior.
+markdown_memory_budget) are excluded. This historical list predates the
+0.9.2 removal of all migration stubs; the 0.9.2 binary emits NGINX's standard
+unknown-directive error for removed names.
 
 ### Core Conversion Directives
 

@@ -4,7 +4,6 @@
 //
 // Regenerate with: python3 tools/reason-codegen/generate.py
 
-
 //! Reason code enum — single source of truth for all decision reason codes.
 //!
 //! This module defines the canonical [`ReasonCode`] enum that represents
@@ -127,7 +126,6 @@ pub enum ReasonCode {
 
     /// Reason: encoding_header_invalid (stage: decompression)
     EncodingHeaderInvalid = 26,
-
 }
 
 #[cfg(test)]
@@ -280,81 +278,37 @@ impl ReasonCode {
             ReasonCode::SkippedAccept => {
                 "header_filter: Accept negotiation determined text/html preferred"
             }
-            ReasonCode::SkippedNoAccept => {
-                "header_filter: no Accept header present"
-            }
-            ReasonCode::SkippedConditional => {
-                "header_filter: conditional request matched (304)"
-            }
-            ReasonCode::DecompressionError => {
-                "body_filter: decompression error"
-            }
+            ReasonCode::SkippedNoAccept => "header_filter: no Accept header present",
+            ReasonCode::SkippedConditional => "header_filter: conditional request matched (304)",
+            ReasonCode::DecompressionError => "body_filter: decompression error",
             ReasonCode::DecompressionBudgetExceeded => {
                 "body_filter: decompression output exceeded budget"
             }
-            ReasonCode::DecompressionFormatError => {
-                "body_filter: invalid compression format"
-            }
-            ReasonCode::DecompressionTruncatedInput => {
-                "body_filter: truncated compressed input"
-            }
-            ReasonCode::DecompressionIoError => {
-                "body_filter: decompression I/O error"
-            }
-            ReasonCode::Timeout => {
-                "body_filter: timeout"
-            }
-            ReasonCode::BudgetExceeded => {
-                "body_filter: budget exceeded"
-            }
-            ReasonCode::ReplayError => {
-                "body_filter: replay error"
-            }
+            ReasonCode::DecompressionFormatError => "body_filter: invalid compression format",
+            ReasonCode::DecompressionTruncatedInput => "body_filter: truncated compressed input",
+            ReasonCode::DecompressionIoError => "body_filter: decompression I/O error",
+            ReasonCode::Timeout => "body_filter: timeout",
+            ReasonCode::BudgetExceeded => "body_filter: budget exceeded",
+            ReasonCode::ReplayError => "body_filter: replay error",
             ReasonCode::SkippedAcceptReject => {
                 "header_filter: Accept explicitly rejects text/markdown (q=0)"
             }
-            ReasonCode::FfiPanic => {
-                "body_filter: FFI panic"
-            }
+            ReasonCode::FfiPanic => "body_filter: FFI panic",
             ReasonCode::NotEligible => {
                 "header_filter: response not eligible (method/status/content-type)"
             }
-            ReasonCode::Disabled => {
-                "header_filter: module disabled for this location"
-            }
-            ReasonCode::FailedOpen => {
-                "body_filter: fail-open path triggered"
-            }
-            ReasonCode::FailedClosed => {
-                "body_filter: fail-closed path triggered"
-            }
-            ReasonCode::ConversionError => {
-                "body_filter: conversion error"
-            }
-            ReasonCode::MemoryBudgetExceeded => {
-                "body_filter: memory budget exceeded"
-            }
-            ReasonCode::Overload => {
-                "header_filter: inflight guard overload"
-            }
-            ReasonCode::InvalidDynconf => {
-                "header_filter: invalid dynconf"
-            }
-            ReasonCode::DegradedSnapshot => {
-                "header_filter: degraded dynconf snapshot"
-            }
-            ReasonCode::HeaderPlanApplyError => {
-                "header_filter: header plan apply error"
-            }
-            ReasonCode::StreamingMidFlightError => {
-                "body_filter: streaming mid-flight error"
-            }
-            ReasonCode::BypassNoTransform => {
-                "header_filter: no-transform bypass"
-            }
-            ReasonCode::EncodingHeaderInvalid => {
-                "body_filter: malformed Content-Encoding grammar"
-            }
+            ReasonCode::Disabled => "header_filter: module disabled for this location",
+            ReasonCode::FailedOpen => "body_filter: fail-open path triggered",
+            ReasonCode::FailedClosed => "body_filter: fail-closed path triggered",
+            ReasonCode::ConversionError => "body_filter: conversion error",
+            ReasonCode::MemoryBudgetExceeded => "body_filter: memory budget exceeded",
+            ReasonCode::Overload => "header_filter: inflight guard overload",
+            ReasonCode::InvalidDynconf => "header_filter: invalid dynconf",
+            ReasonCode::DegradedSnapshot => "header_filter: degraded dynconf snapshot",
+            ReasonCode::HeaderPlanApplyError => "header_filter: header plan apply error",
+            ReasonCode::StreamingMidFlightError => "body_filter: streaming mid-flight error",
+            ReasonCode::BypassNoTransform => "header_filter: no-transform bypass",
+            ReasonCode::EncodingHeaderInvalid => "body_filter: malformed Content-Encoding grammar",
         }
     }
 
@@ -611,7 +565,11 @@ mod tests {
     #[test]
     fn test_log_callsite_non_empty() {
         for rc in &ALL {
-            assert!(!rc.log_callsite().is_empty(), "{:?} has empty log_callsite", rc);
+            assert!(
+                !rc.log_callsite().is_empty(),
+                "{:?} has empty log_callsite",
+                rc
+            );
         }
     }
 
@@ -622,7 +580,8 @@ mod tests {
             let callsite = rc.log_callsite();
             assert!(
                 callsite.starts_with("header_filter:") || callsite.starts_with("body_filter:"),
-                "{:?} log_callsite must start with header_filter: or body_filter:", rc
+                "{:?} log_callsite must start with header_filter: or body_filter:",
+                rc
             );
         }
     }

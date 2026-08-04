@@ -1,7 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-# Native-only E2E validation for large bodies when markdown_limits memory allows them.
+# Native-only E2E validation for large bodies when markdown_limits
+# conversion_memory allows them.
 # Covers:
 #  - 100MB valid HTML conversion path (best-effort success path)
 #  - 1GB allowed-size path with deterministic conversion failure + fail-open replay
@@ -16,8 +17,8 @@ NGINX_VERSION="${NGINX_VERSION:-1.28.2}"
 PORT="${PORT:-18093}"
 KEEP_ARTIFACTS=0
 RUN_1G_GET="${RUN_1G_GET:-1}"
-MARKDOWN_MAX_SIZE="${MARKDOWN_MAX_SIZE:-1536m}"
-MARKDOWN_PARSER_BUDGET="${MARKDOWN_PARSER_BUDGET:-1024m}"
+MARKDOWN_MAX_SIZE="${MARKDOWN_MAX_SIZE:-1g}"
+MARKDOWN_PARSER_MEMORY="${MARKDOWN_PARSER_MEMORY:-1024m}"
 ACCEPT_MARKDOWN_HEADER='Accept: text/markdown'
 NGINX_BIN="${NGINX_BIN:-}"
 
@@ -39,7 +40,7 @@ usage() {
 Usage: $(basename "$0") [--keep-artifacts] [--nginx-version VERSION] [--port PORT] [--skip-1g-get] [--markdown-max-size SIZE]
 
 Build local NGINX with the markdown module and validate very large bodies when
-markdown_limits memory allows them (native-only on Apple Silicon).
+markdown_limits conversion_memory allows them (native-only on Apple Silicon).
 
 Checks:
   1) 100MB valid HTML converts successfully to Markdown (GET, HEAD)
@@ -50,7 +51,7 @@ Notes:
   - This script auto-reexecs under native arm64 on Apple Silicon if launched under Rosetta.
   - 1GB GET can be skipped with --skip-1g-get.
   - Set NGINX_BIN to reuse an existing module-enabled nginx binary and skip rebuilding.
-  - MARKDOWN_PARSER_BUDGET defaults to 1024m so the 100MB conversion fixture is
+  - MARKDOWN_PARSER_MEMORY defaults to 1024m so the 100MB conversion fixture is
     not rejected by the independent parser-memory safety limit.
 EOF
   return 0
@@ -208,8 +209,8 @@ http {
             markdown_accept wildcard;
             markdown_streaming off;
             markdown_cache_validation full;
-            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=600s;
-            markdown_parser_budget ${MARKDOWN_PARSER_BUDGET};
+            markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}
+                conversion_timeout=600s parser_memory=${MARKDOWN_PARSER_MEMORY};
             markdown_error_policy pass;
             markdown_log_verbosity info;
         }
@@ -337,8 +338,8 @@ fi
 echo "Allowed-size huge-body summary:"
 echo "  nginx_version=${NGINX_VERSION}"
 echo "  arch=$(uname -m)"
-echo "  markdown_limits memory=${MARKDOWN_MAX_SIZE}"
-echo "  markdown_parser_budget=${MARKDOWN_PARSER_BUDGET}"
+echo "  markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}"
+echo "  markdown_limits_parser_memory=${MARKDOWN_PARSER_MEMORY}"
 echo "  convert_100m=$(cat "${RAW_DIR}/convert-100m.get.metrics")"
 if [[ -f "${RAW_DIR}/failopen-1g-invalid.get.metrics" ]]; then
   echo "  failopen_1g=$(cat "${RAW_DIR}/failopen-1g-invalid.get.metrics")"

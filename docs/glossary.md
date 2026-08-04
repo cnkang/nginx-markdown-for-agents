@@ -16,7 +16,7 @@ operator documentation, and harness reports.
 | Post-Commit | Streaming phase after Markdown bytes have been sent downstream. | Use for truncated-response risks and post-commit error metrics. |
 | Decision chain | The ordered request/response checks that produce a reason code. | Use for eligibility, reason-code, and operator troubleshooting docs. |
 | Reason code | Stable snake_case outcome string emitted by the module. | Decision-chain codes are lowercase (e.g., `not_eligible`, `converted`, `failed_open`); streaming engine codes are uppercase (e.g., `STREAMING_CONVERT`, `ENGINE_STREAMING`). Use the exact emitted value. |
-| Metrics endpoint | HTTP endpoint enabled by `markdown_metrics`. | Specify output format: plain text, JSON, or Prometheus. |
+| Metrics endpoint | HTTP endpoint enabled by `markdown_metrics`. | The 0.9.2 public endpoint emits Prometheus text 0.0.4 only. |
 | Evidence pack | JSON artifact produced by performance evidence tooling. | Use for release-gate evidence, not ad hoc benchmark output. |
 
 ## Naming Style
@@ -26,10 +26,8 @@ operator documentation, and harness reports.
 - Reason codes must match emitted log and metric labels exactly. Decision-chain
   reason codes use lowercase snake_case; streaming engine reason codes use
   uppercase snake_case.
-- JSON metric paths use dot notation in prose, for example
-  `streaming.postcommit_error_total`.
 - Prometheus examples use the full series name and labels, for example
-  `nginx_markdown_streaming_total{result="fallback"}`.
+  `nginx_markdown_requests_total{outcome="failed_open"}`.
 
 ## Document Updates
 

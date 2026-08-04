@@ -713,6 +713,10 @@ ngx_http_markdown_limits(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_str_t                *value;
     ngx_http_markdown_limits_seen_t  seen;
 
+    if (mcf == NULL || mcf->limits.configured) {
+        return "is duplicate";
+    }
+
     ngx_memzero(&seen, sizeof(seen));
     value = cf->args->elts;
 
@@ -757,6 +761,7 @@ ngx_http_markdown_limits(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         }
     }
 
+    mcf->limits.configured = 1;
     return NGX_CONF_OK;
 }
 
@@ -771,6 +776,7 @@ ngx_http_markdown_trusted_proxies_cleanup(void *data)
 {
     markdown_trusted_proxies_free(data);
 }
+
 
 /*
  * Configuration directive handler: markdown_trusted_proxies (spec 47).
@@ -796,6 +802,7 @@ ngx_http_markdown_trusted_proxies(ngx_conf_t *cf, ngx_command_t *cmd,
     ngx_http_markdown_main_conf_t  *mmcf = conf;
     ngx_pool_cleanup_t             *cln;
     struct MarkdownTrustedProxies  *set;
+    ngx_str_t                      *manifest_entry;
     ngx_str_t                      *value;
     uint8_t                         rc;
 
@@ -823,9 +830,16 @@ ngx_http_markdown_trusted_proxies(ngx_conf_t *cf, ngx_command_t *cmd,
         && ngx_http_markdown_arg_equals(&value[1], off_str,
                                         sizeof(off_str) - 1))
     {
+        mmcf->trusted_proxies_manifest = NULL;
         mmcf->trusted_proxies_configured = 1;
         mmcf->trusted_proxies = NULL;
         return NGX_CONF_OK;
+    }
+
+    mmcf->trusted_proxies_manifest = ngx_array_create(
+        cf->pool, cf->args->nelts - 1, sizeof(ngx_str_t));
+    if (mmcf->trusted_proxies_manifest == NULL) {
+        return NGX_CONF_ERROR;
     }
 
     set = markdown_trusted_proxies_new();
@@ -846,6 +860,12 @@ ngx_http_markdown_trusted_proxies(ngx_conf_t *cf, ngx_command_t *cmd,
     cln->data = set;
 
     for (ngx_uint_t i = 1; i < cf->args->nelts; i++) {
+        manifest_entry = ngx_array_push(mmcf->trusted_proxies_manifest);
+        if (manifest_entry == NULL) {
+            markdown_trusted_proxies_free(set);
+            return NGX_CONF_ERROR;
+        }
+        *manifest_entry = value[i];
         rc = markdown_trusted_proxies_push(set, value[i].data, value[i].len);
         if (rc != TRUSTED_PROXIES_PUSH_OK) {
             ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
@@ -1428,9 +1448,8 @@ ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 static char *
 ngx_http_markdown_metrics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
+    ngx_http_markdown_conf_t *mcf = conf;
     ngx_http_core_loc_conf_t *clcf;
-
-    (void) conf;
 
     clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
     if (clcf == NULL) {
@@ -1438,6 +1457,12 @@ ngx_http_markdown_metrics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void *co
                            "failed to get core location configuration for \"%V\" directive",
                            &cmd->name);
         return NGX_CONF_ERROR;
+    }
+
+    if (mcf != NULL) {
+        if (mcf->ops.metrics_enabled != NGX_CONF_UNSET) {
+            return "is duplicate";
+        }
     }
 
     if (clcf->handler != NULL) {
@@ -1448,6 +1473,9 @@ ngx_http_markdown_metrics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void *co
         return NGX_CONF_ERROR;
     }
 
+    if (mcf != NULL) {
+        mcf->ops.metrics_enabled = 1;
+    }
     clcf->handler = ngx_http_markdown_metrics_handler;
 
     ngx_conf_log_error(NGX_LOG_INFO, cf, 0,
@@ -1547,10 +1575,17 @@ ngx_http_markdown_set_dynconf_path(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
 {
     ngx_str_t                      *value;
-    ngx_http_markdown_conf_t       *mcf = conf;
+    ngx_http_markdown_conf_t       *mcf;
     ngx_http_markdown_main_conf_t  *mmcf;
 
     (void) cmd;
+    (void) conf;
+
+    /* H-only dynconf directives still own the location snapshot consumed by
+     * workers.  Resolve that loc_conf explicitly instead of treating the
+     * command's main-conf offset as a location-config pointer. */
+    mcf = ngx_http_conf_get_module_loc_conf(
+        cf, ngx_http_markdown_filter_module);
 
     if (mcf == NULL) {
         return NGX_CONF_ERROR;
@@ -1591,6 +1626,63 @@ ngx_http_markdown_set_dynconf_path(ngx_conf_t *cf, ngx_command_t *cmd,
     mmcf->dynconf_owner_conf = mcf;
 
     return NGX_CONF_OK;
+}
+
+
+/* Store an H-only dynconf flag in the default location configuration. */
+static char *
+ngx_http_markdown_dynconf_flag(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    ngx_http_markdown_conf_t  *mcf;
+    ngx_str_t                 *value;
+    ngx_flag_t                *slot;
+
+    (void) conf;
+    mcf = ngx_http_conf_get_module_loc_conf(
+        cf, ngx_http_markdown_filter_module);
+    if (mcf == NULL || cf == NULL || cf->args == NULL
+        || cf->args->nelts != 2)
+    {
+        return NGX_CONF_ERROR;
+    }
+
+    value = cf->args->elts;
+    if (cmd == NULL || cmd->name.data == NULL) {
+        return NGX_CONF_ERROR;
+    }
+    if (cmd->name.len == sizeof("markdown_dynamic_config") - 1
+        && ngx_strncasecmp(cmd->name.data,
+                           (u_char *) "markdown_dynamic_config",
+                           sizeof("markdown_dynamic_config") - 1) == 0)
+    {
+        slot = &mcf->advanced.dynconf_enabled;
+    } else if (cmd->name.len == sizeof("markdown_dynconf_dry_run") - 1
+               && ngx_strncasecmp(cmd->name.data,
+                                  (u_char *) "markdown_dynconf_dry_run",
+                                  sizeof("markdown_dynconf_dry_run") - 1) == 0)
+    {
+        slot = &mcf->advanced.dynconf_dry_run;
+    } else {
+        return NGX_CONF_ERROR;
+    }
+    if (*slot != NGX_CONF_UNSET) {
+        return "is duplicate";
+    }
+
+    if (value[1].len == 2
+        && ngx_strncasecmp(value[1].data, (u_char *) "on", 2) == 0)
+    {
+        *slot = 1;
+        return NGX_CONF_OK;
+    }
+    if (value[1].len == 3
+        && ngx_strncasecmp(value[1].data, (u_char *) "off", 3) == 0)
+    {
+        *slot = 0;
+        return NGX_CONF_OK;
+    }
+
+    return "is not a valid flag";
 }
 
 /*

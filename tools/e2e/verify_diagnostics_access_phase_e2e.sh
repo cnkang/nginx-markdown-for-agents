@@ -80,6 +80,8 @@ PORT="${PORT:-18092}"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/access-phase-e2e.XXXXXX")"
 RESULT_TSV="${WORK}/results.tsv"
 NGINX_PID=""
+AUTH_USER="e2e-user"
+AUTH_PASSWORD="e2e-${PORT}"
 
 # ── Cleanup ────────────────────────────────────────────────────────
 # shellcheck disable=SC2329
@@ -89,6 +91,7 @@ cleanup() {
     wait "${NGINX_PID}" 2>/dev/null || true
   fi
   rm -rf "${WORK}"
+  return 0
 }
 trap cleanup EXIT INT TERM
 
@@ -108,11 +111,11 @@ run_case() {
       ;;
     auth_basic)
       ACCESS="auth_basic \"e2e-test\"; auth_basic_user_file ${prefix}/conf/passwd;"
-      printf '%s\n' 'testuser:{PLAIN}testpass' > "${prefix}/conf/passwd"
+      printf '%s\n' "${AUTH_USER}:{PLAIN}${AUTH_PASSWORD}" > "${prefix}/conf/passwd"
       ;;
     satisfy_any)
       ACCESS="satisfy any; allow 127.0.0.1; deny all; auth_basic \"e2e-test\"; auth_basic_user_file ${prefix}/conf/passwd;"
-      printf '%s\n' 'testuser:{PLAIN}testpass' > "${prefix}/conf/passwd"
+      printf '%s\n' "${AUTH_USER}:{PLAIN}${AUTH_PASSWORD}" > "${prefix}/conf/passwd"
       ;;
     *)
       echo "ERROR: unknown policy: ${policy}" >&2
@@ -195,10 +198,14 @@ EOF
           ;;
         auth_basic)
           expected_auth=200; expected_unauth=401
-          auth_curl_args=(-u "testuser:testpass")
+          auth_curl_args=(-u "${AUTH_USER}:${AUTH_PASSWORD}")
           ;;
         satisfy_any)
           expected_auth=200; expected_unauth=401
+          ;;
+        *)
+          echo "FAIL: unsupported access policy=${policy}" >&2
+          return 1
           ;;
       esac
 
@@ -246,9 +253,11 @@ EOF
           ;;
         satisfy_any)
           # satisfy any: 127.0.0.1 is allowed, so even without credentials it passes
-          # Test with bad credentials to verify auth_basic challenge works
-          unauth_status="$(curl -sS ${method_flag} -u baduser:badpass -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/${handler}")"
-          # satisfy any: allow 127.0.0.1 passes, so even bad creds get 200 from the allow rule
+          # Omitting credentials verifies that the allow rule alone is sufficient.
+          unauth_status="$(curl -sS ${method_flag} \
+            -o /dev/null -w '%{http_code}' \
+            "http://127.0.0.1:${PORT}/${handler}")"
+          # satisfy any: allow 127.0.0.1 passes without credentials.
           # This confirms that at least one of the access checks (allow) passed
           printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
             "${policy}" "${handler}" "${method}" "satisfy_any_allow_wins" "200" "${unauth_status}" "${config_digest}" >> "${RESULT_TSV}"
@@ -256,6 +265,10 @@ EOF
             echo "FAIL: ${policy}/${handler}/${method}/satisfy_any_allow_wins: expected=200 actual=${unauth_status}" >&2
             fail_count=$((fail_count + 1))
           fi
+          ;;
+        *)
+          echo "FAIL: unsupported access policy=${policy}" >&2
+          return 1
           ;;
       esac
     done

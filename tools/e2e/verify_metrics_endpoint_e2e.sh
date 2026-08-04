@@ -2,9 +2,8 @@
 # verify_metrics_endpoint_e2e.sh — Thin wrapper for the metrics-endpoint E2E scenario.
 #
 # Delegates execution to the Rust e2e-harness binary which validates
-# the markdown metrics endpoint including JSON, plain-text, and
-# Prometheus format output, content negotiation, and shared-memory
-# aggregation.
+# the markdown metrics endpoint using the frozen Prometheus text 0.0.4
+# contract, fixed content type, and shared-memory aggregation.
 #
 # This script is a backward-compatible entry point retained for CI and
 # Makefile compatibility.  All assertion logic lives in the Rust harness.

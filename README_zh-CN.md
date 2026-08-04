@@ -114,15 +114,19 @@ curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/
 
 如果你想先看面向生产环境的实用配置，直接跳到 [部署示例](docs/guides/DEPLOYMENT_EXAMPLES.md)。
 
-如果你想直接查看覆盖三种 profile 的完整生产配置模板，参见 [生产示例](examples/production/) 目录。
+如果你想直接查看使用冻结显式指令面的完整生产配置模板，参见 [生产示例](examples/production/) 目录。
 
-## Profiles
+## 显式生产配置
 
-生产部署推荐使用 `markdown_profile` 指令，一行配置即可应用一组经过测试的默认值，无需逐一设置每个指令：
+0.9.2 已移除不透明的 profile。请显式配置行为，使 `nginx -T` 能展示每个
+运维可见的设置：
 
 ```nginx
 http {
-    markdown_profile balanced;
+    markdown_cache_validation ims_only;
+    markdown_streaming auto;
+    markdown_limits conversion_memory=64m conversion_timeout=30s
+        parser_timeout=10s max_inflight=64;
 
     server {
         listen 80;
@@ -134,17 +138,10 @@ http {
 }
 ```
 
-三个可用 profile：
-
-| Profile | 适用场景 |
-|---------|----------|
-| `balanced` | 通用部署（推荐起步选择） |
-| `strict_cache` | CDN / 缓存代理，需要完整 ETag 支持 |
-| `streaming_first` | AI Agent 工作负载，面向大文档 |
-
-合并优先级：显式指令 > profile 默认值 > 内置默认值。你可以在同一 context 中用显式指令覆盖 profile 的任何非强制字段。
-
-完整的 profile 参考、默认值表和冲突规则见 [docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md#profiles)。
+需要严格缓存校验时使用 `markdown_cache_validation full` 与
+`markdown_streaming off`；面向大文档的 Agent 响应可使用
+`markdown_accept wildcard` 与 `markdown_streaming force`。完整替换关系见
+[迁移指南](docs/guides/MIGRATION-0.9.2.md)。
 
 ## 针对特定 Bot 返回 Markdown
 
@@ -210,7 +207,7 @@ curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/docs/
 | **可选元数据** | 支持自动估算并插入 Markdown Token 数及干净的 YAML front matter。 |
 | **指标监控端点** | 暴露 Prometheus 兼容的转换计数与运行时指标，助力集群可观测性建设。 |
 | **双引擎模式** | 典型大小响应走全缓冲（默认），大响应/分块响应支持自动或强制路由到流式引擎。 |
-| **有界内存流式** | 流式引擎在有界内存中增量转换并根据 `markdown_stream_flush_min` 阈值按大小即时 flush。 |
+| **有界内存流式** | 使用 `markdown_streaming` 选择流式路径，并由 `markdown_limits streaming_buffer=` 设定上限。 |
 
 ## 平台支持
 
@@ -407,8 +404,8 @@ v0.9.1 是 **v1.0 前最后一次基线收敛与兼容性重置**。它在性能
 - **Rust 基线重置**：源码构建现在要求 Rust 1.97+；仓库、CI 和发布构建使用精确的 Rust 1.97.0 (MSRV 1.97)。预构建模块的用户不需要安装 Rust。
 - **单一流式控制**：`markdown_streaming off|auto|force` 现在是唯一处理路径选择器。重复的 `markdown_streaming_engine` 仅保留拒绝入口，并给出 off/auto/on 的精确迁移提示。
 - **明确支持的 flavor**：`markdown_flavor` 仅支持 `commonmark` 和 `gfm`。实验性的 `mdx` 与 `org-mode` 从未有独立生产语义，现会被明确拒绝。
-- **混合零拷贝流式输出**：`markdown_streaming_zero_copy on`（默认关闭，需显式开启）允许 `ngx_buf_t` 直接引用 Rust 管理的内存，省去中间的 pool-copy，降低非终端流式分块的 memcpy 开销。NGINX 请求池清理句柄确保在背压和请求销毁场景下 Rust 缓冲区的生命周期安全。
-- **流式解压路由（gzip + deflate + Brotli）**：在 `streaming_first` profile 下，当 `markdown_auto_decompress on` 且 `markdown_cache_validation` 不为 `full` 时，gzip、deflate（包括 zlib 封装 RFC 1950 和原始 RFC 1951 deflate）及 Brotli 响应通过流式引擎增量解压，无需强制全缓冲积攒。gzip member 边界和 trailer 会跨分块校验。Brotli 流式解压需要构建时的 `libbrotlidec`（通过 `NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off` 控制，官方构件默认启用）。
+- **自动零拷贝流式输出**：由缓冲区所有权和背压状态在内部选择安全的交付路径，不暴露零拷贝指令。
+- **流式解压路由（gzip + deflate + Brotli）**：显式设置 `markdown_streaming force`、`markdown_auto_decompress on` 且 `markdown_cache_validation` 不为 `full` 时，gzip、deflate（包括 zlib 封装 RFC 1950 和原始 RFC 1951 deflate）及 Brotli 响应通过流式引擎增量解压，无需强制全缓冲积攒。gzip member 边界和 trailer 会跨分块校验。Brotli 流式解压需要构建时的 `libbrotlidec`（通过 `NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off` 控制，官方构件默认启用）。
 - **全缓冲拷贝减少**：内部优化（默认开启，无配置项），通过将连续缓冲区直接传递给解压器并通过指针赋值交换输出，消除全缓冲压缩路径中冗余的 memcpy。
 - **`markdown_auto_decompress` 指令**：现已正式注册为可配置指令（默认开启）。此前仅为内部字段，无法通过 `nginx.conf` 设置。
 - **性能证据门禁**：模块级基准测试工具（`tools/perf/run_module_benchmark.sh`）与自动化发布门禁（`make release-gates-check-091`）在发布前强制验证延迟、TTFB、内存斜率和回退率阈值。

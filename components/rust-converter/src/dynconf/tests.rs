@@ -1,7 +1,7 @@
 //! Unit tests for the dynconf parser module.
 
-use super::*;
 use super::parser::DynconfParseErrorKind;
+use super::*;
 
 #[test]
 fn test_minimal_valid_document() {
@@ -211,10 +211,7 @@ fn test_log_verbosity_all_values() {
 #[test]
 fn test_error_policy_all_values() {
     for policy in &["pass", "fail_closed", "status 429", "status 503"] {
-        let input = format!(
-            r#"{{"schema_version": 1, "error_policy": "{}"}}"#,
-            policy
-        );
+        let input = format!(r#"{{"schema_version": 1, "error_policy": "{}"}}"#, policy);
         let result = parse_dynconf(input.as_bytes()).unwrap();
         assert!(result.error_policy.is_some());
     }

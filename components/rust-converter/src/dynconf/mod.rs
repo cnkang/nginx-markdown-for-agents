@@ -35,18 +35,18 @@
 //! The canonical key order is:
 //! `schema_version`, `filter`, `prune_noise`, `log_verbosity`, `error_policy`, `streaming_buffer`
 
-mod parser;
-mod schema;
 mod digest;
 pub mod ffi;
+mod parser;
+mod schema;
 
-pub use parser::{DynconfParseError, DynconfParseErrorKind};
-pub use schema::{DynconfValue, FilterValue, PruneNoiseValue, LogVerbosity, ErrorPolicy};
 pub use digest::compute_source_digest;
+pub use parser::{DynconfParseError, DynconfParseErrorKind};
+pub use schema::{DynconfValue, ErrorPolicy, FilterValue, LogVerbosity, PruneNoiseValue};
 
+use digest::compute_active_digest;
 use parser::parse_json_with_budget;
 use schema::validate_dynconf;
-use digest::compute_active_digest;
 
 /// Maximum allowed document size in bytes (1 MiB).
 pub const MAX_DOCUMENT_SIZE: usize = 1_048_576;

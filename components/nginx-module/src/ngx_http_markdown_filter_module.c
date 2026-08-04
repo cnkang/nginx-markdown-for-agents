@@ -21,8 +21,8 @@
 #include "ngx_http_markdown_decision_log_impl.h"
 #include "ngx_http_markdown_inflight_impl.h"
 #include "ngx_http_markdown_request_impl.h"
+#include "ngx_http_markdown_metrics_v1_renderer.h"
 #include "ngx_http_markdown_metrics_impl.h"
-#include "ngx_http_markdown_prometheus_impl.h"
 #include "ngx_http_markdown_diagnostics_accessors_impl.h"
 
 #ifdef MARKDOWN_STREAMING_ENABLED

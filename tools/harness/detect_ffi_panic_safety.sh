@@ -359,7 +359,7 @@ while IFS= read -r rs_file; do
                         category = "direct_catch"
                     } else if (calls_sibling_with_catch) {
                         category = "delegated_catch"
-                    } else if (has_ptr_write_zeroed && !has_validate && !has_slice_from_raw && !has_alloc) {
+                    } else if ((has_ptr_write_zeroed || (body ~ /ptr::write[[:space:]]*\(/ && body ~ /FFIDynconfResult[[:space:]]*\{/)) && !has_validate && !has_slice_from_raw && !has_alloc) {
                         category = "safe_init_helper"
                     } else if (func_name ~ /_count$/ && !has_validate && !has_alloc && !has_deref_ffi_input && has_static_read) {
                         category = "safe_static_lookup"

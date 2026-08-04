@@ -415,6 +415,14 @@ def check_file(filepath: Path) -> tuple[list[str], list[str]]:
     if not source.strip():
         return warnings, infos
 
+    # Generated reason tables intentionally contain adjacent repeated metric
+    # family names: several reason codes share one Prometheus family.  The
+    # reason-code generator and its --check gate are the authoritative drift
+    # protection for these files; treating those repeated literals as merge
+    # residuals makes the duplicate detector reject valid generated output.
+    if "DO NOT EDIT" in "\n".join(source.splitlines()[:12]):
+        return warnings, infos
+
     lines = source.splitlines()
 
     warnings = _find_adjacent_duplicates(lines, rel)

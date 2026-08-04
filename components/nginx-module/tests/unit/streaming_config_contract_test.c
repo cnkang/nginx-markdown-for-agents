@@ -612,7 +612,7 @@ test_dynconf_directives_support_published_contexts(void)
     ngx_command_t     *cmd;
     size_t             i;
 
-    TEST_SUBSECTION("dynconf directives support published contexts");
+    TEST_SUBSECTION("dynconf directives enforce the published HTTP-only context");
 
     for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
         cmd = find_directive(names[i]);
@@ -620,13 +620,13 @@ test_dynconf_directives_support_published_contexts(void)
             "dynconf directive should be registered");
         TEST_ASSERT((cmd->type & NGX_HTTP_MAIN_CONF) != 0,
             "dynconf directive should allow HTTP context");
-        TEST_ASSERT((cmd->type & NGX_HTTP_SRV_CONF) != 0,
-            "dynconf directive should allow server context");
-        TEST_ASSERT((cmd->type & NGX_HTTP_LOC_CONF) != 0,
-            "dynconf directive should allow location context");
+        TEST_ASSERT((cmd->type & NGX_HTTP_SRV_CONF) == 0,
+            "dynconf directive should reject server context");
+        TEST_ASSERT((cmd->type & NGX_HTTP_LOC_CONF) == 0,
+            "dynconf directive should reject location context");
     }
 
-    TEST_PASS("dynconf directives preserve all published contexts");
+    TEST_PASS("dynconf directives enforce HTTP-only context");
 }
 
 static void

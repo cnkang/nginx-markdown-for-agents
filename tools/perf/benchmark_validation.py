@@ -17,6 +17,12 @@ _HTTP_STATUS_LINE_RE = re.compile(
     r"^HTTP/[^\s]+[ \t]+([1-5]\d{2})",
     re.ASCII,
 )
+_PROMETHEUS_LINE_RE = re.compile(
+    r"^(?P<name>[a-zA-Z_:][a-zA-Z0-9_:]*)"
+    r"(?:\{(?P<labels>[^}]*)\})?\s+"
+    r"(?P<value>[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?|[+-]?Inf|NaN)"
+    r"(?:\s+\d+)?$"
+)
 
 #: Canonical module-benchmark scenario names.
 #: Kept here as a single source of truth shared by
@@ -120,6 +126,113 @@ def _failure(summary: dict, reason: str) -> dict:
     summary["verdict"] = "fail"
     summary["failure_reason"] = reason
     return summary
+
+
+def _parse_prometheus_labels(label_text: str) -> dict[str, str] | None:
+    """Parse the simple quoted labels emitted by the module renderer."""
+    labels: dict[str, str] = {}
+    if not label_text:
+        return labels
+    for item in label_text.split(","):
+        key, separator, value = item.partition("=")
+        if separator != "=" or len(value) < 2:
+            return None
+        if value[0] != '"' or value[-1] != '"':
+            return None
+        labels[key] = value[1:-1]
+    return labels
+
+
+def _parse_prometheus_sample(
+    raw_line: str,
+) -> tuple[str, dict[str, str], float] | None:
+    """Parse one Prometheus sample, ignoring comments and malformed lines."""
+    line = raw_line.strip()
+    if not line or line.startswith("#"):
+        return None
+    match = _PROMETHEUS_LINE_RE.fullmatch(line)
+    if match is None:
+        return None
+    labels = _parse_prometheus_labels(match.group("labels") or "")
+    if labels is None:
+        return None
+    try:
+        value = float(match.group("value"))
+    except ValueError:
+        return None
+    return match.group("name"), labels, value
+
+
+def _parse_prometheus_families(
+    content: str,
+) -> dict[str, list[tuple[dict[str, str], float]]]:
+    """Collect valid Prometheus samples by family name."""
+    families: dict[str, list[tuple[dict[str, str], float]]] = {}
+    for raw_line in content.splitlines():
+        sample = _parse_prometheus_sample(raw_line)
+        if sample is None:
+            continue
+        name, labels, value = sample
+        families.setdefault(name, []).append((labels, value))
+    return families
+
+
+def _prometheus_total(
+    families: dict[str, list[tuple[dict[str, str], float]]],
+    name: str,
+    **wanted: str,
+) -> float:
+    """Sum one family, optionally restricted to exact label values."""
+    return sum(
+        value
+        for labels, value in families.get(name, [])
+        if all(labels.get(key) == expected for key, expected in wanted.items())
+    )
+
+
+def parse_prometheus_metrics(content: str) -> dict[str, Any]:
+    """Map the frozen Prometheus endpoint into benchmark-owned fields.
+
+    The benchmark report keeps its historical, tool-owned metric names, while
+    the module endpoint is intentionally Prometheus-only in 0.9.2. Unknown
+    families and malformed samples are ignored at this compatibility boundary.
+    """
+    families = _parse_prometheus_families(content)
+    streaming_attempts = _prometheus_total(
+        families, "nginx_markdown_conversion_attempts_total", engine="streaming"
+    )
+    full_buffer_attempts = _prometheus_total(
+        families, "nginx_markdown_conversion_attempts_total", engine="full_buffer"
+    )
+    streaming_deliveries = _prometheus_total(
+        families, "nginx_markdown_conversion_deliveries_total", engine="streaming"
+    )
+    full_buffer_deliveries = _prometheus_total(
+        families, "nginx_markdown_conversion_deliveries_total", engine="full_buffer"
+    )
+    return {
+        "streaming_path_hits": streaming_attempts,
+        "fullbuffer_path_hits": full_buffer_attempts,
+        "streaming": {
+            "requests_total": streaming_attempts,
+            "fallback_total": _prometheus_total(
+                families, "nginx_markdown_streaming_events_total", transition="fallback"
+            ),
+        },
+        "perf": {
+            "decompression_events_total": _prometheus_total(
+                families, "nginx_markdown_decompression_events_total"
+            ),
+            "decompression_budget_exceeded_total": _prometheus_total(
+                families,
+                "nginx_markdown_decompression_events_total",
+                outcome="failure",
+                reason="budget_exceeded",
+            ),
+            "zero_copy_output_total": streaming_deliveries,
+            "copied_output_total": full_buffer_deliveries,
+        },
+    }
 
 
 def parse_ab_result(content: str, iterations: int) -> dict:
@@ -388,8 +501,8 @@ class ScenarioResultInput:
     nginx_metrics: Mapping[str, Any]
 
 
-def build_scenario_result(data: ScenarioResultInput) -> dict:
-    """Build a scenario report gated by strict load-integrity evidence."""
+def _load_result(data: ScenarioResultInput) -> tuple[dict, float, float, float, float]:
+    """Parse the selected load generator and return performance fields."""
     if data.load_generator == "ab":
         load = parse_ab_result(data.raw_content, data.iterations)
         rps, p50, p95, p99 = _ab_performance(data.raw_content)
@@ -403,19 +516,102 @@ def build_scenario_result(data: ScenarioResultInput) -> dict:
         rps = p50 = p95 = p99 = 0.0
     if data.load_exit_code != 0:
         load = _failure(load, f"load_generator_exit: {data.load_exit_code}")
+    return load, rps, p50, p95, p99
 
-    perf = data.nginx_metrics.get("perf", {}) or {}
-    streaming = data.nginx_metrics.get("streaming", {}) or {}
-    streaming_hits = data.nginx_metrics.get("streaming_path_hits", 0)
-    fullbuffer_hits = data.nginx_metrics.get("fullbuffer_path_hits", 0)
+
+def _path_metrics(
+    nginx_metrics: Mapping[str, Any],
+) -> tuple[
+    tuple[dict[str, Any], dict[str, Any], float, float, float | None, float | None],
+    float,
+    float,
+    float,
+    float,
+]:
+    """Derive path ratios and streaming counters from the metrics adapter."""
+    perf = nginx_metrics.get("perf", {}) or {}
+    streaming = nginx_metrics.get("streaming", {}) or {}
+    streaming_hits = nginx_metrics.get("streaming_path_hits", 0)
+    fullbuffer_hits = nginx_metrics.get("fullbuffer_path_hits", 0)
     total_hits = streaming_hits + fullbuffer_hits
     streaming_ratio = streaming_hits / total_hits if total_hits > 0 else None
     fullbuffer_ratio = fullbuffer_hits / total_hits if total_hits > 0 else None
     requests_total = streaming.get("requests_total", 0)
     failopen_total = streaming.get("precommit_failopen_total", 0)
-    fallback_rate = (
-        failopen_total / requests_total if requests_total > 0 else 0.0
+    fallback_rate = failopen_total / requests_total if requests_total > 0 else 0.0
+    return (
+        perf,
+        streaming,
+        streaming_hits,
+        fullbuffer_hits,
+        streaming_ratio,
+        fullbuffer_ratio,
+    ), requests_total, failopen_total, fallback_rate, total_hits
+
+
+def _decompression_path_metrics(
+    compression: str,
+    perf: Mapping[str, Any],
+    streaming_hits: float,
+) -> tuple[float, float]:
+    """Map decompression events to the benchmark's path fields."""
+    events = perf.get("decompression_events_total", 0)
+    if compression != "none" and events:
+        return (0, events) if streaming_hits == 0 else (events, 0)
+    return (
+        perf.get("decompression_streaming_total", 0),
+        perf.get("decompression_fullbuffer_total", 0),
     )
+
+
+def _scenario_metrics(
+    data: ScenarioResultInput,
+    performance: tuple[float, float, float, float],
+    path,
+) -> dict[str, Any]:
+    """Assemble the stable metric payload for one scenario."""
+    rps, p50, p95, p99 = performance
+    (perf, streaming, streaming_hits, fullbuffer_hits, streaming_ratio,
+     fullbuffer_ratio), requests_total, failopen_total, fallback_rate, _ = path
+    decomp_streaming, decomp_fullbuffer = _decompression_path_metrics(
+        data.compression, perf, streaming_hits
+    )
+    return {
+        "rps": rps,
+        "latency_p50_ms": p50,
+        "latency_p95_ms": p95,
+        "latency_p99_ms": p99,
+        "ttfb_p50_ms": data.ttfb.get("ttfb_p50_ms"),
+        "ttfb_p95_ms": data.ttfb.get("ttfb_p95_ms"),
+        "ttlb_p50_ms": p50,
+        "worker_rss_mb": data.worker_rss_kb / 1024.0,
+        "baseline_rss_bytes": data.baseline_rss_kb * 1024,
+        "peak_rss_bytes": data.peak_rss_kb * 1024,
+        "input_bytes": data.input_bytes,
+        "streaming_path_hits": streaming_hits,
+        "fullbuffer_path_hits": fullbuffer_hits,
+        "streaming_ratio": streaming_ratio,
+        "fullbuffer_ratio": fullbuffer_ratio,
+        "fallback_rate": fallback_rate,
+        "streaming_fallback_total": streaming.get("fallback_total", 0),
+        "streaming_requests_total": requests_total,
+        "precommit_failopen_total": failopen_total,
+        "throughput_mbps": 0.0,
+        "decompression_streaming_total": decomp_streaming,
+        "decompression_fullbuffer_total": decomp_fullbuffer,
+        "zero_copy_output_total": perf.get("zero_copy_output_total", 0),
+        "copied_output_total": perf.get("copied_output_total", 0),
+        "pending_output_high_watermark_bytes": perf.get(
+            "pending_output_high_watermark_bytes", 0
+        ),
+    }
+
+
+def build_scenario_result(data: ScenarioResultInput) -> dict:
+    """Build a scenario report gated by strict load-integrity evidence."""
+    load, rps, p50, p95, p99 = _load_result(data)
+    path = _path_metrics(data.nginx_metrics)
+
     result = {
         "name": data.name,
         "profile": data.profile,
@@ -424,39 +620,7 @@ def build_scenario_result(data: ScenarioResultInput) -> dict:
         "concurrency": data.concurrency,
         "status": "completed" if load.get("verdict") == "pass" else "failed",
         "load_integrity": load,
-        "metrics": {
-            "rps": rps,
-            "latency_p50_ms": p50,
-            "latency_p95_ms": p95,
-            "latency_p99_ms": p99,
-            "ttfb_p50_ms": data.ttfb.get("ttfb_p50_ms"),
-            "ttfb_p95_ms": data.ttfb.get("ttfb_p95_ms"),
-            "ttlb_p50_ms": p50,
-            "worker_rss_mb": data.worker_rss_kb / 1024.0,
-            "baseline_rss_bytes": data.baseline_rss_kb * 1024,
-            "peak_rss_bytes": data.peak_rss_kb * 1024,
-            "input_bytes": data.input_bytes,
-            "streaming_path_hits": streaming_hits,
-            "fullbuffer_path_hits": fullbuffer_hits,
-            "streaming_ratio": streaming_ratio,
-            "fullbuffer_ratio": fullbuffer_ratio,
-            "fallback_rate": fallback_rate,
-            "streaming_fallback_total": streaming.get("fallback_total", 0),
-            "streaming_requests_total": requests_total,
-            "precommit_failopen_total": failopen_total,
-            "throughput_mbps": 0.0,
-            "decompression_streaming_total": perf.get(
-                "decompression_streaming_total", 0
-            ),
-            "decompression_fullbuffer_total": perf.get(
-                "decompression_fullbuffer_total", 0
-            ),
-            "zero_copy_output_total": perf.get("zero_copy_output_total", 0),
-            "copied_output_total": perf.get("copied_output_total", 0),
-            "pending_output_high_watermark_bytes": perf.get(
-                "pending_output_high_watermark_bytes", 0
-            ),
-        },
+        "metrics": _scenario_metrics(data, (rps, p50, p95, p99), path),
     }
     if result["status"] == "failed":
         result["reason"] = f"load_integrity_failed: {load['failure_reason']}"

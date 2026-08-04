@@ -3,6 +3,7 @@
  */
 
 #include "../include/test_common.h"
+#include "../../rust-converter/include/markdown_converter.h"
 
 #include <ctype.h>
 #include <stdarg.h>
@@ -22,6 +23,12 @@
 #endif
 #ifndef NGX_DECLINED
 #define NGX_DECLINED -2
+#endif
+#ifndef NGX_HTTP_TOO_MANY_REQUESTS
+#define NGX_HTTP_TOO_MANY_REQUESTS 429
+#endif
+#ifndef NGX_HTTP_SERVICE_UNAVAILABLE
+#define NGX_HTTP_SERVICE_UNAVAILABLE 503
 #endif
 
 #ifndef NGX_LOG_ERR
@@ -157,6 +164,21 @@ ngx_pnalloc(ngx_pool_t *pool, size_t size)
     return malloc(size);
 }
 
+static void *
+ngx_alloc(size_t size, ngx_log_t *log)
+{
+    UNUSED(log);
+    return malloc(size);
+}
+
+static void
+ngx_free(void *ptr)
+{
+    free(ptr);
+}
+
+#define ngx_time() ((time_t) 1700000000)
+
 static ssize_t
 ngx_parse_size(ngx_str_t *line)
 {
@@ -211,6 +233,39 @@ ngx_del_timer(ngx_event_t *ev)
 #define NGX_HTTP_MARKDOWN_LOG_WARN   1
 #define NGX_HTTP_MARKDOWN_LOG_INFO   2
 #define NGX_HTTP_MARKDOWN_LOG_DEBUG  3
+
+void
+markdown_dynconf_result_init(FFIDynconfResult *result)
+{
+    memset(result, 0, sizeof(*result));
+    result->error_code = DYNCONF_ERR_INTERNAL;
+    result->filter = DYNCONF_NOT_SET_U8;
+    result->prune_noise = DYNCONF_NOT_SET_U8;
+    result->log_verbosity = DYNCONF_NOT_SET_U8;
+    result->error_policy = DYNCONF_NOT_SET_U8;
+    result->streaming_buffer = DYNCONF_NOT_SET_U64;
+}
+
+void
+markdown_dynconf_parse(const uint8_t *data, size_t data_len,
+    FFIDynconfResult *result)
+{
+    UNUSED(data);
+    UNUSED(data_len);
+    markdown_dynconf_result_init(result);
+}
+
+void
+markdown_dynconf_result_free(FFIDynconfResult *result)
+{
+    UNUSED(result);
+}
+
+void
+ngx_http_markdown_record_dynconf_reload(ngx_uint_t error_code)
+{
+    UNUSED(error_code);
+}
 
 #include "../../src/ngx_http_markdown_dynconf_impl.h"
 

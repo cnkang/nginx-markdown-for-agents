@@ -51,7 +51,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * Enables or disables Markdown conversion for this context.
      * Also supports per-request toggle via nginx variables/complex values.
      * Default: off
-     * Context: http, server, location
+     * Context: http
      *
      * Example:
      *   location /api {
@@ -80,7 +80,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * Any subset of keys may be given; unspecified keys inherit
      * (per-key inheritance).
      * Public default: (per-key inheritance)
-     * Context: http, server, location
+     * Context: http
      *
      * Example:
      *   markdown_limits conversion_timeout=30s conversion_memory=64m;
@@ -105,7 +105,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   fail_closed - return 502 on pre-commit error
      *   status <c>  - return status code c (429 or 503)
      * Default: pass
-     * Context: http, server, location
+     * Context: http
      *
      * Example:
      *   markdown_error_policy status 503;
@@ -400,8 +400,8 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     /*
      * markdown_metrics
      *
-     * Enables metrics exposure endpoint at this location.
-     * Returns metrics in plain text or JSON format based on Accept header.
+     * Enables the Prometheus text 0.0.4 metrics endpoint at this location.
+     * Accept negotiation cannot select a removed JSON or legacy text format.
      * Access is restricted to localhost (127.0.0.1, ::1) by default for security.
      * Default: off
      * Context: location only
@@ -410,10 +410,6 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   location /markdown-metrics {
      *       markdown_metrics;
      *   }
-     *
-     * Response formats:
-     * - Plain text (default): Accept: text/plain or no Accept header
-     * - JSON: Accept: application/json
      *
      * Security: Only accessible from localhost by default.
      * NGINX allow/deny directives can further restrict access, but they do
@@ -560,9 +556,9 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      */
     {
         ngx_string("markdown_dynamic_config"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
-        ngx_conf_set_flag_slot,
-        NGX_HTTP_LOC_CONF_OFFSET,
+        NGX_HTTP_MAIN_CONF|NGX_CONF_FLAG,
+        ngx_http_markdown_dynconf_flag,
+        NGX_HTTP_MAIN_CONF_OFFSET,
         offsetof(ngx_http_markdown_conf_t, advanced.dynconf_enabled),
         NULL
     },
@@ -581,9 +577,9 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      */
     {
         ngx_string("markdown_dynamic_config_path"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        NGX_HTTP_MAIN_CONF|NGX_CONF_TAKE1,
         ngx_http_markdown_set_dynconf_path,
-        NGX_HTTP_LOC_CONF_OFFSET,
+        NGX_HTTP_MAIN_CONF_OFFSET,
         offsetof(ngx_http_markdown_conf_t, advanced.dynconf_path),
         NULL
     },
@@ -604,10 +600,9 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      */
     {
         ngx_string("markdown_dynconf_dry_run"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF
-            |NGX_CONF_FLAG,
-        ngx_conf_set_flag_slot,
-        NGX_HTTP_LOC_CONF_OFFSET,
+        NGX_HTTP_MAIN_CONF|NGX_CONF_FLAG,
+        ngx_http_markdown_dynconf_flag,
+        NGX_HTTP_MAIN_CONF_OFFSET,
         offsetof(ngx_http_markdown_conf_t, advanced.dynconf_dry_run),
         NULL
     },
@@ -638,8 +633,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      */
     {
         ngx_string("markdown_diagnostics"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF
-            |NGX_CONF_FLAG,
+        NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
         ngx_http_markdown_diagnostics_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_markdown_conf_t, ops.diagnostics_enabled),

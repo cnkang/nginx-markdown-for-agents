@@ -398,6 +398,107 @@ ngx_module_t ngx_http_markdown_filter_module = { 0 };
 #define NGX_HTTP_MARKDOWN_METRIC_INC(field)                                          \
     NGX_HTTP_MARKDOWN_METRIC_ADD(field, 1)
 
+static void
+ngx_http_markdown_record_decompression_success_metrics(
+    const ngx_http_markdown_ctx_t *ctx)
+{
+    if (ctx == NULL) {
+        return;
+    }
+
+    NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.succeeded);
+    switch (ctx->decompression.type) {
+    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.gzip);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.deflate);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.brotli);
+        break;
+    default:
+        break;
+    }
+}
+
+static void
+ngx_http_markdown_record_decompression_failure_budget(
+    ngx_http_markdown_compression_type_e type)
+{
+    switch (type) {
+    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.gzip_failures.budget);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.deflate_failures.budget);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.brotli_failures.budget);
+        break;
+    default:
+        break;
+    }
+}
+
+static void
+ngx_http_markdown_record_decompression_failure_format(
+    ngx_http_markdown_compression_type_e type)
+{
+    switch (type) {
+    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.gzip_failures.format);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.deflate_failures.format);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.brotli_failures.format);
+        break;
+    default:
+        break;
+    }
+}
+
+static void
+ngx_http_markdown_record_decompression_failure_truncated(
+    ngx_http_markdown_compression_type_e type)
+{
+    switch (type) {
+    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.gzip_failures.truncated);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            decompressions.deflate_failures.truncated);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.brotli_failures.truncated);
+        break;
+    default:
+        break;
+    }
+}
+
+static void
+ngx_http_markdown_record_decompression_failure_io(
+    ngx_http_markdown_compression_type_e type)
+{
+    switch (type) {
+    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.gzip_failures.io);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.deflate_failures.io);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.brotli_failures.io);
+        break;
+    default:
+        break;
+    }
+}
+
 #define NGX_HTTP_MARKDOWN_METRIC_WATERMARK(field, value)                             \
     do {                                                                             \
         if (ngx_http_markdown_metrics != NULL) {                                     \

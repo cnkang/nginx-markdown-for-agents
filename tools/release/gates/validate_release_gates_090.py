@@ -43,10 +43,13 @@ def check_file_exists(repo: Path, rel_path: str, description: str) -> dict:
 
 
 def check_reason_code_count(repo: Path) -> dict:
-    """Verify Rust reason code count is 26 (0.9.0 frozen count).
+    """Verify the 0.9.x reason-code floor and generated-boundary parity.
 
-    0.9.0 freezes at exactly 26 reason codes. After 1.0.0, only additive
-    new codes are permitted. The gate uses == 26 to detect drift.
+    The 0.9.0 baseline contains 26 codes.  The current 0.9.2 freeze adds
+    the distinct ``encoding_header_invalid`` code, so a prior-version
+    regression gate must not reject the newer release solely because its
+    generated registry has grown.  It still verifies that Rust and C expose
+    the same count and that the baseline floor remains present.
     """
     rc_file = repo / "components/rust-converter/src/decision/reason_code.rs"
     if not rc_file.exists():
@@ -60,11 +63,31 @@ def check_reason_code_count(repo: Path) -> dict:
         return {"name": "reason_code_count", "status": "fail",
                 "message": "REASON_CODE_COUNT not found in reason_code.rs"}
     count = int(match.group(1))
-    if count == 26:
+    if count < 26:
+        return {"name": "reason_code_count", "status": "fail",
+                "message": f"Expected at least 26, got {count}"}
+
+    c_file = repo / "components/nginx-module/src/ngx_http_markdown_reason_generated.h"
+    if c_file.exists():
+        c_content = c_file.read_text(encoding="utf-8")
+        c_match = re.search(
+            r"#define\s+REASON_CODE_COUNT\s+(\d+)", c_content
+        )
+        if c_match and int(c_match.group(1)) != count:
+            return {
+                "name": "reason_code_count",
+                "status": "fail",
+                "message": (
+                    "Rust/C reason-code count mismatch: "
+                    f"Rust={count}, C={c_match.group(1)}"
+                ),
+            }
+
+    if count >= 26:
         return {"name": "reason_code_count", "status": "pass",
                 "details": {"count": count}}
     return {"name": "reason_code_count", "status": "fail",
-            "message": f"Expected exactly 26, got {count}"}
+            "message": f"Expected at least 26, got {count}"}
 
 
 def check_diagnostics_schema_version(repo: Path) -> dict:
@@ -92,7 +115,7 @@ def check_diagnostics_schema_version(repo: Path) -> dict:
     )
     emission = re.compile(
         r'ngx_slprintf\s*\(\s*p\s*,\s*last\s*,\s*'
-        r'"  \\"schema_version\\": 1,\\n"\s*\)'
+        r'"[^"\n]*\\"schema_version\\"\s*:\s*1\s*[,}]'
     )
     if not emission.search(renderer_without_comments):
         return {"name": "diagnostics_schema_v1", "status": "fail",
@@ -247,22 +270,24 @@ def check_inflight_guard(repo: Path) -> dict:
 
 
 def _check_removed_directives(content: str, removed: list) -> list:
-    """Verify each removed directive is present as a reject-only stub.
+    """Verify removed directives are absent from the live command registry.
 
-    For every directive name in *removed*, check that the config directives
-    implementation file contains both the ngx_string("name") entry and the
-    reject handler (ngx_http_markdown_reject_removed_directive) in the
-    surrounding 700-byte block.  Return a list of problem descriptions.
+    The 0.9.2 reset deliberately removes these names from ``ngx_command_t``.
+    NGINX then provides the standard unknown-directive error.  Older versions
+    of this validator required reject-only stubs, which contradicted the
+    frozen Wave 1 command table and also matched migration comments rather
+    than the live registry.
     """
     missing = []
+    registry_marker = "static ngx_command_t ngx_http_markdown_filter_commands[] = {"
+    registry_start = content.find(registry_marker)
+    registry_end = content.find("\n};", registry_start)
+    if registry_start < 0 or registry_end < 0:
+        return ["live ngx_command_t registry missing or unterminated"]
+    registry = content[registry_start:registry_end]
     for name in removed:
-        idx = content.find(f'ngx_string("{name}")')
-        if idx < 0:
-            missing.append(f"{name}: directive missing")
-            continue
-        block = content[idx:idx + 700]
-        if "ngx_http_markdown_reject_removed_directive" not in block:
-            missing.append(f"{name}: not reject-only")
+        if f'ngx_string("{name}")' in registry:
+            missing.append(f"{name}: still present in live command registry")
     return missing
 
 
@@ -283,7 +308,7 @@ def _check_migration_guide(migration: Path) -> list:
 
 
 def check_config_v2_removed_directives(repo: Path) -> dict:
-    """Verify removed Config V2 directives are reject-only stubs."""
+    """Verify removed Config V2 directives are not active commands."""
     directives = (
         repo /
         "components/nginx-module/src/ngx_http_markdown_config_directives_impl.h"
@@ -484,11 +509,25 @@ def check_last_modified_time_fallback(repo: Path) -> dict:
 
 
 def check_profile_explicit_inheritance(repo: Path) -> dict:
-    """Verify profile cache_validation_explicit is inherited across scopes."""
+    """Check profile inheritance only when the profile surface still exists.
+
+    The 0.9.2 reset removes ``markdown_profile`` and its configuration fields.
+    A newer release gate must not fail solely because that prior-version
+    contract no longer exists.
+    """
     merge_impl = (
         repo / "components/nginx-module/src/ngx_http_markdown_config_core_impl.h"
     )
     test_file = repo / "components/nginx-module/tests/unit/profile_test.c"
+    directives = (
+        repo
+        / "components/nginx-module/src/ngx_http_markdown_config_directives_impl.h"
+    )
+    if directives.exists():
+        directive_text = directives.read_text()
+        if 'ngx_string("markdown_profile")' not in directive_text:
+            return {"name": "profile_explicit_inheritance", "status": "pass",
+                    "message": "profile surface removed; no inheritance contract"}
     if not merge_impl.exists() or not test_file.exists():
         return {"name": "profile_explicit_inheritance", "status": "fail",
                 "message": "merge implementation or profile test missing"}

@@ -22,8 +22,8 @@ The OTel surface consisted of two active directives (`markdown_otel on|off` and
 `markdown_otel_endpoint <uri>`) plus five reject-only directives for unimplemented
 features (tracing, metrics, service_name, span_buffer_size, export_timeout).
 
-As part of the 0.9.2 final pre-v1 breaking freeze (Spec 62), the OTel subsystem
-is removed entirely because:
+As part of the 0.9.2 final pre-v1 breaking freeze, the OTel subsystem is
+removed entirely because:
 
 1. **Incomplete implementation**: Only basic span creation was implemented.
    Retry buffering, export timeouts, metrics export, and service-name override

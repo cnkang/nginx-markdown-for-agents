@@ -57,6 +57,7 @@ ngx_int_t ngx_http_markdown_get_reason_code_str(uint32_t code,
 #define REASON_HEADER_PLAN_APPLY_ERR    23
 #define REASON_STREAMING_MID_FLIGHT_ERR 24
 #define REASON_BYPASS_NO_TRANSFORM      25
+#define REASON_ENCODING_HEADER_INVALID  26
 
 
 /*
@@ -92,6 +93,7 @@ static ngx_str_t  reason_str_header_plan_apply_err;
 static ngx_str_t  reason_str_streaming_mid_flight_err;
 static ngx_str_t  reason_str_ffi_panic;
 static ngx_str_t  reason_str_bypass_no_transform;
+static ngx_str_t  reason_str_encoding_header_invalid;
 
 static ngx_flag_t reason_strs_initialized = 0;
 
@@ -161,6 +163,8 @@ ngx_http_markdown_reason_init_strs(void)
         &reason_str_ffi_panic);
     ngx_http_markdown_get_reason_code_str(REASON_BYPASS_NO_TRANSFORM,
         &reason_str_bypass_no_transform);
+    ngx_http_markdown_get_reason_code_str(REASON_ENCODING_HEADER_INVALID,
+        &reason_str_encoding_header_invalid);
 
     reason_strs_initialized = 1;
 }

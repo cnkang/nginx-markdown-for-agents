@@ -36,10 +36,9 @@ This operational guide provides procedures for monitoring, troubleshooting, tuni
 
 - This guide includes example commands, sample metrics, and suggested thresholds. Validate them in staging before production use.
 - Metric field names in this guide should match the current metrics endpoint implementation in `components/nginx-module/src/ngx_http_markdown_filter_module.c`.
-- The built-in metrics endpoint returns human-readable text, JSON, or native
-  Prometheus exposition. Prometheus output requires
-  `markdown_metrics_format prometheus` and an explicit Prometheus `Accept`
-  header; see [Prometheus Metrics Guide](prometheus-metrics.md).
+- The built-in metrics endpoint returns the frozen Prometheus exposition.
+  Send an explicit Prometheus `Accept` header; see
+  [Prometheus Metrics Guide](prometheus-metrics.md).
 - Metrics are aggregated in shared memory across workers; a single endpoint response reflects the whole NGINX instance, not just the worker that served `/markdown-metrics`.
 - For “why this request took a specific branch,” use [../architecture/REQUEST_LIFECYCLE.md](../architecture/REQUEST_LIFECYCLE.md) and [../architecture/CONFIG_BEHAVIOR_MAP.md](../architecture/CONFIG_BEHAVIOR_MAP.md) alongside this runbook.
 
@@ -47,7 +46,7 @@ This operational guide provides procedures for monitoring, troubleshooting, tuni
 
 - **Module** means the NGINX Markdown filter module (the NGINX C component).
 - **Rust converter** means the Rust HTML-to-Markdown library and FFI layer.
-- **Metrics endpoint** means the HTTP endpoint enabled by `markdown_metrics` (plain text or JSON output).
+  - **Metrics endpoint** means the HTTP endpoint enabled by `markdown_metrics` (Prometheus text 0.0.4 only).
 - Metrics commands in this guide often use `http://localhost/markdown-metrics`; replace it with your actual metrics endpoint path when different.
 
 ---
@@ -56,64 +55,20 @@ This operational guide provides procedures for monitoring, troubleshooting, tuni
 
 ### Key Metrics to Monitor
 
-The module exposes metrics via the `markdown_metrics` endpoint. Configure monitoring to collect these metrics regularly.
+The endpoint emits exactly the eleven bounded Prometheus families defined in
+the [Prometheus Metrics Guide](prometheus-metrics.md). Monitor the labeled
+request outcomes, conversion attempts and successful deliveries, the duration
+histogram, byte counters, inflight gauge, streaming/decompression/dynconf
+events, and `build_info`. Do not derive dashboards from removed JSON fields or
+legacy family names.
 
-#### Conversion Metrics
-
-| Metric | Description | Type | Alert Threshold |
-|--------|-------------|------|-----------------|
-| `conversions_attempted` | Total conversion attempts | Cumulative counter field | N/A (informational) |
-| `conversions_succeeded` | Successful conversions | Cumulative counter field | N/A (informational) |
-| `conversions_failed` | Failed conversions | Cumulative counter field | > 5% of attempts |
-| `failures_conversion` | Failures due to conversion errors | Cumulative counter field | > 2% of attempts |
-| `failures_resource_limit` | Failures due to resource limits | Cumulative counter field | > 3% of attempts |
-| `failures_system` | Failures due to system errors | Cumulative counter field | > 0.1% of attempts |
-
-#### Performance Metrics
-
-| Metric | Description | Type | Alert Threshold |
-|--------|-------------|------|-----------------|
-| `conversion_time_sum_ms` | Total conversion time (sum) | Cumulative counter field | N/A (derive average) |
-| `conversion_completed` | Completed conversions (`success + failure`) | Derived cumulative field | N/A (informational) |
-| `conversion_time_avg_ms` | Average conversion time across completed conversions | Derived field exposed by endpoint | > 200ms sustained |
-| `input_bytes` | Total input bytes processed | Cumulative counter field | N/A (informational) |
-| `input_bytes_avg` | Average successful input size | Derived field exposed by endpoint | N/A (informational) |
-| `output_bytes` | Total output bytes generated | Cumulative counter field | N/A (informational) |
-| `output_bytes_avg` | Average successful output size | Derived field exposed by endpoint | N/A (informational) |
-| `conversion_latency_buckets.*` | Completed conversions by discrete latency band (each conversion increments exactly one time-range bucket) | Cumulative counter field | Watch for drift toward slower buckets |
-
-#### Decompression Metrics
-
-| Metric | Description | Type | Alert Threshold |
-|--------|-------------|------|-----------------|
-| `decompressions_attempted` | Responses decompressed before conversion | Cumulative counter field | N/A (informational) |
-| `decompressions_succeeded` | Successful decompressions | Cumulative counter field | N/A (informational) |
-| `decompressions_failed` | Failed decompressions | Cumulative counter field | > 1% of decompression attempts |
-| `decompressions_gzip` | Successful gzip decompressions | Cumulative counter field | N/A (informational) |
-| `decompressions_deflate` | Successful deflate decompressions | Cumulative counter field | N/A (informational) |
-| `decompressions_brotli` | Successful brotli decompressions | Cumulative counter field | N/A (informational) |
-
-#### Derived Metrics
-
-Calculate these metrics from the raw counters:
-
-Guard denominator-based formulas so dashboards and alerts emit `0`/`null` instead of `Inf` or `NaN` when the corresponding counter is still zero.
+The conservation checks to use after the system is quiescent are:
 
 ```text
-# Failure rate
-failure_rate = (conversions_failed / conversions_attempted) * 100
-
-# Average conversion time
-avg_conversion_time = conversion_completed > 0 ? (conversion_time_sum_ms / conversion_completed) : 0
-
-# Size reduction (proxy for token reduction trend)
-size_reduction = ((input_bytes - output_bytes) / input_bytes) * 100
-
-# Success rate
-success_rate = (conversions_succeeded / conversions_attempted) * 100
-
-# Decompression success rate
-decompression_success_rate = (decompressions_succeeded / decompressions_attempted) * 100
+sum(requests_total) >= sum(conversion_attempts_total)
+sum(conversion_attempts_total) >= sum(conversion_deliveries_total)
+conversion_duration_seconds_count <= sum(conversion_attempts_total)
+inflight_requests == 0
 ```
 
 
@@ -125,79 +80,24 @@ decompression_success_rate = (decompressions_succeeded / decompressions_attempte
 # Optional: override if your metrics endpoint uses a different path
 export METRICS_URL="${METRICS_URL:-http://localhost/markdown-metrics}"
 
-# Plain text format (default when no Accept header is sent)
-curl -H "Accept: text/plain" "$METRICS_URL"
-
-# JSON format
-curl -H "Accept: application/json" "$METRICS_URL"
+# Prometheus text exposition format 0.0.4 (the only public format)
+curl --fail-with-body -H "Accept: text/plain; version=0.0.4" "$METRICS_URL"
 ```
 
-**Example Output (Plain Text):**
+**Example Output:**
 ```text
-Markdown Filter Metrics
------------------------
-Conversions Attempted: 1250
-Conversions Succeeded: 1180
-Conversions Failed: 70
-Conversions Bypassed: 20
-Conversions Completed: 1250
-
-Failure Breakdown:
-- Conversion Errors: 25
-- Resource Limit Exceeded: 40
-- System Errors: 5
-
-Performance:
-- Total Conversion Time: 45000 ms
-- Average Conversion Time: 36 ms
-- Total Input Bytes: 52428800
-- Average Input Bytes: 44431
-- Total Output Bytes: 15728640
-- Average Output Bytes: 13329
-- Latency <= 10ms: 140
-- Latency <= 100ms: 1030
-- Latency <= 1000ms: 80
-- Latency > 1000ms: 0
-```
-
-**Example Output (JSON):**
-```json
-{
-  "conversions_attempted": 1250,
-  "conversions_succeeded": 1180,
-  "conversions_failed": 70,
-  "conversions_bypassed": 20,
-  "conversion_completed": 1250,
-  "failures_conversion": 25,
-  "failures_resource_limit": 40,
-  "failures_system": 5,
-  "conversion_time_sum_ms": 45000,
-  "conversion_time_avg_ms": 36,
-  "input_bytes": 52428800,
-  "input_bytes_avg": 44431,
-  "output_bytes": 15728640,
-  "output_bytes_avg": 13329,
-  "conversion_latency_buckets": {
-    "le_10ms": 140,
-    "le_100ms": 1030,
-    "le_1000ms": 80,
-    "gt_1000ms": 0
-  },
-  "decompressions_attempted": 210,
-  "decompressions_succeeded": 205,
-  "decompressions_failed": 5,
-  "decompressions_gzip": 160,
-  "decompressions_deflate": 25,
-  "decompressions_brotli": 20
-}
+# HELP nginx_markdown_requests_total Requests entering the decision chain
+# TYPE nginx_markdown_requests_total counter
+nginx_markdown_requests_total{outcome="converted",stage="delivery",reason="none"} 1180
+# TYPE nginx_markdown_conversion_duration_seconds histogram
+nginx_markdown_conversion_duration_seconds_count{engine="full_buffer"} 1180
 ```
 
 ---
 
 ### Prometheus Integration
 
-The built-in endpoint can emit native Prometheus exposition format. Configure
-`markdown_metrics_format prometheus` on the metrics location and send an
+The built-in endpoint emits native Prometheus exposition format. Send an
 explicit Prometheus `Accept` header from the scraper. See
 [Prometheus Metrics Guide](prometheus-metrics.md) for the full metric catalog.
 
@@ -214,25 +114,25 @@ scrape_configs:
 **Grafana Dashboard Queries:**
 
 ```promql
-# Failure rate
-sum(rate(nginx_markdown_failures_total[5m]))
-/ clamp_min(rate(nginx_markdown_requests_total[5m]), 1e-10) * 100
+# Failed request rate
+sum(rate(nginx_markdown_requests_total{outcome=~"failed_.*"}[5m]))
+/ clamp_min(sum(rate(nginx_markdown_requests_total[5m])), 1e-10) * 100
 
 # Slow conversion bucket share (> 1s)
-(rate(nginx_markdown_conversion_latency_bucket_total{le="+Inf"}[5m])
-  - rate(nginx_markdown_conversion_latency_bucket_total{le="1.0"}[5m]))
-/ clamp_min(rate(nginx_markdown_conversion_latency_bucket_total{le="+Inf"}[5m]), 1e-10) * 100
+(sum(rate(nginx_markdown_conversion_duration_seconds_bucket{le="+Inf"}[5m]))
+  - sum(rate(nginx_markdown_conversion_duration_seconds_bucket{le="1.0"}[5m])))
+/ clamp_min(sum(rate(nginx_markdown_conversion_duration_seconds_count[5m])), 1e-10) * 100
 
 # Throughput (conversions per second)
-rate(nginx_markdown_conversions_total[1m])
+sum(rate(nginx_markdown_conversion_deliveries_total[1m]))
 
 # Size reduction percentage (proxy for token reduction trend)
 (1 - (rate(nginx_markdown_output_bytes_total[5m])
   / clamp_min(rate(nginx_markdown_input_bytes_total[5m]), 1))) * 100
 
 # Decompression failure rate
-rate(nginx_markdown_decompression_failures_total[5m])
-/ clamp_min(sum(rate(nginx_markdown_decompressions_total[5m])), 1e-10) * 100
+sum(rate(nginx_markdown_decompression_events_total{outcome="failure"}[5m]))
+/ clamp_min(sum(rate(nginx_markdown_decompression_events_total[5m])), 1e-10) * 100
 ```
 
 ---
@@ -320,9 +220,9 @@ fi
 # check_markdown_filter.sh
 #!/bin/bash
 
-METRICS=$(curl -s -H "Accept: text/plain" "${METRICS_URL:-http://localhost/markdown-metrics}")
-FAILED=$(echo "$METRICS" | grep conversions_failed | awk '{print $2}')
-ATTEMPTED=$(echo "$METRICS" | grep conversions_attempted | awk '{print $2}')
+METRICS=$(curl -s -H "Accept: text/plain; version=0.0.4" "${METRICS_URL:-http://localhost/markdown-metrics}")
+FAILED=$(echo "$METRICS" | grep 'nginx_markdown_requests_total{.*outcome="failed_' | awk '{sum += $2} END {print sum + 0}')
+ATTEMPTED=$(echo "$METRICS" | grep 'nginx_markdown_conversion_attempts_total' | awk '{sum += $2} END {print sum + 0}')
 
 if [ "$ATTEMPTED" -eq 0 ]; then
     echo "WARNING: No conversion attempts"
@@ -355,7 +255,7 @@ The repository CI now includes a non-blocking Darwin/macOS smoke workflow that e
 
 **Symptoms:**
 - Clients receive HTML instead of Markdown
-- `conversions_attempted` counter not increasing
+- `nginx_markdown_conversion_attempts_total` is not increasing
 
 **Diagnostic Steps:**
 
@@ -395,7 +295,7 @@ tail -100 /var/log/nginx/error.log | grep markdown
 - Extension/path map uses `$request_uri` and fails when query strings are present
 - `text/*` path in map enabled but `markdown_accept` is still `strict`
 - Response not eligible (non-200 status, non-HTML content)
-- Response exceeds `markdown_limits memory=...` limit
+- Response exceeds `markdown_limits conversion_memory=...` limit
 
 **Solutions:**
 - Enable filter: `markdown_filter on;`
@@ -403,21 +303,21 @@ tail -100 /var/log/nginx/error.log | grep markdown
 - For map-based config, use regex for `Accept` matching and prefer `$uri` for extension checks
 - Enable wildcard support when required: `markdown_accept wildcard;`
 - Check backend returns 200 with `Content-Type: text/html`
-- Increase size limit if needed: `markdown_limits memory=20m;`
+- Increase size limit if needed: `markdown_limits conversion_memory=20m;`
 
 ---
 
 #### Issue 2: High Failure Rate
 
 **Symptoms:**
-- `conversions_failed` counter increasing rapidly
+- `nginx_markdown_requests_total{outcome=~"failed_.*"}` increasing rapidly
 - Alert: Failure rate > 5%
 
 **Diagnostic Steps:**
 
 1. **Check failure categories:**
 ```bash
-curl -H "Accept: text/plain" "${METRICS_URL:-http://localhost/markdown-metrics}" | grep failures
+curl -H "Accept: text/plain; version=0.0.4" "${METRICS_URL:-http://localhost/markdown-metrics}" | grep 'outcome="failed_'
 ```
 
 2. **Analyze error logs:**
@@ -452,7 +352,7 @@ grep "conversion failed" /var/log/nginx/error.log | \
   - Report bug if HTML is valid but conversion fails
 
 - **For resource_limit:**
-  - Increase limits: `markdown_limits memory=20m timeout=10s;`
+  - Increase limits: `markdown_limits conversion_memory=20m conversion_timeout=10s;`
   - Optimize content: Reduce HTML size at source
   - Use fail-open: `markdown_error_policy pass;`
 
@@ -474,17 +374,20 @@ grep "conversion failed" /var/log/nginx/error.log | \
 
 1. **Check average conversion time:**
 ```bash
-curl -H "Accept: text/plain" "${METRICS_URL:-http://localhost/markdown-metrics}"
-# Calculate only when conversion_completed > 0:
-#   conversion_time_sum_ms / conversion_completed
-# Otherwise record 0 (or null in your dashboard) to avoid Inf/NaN.
+curl -H "Accept: text/plain; version=0.0.4" "${METRICS_URL:-http://localhost/markdown-metrics}"
+# Use the histogram's rate/quantile functions; do not parse removed JSON fields.
+```
+
+```promql
+histogram_quantile(0.95,
+  sum by (le) (rate(nginx_markdown_conversion_duration_seconds_bucket[5m])))
 ```
 
 **Diagnostic Steps:**
 
 1. **Check average conversion time:**
 ```bash
-curl -H "Accept: text/plain" "${METRICS_URL:-http://localhost/markdown-metrics}"
+curl -H "Accept: text/plain; version=0.0.4" "${METRICS_URL:-http://localhost/markdown-metrics}"
 
 # Monitor logs
 tail -f /var/log/nginx/error.log | grep markdown
@@ -544,7 +447,7 @@ curl -H "Accept: text/markdown" http://localhost/test
 #### Upgrading to 0.9.x
 
 - `fullbuffer_path_hits` and `incremental_path_hits` have been moved to the end of `ngx_http_markdown_metrics_t`. If you use shared-memory metrics, a graceful reload is sufficient; no data migration is needed.
-- The `incremental` feature is off by default. Enable it with `--features incremental` when building the Rust converter to use the incremental processing path. Note: the `markdown_large_body_threshold` directive was retired in 0.9.0; its threshold-routing role is now served by `markdown_stream_threshold` (v0.8.0+, default 1m) under the `markdown_streaming auto` policy.
+- The `incremental` feature is off by default. Enable it with `--features incremental` when building the Rust converter to use the incremental processing path. Streaming selection is controlled by `markdown_streaming off|auto|force`; `auto` uses an internal bounded heuristic rather than an operator-facing threshold directive.
 - `X-Forwarded-Host` and `X-Forwarded-Proto` headers are no longer trusted by default for base URL construction. If NGINX sits behind a trusted reverse proxy that sets these headers, add its proxy range in the `http` context, for example `markdown_trusted_proxies 10.0.0.0/8;`. Forwarded headers remain ignored for direct peers outside the configured CIDRs.
 
 #### Upgrading to 0.2.x
@@ -632,8 +535,8 @@ Variable-driven `markdown_filter` support is new in 0.2.0. Existing static `on`/
 
 1. **Assess impact:**
 ```bash
-curl -H "Accept: text/plain" "${METRICS_URL:-http://localhost/markdown-metrics}"
-# Check: conversions_failed, failure categories
+curl -H "Accept: text/plain; version=0.0.4" "${METRICS_URL:-http://localhost/markdown-metrics}"
+# Check: nginx_markdown_requests_total{outcome=~"failed_.*"}
 ```
 
 2. **Identify failure category:**
@@ -650,7 +553,7 @@ grep "conversion failed" /var/log/nginx/error.log | tail -50
    - Report bug if needed
 
    **If resource_limit:**
-   - Increase limits temporarily: `markdown_limits memory=20m timeout=10s;`
+   - Increase limits temporarily: `markdown_limits conversion_memory=20m conversion_timeout=10s;`
    - Reload NGINX: `nginx -s reload`
    - Investigate root cause
 
@@ -661,7 +564,7 @@ grep "conversion failed" /var/log/nginx/error.log | tail -50
 
 4. **Monitor for improvement:**
 ```bash
-watch -n 30 'curl -s -H "Accept: text/plain" "${METRICS_URL:-http://localhost/markdown-metrics}" | grep failed'
+watch -n 30 'curl -s -H "Accept: text/plain; version=0.0.4" "${METRICS_URL:-http://localhost/markdown-metrics}" | grep failed'
 ```
 
 5. **Document incident:**
@@ -682,10 +585,8 @@ watch -n 30 'curl -s -H "Accept: text/plain" "${METRICS_URL:-http://localhost/ma
 1. **Verify issue:**
 ```bash
 # Check average conversion time
-curl -H "Accept: text/plain" "${METRICS_URL:-http://localhost/markdown-metrics}"
-# Calculate only when conversion_completed > 0:
-#   conversion_time_sum_ms / conversion_completed
-# Otherwise record 0 (or null in your dashboard) to avoid Inf/NaN.
+curl -H "Accept: text/plain; version=0.0.4" "${METRICS_URL:-http://localhost/markdown-metrics}"
+# Use histogram_quantile over nginx_markdown_conversion_duration_seconds.
 ```
 
 2. **Identify slow requests:**
@@ -705,7 +606,7 @@ iostat -x 1 5
 4. **Take immediate action:**
 
    **If system overloaded:**
-   - Reduce timeout: `markdown_limits timeout=2s;`
+   - Reduce timeout: `markdown_limits conversion_timeout=2s parser_timeout=2s;`
    - Enable rate limiting
    - Scale horizontally if possible
 
@@ -755,7 +656,7 @@ dmesg | tail -50
 
    **If out of memory:**
    - Check memory usage: `free -h`
-   - Reduce `markdown_limits memory=` value
+   - Reduce `markdown_limits conversion_memory=` value
    - Add more RAM or swap
 
    **If segmentation fault:**
@@ -775,7 +676,7 @@ systemctl restart nginx
 5. **Prevent recurrence:**
 ```nginx
 # Reduce resource limits
-    markdown_limits memory=5m timeout=3s;
+    markdown_limits conversion_memory=5m conversion_timeout=3s parser_timeout=3s;
 
 # Enable fail-open
 markdown_error_policy pass;
@@ -997,7 +898,7 @@ The table below maps each reason code to its internal enum, error category, requ
 | Reason Code | Request State | Description | Suggested Operator Action |
 |---|---|---|---|
 | `disabled` | NOT_ENABLED | Module disabled by configuration for this scope | Expected for scopes where you have not enabled conversion. If unexpected, check `markdown_filter` in the relevant `location`/`server` block. |
-| `not_eligible` | SKIPPED | Request not eligible (method not GET/HEAD, non-200/206 status, Range request, non-`text/html` Content-Type, exceeds `markdown_limits memory=`, or auth policy denies) | The individual failing check is in the structured log metadata. Most are expected (POST/PUT/DELETE, non-HTML, partial content). If an HTML GET page triggers this, check the failing check field in the log. |
+| `not_eligible` | SKIPPED | Request not eligible (method not GET/HEAD, non-200/206 status, Range request, non-`text/html` Content-Type, exceeds `markdown_limits conversion_memory=`, or auth policy denies) | The individual failing check is in the structured log metadata. Most are expected (POST/PUT/DELETE, non-HTML, partial content). If an HTML GET page triggers this, check the failing check field in the log. |
 | `skipped_accept` | SKIPPED | `Accept` header present but does not request Markdown | Expected for normal browser traffic. If an AI agent triggers this, verify the client sends `Accept: text/markdown`. Check `markdown_accept` if using `*/*`. |
 | `skipped_no_accept` | SKIPPED | No `Accept` header and `markdown_accept` is `strict` | Expected when clients omit `Accept`. Relax `markdown_accept` to `wildcard` if you want to convert such traffic. |
 | `skipped_accept_reject` | SKIPPED | `Accept` explicitly rejects Markdown (`text/markdown;q=0` or wildcard with `q=0`) | Expected when a client signals it does not want Markdown. No action needed. |
@@ -1032,13 +933,13 @@ When the streaming engine is active (`markdown_streaming auto` or `force`), the 
 
 #### Failure Sub-Classification Codes
 
-When conversion fails (`failed_open` or `failed_closed`), the decision log also records a failure sub-classification that provides more detail (the `reason` label on `nginx_markdown_failures_total`):
+When conversion fails (`failed_open` or `failed_closed`), the decision log also records a failure sub-classification in the `reason` label on `nginx_markdown_requests_total`:
 
 | Failure Code | Description | Suggested Operator Action |
 |---|---|---|
 | `conversion_error` | HTML parse or conversion error | Inspect the failing HTML with `curl`. Check if the upstream changed its HTML structure. Report a bug if the HTML is valid. |
-| `memory_budget_exceeded` | Memory limit reached (`markdown_limits memory=...` or parser budget) | Increase `markdown_limits memory=...` or `markdown_parser_budget`, or exclude large/complex pages from conversion scope. |
-| `timeout` | Parser execution exceeded `markdown_parse_timeout` | Increase `markdown_parse_timeout` or exclude slow pages. |
+| `memory_budget_exceeded` | Memory limit reached (`markdown_limits conversion_memory=...` or `parser_memory=...`) | Increase the relevant `markdown_limits` key, or exclude large/complex pages from conversion scope. |
+| `timeout` | Parser execution exceeded `markdown_limits parser_timeout=...` | Increase `markdown_limits parser_timeout=...` or exclude slow pages. |
 | `ffi_panic` | Internal/system error (Rust↔C panic) | Urgent — indicates an unexpected internal failure. Collect logs (`dmesg`) and report a bug. |
 
 ### Request States
@@ -1056,21 +957,17 @@ Every request ends in one of four mutually exclusive states, derived from its re
 
 You can determine the count of requests in each state using the metrics endpoint and decision log entries.
 
-**From the metrics endpoint** (`curl -s -H "Accept: application/json" http://localhost/markdown-metrics`):
+**From the metrics endpoint** (`curl -s -H "Accept: text/plain; version=0.0.4" http://localhost/markdown-metrics`):
 
 ```text
-NOT_ENABLED = skips.config
+CONVERTED   = sum(requests_total{outcome="converted"})
 
-SKIPPED     = skips.method + skips.status + skips.range + skips.streaming
-              + skips.content_type + skips.size + skips.auth + skips.accept
+SKIPPED     = sum(requests_total{outcome="skipped"})
 
-CONVERTED   = conversions_succeeded
-
-FAILED      = conversions_failed
-              (breakdown: failures_conversion + failures_resource_limit + failures_system)
+FAILED      = sum(requests_total{outcome=~"failed_.*"})
 ```
 
-> **Note:** `conversions_failed` counts all requests that entered the FAILED state, including conversion errors, decompression failures, and system errors. The breakdown counters (`failures_conversion`, `failures_resource_limit`, `failures_system`) provide the sub-classification.
+> **Note:** The outcome, stage, and reason labels are the authoritative request-level classification. They are bounded and do not include a path or URI dimension.
 
 **From decision log entries** (useful for request-level correlation):
 
@@ -1082,8 +979,8 @@ SKIPPED     = count of "reason=not_eligible" (and other skipped_* codes) in deci
                + skipped_accept_reject + skipped_conditional + bypass_no_transform)
 ```
 
-> **Note:** Per-skip-reason counters are exposed as JSON `skips.*` fields and
-> as Prometheus `nginx_markdown_skips_total{reason="..."}` series. Use decision
+> **Note:** Request outcomes are exposed as Prometheus
+> `nginx_markdown_requests_total{outcome=...,stage=...,reason=...}` series. Use decision
 > log grep patterns when you need request URIs, status details, or correlation
 > with a specific upstream response.
 
@@ -1091,7 +988,7 @@ Example commands to check each state:
 
 ```bash
 # Check metrics endpoint
-curl -s -H "Accept: text/plain" http://localhost/markdown-metrics
+curl -s -H "Accept: text/plain; version=0.0.4" http://localhost/markdown-metrics
 
 # Count NOT_ENABLED from logs
 grep "markdown decision:" /var/log/nginx/error.log | grep -c "reason=disabled"
@@ -1119,22 +1016,22 @@ The alignment works as follows:
 
 | Reason Code Category | Metrics Endpoint Field | Log Correlation | Example |
 |---|---|---|---|
-| Skip codes (`not_eligible`, `skipped_*`, `bypass_no_transform`) | JSON `skips.*`; Prometheus `nginx_markdown_skips_total{reason="..."}` | `reason` field in decision log | `grep "reason=not_eligible" error.log` |
-| Failure categories (`conversion_error`, `resource_limit`, `system_error`) | `nginx_markdown_failures_total{reason="..."}` | Map the bounded metric category to the more specific `reason` field in decision logs | `grep "reason=conversion_error" error.log` |
-| `converted` | `conversions_succeeded` | `reason` field in decision log | `grep "reason=converted" error.log` |
-| `failed_open` | `conversions_failed` (aggregate) | `reason` field in decision log | `grep "reason=failed_open" error.log` |
-| `failed_closed` | `conversions_failed` (aggregate) | `reason` field in decision log | `grep "reason=failed_closed" error.log` |
+| Skip codes (`not_eligible`, `skipped_*`, `bypass_no_transform`) | `nginx_markdown_requests_total{outcome="skipped",reason="..."}` | `reason` field in decision log | `grep "reason=not_eligible" error.log` |
+| Failure categories (`conversion_error`, `resource_limit`, `system_error`) | `nginx_markdown_requests_total{outcome=~"failed_.*",reason="..."}` | `reason` field in decision log | `grep "reason=conversion_error" error.log` |
+| `converted` | `nginx_markdown_requests_total{outcome="converted"}` | `reason` field in decision log | `grep "reason=converted" error.log` |
+| `failed_open` | `nginx_markdown_requests_total{outcome="failed_open"}` | `reason` field in decision log | `grep "reason=failed_open" error.log` |
+| `failed_closed` | `nginx_markdown_requests_total{outcome="failed_closed"}` | `reason` field in decision log | `grep "reason=failed_closed" error.log` |
 
 #### Correlating a Metric Spike with Logs
 
 When you see a spike in a metric, use the same reason code string to find the corresponding log entries:
 
 ```bash
-# Example: you see failures_conversion increasing in the metrics endpoint
+# Example: you see failed request samples increasing in the metrics endpoint
 # Find the matching log entries:
 grep "markdown decision:" /var/log/nginx/error.log | grep "category=FAIL_CONVERSION"
 
-# Example: you see conversions_failed increasing
+# Example: you see failed_open or failed_closed samples increasing
 # Find the matching log entries:
 grep "markdown decision:" /var/log/nginx/error.log | grep -E "reason=failed_open\|reason=failed_closed"
 
@@ -1231,7 +1128,7 @@ The `markdown_log_verbosity` directive controls which decision outcomes produce 
 | `info` (default) | All outcomes | Base | Recommended for rollout — full visibility into every decision |
 | `debug` | All outcomes | Extended (adds `filter_value`, `accept`, `status`) | Troubleshooting — maximum detail for diagnosing specific requests |
 
-At `error` and `warn` levels, non-failure outcomes (`not_eligible`, `skipped_*`, `disabled`, `converted`, `ENGINE_STREAMING`, `STREAMING_CONVERT`, `STREAMING_SHADOW`, `STREAMING_SKIP_UNSUPPORTED`) are silently suppressed. Both levels only emit failure outcomes: `failed_open`, `failed_closed`, `STREAMING_FAIL_POSTCOMMIT`, `STREAMING_PRECOMMIT_FAILOPEN`, `STREAMING_PRECOMMIT_REJECT`, `STREAMING_BUDGET_EXCEEDED`, `STREAMING_FALLBACK_PREBUFFER`. At `info` and `debug` levels, they include full outcomes. Decision logs retain specific reason codes such as `memory_budget_exceeded`, `timeout`, or `ffi_panic`; the Prometheus `nginx_markdown_failures_total` family intentionally aggregates them into `conversion_error`, `resource_limit`, and `system_error`. The legacy `category=` field (for example `FAIL_CONVERSION`, `FAIL_RESOURCE_LIMIT`, or `FAIL_SYSTEM`) is used for streaming error-class mapping by `ngx_http_markdown_log_decision_with_category()`.
+At `error` and `warn` levels, non-failure outcomes (`not_eligible`, `skipped_*`, `disabled`, and `converted`) are silently suppressed. Both levels only emit failure outcomes such as `failed_open` and `failed_closed`. At `info` and `debug` levels, the full bounded outcome set is available. Decision logs retain specific reason codes such as `memory_budget_exceeded`, `timeout`, or `ffi_panic`; the Prometheus `nginx_markdown_requests_total` family carries those values in its `reason` label.
 
 #### Configuration examples
 
@@ -1368,35 +1265,21 @@ tail -f /var/log/nginx/error.log | grep "markdown decision:"
 
 | Metric Name | Type | Description |
 |-------------|------|-------------|
-| `conversions_attempted` | Cumulative counter field | Total conversion attempts |
-| `conversions_succeeded` | Cumulative counter field | Successful conversions |
-| `conversions_failed` | Cumulative counter field | Failed conversions |
-| `conversions_bypassed` | Cumulative counter field | Bypassed responses (ineligible/passthrough) |
-| `failures_conversion` | Cumulative counter field | Conversion errors (HTML parsing, Markdown generation, etc.) |
-| `failures_resource_limit` | Cumulative counter field | Resource limit violations (size, timeout) |
-| `failures_system` | Cumulative counter field | System errors (memory/internal failures) |
-| `input_bytes` | Cumulative counter field | Total input bytes processed |
-| `output_bytes` | Cumulative counter field | Total output bytes generated |
-| `conversion_time_sum_ms` | Cumulative counter field | Total conversion time in milliseconds |
+| `nginx_markdown_requests_total` | Counter | One terminal request outcome; labels: outcome, stage, reason |
+| `nginx_markdown_conversion_attempts_total` | Counter | Committed conversion attempts; label: engine |
+| `nginx_markdown_conversion_deliveries_total` | Counter | Successful converted Markdown deliveries; label: engine |
+| `nginx_markdown_conversion_duration_seconds` | Histogram | Conversion duration by engine |
+| `nginx_markdown_input_bytes_total` | Counter | Input bytes read for conversion |
+| `nginx_markdown_output_bytes_total` | Counter | Converted bytes delivered downstream |
+| `nginx_markdown_inflight_requests` | Gauge | Current in-flight conversions |
+| `nginx_markdown_streaming_events_total` | Counter | Bounded streaming transitions |
+| `nginx_markdown_decompression_events_total` | Counter | Bounded decompression events |
+| `nginx_markdown_dynconf_reloads_total` | Counter | Dynamic-configuration reload outcomes |
+| `nginx_markdown_build_info` | Gauge | Build identity; value is always `1` |
 
-### Derived Metrics Formulas
-
-```
-# Success rate (%)
-success_rate = (conversions_succeeded / conversions_attempted) * 100
-
-# Failure rate (%)
-failure_rate = (conversions_failed / conversions_attempted) * 100
-
-# Average conversion time (ms)
-avg_conversion_time = conversion_completed > 0 ? (conversion_time_sum_ms / conversion_completed) : 0
-
-# Size reduction (%)
-size_reduction = ((input_bytes - output_bytes) / input_bytes) * 100
-
-# Throughput (req/s)
-throughput = conversions_succeeded / time_period_seconds
-```
+The authoritative labels, values, histogram boundaries, and help text are in
+the [Prometheus Metrics Guide](prometheus-metrics.md). No JSON or legacy
+plain-text metric fields are part of the 0.9.2 contract.
 
 
 ## Document Updates

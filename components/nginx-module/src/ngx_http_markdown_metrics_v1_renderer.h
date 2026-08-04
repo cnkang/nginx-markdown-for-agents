@@ -52,10 +52,21 @@ u_char *ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...);
  * from this v1 snapshot.
  */
 typedef struct {
+    ngx_atomic_uint_t buckets[NGX_HTTP_MARKDOWN_METRICS_V1_BUCKET_COUNT];
+    ngx_atomic_uint_t sum_us;
+    ngx_atomic_uint_t count;
+} ngx_http_markdown_metrics_v1_histogram_t;
+
+typedef struct {
     /* Family 1: requests_total (counter) */
     struct {
         ngx_atomic_uint_t converted;
-        ngx_atomic_uint_t skipped;
+        ngx_atomic_uint_t skipped_not_eligible;
+        ngx_atomic_uint_t skipped_accept;
+        ngx_atomic_uint_t skipped_no_accept;
+        ngx_atomic_uint_t skipped_conditional;
+        ngx_atomic_uint_t skipped_disabled;
+        ngx_atomic_uint_t skipped_bypass_no_transform;
         ngx_atomic_uint_t failed_open;
         ngx_atomic_uint_t failed_closed;
         ngx_atomic_uint_t aborted;
@@ -74,11 +85,8 @@ typedef struct {
     } deliveries;
 
     /* Family 4: conversion_duration_seconds (histogram) */
-    struct {
-        ngx_atomic_uint_t buckets[NGX_HTTP_MARKDOWN_METRICS_V1_BUCKET_COUNT];
-        ngx_atomic_uint_t sum_us;  /* microseconds for precision */
-        ngx_atomic_uint_t count;
-    } duration;
+    ngx_http_markdown_metrics_v1_histogram_t duration_full_buffer;
+    ngx_http_markdown_metrics_v1_histogram_t duration_streaming;
 
     /* Family 5: input_bytes_total (counter) */
     ngx_atomic_uint_t input_bytes;
@@ -134,11 +142,73 @@ typedef struct {
     /* Family 11: build_info (gauge, always 1) */
     struct {
         u_char  *version;
-        u_char  *nginx_version;
+        u_char  *nginx_version_text;
         u_char  *features;
     } build_info;
 } ngx_http_markdown_metrics_v1_snapshot_t;
 
+
+static u_char *
+ngx_http_markdown_metrics_v1_render_histogram(
+    u_char *p,
+    u_char *end,
+    const char *engine,
+    const ngx_http_markdown_metrics_v1_histogram_t *histogram)
+{
+    static const char *bucket_le[
+        NGX_HTTP_MARKDOWN_METRICS_V1_BUCKET_COUNT] = {
+        "0.001", "0.005", "0.01", "0.025", "0.05",
+        "0.1", "0.25", "0.5", "1.0", "5.0"
+    };
+    ngx_atomic_uint_t  cumulative;
+    ngx_atomic_uint_t  sum_seconds;
+    ngx_atomic_uint_t  sum_frac;
+    ngx_uint_t         i;
+
+    if (p == NULL || end == NULL || engine == NULL || histogram == NULL) {
+        return NULL;
+    }
+
+    cumulative = 0;
+    for (i = 0; i < NGX_HTTP_MARKDOWN_METRICS_V1_BUCKET_COUNT; i++) {
+        cumulative += histogram->buckets[i];
+        p = ngx_slprintf(p, end,
+            "nginx_markdown_conversion_duration_seconds_bucket"
+            "{engine=\"%s\",le=\"%s\"} %uA\n",
+            engine, bucket_le[i], cumulative);
+        if (p >= end) {
+            return NULL;
+        }
+    }
+
+    p = ngx_slprintf(p, end,
+        "nginx_markdown_conversion_duration_seconds_bucket"
+        "{engine=\"%s\",le=\"+Inf\"} %uA\n",
+        engine, histogram->count);
+    if (p >= end) {
+        return NULL;
+    }
+
+    sum_seconds = histogram->sum_us / 1000000;
+    sum_frac = histogram->sum_us % 1000000;
+    p = ngx_slprintf(p, end,
+        "nginx_markdown_conversion_duration_seconds_sum"
+        "{engine=\"%s\"} %uA.%06uA\n",
+        engine, sum_seconds, sum_frac);
+    if (p >= end) {
+        return NULL;
+    }
+
+    p = ngx_slprintf(p, end,
+        "nginx_markdown_conversion_duration_seconds_count"
+        "{engine=\"%s\"} %uA\n",
+        engine, histogram->count);
+    if (p >= end) {
+        return NULL;
+    }
+
+    return p;
+}
 
 /*
  * Render the 11 frozen metric families in Prometheus text 0.0.4 format.
@@ -161,21 +231,6 @@ ngx_http_markdown_metrics_v1_render(
     u_char *end,
     const ngx_http_markdown_metrics_v1_snapshot_t *snapshot)
 {
-    /*
-     * Bucket boundaries in microseconds (for integer comparison)
-     * and seconds (for label output).
-     * Boundaries: 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 5.0
-     */
-    static const char *bucket_le[NGX_HTTP_MARKDOWN_METRICS_V1_BUCKET_COUNT] = {
-        "0.001", "0.005", "0.01", "0.025", "0.05",
-        "0.1", "0.25", "0.5", "1.0", "5.0"
-    };
-
-    ngx_atomic_uint_t  cumulative;
-    ngx_atomic_uint_t  sum_seconds;
-    ngx_atomic_uint_t  sum_frac;
-    ngx_uint_t         i;
-
     if (p == NULL || end == NULL || snapshot == NULL) {
         return NULL;
     }
@@ -189,18 +244,43 @@ ngx_http_markdown_metrics_v1_render(
         "in the module decision chain.\n"
         "# TYPE nginx_markdown_requests_total counter\n"
         "nginx_markdown_requests_total"
-        "{outcome=\"converted\"} %uA\n"
+        "{outcome=\"converted\",stage=\"conversion\","
+        "reason=\"converted\"} %uA\n"
         "nginx_markdown_requests_total"
-        "{outcome=\"skipped\"} %uA\n"
+        "{outcome=\"skipped\",stage=\"eligibility\","
+        "reason=\"not_eligible\"} %uA\n"
         "nginx_markdown_requests_total"
-        "{outcome=\"failed_open\"} %uA\n"
+        "{outcome=\"skipped\",stage=\"eligibility\","
+        "reason=\"skipped_accept\"} %uA\n"
         "nginx_markdown_requests_total"
-        "{outcome=\"failed_closed\"} %uA\n"
+        "{outcome=\"skipped\",stage=\"eligibility\","
+        "reason=\"skipped_no_accept\"} %uA\n"
         "nginx_markdown_requests_total"
-        "{outcome=\"aborted\"} %uA\n"
+        "{outcome=\"skipped\",stage=\"eligibility\","
+        "reason=\"skipped_conditional\"} %uA\n"
+        "nginx_markdown_requests_total"
+        "{outcome=\"skipped\",stage=\"eligibility\","
+        "reason=\"disabled\"} %uA\n"
+        "nginx_markdown_requests_total"
+        "{outcome=\"skipped\",stage=\"eligibility\","
+        "reason=\"bypass_no_transform\"} %uA\n"
+        "nginx_markdown_requests_total"
+        "{outcome=\"failed_open\",stage=\"delivery\","
+        "reason=\"failed_open\"} %uA\n"
+        "nginx_markdown_requests_total"
+        "{outcome=\"failed_closed\",stage=\"delivery\","
+        "reason=\"failed_closed\"} %uA\n"
+        "nginx_markdown_requests_total"
+        "{outcome=\"aborted\",stage=\"delivery\","
+        "reason=\"streaming_mid_flight_error\"} %uA\n"
         "\n",
         snapshot->requests.converted,
-        snapshot->requests.skipped,
+        snapshot->requests.skipped_not_eligible,
+        snapshot->requests.skipped_accept,
+        snapshot->requests.skipped_no_accept,
+        snapshot->requests.skipped_conditional,
+        snapshot->requests.skipped_disabled,
+        snapshot->requests.skipped_bypass_no_transform,
         snapshot->requests.failed_open,
         snapshot->requests.failed_closed,
         snapshot->requests.aborted);
@@ -260,44 +340,17 @@ ngx_http_markdown_metrics_v1_render(
         return NULL;
     }
 
-    /* Emit cumulative bucket lines */
-    cumulative = 0;
-    for (i = 0; i < NGX_HTTP_MARKDOWN_METRICS_V1_BUCKET_COUNT; i++) {
-        cumulative += snapshot->duration.buckets[i];
-        p = ngx_slprintf(p, end,
-            "nginx_markdown_conversion_duration_seconds_bucket"
-            "{le=\"%s\"} %uA\n",
-            bucket_le[i], cumulative);
-        if (p >= end) {
-            return NULL;
-        }
-    }
-
-    /* +Inf bucket (always equals total count) */
-    p = ngx_slprintf(p, end,
-        "nginx_markdown_conversion_duration_seconds_bucket"
-        "{le=\"+Inf\"} %uA\n",
-        snapshot->duration.count);
-    if (p >= end) {
+    p = ngx_http_markdown_metrics_v1_render_histogram(
+        p, end, "full_buffer", &snapshot->duration_full_buffer);
+    if (p == NULL) {
         return NULL;
     }
-
-    /* _sum (convert microseconds to seconds.fraction) */
-    sum_seconds = snapshot->duration.sum_us / 1000000;
-    sum_frac = snapshot->duration.sum_us % 1000000;
-    p = ngx_slprintf(p, end,
-        "nginx_markdown_conversion_duration_seconds_sum "
-        "%uA.%06uA\n",
-        sum_seconds, sum_frac);
-    if (p >= end) {
+    p = ngx_http_markdown_metrics_v1_render_histogram(
+        p, end, "streaming", &snapshot->duration_streaming);
+    if (p == NULL) {
         return NULL;
     }
-
-    /* _count */
-    p = ngx_slprintf(p, end,
-        "nginx_markdown_conversion_duration_seconds_count "
-        "%uA\n\n",
-        snapshot->duration.count);
+    p = ngx_slprintf(p, end, "\n");
     if (p >= end) {
         return NULL;
     }
@@ -356,17 +409,17 @@ ngx_http_markdown_metrics_v1_render(
         "# TYPE nginx_markdown_streaming_events_total "
         "counter\n"
         "nginx_markdown_streaming_events_total"
-        "{transition=\"commit\"} %uA\n"
+        "{transition=\"commit\",reason=\"converted\"} %uA\n"
         "nginx_markdown_streaming_events_total"
-        "{transition=\"fallback\"} %uA\n"
+        "{transition=\"fallback\",reason=\"bypass_no_transform\"} %uA\n"
         "nginx_markdown_streaming_events_total"
-        "{transition=\"safe_finish_start\"} %uA\n"
+        "{transition=\"safe_finish_start\",reason=\"converted\"} %uA\n"
         "nginx_markdown_streaming_events_total"
-        "{transition=\"abort_start\"} %uA\n"
+        "{transition=\"abort_start\",reason=\"streaming_mid_flight_error\"} %uA\n"
         "nginx_markdown_streaming_events_total"
-        "{transition=\"resume_success\"} %uA\n"
+        "{transition=\"resume_success\",reason=\"converted\"} %uA\n"
         "nginx_markdown_streaming_events_total"
-        "{transition=\"resume_failure\"} %uA\n"
+        "{transition=\"resume_failure\",reason=\"streaming_mid_flight_error\"} %uA\n"
         "\n",
         snapshot->streaming_events.commit,
         snapshot->streaming_events.fallback,
@@ -512,7 +565,7 @@ ngx_http_markdown_metrics_v1_render(
         "features=\"%s\"} 1\n"
         "\n",
         snapshot->build_info.version,
-        snapshot->build_info.nginx_version,
+        snapshot->build_info.nginx_version_text,
         snapshot->build_info.features);
     if (p >= end) {
         return NULL;

@@ -173,10 +173,7 @@ pub fn validate_dynconf(value: &JsonValue) -> Result<DynconfValue, DynconfParseE
             if raw.contains('.') || raw.contains('e') || raw.contains('E') {
                 return Err(DynconfParseError::new(
                     DynconfParseErrorKind::InvalidSchemaVersion,
-                    format!(
-                        "schema_version must be integer 1, got '{}'",
-                        raw
-                    ),
+                    format!("schema_version must be integer 1, got '{}'", raw),
                 ));
             }
             if *val != 1.0 {
@@ -324,10 +321,7 @@ fn validate_streaming_buffer(value: &JsonValue) -> Result<u64, DynconfParseError
             if raw.contains('.') || raw.contains('e') || raw.contains('E') {
                 return Err(DynconfParseError::new(
                     DynconfParseErrorKind::InvalidType,
-                    format!(
-                        "streaming_buffer must be an integer, got '{}'",
-                        raw
-                    ),
+                    format!("streaming_buffer must be an integer, got '{}'", raw),
                 ));
             }
 
@@ -354,10 +348,7 @@ fn validate_streaming_buffer(value: &JsonValue) -> Result<u64, DynconfParseError
             if parsed < 0 {
                 return Err(DynconfParseError::new(
                     DynconfParseErrorKind::ValueOutOfRange,
-                    format!(
-                        "streaming_buffer must be positive, got {}",
-                        parsed
-                    ),
+                    format!("streaming_buffer must be positive, got {}", parsed),
                 ));
             }
 

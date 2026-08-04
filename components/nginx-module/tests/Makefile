@@ -22,7 +22,7 @@ endif
 endif
 SANITIZER_ENV ?= ASAN_OPTIONS=$(ASAN_OPTIONS_BASE) UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
 
-.PHONY: unit unit-smoke unit-clang-smoke unit-sanitize-smoke $(addprefix unit-,$(UNIT_NAMES)) integration-c integration-nginx e2e unit-coverage clean
+.PHONY: unit unit-smoke unit-clang-smoke unit-sanitize-smoke unit-otel_impl $(addprefix unit-,$(UNIT_NAMES)) integration-c integration-nginx e2e unit-coverage clean
 
 build/unit build/integration build/generated:
 	@mkdir -p $@
@@ -68,7 +68,7 @@ build/unit/%: unit/%_test.c include/test_common.h include/test_metrics_snapshot.
 	  eligibility_impl|hard_excluded_params_case|hard_excluded_types_security|status_code_excluded_security) extra_cflags="-Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  config_core_impl) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  v070_default_values) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
-	  dynconf_impl) extra_cflags="-Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
+  dynconf_impl) extra_cflags="-Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -DNGX_HTTP_MARKDOWN_DYNCONF_LEGACY_TEST -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  dynconf_snapshot) extra_cflags="-Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  effective_conf) extra_cflags="-Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  prometheus_renderer) extra_cflags="-DMARKDOWN_STREAMING_ENABLED" ;; \
@@ -84,6 +84,10 @@ unit: $(UNIT_BINS)
 	  echo "Running $$t"; \
 	  "$$t"; \
 	done
+
+# Keep the release gate's historical name while exercising the surviving
+# request-scoped instrumentation coverage in the streaming implementation.
+unit-otel_impl: unit-streaming_impl
 
 # fast smoke subset used by top-level make test
 unit-smoke: build/unit/body_filter build/unit/eligibility build/unit/headers
@@ -126,7 +130,7 @@ COV_DIR ?= build/coverage
 unit-coverage:
 	@$(MAKE) clean
 	@$(MAKE) unit \
-		CFLAGS_COMMON="-Wall -Wextra -Werror=implicit-function-declaration -Werror=incompatible-pointer-types -g --coverage -std=$(CSTD) -Iinclude" \
+		CFLAGS_COMMON="-Wall -Wextra -Werror=implicit-function-declaration -Werror=incompatible-pointer-types -g --coverage -std=$(CSTD) -Iinclude -I../../rust-converter/include" \
 		LDFLAGS_COMMON="--coverage"
 	@mkdir -p $(COV_DIR)
 	lcov --capture --directory build/unit --output-file $(COV_DIR)/raw.lcov \

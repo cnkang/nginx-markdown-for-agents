@@ -36,7 +36,7 @@ The profile directive is removed. Use explicit directive settings instead.
 markdown_profile balanced;
 
 # AFTER (0.9.2) — balanced equivalent
-markdown_limits conversion_memory=64m conversion_timeout=5s max_inflight=64;
+markdown_limits conversion_memory=64m conversion_timeout=5s parser_timeout=5s max_inflight=64;
 markdown_cache_validation ims_only;
 markdown_error_policy pass;
 ```

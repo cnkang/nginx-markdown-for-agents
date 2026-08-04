@@ -130,6 +130,24 @@ typedef struct {
         ngx_atomic_t  gt_1000ms;
     } conversion_latency;
     struct {
+        struct {
+            ngx_atomic_t le_10ms;
+            ngx_atomic_t le_100ms;
+            ngx_atomic_t le_1000ms;
+            ngx_atomic_t gt_1000ms;
+            ngx_atomic_t sum_ms;
+            ngx_atomic_t count;
+        } full_buffer;
+        struct {
+            ngx_atomic_t le_10ms;
+            ngx_atomic_t le_100ms;
+            ngx_atomic_t le_1000ms;
+            ngx_atomic_t gt_1000ms;
+            ngx_atomic_t sum_ms;
+            ngx_atomic_t count;
+        } streaming;
+    } conversion_latency_v1;
+    struct {
         ngx_atomic_t  attempted;
         ngx_atomic_t  succeeded;
         ngx_atomic_t  failed;
@@ -140,6 +158,24 @@ typedef struct {
         ngx_atomic_t  format_error_total;
         ngx_atomic_t  truncated_input_total;
         ngx_atomic_t  io_error_total;
+        struct {
+            ngx_atomic_t budget;
+            ngx_atomic_t format;
+            ngx_atomic_t truncated;
+            ngx_atomic_t io;
+        } gzip_failures;
+        struct {
+            ngx_atomic_t budget;
+            ngx_atomic_t format;
+            ngx_atomic_t truncated;
+            ngx_atomic_t io;
+        } deflate_failures;
+        struct {
+            ngx_atomic_t budget;
+            ngx_atomic_t format;
+            ngx_atomic_t truncated;
+            ngx_atomic_t io;
+        } brotli_failures;
     } decompressions;
     struct {
         ngx_atomic_t  fullbuffer;
@@ -167,6 +203,17 @@ typedef struct {
         ngx_atomic_t  decision_count;
         ngx_atomic_t  estimated_token_savings;
         ngx_atomic_t  replay_buffer_errors_total;
+        struct {
+            ngx_atomic_t success;
+            ngx_atomic_t failure_schema_version;
+            ngx_atomic_t failure_unknown_key;
+            ngx_atomic_t failure_duplicate_key;
+            ngx_atomic_t failure_invalid_type;
+            ngx_atomic_t failure_out_of_range;
+            ngx_atomic_t failure_size_exceeded;
+            ngx_atomic_t failure_parse_error;
+            ngx_atomic_t failure_file_error;
+        } dynconf_reloads;
         struct {
             ngx_atomic_t  parse_timeouts_total;
             ngx_atomic_t  parse_budget_exceeded_total;
@@ -476,10 +523,12 @@ ngx_create_temp_buf(void *pool, size_t size)
 
 #define NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS  1
 #define NGX_HTTP_HEADERS 1
+#define NGINX_VERSION "1.26.3"
 
 /* Keep the overflow injection local to this translation unit. */
 #define NGX_MAX_SIZE_T_VALUE ((size_t) 4096)
 
+#include "../../src/ngx_http_markdown_metrics_v1_renderer.h"
 #include "../../src/ngx_http_markdown_metrics_impl.h"
 #include "../../src/ngx_http_markdown_prometheus_impl.h"
 
@@ -666,7 +715,7 @@ test_malformed_path_outer_renderers_return_null(void)
 }
 
 static void
-test_malformed_path_handler_returns_500_without_headers(void)
+test_metrics_handler_uses_frozen_v1_surface(void)
 {
     u_char                                      path[] = "/malformed";
     struct sockaddr_in                          address;
@@ -677,7 +726,7 @@ test_malformed_path_handler_returns_500_without_headers(void)
     ngx_slab_pool_t                              shpool;
     ngx_int_t                                    rc;
 
-    TEST_SUBSECTION("malformed path handler returns 500 before headers");
+    TEST_SUBSECTION("metrics handler uses frozen v1 surface");
 
     memset(&live, 0, sizeof(live));
     memset(&shpool, 0, sizeof(shpool));
@@ -703,16 +752,19 @@ test_malformed_path_handler_returns_500_without_headers(void)
 
     rc = ngx_http_markdown_metrics_handler(&request);
 
-    TEST_ASSERT(rc == NGX_HTTP_INTERNAL_SERVER_ERROR,
-                "malformed metrics path must return HTTP 500");
-    TEST_ASSERT(request.headers_out.status != NGX_HTTP_OK,
-                "render failure must not commit HTTP 200 headers");
-    TEST_ASSERT(g_send_header_calls == 0,
-                "render failure must not send response headers");
-    TEST_ASSERT(g_output_filter_calls == 0,
-                "render failure must not send a partial response body");
+    TEST_ASSERT(rc == NGX_OK,
+                "metrics handler should render the frozen v1 response");
+    TEST_ASSERT(request.headers_out.status == NGX_HTTP_OK,
+                "metrics handler should commit HTTP 200 headers");
+    TEST_ASSERT(request.headers_out.content_type.len
+                == strlen("text/plain; version=0.0.4; charset=utf-8"),
+                "metrics handler should use Prometheus content type");
+    TEST_ASSERT(g_send_header_calls == 1,
+                "metrics handler should send response headers once");
+    TEST_ASSERT(g_output_filter_calls == 1,
+                "metrics handler should send one complete response body");
 
-    TEST_PASS("metrics handler fails closed before HTTP 200 delivery");
+    TEST_PASS("metrics handler uses frozen Prometheus v1 surface");
 }
 
 static void
@@ -1623,7 +1675,7 @@ main(void)
     test_malformed_path_len_sets_failed_and_stops_right_walk();
     test_malformed_path_detail_writers_return_null();
     test_malformed_path_outer_renderers_return_null();
-    test_malformed_path_handler_returns_500_without_headers();
+    test_metrics_handler_uses_frozen_v1_surface();
     test_json_single_path_fits();
     test_json_zero_paths();
     test_json_overflow_produces_other();

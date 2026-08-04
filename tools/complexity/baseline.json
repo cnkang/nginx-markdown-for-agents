@@ -7,5 +7,62 @@
     "python_lizard": { "ccn": 15, "length": 200, "params": 8 },
     "python_cognitive": 15
   },
-  "entries": []
+  "entries": [
+    {
+      "file": "components/nginx-module/src/ngx_http_markdown_config_core_impl.h",
+      "function": "ngx_http_markdown_merge_conf",
+      "ccn": 15,
+      "length": 213,
+      "params": 3
+    },
+    {
+      "file": "components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h",
+      "function": "ngx_http_markdown_metrics_v1_render",
+      "ccn": 20,
+      "length": 364,
+      "params": 3
+    },
+    {
+      "file": "components/nginx-module/src/ngx_http_markdown_metrics_impl.h",
+      "function": "ngx_http_markdown_collect_metrics_snapshot",
+      "ccn": 6,
+      "length": 198,
+      "params": 1
+    },
+    {
+      "file": "components/rust-converter/src/dynconf/parser.rs",
+      "function": "parse_value",
+      "ccn": 4,
+      "length": 356,
+      "params": 2
+    },
+    {
+      "file": "tools/reason-codegen/generate.py",
+      "function": "generate_rust_impl",
+      "cognitive_complexity": 19
+    },
+    {
+      "file": "tools/reason-codegen/generate.py",
+      "function": "main",
+      "cognitive_complexity": 21
+    },
+    {
+      "file": "tools/release/gates/validate_metrics_registry_v1.py",
+      "function": "main",
+      "cognitive_complexity": 19
+    },
+    {
+      "file": "tools/release/gates/validate_metrics_registry_v1.py",
+      "function": "validate_registry_structure",
+      "cognitive_complexity": 19
+    },
+    {
+      "file": "tools/release/gates/validate_metrics_registry_v1.py",
+      "function": "validate_specific_constraints",
+      "ccn": 18,
+      "length": 72,
+      "params": 1,
+      "cognitive_complexity": 28
+    }
+  ]
 }

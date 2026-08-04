@@ -309,15 +309,16 @@ generate_nginx_conf() {
         proxy_http_version 1.1;
         proxy_buffering off;
         proxy_set_header Connection \"\";
-        markdown_profile streaming_first;
-        markdown_streaming_zero_copy on;"
+        markdown_streaming force;"
       ;;
     strict_cache)
       profile_directives="
-        markdown_cache_validation full;"
+        markdown_cache_validation full;
+        markdown_streaming off;"
       ;;
     balanced)
-      profile_directives=""
+      profile_directives="
+        markdown_streaming auto;"
       ;;
     *)
       log "warning: unknown profile '$profile', using balanced"
@@ -364,8 +365,8 @@ http {
             # The 1 MiB Brotli fixture can expand from one very small wire
             # chunk. Keep both conversion and pre-commit replay buffers large
             # enough for that valid first batch while retaining hard caps.
-            markdown_limits memory=64m timeout=2s streaming_buffer=16m max_inflight=64;
-            markdown_stream_precommit_buffer 16m;
+            markdown_limits conversion_memory=64m conversion_timeout=2s
+                parser_timeout=2s streaming_buffer=16m max_inflight=64;
             $profile_directives
         }
 
@@ -943,7 +944,7 @@ run_scenario() {
   # Fetch real NGINX metrics from metrics endpoint
   log "  Fetching real NGINX metrics..."
   local metrics_json
-  metrics_json="$(curl -s -H 'Accept: application/json' "http://127.0.0.1:${NGINX_PORT}/markdown-metrics" || echo '{}')"
+  metrics_json="$(curl -s -H 'Accept: text/plain; version=0.0.4' "http://127.0.0.1:${NGINX_PORT}/markdown-metrics" || echo '')"
   local metrics_file="$NGINX_WORKDIR/${SC_NAME}_metrics.json"
   printf '%s\n' "$metrics_json" > "$metrics_file"
 
@@ -1026,13 +1027,17 @@ from pathlib import Path
 
 sys.path.insert(0, sys.argv[16])
 
-from tools.perf.benchmark_validation import ScenarioResultInput, build_scenario_result
+from tools.perf.benchmark_validation import ScenarioResultInput, build_scenario_result, parse_prometheus_metrics
 
 
-def read_json_file(path):
+def read_metrics_file(path):
     try:
-        return json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        content = Path(path).read_text(encoding="utf-8")
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            return parse_prometheus_metrics(content)
+    except OSError:
         return {}
 
 
@@ -1045,8 +1050,8 @@ result = build_scenario_result(ScenarioResultInput(
     concurrency=int(sys.argv[6]),
     worker_rss_kb=int(sys.argv[7]),
     load_generator=sys.argv[8],
-    ttfb=read_json_file(sys.argv[9]),
-    nginx_metrics=read_json_file(sys.argv[10]),
+    ttfb=json.loads(Path(sys.argv[9]).read_text(encoding="utf-8")),
+    nginx_metrics=read_metrics_file(sys.argv[10]),
     input_bytes=int(sys.argv[11]),
     baseline_rss_kb=int(sys.argv[12]),
     peak_rss_kb=int(sys.argv[13]),
