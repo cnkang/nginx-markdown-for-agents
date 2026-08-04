@@ -199,12 +199,10 @@ pub struct MarkdownOptions {
     /// paths; full-buffer relies on NGINX-side buffering limits.
     /// Populated from `markdown_limits memory=<size>` (Config V2).
     pub memory_budget: u64,
-    /// LLM provider for token estimation (0=default, 1=openai-gpt, 2=anthropic-claude,
-    /// 3=google-gemini, 4=meta-llama).
+    /// LLM provider for token estimation (removed in 0.9.2 — no LLM adapter in 1.0).
     ///
-    /// When non-zero and `estimate_tokens` is enabled, the provider's
-    /// characteristic chars-per-token ratio overrides the default 4.0.
-    /// Populated from the `markdown_llm_provider` NGINX directive.
+    /// Retained temporarily for FFI ABI stability; always zero in production.
+    /// Final removal deferred to Wave 4 Task 8.13 (FFI freeze).
     pub llm_provider: u8,
     /// Explicit chars-per-token ratio for token estimation (0.0 = use default/provider).
     ///
