@@ -7,6 +7,8 @@
  * Determines whether a streaming chunk is delivered via the
  * zero-copy buffer factory (Rust memory referenced directly)
  * or the existing pool-copy path (data copied into pool).
+ *
+ * Zero-copy was removed in 0.9.2 (directive deleted); always pool-copy.
  */
 typedef enum {
     NGX_HTTP_MARKDOWN_OUTPUT_POOL_COPY  = 0,
@@ -17,23 +19,14 @@ typedef enum {
 /*
  * Hybrid output decision function.
  *
- * Evaluates three guards to determine the output path for a
- * streaming chunk.  Zero-copy is selected only when ALL guards
- * are clear; any single guard active forces pool-copy.
+ * Zero-copy removed in 0.9.2: always returns POOL_COPY.
  *
- * Decision matrix:
- *   Feature OFF    -> POOL_COPY (Req 3.1)
- *   Terminal chunk -> POOL_COPY (Req 3.3)
- *   Backpressure  -> POOL_COPY (Req 3.4)
- *   All clear     -> ZERO_COPY (Req 3.2)
- *
- * conf               - location configuration (for zero_copy flag)
- * chunk_is_terminal  - 1 if this is a last_buf chunk
- * backpressure_active - 1 if pending output exists
+ * conf               - location configuration (unused)
+ * chunk_is_terminal  - whether this is the last chunk (unused)
+ * backpressure_active - whether downstream backpressure is active (unused)
  *
  * Returns:
- *   NGX_HTTP_MARKDOWN_OUTPUT_POOL_COPY or
- *   NGX_HTTP_MARKDOWN_OUTPUT_ZERO_COPY
+ *   NGX_HTTP_MARKDOWN_OUTPUT_POOL_COPY
  */
 static inline ngx_http_markdown_output_decision_t
 ngx_http_markdown_hybrid_output_decision(
@@ -41,23 +34,11 @@ ngx_http_markdown_hybrid_output_decision(
     ngx_flag_t chunk_is_terminal,
     ngx_flag_t backpressure_active)
 {
-    /* Feature gate OFF -> pool-copy (Req 3.1) */
-    if (conf->stream.zero_copy != 1) {
-        return NGX_HTTP_MARKDOWN_OUTPUT_POOL_COPY;
-    }
+    (void) conf;
+    (void) chunk_is_terminal;
+    (void) backpressure_active;
 
-    /* Terminal chunk -> pool-copy (Req 3.3) */
-    if (chunk_is_terminal) {
-        return NGX_HTTP_MARKDOWN_OUTPUT_POOL_COPY;
-    }
-
-    /* Backpressure active -> pool-copy (Req 3.4) */
-    if (backpressure_active) {
-        return NGX_HTTP_MARKDOWN_OUTPUT_POOL_COPY;
-    }
-
-    /* All guards clear -> zero-copy (Req 3.2) */
-    return NGX_HTTP_MARKDOWN_OUTPUT_ZERO_COPY;
+    return NGX_HTTP_MARKDOWN_OUTPUT_POOL_COPY;
 }
 
 #endif /* _NGX_HTTP_MARKDOWN_OUTPUT_DECISION_IMPL_H_INCLUDED_ */

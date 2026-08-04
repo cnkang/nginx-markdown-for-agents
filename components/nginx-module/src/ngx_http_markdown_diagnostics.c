@@ -9,7 +9,7 @@
  *   - Dynamic configuration state (mtime, version, LKG)
  *
  * The endpoint is gated by the markdown_diagnostics directive (on/off)
- * and access control (default deny, explicit allow needed).
+ * and native NGINX access-phase directives (allow/deny).
  *
  * Requirement: REQ-0700-OPERABILITY-001
  * Risk Pack: dynamic-config-hot-reload
@@ -62,10 +62,6 @@ static ngx_flag_t  ngx_http_markdown_g_diag_recording_requested = 0;
 /*
  * Forward declarations for static helper functions.
  */
-static ngx_int_t ngx_http_markdown_diagnostics_check_cidr(
-    const struct sockaddr *sa, const ngx_array_t *allow_list);
-static ngx_int_t ngx_http_markdown_diagnostics_check_loopback(
-    const struct sockaddr *sa);
 static ngx_int_t ngx_http_markdown_diagnostics_check_access(
     ngx_http_request_t *r);
 static ngx_int_t ngx_http_markdown_diagnostics_build_json(
@@ -336,6 +332,20 @@ ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
 
     /* Only allow read-only GET and HEAD requests. */
     if (!(r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD))) {
+        ngx_table_elt_t  *allow_hdr;
+
+        /*
+         * Add Allow: GET, HEAD header per RFC 9110 Section 15.5.6.
+         * NGINX does not automatically add the Allow header for 405
+         * responses from content handlers, so we set it explicitly.
+         */
+        allow_hdr = ngx_list_push(&r->headers_out.headers);
+        if (allow_hdr != NULL) {
+            allow_hdr->hash = 1;
+            ngx_str_set(&allow_hdr->key, "Allow");
+            ngx_str_set(&allow_hdr->value, "GET, HEAD");
+        }
+
         return NGX_HTTP_NOT_ALLOWED;
     }
 
@@ -448,198 +458,42 @@ ngx_http_markdown_diagnostics_get_state(void)
 /*
  * Access control for the diagnostics endpoint.
  *
- * Default-deny policy with CIDR allowlist support:
+ * Access control is delegated to NGINX's native access-phase directives
+ * (allow/deny/auth_basic/satisfy). The diagnostics content handler runs
+ * in the content phase, which executes AFTER the access phase has already
+ * applied any configured restrictions.
  *
- *   1. The endpoint only activates when "markdown_diagnostics on" is
- *      explicitly configured in a location block.  Without this directive
- *      the handler is never registered, so no external access is possible.
+ * Operators should use standard NGINX access directives:
  *
- *   2. If markdown_diagnostics_allow directives are configured, the
- *      client IP is checked against the CIDR allow list.  Only matching
- *      addresses are permitted.
+ *   location /nginx-markdown/diagnostics {
+ *       markdown_diagnostics on;
+ *       allow 127.0.0.1;
+ *       allow ::1;
+ *       deny all;
+ *   }
  *
- *   3. If no markdown_diagnostics_allow directives are configured
- *      (allow list is empty/NULL), falls back to the built-in
- *      loopback-only restriction: only 127.0.0.1 and ::1 are allowed.
- *
- *   4. For additional access control, operators can also use NGINX's
- *      native allow/deny directives in the same location block.
+ * The handler performs only a minimal NULL sockaddr check as a safety
+ * guard; the actual CIDR-based access control is handled by NGINX's
+ * access module before this handler is invoked.
  *
  * Parameters:
  *   r - HTTP request
  *
  * Returns:
  *   NGX_OK             - access permitted
- *   NGX_HTTP_FORBIDDEN - access denied
+ *   NGX_HTTP_FORBIDDEN - access denied (no sockaddr)
  */
-#if (NGX_HAVE_INET6)
-static ngx_int_t
-ngx_http_markdown_diagnostics_match_ipv6_cidr(
-    const struct sockaddr_in6 *sin6, const ngx_cidr_t *cidr)
-{
-    for (ngx_uint_t j = 0; j < 16; j++) {
-        if ((sin6->sin6_addr.s6_addr[j]
-             & cidr->u.in6.mask.s6_addr[j])
-            != cidr->u.in6.addr.s6_addr[j])
-        {
-            return NGX_DECLINED;
-        }
-    }
-
-    return NGX_OK;
-}
-#endif
-
-
-static ngx_int_t
-ngx_http_markdown_diagnostics_check_cidr(const struct sockaddr *sa,
-    const ngx_array_t *allow_list)
-{
-    const ngx_cidr_t           *cidrs;
-    const struct sockaddr_in   *sin;
-#if (NGX_HAVE_INET6)
-    const struct sockaddr_in6  *sin6;
-#endif
-
-    cidrs = allow_list->elts;
-
-    for (ngx_uint_t i = 0; i < allow_list->nelts; i++) {
-
-        switch (sa->sa_family) {
-
-        case AF_INET:
-            if (cidrs[i].family != AF_INET) {
-                continue;
-            }
-
-            sin = (const struct sockaddr_in *) sa;
-            if ((sin->sin_addr.s_addr & cidrs[i].u.in.mask)
-                == cidrs[i].u.in.addr)
-            {
-                return NGX_OK;
-            }
-            break;
-
-#if (NGX_HAVE_INET6)
-        case AF_INET6:
-            if (cidrs[i].family != AF_INET6) {
-                continue;
-            }
-
-            sin6 = (const struct sockaddr_in6 *) sa;
-            if (ngx_http_markdown_diagnostics_match_ipv6_cidr(
-                    sin6, &cidrs[i]) == NGX_OK)
-            {
-                return NGX_OK;
-            }
-            break;
-#endif
-
-        default:
-            break;
-        }
-    }
-
-    return NGX_DECLINED;
-}
-
-
-static ngx_int_t
-ngx_http_markdown_diagnostics_check_loopback(const struct sockaddr *sa)
-{
-    const struct sockaddr_in   *sin;
-#if (NGX_HAVE_INET6)
-    const struct sockaddr_in6  *sin6;
-    static const uint8_t  ipv6_loopback[16] = {
-        0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 1
-    };
-#endif
-
-    switch (sa->sa_family) {
-
-    case AF_INET:
-        sin = (const struct sockaddr_in *) sa;
-
-        if (sin->sin_addr.s_addr == htonl(INADDR_LOOPBACK)) {
-            return NGX_OK;
-        }
-
-        break;
-
-#if (NGX_HAVE_INET6)
-    case AF_INET6:
-        sin6 = (const struct sockaddr_in6 *) sa;
-
-        if (ngx_memcmp(sin6->sin6_addr.s6_addr,
-                       ipv6_loopback, 16) == 0)
-        {
-            return NGX_OK;
-        }
-
-        break;
-#endif
-
-    default:
-        break;
-    }
-
-    return NGX_DECLINED;
-}
-
-
 static ngx_int_t
 ngx_http_markdown_diagnostics_check_access(ngx_http_request_t *r)
 {
-    const struct sockaddr        *sa;
-    const ngx_http_markdown_conf_t    *conf;
-    const ngx_array_t                 *allow_list;
-
-    sa = r->connection->sockaddr;
-
-    if (sa == NULL) {
+    if (r->connection->sockaddr == NULL) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
             "markdown: no client address, "
-            "denying access");
+            "denying diagnostics access");
         return NGX_HTTP_FORBIDDEN;
     }
 
-    /* Retrieve the location configuration for the allow list. */
-    conf = ngx_http_get_module_loc_conf(r,
-        ngx_http_markdown_filter_module);
-
-    allow_list = (conf != NULL) ? conf->ops.diagnostics_allow : NULL;
-
-    /*
-     * If a CIDR allow list is configured, check the client IP
-     * against it.  Only matching addresses are permitted.
-     */
-    if (allow_list != NULL && allow_list->nelts > 0) {
-        if (ngx_http_markdown_diagnostics_check_cidr(sa, allow_list)
-            == NGX_OK)
-        {
-            return NGX_OK;
-        }
-
-        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-            "markdown: client address not in "
-            "diagnostics_allow list, denying access");
-        return NGX_HTTP_FORBIDDEN;
-    }
-
-    /*
-     * No allow list configured: fall back to loopback-only.
-     */
-    if (ngx_http_markdown_diagnostics_check_loopback(sa) == NGX_OK) {
-        return NGX_OK;
-    }
-
-    ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-        "markdown: access denied for "
-        "non-loopback client; configure "
-        "markdown_diagnostics_allow for granular control");
-
-    return NGX_HTTP_FORBIDDEN;
+    return NGX_OK;
 }
 
 
@@ -670,20 +524,13 @@ ngx_http_markdown_diagnostics_check_access(ngx_http_request_t *r)
  */
 /*
  * Map profile enum to its canonical string name for JSON output.
+ * Profile directive removed in 0.9.2; always returns "none".
  */
 static const char *
 ngx_http_markdown_diagnostics_profile_name(ngx_uint_t profile)
 {
-    switch (profile) {
-    case NGX_HTTP_MARKDOWN_PROFILE_STRICT_CACHE:
-        return "strict_cache";
-    case NGX_HTTP_MARKDOWN_PROFILE_BALANCED:
-        return "balanced";
-    case NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST:
-        return "streaming_first";
-    default:
-        return "none";
-    }
+    (void) profile;
+    return "none";
 }
 
 
@@ -788,66 +635,17 @@ static u_char *
 ngx_http_markdown_diagnostics_fmt_profile(
     u_char *p, u_char *last, const ngx_http_markdown_conf_t *conf)
 {
-    ngx_uint_t   profile_name;
-    ngx_flag_t   first = 1;
+    (void) conf;
 
-    if (conf == NULL) {
-        profile_name = NGX_HTTP_MARKDOWN_PROFILE_NONE;
-    } else {
-        profile_name = conf->profile.name;
-    }
-
-    /* --- profile section --- */
+    /* --- profile section (removed in 0.9.2, emit "none" for compatibility) --- */
     p = ngx_slprintf(p, last,
-        "  \"profile\": \"%s\",\n",
-        ngx_http_markdown_diagnostics_profile_name(profile_name));
+        "  \"profile\": \"none\",\n");
 
-    /* --- overridden_fields --- */
-    p = ngx_slprintf(p, last, "  \"overridden_fields\": [");
+    /* --- overridden_fields (always empty now that profile is removed) --- */
+    p = ngx_slprintf(p, last, "  \"overridden_fields\": [],\n");
 
-    if (conf != NULL
-        && profile_name != NGX_HTTP_MARKDOWN_PROFILE_NONE)
-    {
-        /* Check streaming policy explicit */
-        if (conf->stream.policy_explicit) {
-            if (!first) {
-                p = ngx_slprintf(p, last, ", ");
-            }
-            p = ngx_slprintf(p, last, "\"streaming\"");
-            first = 0;
-        }
-
-        /* Check cache_validation explicit */
-        if (conf->profile.cache_validation_explicit) {
-            if (!first) {
-                p = ngx_slprintf(p, last, ", ");
-            }
-            p = ngx_slprintf(p, last, "\"cache_validation\"");
-        }
-    }
-
-    p = ngx_slprintf(p, last, "],\n");
-
-    /* --- forced_fields --- */
-    p = ngx_slprintf(p, last, "  \"forced_fields\": [");
-
-    switch (profile_name) {
-
-    case NGX_HTTP_MARKDOWN_PROFILE_STRICT_CACHE:
-        p = ngx_slprintf(p, last, "\"streaming\"");
-        break;
-
-    case NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST:
-        p = ngx_slprintf(p, last,
-            "\"cache_validation\", \"streaming\"");
-        break;
-
-    default:
-        /* balanced and none: no forced fields */
-        break;
-    }
-
-    p = ngx_slprintf(p, last, "],\n");
+    /* --- forced_fields (always empty now that profile is removed) --- */
+    p = ngx_slprintf(p, last, "  \"forced_fields\": [],\n");
 
     return p;
 }
@@ -942,11 +740,6 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
     const char  *policy_str;
     const char  *policy_source_str;
     const char  *on_error_str;
-    size_t       threshold;
-    size_t       precommit_buffer;
-    size_t       flush_min;
-    ngx_flag_t   threshold_explicit;
-    u_char       threshold_explicit_str[sizeof("false")];
 
     if (conf != NULL) {
         if (conf->stream.policy_explicit) {
@@ -980,34 +773,14 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
         ? ngx_http_markdown_diagnostics_error_policy_str(
             conf->on_error, conf->error_status)
         : "unknown";
-    threshold = (conf != NULL)
-        ? conf->stream.threshold : 0;
-    precommit_buffer = (conf != NULL)
-        ? conf->stream.precommit_buffer : 0;
-    flush_min = (conf != NULL)
-        ? conf->stream.flush_min : 0;
-    threshold_explicit = (conf != NULL
-        && conf->stream.threshold_explicit) ? 1 : 0;
-    if (threshold_explicit) {
-        ngx_memcpy(threshold_explicit_str, "true", sizeof("true"));
-    } else {
-        ngx_memcpy(threshold_explicit_str, "false",
-                   sizeof("false"));
-    }
 
     p = ngx_slprintf(p, last,
         "  \"streaming_config\": {\n"
         "    \"policy\": \"%s\",\n"
         "    \"policy_source\": \"%s\",\n"
-        "    \"on_error\": \"%s\",\n"
-        "    \"threshold\": %uz,\n"
-        "    \"precommit_buffer\": %uz,\n"
-        "    \"flush_min\": %uz,\n"
-        "    \"threshold_explicit\": %s\n"
+        "    \"on_error\": \"%s\"\n"
         "  },\n",
-        policy_str, policy_source_str, on_error_str, threshold,
-        precommit_buffer, flush_min,
-        threshold_explicit_str);
+        policy_str, policy_source_str, on_error_str);
 #else
     p = ngx_slprintf(p, last,
         "  \"streaming_config\": null,\n");

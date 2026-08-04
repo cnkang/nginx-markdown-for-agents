@@ -66,8 +66,9 @@ typedef struct {
 /*
  * Compute the next decision given the current context and event.
  *
- * This is a pure function: no allocations, no I/O, no global state.
- * The result is fully determined by the input parameters.
+ * This function performs no allocation and does not mutate the decision
+ * context. It may emit an error log via ctx->log when the PRE_COMMIT
+ * invariant is violated.
  *
  * Returns:
  *   A decision struct with new_state, action, and reason fields.

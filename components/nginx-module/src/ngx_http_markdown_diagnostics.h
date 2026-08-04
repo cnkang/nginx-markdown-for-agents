@@ -163,11 +163,10 @@ void ngx_http_markdown_diagnostics_record(
  *   - dynconf_state: dynamic configuration watcher state
  *   - streaming_config: streaming policy configuration
  *
- * Access control: by default (no markdown_diagnostics_allow directives),
- * only loopback clients (127.0.0.1 or ::1) are permitted.  When one or more
- * markdown_diagnostics_allow CIDR entries are configured, access is granted
- * to clients whose address matches the allow-list; non-matching clients
- * receive NGX_HTTP_FORBIDDEN.  Requests with no/unknown peer address are
+ * Access control: the diagnostics content handler runs in the NGINX content
+ * phase, which executes AFTER the access phase.  Use native NGINX
+ * allow/deny/auth_basic/satisfy directives in the location block to restrict
+ * access.  Requests with no/unknown peer address are
  * denied.  Only GET and HEAD are accepted.
  *
  * Parameters:

@@ -124,8 +124,10 @@ typedef struct {
         ngx_atomic_uint_t precommit_failopen_total;
         ngx_atomic_uint_t precommit_reject_total;
         ngx_atomic_uint_t budget_exceeded_total;
+#ifdef MARKDOWN_STREAMING_SHADOW_DEBUG
         ngx_atomic_uint_t shadow_total;
         ngx_atomic_uint_t shadow_diff_total;
+#endif
         ngx_atomic_uint_t last_ttfb_ms;
         ngx_atomic_uint_t last_peak_memory_bytes;
 
@@ -153,7 +155,8 @@ typedef struct {
     } streaming;
 #endif
 
-    /* Per-path metrics */
+    /* Per-path metrics (removed from production in 0.9.2) */
+#ifdef MARKDOWN_METRICS_PER_PATH_DEBUG
     struct {
         ngx_atomic_uint_t path_entries;
         ngx_atomic_uint_t path_conversions;
@@ -162,6 +165,7 @@ typedef struct {
         ngx_atomic_uint_t unretained_conversions;
         ngx_atomic_uint_t unretained_conversion_time_sum_ms;
     } per_path;
+#endif
 
     /* Performance metrics (backpressure, decompression path, output mode) */
     ngx_http_markdown_metrics_perf_snapshot_t perf;
@@ -329,8 +333,6 @@ ngx_http_markdown_metrics_write_json_routing(
         "    \"precommit_failopen_total\": %uA,\n"
         "    \"precommit_reject_total\": %uA,\n"
         "    \"budget_exceeded_total\": %uA,\n"
-        "    \"shadow_total\": %uA,\n"
-        "    \"shadow_diff_total\": %uA,\n"
         "    \"last_ttfb_ms\": %uA,\n"
         "    \"last_peak_memory_bytes\": %uA\n"
         "  },\n"
@@ -357,11 +359,7 @@ ngx_http_markdown_metrics_write_json_routing(
         "  \"parse_timeouts_total\": %uA,\n"
         "  \"parse_budget_exceeded_total\": %uA,\n"
         "  \"per_path\": {\n"
-        "    \"path_entries\": %uA,\n"
-        "    \"path_conversions\": %uA,\n"
-        "    \"path_conversion_time_sum_ms\": %uA,\n"
-        "    \"overflow_count\": %uA,\n"
-        "    \"paths\": [",
+        "    \"paths\": [\n",
         snapshot->path_hits.fullbuffer,
         snapshot->path_hits.incremental,
 #ifdef MARKDOWN_STREAMING_ENABLED
@@ -374,8 +372,6 @@ ngx_http_markdown_metrics_write_json_routing(
         snapshot->streaming.precommit_failopen_total,
         snapshot->streaming.precommit_reject_total,
         snapshot->streaming.budget_exceeded_total,
-        snapshot->streaming.shadow_total,
-        snapshot->streaming.shadow_diff_total,
         snapshot->streaming.last_ttfb_ms,
         snapshot->streaming.last_peak_memory_bytes,
 #endif
@@ -397,11 +393,7 @@ ngx_http_markdown_metrics_write_json_routing(
         snapshot->results.decision_count,
         snapshot->results.estimated_token_savings,
         snapshot->results.parse_interrupts.parse_timeouts_total,
-        snapshot->results.parse_interrupts.parse_budget_exceeded_total,
-        snapshot->per_path.path_entries,
-        snapshot->per_path.path_conversions,
-        snapshot->per_path.path_conversion_time_sum_ms,
-        snapshot->per_path.overflow_count);
+        snapshot->results.parse_interrupts.parse_budget_exceeded_total);
 }
 
 /**
@@ -498,10 +490,12 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
         metrics->streaming.precommit_reject_total;
     snapshot->streaming.budget_exceeded_total =
         metrics->streaming.budget_exceeded_total;
+#ifdef MARKDOWN_STREAMING_SHADOW_DEBUG
     snapshot->streaming.shadow_total =
         metrics->streaming.shadow_total;
     snapshot->streaming.shadow_diff_total =
         metrics->streaming.shadow_diff_total;
+#endif
     snapshot->streaming.last_ttfb_ms =
         metrics->streaming.last_ttfb_ms;
     snapshot->streaming.last_peak_memory_bytes =
@@ -550,6 +544,7 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
     snapshot->results.replay_buffer_errors_total =
         metrics->results.replay_buffer_errors_total;
 
+#ifdef MARKDOWN_METRICS_PER_PATH_DEBUG
     snapshot->per_path.path_entries =
         metrics->per_path.path_entries;
     snapshot->per_path.path_conversions =
@@ -562,6 +557,7 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
         metrics->per_path.unretained_conversions;
     snapshot->per_path.unretained_conversion_time_sum_ms =
         metrics->per_path.unretained_conversion_time_sum_ms;
+#endif /* MARKDOWN_METRICS_PER_PATH_DEBUG */
 
     /*
      * Inflight counter is per-worker (not in shared memory),
@@ -832,11 +828,7 @@ ngx_http_markdown_metrics_select_format(
         return NGX_HTTP_MARKDOWN_METRICS_OUTPUT_JSON;
     }
 
-    if (conf != NULL
-        && conf->ops.metrics_format
-           == NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS
-        && ngx_http_markdown_metrics_prefers_prometheus(r))
-    {
+    if (ngx_http_markdown_metrics_prefers_prometheus(r)) {
         return NGX_HTTP_MARKDOWN_METRICS_OUTPUT_PROMETHEUS;
     }
 
@@ -873,8 +865,13 @@ ngx_http_markdown_metrics_derive_values(
  * that lack full NGINX type definitions define the macro to 0
  * before including this header.
  */
+/*
+ * Per-path walk removed in 0.9.2 — markdown_metrics_per_path directive deleted.
+ * Default to disabled; only debug builds with MARKDOWN_METRICS_PER_PATH_DEBUG
+ * may re-enable.
+ */
 #ifndef NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
-#define NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED  1
+#define NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED  0
 #endif
 
 #if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
@@ -1111,8 +1108,6 @@ ngx_http_markdown_metrics_write_text_summary(
         "- Streaming Pre-Commit Fail-Open: %uA\n"
         "- Streaming Pre-Commit Reject: %uA\n"
         "- Streaming Budget Exceeded: %uA\n"
-        "- Streaming Shadow Total: %uA\n"
-        "- Streaming Shadow Diff Total: %uA\n"
         "- Streaming Last TTFB (ms): %uA\n"
         "- Streaming Peak Memory (bytes): %uA\n"
 #endif
@@ -1159,8 +1154,6 @@ ngx_http_markdown_metrics_write_text_summary(
         snapshot->streaming.precommit_failopen_total,
         snapshot->streaming.precommit_reject_total,
         snapshot->streaming.budget_exceeded_total,
-        snapshot->streaming.shadow_total,
-        snapshot->streaming.shadow_diff_total,
         snapshot->streaming.last_ttfb_ms,
         snapshot->streaming.last_peak_memory_bytes
 #endif
@@ -1193,11 +1186,7 @@ ngx_http_markdown_metrics_write_text_decision(
         "- Decision Count: %uA\n"
         "- Estimated Token Savings: %uA\n"
         "- Parse Timeouts Total: %uA\n"
-        "- Parse Budget Exceeded Total: %uA\n"
-        "- Per-Path Entries: %uA\n"
-        "- Per-Path Conversions: %uA\n"
-        "- Per-Path Conversion Time (ms): %uA\n"
-        "- Per-Path Overflow Count: %uA\n",
+        "- Parse Budget Exceeded Total: %uA\n",
         snapshot->requests_entered,
         snapshot->skips.config,
         snapshot->skips.method,
@@ -1216,11 +1205,7 @@ ngx_http_markdown_metrics_write_text_decision(
         snapshot->results.decision_count,
         snapshot->results.estimated_token_savings,
         snapshot->results.parse_interrupts.parse_timeouts_total,
-        snapshot->results.parse_interrupts.parse_budget_exceeded_total,
-        snapshot->per_path.path_entries,
-        snapshot->per_path.path_conversions,
-        snapshot->per_path.path_conversion_time_sum_ms,
-        snapshot->per_path.overflow_count);
+        snapshot->results.parse_interrupts.parse_budget_exceeded_total);
 }
 
 static u_char *

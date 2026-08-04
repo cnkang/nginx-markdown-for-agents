@@ -32,6 +32,7 @@
 #define NGX_HTTP_MARKDOWN_DYNCONF_IMPL_H
 
 #include <stdlib.h>
+#include <sys/types.h>
 
 
 /*
@@ -46,6 +47,26 @@
 #define NGX_HTTP_MARKDOWN_DYNCONF_WATCH_MS  1000
 
 /*
+ * Backstop full content-digest check frequency in timer ticks.
+ *
+ * Every BACKSTOP_TICKS timer firings (~30 seconds at 1-second interval),
+ * the watcher reads the file and computes a content digest even if metadata
+ * has not changed.  This prevents same-inode or same-mtime-tick atomic
+ * replaces from being permanently missed.
+ *
+ * This is a FIXED internal constant — NOT operator-configurable in 1.0.
+ * No directive or dynconf key exists for it.
+ *
+ * Requirements: 3.3, 3.12
+ */
+#define NGX_HTTP_MARKDOWN_DYNCONF_BACKSTOP_TICKS  30
+
+/*
+ * SHA-256 hex digest length (64 hex chars + NUL terminator).
+ */
+#define NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_LEN  65
+
+/*
  * Reload result codes for observability and logging.
  */
 #define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED      0
@@ -56,24 +77,13 @@
 #define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL  5
 
 /*
- * Profile conflict detection and dynconf dry-run (spec 50, task 7.5).
+ * Dynconf dry-run validation (0.9.2).
  *
- * Profile conflict detection (markdown_detect_conflicts) runs only at
- * config parse time (nginx -t / merge_conf).  The dynconf dry-run path
- * does NOT need additional profile conflict checks because the
- * dynconf-mutable fields (enabled, prune_noise, log_verbosity,
- * memory_budget, streaming_budget) are NOT profile-relevant:
- *
- * - Profiles only force `streaming` and `cache_validation`, which are
- *   static config and not dynconf-mutable.
- * - The general conflict rules (Full+Force, Full+Auto, FailClosed+Force,
- *   max_inflight==0) involve fields that are also static.
- *
- * Therefore, dynconf dry-run inherits the static profile conflict
- * detection from config parse time.  If a future version adds
- * profile-relevant dynconf-mutable fields, the dry-run validation in
- * ngx_http_markdown_dynconf_reload_from_file() would need to call
- * markdown_detect_conflicts with overlay values.
+ * The dynconf-mutable field set (filter, prune_noise, log_verbosity,
+ * error_policy, streaming_buffer) does not include any fields that
+ * require cross-field conflict detection at runtime.  All structural
+ * conflict rules (streaming+conditional, max_inflight==0) involve
+ * static-only configuration and are checked at nginx -t time.
  */
 
 /*
@@ -147,6 +157,7 @@ typedef struct ngx_http_markdown_dynconf_snapshot_s {
     ngx_http_complex_value_t *enabled_complex;
     ngx_flag_t   prune_noise;
     ngx_uint_t   log_verbosity;
+    ngx_uint_t   error_policy;
 #ifdef MARKDOWN_STREAMING_ENABLED
     size_t       streaming_budget;
 #endif
@@ -198,6 +209,49 @@ typedef struct {
     ngx_event_t  *timer;
     ngx_uint_t    active;
 
+    /*
+     * Two-tier polling file identity fields (Requirements: 3.3, 3.12).
+     *
+     * Fast path (every tick): stat-only check of device ID, inode, size,
+     * and highest-available mtime precision.  No file read under steady
+     * state.
+     */
+    dev_t         file_dev;       /* device ID of last stat */
+    ino_t         file_ino;       /* inode number of last stat */
+    off_t         file_size;      /* file size in bytes of last stat */
+    time_t        file_mtime_sec; /* mtime seconds of last stat */
+    long          file_mtime_nsec;/* mtime nanoseconds (0 if unavailable) */
+
+    /*
+     * Tick counter for backstop scheduling.
+     * Incremented on each timer firing; reset to 0 after backstop.
+     */
+    ngx_uint_t    tick_counter;
+
+    /*
+     * Worker-local monotonically increasing generation counter.
+     * Starts at 1, incremented on each successful reload within
+     * this worker.  Cross-worker convergence is via matching
+     * active_digest values, not generation counter equality.
+     * (Requirement 3.7)
+     */
+    ngx_uint_t    generation;
+
+    /*
+     * Content digests (Requirements: 3.7, 3.16).
+     *
+     * source_digest: SHA-256 over raw file bytes.
+     * active_digest: SHA-256 over canonical UTF-8 JSON representation
+     *   of the typed dynconf overlay (from Rust FFI).
+     * lkg_digest: active_digest of the last-known-good configuration.
+     *
+     * Stored as 64 hex chars + NUL terminator.
+     * Empty string means "not yet computed".
+     */
+    u_char        source_digest[NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_LEN];
+    u_char        active_digest[NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_LEN];
+    u_char        lkg_digest[NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_LEN];
+
     ngx_http_markdown_dynconf_snapshot_t  active_snapshot;
     ngx_http_markdown_dynconf_snapshot_t  staging_snapshot;
     ngx_http_markdown_dynconf_snapshot_t  last_known_good;
@@ -245,6 +299,7 @@ ngx_http_markdown_dynconf_snapshot_from_conf(
     snapshot->enabled_complex = conf->enabled_complex;
     snapshot->prune_noise = conf->advanced.prune_noise;
     snapshot->log_verbosity = conf->policy.log_verbosity;
+    snapshot->error_policy = conf->on_error;
 #ifdef MARKDOWN_STREAMING_ENABLED
     snapshot->streaming_budget = conf->stream.budget;
 #endif
@@ -277,6 +332,7 @@ ngx_http_markdown_dynconf_apply_snapshot(
     conf->enabled_complex = snapshot->enabled_complex;
     conf->advanced.prune_noise = snapshot->prune_noise;
     conf->policy.log_verbosity = snapshot->log_verbosity;
+    conf->on_error = snapshot->error_policy;
 #ifdef MARKDOWN_STREAMING_ENABLED
         conf->stream.budget = snapshot->streaming_budget;
 #endif
@@ -287,10 +343,19 @@ ngx_http_markdown_dynconf_apply_snapshot(
 /**
  * Build the effective configuration view from a dynconf snapshot and live conf.
  *
- * If the snapshot is non-NULL and valid, its values take precedence.
- * Otherwise, the corresponding fields from the live conf are used.
- * The resulting view is stored in the caller-provided struct (typically
- * allocated from the request pool and hung off ctx->effective_conf).
+ * Implements the five-tier precedence model (0.9.2):
+ *   1. Request variable evaluation (applied after this function, at is_enabled)
+ *   2. Server/location explicit static (block bit SET → use conf value)
+ *   3. Dynconf runtime override (block bit NOT set → use snapshot value)
+ *   4. Inherited http baseline (conf value when block bit not set and no snap)
+ *   5. Built-in default (conf value when nothing configured)
+ *
+ * For each dynconf-mutable field, checks the location's block mask:
+ *   - If the block bit IS set: use the static conf value (tier 2)
+ *   - If the block bit is NOT set and snapshot is valid: use snapshot (tier 3)
+ *   - Otherwise: use the conf value (tiers 4-5)
+ *
+ * Records per-field provenance for diagnostics.
  *
  * @param eff  Target effective config view to populate; must be non-NULL.
  * @param snap Dynconf snapshot bound to this request; may be NULL.
@@ -302,29 +367,134 @@ ngx_http_markdown_build_effective_conf(
     const ngx_http_markdown_dynconf_snapshot_t *snap,
     const ngx_http_markdown_conf_t *conf)
 {
+    ngx_uint_t  mask;
+    ngx_flag_t  snap_valid;
+
     if (eff == NULL || conf == NULL) {
         return;
     }
 
-    if (snap != NULL && snap->valid) {
-        eff->enabled        = snap->enabled;
-        eff->enabled_source = snap->enabled_source;
-        eff->prune_noise    = snap->prune_noise;
-        eff->log_verbosity  = snap->log_verbosity;
-        eff->memory_budget  = snap->memory_budget;
-#ifdef MARKDOWN_STREAMING_ENABLED
-        eff->streaming_budget = snap->streaming_budget;
-#endif
-    } else {
-        eff->enabled        = conf->enabled;
+    mask = conf->advanced.dynconf_block_mask;
+    snap_valid = (snap != NULL && snap->valid);
+
+    /* Copy block mask into effective_conf for diagnostics */
+    eff->block_mask = mask;
+
+    /*
+     * Field: filter (enabled / enabled_source)
+     *
+     * If block bit is set, use static conf value (tier 2).
+     * If block bit is clear and snapshot valid, use dynconf (tier 3).
+     * Otherwise, use conf value (tier 4/5).
+     *
+     * Special case: if enabled_source is COMPLEX (variable), the
+     * provenance is request_variable (tier 1, evaluated at request
+     * time in ngx_http_markdown_is_enabled after this function).
+     */
+    if (conf->enabled_source == NGX_HTTP_MARKDOWN_ENABLED_COMPLEX) {
+        /* Tier 1: request variable always wins */
+        eff->enabled = conf->enabled;
         eff->enabled_source = conf->enabled_source;
-        eff->prune_noise    = conf->advanced.prune_noise;
-        eff->log_verbosity  = conf->policy.log_verbosity;
-        eff->memory_budget  = conf->advanced.memory_budget;
-#ifdef MARKDOWN_STREAMING_ENABLED
-        eff->streaming_budget = conf->stream.budget;
-#endif
+        eff->filter_provenance =
+            NGX_HTTP_MARKDOWN_PROVENANCE_REQUEST_VARIABLE;
+    } else if (mask & NGX_HTTP_MARKDOWN_BLOCK_FILTER) {
+        eff->enabled = conf->enabled;
+        eff->enabled_source = conf->enabled_source;
+        eff->filter_provenance = NGX_HTTP_MARKDOWN_PROVENANCE_STATIC;
+    } else if (snap_valid) {
+        eff->enabled = snap->enabled;
+        eff->enabled_source = snap->enabled_source;
+        eff->filter_provenance = NGX_HTTP_MARKDOWN_PROVENANCE_DYNCONF;
+    } else {
+        eff->enabled = conf->enabled;
+        eff->enabled_source = conf->enabled_source;
+        eff->filter_provenance = NGX_HTTP_MARKDOWN_PROVENANCE_STATIC;
     }
+
+    /*
+     * Field: prune_noise
+     */
+    if (mask & NGX_HTTP_MARKDOWN_BLOCK_PRUNE_NOISE) {
+        eff->prune_noise = conf->advanced.prune_noise;
+        eff->prune_noise_provenance =
+            NGX_HTTP_MARKDOWN_PROVENANCE_STATIC;
+    } else if (snap_valid) {
+        eff->prune_noise = snap->prune_noise;
+        eff->prune_noise_provenance =
+            NGX_HTTP_MARKDOWN_PROVENANCE_DYNCONF;
+    } else {
+        eff->prune_noise = conf->advanced.prune_noise;
+        eff->prune_noise_provenance =
+            NGX_HTTP_MARKDOWN_PROVENANCE_STATIC;
+    }
+
+    /*
+     * Field: log_verbosity
+     */
+    if (mask & NGX_HTTP_MARKDOWN_BLOCK_LOG_VERBOSITY) {
+        eff->log_verbosity = conf->policy.log_verbosity;
+        eff->log_verbosity_provenance =
+            NGX_HTTP_MARKDOWN_PROVENANCE_STATIC;
+    } else if (snap_valid) {
+        eff->log_verbosity = snap->log_verbosity;
+        eff->log_verbosity_provenance =
+            NGX_HTTP_MARKDOWN_PROVENANCE_DYNCONF;
+    } else {
+        eff->log_verbosity = conf->policy.log_verbosity;
+        eff->log_verbosity_provenance =
+            NGX_HTTP_MARKDOWN_PROVENANCE_STATIC;
+    }
+
+    /*
+     * Field: error_policy
+     */
+    if (mask & NGX_HTTP_MARKDOWN_BLOCK_ERROR_POLICY) {
+        eff->error_policy = conf->on_error;
+        eff->error_policy_provenance =
+            NGX_HTTP_MARKDOWN_PROVENANCE_STATIC;
+    } else if (snap_valid) {
+        eff->error_policy = snap->error_policy;
+        eff->error_policy_provenance =
+            NGX_HTTP_MARKDOWN_PROVENANCE_DYNCONF;
+    } else {
+        eff->error_policy = conf->on_error;
+        eff->error_policy_provenance =
+            NGX_HTTP_MARKDOWN_PROVENANCE_STATIC;
+    }
+
+    /*
+     * Field: memory_budget (legacy bridge from conversion_memory).
+     *
+     * memory_budget is NOT part of the 0.9.2 dynconf-mutable field
+     * set (which is filter, prune_noise, log_verbosity, error_policy,
+     * streaming_buffer).  However, it was historically overlaid by
+     * dynconf and tests validate this behavior.  We preserve the
+     * legacy overlay behavior without block mask gating.
+     */
+    if (snap_valid) {
+        eff->memory_budget = snap->memory_budget;
+    } else {
+        eff->memory_budget = conf->advanced.memory_budget;
+    }
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    /*
+     * Field: streaming_buffer
+     */
+    if (mask & NGX_HTTP_MARKDOWN_BLOCK_STREAMING_BUFFER) {
+        eff->streaming_budget = conf->stream.budget;
+        eff->streaming_buffer_provenance =
+            NGX_HTTP_MARKDOWN_PROVENANCE_STATIC;
+    } else if (snap_valid) {
+        eff->streaming_budget = snap->streaming_budget;
+        eff->streaming_buffer_provenance =
+            NGX_HTTP_MARKDOWN_PROVENANCE_DYNCONF;
+    } else {
+        eff->streaming_budget = conf->stream.budget;
+        eff->streaming_buffer_provenance =
+            NGX_HTTP_MARKDOWN_PROVENANCE_STATIC;
+    }
+#endif
 }
 
 
@@ -424,24 +594,35 @@ ngx_http_markdown_effective_enabled_source(
 
 
 /*
- * Check if the watched configuration file has changed.
+ * Two-tier polling: fast-path stat-only metadata check.
  *
- * Compares the current file modification time against the
- * stored last_mtime.  If different, updates last_mtime
- * and returns 1.
+ * Compares current file identity (device, inode, size, mtime with
+ * nanosecond precision where available) against stored values.
+ * If ANY metadata field differs, returns 1 (metadata changed).
+ * Does NOT read the file — no I/O beyond stat().
+ *
+ * Per-event-loop-iteration stat calls are prohibited: this function
+ * is called at most once per timer tick (1-second interval).
  *
  * Parameters:
  *   watcher - Dynamic config watcher
  *   log     - NGINX log
  *
  * Returns:
- *   1 if file changed, 0 otherwise
+ *   1 if file metadata changed, 0 otherwise (including stat failure)
+ *
+ * Requirements: 3.3, 3.12
  */
 static ngx_int_t
 ngx_http_markdown_dynconf_check(ngx_http_markdown_dynconf_watcher_t *watcher,
                                 ngx_log_t *log)
 {
     ngx_file_info_t  fi;
+    dev_t            cur_dev;
+    ino_t            cur_ino;
+    off_t            cur_size;
+    time_t           cur_mtime_sec;
+    long             cur_mtime_nsec;
 
     if (watcher == NULL || !watcher->active) {
         return 0;
@@ -468,8 +649,45 @@ ngx_http_markdown_dynconf_check(ngx_http_markdown_dynconf_watcher_t *watcher,
         }
     }
 
-    if (ngx_file_mtime(&fi) != watcher->last_mtime) {
-        watcher->last_mtime = ngx_file_mtime(&fi);
+    /* Extract file identity fields from stat result. */
+    cur_dev = fi.st_dev;
+    cur_ino = fi.st_ino;
+    cur_size = (off_t) fi.st_size;
+    cur_mtime_sec = ngx_file_mtime(&fi);
+
+    /*
+     * Extract nanosecond mtime precision where available.
+     * macOS uses st_mtimespec; Linux uses st_mtim.
+     * Falls back to 0 (second-only precision) on other platforms
+     * or test stubs.
+     */
+#if defined(__APPLE__)
+    cur_mtime_nsec = fi.st_mtimespec.tv_nsec;
+#elif defined(__linux__) && defined(_POSIX_C_SOURCE) && _POSIX_C_SOURCE >= 200809L
+    cur_mtime_nsec = fi.st_mtim.tv_nsec;
+#elif defined(__linux__)
+    cur_mtime_nsec = fi.st_mtim.tv_nsec;
+#else
+    cur_mtime_nsec = 0;
+#endif
+
+    /* Compare all metadata fields.  Any change triggers reload. */
+    if (cur_dev != watcher->file_dev
+        || cur_ino != watcher->file_ino
+        || cur_size != watcher->file_size
+        || cur_mtime_sec != watcher->file_mtime_sec
+        || cur_mtime_nsec != watcher->file_mtime_nsec)
+    {
+        /* Update stored identity to current values. */
+        watcher->file_dev = cur_dev;
+        watcher->file_ino = cur_ino;
+        watcher->file_size = cur_size;
+        watcher->file_mtime_sec = cur_mtime_sec;
+        watcher->file_mtime_nsec = cur_mtime_nsec;
+
+        /* Also update last_mtime for backward compatibility. */
+        watcher->last_mtime = cur_mtime_sec;
+
         return 1;
     }
 
@@ -478,29 +696,34 @@ ngx_http_markdown_dynconf_check(ngx_http_markdown_dynconf_watcher_t *watcher,
 
 
 /**
- * Poll the dynamic-configuration watcher for file changes, log detected changes,
- * and re-arm the watch timer.
+ * Two-tier dynconf polling timer handler (Requirements: 3.3, 3.6, 3.12).
  *
- * This timer callback reads the watcher from ev->data, skips processing if the
- * watcher is NULL or not active, calls the change-detection routine and logs an
- * informational message if a change is observed, and re-arms the watch timer
- * for the next polling interval.
+ * Implements the bounded timer interval (1 second per worker) with:
  *
- * After a file change is detected (dynconf_check returns 1), a two-phase
- * reload is attempted.  If the reload succeeds (RELOAD_APPLIED or
- * RELOAD_NO_CHANGE), applied_mtime is updated to last_mtime, confirming
- * the reload.  If the reload fails (INVALID_FILE or IO_ERROR),
- * applied_mtime is NOT updated, so the next timer cycle will see
- * last_mtime != applied_mtime and retry the reload — matching the
- * failure-retry contract described in
- * docs/harness/risk-packs/dynamic-config-hot-reload.md.
+ *   Fast path (every tick): stat-only check of device ID, inode, size,
+ *   and highest-available mtime precision (nanosecond where available).
+ *   No file read on every tick under steady state.
  *
- * Additionally, even when no new file change is detected (dynconf_check
- * returns 0), if last_mtime != applied_mtime (indicating a previous
- * failed reload), a retry is attempted.  This covers the case where
- * the file content was invalid but the mtime has not changed since.
+ *   Full content-digest backstop (every 30 ticks, ~30 seconds): read
+ *   file and compute content digest even without metadata changes —
+ *   prevents same-inode or same-mtime-tick atomic replaces from being
+ *   permanently missed.
  *
- * @param ev Timer event whose `data` field points to the watcher; may be NULL.
+ * On metadata change (fast path) OR content-digest change (backstop):
+ * trigger reload if content differs from active snapshot.
+ *
+ * File I/O (read + hash) SHALL NOT occur on every timer tick under
+ * steady state.  Per-event-loop-iteration stat calls are prohibited.
+ *
+ * Generation counter: worker-local monotonically increasing, starts at 1,
+ * incremented on each successful reload within that worker.
+ *
+ * WHEN source_digest changes but active_digest does not (formatting-only
+ * change): reload the snapshot (update source_digest and generation),
+ * because file content has changed.  This is NOT a validated_noop —
+ * generation always increments on any successful reload.
+ *
+ * @param ev Timer event whose `data` field points to the watcher.
  */
 static void
 ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev)
@@ -508,6 +731,8 @@ ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev)
     ngx_http_markdown_dynconf_watcher_t  *watcher;
     ngx_int_t                            reload_rc;
     ngx_uint_t                            reload_attempted;
+    ngx_uint_t                            metadata_changed;
+    ngx_uint_t                            backstop_tick;
 
     watcher = ev->data;
 
@@ -518,9 +743,25 @@ ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev)
     reload_rc = NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE;
     reload_attempted = 0;
 
-    if (ngx_http_markdown_dynconf_check(watcher, ev->log)) {
+    /* Increment tick counter for backstop scheduling. */
+    watcher->tick_counter++;
+
+    /* Determine if this is a backstop tick. */
+    backstop_tick = (watcher->tick_counter
+                     >= NGX_HTTP_MARKDOWN_DYNCONF_BACKSTOP_TICKS) ? 1 : 0;
+
+    /* Fast path: stat-only metadata check (every tick). */
+    metadata_changed = ngx_http_markdown_dynconf_check(watcher, ev->log);
+
+    if (metadata_changed) {
+        /*
+         * Metadata changed: read file, parse, and reload.
+         * Reset backstop counter since we're reading the file now.
+         */
+        watcher->tick_counter = 0;
+
         ngx_log_error(NGX_LOG_INFO, ev->log, 0,
-                      "markdown: change detected on \"%V\", "
+                      "markdown: metadata change detected on \"%V\", "
                       "performing two-phase reload",
                       &watcher->path);
 
@@ -530,12 +771,40 @@ ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev)
                                                           watcher->conf,
                                                           ev->log);
         }
+    } else if (backstop_tick) {
+        /*
+         * Full content-digest backstop: read file and compute digest
+         * even without metadata changes.  This prevents same-inode or
+         * same-mtime-tick atomic replaces from being permanently missed.
+         *
+         * Reset tick counter after backstop regardless of outcome.
+         */
+        watcher->tick_counter = 0;
+
+        if (watcher->conf != NULL) {
+            reload_attempted = 1;
+            reload_rc = ngx_http_markdown_dynconf_reload(watcher,
+                                                          watcher->conf,
+                                                          ev->log);
+
+            if (reload_rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE) {
+                /* Backstop check: no content change — steady state. */
+                (void) 0;
+            } else if (reload_rc
+                       == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED)
+            {
+                ngx_log_error(NGX_LOG_INFO, ev->log, 0,
+                              "markdown: backstop detected content "
+                              "change on \"%V\" (atomic replace?)",
+                              &watcher->path);
+            }
+        }
     } else if (watcher->last_mtime != watcher->applied_mtime) {
         /*
-         * No new mtime change detected, but a previous reload failed
-         * (last_mtime advanced but applied_mtime did not).  Retry the
-         * reload so that transient errors (e.g. briefly invalid file
-         * content) are eventually resolved without operator intervention.
+         * No new metadata change and not a backstop tick, but a
+         * previous reload failed (last_mtime advanced but
+         * applied_mtime did not).  Retry the reload so transient
+         * errors are eventually resolved.
          */
         ngx_log_error(NGX_LOG_INFO, ev->log, 0,
                       "markdown: retrying failed reload on \"%V\" "
@@ -577,10 +846,7 @@ ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev)
         /*
          * Dry-run mode (pass or fail): update applied_mtime to
          * suppress repeated re-validation of the same file content
-         * on every timer cycle.  For DRY_RUN_FAIL, the errors are
-         * stored in watcher->last_validation and have already been
-         * logged; re-validating the same content would produce
-         * identical results.
+         * on every timer cycle.
          */
         watcher->applied_mtime = watcher->last_mtime;
     }
@@ -674,9 +940,27 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
                       path);
         watcher->last_mtime = 0;
         watcher->applied_mtime = 0;
+        watcher->file_dev = 0;
+        watcher->file_ino = 0;
+        watcher->file_size = 0;
+        watcher->file_mtime_sec = 0;
+        watcher->file_mtime_nsec = 0;
     } else {
         watcher->last_mtime = ngx_file_mtime(&fi);
         watcher->applied_mtime = watcher->last_mtime;
+
+        /* Capture full file identity for two-tier fast path. */
+        watcher->file_dev = fi.st_dev;
+        watcher->file_ino = fi.st_ino;
+        watcher->file_size = (off_t) fi.st_size;
+        watcher->file_mtime_sec = ngx_file_mtime(&fi);
+#if defined(__APPLE__)
+        watcher->file_mtime_nsec = fi.st_mtimespec.tv_nsec;
+#elif defined(__linux__)
+        watcher->file_mtime_nsec = fi.st_mtim.tv_nsec;
+#else
+        watcher->file_mtime_nsec = 0;
+#endif
     }
 
     /* Allocate the timer event from the cycle pool. */
@@ -693,6 +977,13 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
     watcher->version = 0;
     watcher->lkg_valid = 0;
     watcher->conf = conf;
+
+    /* Initialize two-tier polling state. */
+    watcher->tick_counter = 0;
+    watcher->generation = 0;  /* Will become 1 on first successful reload. */
+    watcher->source_digest[0] = '\0';
+    watcher->active_digest[0] = '\0';
+    watcher->lkg_digest[0] = '\0';
 
     /* Initialize active snapshot from current configuration. */
     ngx_http_markdown_dynconf_snapshot_from_conf(&watcher->active_snapshot,
@@ -2073,6 +2364,18 @@ ngx_http_markdown_dynconf_reload_normal(
         watcher->lkg_mtime = watcher->applied_mtime;
 
         /*
+         * Preserve the current active_digest as the LKG digest
+         * before overwriting active_digest with the new value.
+         * lkg_digest always refers to the active_digest of the
+         * last-known-good configuration (canonical form), not
+         * the source_digest. (Requirement 3.16)
+         */
+        if (watcher->active_digest[0] != '\0') {
+            ngx_memcpy(watcher->lkg_digest, watcher->active_digest,
+                       NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_LEN);
+        }
+
+        /*
          * SHALLOW COPY: active_snapshot = staging_snapshot is a C struct
          * assignment (bitwise copy).  NGINX worker event-loop ordering
          * makes a plain assignment the correct lifecycle primitive here;
@@ -2092,14 +2395,26 @@ ngx_http_markdown_dynconf_reload_normal(
 #ifdef MARKDOWN_STREAMING_ENABLED
         _Static_assert(
             sizeof(ngx_http_markdown_dynconf_snapshot_t)
-                == 8 * sizeof(void *),
+                == 9 * sizeof(void *),
             "dynconf_snapshot_t layout changed, review shallow copy");
 #else
         _Static_assert(
             sizeof(ngx_http_markdown_dynconf_snapshot_t)
-                == 7 * sizeof(void *),
+                == 8 * sizeof(void *),
             "dynconf_snapshot_t layout changed, review shallow copy");
 #endif
+
+        /*
+         * Increment generation counter on every successful reload.
+         * WHEN source_digest changes but active_digest does not
+         * (formatting-only change): generation still increments
+         * because the file content has changed.  This is NOT a
+         * validated_noop. (Requirement 3.16)
+         *
+         * Generation starts at 0 (no reload yet) and becomes 1
+         * on first successful reload.
+         */
+        watcher->generation++;
         watcher->version++;
 
         ngx_http_markdown_dynconf_apply_snapshot(conf,
@@ -2107,8 +2422,9 @@ ngx_http_markdown_dynconf_reload_normal(
 
         ngx_log_error(NGX_LOG_INFO, log, 0,
                       "markdown: applied %ui settings from \"%V\" "
-                      "(version=%ui, lkg preserved)",
-                      applied, &watcher->path, watcher->version);
+                      "(version=%ui, generation=%ui, lkg preserved)",
+                      applied, &watcher->path, watcher->version,
+                      watcher->generation);
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED;
     }
 

@@ -114,7 +114,7 @@ ngx_http_markdown_reason_is_exact(const ngx_str_t *reason_code,
  *   - "STREAMING_FALLBACK_" prefix (streaming degraded to fallback path)
  *
  * All other codes (skipped_*, converted, disabled, not_eligible,
- * ENGINE_*, STREAMING_CONVERT, STREAMING_SHADOW, STREAMING_SKIP_*)
+ * ENGINE_*, STREAMING_CONVERT, STREAMING_SKIP_*)
  * are non-failure outcomes.
  *
  * Parameters:
@@ -139,7 +139,7 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
         ngx_http_markdown_literal("timeout"),
         ngx_http_markdown_literal("budget_exceeded"),
         ngx_http_markdown_literal("replay_error"),
-        /* Indices 20-24: reserved for future reason codes (not yet production-used) */
+        /* Production failure outcomes for reason codes 20-24 */
         ngx_http_markdown_literal("overload"),
         ngx_http_markdown_literal("invalid_dynconf"),
         ngx_http_markdown_literal("degraded_snapshot"),
