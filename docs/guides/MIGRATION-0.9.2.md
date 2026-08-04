@@ -1,126 +1,330 @@
-# Migration Guide: 0.9.1 → 0.9.2
+# Migration Guide: 0.9.1 → 0.9.2 (Final Breaking Freeze)
 
 ## Overview
 
-**0.9.1 → 0.9.2 is a non-breaking release.** There are no configuration
-directive changes, no ABI changes, and no metric contract changes. All
-0.9.1 configurations are valid under 0.9.2 without modification.
+**0.9.2 is the final breaking release before 1.0.** The configuration surface
+has been reduced from 63 directives to exactly 25. All removed directives now
+produce NGINX's standard "unknown directive" error during `nginx -t`.
 
-This guide documents the new features and behavioral corrections available
-in 0.9.2.
+After 0.9.2, all 1.x releases maintain backward compatibility for a minimum of
+24 months.
 
-**Upgrade path:** replace the module binary, restart NGINX, and optionally
-adopt the new features described below.
+**Upgrade path:** update your nginx.conf to remove/replace removed directives
+(see tables below), replace the module binary, then run `nginx -t` to validate.
 
 ---
 
-## New Features
+## Breaking Changes Summary
 
-### Diagnostics `reason_to_code` Mapping Fix
+| Category | Count | Action |
+|----------|-------|--------|
+| Reject-only migration stubs removed | 19 | Already caused `nginx -t` failure; now produce standard "unknown directive" |
+| Active directives removed | 12 | Replace with equivalents (see below) |
+| Directives unified into `markdown_limits` | 5 | Use `markdown_limits key=value` syntax |
+| Total retained directives | 25 | No change needed |
 
-The `bypass_no_transform` reason code was missing from the diagnostics
-`reason_to_code` mapping table. This caused the diagnostics endpoint to
-omit the numeric code for `bypass_no_transform` decisions.
+---
 
-**Impact:** Operators using the diagnostics endpoint to map reason strings
-to numeric codes will now see the complete mapping. No configuration change
-required.
+## Removed Active Directives — Before/After
 
-### C Reason Code Constants Synchronized
+### `markdown_profile` → explicit settings
 
-The C module reason code constants in
-`components/nginx-module/src/ngx_http_markdown_reason.c` now include the
-eight decompression error-series constants (codes 4–11). The Rust converter
-emitted these codes, but the C module previously lacked symbolic definitions
-for them.
+The profile directive is removed. Use explicit directive settings instead.
 
-**Impact:** Source builders and integrators referencing C reason code
-constants for decompression errors can now use the complete set. No
-configuration change required.
+```nginx
+# BEFORE (0.9.1)
+markdown_profile balanced;
 
-### OTel Ownership on Reload/Shutdown
-
-The experimental OTel implementation is request-scoped. Spans and their
-nonblocking export subrequests use request-pool ownership; there are no
-worker-owned OTel threads, queues, timers, or file descriptors to flush at
-reload or shutdown. No configuration change is required.
-
-### Dynconf Restore Procedure
-
-The diagnostics endpoint is read-only and accepts only `GET` and `HEAD`. It has
-no runtime rollback action. To restore a previous dynamic configuration,
-write a complete valid key/value file to a temporary file and atomically rename
-it over `markdown_dynamic_config_path`; the watcher will validate the changed
-file and promote it through the normal reload path. Atomic rename prevents
-partial-file reads, but each worker applies the file through its own watcher
-cycle; use diagnostics or request behavior to verify convergence. A controlled
-NGINX reload is required when operations need a strong synchronization
-boundary. The internal LKG snapshot protects the active state when the
-restored file is invalid.
-
-See [DYNAMIC_CONFIG.md](DYNAMIC_CONFIG.md) and
-[ROLLBACK-0.9.2.md](ROLLBACK-0.9.2.md) for the complete procedure.
-
-**Impact:** Opt-in. Existing configurations are unaffected.
-
-### Public Surface Inventory and Drift Detection Gate
-
-A new release gate (`make release-gates-check-092`) validates the complete
-public API metadata contract: directive defaults, syntax, status, migration
-targets, handlers and contexts; dynconf policy; metric type, labels, order and
-cardinality; reason codes; and Rust/C FFI prototypes and ABI. This is a
-build-time and CI gate, not a runtime feature.
-
-**Impact:** No configuration change required. CI and release workflows
-should add `make release-gates-check-092` to their gate chain.
-
-### Release Gates 0.9.2
-
-The `release-gates-check-092` Make target provides the 0.9.2 release gate
-chain, additive on 0.9.1 gates:
-
-```bash
-make release-gates-check-092
+# AFTER (0.9.2) — balanced equivalent
+markdown_limits conversion_memory=64m conversion_timeout=5s max_inflight=64;
+markdown_cache_validation ims_only;
+markdown_error_policy pass;
 ```
 
-This includes all 0.9.1 gates plus blocking performance evidence against
-baseline 0.9.2 and the public surface source metadata/ABI drift detection gate.
+```nginx
+# BEFORE (0.9.1)
+markdown_profile strict_cache;
+
+# AFTER (0.9.2) — strict_cache equivalent
+markdown_limits conversion_memory=128m conversion_timeout=10s max_inflight=32;
+markdown_cache_validation full;
+markdown_error_policy pass;
+```
+
+```nginx
+# BEFORE (0.9.1)
+markdown_profile streaming_first;
+
+# AFTER (0.9.2) — streaming_first equivalent
+markdown_streaming force;
+markdown_limits conversion_memory=256m conversion_timeout=30s streaming_buffer=16m max_inflight=128;
+markdown_error_policy pass;
+markdown_accept wildcard;
+```
+
+### `markdown_metrics_format` → removed (single format)
+
+The metrics endpoint now always renders in Prometheus text format. The
+`markdown_metrics_format` directive is no longer needed.
+
+```nginx
+# BEFORE (0.9.1)
+location /markdown-metrics {
+    markdown_metrics;
+    markdown_metrics_format prometheus;
+}
+
+# AFTER (0.9.2)
+location /markdown-metrics {
+    markdown_metrics;
+}
+```
+
+### `markdown_metrics_per_path` / `markdown_metrics_per_path_cardinality` → removed
+
+Per-path metrics have been removed to avoid unbounded cardinality.
+
+```nginx
+# BEFORE (0.9.1)
+markdown_metrics_per_path on;
+markdown_metrics_per_path_cardinality 200;
+
+# AFTER (0.9.2)
+# Remove both directives. Use log-based path analysis instead.
+```
+
+### `markdown_buffer_chunked` → removed (always buffers)
+
+Chunked response buffering is now always enabled internally.
+
+```nginx
+# BEFORE (0.9.1)
+markdown_buffer_chunked off;
+
+# AFTER (0.9.2)
+# Remove the directive. Chunked buffering is always on.
+```
+
+### `markdown_streaming_shadow` → removed
+
+Shadow mode comparison has been removed.
+
+```nginx
+# BEFORE (0.9.1)
+markdown_streaming_shadow on;
+
+# AFTER (0.9.2)
+# Remove the directive. No replacement.
+```
+
+### `markdown_streaming_zero_copy` → removed (internalized)
+
+Zero-copy output is now an internal optimization, not operator-controlled.
+
+```nginx
+# BEFORE (0.9.1)
+markdown_streaming_zero_copy on;
+
+# AFTER (0.9.2)
+# Remove the directive. Zero-copy is managed internally.
+```
+
+### `markdown_llm_provider` / `markdown_chars_per_token` → removed
+
+LLM provider selection has been removed. Token estimation uses a fixed ratio.
+
+```nginx
+# BEFORE (0.9.1)
+markdown_llm_provider openai-gpt;
+markdown_chars_per_token 4;
+
+# AFTER (0.9.2)
+# Remove both directives. Token estimation uses a fixed internal ratio.
+markdown_token_estimate on;
+```
+
+### `markdown_stream_types` → replaced by `markdown_stream_excluded_types`
+
+The positive allowlist is removed. Use the exclusion list instead.
+
+```nginx
+# BEFORE (0.9.1)
+markdown_stream_types text/html application/xhtml+xml;
+
+# AFTER (0.9.2)
+# markdown_content_types controls conversion eligibility.
+# markdown_stream_excluded_types controls streaming exclusions.
+markdown_stream_excluded_types text/csv application/xml;
+```
+
+### `markdown_stream_threshold` → removed (internalized)
+
+The streaming threshold is now a fixed internal constant (1 MiB). Chunked
+responses (no Content-Length) always stream.
+
+```nginx
+# BEFORE (0.9.1)
+markdown_stream_threshold 512k;
+
+# AFTER (0.9.2)
+# Remove the directive. The threshold is fixed at 1 MiB internally.
+```
+
+### `markdown_stream_precommit_buffer` / `markdown_stream_flush_min` → `markdown_limits streaming_buffer=`
+
+Precommit buffer size is now controlled through `markdown_limits`.
+
+```nginx
+# BEFORE (0.9.1)
+markdown_stream_precommit_buffer 512k;
+markdown_stream_flush_min 32k;
+
+# AFTER (0.9.2)
+markdown_limits streaming_buffer=512k;
+# Flush minimum is now an internal heuristic.
+```
+
+### `markdown_parse_timeout` / `markdown_parser_budget` / `markdown_decompress_max_size` → `markdown_limits`
+
+These standalone directives are unified into `markdown_limits`.
+
+```nginx
+# BEFORE (0.9.1)
+markdown_parse_timeout 10s;
+markdown_parser_budget 32m;
+markdown_decompress_max_size 20m;
+
+# AFTER (0.9.2)
+markdown_limits parser_timeout=10s parser_memory=32m decompressed_size=20m;
+```
+
+### `markdown_otel` / `markdown_otel_endpoint` → removed
+
+The experimental OpenTelemetry subsystem has been removed entirely.
+
+```nginx
+# BEFORE (0.9.1)
+markdown_otel on;
+markdown_otel_endpoint http://otel-collector:4317;
+
+# AFTER (0.9.2)
+# Remove both directives. Use NGINX's native OTel module instead.
+```
 
 ---
 
-## Fixed
+## Removed Reject-Only Directives (19)
 
-- `stream_state` `PRE_COMMIT` fallthrough now logs an invariant violation
-  instead of silently advancing state. This improves debuggability for
-  streaming backpressure edge cases.
+These directives already caused `nginx -t` failure with a migration hint in
+0.9.0/0.9.1. In 0.9.2, the migration stubs are removed entirely and NGINX
+produces its standard "unknown directive" error.
+
+| Removed Directive | Replacement |
+|-------------------|-------------|
+| `markdown_max_size` | `markdown_limits conversion_memory=<size>` |
+| `markdown_timeout` | `markdown_limits conversion_timeout=<time>` |
+| `markdown_streaming_budget` | `markdown_limits streaming_buffer=<size>` |
+| `markdown_on_error` | `markdown_error_policy pass\|fail_closed\|status <code>` |
+| `markdown_streaming_on_error` | `markdown_error_policy pass\|fail_closed\|status <code>` |
+| `markdown_on_wildcard` | `markdown_accept strict\|wildcard\|force` |
+| `markdown_etag` | `markdown_cache_validation off\|ims_only\|full` |
+| `markdown_etag_policy` | `markdown_cache_validation off\|ims_only\|full` |
+| `markdown_conditional_requests` | `markdown_cache_validation off\|ims_only\|full` |
+| `markdown_trust_forwarded_headers` | `markdown_trusted_proxies <CIDR>...` |
+| `markdown_forwarded_headers` | `markdown_trusted_proxies <CIDR>...` |
+| `markdown_large_body_threshold` | Removed, no replacement |
+| `markdown_streaming_engine` | `markdown_streaming off\|auto\|force` |
+| `markdown_memory_budget` | `markdown_limits conversion_memory=<size>` |
+| `markdown_otel_tracing` | Removed (use NGINX native OTel) |
+| `markdown_otel_metrics` | `markdown_metrics` |
+| `markdown_otel_service_name` | Removed, no replacement |
+| `markdown_otel_span_buffer_size` | Removed, no replacement |
+| `markdown_otel_export_timeout` | Removed, no replacement |
 
 ---
 
-## No Action Required
+## `markdown_limits` Unified Syntax
 
-All 0.9.1 configurations are valid under 0.9.2. There are no:
+All resource limits are now managed through the single `markdown_limits`
+directive with key=value pairs:
 
-- Directive additions, removals, or renames
-- ABI changes
-- Metric contract changes
-- Default behavior changes
+```nginx
+markdown_limits conversion_timeout=30s
+               parser_timeout=10s
+               conversion_memory=64m
+               parser_memory=32m
+               streaming_buffer=2m
+               decompressed_size=10m
+               decompression_ratio=100
+               max_inflight=64;
+```
+
+| Key | Type | Default | Range |
+|-----|------|---------|-------|
+| `conversion_timeout` | duration (ms, s) | 30s | 1ms–1h |
+| `parser_timeout` | duration (ms, s) | 10s | 1ms–1h |
+| `conversion_memory` | size (k, m, g) | 64m | 64k–1g |
+| `parser_memory` | size (k, m, g) | 32m | 64k–1g |
+| `streaming_buffer` | size (k, m, g) | 2m | 64k–1g |
+| `decompressed_size` | size (k, m, g) | 10m | 64k–1g |
+| `decompression_ratio` | integer | 100 | 1–10000 |
+| `max_inflight` | integer | 64 | 1–65535 |
+
+Cross-key constraints: `parser_timeout <= conversion_timeout`,
+`parser_memory <= conversion_memory`, `streaming_buffer <= conversion_memory`.
+
+---
+
+## Final 25-Directive Contract
+
+After 0.9.2, these 25 directives constitute the frozen public surface:
+
+| # | Directive | Context |
+|---|-----------|---------|
+| 1 | `markdown_filter` | http, server, location |
+| 2 | `markdown_flavor` | http, server, location |
+| 3 | `markdown_accept` | http, server, location |
+| 4 | `markdown_token_estimate` | http, server, location |
+| 5 | `markdown_front_matter` | http, server, location |
+| 6 | `markdown_limits` | http, server, location |
+| 7 | `markdown_auto_decompress` | http, server, location |
+| 8 | `markdown_error_policy` | http, server, location |
+| 9 | `markdown_cache_validation` | http, server, location |
+| 10 | `markdown_content_types` | http, server, location |
+| 11 | `markdown_auth_policy` | http, server, location |
+| 12 | `markdown_auth_cookies` | http, server, location |
+| 13 | `markdown_trusted_proxies` | http |
+| 14 | `markdown_streaming` | http, server, location |
+| 15 | `markdown_stream_excluded_types` | http, server, location |
+| 16 | `markdown_prune_noise` | http, server, location |
+| 17 | `markdown_prune_selectors` | http, server, location |
+| 18 | `markdown_prune_protection_selectors` | http, server, location |
+| 19 | `markdown_log_verbosity` | http, server, location |
+| 20 | `markdown_metrics` | location |
+| 21 | `markdown_metrics_shm_size` | http |
+| 22 | `markdown_dynamic_config` | http |
+| 23 | `markdown_dynamic_config_path` | http |
+| 24 | `markdown_dynconf_dry_run` | http |
+| 25 | `markdown_diagnostics` | location |
 
 ---
 
 ## Verification
 
-After upgrading, verify:
+After upgrading:
 
 ```bash
-# Configuration still valid
+# Validate configuration (must pass with no removed directives)
 sudo nginx -t
 
 # Doctor check
 bash tools/doctor/nginx-markdown-doctor.sh
 
-# Diagnostics endpoint shows complete reason_to_code mapping
-curl -s http://localhost/nginx-markdown/diagnostics | \
-  python3 -m json.tool | grep bypass_no_transform
+# Verify metrics endpoint still works
+curl -s http://localhost/markdown-metrics | head -5
+
+# Verify diagnostics endpoint
+curl -s http://localhost/nginx-markdown/diagnostics | python3 -m json.tool | head
 ```
 
 ---
@@ -139,4 +343,4 @@ curl -s http://localhost/nginx-markdown/diagnostics | \
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-07-30 | Kang | Initial migration guide for 0.9.1 → 0.9.2 |
+| 0.9.2 | 2026-07-30 | Kang | Complete rewrite for 0.9.2 breaking freeze: 25-directive contract, before/after examples for all removed directives |
