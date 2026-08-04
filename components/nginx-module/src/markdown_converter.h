@@ -186,6 +186,31 @@
 #define MARKDOWN_ABI_VERSION 1
 
 /**
+ * Generated-header identity hash (SHA-256 truncated to u64).
+ *
+ * Detects header regeneration drift even when the numeric ABI version is
+ * unchanged. Recomputed when header content changes.
+ */
+#define MARKDOWN_HEADER_HASH 0xda08899b74f14f7fULL
+
+/**
+ * Exported-symbol-set hash (SHA-256 truncated to u64).
+ *
+ * Detects additions, removals, or renames of FFI exports even when the
+ * numeric ABI version is unchanged. Computed from the canonical sorted
+ * newline-joined export names.
+ */
+#define MARKDOWN_SYMBOL_SET_HASH 0x502a823d992f9f9fULL
+
+/**
+ * ABI struct layout fingerprint (SHA-256 truncated to u64, LP64).
+ *
+ * Computed from sorted struct_name:size pairs. Detects struct size changes
+ * or additions/removals even when the numeric version is unchanged.
+ */
+#define MARKDOWN_LAYOUT_FINGERPRINT 0x82fbfcc59d6ce87fULL
+
+/**
  * Success - no error occurred.
  */
 #define ERROR_SUCCESS 0
@@ -1425,6 +1450,28 @@ void markdown_dynconf_result_free(struct FFIDynconfResult *result);
  * expectation.
  */
 uint32_t markdown_abi_version(void);
+
+/**
+ * Return the generated-header identity hash.
+ *
+ * Part of the 4-tuple ABI handshake: (numeric_abi_version, header_hash,
+ * symbol_set_hash, layout_fingerprint).
+ */
+uint64_t markdown_abi_header_hash(void);
+
+/**
+ * Return the exported-symbol-set hash.
+ *
+ * Part of the 4-tuple ABI handshake.
+ */
+uint64_t markdown_abi_symbol_set_hash(void);
+
+/**
+ * Return the ABI struct layout fingerprint.
+ *
+ * Part of the 4-tuple ABI handshake.
+ */
+uint64_t markdown_abi_layout_fingerprint(void);
 
 /**
  * Allocate a new converter handle for use across multiple FFI calls.

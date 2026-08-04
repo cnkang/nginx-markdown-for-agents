@@ -117,6 +117,19 @@ That keeps the contract easier to reason about:
 
 This reduces coupling and makes it easier to test each side independently.
 
+### FFI Classification: INTERNAL_ONLY
+
+The FFI boundary is classified as `INTERNAL_ONLY`. Rust/C struct layouts,
+function signatures, and numeric constants may change between any two versions
+without notice. The Rust static library and NGINX module are released as one
+product; this project does not publish the generated header as a third-party
+SDK or promise ABI compatibility to external callers.
+
+A 4-tuple ABI handshake executes during module preconfiguration, before any
+business FFI call: `(numeric_abi_version, generated_header_hash,
+exported_symbol_set_hash, abi_layout_fingerprint)`. On any mismatch, NGINX
+logs each independent failure and refuses to start (`NGX_ERROR`).
+
 ## Request Flow
 
 For an eligible Markdown request, the runtime flow is:

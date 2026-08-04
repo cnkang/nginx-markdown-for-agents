@@ -89,6 +89,41 @@ test_abi_version_alignment(void)
 
 
 static void
+test_abi_tuple_handshake(void)
+{
+    /* Full tuple match */
+    TEST_ASSERT(ngx_http_markdown_ffi_abi_tuple_matches(
+        MARKDOWN_ABI_VERSION, MARKDOWN_HEADER_HASH,
+        MARKDOWN_SYMBOL_SET_HASH, MARKDOWN_LAYOUT_FINGERPRINT),
+        "full tuple handshake must pass with correct values");
+
+    /* Numeric mismatch */
+    TEST_ASSERT(!ngx_http_markdown_ffi_abi_tuple_matches(
+        MARKDOWN_ABI_VERSION + 1, MARKDOWN_HEADER_HASH,
+        MARKDOWN_SYMBOL_SET_HASH, MARKDOWN_LAYOUT_FINGERPRINT),
+        "numeric ABI mismatch must fail the tuple handshake");
+
+    /* Header hash mismatch */
+    TEST_ASSERT(!ngx_http_markdown_ffi_abi_tuple_matches(
+        MARKDOWN_ABI_VERSION, MARKDOWN_HEADER_HASH ^ 1,
+        MARKDOWN_SYMBOL_SET_HASH, MARKDOWN_LAYOUT_FINGERPRINT),
+        "header hash mismatch must fail the tuple handshake");
+
+    /* Symbol set hash mismatch */
+    TEST_ASSERT(!ngx_http_markdown_ffi_abi_tuple_matches(
+        MARKDOWN_ABI_VERSION, MARKDOWN_HEADER_HASH,
+        MARKDOWN_SYMBOL_SET_HASH ^ 1, MARKDOWN_LAYOUT_FINGERPRINT),
+        "symbol set hash mismatch must fail the tuple handshake");
+
+    /* Layout fingerprint mismatch */
+    TEST_ASSERT(!ngx_http_markdown_ffi_abi_tuple_matches(
+        MARKDOWN_ABI_VERSION, MARKDOWN_HEADER_HASH,
+        MARKDOWN_SYMBOL_SET_HASH, MARKDOWN_LAYOUT_FINGERPRINT ^ 1),
+        "layout fingerprint mismatch must fail the tuple handshake");
+}
+
+
+static void
 test_markdown_options_field_access(void)
 {
     MarkdownOptions opts;
@@ -164,6 +199,7 @@ main(void)
     test_ffi_accept_result_field_access();
     test_error_codes_compile();
     test_abi_version_alignment();
+    test_abi_tuple_handshake();
     test_markdown_options_field_access();
     test_ffi_header_entry_field_access();
     test_ffi_header_plan_field_access();

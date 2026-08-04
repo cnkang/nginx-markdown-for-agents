@@ -63,7 +63,8 @@ use super::abi::{
 use super::abi::{
     DECOMP_CATEGORY_INVALID_ARGS, DECOMP_CATEGORY_IO_ERROR, ERROR_INTERNAL, FFIAcceptResult,
     FFIDecompResult, FFIEligibilityInput, FFIHeaderEntry, FFIHeaderPlan, FFIHeaderPlanHandle,
-    FFIStr, MARKDOWN_ABI_VERSION, MarkdownConverterHandle, MarkdownOptions, MarkdownResult,
+    FFIStr, MARKDOWN_ABI_VERSION, MARKDOWN_HEADER_HASH, MARKDOWN_LAYOUT_FINGERPRINT,
+    MARKDOWN_SYMBOL_SET_HASH, MarkdownConverterHandle, MarkdownOptions, MarkdownResult,
     NEGOTIATE_REASON_CONVERT, NEGOTIATE_REASON_EXPLICIT_REJECT, NEGOTIATE_REASON_LOWER_Q,
     NEGOTIATE_REASON_MALFORMED, NEGOTIATE_REASON_NO_ACCEPT,
 };
@@ -151,6 +152,34 @@ impl Drop for PendingConflictMessage {
 #[unsafe(no_mangle)]
 pub extern "C" fn markdown_abi_version() -> u32 {
     MARKDOWN_ABI_VERSION
+}
+
+/// Return the generated-header identity hash.
+///
+/// This accessor is intentionally trivial and panic-free. Part of the
+/// 4-tuple ABI handshake: (numeric_abi_version, header_hash,
+/// symbol_set_hash, layout_fingerprint).
+#[unsafe(no_mangle)]
+pub extern "C" fn markdown_abi_header_hash() -> u64 {
+    MARKDOWN_HEADER_HASH
+}
+
+/// Return the exported-symbol-set hash.
+///
+/// This accessor is intentionally trivial and panic-free. Part of the
+/// 4-tuple ABI handshake.
+#[unsafe(no_mangle)]
+pub extern "C" fn markdown_abi_symbol_set_hash() -> u64 {
+    MARKDOWN_SYMBOL_SET_HASH
+}
+
+/// Return the ABI struct layout fingerprint.
+///
+/// This accessor is intentionally trivial and panic-free. Part of the
+/// 4-tuple ABI handshake.
+#[unsafe(no_mangle)]
+pub extern "C" fn markdown_abi_layout_fingerprint() -> u64 {
+    MARKDOWN_LAYOUT_FINGERPRINT
 }
 
 /// Allocate a new converter handle for use across multiple FFI calls.
@@ -1408,6 +1437,21 @@ mod tests {
     #[test]
     fn abi_version_matches_generated_header_owner() {
         assert_eq!(markdown_abi_version(), MARKDOWN_ABI_VERSION);
+    }
+
+    #[test]
+    fn abi_header_hash_matches_constant() {
+        assert_eq!(markdown_abi_header_hash(), MARKDOWN_HEADER_HASH);
+    }
+
+    #[test]
+    fn abi_symbol_set_hash_matches_constant() {
+        assert_eq!(markdown_abi_symbol_set_hash(), MARKDOWN_SYMBOL_SET_HASH);
+    }
+
+    #[test]
+    fn abi_layout_fingerprint_matches_constant() {
+        assert_eq!(markdown_abi_layout_fingerprint(), MARKDOWN_LAYOUT_FINGERPRINT);
     }
 
     #[test]

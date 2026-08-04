@@ -30,6 +30,17 @@ ngx_http_markdown_ffi_abi_matches(uint32_t actual)
     return actual == MARKDOWN_ABI_VERSION;
 }
 
+/* Return non-zero only when the full 4-tuple ABI handshake passes. */
+static inline int
+ngx_http_markdown_ffi_abi_tuple_matches(uint32_t abi, uint64_t hdr,
+                                        uint64_t sym, uint64_t layout)
+{
+    return abi == MARKDOWN_ABI_VERSION
+        && hdr == MARKDOWN_HEADER_HASH
+        && sym == MARKDOWN_SYMBOL_SET_HASH
+        && layout == MARKDOWN_LAYOUT_FINGERPRINT;
+}
+
 /*
  * Guard: these layout checks are only valid on LP64 platforms
  * (64-bit pointers, 64-bit size_t). Fail explicitly on other

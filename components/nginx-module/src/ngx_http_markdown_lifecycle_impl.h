@@ -12,20 +12,67 @@
  * on request-path orchestration.
  */
 
-/* Validate the Rust/C ABI, then reset state before parsing directives. */
+/* Validate the full Rust/C ABI 4-tuple handshake, then reset state. */
 static ngx_int_t
 ngx_http_markdown_preconfiguration(ngx_conf_t *cf)
 {
     uint32_t  actual_abi;
+    uint64_t  actual_header_hash;
+    uint64_t  actual_symbol_hash;
+    uint64_t  actual_layout_fp;
+    ngx_int_t mismatch;
 
+    mismatch = 0;
+
+    /* 1. Numeric ABI version */
     actual_abi = markdown_abi_version();
     if (!ngx_http_markdown_ffi_abi_matches(actual_abi)) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-                           "markdown: Rust/C ABI mismatch "
-                           "(expected=%ui, actual=%ui); rebuild the module "
-                           "and bundled Rust converter together",
+                           "markdown: ABI handshake FAILED — numeric version "
+                           "mismatch (expected=%ui, actual=%ui)",
                            (ngx_uint_t) MARKDOWN_ABI_VERSION,
                            (ngx_uint_t) actual_abi);
+        mismatch = 1;
+    }
+
+    /* 2. Generated-header identity hash */
+    actual_header_hash = markdown_abi_header_hash();
+    if (actual_header_hash != MARKDOWN_HEADER_HASH) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "markdown: ABI handshake FAILED — header hash "
+                           "mismatch (expected=0x%016xL, actual=0x%016xL)",
+                           MARKDOWN_HEADER_HASH,
+                           actual_header_hash);
+        mismatch = 1;
+    }
+
+    /* 3. Exported-symbol-set hash */
+    actual_symbol_hash = markdown_abi_symbol_set_hash();
+    if (actual_symbol_hash != MARKDOWN_SYMBOL_SET_HASH) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "markdown: ABI handshake FAILED — symbol set hash "
+                           "mismatch (expected=0x%016xL, actual=0x%016xL)",
+                           MARKDOWN_SYMBOL_SET_HASH,
+                           actual_symbol_hash);
+        mismatch = 1;
+    }
+
+    /* 4. ABI struct layout fingerprint */
+    actual_layout_fp = markdown_abi_layout_fingerprint();
+    if (actual_layout_fp != MARKDOWN_LAYOUT_FINGERPRINT) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "markdown: ABI handshake FAILED — layout "
+                           "fingerprint mismatch "
+                           "(expected=0x%016xL, actual=0x%016xL)",
+                           MARKDOWN_LAYOUT_FINGERPRINT,
+                           actual_layout_fp);
+        mismatch = 1;
+    }
+
+    if (mismatch) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "markdown: Rust/C ABI handshake failed; rebuild "
+                           "the module and bundled Rust converter together");
         return NGX_ERROR;
     }
 
