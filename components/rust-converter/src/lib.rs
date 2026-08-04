@@ -66,6 +66,10 @@ pub mod incremental;
 #[cfg(feature = "streaming")]
 pub mod streaming;
 
+// Streaming lifecycle state machine (formal model)
+#[cfg(feature = "streaming")]
+pub mod streaming_lifecycle;
+
 // Re-export main types for convenience
 pub use converter::MarkdownConverter;
 pub use error::ConversionError;
