@@ -394,9 +394,9 @@ static void test_pre_commit_replay_unavail_overflow_no_limits(void)
 
     TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
                 "REPLAY_UNAVAILABLE + OVERFLOW (no limits) -> PASSTHROUGH");
-    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_REJECT_502,
-                "action = REJECT_502");
-    TEST_PASS("PRE_COMMIT_REPLAY_UNAVAILABLE -> PASSTHROUGH/REJECT_502");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_REJECT_STATUS,
+                "action = REJECT_STATUS");
+    TEST_PASS("PRE_COMMIT_REPLAY_UNAVAILABLE -> PASSTHROUGH/REJECT_STATUS");
 }
 
 /* --- COMMITTED transitions --- */
@@ -738,9 +738,9 @@ static void test_pre_commit_on_error_reject(void)
 
     TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
                 "PRE_COMMIT + ON_ERROR_REJECT -> PASSTHROUGH");
-    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_REJECT_502,
-                "action = REJECT_502");
-    TEST_PASS("PRE_COMMIT + ON_ERROR_REJECT -> REJECT_502");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_REJECT_STATUS,
+                "action = REJECT_STATUS");
+    TEST_PASS("PRE_COMMIT + ON_ERROR_REJECT -> REJECT_STATUS");
 }
 
 static void test_pre_commit_resource_limit(void)
@@ -855,9 +855,9 @@ static void test_pre_commit_replay_unavail_resource_limit(void)
 
     TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
                 "REPLAY_UNAVAIL + RESOURCE_LIMIT -> PASSTHROUGH");
-    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_REJECT_502,
-                "action = REJECT_502");
-    TEST_PASS("REPLAY_UNAVAILABLE + RESOURCE_LIMIT -> REJECT_502");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_REJECT_STATUS,
+                "action = REJECT_STATUS");
+    TEST_PASS("REPLAY_UNAVAILABLE + RESOURCE_LIMIT -> REJECT_STATUS");
 }
 
 static void test_pre_commit_replay_unavail_default_event(void)
@@ -876,7 +876,7 @@ static void test_pre_commit_replay_unavail_default_event(void)
     TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
                 "REPLAY_UNAVAIL + default -> PASSTHROUGH");
     TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_PASSTHROUGH,
-                "action = PASSTHROUGH (safe, not REJECT_502)");
+                "action = PASSTHROUGH (safe, not REJECT_STATUS)");
     TEST_PASS("REPLAY_UNAVAILABLE + default -> safe PASSTHROUGH");
 }
 

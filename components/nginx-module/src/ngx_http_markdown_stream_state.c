@@ -7,7 +7,7 @@
  * Design invariants:
  *   1. No allocations, no I/O, no global mutable state.
  *   2. Post-commit irreversibility: once COMMITTED, POST_COMMIT_SAFE_FINISH,
- *      or POST_COMMIT_ABORT, the engine NEVER returns PASS_HTML or REJECT_502.
+ *      or POST_COMMIT_ABORT, the engine NEVER returns PASS_HTML or REJECT_STATUS.
  *   3. PASSTHROUGH is terminal: any event in PASSTHROUGH stays PASSTHROUGH.
  *   4. Pre-commit HTML fallback requires replay_available AND
  *      !headers_committed.
@@ -140,7 +140,7 @@ ngx_http_markdown_stream_decide(const ngx_http_markdown_stream_ctx_t *ctx,
      * Terminal states: PASSTHROUGH, POST_COMMIT_SAFE_FINISH,
      * POST_COMMIT_ABORT.  Any event stays in the current state.
      * Post-commit terminals must NEVER produce PASS_HTML or
-     * REJECT_502.
+     * REJECT_STATUS.
      */
     case NGX_HTTP_MD_STATE_PASSTHROUGH:
         return ngx_http_markdown_make_decision(
@@ -273,7 +273,7 @@ ngx_http_markdown_stream_decide_streaming_candidate(
  *   - Fallback events -> PASSTHROUGH with PASS_HTML action
  *   - Full-doc feature -> FULL_BUFFER_FALLBACK (if within limits)
  *   - ON_ERROR_PASS -> PASSTHROUGH with PASS_HTML
- *   - ON_ERROR_REJECT -> PASSTHROUGH with REJECT_502
+ *   - ON_ERROR_REJECT -> PASSTHROUGH with REJECT_STATUS
  *
  * When replay_available=false AND headers_committed=false (pre-commit fallback without replay):
  *   - Delegated to PRE_COMMIT_REPLAY_UNAVAILABLE handler
@@ -348,7 +348,7 @@ ngx_http_markdown_stream_decide_pre_commit(
         case NGX_HTTP_MD_EVENT_ON_ERROR_REJECT:
             return ngx_http_markdown_make_decision(
                 NGX_HTTP_MD_STATE_PASSTHROUGH,
-                NGX_HTTP_MD_ACTION_REJECT_502,
+                NGX_HTTP_MD_ACTION_REJECT_STATUS,
                 NGX_HTTP_MD_REASON_ON_ERROR_REJECT);
 
         /* Full-buffer triggers (full-buffer fallback evaluation) */
@@ -410,7 +410,7 @@ ngx_http_markdown_stream_decide_pre_commit(
  * Valid transitions:
  *   - EVENT_COMMIT -> COMMITTED (proceed with streaming)
  *   - EVENT_REPLAY_OVERFLOW -> FULL_BUFFER_FALLBACK (within limits)
- *                           or PASSTHROUGH/REJECT_502 (exceeded)
+ *                           or PASSTHROUGH/REJECT_STATUS (exceeded)
  *   - Full-buffer triggers -> resource limit check
  */
 static ngx_http_markdown_decision_t
@@ -435,7 +435,7 @@ ngx_http_markdown_stream_decide_pre_commit_replay_unavailable(
         }
         return ngx_http_markdown_make_decision(
             NGX_HTTP_MD_STATE_PASSTHROUGH,
-            NGX_HTTP_MD_ACTION_REJECT_502,
+            NGX_HTTP_MD_ACTION_REJECT_STATUS,
             NGX_HTTP_MD_REASON_RESOURCE_LIMIT_EXCEEDED);
 
     /* Full-buffer triggers (full-buffer fallback evaluation) */
@@ -458,22 +458,22 @@ ngx_http_markdown_stream_decide_pre_commit_replay_unavailable(
     case NGX_HTTP_MD_EVENT_RESOURCE_LIMIT:
         return ngx_http_markdown_make_decision(
             NGX_HTTP_MD_STATE_PASSTHROUGH,
-            NGX_HTTP_MD_ACTION_REJECT_502,
+            NGX_HTTP_MD_ACTION_REJECT_STATUS,
             NGX_HTTP_MD_REASON_RESOURCE_LIMIT_EXCEEDED);
 
     case NGX_HTTP_MD_EVENT_ON_ERROR_REJECT:
         return ngx_http_markdown_make_decision(
             NGX_HTTP_MD_STATE_PASSTHROUGH,
-            NGX_HTTP_MD_ACTION_REJECT_502,
+            NGX_HTTP_MD_ACTION_REJECT_STATUS,
             NGX_HTTP_MD_REASON_ON_ERROR_REJECT);
 
     default:
         /*
          * Unknown/unrecognized event in PRE_COMMIT_REPLAY_UNAVAILABLE:
-         * safe passthrough, not REJECT_502.  Unknown future events
+         * safe passthrough, not REJECT_STATUS.  Unknown future events
          * must not accidentally reject valid upstream responses.
          * Only explicit NGX_HTTP_MD_EVENT_RESOURCE_LIMIT warrants
-         * REJECT_502 (known resource exhaustion).
+         * REJECT_STATUS (known resource exhaustion).
          */
         return ngx_http_markdown_make_decision(
             NGX_HTTP_MD_STATE_PASSTHROUGH,
@@ -487,7 +487,7 @@ ngx_http_markdown_stream_decide_pre_commit_replay_unavailable(
  * COMMITTED state handler — post-commit error handling.
  *
  * Headers have been sent downstream.  The critical safety property
- * applies here: we must NEVER produce PASS_HTML or REJECT_502.
+ * applies here: we must NEVER produce PASS_HTML or REJECT_STATUS.
  *
  * Valid transitions:
  *   - EVENT_ERROR:
