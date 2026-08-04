@@ -1647,8 +1647,8 @@ The endpoint reads shared-memory counters, so values are aggregated across worke
 `::1`). NGINX `allow`/`deny` rules can further restrict access, but they do
 not broaden access beyond localhost.
 
-This differs from `markdown_diagnostics`: diagnostics defaults to loopback but
-can be exposed to selected CIDRs with `markdown_diagnostics_allow`.
+This differs from `markdown_diagnostics`: both endpoints delegate access control
+to NGINX's native `allow`/`deny` directives in the location block.
 
 **Example:**
 ```nginx
@@ -1810,41 +1810,29 @@ When enabled, the endpoint exposes a JSON object containing:
 - `metrics_snapshot`: key counters (conversions, deliveries, errors)
 - `dynconf_state`: active mtime, config version, LKG mtime
 
-Access is restricted by default: only loopback addresses (127.0.0.1, ::1)
-are permitted unless `markdown_diagnostics_allow` is configured. Unlike
-`markdown_metrics`, diagnostics can be exposed to selected non-loopback CIDRs.
-Treat diagnostics output as sensitive operational data and prefer `internal`,
-VPN CIDRs, or management-network CIDRs instead of public exposure.
-
-#### markdown_diagnostics_allow
-
-**Syntax:** `markdown_diagnostics_allow <CIDR>;`
-**Default:** none (loopback-only when empty)
-**Context:** http, server, location
-
-Adds a CIDR address to the diagnostics endpoint allow list. Multiple
-directives can be specified to allow multiple networks. When at least one
-`markdown_diagnostics_allow` directive is present, only matching client
-addresses are permitted; the loopback fallback is replaced by the explicit
-list.
+Access is restricted using NGINX's native access-phase directives
+(`allow`/`deny`/`auth_basic`/`satisfy`). The diagnostics content handler runs
+in the content phase, which executes after the access phase has already
+enforced any configured restrictions. Treat diagnostics output as sensitive
+operational data and prefer `internal`, VPN CIDRs, or management-network
+CIDRs instead of public exposure.
 
 **Example:**
 ```nginx
 location /nginx-markdown/diagnostics {
     markdown_diagnostics on;
-    markdown_diagnostics_allow 127.0.0.1/32;
-    markdown_diagnostics_allow ::1/128;
-    markdown_diagnostics_allow 10.0.0.0/8;
+    allow 127.0.0.1;
+    allow ::1;
+    allow 10.0.0.0/8;
+    deny all;
 }
 ```
 
 **Notes:**
 - The diagnostics endpoint is read-only and does not modify module state.
 - The `recent_decisions` ring buffer holds up to 100 entries by default.
-- When no `markdown_diagnostics_allow` is configured, only loopback
-  addresses are permitted (built-in default-deny).
-- For additional access control, NGINX's native `allow`/`deny` directives
-  can be used alongside `markdown_diagnostics_allow`.
+- Use native NGINX `allow`/`deny` directives for access control (the
+  removed `markdown_diagnostics_allow` directive is no longer available).
 - Disable in production if the endpoint is not needed to avoid exposing
   internal state.
 

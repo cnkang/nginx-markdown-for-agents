@@ -200,6 +200,13 @@
       ],
       "notes": "Validates source file encoding (UTF-8, no BOM, consistent line endings) across Sonar scan roots. See tools/sonar/check_source_encoding.py."
     },
+    "diagnostics-access-phase": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make verify-diagnostics-access-phase-e2e"
+      ],
+      "notes": "Verifies native NGINX access-phase directives (allow/deny/auth_basic/satisfy) correctly restrict diagnostics and metrics content handlers. Requires NGINX_BIN and NGINX_MODULE_SO; emits SKIP when unavailable. Schema: diagnostics-access-phase-e2e.v1."
+    },
     "runtime-e2e": {
       "phase": "umbrella",
       "commands": [

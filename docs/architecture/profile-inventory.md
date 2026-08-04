@@ -110,7 +110,6 @@ OTel controls are reject-only and therefore are not active profile fields.
 | `markdown_metrics_per_path_cardinality` | 100 | http | Global |
 | `markdown_metrics_shm_size` | 8×pagesize | http | Global |
 | `markdown_diagnostics` | off | http, server, location | on\|off |
-| `markdown_diagnostics_allow` | (loopback only) | http, server, location | CIDR |
 | `markdown_otel` | off | http, server, location | on\|off |
 | `markdown_otel_endpoint` | (empty) | http, server, location | Internal URI |
 
