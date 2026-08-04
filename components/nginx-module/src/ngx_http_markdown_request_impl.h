@@ -817,15 +817,8 @@ ngx_http_markdown_select_header_path(
     }
 #else
 #ifndef MARKDOWN_STREAMING_ENABLED
-    if (conf->stream.threshold_explicit
-        && r->method != NGX_HTTP_HEAD
-        && r->headers_out.status != NGX_HTTP_NOT_MODIFIED)
-    {
-        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                     "markdown: markdown_stream_threshold is set, "
-                     "but streaming support was not compiled in; using "
-                     "full-buffer path");
-    }
+    /* No threshold_explicit warning needed - threshold is now internalized */
+    (void) conf;
 #endif
 #endif
 

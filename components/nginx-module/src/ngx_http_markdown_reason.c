@@ -593,8 +593,10 @@ static ngx_str_t ngx_http_markdown_reason_streaming_precommit_failopen_str =
     ngx_string("STREAMING_PRECOMMIT_FAILOPEN");
 static ngx_str_t ngx_http_markdown_reason_streaming_precommit_reject_str =
     ngx_string("STREAMING_PRECOMMIT_REJECT");
+#ifdef MARKDOWN_STREAMING_SHADOW_DEBUG
 static ngx_str_t ngx_http_markdown_reason_streaming_shadow_str =
     ngx_string("STREAMING_SHADOW");
+#endif
 
 /* Auto-mode engine selection reason codes */
 static ngx_str_t ngx_http_markdown_reason_eligible_streaming_auto_str =
@@ -651,11 +653,13 @@ ngx_http_markdown_reason_streaming_precommit_reject(void)
     return &ngx_http_markdown_reason_streaming_precommit_reject_str;
 }
 
+#ifdef MARKDOWN_STREAMING_SHADOW_DEBUG
 const ngx_str_t *
 ngx_http_markdown_reason_streaming_shadow(void)
 {
     return &ngx_http_markdown_reason_streaming_shadow_str;
 }
+#endif
 
 const ngx_str_t *
 ngx_http_markdown_reason_eligible_streaming_auto(void)

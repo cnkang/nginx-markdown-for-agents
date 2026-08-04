@@ -142,10 +142,16 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
          * into the shared metrics struct.  This is a global (http-level)
          * setting because the SHM metrics struct is process-wide.
          */
-        if (ngx_http_markdown_metrics != NULL && mcf != NULL) {
+        /*
+         * Per-path metrics removed from production in 0.9.2
+         * (unbounded cardinality risk).
+         */
+#ifdef MARKDOWN_METRICS_PER_PATH_DEBUG
+        if (ngx_http_markdown_metrics != NULL) {
             ngx_http_markdown_metrics->per_path.cardinality_limit =
-                mcf->metrics_per_path_cardinality;
+                NGX_HTTP_MARKDOWN_PER_PATH_CARDINALITY_DEFAULT;
         }
+#endif
     }
 
     return NGX_OK;

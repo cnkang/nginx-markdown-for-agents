@@ -224,23 +224,6 @@ ngx_http_markdown_cache_validation_str(ngx_uint_t conditional_requests)
 
 
 /*
- * Map metrics_format enum to string representation.
- */
-static const char *
-ngx_http_markdown_metrics_format_str(ngx_uint_t val)
-{
-    switch (val) {
-    case NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO:
-        return "auto";
-    case NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS:
-        return "prometheus";
-    default:
-        return "unknown";
-    }
-}
-
-
-/*
  * Map log_verbosity enum to string representation.
  */
 static const char *
@@ -359,21 +342,9 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
         "markdown_accept",
         ngx_http_markdown_accept_policy_str(conf->accept_policy), 1);
 
-    /* markdown_buffer_chunked (on/off) */
-    p = ngx_http_markdown_snapshot_flag(p, last,
-        "markdown_buffer_chunked", conf->buffer_chunked, 1);
-
     /* markdown_auto_decompress (on/off) */
     p = ngx_http_markdown_snapshot_flag(p, last,
         "markdown_auto_decompress", conf->decompress.auto_decompress, 1);
-
-    /* markdown_parse_timeout */
-    p = ngx_http_markdown_snapshot_msec(p, last,
-        "markdown_parse_timeout", conf->decompress.parse_timeout, 1);
-
-    /* markdown_parser_budget */
-    p = ngx_http_markdown_snapshot_size(p, last,
-        "markdown_parser_budget", conf->decompress.parser_budget, 1);
 
     /* markdown_prune_noise (on/off) */
     p = ngx_http_markdown_snapshot_flag(p, last,
@@ -396,12 +367,6 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     p = ngx_http_markdown_snapshot_str(p, last,
         "markdown_cache_validation",
         ngx_http_markdown_cache_validation_str(conf->policy.conditional_requests),
-        1);
-
-    /* markdown_metrics_format */
-    p = ngx_http_markdown_snapshot_str(p, last,
-        "markdown_metrics_format",
-        ngx_http_markdown_metrics_format_str(conf->ops.metrics_format),
 #ifdef MARKDOWN_STREAMING_ENABLED
         1);
 #else
@@ -412,30 +377,7 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     /* markdown_streaming */
     p = ngx_http_markdown_snapshot_str(p, last,
         "markdown_streaming",
-        ngx_http_markdown_streaming_policy_str(conf->stream.policy), 1);
-
-    /* markdown_streaming_shadow (on/off) */
-    p = ngx_http_markdown_snapshot_flag(p, last,
-        "markdown_streaming_shadow", conf->stream.shadow, 1);
-
-    /* markdown_streaming_zero_copy (on/off) */
-    p = ngx_http_markdown_snapshot_flag(p, last,
-        "markdown_streaming_zero_copy", conf->stream.zero_copy, 1);
-
-    /* markdown_stream_threshold (v0.8.0 directive name) */
-    p = ngx_http_markdown_snapshot_size(p, last,
-        "markdown_stream_threshold",
-        conf->stream.threshold, 1);
-
-    /* markdown_stream_precommit_buffer */
-    p = ngx_http_markdown_snapshot_size(p, last,
-        "markdown_stream_precommit_buffer",
-        conf->stream.precommit_buffer, 1);
-
-    /* markdown_stream_flush_min */
-    p = ngx_http_markdown_snapshot_size(p, last,
-        "markdown_stream_flush_min",
-        conf->stream.flush_min, 0);
+        ngx_http_markdown_streaming_policy_str(conf->stream.policy), 0);
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
     /*
