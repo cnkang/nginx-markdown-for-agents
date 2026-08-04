@@ -19,7 +19,157 @@
  * This constant is used by the closure test to verify that all variants
  * are accounted for in the `ALL` array. Update this when adding variants.
  */
-#define REASON_CODE_COUNT 26
+#define REASON_CODE_COUNT 27
+
+/**
+ * Maximum allowed document size in bytes (1 MiB).
+ */
+#define MAX_DOCUMENT_SIZE 1048576
+
+/**
+ * Maximum allowed nesting depth for JSON structures.
+ */
+#define MAX_NESTING_DEPTH 8
+
+/**
+ * Maximum number of parse tokens allowed.
+ */
+#define MAX_TOKEN_BUDGET 10000
+
+/**
+ * FFI result code: success.
+ */
+#define DYNCONF_OK 0
+
+/**
+ * FFI result code: document too large.
+ */
+#define DYNCONF_ERR_TOO_LARGE 1
+
+/**
+ * FFI result code: invalid JSON.
+ */
+#define DYNCONF_ERR_INVALID_JSON 2
+
+/**
+ * FFI result code: token budget exceeded.
+ */
+#define DYNCONF_ERR_TOKEN_BUDGET 3
+
+/**
+ * FFI result code: nesting depth exceeded.
+ */
+#define DYNCONF_ERR_NESTING_DEPTH 4
+
+/**
+ * FFI result code: duplicate key.
+ */
+#define DYNCONF_ERR_DUPLICATE_KEY 5
+
+/**
+ * FFI result code: missing schema_version.
+ */
+#define DYNCONF_ERR_MISSING_SCHEMA_VERSION 6
+
+/**
+ * FFI result code: invalid schema_version.
+ */
+#define DYNCONF_ERR_INVALID_SCHEMA_VERSION 7
+
+/**
+ * FFI result code: unknown key.
+ */
+#define DYNCONF_ERR_UNKNOWN_KEY 8
+
+/**
+ * FFI result code: invalid type for a value.
+ */
+#define DYNCONF_ERR_INVALID_TYPE 9
+
+/**
+ * FFI result code: value out of range.
+ */
+#define DYNCONF_ERR_VALUE_OUT_OF_RANGE 10
+
+/**
+ * FFI result code: invalid UTF-8.
+ */
+#define DYNCONF_ERR_INVALID_UTF8 11
+
+/**
+ * FFI result code: internal panic.
+ */
+#define DYNCONF_ERR_INTERNAL 255
+
+/**
+ * Sentinel value for "not present" in optional u8 fields.
+ */
+#define DYNCONF_NOT_SET_U8 255
+
+/**
+ * Sentinel value for "not present" in optional u64 fields.
+ */
+#define DYNCONF_NOT_SET_U64 UINT64_MAX
+
+/**
+ * FFI filter value: on.
+ */
+#define DYNCONF_FILTER_ON 0
+
+/**
+ * FFI filter value: off.
+ */
+#define DYNCONF_FILTER_OFF 1
+
+/**
+ * FFI prune_noise value: on.
+ */
+#define DYNCONF_PRUNE_NOISE_ON 0
+
+/**
+ * FFI prune_noise value: off.
+ */
+#define DYNCONF_PRUNE_NOISE_OFF 1
+
+/**
+ * FFI log_verbosity value: error.
+ */
+#define DYNCONF_LOG_ERROR 0
+
+/**
+ * FFI log_verbosity value: warn.
+ */
+#define DYNCONF_LOG_WARN 1
+
+/**
+ * FFI log_verbosity value: info.
+ */
+#define DYNCONF_LOG_INFO 2
+
+/**
+ * FFI log_verbosity value: debug.
+ */
+#define DYNCONF_LOG_DEBUG 3
+
+/**
+ * FFI error_policy value: pass.
+ */
+#define DYNCONF_POLICY_PASS 0
+
+/**
+ * FFI error_policy value: fail_closed.
+ */
+#define DYNCONF_POLICY_FAIL_CLOSED 1
+
+/**
+ * FFI error_policy value: status 429.
+ */
+#define DYNCONF_POLICY_STATUS_429 2
+
+/**
+ * FFI error_policy value: status 503.
+ */
+#define DYNCONF_POLICY_STATUS_503 3
 
 /**
  * Number of error class variants.
@@ -376,6 +526,64 @@ typedef struct StreamingConverterHandle StreamingConverterHandle;
 #endif
 
 /**
+ * C-compatible result struct for dynconf parsing.
+ *
+ * All string fields (source_digest, active_digest, error_message) are
+ * UTF-8 byte pointers with explicit lengths. They are owned by Rust and
+ * must be freed via `markdown_dynconf_result_free`.
+ */
+typedef struct FFIDynconfResult {
+  /**
+   * Result code (0 = success, non-zero = error).
+   */
+  uint32_t error_code;
+  /**
+   * Error message bytes (NULL on success).
+   */
+  const uint8_t *error_message;
+  /**
+   * Error message byte length (0 on success).
+   */
+  uintptr_t error_message_len;
+  /**
+   * Source digest (SHA-256 hex, 64 bytes). NULL on error.
+   */
+  const uint8_t *source_digest;
+  /**
+   * Source digest length (64 on success, 0 on error).
+   */
+  uintptr_t source_digest_len;
+  /**
+   * Active digest (SHA-256 hex, 64 bytes). NULL on error.
+   */
+  const uint8_t *active_digest;
+  /**
+   * Active digest length (64 on success, 0 on error).
+   */
+  uintptr_t active_digest_len;
+  /**
+   * Filter value (DYNCONF_FILTER_ON/OFF or DYNCONF_NOT_SET_U8).
+   */
+  uint8_t filter;
+  /**
+   * Prune noise value (DYNCONF_PRUNE_NOISE_ON/OFF or DYNCONF_NOT_SET_U8).
+   */
+  uint8_t prune_noise;
+  /**
+   * Log verbosity value (DYNCONF_LOG_* or DYNCONF_NOT_SET_U8).
+   */
+  uint8_t log_verbosity;
+  /**
+   * Error policy value (DYNCONF_POLICY_* or DYNCONF_NOT_SET_U8).
+   */
+  uint8_t error_policy;
+  /**
+   * Streaming buffer value in bytes (DYNCONF_NOT_SET_U64 if absent).
+   */
+  uint64_t streaming_buffer;
+} FFIDynconfResult;
+
+/**
  * Conversion options passed from C to Rust.
  *
  * This full-buffer ABI keeps its own explicit `#[repr(C)]` layout instead of
@@ -488,12 +696,10 @@ typedef struct MarkdownOptions {
    */
   uint64_t memory_budget;
   /**
-   * LLM provider for token estimation (0=default, 1=openai-gpt, 2=anthropic-claude,
-   * 3=google-gemini, 4=meta-llama).
+   * LLM provider for token estimation (removed in 0.9.2 — no LLM adapter in 1.0).
    *
-   * When non-zero and `estimate_tokens` is enabled, the provider's
-   * characteristic chars-per-token ratio overrides the default 4.0.
-   * Populated from the `markdown_llm_provider` NGINX directive.
+   * Retained temporarily for FFI ABI stability; always zero in production.
+   * Final removal deferred to Wave 4 Task 8.13 (FFI freeze).
    */
   uint8_t llm_provider;
   /**
@@ -1145,6 +1351,51 @@ const uint8_t *markdown_reason_code_metric_key(uint32_t code, uintptr_t *out_len
  * C callers can use this to verify they handle all variants.
  */
 uint32_t markdown_reason_code_count(void);
+
+/**
+ * Initialize an FFIDynconfResult to safe defaults.
+ *
+ * # Safety
+ *
+ * `result` must point to a valid, writable `FFIDynconfResult`.
+ */
+void markdown_dynconf_result_init(struct FFIDynconfResult *result);
+
+/**
+ * Parse and validate a dynconf JSON document.
+ *
+ * This is the primary FFI entry point for dynconf parsing. The C module
+ * reads the file, enforces the 1 MiB size cap, and passes the raw bytes
+ * to this function. Rust performs all JSON parsing, validation, and
+ * digest computation.
+ *
+ * # Safety
+ *
+ * - `data` must point to `data_len` bytes of readable memory, or be NULL
+ *   if `data_len` is 0.
+ * - `result` must point to a valid, writable `FFIDynconfResult` that has
+ *   been initialized via `markdown_dynconf_result_init`.
+ * - After a successful call, `result` contains heap-allocated strings that
+ *   must be freed via `markdown_dynconf_result_free`.
+ */
+void markdown_dynconf_parse(const uint8_t *data,
+                            uintptr_t data_len,
+                            struct FFIDynconfResult *result);
+
+/**
+ * Free heap memory owned by an FFIDynconfResult.
+ *
+ * After calling this function, all pointer fields in `result` become invalid.
+ * It is safe to call this on a result that was initialized but never
+ * populated (e.g., after a NULL pointer early-return).
+ *
+ * # Safety
+ *
+ * - `result` must point to a valid `FFIDynconfResult` that was populated
+ *   by `markdown_dynconf_parse` or initialized via `markdown_dynconf_result_init`.
+ * - Must be called exactly once per successful `markdown_dynconf_parse` call.
+ */
+void markdown_dynconf_result_free(struct FFIDynconfResult *result);
 
 /**
  * Return the bundled Rust/C boundary version.
