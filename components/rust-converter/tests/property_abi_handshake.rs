@@ -14,9 +14,9 @@
 //! 3. That each independent tuple element is checked individually
 
 use nginx_markdown_converter::ffi::{
-    markdown_abi_header_hash, markdown_abi_layout_fingerprint, markdown_abi_symbol_set_hash,
-    markdown_abi_version, MARKDOWN_ABI_VERSION, MARKDOWN_HEADER_HASH, MARKDOWN_LAYOUT_FINGERPRINT,
-    MARKDOWN_SYMBOL_SET_HASH,
+    MARKDOWN_ABI_VERSION, MARKDOWN_HEADER_HASH, MARKDOWN_LAYOUT_FINGERPRINT,
+    MARKDOWN_SYMBOL_SET_HASH, markdown_abi_header_hash, markdown_abi_layout_fingerprint,
+    markdown_abi_symbol_set_hash, markdown_abi_version,
 };
 use proptest::prelude::*;
 
@@ -200,7 +200,10 @@ fn abi_accessors_return_correct_constants() {
     assert_eq!(markdown_abi_version(), MARKDOWN_ABI_VERSION);
     assert_eq!(markdown_abi_header_hash(), MARKDOWN_HEADER_HASH);
     assert_eq!(markdown_abi_symbol_set_hash(), MARKDOWN_SYMBOL_SET_HASH);
-    assert_eq!(markdown_abi_layout_fingerprint(), MARKDOWN_LAYOUT_FINGERPRINT);
+    assert_eq!(
+        markdown_abi_layout_fingerprint(),
+        MARKDOWN_LAYOUT_FINGERPRINT
+    );
 }
 
 /// Verify that the full correct tuple passes the handshake.
@@ -247,11 +250,14 @@ fn handshake_precedes_business_ffi_calls() {
     // If handshake had failed, the C module would return NGX_ERROR here
     // and never reach this point.
     use nginx_markdown_converter::ffi::{
-        markdown_converter_free, markdown_converter_new, markdown_options_init, MarkdownOptions,
+        MarkdownOptions, markdown_converter_free, markdown_converter_new, markdown_options_init,
     };
 
     let handle = markdown_converter_new();
-    assert!(!handle.is_null(), "converter handle must be allocated after handshake");
+    assert!(
+        !handle.is_null(),
+        "converter handle must be allocated after handshake"
+    );
 
     // Verify we can initialize options (business FFI) only after handshake
     let mut opts: MarkdownOptions = unsafe { std::mem::zeroed() };

@@ -23,11 +23,11 @@
 //! the outer streaming engine (NGINX body filter loop). This module handles
 //! only lifecycle boundary events.
 
-pub mod types;
-pub mod plan;
 pub mod apply;
+pub mod plan;
 pub mod policy;
+pub mod types;
 
-pub use types::*;
-pub use plan::plan;
 pub use apply::apply_result;
+pub use plan::plan;
+pub use types::*;

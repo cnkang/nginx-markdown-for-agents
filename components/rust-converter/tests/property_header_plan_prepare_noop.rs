@@ -52,9 +52,9 @@ impl SimHeadersOut {
 
     /// Find the first active header matching the name (case-insensitive).
     fn find_active(&self, name: &str) -> Option<usize> {
-        self.headers.iter().position(|h| {
-            h.active && h.name.eq_ignore_ascii_case(name)
-        })
+        self.headers
+            .iter()
+            .position(|h| h.active && h.name.eq_ignore_ascii_case(name))
     }
 
     /// Count active headers matching the name (case-insensitive).
@@ -253,8 +253,7 @@ fn header_name() -> impl Strategy<Value = String> {
 
 /// Generate a header value (ASCII printable, no control chars).
 fn header_value() -> impl Strategy<Value = String> {
-    prop::string::string_regex("[A-Za-z0-9 _.;=/-]{0,50}")
-        .unwrap()
+    prop::string::string_regex("[A-Za-z0-9 _.;=/-]{0,50}").unwrap()
 }
 
 /// Generate an initial set of response headers (simulating upstream headers).
@@ -274,9 +273,8 @@ fn initial_headers() -> impl Strategy<Value = SimHeadersOut> {
 fn arbitrary_header_plan() -> impl Strategy<Value = HeaderPlan> {
     prop_oneof![
         // Standard conversion plan
-        (header_value(), any::<bool>()).prop_map(|(ct, has_etag)| {
-            HeaderPlan::for_markdown_conversion(&ct, has_etag)
-        }),
+        (header_value(), any::<bool>())
+            .prop_map(|(ct, has_etag)| { HeaderPlan::for_markdown_conversion(&ct, has_etag) }),
         // Error pre-commit plan
         header_value().prop_map(|ct| HeaderPlan::for_error_pre_commit(&ct)),
         // Bypass/pass-through (empty plan)

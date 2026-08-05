@@ -6,7 +6,7 @@
 //! record into the ledger before producing the plan decision and first
 //! transition frame.
 
-use super::policy::{event_failure_policy, EventFailurePolicy};
+use super::policy::{EventFailurePolicy, event_failure_policy};
 use super::types::*;
 
 /// Execute the plan phase of the streaming lifecycle state machine.
@@ -30,16 +30,12 @@ pub fn plan(
     match policy {
         EventFailurePolicy::Required => {
             if event.failure_record.is_none() {
-                return Err(StateMachineError::MissingRequiredFailureRecord {
-                    event: event.kind,
-                });
+                return Err(StateMachineError::MissingRequiredFailureRecord { event: event.kind });
             }
         }
         EventFailurePolicy::Forbidden => {
             if event.failure_record.is_some() {
-                return Err(StateMachineError::ForbiddenFailureRecord {
-                    event: event.kind,
-                });
+                return Err(StateMachineError::ForbiddenFailureRecord { event: event.kind });
             }
         }
         EventFailurePolicy::ReusePersisted => {
@@ -258,14 +254,14 @@ fn lookup_plan_transition(
         }
 
         /* PLAN-19: COMMITTED + COMMIT (redundant commit) → invariant violation */
-        (StreamingState::Committed, EventKind::Commit) => Err(StateMachineError::InvariantViolation {
-            message: "COMMIT in COMMITTED state".to_string(),
-        }),
+        (StreamingState::Committed, EventKind::Commit) => {
+            Err(StateMachineError::InvariantViolation {
+                message: "COMMIT in COMMITTED state".to_string(),
+            })
+        }
 
         /* PLAN-20: COMMITTED + ERROR → policy-dependent */
-        (StreamingState::Committed, EventKind::Error) => {
-            plan_postcommit_error(ctx, "PLAN-20")
-        }
+        (StreamingState::Committed, EventKind::Error) => plan_postcommit_error(ctx, "PLAN-20"),
 
         /* PLAN-21: COMMITTED + UPSTREAM_END → FINALIZE_CONVERTER */
         (StreamingState::Committed, EventKind::UpstreamEnd) => Ok(PlanTransition {
@@ -384,10 +380,7 @@ fn lookup_plan_transition(
         }),
 
         /* All other (state, event) pairs are invalid */
-        _ => Err(StateMachineError::InvalidTransition {
-            state,
-            event,
-        }),
+        _ => Err(StateMachineError::InvalidTransition { state, event }),
     }
 }
 
@@ -637,10 +630,7 @@ mod tests {
         ctx.resolved_error_policy = ResolvedErrorPolicy::Status502;
         let result = plan(StreamingState::PreCommit, error_event(), &ctx).unwrap();
         assert_eq!(result.first_frame.action, Action::RejectStatus);
-        assert_eq!(
-            result.first_frame.action_payload.reject_status,
-            Some(502)
-        );
+        assert_eq!(result.first_frame.action_payload.reject_status, Some(502));
     }
 
     #[test]
@@ -656,10 +646,7 @@ mod tests {
         .unwrap();
         /* PASS with replay unavailable → REJECT_STATUS(502), NOT PASS_HTML */
         assert_eq!(result.first_frame.action, Action::RejectStatus);
-        assert_eq!(
-            result.first_frame.action_payload.reject_status,
-            Some(502)
-        );
+        assert_eq!(result.first_frame.action_payload.reject_status, Some(502));
     }
 
     #[test]
