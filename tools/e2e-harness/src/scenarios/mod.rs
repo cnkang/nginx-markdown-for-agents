@@ -10,6 +10,7 @@ pub mod auth_cache;
 pub mod brotli_streaming;
 pub mod common;
 pub mod conditional_requests;
+pub mod encoding_chain;
 pub mod metrics_endpoint;
 pub mod smoke;
 pub mod status_codes;
@@ -207,12 +208,19 @@ static SCENARIOS: &[ScenarioEntry] = &[
         name: "accept-negotiation",
         run: accept_negotiation::run,
     },
+    ScenarioEntry {
+        name: "encoding-chain",
+        run: encoding_chain::run,
+    },
 ];
 
 /// Build scenario-specific upstream routes.
 pub fn fixture_spec(name: &str, listen_port: u16) -> crate::fixtures::FixtureSpec {
     if name == "brotli-streaming" {
         return brotli_streaming::fixture_spec(listen_port);
+    }
+    if name == "encoding-chain" {
+        return encoding_chain::fixture_spec(listen_port);
     }
     crate::fixtures::FixtureSpec {
         listen_port: Some(listen_port),

@@ -40,6 +40,48 @@ pub enum RouteBehavior {
         chunk_size: usize,
         fault: BrotliFault,
     },
+    /// Multi-layer Content-Encoding chain response (Spec 62 Wave 4).
+    ///
+    /// `chain` lists encodings in application order (first applied first);
+    /// the wire body is produced by applying the chain, and the
+    /// `Content-Encoding` response header lists the chain tokens in the same
+    /// order.
+    EncodingChain {
+        body: String,
+        chain: Vec<EncodingLayer>,
+        fault: EncodingFault,
+    },
+}
+
+/// One Content-Encoding layer of an encoding chain (application order).
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub enum EncodingLayer {
+    /// `gzip` (RFC 1952).
+    #[default]
+    Gzip,
+    /// raw `deflate` (RFC 1951).
+    Deflate,
+    /// `br` (RFC 7932).
+    Br,
+    /// `identity` (no-op layer).
+    Identity,
+}
+
+/// Optional mutation applied to an encoding chain response.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub enum EncodingFault {
+    /// Return a valid chained response.
+    #[default]
+    None,
+    /// Malformed Content-Encoding grammar (e.g. consecutive commas) with a
+    /// valid body: the module must emit `ENCODING_HEADER_INVALID`.
+    MalformedGrammar,
+    /// Syntactically valid unknown token in the chain: precommit passthrough.
+    UnknownToken,
+    /// More than three non-identity layers: depth passthrough.
+    DepthOverflow,
+    /// Truncated compressed payload for the outer layer.
+    Truncated,
 }
 
 /// Optional mutation applied after creating a valid Brotli stream.
