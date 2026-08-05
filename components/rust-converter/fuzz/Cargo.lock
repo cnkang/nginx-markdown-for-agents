@@ -295,6 +295,7 @@ dependencies = [
 name = "nginx-markdown-converter-fuzz"
 version = "0.0.0"
 dependencies = [
+ "brotli",
  "flate2",
  "libfuzzer-sys",
  "markup5ever_rcdom",
