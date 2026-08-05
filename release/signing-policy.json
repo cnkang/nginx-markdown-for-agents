@@ -1,0 +1,87 @@
+{
+  "schema_version": "release.signing-policy.v1",
+  "title": "0.9.2 Release Signing Policy (frozen)",
+  "frozen_at": "2026-08-05",
+  "owner_task": "spec62 Task 10.3 (Wave 5)",
+  "status": "frozen",
+  "note": "Private keys and key material are NEVER included in this policy or any repository artifact. This policy defines the mechanism, identity binding, and verification contract only.",
+  "artifact_types": {
+    "source_archive": {
+      "signing_mechanism": "GPG detached signature over the archive's SHA-256 checksum file (SHA256SUMS.asc), repository-configured GPG signing key",
+      "identity_issuer": "Repository GPG signing key (release-signing environment secret GPG_KEY_ID); identity published in docs/guides/GPG_KEY_MANAGEMENT.md",
+      "attachment_name": "SHA256SUMS.asc (detached ASCII-armored signature over SHA256SUMS)",
+      "digest_binding": "SHA256SUMS lists the source archive path and its sha256 digest; the detached signature covers the exact checksum file bytes",
+      "verification_commands": [
+        "gpg --verify SHA256SUMS.asc SHA256SUMS",
+        "shasum -a 256 -c SHA256SUMS"
+      ],
+      "release_pipeline": "packaging/scripts/generate-checksums.sh (producer) -> packaging/scripts/gpg-sign-checksums.sh (signer) -> integrity-signing job in .github/workflows/release-packages.yml"
+    },
+    "deb": {
+      "signing_mechanism": "GPG (dpkg-sig builder signature) using the repository signing key",
+      "identity_issuer": "Repository GPG signing key (GPG_KEY_ID)",
+      "attachment_name": "dpkg-sig embedded signature (no separate attachment)",
+      "digest_binding": "The .deb control and payload digests are covered by the embedded dpkg-sig signature; package sha256 also listed in SHA256SUMS",
+      "verification_commands": [
+        "dpkg-sig --verify <package>.deb",
+        "gpg --verify SHA256SUMS.asc SHA256SUMS",
+        "dpkg-deb --info <package>.deb"
+      ],
+      "release_pipeline": "packaging/scripts/sign-packages.sh (signer) in .github/workflows/sign-and-publish.yml; canonical 0.9.2 pipeline signs SHA256SUMS.asc (release-packages.yml integrity-signing)"
+    },
+    "rpm": {
+      "signing_mechanism": "GPG (rpm --addsign) using the repository signing key",
+      "identity_issuer": "Repository GPG signing key (GPG_KEY_ID)",
+      "attachment_name": "Embedded RPM PGP header signature",
+      "digest_binding": "RPM header signature covers package content digest; package sha256 also listed in SHA256SUMS",
+      "verification_commands": [
+        "rpm -K --nosignature <package>.rpm",
+        "rpm -Kv <package>.rpm",
+        "gpg --verify SHA256SUMS.asc SHA256SUMS"
+      ],
+      "release_pipeline": "packaging/scripts/sign-packages.sh (signer) in .github/workflows/sign-and-publish.yml; canonical 0.9.2 pipeline signs SHA256SUMS.asc (release-packages.yml integrity-signing)"
+    },
+    "oci": {
+      "signing_mechanism": "Cosign/Sigstore identity-bound signature (keyless or dedicated identity); repository-configured cosign workflow step",
+      "identity_issuer": "Sigstore identity binding (repository identity; OIDC from GitHub Actions workflow)",
+      "attachment_name": "Cosign signature layer attached to the image manifest (cosign sign)",
+      "digest_binding": "Cosign signature binds the image manifest digest (sha256:<digest>); verification uses cosign verify against the identity",
+      "verification_commands": [
+        "cosign verify --certificate-identity <identity> --certificate-oidc-issuer <issuer> <image>@sha256:<digest>",
+        "cosign verify-attestation <image>@sha256:<digest>"
+      ],
+      "release_pipeline": "Repository OCI release workflow (cosign sign step, to be wired before OCI publication)"
+    },
+    "homebrew_formula_source": {
+      "signing_mechanism": "Checksum + provenance verification (no detached GPG required per Requirement 14 criterion 4)",
+      "identity_issuer": "Source archive digest computed at formula render time (shasum -a 256 over the tag archive)",
+      "attachment_name": "Formula `sha256` stanza (embedded)",
+      "digest_binding": "Formula sha256 MUST equal the digest of the exact bytes served by the formula URL (verified by packaging/scripts/verify_homebrew_formula.py and verify_git_archive.py)",
+      "verification_commands": [
+        "python3 packaging/scripts/verify_homebrew_formula.py",
+        "python3 packaging/scripts/verify_git_archive.py --tag <tag>"
+      ],
+      "release_pipeline": "packaging/homebrew/nginx-markdown-module.rb rendered by packaging/scripts/render_homebrew_formula.py; homebrew-formula-gate.yml and homebrew-tap-publish.yml"
+    },
+    "homebrew_bottle": {
+      "signing_mechanism": "Checksum + provenance (bottle sha256 recorded in the bottle JSON); no detached GPG",
+      "identity_issuer": "Bottle digest computed by Homebrew build",
+      "attachment_name": "Bottle sha256 in the formula/bottle JSON",
+      "digest_binding": "Bottle sha256 binds the exact bottle artifact bytes",
+      "verification_commands": [
+        "brew bottle --json <formula>",
+        "shasum -a 256 <bottle>.tar.gz"
+      ],
+      "release_pipeline": "Homebrew bottle production (when applicable); bottle sha256 embedded in formula JSON"
+    }
+  },
+  "key_management": {
+    "reference": "docs/guides/GPG_KEY_MANAGEMENT.md",
+    "secret_storage": "GitHub Actions environment 'release-signing' secrets (GPG_PRIVATE_KEY, GPG_PASSPHRASE, GPG_KEY_ID); step-scoped to the signing job only",
+    "rotation": "Key rotation follows docs/guides/GPG_KEY_MANAGEMENT.md; rotated keys remain valid for verification of prior releases"
+  },
+  "policy_reference_notes": [
+    "Requirement 14 criterion 4: GPG for source/DEB/RPM; Cosign/Sigstore identity-bound signatures for OCI; checksum/provenance for Homebrew without detached GPG",
+    "Task 10.7 is the sole producer of candidate-bound signatures for the frozen candidate SHA; failed/superseded attempts retain unique run_id and are never promoted"
+  ]
+}

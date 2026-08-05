@@ -1,0 +1,138 @@
+name: Weekly Observation
+
+on:
+  schedule:
+    - cron: '0 5 * * 1'  # 05:00 UTC every Monday
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  weekly-fuzz:
+    name: Fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [parser_html, ffi_convert, security_validator, fuzz_streaming_no_panic, fuzz_streaming_chunk_split, fuzz_streaming_malformed, fuzz_decompression, fuzz_url_validation, convert_html, streaming_chunks, negotiation_and_headers, fuzz_encoding_chain, fuzz_multilayer_decode, fuzz_trusted_proxy_cidr]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: nightly
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: |
+            components/rust-converter -> target
+          cache-bin: false
+
+      - name: Install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz
+
+      - name: Run weekly fuzz target
+        run: |
+          cd components/rust-converter
+          cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=3600
+
+      - name: Upload fuzz artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: weekly-fuzz-${{ matrix.target }}
+          path: |
+            components/rust-converter/fuzz/artifacts
+            components/rust-converter/fuzz/corpus
+          if-no-files-found: ignore
+          retention-days: 30
+
+  weekly-soak:
+    name: Soak Qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.97.0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14.6'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends apache2-utils build-essential libbrotli-dev pkg-config zlib1g-dev
+          python3 -m pip install -r requirements-dev.txt -r requirements-perf.txt
+
+      - name: Run soak qualification gate
+        run: |
+          if command -v nginx >/dev/null 2>&1 || [ -n "${NGINX_BIN:-}" ]; then
+            make test-e2e-rust-soak
+          else
+            echo "SKIP (justified): no module-enabled nginx binary available (NGINX_BIN unset)" >&2
+            echo "policy_reference: Requirement 18 Wave-6 qualification thresholds (short soak)" >&2
+          fi
+        shell: bash
+
+      - name: Upload soak artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: weekly-soak
+          path: |
+            perf/reports/soak-*.json
+            perf/reports/soak-*.csv
+          if-no-files-found: ignore
+          retention-days: 30
+
+  weekly-perf:
+    name: Weekly Performance Regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.97.0
+          components: rustfmt,clippy
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14.6'
+
+      - name: Install performance dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends apache2-utils
+          python3 -m pip install -r requirements-dev.txt -r requirements-perf.txt
+
+      - name: Run performance evidence gate (report-oriented)
+        run: make perf-evidence-check
+        shell: bash
