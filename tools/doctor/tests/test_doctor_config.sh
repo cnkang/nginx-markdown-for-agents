@@ -5,7 +5,7 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "$0")/../../.." && pwd)
 tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/doctor-config-test.XXXXXX")
 cleanup() {
-    rm -f "$tmpdir/nginx" "$tmpdir/uname" "$tmpdir/ldd" "$tmpdir/nm"
+    rm -f "$tmpdir/nginx" "$tmpdir/uname" "$tmpdir/ldd" "$tmpdir/nm" "$tmpdir/rustc"
     rm -f "$tmpdir/ngx_http_markdown_filter_module.so"
     rm -f "$tmpdir/captured.conf" "$tmpdir/output.json"
     rmdir "$tmpdir"
@@ -65,6 +65,11 @@ SYMBOLS
 STUB
 chmod +x "$tmpdir/uname" "$tmpdir/ldd" "$tmpdir/nm"
 : > "$tmpdir/ngx_http_markdown_filter_module.so"
+cat > "$tmpdir/rustc" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' 'rustc 1.97.0 (contract toolchain)'
+STUB
+chmod +x "$tmpdir/rustc"
 
 PATH="$tmpdir:$PATH" DOCTOR_CAPTURE_PATH="$capture_path" \
     bash "$repo_root/tools/doctor/nginx-markdown-doctor.sh" \
@@ -86,5 +91,7 @@ grep -Fq '"artifact":"ngx_http_markdown_filter_module-1.26.3-glibc-x86_64.tar.gz
     "$tmpdir/output.json"
 grep -Fq '"name":"rust_linkage","status":"pass"' "$tmpdir/output.json"
 grep -Fq '"markdown_abi_version"' "$tmpdir/output.json"
+grep -Fq '"name":"rust_toolchain","status":"pass"' "$tmpdir/output.json"
+grep -Fq '"pinned_channel":"1.97.0"' "$tmpdir/output.json"
 
 printf '%s\n' 'doctor config test passed'

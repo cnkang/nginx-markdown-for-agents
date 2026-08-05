@@ -66,7 +66,8 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         security-static security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny \
         supply-chain supply-chain-trivy supply-chain-sbom \
         complexity-check \
-	docs-check license-check release-notes release-gates-check release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x release-gates-check-090 release-gates-check-091 release-gates-check-092 release-gates-check-all release-gates-check-legacy release-gates-check-strict \
+	docs-check license-check release-notes release-gates-check release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x         release-gates-check-090 release-gates-check-091 release-gates-check-092 release-gates-check-all release-gates-check-legacy release-gates-check-strict \
+        release-matrix-check \
         perf-evidence-check \
         test-production-examples-nginx-t test-production-examples-e2e-smoke \
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
@@ -918,7 +919,22 @@ release-gates-check-092: release-gates-check-091
 	$(MAKE) -C $(NGINX_TEST_DIR) unit-otel_impl
 	@echo "  [6/6] Official build feature manifest (Task 8.12a)"
 	python3 tools/release/gates/validate_official_feature_manifest.py
+	@echo "  [7/7] Canonical release matrix (Task 10.2)"
+	PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
 	@echo "=== 0.9.2 Release Gates: PASS ==="
+
+# release-matrix-check: Canonical release-matrix gate (Task 10.2).
+# Validates docs/release/release-matrix.json against the immutable
+# schemas/release-matrix.schema.json, requires a fully canonical document
+# (no legacy aliases, no legacy top-level matrix, no dropped metadata
+# keys), and binds every entry to the frozen ABI version and the official
+# feature-manifest digest. Fail-closed on any drift.
+# Classification: BLOCKING
+release-matrix-check:
+	@echo "=== Canonical Release Matrix Check ==="
+	PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
+	PYTHONPATH=. python3 -m pytest tools/release/matrix/tests/test_validate_release_matrix.py -q --tb=short
+	@echo "  Canonical Release Matrix Check: PASSED"
 
 release-gates-check-all: release-gates-check release-gates-check-092
 	@echo "=== Release Gates: ALL PASS ==="
@@ -1154,6 +1170,7 @@ help:
 	@echo "  release-gates-check-090  - Validate 0.9.0 release gates (additive on 0.8.0; production examples, gate validator)"
 	@echo "  release-gates-check-091  - Validate 0.9.1 release gates (blocking; module benchmark evidence gate)"
 	@echo "  release-gates-check-092  - Validate 0.9.2 release gates (blocking; 091 + 092 evidence + contract checks)"
+	@echo "  release-matrix-check      - Validate canonical release matrix against W4 schema and ABI/feature bindings"
 	@echo "  release-perf-evidence-blocking - Shared blocking evidence helper (requires BASELINE_VERSION)"
 	@echo "  perf-evidence-check      - Run performance evidence gate (non-blocking, report-only)"
 	@echo "  release-gates-check-all  - Run current baseline and 0.9.2 release gates"

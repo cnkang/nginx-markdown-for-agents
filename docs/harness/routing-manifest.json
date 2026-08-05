@@ -164,6 +164,13 @@
       ],
       "notes": "Validates release-manifest.json generation, validation, and path traversal protection (Rule 54)"
     },
+    "release-matrix": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make release-matrix-check"
+      ],
+      "notes": "Validates docs/release/release-matrix.json against the immutable W4 release-matrix schema, requires a fully canonical document (no legacy aliases or legacy top-level matrix), and binds every entry to the frozen ABI version and the official feature-manifest digest (Rule 62)"
+    },
     "version-consistency": {
       "phase": "focused-semantic",
       "commands": [
@@ -600,7 +607,8 @@
         "release-governance",
         "v080-gates",
         "v092-gates",
-        "release-quality"
+        "release-quality",
+        "release-matrix"
       ]
     },
     {

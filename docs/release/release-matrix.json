@@ -1,0 +1,275 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "nginx_version": "1.24.0",
+      "os": "debian12",
+      "libc": "glibc",
+      "target": "x86_64-unknown-linux-gnu",
+      "artifact_type": "deb",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.24.0",
+      "os": "debian12",
+      "libc": "glibc",
+      "target": "aarch64-unknown-linux-gnu",
+      "artifact_type": "deb",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.24.0",
+      "os": "almalinux9",
+      "libc": "glibc",
+      "target": "x86_64-unknown-linux-gnu",
+      "artifact_type": "rpm",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.24.0",
+      "os": "almalinux9",
+      "libc": "glibc",
+      "target": "aarch64-unknown-linux-gnu",
+      "artifact_type": "rpm",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.26.3",
+      "os": "debian12",
+      "libc": "glibc",
+      "target": "x86_64-unknown-linux-gnu",
+      "artifact_type": "deb",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.26.3",
+      "os": "debian12",
+      "libc": "glibc",
+      "target": "aarch64-unknown-linux-gnu",
+      "artifact_type": "deb",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.26.3",
+      "os": "almalinux9",
+      "libc": "glibc",
+      "target": "x86_64-unknown-linux-gnu",
+      "artifact_type": "rpm",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.26.3",
+      "os": "almalinux9",
+      "libc": "glibc",
+      "target": "aarch64-unknown-linux-gnu",
+      "artifact_type": "rpm",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.28.3",
+      "os": "debian12",
+      "libc": "glibc",
+      "target": "x86_64-unknown-linux-gnu",
+      "artifact_type": "deb",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.28.3",
+      "os": "debian12",
+      "libc": "glibc",
+      "target": "aarch64-unknown-linux-gnu",
+      "artifact_type": "deb",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.28.3",
+      "os": "almalinux9",
+      "libc": "glibc",
+      "target": "x86_64-unknown-linux-gnu",
+      "artifact_type": "rpm",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.28.3",
+      "os": "almalinux9",
+      "libc": "glibc",
+      "target": "aarch64-unknown-linux-gnu",
+      "artifact_type": "rpm",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.30.4",
+      "os": "debian12",
+      "libc": "glibc",
+      "target": "x86_64-unknown-linux-gnu",
+      "artifact_type": "deb",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.30.4",
+      "os": "debian12",
+      "libc": "glibc",
+      "target": "aarch64-unknown-linux-gnu",
+      "artifact_type": "deb",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.30.4",
+      "os": "almalinux9",
+      "libc": "glibc",
+      "target": "x86_64-unknown-linux-gnu",
+      "artifact_type": "rpm",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.30.4",
+      "os": "almalinux9",
+      "libc": "glibc",
+      "target": "aarch64-unknown-linux-gnu",
+      "artifact_type": "rpm",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.31.3",
+      "os": "debian12",
+      "libc": "glibc",
+      "target": "x86_64-unknown-linux-gnu",
+      "artifact_type": "deb",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.31.3",
+      "os": "debian12",
+      "libc": "glibc",
+      "target": "aarch64-unknown-linux-gnu",
+      "artifact_type": "deb",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.31.3",
+      "os": "almalinux9",
+      "libc": "glibc",
+      "target": "x86_64-unknown-linux-gnu",
+      "artifact_type": "rpm",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.31.3",
+      "os": "almalinux9",
+      "libc": "glibc",
+      "target": "aarch64-unknown-linux-gnu",
+      "artifact_type": "rpm",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.26.3",
+      "os": "debian12",
+      "libc": "glibc",
+      "target": "x86_64-unknown-linux-gnu",
+      "artifact_type": "oci",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.26.3",
+      "os": "debian12",
+      "libc": "glibc",
+      "target": "aarch64-unknown-linux-gnu",
+      "artifact_type": "oci",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.26.3",
+      "os": "alpine3.20",
+      "libc": "musl",
+      "target": "x86_64-unknown-linux-musl",
+      "artifact_type": "oci",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.26.3",
+      "os": "alpine3.20",
+      "libc": "musl",
+      "target": "aarch64-unknown-linux-musl",
+      "artifact_type": "oci",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.31.3",
+      "os": "debian12",
+      "libc": "glibc",
+      "target": "x86_64-unknown-linux-gnu",
+      "artifact_type": "oci",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.31.3",
+      "os": "debian12",
+      "libc": "glibc",
+      "target": "aarch64-unknown-linux-gnu",
+      "artifact_type": "oci",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.31.3",
+      "os": "alpine3.20",
+      "libc": "musl",
+      "target": "x86_64-unknown-linux-musl",
+      "artifact_type": "oci",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.31.3",
+      "os": "alpine3.20",
+      "libc": "musl",
+      "target": "aarch64-unknown-linux-musl",
+      "artifact_type": "oci",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.26.3",
+      "os": "macos",
+      "libc": "darwin",
+      "target": "aarch64-apple-darwin",
+      "artifact_type": "homebrew",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    },
+    {
+      "nginx_version": "1.26.3",
+      "os": "linux",
+      "libc": "any",
+      "target": "any",
+      "artifact_type": "source",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
+    }
+  ]
+}
