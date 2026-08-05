@@ -20,13 +20,19 @@ fn arb_html() -> impl Strategy<Value = String> {
     prop_oneof![
         Just("<html><body><h1>Title</h1><p>Paragraph</p></body></html>".to_string()),
         Just("<html><body><ul><li>one</li><li>two</li></ul></body></html>".to_string()),
-        Just("<html><head><title>t</title></head><body><a href=\"/x\">link</a></body></html>".to_string()),
+        Just(
+            "<html><head><title>t</title></head><body><a href=\"/x\">link</a></body></html>"
+                .to_string()
+        ),
         Just("<html><body><p>line1</p>\n<p>line2</p></body></html>".to_string()),
         Just("<html><body><blockquote><p>quoted</p></blockquote></body></html>".to_string()),
         Just("<html><body><pre><code>fn main() {}</code></pre></body></html>".to_string()),
         Just("<html><body><img src=\"/img.png\" alt=\"alt text\"></body></html>".to_string()),
         Just("<html><body><table><tr><td>a</td><td>b</td></tr></table></body></html>".to_string()),
-        Just("<html><body>plain text with <em>emphasis</em> and <strong>bold</strong></body></html>".to_string()),
+        Just(
+            "<html><body>plain text with <em>emphasis</em> and <strong>bold</strong></body></html>"
+                .to_string()
+        ),
         Just("<html><body><!-- comment --><p>after comment</p></body></html>".to_string()),
     ]
 }

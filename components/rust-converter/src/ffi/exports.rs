@@ -61,16 +61,15 @@ use super::abi::{
     TRUSTED_PROXIES_PUSH_OK,
 };
 use super::abi::{
-    DECOMP_CATEGORY_BUDGET_EXCEEDED, DECOMP_CATEGORY_FORMAT_ERROR,
-    DECOMP_CATEGORY_INVALID_ARGS, DECOMP_CATEGORY_IO_ERROR, DECOMP_CATEGORY_RATIO_EXCEEDED,
-    DECOMP_CATEGORY_TRUNCATED_INPUT, ENCODING_CHAIN_DEPTH_EXCEEDED, ENCODING_CHAIN_MALFORMED,
-    ENCODING_CHAIN_UNKNOWN_TOKEN, ENCODING_CHAIN_VALID, ERROR_INTERNAL, FFIAcceptResult,
-    FFIChainDecodeResult, FFIDecompResult, FFIEncodingChainResult, FFIEligibilityInput,
-    FFIHeaderEntry, FFIHeaderPlan, FFIHeaderPlanHandle, FFIStr, MARKDOWN_ABI_VERSION,
-    MARKDOWN_HEADER_HASH, MARKDOWN_LAYOUT_FINGERPRINT, MARKDOWN_SYMBOL_SET_HASH,
-    MarkdownConverterHandle, MarkdownOptions, MarkdownResult, NEGOTIATE_REASON_CONVERT,
-    NEGOTIATE_REASON_EXPLICIT_REJECT, NEGOTIATE_REASON_LOWER_Q, NEGOTIATE_REASON_MALFORMED,
-    NEGOTIATE_REASON_NO_ACCEPT,
+    DECOMP_CATEGORY_BUDGET_EXCEEDED, DECOMP_CATEGORY_FORMAT_ERROR, DECOMP_CATEGORY_INVALID_ARGS,
+    DECOMP_CATEGORY_IO_ERROR, DECOMP_CATEGORY_RATIO_EXCEEDED, DECOMP_CATEGORY_TRUNCATED_INPUT,
+    ENCODING_CHAIN_DEPTH_EXCEEDED, ENCODING_CHAIN_MALFORMED, ENCODING_CHAIN_UNKNOWN_TOKEN,
+    ENCODING_CHAIN_VALID, ERROR_INTERNAL, FFIAcceptResult, FFIChainDecodeResult, FFIDecompResult,
+    FFIEligibilityInput, FFIEncodingChainResult, FFIHeaderEntry, FFIHeaderPlan,
+    FFIHeaderPlanHandle, FFIStr, MARKDOWN_ABI_VERSION, MARKDOWN_HEADER_HASH,
+    MARKDOWN_LAYOUT_FINGERPRINT, MARKDOWN_SYMBOL_SET_HASH, MarkdownConverterHandle,
+    MarkdownOptions, MarkdownResult, NEGOTIATE_REASON_CONVERT, NEGOTIATE_REASON_EXPLICIT_REJECT,
+    NEGOTIATE_REASON_LOWER_Q, NEGOTIATE_REASON_MALFORMED, NEGOTIATE_REASON_NO_ACCEPT,
 };
 use super::abi::{
     FFI_CONFIG_NOT_SET_U8, FFI_CONFIG_NOT_SET_U32, FFI_CONFIG_NOT_SET_U64, FFIConflict,
@@ -806,29 +805,18 @@ pub unsafe extern "C" fn markdown_decide_base_url(
         let inp = unsafe { &*input };
 
         let source_ip = unsafe { optional_str(inp.source_ip, inp.source_ip_len) }.unwrap_or("");
-        let forwarded = unsafe {
-            optional_str_present(inp.forwarded, inp.forwarded_len)
-        };
+        let forwarded = unsafe { optional_str_present(inp.forwarded, inp.forwarded_len) };
         let x_forwarded_for =
-            unsafe {
-                optional_str_present(inp.x_forwarded_for, inp.x_forwarded_for_len)
-            };
+            unsafe { optional_str_present(inp.x_forwarded_for, inp.x_forwarded_for_len) };
         let x_forwarded_proto =
-            unsafe {
-                optional_str_present(inp.x_forwarded_proto, inp.x_forwarded_proto_len)
-            };
+            unsafe { optional_str_present(inp.x_forwarded_proto, inp.x_forwarded_proto_len) };
         let x_forwarded_host =
-            unsafe {
-                optional_str_present(inp.x_forwarded_host, inp.x_forwarded_host_len)
-            };
+            unsafe { optional_str_present(inp.x_forwarded_host, inp.x_forwarded_host_len) };
         let x_forwarded_port =
-            unsafe {
-                optional_str_present(inp.x_forwarded_port, inp.x_forwarded_port_len)
-            };
+            unsafe { optional_str_present(inp.x_forwarded_port, inp.x_forwarded_port_len) };
         let host = unsafe { optional_str_present(inp.host, inp.host_len) };
-        let direct_scheme = unsafe {
-            optional_str_present(inp.direct_scheme, inp.direct_scheme_len)
-        };
+        let direct_scheme =
+            unsafe { optional_str_present(inp.direct_scheme, inp.direct_scheme_len) };
 
         let cidrs: &[crate::forwarded::Cidr] = if inp.trusted.is_null() {
             &[]
@@ -1222,7 +1210,7 @@ pub unsafe extern "C" fn markdown_parse_encoding_chain(
     result: *mut FFIEncodingChainResult,
 ) -> u8 {
     if result.is_null() {
-        return ENCODING_CHAIN_MALFORMED as u8;
+        return ENCODING_CHAIN_MALFORMED;
     }
     let result_ref = unsafe { &mut *result };
     result_ref.classification = ENCODING_CHAIN_VALID;
@@ -1396,10 +1384,7 @@ pub unsafe extern "C" fn markdown_decode_encoding_chain(
         layer_vec.push(enc);
     }
 
-    let limits = crate::encoding::DecodeLimits {
-        max_output,
-        ratio,
-    };
+    let limits = crate::encoding::DecodeLimits { max_output, ratio };
 
     let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
         crate::encoding::decode_chain(input_slice, &layer_vec, limits)
@@ -1424,12 +1409,8 @@ pub unsafe extern "C" fn markdown_decode_encoding_chain(
                 crate::encoding::ChainDecodeError::BudgetExceeded => {
                     DECOMP_CATEGORY_BUDGET_EXCEEDED
                 }
-                crate::encoding::ChainDecodeError::RatioExceeded => {
-                    DECOMP_CATEGORY_RATIO_EXCEEDED
-                }
-                crate::encoding::ChainDecodeError::FormatError(_) => {
-                    DECOMP_CATEGORY_FORMAT_ERROR
-                }
+                crate::encoding::ChainDecodeError::RatioExceeded => DECOMP_CATEGORY_RATIO_EXCEEDED,
+                crate::encoding::ChainDecodeError::FormatError(_) => DECOMP_CATEGORY_FORMAT_ERROR,
                 crate::encoding::ChainDecodeError::TruncatedInput(_) => {
                     DECOMP_CATEGORY_TRUNCATED_INPUT
                 }
@@ -2076,9 +2057,8 @@ mod tests {
 
         let mut buf = [0u8; 128];
         let mut decision = empty_decision();
-        let rc = unsafe {
-            markdown_decide_base_url(&input, buf.as_mut_ptr(), buf.len(), &mut decision)
-        };
+        let rc =
+            unsafe { markdown_decide_base_url(&input, buf.as_mut_ptr(), buf.len(), &mut decision) };
         assert_eq!(rc, DECIDE_BASE_URL_OK);
         let url = std::str::from_utf8(&buf[..decision.base_url_len]).unwrap();
         assert_eq!(url, "http://origin.example.com");
@@ -2616,9 +2596,8 @@ mod tests {
     fn parse_encoding_chain_valid_chain() {
         let value = b"gzip, deflate, BR";
         let mut result: FFIEncodingChainResult = unsafe { std::mem::zeroed() };
-        let classification = unsafe {
-            markdown_parse_encoding_chain(value.as_ptr(), value.len(), &mut result)
-        };
+        let classification =
+            unsafe { markdown_parse_encoding_chain(value.as_ptr(), value.len(), &mut result) };
         assert_eq!(classification, ENCODING_CHAIN_VALID);
         assert_eq!(result.classification, ENCODING_CHAIN_VALID);
         assert_eq!(result.layer_count, 3);
@@ -2630,9 +2609,8 @@ mod tests {
     fn parse_encoding_chain_identity_removed() {
         let value = b"identity, gzip, identity";
         let mut result: FFIEncodingChainResult = unsafe { std::mem::zeroed() };
-        let classification = unsafe {
-            markdown_parse_encoding_chain(value.as_ptr(), value.len(), &mut result)
-        };
+        let classification =
+            unsafe { markdown_parse_encoding_chain(value.as_ptr(), value.len(), &mut result) };
         assert_eq!(classification, ENCODING_CHAIN_VALID);
         assert_eq!(result.layer_count, 1);
         assert_eq!(result.layers, [0, 0, 0]);
@@ -2643,9 +2621,8 @@ mod tests {
     fn parse_encoding_chain_identity_only() {
         let value = b"identity";
         let mut result: FFIEncodingChainResult = unsafe { std::mem::zeroed() };
-        let classification = unsafe {
-            markdown_parse_encoding_chain(value.as_ptr(), value.len(), &mut result)
-        };
+        let classification =
+            unsafe { markdown_parse_encoding_chain(value.as_ptr(), value.len(), &mut result) };
         assert_eq!(classification, ENCODING_CHAIN_VALID);
         assert_eq!(result.layer_count, 0);
         assert_eq!(result.identity_present, 1);
@@ -2666,9 +2643,8 @@ mod tests {
         ];
         for value in cases {
             let mut result: FFIEncodingChainResult = unsafe { std::mem::zeroed() };
-            let classification = unsafe {
-                markdown_parse_encoding_chain(value.as_ptr(), value.len(), &mut result)
-            };
+            let classification =
+                unsafe { markdown_parse_encoding_chain(value.as_ptr(), value.len(), &mut result) };
             assert_eq!(
                 classification,
                 ENCODING_CHAIN_MALFORMED,
@@ -2683,9 +2659,8 @@ mod tests {
     fn parse_encoding_chain_unknown_token() {
         let value = b"gzip, zstd";
         let mut result: FFIEncodingChainResult = unsafe { std::mem::zeroed() };
-        let classification = unsafe {
-            markdown_parse_encoding_chain(value.as_ptr(), value.len(), &mut result)
-        };
+        let classification =
+            unsafe { markdown_parse_encoding_chain(value.as_ptr(), value.len(), &mut result) };
         assert_eq!(classification, ENCODING_CHAIN_UNKNOWN_TOKEN);
     }
 
@@ -2693,21 +2668,18 @@ mod tests {
     fn parse_encoding_chain_depth_exceeded() {
         let value = b"gzip, deflate, br, gzip";
         let mut result: FFIEncodingChainResult = unsafe { std::mem::zeroed() };
-        let classification = unsafe {
-            markdown_parse_encoding_chain(value.as_ptr(), value.len(), &mut result)
-        };
+        let classification =
+            unsafe { markdown_parse_encoding_chain(value.as_ptr(), value.len(), &mut result) };
         assert_eq!(classification, ENCODING_CHAIN_DEPTH_EXCEEDED);
     }
 
     #[test]
     fn parse_encoding_chain_null_inputs() {
         let mut result: FFIEncodingChainResult = unsafe { std::mem::zeroed() };
-        let classification =
-            unsafe { markdown_parse_encoding_chain(ptr::null(), 5, &mut result) };
+        let classification = unsafe { markdown_parse_encoding_chain(ptr::null(), 5, &mut result) };
         assert_eq!(classification, DECOMP_CATEGORY_INVALID_ARGS as u8);
         /* NULL with zero length represents a present empty field here. */
-        let classification =
-            unsafe { markdown_parse_encoding_chain(ptr::null(), 0, &mut result) };
+        let classification = unsafe { markdown_parse_encoding_chain(ptr::null(), 0, &mut result) };
         assert_eq!(classification, ENCODING_CHAIN_MALFORMED);
     }
 
@@ -2829,43 +2801,19 @@ mod tests {
         let mut result: FFIChainDecodeResult = unsafe { std::mem::zeroed() };
         /* NULL layers with non-zero count. */
         let rc = unsafe {
-            markdown_decode_encoding_chain(
-                ptr::null(),
-                0,
-                ptr::null(),
-                1,
-                1024,
-                100,
-                &mut result,
-            )
+            markdown_decode_encoding_chain(ptr::null(), 0, ptr::null(), 1, 1024, 100, &mut result)
         };
         assert_eq!(rc, 105); /* DECOMP_CATEGORY_INVALID_ARGS */
         /* Unknown layer code. */
         let bad = [9u8];
         let rc = unsafe {
-            markdown_decode_encoding_chain(
-                ptr::null(),
-                0,
-                bad.as_ptr(),
-                1,
-                1024,
-                100,
-                &mut result,
-            )
+            markdown_decode_encoding_chain(ptr::null(), 0, bad.as_ptr(), 1, 1024, 100, &mut result)
         };
         assert_eq!(rc, 105);
         /* Depth overflow. */
         let four = [0u8, 0, 0, 0];
         let rc = unsafe {
-            markdown_decode_encoding_chain(
-                ptr::null(),
-                0,
-                four.as_ptr(),
-                4,
-                1024,
-                100,
-                &mut result,
-            )
+            markdown_decode_encoding_chain(ptr::null(), 0, four.as_ptr(), 4, 1024, 100, &mut result)
         };
         assert_eq!(rc, 105);
         /* NULL result pointer. */

@@ -74,7 +74,10 @@ fn flip_case(s: &str, index: usize) -> String {
 /// Generate a syntactically valid chain value with arbitrary SP/HTAB
 /// whitespace placement and mixed casing.
 fn arb_chain_value(max_tokens: usize) -> impl Strategy<Value = String> {
-    (1usize..=max_tokens, proptest::collection::vec(arb_token(), 0..=max_tokens))
+    (
+        1usize..=max_tokens,
+        proptest::collection::vec(arb_token(), 0..=max_tokens),
+    )
         .prop_flat_map(move |(count, _)| {
             proptest::collection::vec(arb_token(), count).prop_map(|tokens| {
                 let mut out = String::new();
@@ -84,7 +87,7 @@ fn arb_chain_value(max_tokens: usize) -> impl Strategy<Value = String> {
                     }
                     out.push_str(prop_ws_before());
                     out.push_str(tok);
-                    out.push_str(&prop_ws_after());
+                    out.push_str(prop_ws_after());
                 }
                 out
             })
@@ -314,14 +317,24 @@ fn identity_does_not_count_toward_depth() {
         .copied()
         .filter(|e| *e != Encoding::Identity)
         .collect();
-    assert_eq!(non_identity, vec![Encoding::Gzip, Encoding::Deflate, Encoding::Br]);
+    assert_eq!(
+        non_identity,
+        vec![Encoding::Gzip, Encoding::Deflate, Encoding::Br]
+    );
 }
 
 /// Malformed grammar must never start a decoder or mutate headers: the
 /// parser classification is the only observable outcome.
 #[test]
 fn malformed_grammar_never_returns_layers() {
-    let cases: &[&[u8]] = &[b",gzip", b"gzip,", b"gzip,,deflate", b"\"gzip\"", b"gzip;q=1", b"gzip\n"];
+    let cases: &[&[u8]] = &[
+        b",gzip",
+        b"gzip,",
+        b"gzip,,deflate",
+        b"\"gzip\"",
+        b"gzip;q=1",
+        b"gzip\n",
+    ];
     for value in cases {
         let outcome = parse_encoding_chain(value);
         assert!(
@@ -363,7 +376,10 @@ fn budget_and_ratio_reasons_are_distinct() {
     let budget_err = decode_chain(
         &wire,
         &[Encoding::Gzip],
-        DecodeLimits { max_output: 10, ratio: 1000 },
+        DecodeLimits {
+            max_output: 10,
+            ratio: 1000,
+        },
     )
     .unwrap_err();
     assert_eq!(budget_err, ChainDecodeError::BudgetExceeded);
@@ -371,7 +387,10 @@ fn budget_and_ratio_reasons_are_distinct() {
     let ratio_err = decode_chain(
         &wire,
         &[Encoding::Gzip],
-        DecodeLimits { max_output: 10 * 1024 * 1024, ratio: 10 },
+        DecodeLimits {
+            max_output: 10 * 1024 * 1024,
+            ratio: 10,
+        },
     )
     .unwrap_err();
     assert_eq!(ratio_err, ChainDecodeError::RatioExceeded);
