@@ -420,6 +420,8 @@ jobs:
           bash tools/harness/detect_version_consistency.sh
           PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
           make -C components/nginx-module/tests unit-otel_impl
+          PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
+          PYTHONPATH=. python3 tools/release/gates/validate_official_feature_manifest.py
 
   nginx-c-clang-smoke:
     name: NGINX C Clang Smoke

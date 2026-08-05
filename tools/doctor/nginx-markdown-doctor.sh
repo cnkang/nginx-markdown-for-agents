@@ -511,7 +511,76 @@ check_rust_linkage() {
     return 0
 }
 
-# Check 7: OS/arch/libc detection
+# Check 7: Rust toolchain version
+# The repository pins an exact compiler toolchain (rust-toolchain.toml
+# channel 1.97.0) and separately declares the MSRV floor (Cargo.toml
+# rust-version 1.97). This check verifies the active rustc satisfies the
+# MSRV and that a repository checkout pins the exact contract toolchain.
+check_rust_toolchain() {
+    local expected_msrv="1.97.0"
+
+    if ! command -v rustc >/dev/null 2>&1; then
+        emit_check "rust_toolchain" "skip" "rustc not available (install Rust via rustup)"
+        return 0
+    fi
+
+    local rustc_version
+    rustc_version=$(rustc --version 2>/dev/null | awk '{print $2}' || true)
+
+    local msrv_ok="false"
+    if [[ -n "$rustc_version" ]]; then
+        local min="${expected_msrv%.*}"
+        local ver_major ver_minor
+        ver_major=$(printf '%s\n' "$rustc_version" | cut -d. -f1)
+        ver_minor=$(printf '%s\n' "$rustc_version" | cut -d. -f2)
+        if [[ -n "$ver_major" && -n "$ver_minor" ]] \
+            && (( ver_major > ${min%.*} )) 2>/dev/null; then
+            msrv_ok="true"
+        elif [[ -n "$ver_major" && -n "$ver_minor" ]] \
+            && (( ver_major == ${min%.*} )) 2>/dev/null \
+            && (( ver_minor >= ${min#*.} )) 2>/dev/null; then
+            msrv_ok="true"
+        fi
+    fi
+
+    local doctor_root
+    doctor_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd 2>/dev/null || printf '')
+    local toolchain_file=""
+    if [[ -n "$doctor_root" && -f "$doctor_root/rust-toolchain.toml" ]]; then
+        toolchain_file=$(grep -E '^channel[[:space:]]*=' "$doctor_root/rust-toolchain.toml" \
+            | head -1 | sed 's/^channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/' || true)
+    fi
+
+    local pinned_ok="false"
+    if [[ -n "$toolchain_file" && "$toolchain_file" == "$expected_msrv" ]]; then
+        pinned_ok="true"
+    fi
+
+    if [[ "$msrv_ok" == "true" ]]; then
+        if [[ -z "$toolchain_file" ]]; then
+            emit_check "rust_toolchain" "pass" \
+                "rustc ${rustc_version} meets MSRV ${expected_msrv}" \
+                '{"rustc_version":"'"$rustc_version"'","msrv":"'"$expected_msrv"'"}'
+        elif [[ "$pinned_ok" == "true" ]]; then
+            emit_check "rust_toolchain" "pass" \
+                "rustc ${rustc_version} meets MSRV; repository pins exact toolchain ${toolchain_file}" \
+                '{"rustc_version":"'"$rustc_version"'","msrv":"'"$expected_msrv"'","pinned_channel":"'"$toolchain_file"'"}'
+        else
+            emit_check "rust_toolchain" "warn" \
+                "rustc ${rustc_version} meets MSRV but rust-toolchain.toml is not pinned to ${expected_msrv}" \
+                '{"rustc_version":"'"$rustc_version"'","msrv":"'"$expected_msrv"'","pinned_channel":"'"$toolchain_file"'"}' \
+                "Set channel = \"${expected_msrv}\" in rust-toolchain.toml for reproducible release builds"
+        fi
+    else
+        emit_check "rust_toolchain" "warn" \
+            "rustc ${rustc_version:-unknown} is below the MSRV floor ${expected_msrv}" \
+            '{"rustc_version":"'"$rustc_version"'","msrv":"'"$expected_msrv"'"}' \
+            "Install Rust ${expected_msrv} or newer (rustup toolchain install ${expected_msrv})"
+    fi
+    return 0
+}
+
+# Check 8: OS/arch/libc detection
 check_os_arch() {
     # Detect OS
     local os_name
@@ -791,6 +860,7 @@ main() {
     check_configure_args
     check_module_signature
     check_rust_linkage
+    check_rust_toolchain
     check_os_arch
     check_package_type
     recommend_artifact
