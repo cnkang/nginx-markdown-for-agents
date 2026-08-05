@@ -158,35 +158,54 @@ def scan_c_callsites(
         # Skip the generated header itself — it declares, not calls.
         if path.name == "markdown_converter.h":
             continue
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+        text = _read_text(path)
+        if text is None:
             continue
 
-        lines = text.splitlines()
         active_guards: list[str] = []
-
-        for lineno, line in enumerate(lines, start=1):
-            # Track conditional compilation state.
-            ifdef_match = IFDEF_RE.match(line)
-            if ifdef_match:
-                active_guards.append(ifdef_match.group(1))
-            elif ENDIF_RE.match(line):
-                if active_guards:
-                    active_guards.pop()
-
-            # Find callsites.
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            _update_guard_stack(line, active_guards)
             for match in CALLSITE_RE.finditer(line):
-                name = match.group(1)
-                record = {
-                    "file": str(path.relative_to(ROOT)),
-                    "line": lineno,
-                    "context": line.strip()[:120],
-                    "ifdef_guard": active_guards[-1] if active_guards else None,
-                }
-                callsites.setdefault(name, []).append(record)
+                _record_callsite(callsites, match, path, lineno, line, active_guards)
 
     return callsites
+
+
+def _read_text(path: Path) -> str | None:
+    """Read a text file, returning None when unreadable."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _update_guard_stack(line: str, active_guards: list[str]) -> None:
+    """Track conditional compilation state for one source line."""
+    ifdef_match = IFDEF_RE.match(line)
+    if ifdef_match:
+        active_guards.append(ifdef_match.group(1))
+    elif ENDIF_RE.match(line):
+        if active_guards:
+            active_guards.pop()
+
+
+def _record_callsite(
+    callsites: dict[str, list[dict[str, Any]]],
+    match: re.Match[str],
+    path: Path,
+    lineno: int,
+    line: str,
+    active_guards: list[str],
+) -> None:
+    """Append one callsite record for a regex match."""
+    name = match.group(1)
+    record = {
+        "file": str(path.relative_to(ROOT)),
+        "line": lineno,
+        "context": line.strip()[:120],
+        "ifdef_guard": active_guards[-1] if active_guards else None,
+    }
+    callsites.setdefault(name, []).append(record)
 
 
 def scan_test_references(test_directory: Path) -> set[str]:
@@ -224,39 +243,9 @@ def classify_exports(
     results: list[dict[str, Any]] = []
 
     for name in exports:
-        if name in LOADER_ABI_FUNCTIONS:
-            classification = "loader_abi"
-            callsite_count = len(production_callsites.get(name, []))
-            callsite_files = sorted(
-                {cs["file"] for cs in production_callsites.get(name, [])}
-            )
-        elif name in production_callsites and production_callsites[name]:
-            classification = "production_called"
-            callsite_count = len(production_callsites[name])
-            callsite_files = sorted(
-                {cs["file"] for cs in production_callsites[name]}
-            )
-        elif name in test_references:
-            classification = "test_only"
-            callsite_count = 0
-            callsite_files = []
-        else:
-            # Check lifecycle pair: if the paired counterpart is
-            # production-called, infer this function is also
-            # production-called and reuse the paired callsite evidence.
-            paired = LIFECYCLE_PAIRS.get(name)
-            paired_callsites = production_callsites.get(paired, []) if paired else []
-            if paired and paired_callsites:
-                classification = "production_called"
-                callsite_count = len(paired_callsites)
-                callsite_files = sorted(
-                    {cs["file"] for cs in paired_callsites}
-                )
-            else:
-                classification = "dead"
-                callsite_count = 0
-                callsite_files = []
-
+        classification, callsite_count, callsite_files = _classify_one(
+            name, production_callsites, test_references
+        )
         record: dict[str, Any] = {
             "name": name,
             "classification": classification,
@@ -275,6 +264,43 @@ def classify_exports(
         results.append(record)
 
     return results
+
+
+def _classify_one(
+    name: str,
+    production_callsites: dict[str, list[dict[str, Any]]],
+    test_references: set[str],
+) -> tuple[str, int, list[str]]:
+    """Classify a single export name into (classification, count, files)."""
+    if name in LOADER_ABI_FUNCTIONS:
+        return _callsite_classification("loader_abi", production_callsites.get(name, []))
+
+    if name in production_callsites and production_callsites[name]:
+        return _callsite_classification(
+            "production_called", production_callsites[name]
+        )
+
+    if name in test_references:
+        return "test_only", 0, []
+
+    # Lifecycle pair: if the paired counterpart is production-called, infer
+    # this function is also production-called and reuse the paired evidence.
+    paired = LIFECYCLE_PAIRS.get(name)
+    paired_callsites = production_callsites.get(paired, []) if paired else []
+    if paired and paired_callsites:
+        return _callsite_classification("production_called", paired_callsites)
+
+    return "dead", 0, []
+
+
+def _callsite_classification(
+    classification: str,
+    callsites: list[dict[str, Any]],
+) -> tuple[str, int, list[str]]:
+    """Build the classification triple from a callsite list."""
+    count = len(callsites)
+    files = sorted({cs["file"] for cs in callsites})
+    return classification, count, files
 
 
 def build_inventory(
@@ -394,7 +420,7 @@ def main() -> int:
         output = json.dumps(inventory, indent=2, ensure_ascii=False) + "\n"
         if args.output:
             validated_output = validate_write_path_within_root(
-                Path(args.output), ROOT, purpose="FFI dead export inventory"
+                args.output, ROOT, purpose="FFI dead export inventory"
             )
             validated_output.parent.mkdir(parents=True, exist_ok=True)
             validated_output.write_text(output, encoding="utf-8")
