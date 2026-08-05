@@ -177,6 +177,14 @@ fn write_nginx_conf_stub(
             port,
             upstream_port,
         ),
+        "encoding-chain" => encoding_chain_nginx_conf(
+            &error_log,
+            &access_log,
+            &pid_path,
+            nginx_bin,
+            port,
+            upstream_port,
+        ),
         "metrics-endpoint" => metrics_nginx_conf(
             &error_log,
             &access_log,
@@ -242,6 +250,69 @@ http {{\n\
             markdown_error_policy pass;\n\
             proxy_set_header Accept \"\";\n\
             proxy_pass http://fixture_backend;\n\
+        }}\n\
+        location = /markdown-metrics {{ markdown_metrics; }}\n\
+    }}\n\
+}}\n",
+        error_log.display(),
+        pid_path.display(),
+        access_log.display(),
+    )
+}
+
+fn encoding_chain_nginx_conf(
+    error_log: &Path,
+    access_log: &Path,
+    pid_path: &Path,
+    nginx_bin: &Path,
+    port: u16,
+    upstream_port: u16,
+) -> String {
+    let load_module = find_module(nginx_bin)
+        .map(|path| format!("load_module {};\n", path.display()))
+        .unwrap_or_default();
+    format!(
+        "{load_module}worker_processes 1;\n\
+error_log {} info;\n\
+pid {};\n\
+events {{ worker_connections 1024; }}\n\
+http {{\n\
+    access_log {};\n\
+    upstream fixture_backend {{ server 127.0.0.1:{upstream_port}; }}\n\
+    server {{\n\
+        listen 127.0.0.1:{port};\n\
+        location /chain/ {{\n\
+            markdown_filter on;\n\
+            markdown_accept wildcard;\n\
+            markdown_streaming off;\n\
+            markdown_auto_decompress on;\n\
+            markdown_cache_validation off;\n\
+            markdown_limits conversion_memory=64m conversion_timeout=30s;\n\
+            markdown_error_policy pass;\n\
+            proxy_pass http://fixture_backend/;\n\
+        }}\n\
+        location /chain-stream/ {{\n\
+            markdown_filter on;\n\
+            markdown_accept wildcard;\n\
+            markdown_streaming force;\n\
+            markdown_auto_decompress on;\n\
+            markdown_cache_validation off;\n\
+            markdown_limits conversion_memory=64m conversion_timeout=30s;\n\
+            markdown_error_policy pass;\n\
+            proxy_http_version 1.1;\n\
+            proxy_buffering off;\n\
+            proxy_set_header Connection \"\";\n\
+            proxy_pass http://fixture_backend/;\n\
+        }}\n\
+        location /chain-fail-closed/ {{\n\
+            markdown_filter on;\n\
+            markdown_accept wildcard;\n\
+            markdown_streaming off;\n\
+            markdown_auto_decompress on;\n\
+            markdown_cache_validation off;\n\
+            markdown_limits conversion_memory=64m conversion_timeout=30s;\n\
+            markdown_error_policy fail_closed;\n\
+            proxy_pass http://fixture_backend/;\n\
         }}\n\
         location = /markdown-metrics {{ markdown_metrics; }}\n\
     }}\n\
