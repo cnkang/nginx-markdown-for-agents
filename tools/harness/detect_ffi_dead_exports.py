@@ -29,7 +29,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 
-from lib.path_validation import validate_read_path  # noqa: E402
+from lib.path_validation import validate_read_path, validate_write_path_within_root  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -393,10 +393,13 @@ def main() -> int:
     else:
         output = json.dumps(inventory, indent=2, ensure_ascii=False) + "\n"
         if args.output:
-            Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-            Path(args.output).write_text(output, encoding="utf-8")
+            validated_output = validate_write_path_within_root(
+                Path(args.output), ROOT, purpose="FFI dead export inventory"
+            )
+            validated_output.parent.mkdir(parents=True, exist_ok=True)
+            validated_output.write_text(output, encoding="utf-8")
             print(
-                "Wrote inventory to {}".format(args.output), file=sys.stderr
+                "Wrote inventory to {}".format(validated_output), file=sys.stderr
             )
         else:
             print(output)
