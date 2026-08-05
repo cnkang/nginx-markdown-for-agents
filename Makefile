@@ -72,6 +72,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
         verify-brotli-streaming-e2e \
+        verify-encoding-chain-e2e \
         verify-streaming-failure-cache-e2e \
         verify-streaming-failure-cache-e2e-plan \
         verify-metrics-endpoint-e2e verify-conditional-requests-e2e verify-config-merge-e2e \
@@ -148,6 +149,9 @@ test-rust-fuzz-smoke:
 	cd $(RUST_DIR) && cargo +nightly fuzz run convert_html -- -max_total_time=5
 	cd $(RUST_DIR) && cargo +nightly fuzz run streaming_chunks -- -max_total_time=5
 	cd $(RUST_DIR) && cargo +nightly fuzz run negotiation_and_headers -- -max_total_time=5
+	cd $(RUST_DIR) && cargo +nightly fuzz run fuzz_encoding_chain -- -max_total_time=5
+	cd $(RUST_DIR) && cargo +nightly fuzz run fuzz_multilayer_decode -- -max_total_time=5
+	cd $(RUST_DIR) && cargo +nightly fuzz run fuzz_trusted_proxy_cidr -- -max_total_time=5
 
 fuzz-smoke:
 	cd $(RUST_DIR) && cargo +nightly fuzz run convert_html -- -max_total_time=30
@@ -217,6 +221,12 @@ test-benchmark-summary:
 	python3 tools/perf/format_pr_summary.py \
 	--report $(CORPUS_REPORT)
 
+# Determinism corpus (Spec 62 Wave 4 Requirement 13.4): every corpus fixture
+# must produce byte-identical output across repeated independent converter
+# runs.
+test-corpus-determinism:
+	bash tools/corpus/verify_determinism.sh
+
 docs-check-base:
 	python3 tools/docs/check_docs.py
 	python3 tools/docs/check_packaging_docs.py
@@ -224,6 +234,7 @@ docs-check-base:
 	python3 tools/docs/validate_packaging_matrix.py
 	python3 tools/render_release_matrix_docs.py --check
 	python3 tools/release/matrix/validate_workflow_matrix_consumers.py
+	python3 tools/release/gates/validate_release_matrix_schema.py
 
 docs-check: docs-check-base
 	python3 tools/harness/check_harness_sync.py
@@ -905,12 +916,15 @@ release-gates-check-092: release-gates-check-091
 	PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
 	@echo "  [5/5] OTel request-scoped unit test"
 	$(MAKE) -C $(NGINX_TEST_DIR) unit-otel_impl
+	@echo "  [6/6] Official build feature manifest (Task 8.12a)"
+	python3 tools/release/gates/validate_official_feature_manifest.py
 	@echo "=== 0.9.2 Release Gates: PASS ==="
 
 release-gates-check-all: release-gates-check release-gates-check-092
 	@echo "=== Release Gates: ALL PASS ==="
 
-# Production Examples: validate all examples pass nginx -t (NEW)
+# Production Examples + Migration Guide: validate all example configs pass
+# nginx -t (NEW)
 # Requires a module-enabled NGINX binary (NGINX_BIN or PATH nginx).
 # When the binary is unavailable, the gate fails unless
 # RELEASE_GATE_ALLOW_SKIP_MODULE=1 is set, mirroring the 091
@@ -918,33 +932,13 @@ release-gates-check-all: release-gates-check release-gates-check-092
 # (non-release validation only); tag-release CI must provide NGINX_BIN.
 test-production-examples-nginx-t: SHELL := /bin/bash
 test-production-examples-nginx-t:
-	@echo "=== Production Examples nginx -t ==="
+	@echo "=== Examples and Migration Guide nginx -t ==="
 	@nginx_bin="$${NGINX_BIN:-nginx}"; \
 	module_so="$${MODULE_SO:-}"; \
 	if command -v "$$nginx_bin" >/dev/null 2>&1; then \
-		runtime_prefix="$${RUNNER_TEMP:-$${TMPDIR:-/tmp}}/nginx-markdown-config-test-$$$$"; \
-		mkdir -p "$$runtime_prefix/logs"; \
-		trap 'rm -rf -- "$$runtime_prefix"' EXIT; \
-		set -- examples/production/*.conf; \
-		if [ "$$1" = 'examples/production/*.conf' ]; then \
-			echo "FAIL: no production example configs found in examples/production/" >&2; \
-			exit 1; \
-		fi; \
-		for conf in "$$@"; do \
-			echo "  Testing: $$conf"; \
-			test_conf="$$runtime_prefix/$$(basename "$$conf")"; \
-			sed -E 's/^([[:space:]]*)listen[[:space:]]+80([[:space:]]*;)/\1listen 18080\2/' \
-				"$$conf" > "$$test_conf"; \
-			if [[ -n "$$module_so" ]]; then \
-				"$$nginx_bin" -t -p "$$runtime_prefix/" \
-					-g "load_module $$module_so;" \
-					-c "$$test_conf" 2>&1 || exit 1; \
-			else \
-				"$$nginx_bin" -t -p "$$runtime_prefix/" \
-					-c "$$test_conf" 2>&1 || exit 1; \
-			fi; \
-		done; \
-		echo "All production examples pass nginx -t"; \
+		NGINX_BIN="$$(command -v "$$nginx_bin")" \
+		MODULE_SO="$$module_so" \
+			bash tools/e2e/verify_examples_nginx_t.sh || exit 1; \
 	else \
 		if [ "$${RELEASE_GATE_ALLOW_SKIP_MODULE:-0}" = "1" ]; then \
 			echo "SKIP: nginx binary not found (set NGINX_BIN to a module-enabled nginx; RELEASE_GATE_ALLOW_SKIP_MODULE=1)"; \
@@ -1014,6 +1008,9 @@ verify-chunked-native-e2e-stress:
 
 verify-brotli-streaming-e2e:
 	./tools/e2e/verify_brotli_streaming_e2e.sh
+
+verify-encoding-chain-e2e:
+	./tools/e2e/verify_encoding_chain_e2e.sh
 
 verify-streaming-failure-cache-e2e:
 	./tools/e2e/verify_streaming_failure_cache_e2e.sh $(E2E_ARGS)
@@ -1162,7 +1159,7 @@ help:
 	@echo "  release-gates-check-all  - Run current baseline and 0.9.2 release gates"
 	@echo "  release-gates-check-legacy - Validate 0.4.0 release gate documents"
 	@echo "  release-gates-check-strict - Validate all sub-specs #12-#18 for full compliance"
-	@echo "  test-production-examples-nginx-t - Validate production example configs pass nginx -t"
+	@echo "  test-production-examples-nginx-t - Validate example configs and migration-guide examples pass nginx -t"
 	@echo "  test-production-examples-e2e-smoke - Production examples E2E smoke (deferred to CI)"
 	@echo "  release-notes            - Generate release notes from release-matrix.json"
 	@echo "  coverage-c               - Generate C module e2e coverage (builds NGINX with --coverage)"

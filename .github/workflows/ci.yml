@@ -908,6 +908,9 @@ jobs:
       - name: Run corpus benchmark
         run: make test-benchmark
 
+      - name: Run determinism corpus (Requirement 13.4)
+        run: make test-corpus-determinism
+
       - name: Detect platform
         id: platform
         run: |
