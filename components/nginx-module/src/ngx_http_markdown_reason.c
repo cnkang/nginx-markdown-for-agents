@@ -546,6 +546,23 @@ ngx_http_markdown_reason_bypass_no_transform(void)
 
 
 /*
+ * Return the "encoding_header_invalid" reason code.
+ *
+ * Used when the Content-Encoding chain grammar is malformed (empty/quoted
+ * token, comma error, token parameter, control character, or overlong
+ * token).  The reason is emitted during outer precommit routing with
+ * stage=decompression and error_origin=format; no decoder is started and
+ * no response header is mutated before the policy outcome is committed.
+ */
+const ngx_str_t *
+ngx_http_markdown_reason_encoding_header_invalid(void)
+{
+    ngx_http_markdown_reason_init_strs();
+    return &reason_str_encoding_header_invalid;
+}
+
+
+/*
  * Compressed responses can be skipped in both full-buffer and streaming
  * builds, so this reason must remain available without the streaming feature.
  */

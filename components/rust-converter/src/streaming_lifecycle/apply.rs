@@ -685,8 +685,11 @@ fn apply_begin_abort(
     _ctx: &TransitionContext,
 ) -> Result<ApplyResult, StateMachineError> {
     match outcome.ngx_result {
-        NgxResult::Ok | NgxResult::Done => {
-            /* Setup complete → next step is SEND_ABORT_TERMINAL */
+        NgxResult::Ok => {
+            /* Setup complete → next step is SEND_ABORT_TERMINAL.
+             * BEGIN_ABORT is a synthetic setup step: only NGX_OK is legal.
+             * NGX_DONE is rejected because there is no async suspension in
+             * the abort setup path. */
             let next = TransitionFrame {
                 transition_id: frame.transition_id.clone(),
                 step_id: format!("{}-ABORT-TERM-S3", frame.transition_id),
@@ -713,7 +716,7 @@ fn apply_begin_abort(
             })
         }
         _ => Err(StateMachineError::InvariantViolation {
-            message: "BEGIN_ABORT must complete with NGX_OK/NGX_DONE".to_string(),
+            message: "BEGIN_ABORT must complete with NGX_OK".to_string(),
         }),
     }
 }

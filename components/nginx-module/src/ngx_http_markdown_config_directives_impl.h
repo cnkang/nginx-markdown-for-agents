@@ -99,8 +99,8 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     /*
      * markdown_error_policy pass|fail_closed|status <code>   (Config V2, 0.9.0)
      *
-     * Unified pre-commit error policy. Consolidates the removed
-     * markdown_on_error and markdown_streaming_on_error directives.
+     * Unified pre-commit error policy. Consolidates the removed legacy
+     * on-error and streaming-on-error directives.
      *   pass        - return original content on pre-commit error (fail-open)
      *   fail_closed - return 502 on pre-commit error
      *   status <c>  - return status code c (429 or 503)
@@ -252,8 +252,8 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     /*
      * markdown_cache_validation off|ims_only|full   (Config V2, 0.9.0)
      *
-     * Cache-validation policy. Consolidates the removed markdown_etag and
-     * markdown_conditional_requests directives.
+     * Cache-validation policy. Consolidates the removed legacy etag and
+     * conditional-request directives.
      *   off      - no ETag, no conditional request handling
      *   ims_only - no ETag, If-Modified-Since only (default)
      *   full     - transformed ETag + If-None-Match + If-Modified-Since

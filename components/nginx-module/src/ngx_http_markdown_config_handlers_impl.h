@@ -857,6 +857,16 @@ ngx_http_markdown_trusted_proxies(ngx_conf_t *cf, ngx_command_t *cmd,
     cln->handler = ngx_http_markdown_trusted_proxies_cleanup;
     cln->data = set;
 
+    if (cf->args->nelts - 1 > NGX_HTTP_MARKDOWN_TRUSTED_PROXIES_MAX) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "\"%V\" directive accepts at most %d entries, got %ui",
+            &cmd->name,
+            (int) NGX_HTTP_MARKDOWN_TRUSTED_PROXIES_MAX,
+            cf->args->nelts - 1);
+        markdown_trusted_proxies_free(set);
+        return NGX_CONF_ERROR;
+    }
+
     for (ngx_uint_t i = 1; i < cf->args->nelts; i++) {
         manifest_entry = ngx_array_push(mmcf->trusted_proxies_manifest);
         if (manifest_entry == NULL) {
@@ -982,8 +992,8 @@ ngx_http_markdown_filter(ngx_conf_t *cf,
  * Configuration directive handler: markdown_error_policy
  * (pass | fail_closed | status <code>).
  *
- * Config V2 (0.9.0): unified error policy consolidating the removed
- * markdown_on_error and markdown_streaming_on_error directives.  The single
+ * Config V2 (0.9.0): unified error policy consolidating the removed legacy
+ * on-error and streaming-on-error directives.  The single
  * on_error field is the runtime source of truth for every conversion path:
  *   pass        -> on_error=PASS
  *   fail_closed -> on_error=REJECT, error_status=502
@@ -1145,7 +1155,7 @@ ngx_http_markdown_cache_validation(ngx_conf_t *cf, ngx_command_t *cmd, void *con
 
     /*
      * markdown_cache_validation (Config V2, 0.9.0) consolidates the removed
-     * markdown_etag and markdown_conditional_requests directives.  It writes
+     * legacy etag and conditional-request directives.  It writes
      * both backing fields (policy.generate_etag, policy.conditional_requests),
      * which remain the runtime source of truth for the conversion and
      * conditional-request paths.

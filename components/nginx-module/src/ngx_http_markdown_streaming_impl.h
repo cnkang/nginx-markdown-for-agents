@@ -604,9 +604,9 @@ ngx_http_markdown_log_conditional_streaming(
  * 6. Content-Type is text/event-stream -> PATH_FULLBUFFER
  * 7. stream_types exclusion match -> PATH_FULLBUFFER
  * 8. policy == force -> PATH_STREAMING
- * 9. policy == auto + CL >= markdown_stream_threshold -> PATH_STREAMING
+ * 9. policy == auto + CL >= NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT -> PATH_STREAMING
  * 10. policy == auto + chunked -> PATH_STREAMING
- * 11. policy == auto + CL < markdown_stream_threshold -> PATH_FULLBUFFER
+ * 11. policy == auto + CL < NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT -> PATH_FULLBUFFER
  *
  * Default (no markdown_streaming directive): auto mode.
  */
@@ -722,7 +722,7 @@ ngx_http_markdown_select_processing_path(
             NGX_HTTP_MARKDOWN_STREAM_REASON_BELOW_THRESHOLD);
     }
 
-    /* auto + CL >= markdown_stream_threshold or chunked (no CL) */
+    /* auto + CL >= NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT or chunked (no CL) */
     ngx_http_markdown_log_decision(r, conf, eff,
         ngx_http_markdown_reason_eligible_streaming_auto());
     return ngx_http_markdown_path_selection(

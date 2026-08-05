@@ -152,8 +152,13 @@ Reject-only OTel names (not active profile fields):
 
 | Directive | Default | Context | Notes |
 |-----------|---------|---------|-------|
-| `markdown_llm_provider` | default | http, server, location | Provider enum |
-| `markdown_chars_per_token` | 0 (use provider default) | http, server, location | Fixed-point ×10 |
+| `markdown_token_estimate` | off | http, server, location | on\|off; emits `X-Markdown-Tokens` (decimal integer token count) |
+
+`markdown_llm_provider` and `markdown_chars_per_token` were removed in
+0.9.2: token estimation uses a fixed deterministic heuristic with a
+built-in 4.0 chars/token default, no provider brands.  The matching FFI
+fields (`llm_provider`, `chars_per_token_fixed`) are retained temporarily
+for ABI stability until the final FFI freeze.
 
 ---
 
@@ -190,7 +195,7 @@ profile):
 - `metrics_*`, `otel_*` — observability plumbing
 - `prune_*` — content surgery, site-specific
 - `dynconf_*` — operational plumbing
-- `llm_provider`, `chars_per_token` — estimation tuning
+- `llm_provider`, `chars_per_token` — estimation tuning (directives removed in 0.9.2; FFI fields retained until 8.13 freeze)
 - `decompress.*`, `parse_timeout`, `parser_budget` — hard safety caps
 - `log_verbosity` — debugging
 

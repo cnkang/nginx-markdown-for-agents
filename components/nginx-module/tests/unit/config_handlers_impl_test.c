@@ -994,6 +994,15 @@ test_simple_enum_handlers(void)
 
     init_conf(&mcf);
     set_arg(&values[1], "status");
+    set_arg(&values[2], "429");
+    rc = ngx_http_markdown_error_policy(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "status 429 should parse");
+    TEST_ASSERT(mcf.on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT,
+        "status 429 should map to on_error=REJECT");
+    TEST_ASSERT(mcf.error_status == 429, "status 429 should store 429");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "status");
     set_arg(&values[2], "418");
     rc = ngx_http_markdown_error_policy(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_ERROR,

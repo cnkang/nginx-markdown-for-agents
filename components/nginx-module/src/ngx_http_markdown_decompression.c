@@ -15,6 +15,8 @@
 #include <limits.h>
 #include <zlib.h>
 
+#include "markdown_converter.h"
+
 #ifndef NGX_MAX_SIZE_T_VALUE
 #define NGX_MAX_SIZE_T_VALUE ((size_t) -1)
 #endif
@@ -29,6 +31,188 @@
 static u_char ngx_http_markdown_encoding_gzip[] = "gzip";
 static u_char ngx_http_markdown_encoding_deflate[] = "deflate";
 static u_char ngx_http_markdown_encoding_br[] = "br";
+
+/*
+ * Collect all Content-Encoding response header fields in received order.
+ *
+ * The values are concatenated with a comma+space separator, matching the
+ * RFC 9110 field-line combination semantics, and returned as a pool-owned
+ * string. A single field line remains a zero-copy view into NGINX response
+ * header storage.
+ *
+ * No separate per-header cap is applied: the total is bounded by the
+ * header storage NGINX itself accepted (large_client_header_buffers and
+ * the module's accepted header size limits).
+ *
+ * Returns NGX_OK with `out` populated, NGX_DECLINED when no Content-Encoding
+ * field exists, or NGX_ERROR for allocation failure.
+ */
+ngx_int_t
+ngx_http_markdown_collect_content_encoding(ngx_http_request_t *r,
+                                           ngx_str_t *out)
+{
+    ngx_list_part_t       *part;
+    ngx_table_elt_t       *headers;
+    ngx_uint_t             i;
+    size_t                 total_len;
+    u_char                *data;
+    ngx_flag_t             first;
+
+    out->data = NULL;
+    out->len = 0;
+
+    if (r->headers_out.content_encoding == NULL) {
+        return NGX_DECLINED;
+    }
+
+    /* Single field line fast path: the combined value is used as-is. */
+    if (r->headers_out.content_encoding->hash != 0) {
+        *out = r->headers_out.content_encoding->value;
+        return NGX_OK;
+    }
+
+    /* Multiple field lines: measure then copy (two passes). */
+    total_len = 0;
+    first = 1;
+    part = &r->headers_out.headers.part;
+
+    while (part != NULL) {
+        headers = part->elts;
+        i = 0;
+        while (i < part->nelts) {
+            if (headers[i].hash == 0) {
+                i++;
+                continue;
+            }
+            if (headers[i].key.len == sizeof("Content-Encoding") - 1
+                && ngx_strncasecmp(headers[i].key.data,
+                                   (u_char *) "Content-Encoding",
+                                   sizeof("Content-Encoding") - 1) == 0)
+            {
+                if (total_len > ((size_t) -1) - headers[i].value.len
+                    || (first == 0 && total_len > ((size_t) -1) - 2))
+                {
+                    return NGX_ERROR;
+                }
+                if (first) {
+                    total_len += headers[i].value.len;
+                    first = 0;
+                } else {
+                    total_len += headers[i].value.len + 2;
+                }
+            }
+            i++;
+        }
+        part = part->next;
+    }
+
+    if (first) {
+        return NGX_DECLINED;
+    }
+
+    data = ngx_pnalloc(r->pool, total_len);
+    if (data == NULL) {
+        return NGX_ERROR;
+    }
+
+    first = 1;
+    part = &r->headers_out.headers.part;
+
+    while (part != NULL) {
+        headers = part->elts;
+        i = 0;
+        while (i < part->nelts) {
+            if (headers[i].hash == 0) {
+                i++;
+                continue;
+            }
+            if (headers[i].key.len == sizeof("Content-Encoding") - 1
+                && ngx_strncasecmp(headers[i].key.data,
+                                   (u_char *) "Content-Encoding",
+                                   sizeof("Content-Encoding") - 1) == 0)
+            {
+                if (first) {
+                    ngx_memcpy(data, headers[i].value.data,
+                               headers[i].value.len);
+                    data += headers[i].value.len;
+                    first = 0;
+                } else {
+                    *data++ = ',';
+                    *data++ = ' ';
+                    ngx_memcpy(data, headers[i].value.data,
+                               headers[i].value.len);
+                    data += headers[i].value.len;
+                }
+            }
+            i++;
+        }
+        part = part->next;
+    }
+
+    out->data = data - total_len;
+    out->len = total_len;
+    return NGX_OK;
+}
+
+/*
+ * Parse the Content-Encoding chain grammar and populate the request
+ * context decompression state.
+ *
+ * Calls the Rust FFI chain parser on the concatenated header value. The
+ * classification outcome decides precommit routing:
+ *
+ *   VALID            - ctx->decompression.layer_count and layers[] hold the
+ *                      non-identity decoder list in application order
+ *   MALFORMED        - canonical ENCODING_HEADER_INVALID (stage=decompression,
+ *                      error_origin=format); no decoder is started
+ *   UNKNOWN_TOKEN    - capability bypass (passthrough, no error policy)
+ *   DEPTH_EXCEEDED   - capability bypass (passthrough, no error policy)
+ *
+ * Returns the ENCODING_CHAIN_* classification, or DECOMP_CATEGORY_INVALID_ARGS
+ * on FFI contract failure.
+ */
+u_char
+ngx_http_markdown_parse_encoding_chain_ffi(ngx_http_request_t *r,
+                                           ngx_http_markdown_ctx_t *ctx,
+                                           const ngx_str_t *combined)
+{
+    FFIEncodingChainResult   result;
+    u_char                   classification;
+
+    ngx_memzero(&result, sizeof(result));
+
+    classification = markdown_parse_encoding_chain(
+        (const uint8_t *) combined->data, combined->len, &result);
+
+    ctx->decompression.chain_parsed = 1;
+    ctx->decompression.layer_count = result.layer_count;
+    ngx_memcpy(ctx->decompression.layers, result.layers,
+               sizeof(ctx->decompression.layers));
+
+    if (classification == ENCODING_CHAIN_VALID) {
+        if (result.layer_count == 0) {
+            return ENCODING_CHAIN_VALID;
+        }
+        /* Map the first layer to the legacy type enum for routing
+         * compatibility (single-layer streaming path). */
+        switch (result.layers[0]) {
+        case 0:
+            ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_GZIP;
+            break;
+        case 1:
+            ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE;
+            break;
+        case 2:
+            ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI;
+            break;
+        default:
+            ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN;
+            break;
+        }
+    }
+
+    return classification;
+}
 
 /*
  * Detect compression type from Content-Encoding header

@@ -97,6 +97,7 @@ ngx_int_t ngx_http_markdown_next_body_filter(ngx_http_request_t *r,
  */
 #define NGX_HTTP_MARKDOWN_PATH_FULLBUFFER   0  /* Full-buffer path */
 #define NGX_HTTP_MARKDOWN_PATH_INCREMENTAL  1  /* Incremental path */
+#define NGX_HTTP_MARKDOWN_TRUSTED_PROXIES_MAX  64  /* Requirement 13.1 */
 #define NGX_HTTP_MARKDOWN_PATH_STREAMING    2  /* Streaming path */
 
 /*
@@ -349,8 +350,8 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_STREAMING_FORCE  2
 
 /*
- * Profile constants removed in 0.9.2 (markdown_profile directive deleted).
- * Retained as a zero-value sentinel for diagnostics compatibility only.
+ * Profile constants removed in 0.9.2; retained as a zero-value sentinel
+ * for diagnostics compatibility only.
  */
 #define NGX_HTTP_MARKDOWN_PROFILE_NONE             0
 
@@ -476,8 +477,8 @@ typedef struct {
 /*
  * Default streaming threshold (1 MiB) — fixed internal constant.
  * Responses with Content-Length >= this threshold use streaming mode
- * in auto mode.  Previously the markdown_stream_threshold directive;
- * now internalized as a non-configurable heuristic.
+ * in auto mode.  Previously operator-configurable; now internalized
+ * as a non-configurable heuristic.
  */
 #define NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT \
     (1024 * 1024)
@@ -667,7 +668,7 @@ typedef struct {
 } ngx_http_markdown_advanced_cfg_t;
 
 /*
- * Resolved profile-default value bundle (markdown_profile, 0.9.0, spec 50).
+ * Resolved profile-default value bundle (0.9.0 profile expansion, spec 50).
  *
  * Pure config-time data: each field carries the default value a given
  * profile contributes for the corresponding Config V2 directive.  The
@@ -708,9 +709,9 @@ typedef struct {
      */
     struct {
         ngx_flag_t   auto_decompress;      /* markdown_auto_decompress on|off (default: on) */
-        size_t       max_size;             /* markdown_decompress_max_size (default: same as max_size) */
-        ngx_msec_t   parse_timeout;        /* markdown_parse_timeout (default: 30000ms) */
-        size_t       parser_budget;        /* markdown_parser_budget (default: 64MB) */
+        size_t       max_size;             /* markdown_limits decompressed_size (default: same as max_size) */
+        ngx_msec_t   parse_timeout;        /* markdown_limits parser_timeout (default: 30000ms) */
+        size_t       parser_budget;        /* markdown_limits parser_memory (default: 64MB) */
         ngx_flag_t   max_size_explicit;    /* 1 if operator set markdown_limits memory at this or parent level */
     } decompress;
 
@@ -988,6 +989,9 @@ typedef struct {
         ngx_flag_t                            done;      /* Whether decompression completed */
         size_t                                compressed_size;   /* Size before decompression */
         size_t                                decompressed_size; /* Size after decompression */
+        ngx_uint_t                            layer_count; /* Non-identity layers (0..3) */
+        u_char                                layers[3];  /* Layer codes in application order */
+        ngx_flag_t                            chain_parsed; /* Chain grammar validated */
     } decompression;
 
     /*
@@ -1712,6 +1716,7 @@ const ngx_str_t *ngx_http_markdown_reason_skip_conditional(void);
 
 /* Return the BYPASS_NO_TRANSFORM reason code (RFC 9111 §5.2.2.6) */
 const ngx_str_t *ngx_http_markdown_reason_bypass_no_transform(void);
+const ngx_str_t *ngx_http_markdown_reason_encoding_header_invalid(void);
 
 /* Return the compressed-response passthrough reason in every build mode. */
 const ngx_str_t *ngx_http_markdown_reason_streaming_skip_compressed(void);
@@ -1853,6 +1858,13 @@ ngx_flag_t ngx_http_markdown_has_no_transform(ngx_http_request_t *r);
 /* Detect compression type from Content-Encoding header */
 ngx_http_markdown_compression_type_e
 ngx_http_markdown_detect_compression(ngx_http_request_t *r);
+ngx_int_t
+ngx_http_markdown_collect_content_encoding(ngx_http_request_t *r,
+                                           ngx_str_t *out);
+u_char
+ngx_http_markdown_parse_encoding_chain_ffi(ngx_http_request_t *r,
+                                           ngx_http_markdown_ctx_t *ctx,
+                                           const ngx_str_t *combined);
 
 /* Decompress gzip/deflate compressed data using zlib */
 ngx_int_t
@@ -1890,6 +1902,7 @@ ngx_http_markdown_decompress(ngx_http_request_t *r,
 #define NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR     -101
 #define NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT  -102
 #define NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR         -103
+#define NGX_HTTP_MARKDOWN_DECOMP_RATIO_EXCEEDED   -104
 #define NGX_HTTP_MARKDOWN_DECOMP_OVERFLOW_ERROR   -105
 
 /*
