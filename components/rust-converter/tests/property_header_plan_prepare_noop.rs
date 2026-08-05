@@ -226,7 +226,7 @@ fn apply_plan_with_failure(
 
     // Prepare phase
     for (i, op) in plan.ops.iter().enumerate() {
-        let should_fail = fail_at_op.map_or(false, |fail_idx| i == fail_idx);
+        let should_fail = fail_at_op == Some(i);
         match prepare_one(headers, op, should_fail) {
             Ok(action) => prepared.push(action),
             Err(e) => {

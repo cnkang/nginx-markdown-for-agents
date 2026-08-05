@@ -501,9 +501,7 @@ fn parse_forwarded_elements(s: &str) -> Option<Vec<ForwardedElement>> {
                 continue;
             }
             any_param = true;
-            let Some((key, value)) = pair.split_once('=') else {
-                return None;
-            };
+            let (key, value) = pair.split_once('=')?;
             let key = key.trim().to_ascii_lowercase();
             if key.is_empty() || seen.contains(&key) {
                 /* Duplicate parameters in one element are invalid. */
@@ -583,13 +581,8 @@ fn unquote(value: &str) -> Option<String> {
                 in_quote = true;
             }
         } else if c == '\\' && in_quote {
-            if let Some(esc) = chars.next() {
-                out.push(esc);
-            } else {
-                return None;
-            }
-        } else if in_quote {
-            out.push(c);
+            let esc = chars.next()?;
+            out.push(esc);
         } else {
             out.push(c);
         }
@@ -625,14 +618,12 @@ fn validate_forwarded_addr(addr: &str) -> Option<String> {
         return Some(lowered);
     }
     /* Bracketed IPv6. */
-    if let Some(rest) = lowered.strip_prefix('[') {
-        if let Some(close) = rest.find(']') {
-            if rest[close + 1..].is_empty() {
-                if rest[..close].parse::<Ipv6Addr>().is_ok() {
-                    return Some(lowered);
-                }
-            }
-        }
+    if let Some(rest) = lowered.strip_prefix('[')
+        && let Some(close) = rest.find(']')
+        && rest[close + 1..].is_empty()
+        && rest[..close].parse::<Ipv6Addr>().is_ok()
+    {
+        return Some(lowered);
     }
     None
 }
@@ -698,7 +689,10 @@ fn validate_forwarded_host(host: &str) -> Option<String> {
         if bytes[0] == b'-' || bytes[bytes.len() - 1] == b'-' {
             return None;
         }
-        if !bytes.iter().all(|b| b.is_ascii_alphanumeric() || *b == b'-') {
+        if !bytes
+            .iter()
+            .all(|b| b.is_ascii_alphanumeric() || *b == b'-')
+        {
             return None;
         }
     }
@@ -747,20 +741,20 @@ fn decide_from_forwarded(input: &BaseUrlInput, trusted: &[Cidr]) -> BaseUrlDecis
 
     /* Validate every element's values; any failure discards the set. */
     for element in &elements {
-        if let Some(for_addr) = &element.for_addr {
-            if validate_forwarded_addr(for_addr).is_none() {
-                return discard_forwarded_set(input, BaseUrlReason::ForwardedInvalidValue);
-            }
+        if let Some(for_addr) = &element.for_addr
+            && validate_forwarded_addr(for_addr).is_none()
+        {
+            return discard_forwarded_set(input, BaseUrlReason::ForwardedInvalidValue);
         }
-        if let Some(proto) = &element.proto {
-            if validate_proto(proto).is_none() {
-                return discard_forwarded_set(input, BaseUrlReason::ForwardedInvalidValue);
-            }
+        if let Some(proto) = &element.proto
+            && validate_proto(proto).is_none()
+        {
+            return discard_forwarded_set(input, BaseUrlReason::ForwardedInvalidValue);
         }
-        if let Some(host) = &element.host {
-            if validate_forwarded_host(host).is_none() {
-                return discard_forwarded_set(input, BaseUrlReason::ForwardedInvalidValue);
-            }
+        if let Some(host) = &element.host
+            && validate_forwarded_host(host).is_none()
+        {
+            return discard_forwarded_set(input, BaseUrlReason::ForwardedInvalidValue);
         }
     }
 
@@ -786,14 +780,11 @@ fn decide_from_forwarded(input: &BaseUrlInput, trusted: &[Cidr]) -> BaseUrlDecis
 /// (never combined across elements).  When the element carries no host, the
 /// direct request Host is used; when it carries no proto, `https` is used
 /// for elements that declare a host (matching the existing spec 47 default).
-fn build_forwarded_decision(
-    element: &ForwardedElement,
-    input: &BaseUrlInput,
-) -> BaseUrlDecision {
-    let host = match &element.host {
-        Some(h) => Some(validate_forwarded_host(h).unwrap_or_default()),
-        None => None,
-    };
+fn build_forwarded_decision(element: &ForwardedElement, input: &BaseUrlInput) -> BaseUrlDecision {
+    let host = element
+        .host
+        .as_ref()
+        .map(|h| validate_forwarded_host(h).unwrap_or_default());
 
     if let Some(h) = host {
         let scheme = match &element.proto {
@@ -834,7 +825,11 @@ fn decide_from_xforwarded(input: &BaseUrlInput, trusted: &[Cidr]) -> BaseUrlDeci
     let Some(xff) = input.x_forwarded_for else {
         /* No Forwarded and no X-Forwarded-For: no forwarded metadata at all;
          * use direct request metadata. */
-        return host_fallback(input.host, input.direct_scheme, BaseUrlReason::FallbackToHost);
+        return host_fallback(
+            input.host,
+            input.direct_scheme,
+            BaseUrlReason::FallbackToHost,
+        );
     };
 
     let addrs = split_forwarded_list(xff);
@@ -942,8 +937,8 @@ fn build_xff_decision(
     hosts: &Option<Vec<String>>,
     ports: &Option<Vec<String>>,
 ) -> BaseUrlDecision {
-    let scheme = validate_proto(&protos.as_ref().unwrap()[idx])
-        .unwrap_or_else(|| "https".to_string());
+    let scheme =
+        validate_proto(&protos.as_ref().unwrap()[idx]).unwrap_or_else(|| "https".to_string());
     let host = validate_forwarded_host(&hosts.as_ref().unwrap()[idx]).unwrap_or_default();
     let port = ports.as_ref().unwrap()[idx].clone();
 
@@ -1139,9 +1134,10 @@ mod tests {
 
     #[test]
     fn forwarded_elements_quoted_values() {
-        let els =
-            parse_forwarded_elements("for=\"[2001:db8::7]\";host=\"example.com:8080\";proto=\"https\"")
-                .unwrap();
+        let els = parse_forwarded_elements(
+            "for=\"[2001:db8::7]\";host=\"example.com:8080\";proto=\"https\"",
+        )
+        .unwrap();
         assert_eq!(els[0].for_addr.as_deref(), Some("[2001:db8::7]"));
         assert_eq!(els[0].host.as_deref(), Some("example.com:8080"));
         assert_eq!(els[0].proto.as_deref(), Some("https"));
@@ -1199,12 +1195,18 @@ mod tests {
 
     #[test]
     fn forwarded_addr_validation() {
-        assert_eq!(validate_forwarded_addr("192.0.2.10").as_deref(), Some("192.0.2.10"));
+        assert_eq!(
+            validate_forwarded_addr("192.0.2.10").as_deref(),
+            Some("192.0.2.10")
+        );
         assert_eq!(
             validate_forwarded_addr("[2001:db8::7]").as_deref(),
             Some("[2001:db8::7]")
         );
-        assert_eq!(validate_forwarded_addr("2001:db8::7").as_deref(), Some("2001:db8::7"));
+        assert_eq!(
+            validate_forwarded_addr("2001:db8::7").as_deref(),
+            Some("2001:db8::7")
+        );
         assert_eq!(validate_forwarded_addr("unknown"), None);
         assert_eq!(validate_forwarded_addr("_obfuscated"), None);
         assert_eq!(validate_forwarded_addr("user@host"), None);
@@ -1232,7 +1234,10 @@ mod tests {
             validate_forwarded_host("[2001:db8::1]:443").as_deref(),
             Some("[2001:db8::1]:443")
         );
-        assert_eq!(validate_forwarded_host("example.com.").as_deref(), Some("example.com"));
+        assert_eq!(
+            validate_forwarded_host("example.com.").as_deref(),
+            Some("example.com")
+        );
         /* Invalid forms. */
         assert_eq!(validate_forwarded_host(""), None);
         assert_eq!(validate_forwarded_host("a..b"), None);
@@ -1411,7 +1416,8 @@ mod tests {
         let mut input = trusted_input("10.1.2.3");
         input.x_forwarded_for = Some("203.0.113.5, 198.51.100.1, 192.0.2.1");
         input.x_forwarded_proto = Some("https, https, https");
-        input.x_forwarded_host = Some("client.example.com, proxy-a.example.com, proxy-b.example.com");
+        input.x_forwarded_host =
+            Some("client.example.com, proxy-a.example.com, proxy-b.example.com");
         input.x_forwarded_port = Some("443, 443, 443");
         let d = decide_base_url(&input, &t);
         assert_eq!(d.base_url, "https://client.example.com:443");
@@ -1621,8 +1627,9 @@ mod tests {
     fn decide_forwarded_chain_exhausted_discards() {
         let t = cidrs(&["10.0.0.0/8"]);
         let mut input = trusted_input("10.1.2.3");
-        input.forwarded =
-            Some("for=10.0.0.5;proto=https;host=a.example.com, for=10.0.0.6;proto=https;host=b.example.com");
+        input.forwarded = Some(
+            "for=10.0.0.5;proto=https;host=a.example.com, for=10.0.0.6;proto=https;host=b.example.com",
+        );
         let d = decide_base_url(&input, &t);
         assert_eq!(d.reason, BaseUrlReason::ChainExhausted);
         assert_eq!(d.source, BaseUrlSource::Host);
@@ -1633,7 +1640,9 @@ mod tests {
     fn decide_forwarded_element_without_for_is_client() {
         let t = cidrs(&["10.0.0.0/8"]);
         let mut input = trusted_input("10.1.2.3");
-        input.forwarded = Some("proto=https;host=client.example.com, for=10.0.0.5;proto=https;host=edge.example.com");
+        input.forwarded = Some(
+            "proto=https;host=client.example.com, for=10.0.0.5;proto=https;host=edge.example.com",
+        );
         let d = decide_base_url(&input, &t);
         assert_eq!(d.reason, BaseUrlReason::ForwardedHeaderTrusted);
         assert_eq!(d.base_url, "https://client.example.com");

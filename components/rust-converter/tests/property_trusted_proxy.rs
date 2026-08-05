@@ -62,8 +62,8 @@ fn addr_strategy() -> impl Strategy<Value = String> {
     ]
 }
 
-/// Property: X-Forwarded-For chain stripping selects the first untrusted
-/// address from the right, and metadata comes from that same index.
+/* Property: X-Forwarded-For chain stripping selects the first untrusted
+ * address from the right, and metadata comes from that same index. */
 proptest! {
     #[test]
     fn p24_xff_chain_strip_selects_same_index_metadata(
@@ -207,8 +207,7 @@ fn positive_6_right_to_left_three_hop_strip() {
     let mut input = trusted_input("10.0.0.1");
     input.x_forwarded_for = Some("203.0.113.5, 198.51.100.1, 192.0.2.1");
     input.x_forwarded_proto = Some("https, https, https");
-    input.x_forwarded_host =
-        Some("client.example.com, proxy-a.example.com, proxy-b.example.com");
+    input.x_forwarded_host = Some("client.example.com, proxy-a.example.com, proxy-b.example.com");
     input.x_forwarded_port = Some("443, 443, 443");
     let d = decide_base_url(&input, &t);
     /* Strip B then A; select the client entry at index 0. */

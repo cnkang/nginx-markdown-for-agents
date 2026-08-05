@@ -20,16 +20,17 @@ const MARKDOWN_CT: &str = "text/markdown; charset=utf-8";
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 fn plan_sets_to(plan: &HeaderPlan, name: &str, value: &str) -> bool {
-    plan.ops.iter().any(|op| matches!(
-        op,
-        HeaderOp::Set { name: n, value: v } if n == name && v == value
-    ))
+    plan.ops.iter().any(|op| match op {
+        HeaderOp::Set { name: n, value: v } => n == name && v == value,
+        _ => false,
+    })
 }
 
 fn plan_deletes_all(plan: &HeaderPlan, name: &str) -> bool {
-    plan.ops
-        .iter()
-        .any(|op| matches!(op, HeaderOp::DeleteAll { name: n } if n == name))
+    plan.ops.iter().any(|op| match op {
+        HeaderOp::DeleteAll { name: n } => n == name,
+        _ => false,
+    })
 }
 
 fn plan_has_etag_placeholder(plan: &HeaderPlan) -> bool {

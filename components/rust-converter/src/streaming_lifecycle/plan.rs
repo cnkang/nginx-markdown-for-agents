@@ -45,13 +45,13 @@ pub fn plan(
 
     /* Phase 2: normalize required record into ledger */
     let mut ledger = ctx.failure_ledger.clone();
-    if policy == EventFailurePolicy::Required {
-        if let Some(ref record) = event.failure_record {
-            if ledger.primary.is_none() {
-                ledger.primary = Some(record.clone());
-            } else {
-                ledger.secondary = Some(record.clone());
-            }
+    if policy == EventFailurePolicy::Required
+        && let Some(ref record) = event.failure_record
+    {
+        if ledger.primary.is_none() {
+            ledger.primary = Some(record.clone());
+        } else {
+            ledger.secondary = Some(record.clone());
         }
     }
 
@@ -138,9 +138,7 @@ fn lookup_plan_transition(
         StreamingState::NotEligible => lookup_not_eligible(event),
         StreamingState::StreamingCandidate => lookup_streaming_candidate(event, ctx),
         StreamingState::PreCommit => lookup_pre_commit(event, ctx),
-        StreamingState::PreCommitReplayUnavailable => {
-            lookup_replay_unavailable(event, ctx)
-        }
+        StreamingState::PreCommitReplayUnavailable => lookup_replay_unavailable(event, ctx),
         StreamingState::Committed => lookup_committed(event, ctx),
         StreamingState::PostCommitSafeFinish
         | StreamingState::PostCommitAbort
@@ -210,9 +208,7 @@ fn lookup_pre_commit(
         EventKind::LookBehindOverflow => {
             plan_action(Action::None, "look_behind_overflow", "PLAN-10")
         }
-        EventKind::ParserUnsuitable => {
-            plan_precommit_fallback(ctx, "parser_unsuitable", "PLAN-11")
-        }
+        EventKind::ParserUnsuitable => plan_precommit_fallback(ctx, "parser_unsuitable", "PLAN-11"),
         EventKind::ResourceLimit => plan_precommit_fallback(ctx, "resource_limit", "PLAN-12"),
         EventKind::Error => plan_precommit_error_recovery(ctx, "error", "PLAN-13"),
         EventKind::Commit => plan_action(Action::CommitHeaders, "commit", "PLAN-14"),
@@ -242,9 +238,7 @@ fn lookup_committed(
             message: "COMMIT in COMMITTED state".to_string(),
         }),
         EventKind::Error => plan_postcommit_error(ctx, "PLAN-20"),
-        EventKind::UpstreamEnd => {
-            plan_action(Action::FinalizeConverter, "upstream_end", "PLAN-21")
-        }
+        EventKind::UpstreamEnd => plan_action(Action::FinalizeConverter, "upstream_end", "PLAN-21"),
         EventKind::ClientAbort => plan_action(Action::None, "client_abort", "PLAN-22"),
         _ => invalid_transition(StreamingState::Committed, event),
     }

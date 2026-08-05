@@ -22,8 +22,10 @@
 
 #![cfg(feature = "streaming")]
 
+use nginx_markdown_converter::streaming_lifecycle::policy::{
+    EventFailurePolicy, event_failure_policy,
+};
 use nginx_markdown_converter::streaming_lifecycle::*;
-use nginx_markdown_converter::streaming_lifecycle::policy::{EventFailurePolicy, event_failure_policy};
 
 // ─── Test helpers ────────────────────────────────────────────────────────────
 
@@ -55,11 +57,15 @@ fn ctx_reject_502() -> PlanContext {
 }
 
 fn ctx_usable() -> TransitionContext {
-    TransitionContext { downstream_usable: true }
+    TransitionContext {
+        downstream_usable: true,
+    }
 }
 
 fn ctx_unusable() -> TransitionContext {
-    TransitionContext { downstream_usable: false }
+    TransitionContext {
+        downstream_usable: false,
+    }
 }
 
 fn ok_outcome() -> ActionOutcome {
@@ -129,30 +135,6 @@ fn error_event(reason: &str) -> EventEnvelope {
             stage: "streaming".to_string(),
             reason: reason.to_string(),
             error_origin: ErrorOrigin::Internal,
-            failure_site: None,
-        }),
-    }
-}
-
-fn resource_limit_event() -> EventEnvelope {
-    EventEnvelope {
-        kind: EventKind::ResourceLimit,
-        failure_record: Some(FailureRecord {
-            stage: "streaming".to_string(),
-            reason: "resource_limit".to_string(),
-            error_origin: ErrorOrigin::MemoryBudget,
-            failure_site: None,
-        }),
-    }
-}
-
-fn budget_init_event() -> EventEnvelope {
-    EventEnvelope {
-        kind: EventKind::BudgetInitFailure,
-        failure_record: Some(FailureRecord {
-            stage: "streaming".to_string(),
-            reason: "budget_init_failure".to_string(),
-            error_origin: ErrorOrigin::Allocation,
             failure_site: None,
         }),
     }
@@ -249,24 +231,6 @@ fn all_8_error_origins() -> [ErrorOrigin; 8] {
     ]
 }
 
-/// Check if a (state, event) pair is in the Plan table.
-fn is_valid_plan_pair(state: StreamingState, event: EventKind) -> bool {
-    let ctx = default_ctx();
-    let env = match event_failure_policy(event) {
-        EventFailurePolicy::Required => EventEnvelope {
-            kind: event,
-            failure_record: Some(FailureRecord {
-                stage: "streaming".to_string(),
-                reason: "test".to_string(),
-                error_origin: ErrorOrigin::Internal,
-                failure_site: None,
-            }),
-        },
-        _ => no_record_event(event),
-    };
-    plan(state, env, &ctx).is_ok()
-}
-
 // ════════════════════════════════════════════════════════════════════════════
 // Property 20: Streaming state machine determinism (Task 6.13, Req 11.1)
 // ════════════════════════════════════════════════════════════════════════════
@@ -287,9 +251,16 @@ fn prop_20_plan_returns_deterministic_result() {
             let r2 = plan(state, env, &ctx);
             // Both must produce the same result (Ok or Err with same error)
             match (&r1, &r2) {
-                (Ok(a), Ok(b)) => assert_eq!(a, b, "plan() must be deterministic for ({:?}, {:?})", state, event),
+                (Ok(a), Ok(b)) => assert_eq!(
+                    a, b,
+                    "plan() must be deterministic for ({:?}, {:?})",
+                    state, event
+                ),
                 (Err(_), Err(_)) => {}
-                _ => panic!("plan() non-deterministic for ({:?}, {:?}): {:?} vs {:?}", state, event, r1, r2),
+                _ => panic!(
+                    "plan() non-deterministic for ({:?}, {:?}): {:?} vs {:?}",
+                    state, event, r1, r2
+                ),
             }
         }
     }
@@ -327,9 +298,18 @@ fn prop_20_plan_returns_plan_decision_and_first_frame() {
     )
     .unwrap();
     // plan_decision has event, initial_action, action_payload, reason, transition_id, failure_ledger
-    assert_eq!(result.plan_decision.initial_action, result.first_frame.action);
-    assert_eq!(result.plan_decision.transition_id, result.first_frame.transition_id);
-    assert_eq!(result.plan_decision.failure_ledger, result.first_frame.failure_ledger);
+    assert_eq!(
+        result.plan_decision.initial_action,
+        result.first_frame.action
+    );
+    assert_eq!(
+        result.plan_decision.transition_id,
+        result.first_frame.transition_id
+    );
+    assert_eq!(
+        result.plan_decision.failure_ledger,
+        result.first_frame.failure_ledger
+    );
 }
 
 #[test]
@@ -390,7 +370,10 @@ fn prop_20_chain_terminates_on_null_next_frame() {
     .unwrap();
     // SEND_TERMINAL success → DONE, next_frame = None
     assert_eq!(term_result.new_state, StreamingState::Done);
-    assert!(term_result.next_frame.is_none(), "chain must terminate at DONE");
+    assert!(
+        term_result.next_frame.is_none(),
+        "chain must terminate at DONE"
+    );
 }
 
 #[test]
@@ -435,7 +418,11 @@ fn prop_20_chain_terminates_on_ngx_again() {
 fn prop_21_at_most_one_terminal_state() {
     // For sequences of events, at most one terminal state is reached.
     // Once in a terminal state, BODY_FILTER_REENTRY is idempotent no-op.
-    for terminal in [StreamingState::Done, StreamingState::Aborted, StreamingState::FailedClosed] {
+    for terminal in [
+        StreamingState::Done,
+        StreamingState::Aborted,
+        StreamingState::FailedClosed,
+    ] {
         let result = plan(
             terminal,
             no_record_event(EventKind::BodyFilterReentry),
@@ -443,13 +430,8 @@ fn prop_21_at_most_one_terminal_state() {
         )
         .unwrap();
         assert_eq!(result.first_frame.action, Action::None);
-        let apply = apply_result(
-            terminal,
-            &result.first_frame,
-            &ok_outcome(),
-            &ctx_usable(),
-        )
-        .unwrap();
+        let apply =
+            apply_result(terminal, &result.first_frame, &ok_outcome(), &ctx_usable()).unwrap();
         // State unchanged — idempotent no-op
         assert_eq!(apply.new_state, terminal);
         assert!(apply.side_effects.is_empty());
@@ -474,7 +456,10 @@ fn prop_21_passthrough_not_terminal_transition() {
     )
     .unwrap();
     assert_eq!(apply.new_state, StreamingState::Passthrough);
-    assert!(!apply.new_state.is_terminal(), "PASSTHROUGH is not terminal");
+    assert!(
+        !apply.new_state.is_terminal(),
+        "PASSTHROUGH is not terminal"
+    );
 }
 
 #[test]
@@ -495,7 +480,10 @@ fn prop_21_full_buffer_fallback_not_terminal() {
     )
     .unwrap();
     assert_eq!(apply.new_state, StreamingState::FullBufferFallback);
-    assert!(!apply.new_state.is_terminal(), "FULL_BUFFER_FALLBACK is not terminal");
+    assert!(
+        !apply.new_state.is_terminal(),
+        "FULL_BUFFER_FALLBACK is not terminal"
+    );
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -563,7 +551,10 @@ fn prop_19_postcommit_abort_never_restores_html() {
     // BEGIN_ABORT → POST_COMMIT_ABORT, next_frame = SEND_ABORT_TERMINAL
     assert_eq!(apply.new_state, StreamingState::PostCommitAbort);
     assert!(apply.next_frame.is_some());
-    assert_eq!(apply.next_frame.as_ref().unwrap().action, Action::SendAbortTerminal);
+    assert_eq!(
+        apply.next_frame.as_ref().unwrap().action,
+        Action::SendAbortTerminal
+    );
     // No HTML restoration side effect exists in the SideEffectKind enum
     // (there is no RestoreHtml or similar variant)
 }
@@ -770,7 +761,10 @@ fn prop_30_none_transitions_distinguished_by_step_and_event() {
     assert_eq!(a2.new_state, StreamingState::PreCommitReplayUnavailable);
 
     // Different transition IDs
-    assert_ne!(r1.plan_decision.transition_id, r2.plan_decision.transition_id);
+    assert_ne!(
+        r1.plan_decision.transition_id,
+        r2.plan_decision.transition_id
+    );
 }
 
 #[test]
@@ -785,7 +779,10 @@ fn prop_30_client_abort_creates_no_failure_record() {
         // CLIENT_ABORT uses NONE action (no FailureRecord)
         assert_eq!(result.first_frame.action, Action::None);
         // The failure_ledger is not modified by the event (no new record)
-        assert!(!result.plan_decision.failure_ledger.is_populated() || result.plan_decision.failure_ledger.primary.is_none());
+        assert!(
+            !result.plan_decision.failure_ledger.is_populated()
+                || result.plan_decision.failure_ledger.primary.is_none()
+        );
     }
 }
 
@@ -814,7 +811,11 @@ fn prop_31_terminal_latch_only_after_ok_or_done() {
         &ctx_usable(),
     )
     .unwrap();
-    assert!(r_ok.side_effects.iter().any(|cmd| matches!(cmd.kind, SideEffectKind::LatchTerminalSent)));
+    assert!(
+        r_ok.side_effects
+            .iter()
+            .any(|cmd| matches!(cmd.kind, SideEffectKind::LatchTerminalSent))
+    );
 
     // NGX_DONE → latch set
     let r_done = apply_result(
@@ -824,7 +825,12 @@ fn prop_31_terminal_latch_only_after_ok_or_done() {
         &ctx_usable(),
     )
     .unwrap();
-    assert!(r_done.side_effects.iter().any(|cmd| matches!(cmd.kind, SideEffectKind::LatchTerminalSent)));
+    assert!(
+        r_done
+            .side_effects
+            .iter()
+            .any(|cmd| matches!(cmd.kind, SideEffectKind::LatchTerminalSent))
+    );
 
     // NGX_AGAIN → no latch
     let r_again = apply_result(
@@ -834,7 +840,12 @@ fn prop_31_terminal_latch_only_after_ok_or_done() {
         &ctx_usable(),
     )
     .unwrap();
-    assert!(!r_again.side_effects.iter().any(|cmd| matches!(cmd.kind, SideEffectKind::LatchTerminalSent)));
+    assert!(
+        !r_again
+            .side_effects
+            .iter()
+            .any(|cmd| matches!(cmd.kind, SideEffectKind::LatchTerminalSent))
+    );
 
     // NGX_ERROR → no latch (goes to ABORTED)
     let r_err = apply_result(
@@ -844,26 +855,30 @@ fn prop_31_terminal_latch_only_after_ok_or_done() {
         &ctx_usable(),
     )
     .unwrap();
-    assert!(!r_err.side_effects.iter().any(|cmd| matches!(cmd.kind, SideEffectKind::LatchTerminalSent)));
+    assert!(
+        !r_err
+            .side_effects
+            .iter()
+            .any(|cmd| matches!(cmd.kind, SideEffectKind::LatchTerminalSent))
+    );
 }
 
 #[test]
 fn prop_31_body_filter_reentry_idempotent_no_op() {
     // BODY_FILTER_REENTRY after DONE/ABORTED/FAILED_CLOSED is idempotent no-op.
-    for terminal in [StreamingState::Done, StreamingState::Aborted, StreamingState::FailedClosed] {
+    for terminal in [
+        StreamingState::Done,
+        StreamingState::Aborted,
+        StreamingState::FailedClosed,
+    ] {
         let result = plan(
             terminal,
             no_record_event(EventKind::BodyFilterReentry),
             &default_ctx(),
         )
         .unwrap();
-        let apply = apply_result(
-            terminal,
-            &result.first_frame,
-            &ok_outcome(),
-            &ctx_usable(),
-        )
-        .unwrap();
+        let apply =
+            apply_result(terminal, &result.first_frame, &ok_outcome(), &ctx_usable()).unwrap();
         assert_eq!(apply.new_state, terminal);
         assert!(apply.side_effects.is_empty());
         assert!(apply.next_frame.is_none());
@@ -898,7 +913,10 @@ fn prop_31_postcommit_abort_recorded_is_one_shot() {
         .iter()
         .filter(|cmd| matches!(cmd.kind, SideEffectKind::RecordPostcommitAbort))
         .count();
-    assert_eq!(abort_count, 1, "RecordPostcommitAbort must appear exactly once");
+    assert_eq!(
+        abort_count, 1,
+        "RecordPostcommitAbort must appear exactly once"
+    );
 }
 
 #[test]
@@ -935,17 +953,14 @@ fn prop_31_begin_abort_chain_completes_with_consumed_handle() {
     .unwrap();
     assert_eq!(r.new_state, StreamingState::PostCommitAbort);
     assert!(r.next_frame.is_some());
-    assert_eq!(r.next_frame.as_ref().unwrap().action, Action::SendAbortTerminal);
+    assert_eq!(
+        r.next_frame.as_ref().unwrap().action,
+        Action::SendAbortTerminal
+    );
 
     // SEND_ABORT_TERMINAL success → DONE
     let term_frame = r.next_frame.unwrap();
-    let term_r = apply_result(
-        r.new_state,
-        &term_frame,
-        &ok_outcome(),
-        &ctx_usable(),
-    )
-    .unwrap();
+    let term_r = apply_result(r.new_state, &term_frame, &ok_outcome(), &ctx_usable()).unwrap();
     assert_eq!(term_r.new_state, StreamingState::Done);
 }
 
@@ -966,7 +981,11 @@ fn prop_32_etag_never_from_upstream_html() {
         }
     }
     // The placeholder is present
-    assert!(plan.ops.iter().any(|op| matches!(op, HeaderOp::SetEtagPlaceholder)));
+    assert!(
+        plan.ops
+            .iter()
+            .any(|op| matches!(op, HeaderOp::SetEtagPlaceholder))
+    );
 }
 
 #[test]
@@ -1007,7 +1026,10 @@ fn prop_32_streaming_committed_never_retroactive_304() {
         &default_ctx(),
     )
     .unwrap();
-    assert_eq!(committed_result.first_frame.action, Action::FinalizeConverter);
+    assert_eq!(
+        committed_result.first_frame.action,
+        Action::FinalizeConverter
+    );
     // FINALIZE_CONVERTER → SEND_CLOSING_OUTPUT/SEND_TERMINAL → DONE
     // No 304 path exists from COMMITTED state.
 }
@@ -1118,7 +1140,10 @@ fn prop_33_finalize_failure_downstream_usable_begin_abort() {
     .unwrap();
     assert_eq!(result.new_state, StreamingState::PostCommitAbort);
     assert!(result.next_frame.is_some());
-    assert_eq!(result.next_frame.as_ref().unwrap().action, Action::BeginAbort);
+    assert_eq!(
+        result.next_frame.as_ref().unwrap().action,
+        Action::BeginAbort
+    );
 }
 
 #[test]
@@ -1142,10 +1167,16 @@ fn prop_33_send_closing_failure_direct_aborted() {
     )
     .unwrap();
     assert_eq!(result.new_state, StreamingState::Aborted);
-    assert!(result.next_frame.is_none(), "No BEGIN_ABORT for closing output failure");
-    assert!(result.side_effects.iter().any(|cmd| matches!(
-        cmd.kind, SideEffectKind::SetSafeFinishOutputLoss
-    )));
+    assert!(
+        result.next_frame.is_none(),
+        "No BEGIN_ABORT for closing output failure"
+    );
+    assert!(
+        result
+            .side_effects
+            .iter()
+            .any(|cmd| matches!(cmd.kind, SideEffectKind::SetSafeFinishOutputLoss))
+    );
 }
 
 #[test]
@@ -1169,10 +1200,16 @@ fn prop_33_send_terminal_failure_direct_aborted() {
     )
     .unwrap();
     assert_eq!(result.new_state, StreamingState::Aborted);
-    assert!(result.next_frame.is_none(), "No retry for terminal send failure");
-    assert!(result.side_effects.iter().any(|cmd| matches!(
-        cmd.kind, SideEffectKind::SetSafeFinishTerminalSendFailed
-    )));
+    assert!(
+        result.next_frame.is_none(),
+        "No retry for terminal send failure"
+    );
+    assert!(
+        result
+            .side_effects
+            .iter()
+            .any(|cmd| matches!(cmd.kind, SideEffectKind::SetSafeFinishTerminalSendFailed))
+    );
 }
 
 #[test]
@@ -1205,7 +1242,10 @@ fn prop_33_commit_headers_only_synthetic_ok() {
         &error_outcome(FailureSite::TerminalSend),
         &ctx_usable(),
     );
-    assert!(r_err.is_err(), "COMMIT_HEADERS + NGX_ERROR must be invariant violation");
+    assert!(
+        r_err.is_err(),
+        "COMMIT_HEADERS + NGX_ERROR must be invariant violation"
+    );
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1258,8 +1298,14 @@ fn proto_no_undocumented_state_event_acceptance() {
     }
     // The full state×event product is exercised (no early exit).
     assert_eq!(accepted + rejected, 15 * 19);
-    assert!(accepted > 0, "at least one documented transition must be accepted");
-    assert!(rejected > 0, "at least one undocumented pair must be rejected");
+    assert!(
+        accepted > 0,
+        "at least one documented transition must be accepted"
+    );
+    assert!(
+        rejected > 0,
+        "at least one undocumented pair must be rejected"
+    );
 }
 
 #[test]
@@ -1267,19 +1313,8 @@ fn proto_cleanup_all_15_states_preserve_state() {
     // CLEANUP in all 15 states preserves the state.
     let ctx = default_ctx();
     for state in all_15_states() {
-        let result = plan(
-            state,
-            no_record_event(EventKind::Cleanup),
-            &ctx,
-        )
-        .unwrap();
-        let apply = apply_result(
-            state,
-            &result.first_frame,
-            &ok_outcome(),
-            &ctx_usable(),
-        )
-        .unwrap();
+        let result = plan(state, no_record_event(EventKind::Cleanup), &ctx).unwrap();
+        let apply = apply_result(state, &result.first_frame, &ok_outcome(), &ctx_usable()).unwrap();
         assert_eq!(
             apply.new_state, state,
             "CLEANUP must preserve state for {:?}",
@@ -1287,7 +1322,10 @@ fn proto_cleanup_all_15_states_preserve_state() {
         );
         // CLEANUP must clear inflight and pending
         assert!(
-            apply.side_effects.iter().any(|cmd| matches!(cmd.kind, SideEffectKind::ClearInflightAndPending)),
+            apply
+                .side_effects
+                .iter()
+                .any(|cmd| matches!(cmd.kind, SideEffectKind::ClearInflightAndPending)),
             "CLEANUP must clear inflight and pending for {:?}",
             state
         );
@@ -1313,21 +1351,38 @@ fn proto_cleanup_full_buffer_fallback_clear_only() {
     .unwrap();
     assert_eq!(apply.new_state, StreamingState::FullBufferFallback);
     // No emit, only clear
-    assert!(!apply.side_effects.iter().any(|cmd| matches!(cmd.kind, SideEffectKind::EmitFailureLedger)));
-    assert!(apply.side_effects.iter().any(|cmd| matches!(cmd.kind, SideEffectKind::ClearInflightAndPending)));
+    assert!(
+        !apply
+            .side_effects
+            .iter()
+            .any(|cmd| matches!(cmd.kind, SideEffectKind::EmitFailureLedger))
+    );
+    assert!(
+        apply
+            .side_effects
+            .iter()
+            .any(|cmd| matches!(cmd.kind, SideEffectKind::ClearInflightAndPending))
+    );
 }
 
 #[test]
 fn proto_event_envelope_required_records_validated() {
     // ERROR, BUDGET_INIT_FAILURE, RESOURCE_LIMIT require a FailureRecord.
-    for kind in [EventKind::Error, EventKind::BudgetInitFailure, EventKind::ResourceLimit] {
+    for kind in [
+        EventKind::Error,
+        EventKind::BudgetInitFailure,
+        EventKind::ResourceLimit,
+    ] {
         let env = EventEnvelope {
             kind,
             failure_record: None,
         };
         let result = plan(StreamingState::PreCommit, env, &default_ctx());
         assert!(
-            matches!(result, Err(StateMachineError::MissingRequiredFailureRecord { .. })),
+            matches!(
+                result,
+                Err(StateMachineError::MissingRequiredFailureRecord { .. })
+            ),
             "Event {:?} must require a FailureRecord",
             kind
         );
@@ -1367,7 +1422,11 @@ fn proto_event_envelope_forbidden_records_rejected() {
         let result = plan(StreamingState::NotEligible, env, &default_ctx());
         // Some of these will fail with InvalidTransition, some with ForbiddenFailureRecord.
         // The key is that they don't silently accept the forbidden record.
-        assert!(result.is_err(), "Forbidden event {:?} with record must be rejected", kind);
+        assert!(
+            result.is_err(),
+            "Forbidden event {:?} with record must be rejected",
+            kind
+        );
     }
 }
 
@@ -1388,41 +1447,51 @@ fn proto_client_abort_all_committed_states() {
     ];
     let ctx = default_ctx();
     for state in &committed_states {
-        let result = plan(
-            *state,
-            no_record_event(EventKind::ClientAbort),
-            &ctx,
-        )
-        .unwrap();
+        let result = plan(*state, no_record_event(EventKind::ClientAbort), &ctx).unwrap();
         assert_eq!(result.first_frame.action, Action::None);
 
-        let apply = apply_result(
-            *state,
-            &result.first_frame,
-            &ok_outcome(),
-            &ctx_usable(),
-        )
-        .unwrap();
+        let apply =
+            apply_result(*state, &result.first_frame, &ok_outcome(), &ctx_usable()).unwrap();
         assert_eq!(apply.new_state, StreamingState::Aborted);
         assert!(apply.next_frame.is_none());
 
         // Must have emit + clear side effects
-        assert!(apply.side_effects.iter().any(|cmd| matches!(
-            cmd.kind, SideEffectKind::EmitFailureLedger
-        )), "CLIENT_ABORT must emit ledger for {:?}", state);
-        assert!(apply.side_effects.iter().any(|cmd| matches!(
-            cmd.kind, SideEffectKind::ClearInflightAndPending
-        )), "CLIENT_ABORT must clear inflight for {:?}", state);
+        assert!(
+            apply
+                .side_effects
+                .iter()
+                .any(|cmd| matches!(cmd.kind, SideEffectKind::EmitFailureLedger)),
+            "CLIENT_ABORT must emit ledger for {:?}",
+            state
+        );
+        assert!(
+            apply
+                .side_effects
+                .iter()
+                .any(|cmd| matches!(cmd.kind, SideEffectKind::ClearInflightAndPending)),
+            "CLIENT_ABORT must clear inflight for {:?}",
+            state
+        );
 
         // No terminal-sent latch
-        assert!(!apply.side_effects.iter().any(|cmd| matches!(
-            cmd.kind, SideEffectKind::LatchTerminalSent
-        )), "CLIENT_ABORT must not set terminal latch for {:?}", state);
+        assert!(
+            !apply
+                .side_effects
+                .iter()
+                .any(|cmd| matches!(cmd.kind, SideEffectKind::LatchTerminalSent)),
+            "CLIENT_ABORT must not set terminal latch for {:?}",
+            state
+        );
 
         // No BEGIN_ABORT or SEND_ABORT_TERMINAL
-        assert!(!apply.side_effects.iter().any(|cmd| matches!(
-            cmd.kind, SideEffectKind::RecordPostcommitAbort
-        )), "CLIENT_ABORT must not record postcommit abort for {:?}", state);
+        assert!(
+            !apply
+                .side_effects
+                .iter()
+                .any(|cmd| matches!(cmd.kind, SideEffectKind::RecordPostcommitAbort)),
+            "CLIENT_ABORT must not record postcommit abort for {:?}",
+            state
+        );
     }
 }
 
@@ -1493,22 +1562,26 @@ fn proto_commit_headers_only_synthetic_ok() {
         failure_ledger: FailureLedger::empty(),
     };
     // NGX_OK → success
-    assert!(apply_result(
-        StreamingState::PreCommit,
-        &frame,
-        &ok_outcome(),
-        &ctx_usable(),
-    )
-    .is_ok());
+    assert!(
+        apply_result(
+            StreamingState::PreCommit,
+            &frame,
+            &ok_outcome(),
+            &ctx_usable(),
+        )
+        .is_ok()
+    );
 
     // NGX_ERROR → invariant violation
-    assert!(apply_result(
-        StreamingState::PreCommit,
-        &frame,
-        &error_outcome(FailureSite::TerminalSend),
-        &ctx_usable(),
-    )
-    .is_err());
+    assert!(
+        apply_result(
+            StreamingState::PreCommit,
+            &frame,
+            &error_outcome(FailureSite::TerminalSend),
+            &ctx_usable(),
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -1524,31 +1597,37 @@ fn proto_begin_abort_only_synthetic_ok() {
         failure_ledger: FailureLedger::empty(),
     };
     // NGX_OK → success
-    assert!(apply_result(
-        StreamingState::PostCommitAbort,
-        &frame,
-        &ok_outcome(),
-        &ctx_usable(),
-    )
-    .is_ok());
+    assert!(
+        apply_result(
+            StreamingState::PostCommitAbort,
+            &frame,
+            &ok_outcome(),
+            &ctx_usable(),
+        )
+        .is_ok()
+    );
 
     // NGX_DONE → error (not legal for BEGIN_ABORT)
-    assert!(apply_result(
-        StreamingState::PostCommitAbort,
-        &frame,
-        &done_outcome(),
-        &ctx_usable(),
-    )
-    .is_err());
+    assert!(
+        apply_result(
+            StreamingState::PostCommitAbort,
+            &frame,
+            &done_outcome(),
+            &ctx_usable(),
+        )
+        .is_err()
+    );
 
     // NGX_ERROR → error
-    assert!(apply_result(
-        StreamingState::PostCommitAbort,
-        &frame,
-        &error_outcome(FailureSite::AbortTerminalSend),
-        &ctx_usable(),
-    )
-    .is_err());
+    assert!(
+        apply_result(
+            StreamingState::PostCommitAbort,
+            &frame,
+            &error_outcome(FailureSite::AbortTerminalSend),
+            &ctx_usable(),
+        )
+        .is_err()
+    );
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1575,11 +1654,33 @@ fn proto_ledger_store_latches_without_emitting() {
     )
     .unwrap();
     // Direct ABORTED (downstream unusable) → store + emit
-    assert!(result.side_effects.iter().any(|cmd| matches!(cmd.kind, SideEffectKind::StoreFailureLedger)));
-    assert!(result.side_effects.iter().any(|cmd| matches!(cmd.kind, SideEffectKind::EmitFailureLedger)));
+    assert!(
+        result
+            .side_effects
+            .iter()
+            .any(|cmd| matches!(cmd.kind, SideEffectKind::StoreFailureLedger))
+    );
+    assert!(
+        result
+            .side_effects
+            .iter()
+            .any(|cmd| matches!(cmd.kind, SideEffectKind::EmitFailureLedger))
+    );
     // Post-effect latches
-    assert!(result.failure_updates.post_effect.set_ledger_stored_after.is_some());
-    assert!(result.failure_updates.post_effect.set_ledger_emitted_if_unemitted_after.is_some());
+    assert!(
+        result
+            .failure_updates
+            .post_effect
+            .set_ledger_stored_after
+            .is_some()
+    );
+    assert!(
+        result
+            .failure_updates
+            .post_effect
+            .set_ledger_emitted_if_unemitted_after
+            .is_some()
+    );
 }
 
 #[test]
@@ -1758,10 +1859,20 @@ fn proto_side_effect_post_effect_latch_references_resolve() {
         .map(|cmd| &cmd.command_id)
         .collect();
     if let Some(ref id) = result.failure_updates.post_effect.set_ledger_stored_after {
-        assert!(cmd_ids.contains(id), "set_ledger_stored_after must reference a command in the same row");
+        assert!(
+            cmd_ids.contains(id),
+            "set_ledger_stored_after must reference a command in the same row"
+        );
     }
-    if let Some(ref id) = result.failure_updates.post_effect.set_ledger_emitted_if_unemitted_after {
-        assert!(cmd_ids.contains(id), "set_ledger_emitted_if_unemitted_after must reference a command in the same row");
+    if let Some(ref id) = result
+        .failure_updates
+        .post_effect
+        .set_ledger_emitted_if_unemitted_after
+    {
+        assert!(
+            cmd_ids.contains(id),
+            "set_ledger_emitted_if_unemitted_after must reference a command in the same row"
+        );
     }
 }
 
@@ -1795,13 +1906,7 @@ fn proto_transition_frame_chain_shares_transition_id() {
     assert_ne!(close_frame.step_id, frame.step_id);
     assert_eq!(close_frame.action, Action::SendClosingOutput);
 
-    let r2 = apply_result(
-        r1.new_state,
-        &close_frame,
-        &ok_outcome(),
-        &ctx_usable(),
-    )
-    .unwrap();
+    let r2 = apply_result(r1.new_state, &close_frame, &ok_outcome(), &ctx_usable()).unwrap();
     let term_frame = r2.next_frame.unwrap();
     assert_eq!(term_frame.transition_id, frame.transition_id);
     assert_ne!(term_frame.step_id, close_frame.step_id);
@@ -1829,18 +1934,20 @@ fn proto_transition_frame_each_step_id_unique() {
     )
     .unwrap();
     let close_frame = r1.next_frame.unwrap();
-    let r2 = apply_result(
-        r1.new_state,
-        &close_frame,
-        &ok_outcome(),
-        &ctx_usable(),
-    )
-    .unwrap();
+    let r2 = apply_result(r1.new_state, &close_frame, &ok_outcome(), &ctx_usable()).unwrap();
     let term_frame = r2.next_frame.unwrap();
 
-    let step_ids = [frame.step_id.clone(), close_frame.step_id.clone(), term_frame.step_id.clone()];
+    let step_ids = [
+        frame.step_id.clone(),
+        close_frame.step_id.clone(),
+        term_frame.step_id.clone(),
+    ];
     let unique: std::collections::HashSet<_> = step_ids.iter().collect();
-    assert_eq!(unique.len(), 3, "All step_ids must be unique within the chain");
+    assert_eq!(
+        unique.len(),
+        3,
+        "All step_ids must be unique within the chain"
+    );
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1953,7 +2060,10 @@ fn proto_no_continue_streaming_action() {
     // Verify by name that none is CONTINUE_STREAMING
     for action in &actions {
         let name = format!("{:?}", action);
-        assert!(!name.contains("ContinueStreaming"), "CONTINUE_STREAMING must not exist");
+        assert!(
+            !name.contains("ContinueStreaming"),
+            "CONTINUE_STREAMING must not exist"
+        );
     }
 }
 
@@ -1997,20 +2107,23 @@ fn proto_cleanup_has_individual_plan_ids() {
     let ctx = default_ctx();
     let mut cleanup_ids = Vec::new();
     for state in all_15_states() {
-        let result = plan(
-            state,
-            no_record_event(EventKind::Cleanup),
-            &ctx,
-        )
-        .unwrap();
+        let result = plan(state, no_record_event(EventKind::Cleanup), &ctx).unwrap();
         cleanup_ids.push(result.plan_decision.transition_id);
     }
     // 15 unique CLEANUP Plan IDs
     let unique: std::collections::HashSet<_> = cleanup_ids.iter().collect();
-    assert_eq!(unique.len(), 15, "Each CLEANUP row must have its own Plan ID");
+    assert_eq!(
+        unique.len(),
+        15,
+        "Each CLEANUP row must have its own Plan ID"
+    );
     // All start with PLAN-
     for id in &cleanup_ids {
-        assert!(id.starts_with("PLAN-"), "CLEANUP Plan ID must start with PLAN-: {}", id);
+        assert!(
+            id.starts_with("PLAN-"),
+            "CLEANUP Plan ID must start with PLAN-: {}",
+            id
+        );
     }
 }
 
@@ -2143,7 +2256,10 @@ fn proto_6_30_ledger_inherited_by_branch_frames() {
     .unwrap();
     // The next frame (SEND_CLOSING_OUTPUT) must carry the same ledger
     let next = result.next_frame.unwrap();
-    assert_eq!(next.failure_ledger, ledger, "FailureLedger must be inherited by branch frame");
+    assert_eq!(
+        next.failure_ledger, ledger,
+        "FailureLedger must be inherited by branch frame"
+    );
 }
 
 // 6.31: Frame metadata and FailureLedger are immutable except through failure_updates
@@ -2269,7 +2385,10 @@ fn proto_6_35_finalize_failure_promotes_primary() {
     // Primary promoted (was None)
     assert!(result.failure_updates.pre_effect.primary_update.is_some());
     // next_frame = BEGIN_ABORT
-    assert_eq!(result.next_frame.as_ref().unwrap().action, Action::BeginAbort);
+    assert_eq!(
+        result.next_frame.as_ref().unwrap().action,
+        Action::BeginAbort
+    );
 }
 
 // 6.36: Abort-terminal success/pending/failure from PLAN-31
@@ -2393,17 +2512,35 @@ fn proto_6_49_legal_rows_atomic() {
 #[test]
 fn proto_6_51_resolved_error_policy_coverage() {
     // STATUS_502 → 502
-    assert_eq!(resolve_reject_status(ResolvedErrorPolicy::Status502, "any"), Some(502));
+    assert_eq!(
+        resolve_reject_status(ResolvedErrorPolicy::Status502, "any"),
+        Some(502)
+    );
     // STATUS_429 → 429
-    assert_eq!(resolve_reject_status(ResolvedErrorPolicy::Status429, "any"), Some(429));
+    assert_eq!(
+        resolve_reject_status(ResolvedErrorPolicy::Status429, "any"),
+        Some(429)
+    );
     // STATUS_503 → 503
-    assert_eq!(resolve_reject_status(ResolvedErrorPolicy::Status503, "any"), Some(503));
+    assert_eq!(
+        resolve_reject_status(ResolvedErrorPolicy::Status503, "any"),
+        Some(503)
+    );
     // PASS + fail_open_unavailable → 502
-    assert_eq!(resolve_reject_status(ResolvedErrorPolicy::Pass, "fail_open_unavailable"), Some(502));
+    assert_eq!(
+        resolve_reject_status(ResolvedErrorPolicy::Pass, "fail_open_unavailable"),
+        Some(502)
+    );
     // PASS + resource_limit → 502
-    assert_eq!(resolve_reject_status(ResolvedErrorPolicy::Pass, "resource_limit"), Some(502));
+    assert_eq!(
+        resolve_reject_status(ResolvedErrorPolicy::Pass, "resource_limit"),
+        Some(502)
+    );
     // PASS + other → None
-    assert_eq!(resolve_reject_status(ResolvedErrorPolicy::Pass, "other"), None);
+    assert_eq!(
+        resolve_reject_status(ResolvedErrorPolicy::Pass, "other"),
+        None
+    );
 }
 
 // 6.52: All protocol table counts exact
@@ -2463,7 +2600,10 @@ fn proto_6_53_no_stale_vocabulary() {
     for action in all_12_actions() {
         let name = format!("{:?}", action);
         assert!(!name.contains("ContinueStreaming"));
-        assert!(!name.contains("REJECT_502"), "REJECT_502 must be renamed to REJECT_STATUS");
+        assert!(
+            !name.contains("REJECT_502"),
+            "REJECT_502 must be renamed to REJECT_STATUS"
+        );
     }
     // Verify REJECT_STATUS exists (not REJECT_502)
     assert!(all_12_actions().contains(&Action::RejectStatus));

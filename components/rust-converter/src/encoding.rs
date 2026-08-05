@@ -302,7 +302,7 @@ pub fn decode_chain(
 
         /* Ratio check: activates at the fixed threshold; overflow-safe
          * comparison via saturating multiplication. */
-        if input_len >= RATIO_ACTIVATION_THRESHOLD && input_len > 0 {
+        if input_len >= RATIO_ACTIVATION_THRESHOLD {
             let allowed = (input_len as u64).saturating_mul(limits.ratio);
             if (decoded.len() as u64) > allowed {
                 return Err(ChainDecodeError::RatioExceeded);
@@ -341,7 +341,7 @@ fn map_decomp_error(e: crate::decompress::DecompError) -> ChainDecodeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::decompress::{decompress_bounded, Format};
+    use crate::decompress::{Format, decompress_bounded};
     use flate2::Compression;
     use flate2::write::{DeflateEncoder, GzEncoder};
     use std::io::Write;
@@ -507,8 +507,7 @@ mod tests {
         );
         /* identity does not count toward depth: 3 non-identity + 2 identity
          * layers remain valid. */
-        let layers =
-            parse_encoding_chain(b"identity, gzip, identity, deflate, br").unwrap();
+        let layers = parse_encoding_chain(b"identity, gzip, identity, deflate, br").unwrap();
         assert_eq!(
             strip_identity(&layers),
             vec![Encoding::Gzip, Encoding::Deflate, Encoding::Br]
@@ -686,9 +685,11 @@ mod tests {
     fn chain_decode_matches_single_decode() {
         let original = b"<html><body>parity</body></html>";
         let compressed = gzip_compress(original);
-        let single =
-            decompress_bounded(&compressed, Format::Gzip, 10 * 1024 * 1024).unwrap().output;
-        let chained = decode_chain(&compressed, &[Encoding::Gzip], DecodeLimits::default()).unwrap();
+        let single = decompress_bounded(&compressed, Format::Gzip, 10 * 1024 * 1024)
+            .unwrap()
+            .output;
+        let chained =
+            decode_chain(&compressed, &[Encoding::Gzip], DecodeLimits::default()).unwrap();
         assert_eq!(chained, single);
     }
 }

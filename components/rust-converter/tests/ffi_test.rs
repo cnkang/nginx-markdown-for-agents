@@ -887,8 +887,7 @@ fn test_chars_per_token_affects_estimate() {
     assert_eq!(
         result_20.token_estimate, result_40.token_estimate,
         "fixed 4.0 ratio must produce identical estimates, got {} vs {}",
-        result_20.token_estimate,
-        result_40.token_estimate,
+        result_20.token_estimate, result_40.token_estimate,
     );
 
     ffi_markdown_result_free(&mut result_20);
