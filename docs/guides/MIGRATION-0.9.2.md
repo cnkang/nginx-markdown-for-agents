@@ -1,5 +1,9 @@
 # Migration Guide: 0.9.1 → 0.9.2 (Final Breaking Freeze)
 
+> Reference: a compact standalone summary of every breaking change
+> (removed directives, replacements, impact) lives in
+> [0.9.2-breaking-changes.md](0.9.2-breaking-changes.md).
+
 ## Overview
 
 **0.9.2 is the final breaking release before 1.0.** The configuration surface
@@ -19,7 +23,7 @@ After 0.9.2, all 1.x releases maintain backward compatibility for a minimum of
 | Category | Count | Action |
 |----------|-------|--------|
 | Reject-only migration stubs removed | 19 | Already caused `nginx -t` failure; now produce standard "unknown directive" |
-| Active directives removed | 12 | Replace with equivalents (see below) |
+| Active directives removed | 14 | Replace with equivalents (see below) |
 | Directives unified into `markdown_limits` | 5 | Use `markdown_limits key=value` syntax |
 | Total retained directives | 25 | No change needed |
 
@@ -91,6 +95,24 @@ markdown_metrics_per_path_cardinality 200;
 
 # AFTER (0.9.2)
 # Remove both directives. Use log-based path analysis instead.
+```
+
+### `markdown_diagnostics_allow` → removed
+
+The diagnostics location used a module-level CIDR allow-list. Access control
+now uses NGINX's standard `allow`/`deny` directives inside the
+`markdown_diagnostics` location.
+
+```nginx
+# BEFORE (0.9.1)
+markdown_diagnostics_allow 10.0.0.0/8;
+
+# AFTER (0.9.2)
+location /nginx-markdown/diagnostics {
+    markdown_diagnostics on;
+    allow 10.0.0.0/8;
+    deny all;
+}
 ```
 
 ### `markdown_buffer_chunked` → removed (always buffers)

@@ -805,6 +805,9 @@
         "tools/e2e/verify_status_codes_e2e.sh",
         "tools/e2e/verify_auth_cache_e2e.sh",
         "tools/e2e/verify_accept_negotiation_e2e.sh",
+        "tools/e2e/verify_examples_nginx_t.sh",
+        "docs/guides/MIGRATION-0.9.2.md",
+        "docs/guides/0.9.2-breaking-changes.md",
         "docs/project/0.6.3-e2e-parity.md",
         "docs/project/0.6.3-test-surface-audit.md",
         "docs/testing/E2E_TESTS.md"

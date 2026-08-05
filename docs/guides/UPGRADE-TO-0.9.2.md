@@ -3,9 +3,13 @@
 ## Overview
 
 This guide covers upgrading to nginx-markdown-for-agents 0.9.2 from 0.9.1.
-0.9.2 is a non-breaking release — all 0.9.1 configurations are valid without
-modification. If you are running 0.9.0, complete
-[MIGRATION-0.9.1.md](MIGRATION-0.9.1.md) before following this guide.
+0.9.2 is a **breaking release**: the configuration surface is reduced from
+63 directives to 25, and configurations using any removed directive fail
+`nginx -t` with `unknown directive` until migrated. Review
+[0.9.2-breaking-changes.md](0.9.2-breaking-changes.md) and
+[MIGRATION-0.9.2.md](MIGRATION-0.9.2.md) before upgrading. If you are running
+0.9.0, complete [MIGRATION-0.9.1.md](MIGRATION-0.9.1.md) before following
+this guide.
 
 > Publication status: 0.9.2 is currently a development candidate. At the
 > time of writing, no `v0.9.2` tag, GitHub Release, package checksum, Docker

@@ -14,6 +14,42 @@ gaps, documents request-scoped OTel ownership, removes the unsafe worker-local
 dynconf restore path, and establishes a public surface source metadata and
 ABI drift gate for release integrity.
 
+### Breaking Changes
+
+0.9.2 is the breaking release before 1.0. The configuration surface is
+reduced from 63 directives to 25; configurations using any removed
+directive fail `nginx -t` with `unknown directive` until migrated. See
+[docs/guides/0.9.2-breaking-changes.md](docs/guides/0.9.2-breaking-changes.md)
+for the complete reference and
+[docs/guides/MIGRATION-0.9.2.md](docs/guides/MIGRATION-0.9.2.md) for
+before/after examples.
+
+- **Directive removals (38 total):** 19 reject-only migration stubs are
+  deleted (the migration-hint error is replaced by NGINX's standard
+  `unknown directive` error); 14 active directives are removed
+  (`markdown_profile`, `markdown_metrics_format`,
+  `markdown_metrics_per_path`, `markdown_metrics_per_path_cardinality`,
+  `markdown_buffer_chunked`, `markdown_streaming_shadow`,
+  `markdown_streaming_zero_copy`, `markdown_llm_provider`,
+  `markdown_chars_per_token`, `markdown_stream_types`,
+  `markdown_stream_threshold`, `markdown_diagnostics_allow`,
+  `markdown_otel`, `markdown_otel_endpoint`); 5 standalone limit
+  directives (`markdown_stream_precommit_buffer`, `markdown_stream_flush_min`,
+  `markdown_parse_timeout`, `markdown_parser_budget`,
+  `markdown_decompress_max_size`) are unified into `markdown_limits`
+  key=value syntax (`streaming_buffer=`, `parser_timeout=`, `parser_memory=`,
+  `decompressed_size=`).
+- **Profile presets removed.** `balanced` / `strict_cache` / `streaming_first`
+  no longer exist; limits are expressed through explicit directives.
+- **OTel subsystem removed.** The experimental `markdown_otel` /
+  `markdown_otel_endpoint` surface and OTel metrics/spans/export paths are
+  gone; use NGINX's native OTel module.
+- **`REJECT_STATUS` action rename (internal).**
+  `NGX_HTTP_MD_ACTION_REJECT_502` was renamed to
+  `NGX_HTTP_MD_ACTION_REJECT_STATUS`; no configuration impact.
+- After 0.9.2, all 1.x releases maintain backward compatibility for a
+  minimum of 24 months.
+
 ### Fixed
 
 - Diagnostics `reason_to_code` mapping was missing `bypass_no_transform`
