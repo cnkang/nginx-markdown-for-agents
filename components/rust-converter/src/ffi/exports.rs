@@ -61,12 +61,16 @@ use super::abi::{
     TRUSTED_PROXIES_PUSH_OK,
 };
 use super::abi::{
-    DECOMP_CATEGORY_INVALID_ARGS, DECOMP_CATEGORY_IO_ERROR, ERROR_INTERNAL, FFIAcceptResult,
-    FFIDecompResult, FFIEligibilityInput, FFIHeaderEntry, FFIHeaderPlan, FFIHeaderPlanHandle,
-    FFIStr, MARKDOWN_ABI_VERSION, MARKDOWN_HEADER_HASH, MARKDOWN_LAYOUT_FINGERPRINT,
-    MARKDOWN_SYMBOL_SET_HASH, MarkdownConverterHandle, MarkdownOptions, MarkdownResult,
-    NEGOTIATE_REASON_CONVERT, NEGOTIATE_REASON_EXPLICIT_REJECT, NEGOTIATE_REASON_LOWER_Q,
-    NEGOTIATE_REASON_MALFORMED, NEGOTIATE_REASON_NO_ACCEPT,
+    DECOMP_CATEGORY_BUDGET_EXCEEDED, DECOMP_CATEGORY_FORMAT_ERROR,
+    DECOMP_CATEGORY_INVALID_ARGS, DECOMP_CATEGORY_IO_ERROR, DECOMP_CATEGORY_RATIO_EXCEEDED,
+    DECOMP_CATEGORY_TRUNCATED_INPUT, ENCODING_CHAIN_DEPTH_EXCEEDED, ENCODING_CHAIN_MALFORMED,
+    ENCODING_CHAIN_UNKNOWN_TOKEN, ENCODING_CHAIN_VALID, ERROR_INTERNAL, FFIAcceptResult,
+    FFIChainDecodeResult, FFIDecompResult, FFIEncodingChainResult, FFIEligibilityInput,
+    FFIHeaderEntry, FFIHeaderPlan, FFIHeaderPlanHandle, FFIStr, MARKDOWN_ABI_VERSION,
+    MARKDOWN_HEADER_HASH, MARKDOWN_LAYOUT_FINGERPRINT, MARKDOWN_SYMBOL_SET_HASH,
+    MarkdownConverterHandle, MarkdownOptions, MarkdownResult, NEGOTIATE_REASON_CONVERT,
+    NEGOTIATE_REASON_EXPLICIT_REJECT, NEGOTIATE_REASON_LOWER_Q, NEGOTIATE_REASON_MALFORMED,
+    NEGOTIATE_REASON_NO_ACCEPT,
 };
 use super::abi::{
     FFI_CONFIG_NOT_SET_U8, FFI_CONFIG_NOT_SET_U32, FFI_CONFIG_NOT_SET_U64, FFIConflict,
@@ -803,10 +807,14 @@ pub unsafe extern "C" fn markdown_decide_base_url(
 
         let source_ip = unsafe { optional_str(inp.source_ip, inp.source_ip_len) }.unwrap_or("");
         let forwarded = unsafe { optional_str(inp.forwarded, inp.forwarded_len) };
+        let x_forwarded_for =
+            unsafe { optional_str(inp.x_forwarded_for, inp.x_forwarded_for_len) };
         let x_forwarded_proto =
             unsafe { optional_str(inp.x_forwarded_proto, inp.x_forwarded_proto_len) };
         let x_forwarded_host =
             unsafe { optional_str(inp.x_forwarded_host, inp.x_forwarded_host_len) };
+        let x_forwarded_port =
+            unsafe { optional_str(inp.x_forwarded_port, inp.x_forwarded_port_len) };
         let host = unsafe { optional_str(inp.host, inp.host_len) };
         let direct_scheme = unsafe { optional_str(inp.direct_scheme, inp.direct_scheme_len) };
 
@@ -822,8 +830,10 @@ pub unsafe extern "C" fn markdown_decide_base_url(
             is_unix_socket: inp.is_unix_socket != 0,
             trusted_configured: inp.trusted_configured != 0,
             forwarded,
+            x_forwarded_for,
             x_forwarded_proto,
             x_forwarded_host,
+            x_forwarded_port,
             host,
             direct_scheme,
         };
@@ -926,8 +936,6 @@ unsafe fn optional_str<'a>(ptr: *const u8, len: usize) -> Option<&'a str> {
 /// - `streaming_budget`: 0 (use engine default)
 /// - `prune_noise`: 0 (disabled)
 /// - `memory_budget`: 0 (use per-engine defaults)
-/// - `llm_provider`: 0 (default)
-/// - `chars_per_token_fixed`: 0 (use default ratio)
 /// - `parse_timeout_ms`: 0 (fall back to `timeout_ms`)
 /// - `parser_memory_budget`: 0 (no per-handle limit; use engine default)
 /// - `flush_threshold`: 0 (use default streaming flush threshold)
@@ -1147,6 +1155,297 @@ pub unsafe extern "C" fn markdown_decomp_result_init(result: *mut FFIDecompResul
         return;
     }
     unsafe { ptr::write(result, std::mem::zeroed()) };
+}
+
+// ─── Content-Encoding chain FFI (Spec 62 Wave 4, Requirement 12) ─────────────
+
+/// Parse a concatenated Content-Encoding header value into an encoding chain.
+///
+/// The C caller concatenates repeated Content-Encoding header fields in
+/// received field order before calling; this function applies the full
+/// comma-separated grammar of Requirement 12.1.
+///
+/// On success (`ENCODING_CHAIN_VALID`), the result carries the non-identity
+/// decoder list in application order (identity tokens removed after
+/// validation) plus an identity-presence flag for audit purposes.
+///
+/// On `ENCODING_CHAIN_MALFORMED` the C caller must emit the canonical
+/// `ENCODING_HEADER_INVALID` reason (`stage=decompression`,
+/// `error_origin=format`) during outer precommit routing, start no decoder,
+/// and mutate no response header. `ENCODING_CHAIN_UNKNOWN_TOKEN` and
+/// `ENCODING_CHAIN_DEPTH_EXCEEDED` are capability bypasses: the entire
+/// conversion is bypassed in precommit with no error-policy dispatch.
+///
+/// # Return Value
+///
+/// Returns one of the `ENCODING_CHAIN_*` classification constants, or
+/// `DECOMP_CATEGORY_INVALID_ARGS` (105) for NULL/empty input with an
+/// invalid length.
+///
+/// # Safety
+///
+/// The caller must ensure that:
+/// - `value` points to at least `value_len` readable bytes; NULL with
+///   non-zero length returns `DECOMP_CATEGORY_INVALID_ARGS`
+/// - `result` points to writable storage for an `FFIEncodingChainResult`
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_parse_encoding_chain(
+    value: *const u8,
+    value_len: usize,
+    result: *mut FFIEncodingChainResult,
+) -> u8 {
+    if result.is_null() {
+        return ENCODING_CHAIN_MALFORMED as u8;
+    }
+    let result_ref = unsafe { &mut *result };
+    result_ref.classification = ENCODING_CHAIN_VALID;
+    result_ref.layer_count = 0;
+    result_ref.layers = [0u8; 3];
+    result_ref.identity_present = 0;
+
+    let value_slice = if value.is_null() {
+        if value_len != 0 {
+            return DECOMP_CATEGORY_INVALID_ARGS as u8;
+        }
+        &[]
+    } else if value_len == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(value, value_len) }
+    };
+
+    if value_slice.is_empty() {
+        /* No Content-Encoding value: valid, no layers. */
+        return ENCODING_CHAIN_VALID;
+    }
+
+    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        crate::encoding::parse_encoding_chain(value_slice)
+    }));
+
+    match outcome {
+        Ok(Ok(layers)) => {
+            let mut non_identity = 0u32;
+            for enc in &layers {
+                if *enc == crate::encoding::Encoding::Identity {
+                    result_ref.identity_present = 1;
+                    continue;
+                }
+                if non_identity < 3 {
+                    result_ref.layers[non_identity as usize] = encoding_to_u8(*enc);
+                }
+                non_identity += 1;
+            }
+            result_ref.layer_count = non_identity;
+            ENCODING_CHAIN_VALID
+        }
+        Ok(Err(crate::encoding::ChainParseError::Malformed)) => ENCODING_CHAIN_MALFORMED,
+        Ok(Err(crate::encoding::ChainParseError::UnknownToken)) => ENCODING_CHAIN_UNKNOWN_TOKEN,
+        Ok(Err(crate::encoding::ChainParseError::DepthExceeded)) => ENCODING_CHAIN_DEPTH_EXCEEDED,
+        Err(_) => {
+            /* Caught panic: fail closed as malformed; no decoder starts. */
+            result_ref.classification = ENCODING_CHAIN_MALFORMED;
+            ENCODING_CHAIN_MALFORMED
+        }
+    }
+}
+
+/// Map an `Encoding` variant to its FFI layer code.
+fn encoding_to_u8(enc: crate::encoding::Encoding) -> u8 {
+    match enc {
+        crate::encoding::Encoding::Gzip => 0,
+        crate::encoding::Encoding::Deflate => 1,
+        crate::encoding::Encoding::Br => 2,
+        crate::encoding::Encoding::Identity => 3,
+    }
+}
+
+/// Zero-initialize an `FFIChainDecodeResult` struct.
+///
+/// # Safety
+///
+/// The caller must ensure that `result` points to writable storage for an
+/// `FFIChainDecodeResult`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_chain_decode_result_init(result: *mut FFIChainDecodeResult) {
+    if result.is_null() {
+        return;
+    }
+    unsafe { ptr::write(result, std::mem::zeroed()) };
+}
+
+/// Decode a multi-layer Content-Encoding chain in reverse application order.
+///
+/// `layers` must be a `layer_count`-element array of format codes
+/// (0=gzip, 1=deflate, 2=br) in application order as returned by
+/// [`markdown_parse_encoding_chain`]; identity tokens must already be
+/// removed. The cumulative output budget (`max_output` = configured
+/// `decompressed_size`) applies across every non-identity intermediate
+/// output; the per-layer expansion ratio (`ratio` = configured
+/// `decompression_ratio`) activates only above the fixed 256-byte
+/// internal threshold.
+///
+/// # Return Value
+///
+/// Returns the error category:
+/// - `0` on success (output is valid decoded data, free with
+///   `markdown_chain_decode_free`)
+/// - `101` = budget exceeded (`DECOMP_CATEGORY_BUDGET_EXCEEDED`)
+/// - `106` = ratio exceeded (`DECOMP_CATEGORY_RATIO_EXCEEDED`)
+/// - `102` = format error (`DECOMP_CATEGORY_FORMAT_ERROR`)
+/// - `103` = truncated input (`DECOMP_CATEGORY_TRUNCATED_INPUT`)
+/// - `104` = I/O error (`DECOMP_CATEGORY_IO_ERROR`)
+/// - `105` = invalid arguments (`DECOMP_CATEGORY_INVALID_ARGS`)
+///
+/// # Safety
+///
+/// The caller must ensure that:
+/// - `input` points to at least `input_len` readable bytes (NULL with
+///   non-zero length returns `DECOMP_CATEGORY_INVALID_ARGS`)
+/// - `layers` is NULL when `layer_count == 0`, otherwise points to at least
+///   `layer_count` readable bytes
+/// - `result` points to writable storage for an `FFIChainDecodeResult`
+///   previously initialized via `markdown_chain_decode_result_init`
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_decode_encoding_chain(
+    input: *const u8,
+    input_len: usize,
+    layers: *const u8,
+    layer_count: u32,
+    max_output: usize,
+    ratio: u64,
+    result: *mut FFIChainDecodeResult,
+) -> u32 {
+    if result.is_null() {
+        return DECOMP_CATEGORY_INVALID_ARGS;
+    }
+    let result_ref = unsafe { &mut *result };
+    result_ref.output = ptr::null_mut();
+    result_ref.output_len = 0;
+    result_ref.error_category = 0;
+
+    if layer_count == 0 {
+        /* No decoder work: identity-only chain. The caller already owns the
+         * input bytes; report success with an empty output. */
+        result_ref.output = ptr::null_mut();
+        result_ref.output_len = 0;
+        return 0;
+    }
+    if layers.is_null() {
+        result_ref.error_category = DECOMP_CATEGORY_INVALID_ARGS;
+        return DECOMP_CATEGORY_INVALID_ARGS;
+    }
+    if layer_count > crate::encoding::MAX_DECODER_DEPTH as u32 {
+        result_ref.error_category = DECOMP_CATEGORY_INVALID_ARGS;
+        return DECOMP_CATEGORY_INVALID_ARGS;
+    }
+
+    let input_slice = if input.is_null() {
+        if input_len != 0 {
+            result_ref.error_category = DECOMP_CATEGORY_INVALID_ARGS;
+            return DECOMP_CATEGORY_INVALID_ARGS;
+        }
+        &[]
+    } else if input_len == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(input, input_len) }
+    };
+
+    let mut layer_vec = Vec::with_capacity(layer_count as usize);
+    for i in 0..layer_count as usize {
+        let code = unsafe { *layers.add(i) };
+        let enc = match code {
+            0 => crate::encoding::Encoding::Gzip,
+            1 => crate::encoding::Encoding::Deflate,
+            2 => crate::encoding::Encoding::Br,
+            _ => {
+                result_ref.error_category = DECOMP_CATEGORY_INVALID_ARGS;
+                return DECOMP_CATEGORY_INVALID_ARGS;
+            }
+        };
+        layer_vec.push(enc);
+    }
+
+    let limits = crate::encoding::DecodeLimits {
+        max_output,
+        ratio,
+    };
+
+    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        crate::encoding::decode_chain(input_slice, &layer_vec, limits)
+    }));
+
+    match outcome {
+        Ok(Ok(decoded)) => {
+            let mut boxed = decoded.into_boxed_slice();
+            result_ref.output_len = boxed.len();
+            result_ref.error_category = 0;
+            if boxed.is_empty() {
+                result_ref.output = ptr::null_mut();
+            } else {
+                let ptr = boxed.as_mut_ptr();
+                std::mem::forget(boxed);
+                result_ref.output = ptr;
+            }
+            0
+        }
+        Ok(Err(e)) => {
+            let code = match e {
+                crate::encoding::ChainDecodeError::BudgetExceeded => {
+                    DECOMP_CATEGORY_BUDGET_EXCEEDED
+                }
+                crate::encoding::ChainDecodeError::RatioExceeded => {
+                    DECOMP_CATEGORY_RATIO_EXCEEDED
+                }
+                crate::encoding::ChainDecodeError::FormatError(_) => {
+                    DECOMP_CATEGORY_FORMAT_ERROR
+                }
+                crate::encoding::ChainDecodeError::TruncatedInput(_) => {
+                    DECOMP_CATEGORY_TRUNCATED_INPUT
+                }
+                crate::encoding::ChainDecodeError::IoError(_) => DECOMP_CATEGORY_IO_ERROR,
+            };
+            result_ref.error_category = code;
+            code
+        }
+        Err(_) => {
+            result_ref.output = ptr::null_mut();
+            result_ref.output_len = 0;
+            result_ref.error_category = DECOMP_CATEGORY_IO_ERROR;
+            DECOMP_CATEGORY_IO_ERROR
+        }
+    }
+}
+
+/// Release the output buffer from a successful `markdown_decode_encoding_chain`
+/// call.
+///
+/// After calling this function, the `result` struct is reset to a safe zero
+/// state. Calling this on a result with a NULL output pointer is a no-op.
+///
+/// # Safety
+///
+/// The caller must ensure that:
+/// - `result` either is NULL or points to a valid `FFIChainDecodeResult`
+///   previously populated by `markdown_decode_encoding_chain`
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_chain_decode_free(result: *mut FFIChainDecodeResult) {
+    if result.is_null() {
+        return;
+    }
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        // SAFETY: `result` was validated as non-NULL above.
+        let result_ref = unsafe { &mut *result };
+        if !result_ref.output.is_null() && result_ref.output_len > 0 {
+            let slice =
+                unsafe { std::slice::from_raw_parts_mut(result_ref.output, result_ref.output_len) };
+            unsafe { drop(Box::from_raw(slice)) };
+        }
+        result_ref.output = ptr::null_mut();
+        result_ref.output_len = 0;
+        result_ref.error_category = 0;
+    }));
 }
 
 // ─── Profile conflict detection FFI (spec 50, 0.9.0) ─────────────────────────
@@ -1477,8 +1776,6 @@ mod tests {
         assert!(opts.prune_protection_selectors.is_null());
         assert_eq!(opts.prune_protection_selector_len, 0);
         assert_eq!(opts.memory_budget, 0);
-        assert_eq!(opts.llm_provider, 0);
-        assert_eq!(opts.chars_per_token_fixed, 0);
         assert_eq!(opts.parse_timeout_ms, 0);
         assert_eq!(opts.parser_memory_budget, 0);
 
@@ -1598,10 +1895,14 @@ mod tests {
             trusted: ptr::null(),
             forwarded: ptr::null(),
             forwarded_len: 0,
+            x_forwarded_for: ptr::null(),
+            x_forwarded_for_len: 0,
             x_forwarded_proto: ptr::null(),
             x_forwarded_proto_len: 0,
             x_forwarded_host: ptr::null(),
             x_forwarded_host_len: 0,
+            x_forwarded_port: ptr::null(),
+            x_forwarded_port_len: 0,
             host: ptr::null(),
             host_len: 0,
             is_unix_socket: 0,
@@ -1685,18 +1986,24 @@ mod tests {
         assert_eq!(push_cidr(handle, "10.0.0.0/8"), TRUSTED_PROXIES_PUSH_OK);
 
         let src = b"10.1.2.3";
+        let xff = b"203.0.113.9";
         let xfh = b"api.example.com";
         let xfp = b"https";
+        let xfport = b"443";
         let host = b"origin.example.com";
         let mut input = empty_base_url_input();
         input.source_ip = src.as_ptr();
         input.source_ip_len = src.len();
         input.trusted = handle;
         input.trusted_configured = 1;
+        input.x_forwarded_for = xff.as_ptr();
+        input.x_forwarded_for_len = xff.len();
         input.x_forwarded_host = xfh.as_ptr();
         input.x_forwarded_host_len = xfh.len();
         input.x_forwarded_proto = xfp.as_ptr();
         input.x_forwarded_proto_len = xfp.len();
+        input.x_forwarded_port = xfport.as_ptr();
+        input.x_forwarded_port_len = xfport.len();
         input.host = host.as_ptr();
         input.host_len = host.len();
 
@@ -1706,7 +2013,7 @@ mod tests {
             unsafe { markdown_decide_base_url(&input, buf.as_mut_ptr(), buf.len(), &mut decision) };
         assert_eq!(rc, DECIDE_BASE_URL_OK);
         let url = std::str::from_utf8(&buf[..decision.base_url_len]).unwrap();
-        assert_eq!(url, "https://api.example.com");
+        assert_eq!(url, "https://api.example.com:443");
         // BaseUrlReason::ForwardedHeaderTrusted == 0
         assert_eq!(decision.reason, 0);
         // BaseUrlSource::XForwarded == 1
@@ -1926,7 +2233,7 @@ mod tests {
         use flate2::write::GzEncoder;
         use std::io::Write;
 
-        let original = vec![b'X'; 10_000];
+        let original = vec![88u8; 10_000]; /* 'X' byte value */
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(&original).unwrap();
         let compressed = encoder.finish().unwrap();
@@ -2237,5 +2544,293 @@ mod tests {
         assert_eq!(out.outcome, 0); /* not_modified */
         assert_eq!(out.reason, 2); /* conditional_ims_evaluated */
         assert_eq!(out.evaluated_header, 2); /* if_modified_since */
+    }
+
+    #[test]
+    fn parse_encoding_chain_valid_chain() {
+        let value = b"gzip, deflate, BR";
+        let mut result: FFIEncodingChainResult = unsafe { std::mem::zeroed() };
+        let classification = unsafe {
+            markdown_parse_encoding_chain(value.as_ptr(), value.len(), &mut result)
+        };
+        assert_eq!(classification, ENCODING_CHAIN_VALID);
+        assert_eq!(result.classification, ENCODING_CHAIN_VALID);
+        assert_eq!(result.layer_count, 3);
+        assert_eq!(result.layers, [0, 1, 2]); /* gzip, deflate, br */
+        assert_eq!(result.identity_present, 0);
+    }
+
+    #[test]
+    fn parse_encoding_chain_identity_removed() {
+        let value = b"identity, gzip, identity";
+        let mut result: FFIEncodingChainResult = unsafe { std::mem::zeroed() };
+        let classification = unsafe {
+            markdown_parse_encoding_chain(value.as_ptr(), value.len(), &mut result)
+        };
+        assert_eq!(classification, ENCODING_CHAIN_VALID);
+        assert_eq!(result.layer_count, 1);
+        assert_eq!(result.layers, [0, 0, 0]);
+        assert_eq!(result.identity_present, 1);
+    }
+
+    #[test]
+    fn parse_encoding_chain_identity_only() {
+        let value = b"identity";
+        let mut result: FFIEncodingChainResult = unsafe { std::mem::zeroed() };
+        let classification = unsafe {
+            markdown_parse_encoding_chain(value.as_ptr(), value.len(), &mut result)
+        };
+        assert_eq!(classification, ENCODING_CHAIN_VALID);
+        assert_eq!(result.layer_count, 0);
+        assert_eq!(result.identity_present, 1);
+    }
+
+    #[test]
+    fn parse_encoding_chain_malformed() {
+        let mut overlong = b"g".repeat(129);
+        overlong.push(112); /* 'p' — no byte-char literal: lizard parser */
+        let cases: Vec<&[u8]> = vec![
+            b",gzip".as_slice(),
+            b"gzip,".as_slice(),
+            b"gzip,,deflate".as_slice(),
+            b"\"gzip\"".as_slice(),
+            b"gzip;q=1".as_slice(),
+            b"gzip\n".as_slice(),
+            overlong.as_slice(),
+        ];
+        for value in cases {
+            let mut result: FFIEncodingChainResult = unsafe { std::mem::zeroed() };
+            let classification = unsafe {
+                markdown_parse_encoding_chain(value.as_ptr(), value.len(), &mut result)
+            };
+            assert_eq!(
+                classification,
+                ENCODING_CHAIN_MALFORMED,
+                "value {:?} must be malformed",
+                String::from_utf8_lossy(value)
+            );
+            assert_eq!(result.layer_count, 0);
+        }
+    }
+
+    #[test]
+    fn parse_encoding_chain_unknown_token() {
+        let value = b"gzip, zstd";
+        let mut result: FFIEncodingChainResult = unsafe { std::mem::zeroed() };
+        let classification = unsafe {
+            markdown_parse_encoding_chain(value.as_ptr(), value.len(), &mut result)
+        };
+        assert_eq!(classification, ENCODING_CHAIN_UNKNOWN_TOKEN);
+    }
+
+    #[test]
+    fn parse_encoding_chain_depth_exceeded() {
+        let value = b"gzip, deflate, br, gzip";
+        let mut result: FFIEncodingChainResult = unsafe { std::mem::zeroed() };
+        let classification = unsafe {
+            markdown_parse_encoding_chain(value.as_ptr(), value.len(), &mut result)
+        };
+        assert_eq!(classification, ENCODING_CHAIN_DEPTH_EXCEEDED);
+    }
+
+    #[test]
+    fn parse_encoding_chain_null_inputs() {
+        let mut result: FFIEncodingChainResult = unsafe { std::mem::zeroed() };
+        let classification =
+            unsafe { markdown_parse_encoding_chain(ptr::null(), 5, &mut result) };
+        assert_eq!(classification, DECOMP_CATEGORY_INVALID_ARGS as u8);
+        /* NULL with zero length: no encoding value, valid empty chain. */
+        let classification =
+            unsafe { markdown_parse_encoding_chain(ptr::null(), 0, &mut result) };
+        assert_eq!(classification, ENCODING_CHAIN_VALID);
+    }
+
+    #[test]
+    fn parse_encoding_chain_null_result_is_malformed() {
+        let value = b"gzip";
+        let classification =
+            unsafe { markdown_parse_encoding_chain(value.as_ptr(), value.len(), ptr::null_mut()) };
+        assert_eq!(classification, ENCODING_CHAIN_MALFORMED);
+    }
+
+    fn gzip_bytes(data: &[u8]) -> Vec<u8> {
+        use flate2::Compression;
+        use flate2::write::GzEncoder;
+        use std::io::Write;
+
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(data).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    fn deflate_bytes(data: &[u8]) -> Vec<u8> {
+        use flate2::Compression;
+        use flate2::write::DeflateEncoder;
+        use std::io::Write;
+
+        let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(data).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    #[test]
+    fn decode_encoding_chain_two_layers() {
+        let original = b"<html><body>FFI chain decode</body></html>";
+        /* Application order [gzip, deflate]: wire = deflate(gzip(content)). */
+        let inner = gzip_bytes(original);
+        let wire = deflate_bytes(&inner);
+        let layers = [0u8, 1u8]; /* gzip, deflate */
+        let mut result: FFIChainDecodeResult = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            markdown_decode_encoding_chain(
+                wire.as_ptr(),
+                wire.len(),
+                layers.as_ptr(),
+                2,
+                10 * 1024 * 1024,
+                100,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, 0, "Expected success (0), got {rc}");
+        assert_eq!(result.error_category, 0);
+        assert_eq!(result.output_len, original.len());
+        let output = unsafe { std::slice::from_raw_parts(result.output, result.output_len) };
+        assert_eq!(output, original);
+        unsafe { markdown_chain_decode_free(&mut result) };
+        assert!(result.output.is_null());
+    }
+
+    #[test]
+    fn decode_encoding_chain_budget_exceeded() {
+        let original = vec![88u8; 200_000]; /* 'X' — no byte-char literal */
+        let inner = gzip_bytes(&original);
+        let wire = deflate_bytes(&inner);
+        let layers = [0u8, 1u8];
+        let mut result: FFIChainDecodeResult = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            markdown_decode_encoding_chain(
+                wire.as_ptr(),
+                wire.len(),
+                layers.as_ptr(),
+                2,
+                100_000,
+                100,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, 101); /* DECOMP_CATEGORY_BUDGET_EXCEEDED */
+        assert_eq!(result.error_category, 101);
+        assert!(result.output.is_null());
+        assert_eq!(result.output_len, 0);
+    }
+
+    #[test]
+    fn decode_encoding_chain_ratio_exceeded() {
+        let original = vec![0u8; 1_000_000];
+        let wire = gzip_bytes(&original);
+        let layers = [0u8];
+        let mut result: FFIChainDecodeResult = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            markdown_decode_encoding_chain(
+                wire.as_ptr(),
+                wire.len(),
+                layers.as_ptr(),
+                1,
+                10 * 1024 * 1024,
+                10,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, 106); /* DECOMP_CATEGORY_RATIO_EXCEEDED */
+        assert_eq!(result.error_category, 106);
+    }
+
+    #[test]
+    fn decode_encoding_chain_zero_layers_is_empty() {
+        let mut result: FFIChainDecodeResult = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            markdown_decode_encoding_chain(ptr::null(), 0, ptr::null(), 0, 1024, 100, &mut result)
+        };
+        assert_eq!(rc, 0);
+        assert!(result.output.is_null());
+        assert_eq!(result.output_len, 0);
+    }
+
+    #[test]
+    fn decode_encoding_chain_invalid_args() {
+        let layers = [0u8];
+        let mut result: FFIChainDecodeResult = unsafe { std::mem::zeroed() };
+        /* NULL layers with non-zero count. */
+        let rc = unsafe {
+            markdown_decode_encoding_chain(
+                ptr::null(),
+                0,
+                ptr::null(),
+                1,
+                1024,
+                100,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, 105); /* DECOMP_CATEGORY_INVALID_ARGS */
+        /* Unknown layer code. */
+        let bad = [9u8];
+        let rc = unsafe {
+            markdown_decode_encoding_chain(
+                ptr::null(),
+                0,
+                bad.as_ptr(),
+                1,
+                1024,
+                100,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, 105);
+        /* Depth overflow. */
+        let four = [0u8, 0, 0, 0];
+        let rc = unsafe {
+            markdown_decode_encoding_chain(
+                ptr::null(),
+                0,
+                four.as_ptr(),
+                4,
+                1024,
+                100,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, 105);
+        /* NULL result pointer. */
+        let rc = unsafe {
+            markdown_decode_encoding_chain(
+                ptr::null(),
+                0,
+                layers.as_ptr(),
+                1,
+                1024,
+                100,
+                ptr::null_mut(),
+            )
+        };
+        assert_eq!(rc, 105);
+    }
+
+    #[test]
+    fn chain_decode_result_init_zeroes() {
+        let mut result: FFIChainDecodeResult = unsafe { std::mem::zeroed() };
+        result.output = ptr::null_mut();
+        result.output_len = 7;
+        result.error_category = 99;
+        unsafe { markdown_chain_decode_result_init(&mut result) };
+        assert!(result.output.is_null());
+        assert_eq!(result.output_len, 0);
+        assert_eq!(result.error_category, 0);
+    }
+
+    #[test]
+    fn chain_decode_free_null_safe() {
+        unsafe { markdown_chain_decode_free(ptr::null_mut()) };
     }
 }

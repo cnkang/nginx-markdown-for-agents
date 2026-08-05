@@ -981,9 +981,8 @@ ngx_http_markdown_metrics_derive_values(
  * before including this header.
  */
 /*
- * Per-path walk removed in 0.9.2 — markdown_metrics_per_path directive deleted.
- * Default to disabled; only debug builds with MARKDOWN_METRICS_PER_PATH_DEBUG
- * may re-enable.
+ * Per-path walk removed in 0.9.2; default to disabled, only debug builds
+ * with MARKDOWN_METRICS_PER_PATH_DEBUG may re-enable.
  */
 #ifndef NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
 #define NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED  0

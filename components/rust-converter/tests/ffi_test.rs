@@ -80,8 +80,6 @@ fn ffi_test_default_options() -> MarkdownOptions {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
-        llm_provider: 0,
-        chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
         flush_threshold: 0,
@@ -165,8 +163,6 @@ fn test_basic_conversion() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
-        llm_provider: 0,
-        chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
         flush_threshold: 0,
@@ -468,8 +464,6 @@ fn test_null_pointer_handling() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
-        llm_provider: 0,
-        chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
         flush_threshold: 0,
@@ -576,8 +570,6 @@ fn test_multiple_conversions() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
-        llm_provider: 0,
-        chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
         flush_threshold: 0,
@@ -637,8 +629,6 @@ fn test_idempotent_free() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
-        llm_provider: 0,
-        chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
         flush_threshold: 0,
@@ -695,8 +685,6 @@ fn test_content_type_charset_detection() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
-        llm_provider: 0,
-        chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
         flush_threshold: 0,
@@ -754,8 +742,6 @@ fn test_gfm_flavor() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
-        llm_provider: 0,
-        chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
         flush_threshold: 0,
@@ -842,11 +828,9 @@ fn test_chars_per_token_affects_estimate() {
 
     let mut options_20 = ffi_test_default_options();
     options_20.estimate_tokens = 1;
-    options_20.chars_per_token_fixed = 20;
 
     let mut options_40 = ffi_test_default_options();
     options_40.estimate_tokens = 1;
-    options_40.chars_per_token_fixed = 40;
 
     let mut result_20 = MarkdownResult {
         markdown: ptr::null_mut(),
@@ -889,17 +873,20 @@ fn test_chars_per_token_affects_estimate() {
 
     assert_eq!(
         result_20.error_code, 0,
-        "chars_per_token=2.0 should succeed"
+        "fixed token estimation should succeed"
     );
     assert_eq!(
         result_40.error_code, 0,
-        "chars_per_token=4.0 should succeed"
+        "fixed token estimation should succeed"
     );
 
-    assert!(
-        result_20.token_estimate > result_40.token_estimate,
-        "chars_per_token_fixed=20 (ratio=2.0) should estimate more tokens than \
-         chars_per_token_fixed=40 (ratio=4.0), got {} vs {}",
+    /* The markdown_chars_per_token override was removed in 0.9.2 and its
+     * FFI field in the Wave 4 Task 8.13 freeze: every conversion uses the
+     * same fixed deterministic 4.0 ratio, so identical inputs produce
+     * identical token estimates. */
+    assert_eq!(
+        result_20.token_estimate, result_40.token_estimate,
+        "fixed 4.0 ratio must produce identical estimates, got {} vs {}",
         result_20.token_estimate,
         result_40.token_estimate,
     );
@@ -938,8 +925,6 @@ fn test_null_result_pointer() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
-        llm_provider: 0,
-        chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
         flush_threshold: 0,
@@ -1021,8 +1006,6 @@ fn test_memory_cleanup_with_all_fields() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
-        llm_provider: 0,
-        chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
         flush_threshold: 0,
@@ -1088,8 +1071,6 @@ fn test_memory_cleanup_error_case() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
-        llm_provider: 0,
-        chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
         flush_threshold: 0,
@@ -1156,8 +1137,6 @@ fn test_panic_catching_invalid_utf8() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
-        llm_provider: 0,
-        chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
         flush_threshold: 0,
@@ -1227,8 +1206,6 @@ fn test_zero_length_html() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
-        llm_provider: 0,
-        chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
         flush_threshold: 0,
@@ -1281,8 +1258,6 @@ fn test_zero_length_html_with_null_pointer() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
-        llm_provider: 0,
-        chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
         flush_threshold: 0,
@@ -1329,8 +1304,6 @@ fn test_null_content_type_with_zero_length() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
-        llm_provider: 0,
-        chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
         flush_threshold: 0,
@@ -1390,8 +1363,6 @@ fn test_error_state_consistency() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
-        llm_provider: 0,
-        chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
         flush_threshold: 0,
@@ -1735,8 +1706,6 @@ fn test_shared_option_field_semantics_aligned() {
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
         memory_budget: 0,
-        llm_provider: 0,
-        chars_per_token_fixed: 0,
         parse_timeout_ms: 30000,
         parser_memory_budget: 64 * 1024 * 1024,
         flush_threshold: 16384,
@@ -1759,8 +1728,6 @@ fn test_shared_option_field_semantics_aligned() {
         prune_selector_len: 0,
         prune_protection_selectors: ptr::null(),
         prune_protection_selector_len: 0,
-        llm_provider: 0,
-        chars_per_token_fixed: 0,
     };
 
     assert_eq!(
@@ -1790,14 +1757,6 @@ fn test_shared_option_field_semantics_aligned() {
     assert_eq!(
         md_opts.front_matter, st_opts.front_matter,
         "front_matter must match"
-    );
-    assert_eq!(
-        md_opts.llm_provider, st_opts.llm_provider,
-        "llm_provider must match"
-    );
-    assert_eq!(
-        md_opts.chars_per_token_fixed, st_opts.chars_per_token_fixed,
-        "chars_per_token_fixed must match"
     );
 
     let md_prune_on = md_opts.prune_noise != 0;

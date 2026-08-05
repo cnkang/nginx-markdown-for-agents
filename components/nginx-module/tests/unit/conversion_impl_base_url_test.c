@@ -110,10 +110,14 @@ struct FFIBaseUrlInput {
     const struct MarkdownTrustedProxies *trusted;
     const uint8_t                       *forwarded;
     uintptr_t                            forwarded_len;
+    const uint8_t                       *x_forwarded_for;
+    uintptr_t                            x_forwarded_for_len;
     const uint8_t                       *x_forwarded_proto;
     uintptr_t                            x_forwarded_proto_len;
     const uint8_t                       *x_forwarded_host;
     uintptr_t                            x_forwarded_host_len;
+    const uint8_t                       *x_forwarded_port;
+    uintptr_t                            x_forwarded_port_len;
     const uint8_t                       *host;
     uintptr_t                            host_len;
     const uint8_t                       *direct_scheme;
@@ -1098,7 +1102,7 @@ test_base_url_marshals_request_fields(void)
     ngx_http_request_t            r;
     ngx_http_markdown_conf_t      conf;
     ngx_http_markdown_main_conf_t main_conf;
-    ngx_table_elt_t               headers[4];
+    ngx_table_elt_t               headers[6];
     ngx_str_t                     base_url;
     struct MarkdownTrustedProxies *handle;
 
@@ -1124,12 +1128,18 @@ test_base_url_marshals_request_fields(void)
     set_str(&headers[1].key, "Forwarded");
     set_str(&headers[1].value, "host=fwd.example.com;proto=https");
     headers[1].hash = 1;
-    set_str(&headers[2].key, "X-Forwarded-Proto");
-    set_str(&headers[2].value, "https");
+    set_str(&headers[2].key, "X-Forwarded-For");
+    set_str(&headers[2].value, "203.0.113.9");
     headers[2].hash = 1;
-    set_str(&headers[3].key, "X-Forwarded-Host");
-    set_str(&headers[3].value, "xfwd.example.com");
+    set_str(&headers[3].key, "X-Forwarded-Proto");
+    set_str(&headers[3].value, "https");
     headers[3].hash = 1;
+    set_str(&headers[4].key, "X-Forwarded-Host");
+    set_str(&headers[4].value, "xfwd.example.com");
+    headers[4].hash = 1;
+    set_str(&headers[5].key, "X-Forwarded-Port");
+    set_str(&headers[5].value, "443");
+    headers[5].hash = 1;
     set_single_header_list(&r, headers, ARRAY_SIZE(headers));
 
     r.loc_conf = &conf;
@@ -1171,6 +1181,11 @@ test_base_url_marshals_request_fields(void)
     TEST_ASSERT(g_captured_base_url_input.x_forwarded_host_len
             == sizeof("xfwd.example.com") - 1,
         "X-Forwarded-Host must be marshaled");
+    TEST_ASSERT(g_captured_base_url_input.x_forwarded_for_len
+            == sizeof("203.0.113.9") - 1,
+        "X-Forwarded-For must be marshaled");
+    TEST_ASSERT(g_captured_base_url_input.x_forwarded_port_len == 3,
+        "X-Forwarded-Port must be marshaled");
     TEST_ASSERT(g_captured_base_url_input.host_len
             == sizeof("origin.example.com") - 1,
         "Host must be marshaled from headers_in.server");

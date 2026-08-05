@@ -787,7 +787,7 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
      */
     if (conf->decompress.auto_decompress && conf->decompress.max_size == 0) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-            "\"markdown_decompress_max_size\" must be greater "
+            "\"decompressed_size\" must be greater "
             "than 0 when auto_decompress is enabled");
         return NGX_CONF_ERROR;
     }

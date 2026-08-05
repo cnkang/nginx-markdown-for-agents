@@ -11,7 +11,7 @@
 //!
 //! # Duplicate Profile Detection
 //!
-//! A duplicate `markdown_profile` directive in the same NGINX context is
+//! A duplicate profile specification in the same NGINX context is
 //! detected at C-side directive parse time: the handler returns
 //! `NGX_CONF_ERROR` when `profile` is already set. The Rust function
 //! [`detect_conflicts`] therefore receives at most one profile and does not

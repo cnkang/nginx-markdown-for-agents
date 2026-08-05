@@ -2,21 +2,42 @@
 
 ## Overview
 
-The `TokenEstimator` provides a fast, character-based heuristic for estimating token counts in Markdown text. This is useful for LLM context window planning when converting HTML to Markdown.
+The `TokenEstimator` provides a fast, **deterministic** character-based heuristic for estimating token counts in Markdown text. This is useful for LLM context window planning when converting HTML to Markdown.
+
+The estimate is exposed by the NGINX module as the `X-Markdown-Tokens` response header (decimal integer token count) when `markdown_token_estimate on;` is configured. The module does **not** use a BPE tokenizer and does not model any specific LLM provider.
 
 ## Implementation Details
 
 ### Algorithm
 
-The estimator uses a simple formula:
+The estimator uses a fixed formula:
+
 ```
 estimated_tokens = ceil(character_count / chars_per_token)
 ```
 
-- **Default**: 4.0 characters per token (reasonable for English text)
-- **Configurable**: Can be adjusted for different languages or use cases
-- **Fast**: No tokenizer dependency, just character counting
-- **Approximate**: Not a replacement for actual tokenization
+- **Default**: 4.0 characters per token (typical for English prose) — a fixed
+  built-in constant since 0.9.2; no provider-derived defaults remain
+- **Deterministic**: identical input always yields identical output; no
+  randomness, no language detection, no model-specific behavior
+- **Fast**: no tokenizer dependency, just character counting
+- **Approximate**: not a replacement for actual tokenization
+
+### Accuracy (quantified error margin)
+
+The heuristic's accuracy depends on content type. As a rule of thumb with the
+4.0 default:
+
+| Content | Typical error |
+|---------|---------------|
+| English prose | ±20% (worst case ±30%) |
+| Code-heavy content | overestimated by up to ~2× (~1.5–2 chars/token) |
+| CJK text | underestimated by up to ~2× (~1.5–2 chars/char) |
+| Mixed-language documents | within ±50% in practice |
+
+Use the estimate when a quick budget upper bound suffices (context-window
+budget checks, progress logging) — never as an exact tokenizer-equivalent
+count.
 
 ### API
 
@@ -28,10 +49,10 @@ pub struct TokenEstimator {
 impl TokenEstimator {
     // Create with default settings (4.0 chars/token)
     pub fn new() -> Self
-    
+
     // Create with custom chars_per_token
     pub fn with_chars_per_token(chars_per_token: f32) -> Self
-    
+
     // Estimate token count for given Markdown text
     pub fn estimate(&self, markdown: &str) -> u32
 }
@@ -77,6 +98,17 @@ let tokens = estimator.estimate(&markdown);
 println!("Markdown will use approximately {} tokens", tokens);
 ```
 
+## NGINX Integration
+
+- Directive: `markdown_token_estimate on|off` (default off)
+- Response header: `X-Markdown-Tokens: <decimal integer>`
+- Units: tokens, integer, decimal representation
+- The estimate is computed with the fixed 4.0 chars/token heuristic (no
+  operator-tunable ratio since the `markdown_chars_per_token` directive was
+  removed in 0.9.2)
+- When `markdown_token_estimate off;`, no estimate is computed and no header
+  is emitted (zero conversion overhead)
+
 ## Test Coverage
 
 The implementation includes comprehensive unit tests covering:
@@ -100,48 +132,48 @@ All tests pass successfully.
 
 1. **CJK Languages**: Character-based estimation is less accurate for Chinese, Japanese, Korean
    - Fewer spaces, different tokenization patterns
-   - May need adjusted chars_per_token value
+   - Underestimated by up to ~2×
 
 2. **Emoji and Unicode**: May skew estimates
    - Single emoji = 1 character but may be multiple tokens
    - Consider this when estimating emoji-heavy content
 
 3. **Code Blocks**: Different tokenization patterns
-   - Code may tokenize differently than prose
+   - Code tokenizes at ~1.5–2 chars/token, so the default overestimates
    - Estimate is still reasonable for mixed content
-
-4. **Model-Specific**: Token counts vary by model
-   - GPT-4 vs Claude vs Llama have different tokenizers
-   - This is a general approximation
 
 ### Recommendations
 
-- Use default 4.0 for English prose
-- Consider 3.0 for conservative estimates (more tokens)
-- Consider 5.0 for optimistic estimates (fewer tokens)
-- For CJK content, consider 2.5-3.0
-- For code-heavy content, consider 3.5
+- Use the fixed 4.0 default for English prose
+- For CJK- or code-heavy workloads, treat the estimate as an upper/lower
+  bound per the error-margin table above rather than a precise count
+- The Rust API remains configurable (`with_chars_per_token`) for
+  programmatic callers that embed the converter directly
 
 ## Requirements Satisfied
 
 - ✅ FR-15.1: Estimate token count using character-based algorithm
-- ✅ Default: 4 characters per token
-- ✅ Configurable chars_per_token
-- ✅ Returns u32 for HTTP header compatibility
+- ✅ Fixed default: 4 characters per token (no provider-derived defaults)
+- ✅ Deterministic: identical input → identical output
+- ✅ No BPE tokenizer / no provider branding
+- ✅ Returns u32 for HTTP header compatibility (decimal integer)
 - ✅ Fast computation (no tokenizer dependency)
+- ✅ Zero overhead when disabled (directive-gated)
 - ✅ Comprehensive test coverage
 
-## Future Enhancements (Out of Scope for v1)
+## Future Enhancements (Out of Scope)
 
 - Language detection for automatic adjustment
 - Token breakdown by section (headers, content, code)
-- Model-specific estimation profiles
 - Actual tokenizer integration for precise counts
 
+Provider-specific estimation profiles are **permanently out of scope**:
+the estimator is a fixed, deterministic heuristic by design (0.9.2 cleanup).
 
 ## Document Updates
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-05 | Agent | Task 8.9: fixed deterministic heuristic (no provider brands), quantified error margin table, explicit no-BPE-tokenizer statement, X-Markdown-Tokens integration section, provider profiles marked permanently out of scope |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

@@ -201,8 +201,8 @@ impl EffectiveConfig {
 /// Merge order: `builtin → profile defaults → explicit overrides`.
 ///
 /// When `profile` is `None`, the built-in Config V2 defaults apply directly
-/// (no profile layer). This is the 0.9.0 behavior when no `markdown_profile`
-/// directive is present.
+/// (no profile layer). This is the 0.9.0 behavior when no profile is
+/// configured.
 ///
 /// # Arguments
 ///

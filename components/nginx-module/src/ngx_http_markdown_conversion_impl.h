@@ -68,8 +68,10 @@ ngx_http_markdown_const_strncasecmp(const u_char *s1, const u_char *s2,
  * Implements: base_url construction via the Rust trusted-proxy decision
  */
 static u_char ngx_http_markdown_hdr_forwarded[] = "Forwarded";
+static u_char ngx_http_markdown_hdr_x_forwarded_for[] = "X-Forwarded-For";
 static u_char ngx_http_markdown_hdr_x_forwarded_proto[] = "X-Forwarded-Proto";
 static u_char ngx_http_markdown_hdr_x_forwarded_host[] = "X-Forwarded-Host";
+static u_char ngx_http_markdown_hdr_x_forwarded_port[] = "X-Forwarded-Port";
 
 /* Maximum scheme://host authority length written by the FFI decision. */
 #define NGX_HTTP_MARKDOWN_BASE_AUTHORITY_MAX  512
@@ -327,8 +329,10 @@ ngx_http_markdown_decide_base_authority(ngx_http_request_t *r,
 {
     const ngx_http_markdown_main_conf_t  *mmcf;
     ngx_str_t                             forwarded;
+    ngx_str_t                             x_forwarded_for;
     ngx_str_t                             x_forwarded_proto;
     ngx_str_t                             x_forwarded_host;
+    ngx_str_t                             x_forwarded_port;
     FFIBaseUrlInput                       input;
     FFIBaseUrlDecision                    decision;
     ngx_int_t                              header_rc;
@@ -339,6 +343,14 @@ ngx_http_markdown_decide_base_authority(ngx_http_request_t *r,
     header_rc = ngx_http_markdown_collect_request_header_values(
         r, ngx_http_markdown_hdr_forwarded,
         sizeof(ngx_http_markdown_hdr_forwarded) - 1, &forwarded);
+    if (header_rc == NGX_ERROR) {
+        return NGX_ERROR;
+    }
+
+    header_rc = ngx_http_markdown_collect_request_header_values(
+        r, ngx_http_markdown_hdr_x_forwarded_for,
+        sizeof(ngx_http_markdown_hdr_x_forwarded_for) - 1,
+        &x_forwarded_for);
     if (header_rc == NGX_ERROR) {
         return NGX_ERROR;
     }
@@ -355,6 +367,14 @@ ngx_http_markdown_decide_base_authority(ngx_http_request_t *r,
         r, ngx_http_markdown_hdr_x_forwarded_host,
         sizeof(ngx_http_markdown_hdr_x_forwarded_host) - 1,
         &x_forwarded_host);
+    if (header_rc == NGX_ERROR) {
+        return NGX_ERROR;
+    }
+
+    header_rc = ngx_http_markdown_collect_request_header_values(
+        r, ngx_http_markdown_hdr_x_forwarded_port,
+        sizeof(ngx_http_markdown_hdr_x_forwarded_port) - 1,
+        &x_forwarded_port);
     if (header_rc == NGX_ERROR) {
         return NGX_ERROR;
     }
@@ -381,6 +401,10 @@ ngx_http_markdown_decide_base_authority(ngx_http_request_t *r,
         input.forwarded = forwarded.data;
         input.forwarded_len = forwarded.len;
     }
+    if (x_forwarded_for.len > 0) {
+        input.x_forwarded_for = x_forwarded_for.data;
+        input.x_forwarded_for_len = x_forwarded_for.len;
+    }
     if (x_forwarded_proto.len > 0) {
         input.x_forwarded_proto = x_forwarded_proto.data;
         input.x_forwarded_proto_len = x_forwarded_proto.len;
@@ -388,6 +412,10 @@ ngx_http_markdown_decide_base_authority(ngx_http_request_t *r,
     if (x_forwarded_host.len > 0) {
         input.x_forwarded_host = x_forwarded_host.data;
         input.x_forwarded_host_len = x_forwarded_host.len;
+    }
+    if (x_forwarded_port.len > 0) {
+        input.x_forwarded_port = x_forwarded_port.data;
+        input.x_forwarded_port_len = x_forwarded_port.len;
     }
     if (r->headers_in.server.len > 0) {
         input.host = r->headers_in.server.data;
@@ -798,17 +826,6 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
         (NGX_HTTP_MARKDOWN_STREAM_FLUSH_MIN_FIXED > UINT32_MAX)
             ? UINT32_MAX
             : (uint32_t) NGX_HTTP_MARKDOWN_STREAM_FLUSH_MIN_FIXED;
-
-    /* llm_provider removed in 0.9.2; always pass default (0) */
-    options->llm_provider = 0;
-
-    /*
-     * chars_per_token_fixed: always 0 (use built-in provider default).
-     * The markdown_chars_per_token directive was removed in 0.9.2;
-     * the FFI field is retained temporarily for ABI layout stability
-     * until Wave 4 task 8.13 performs the final FFI freeze.
-     */
-    options->chars_per_token_fixed = 0;
 
     /*
      * Parse-specific timeout and memory budget.
