@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import sys
 from pathlib import Path
@@ -49,8 +48,13 @@ LOADER_ABI_FUNCTIONS = frozenset({
     "markdown_abi_layout_fingerprint",
 })
 
-# Functions that provide initialization/free lifecycle pairs are always
-# considered production-called if their paired counterpart is production-called.
+# Related function pairs used for production-call inference.
+#
+# If a paired counterpart is production-called, the other side is also
+# considered production-called even when it has no direct callsite in
+# the scanned sources.  These are not strictly init/free pairs; they
+# include functional counterparts such as init→convert, parse→free,
+# and action-policy→handler mappings.
 LIFECYCLE_PAIRS = {
     "markdown_converter_new": "markdown_converter_free",
     "markdown_converter_free": "markdown_converter_new",
@@ -85,7 +89,8 @@ CALLSITE_RE = re.compile(r"\b(markdown_\w+)\s*\(")
 FN_POINTER_RE = re.compile(r"\b(markdown_\w+)\b")
 
 # Conditional compilation guard pattern.
-# Matches: #ifdef X, #if defined(X), #if defined X, #ifndef X
+# Matches: #ifdef X, #if defined(X), #if defined X, #ifndef X.
+# Note: for compound expressions, this captures only the first macro/guard.
 IFDEF_RE = re.compile(
     r"^\s*#\s*if(?:n?def)?\s+(?:defined\s*\(\s*)?(\w+)", re.MULTILINE
 )
@@ -236,13 +241,17 @@ def classify_exports(
             callsite_count = 0
             callsite_files = []
         else:
-            # Check lifecycle pair: if paired function is production-called,
-            # then this function is also production-called (init/free pairs).
+            # Check lifecycle pair: if the paired counterpart is
+            # production-called, infer this function is also
+            # production-called and reuse the paired callsite evidence.
             paired = LIFECYCLE_PAIRS.get(name)
-            if paired and paired in production_callsites and production_callsites[paired]:
+            paired_callsites = production_callsites.get(paired, []) if paired else []
+            if paired and paired_callsites:
                 classification = "production_called"
-                callsite_count = 0
-                callsite_files = []
+                callsite_count = len(paired_callsites)
+                callsite_files = sorted(
+                    {cs["file"] for cs in paired_callsites}
+                )
             else:
                 classification = "dead"
                 callsite_count = 0
