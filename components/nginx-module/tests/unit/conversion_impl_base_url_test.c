@@ -1195,6 +1195,62 @@ test_base_url_marshals_request_fields(void)
 }
 
 /*
+ * Test: an empty Forwarded field remains present across the C/FFI boundary.
+ *
+ * Spec 62 requires any present Forwarded field, including an empty one, to
+ * suppress the X-Forwarded fallback after Rust classifies it as malformed.
+ */
+static void
+test_base_url_preserves_empty_forwarded_presence(void)
+{
+    ngx_http_request_t            r;
+    ngx_http_markdown_conf_t      conf;
+    ngx_http_markdown_main_conf_t main_conf;
+    ngx_table_elt_t               headers[2];
+    ngx_str_t                     base_url;
+
+    TEST_SUBSECTION("base_url preserves empty Forwarded presence");
+
+    reset_base_url_stub();
+    init_request(&r);
+    memset(&conf, 0, sizeof(conf));
+    memset(&main_conf, 0, sizeof(main_conf));
+
+    set_str(&r.connection->addr_text, "10.1.2.3");
+    set_str(&r.uri, "/articles/page.html");
+    set_str(&r.headers_in.server, "origin.example.com");
+
+    memset(headers, 0, sizeof(headers));
+    set_str(&headers[0].key, "Forwarded");
+    headers[0].hash = 1;
+    headers[0].value.data = NULL;
+    headers[0].value.len = 0;
+    set_str(&headers[1].key, "X-Forwarded-For");
+    set_str(&headers[1].value, "203.0.113.9");
+    headers[1].hash = 1;
+    set_single_header_list(&r, headers, ARRAY_SIZE(headers));
+
+    r.loc_conf = &conf;
+    r.main_conf = (void *) &main_conf;
+
+    TEST_ASSERT(ngx_http_markdown_construct_base_url(&r, r.pool, &base_url)
+                    == NGX_OK,
+                "construct_base_url should accept the captured stub result");
+    free(base_url.data);
+
+    TEST_ASSERT(g_captured_base_url_input.forwarded != NULL,
+        "present empty Forwarded must use a non-NULL FFI pointer");
+    TEST_ASSERT(g_captured_base_url_input.forwarded_len == 0,
+        "empty Forwarded must retain its zero length");
+    TEST_ASSERT(g_captured_base_url_input.x_forwarded_for != NULL
+        && g_captured_base_url_input.x_forwarded_for_len
+            == sizeof("203.0.113.9") - 1,
+        "X-Forwarded-For must remain marshaled alongside empty Forwarded");
+
+    TEST_PASS("empty Forwarded presence crosses the FFI boundary");
+}
+
+/*
  * Test: a Unix-domain socket peer is marshaled as is_unix_socket = 1.
  *
  * Validates spec 47 Requirement 2.1 (Unix socket handling).
@@ -2350,6 +2406,7 @@ main(void)
     printf("========================================\n");
 
     test_base_url_marshals_request_fields();
+    test_base_url_preserves_empty_forwarded_presence();
     test_base_url_unix_socket_flag();
     test_base_url_not_configured_marshaled();
     test_base_url_decision_failure_propagates();

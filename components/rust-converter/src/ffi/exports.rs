@@ -806,17 +806,29 @@ pub unsafe extern "C" fn markdown_decide_base_url(
         let inp = unsafe { &*input };
 
         let source_ip = unsafe { optional_str(inp.source_ip, inp.source_ip_len) }.unwrap_or("");
-        let forwarded = unsafe { optional_str(inp.forwarded, inp.forwarded_len) };
+        let forwarded = unsafe {
+            optional_str_present(inp.forwarded, inp.forwarded_len)
+        };
         let x_forwarded_for =
-            unsafe { optional_str(inp.x_forwarded_for, inp.x_forwarded_for_len) };
+            unsafe {
+                optional_str_present(inp.x_forwarded_for, inp.x_forwarded_for_len)
+            };
         let x_forwarded_proto =
-            unsafe { optional_str(inp.x_forwarded_proto, inp.x_forwarded_proto_len) };
+            unsafe {
+                optional_str_present(inp.x_forwarded_proto, inp.x_forwarded_proto_len)
+            };
         let x_forwarded_host =
-            unsafe { optional_str(inp.x_forwarded_host, inp.x_forwarded_host_len) };
+            unsafe {
+                optional_str_present(inp.x_forwarded_host, inp.x_forwarded_host_len)
+            };
         let x_forwarded_port =
-            unsafe { optional_str(inp.x_forwarded_port, inp.x_forwarded_port_len) };
-        let host = unsafe { optional_str(inp.host, inp.host_len) };
-        let direct_scheme = unsafe { optional_str(inp.direct_scheme, inp.direct_scheme_len) };
+            unsafe {
+                optional_str_present(inp.x_forwarded_port, inp.x_forwarded_port_len)
+            };
+        let host = unsafe { optional_str_present(inp.host, inp.host_len) };
+        let direct_scheme = unsafe {
+            optional_str_present(inp.direct_scheme, inp.direct_scheme_len)
+        };
 
         let cidrs: &[crate::forwarded::Cidr] = if inp.trusted.is_null() {
             &[]
@@ -913,6 +925,21 @@ pub unsafe extern "C" fn markdown_header_plan_free(plan: *mut FFIHeaderPlan) {
 unsafe fn optional_str<'a>(ptr: *const u8, len: usize) -> Option<&'a str> {
     if ptr.is_null() || len == 0 {
         return None;
+    }
+    std::str::from_utf8(unsafe { std::slice::from_raw_parts(ptr, len) }).ok()
+}
+
+/// Convert a C pointer + length pair while preserving a present empty value.
+///
+/// This variant distinguishes a NULL pointer (absent field) from a non-NULL
+/// zero-length pointer (present but empty field), as required by the trusted
+/// proxy header precedence contract.
+unsafe fn optional_str_present<'a>(ptr: *const u8, len: usize) -> Option<&'a str> {
+    if ptr.is_null() {
+        return None;
+    }
+    if len == 0 {
+        return Some("");
     }
     std::str::from_utf8(unsafe { std::slice::from_raw_parts(ptr, len) }).ok()
 }
@@ -1179,8 +1206,8 @@ pub unsafe extern "C" fn markdown_decomp_result_init(result: *mut FFIDecompResul
 /// # Return Value
 ///
 /// Returns one of the `ENCODING_CHAIN_*` classification constants, or
-/// `DECOMP_CATEGORY_INVALID_ARGS` (105) for NULL/empty input with an
-/// invalid length.
+/// `DECOMP_CATEGORY_INVALID_ARGS` (105) when a NULL pointer is paired with a
+/// non-zero length.
 ///
 /// # Safety
 ///
@@ -1215,8 +1242,10 @@ pub unsafe extern "C" fn markdown_parse_encoding_chain(
     };
 
     if value_slice.is_empty() {
-        /* No Content-Encoding value: valid, no layers. */
-        return ENCODING_CHAIN_VALID;
+        /* The C caller invokes this only for a present field.  A present
+         * empty field is malformed grammar; an absent field never crosses
+         * this boundary because the C collector returns NGX_DECLINED. */
+        return ENCODING_CHAIN_MALFORMED;
     }
 
     let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
@@ -2023,6 +2052,43 @@ mod tests {
     }
 
     #[test]
+    fn decide_base_url_empty_forwarded_blocks_xff_fallback() {
+        use crate::forwarded::{BaseUrlReason, BaseUrlSource};
+
+        let handle = markdown_trusted_proxies_new();
+        assert_eq!(push_cidr(handle, "10.0.0.0/8"), TRUSTED_PROXIES_PUSH_OK);
+
+        let src = b"10.1.2.3";
+        let empty_forwarded = b"";
+        let xff = b"203.0.113.9";
+        let host = b"origin.example.com";
+        let mut input = empty_base_url_input();
+        input.source_ip = src.as_ptr();
+        input.source_ip_len = src.len();
+        input.trusted = handle;
+        input.trusted_configured = 1;
+        input.forwarded = empty_forwarded.as_ptr();
+        input.forwarded_len = empty_forwarded.len();
+        input.x_forwarded_for = xff.as_ptr();
+        input.x_forwarded_for_len = xff.len();
+        input.host = host.as_ptr();
+        input.host_len = host.len();
+
+        let mut buf = [0u8; 128];
+        let mut decision = empty_decision();
+        let rc = unsafe {
+            markdown_decide_base_url(&input, buf.as_mut_ptr(), buf.len(), &mut decision)
+        };
+        assert_eq!(rc, DECIDE_BASE_URL_OK);
+        let url = std::str::from_utf8(&buf[..decision.base_url_len]).unwrap();
+        assert_eq!(url, "http://origin.example.com");
+        assert_eq!(decision.reason, BaseUrlReason::ForwardedMalformed.as_u8());
+        assert_eq!(decision.source, BaseUrlSource::Host.as_u8());
+
+        unsafe { markdown_trusted_proxies_free(handle) };
+    }
+
+    #[test]
     fn decide_base_url_untrusted_source_ignores_forwarded() {
         let handle = markdown_trusted_proxies_new();
         assert_eq!(push_cidr(handle, "10.0.0.0/8"), TRUSTED_PROXIES_PUSH_OK);
@@ -2639,10 +2705,10 @@ mod tests {
         let classification =
             unsafe { markdown_parse_encoding_chain(ptr::null(), 5, &mut result) };
         assert_eq!(classification, DECOMP_CATEGORY_INVALID_ARGS as u8);
-        /* NULL with zero length: no encoding value, valid empty chain. */
+        /* NULL with zero length represents a present empty field here. */
         let classification =
             unsafe { markdown_parse_encoding_chain(ptr::null(), 0, &mut result) };
-        assert_eq!(classification, ENCODING_CHAIN_VALID);
+        assert_eq!(classification, ENCODING_CHAIN_MALFORMED);
     }
 
     #[test]

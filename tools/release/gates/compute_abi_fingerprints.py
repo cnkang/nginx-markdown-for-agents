@@ -3,8 +3,10 @@
 
 Formulas (documented in components/rust-converter/src/ffi/abi.rs):
 
-- MARKDOWN_HEADER_HASH: SHA-256 of the generated header file bytes,
-  truncated to the first 8 bytes interpreted big-endian.
+- MARKDOWN_HEADER_HASH: SHA-256 of the generated header bytes after replacing
+  the numeric MARKDOWN_HEADER_HASH macro value with the fixed spelling 0ull,
+  truncated to the first 8 bytes interpreted big-endian.  Normalizing the
+  self-referential field makes the fingerprint reproducible.
 - MARKDOWN_SYMBOL_SET_HASH: SHA-256 of the sorted newline-joined
   `#[unsafe(no_mangle)] pub extern "C" fn` export names (excluding
   `#[cfg]`-gated duplicates and helpers), truncated to the first 8 bytes.
@@ -29,6 +31,9 @@ ABI_PATH = REPO_ROOT / "components" / "rust-converter" / "src" / "ffi" / "abi.rs
 STREAMING_PATH = REPO_ROOT / "components" / "rust-converter" / "src" / "ffi" / "streaming.rs"
 EXPORTS_PATH = REPO_ROOT / "components" / "rust-converter" / "src" / "ffi" / "exports.rs"
 HEADER_PATH = REPO_ROOT / "components" / "rust-converter" / "include" / "markdown_converter.h"
+HEADER_HASH_DEFINE = re.compile(
+    rb"(#define\s+MARKDOWN_HEADER_HASH\s+)[0-9]+(?:ull|ULL)?"
+)
 
 
 def truncate8(digest: bytes) -> int:
@@ -37,7 +42,13 @@ def truncate8(digest: bytes) -> int:
 
 def header_hash() -> int:
     raw = HEADER_PATH.read_bytes()
-    return truncate8(hashlib.sha256(raw).digest())
+    # The digest cannot include its own numeric value: replacing it with a
+    # fixed spelling makes the header fingerprint reproducible and gives the
+    # generated constant a stable value.
+    canonical = HEADER_HASH_DEFINE.sub(rb"\g<1>0ull", raw, count=1)
+    if canonical == raw:
+        raise ValueError("MARKDOWN_HEADER_HASH definition is missing")
+    return truncate8(hashlib.sha256(canonical).digest())
 
 
 def symbol_set_hash() -> int:

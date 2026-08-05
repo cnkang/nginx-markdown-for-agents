@@ -145,8 +145,6 @@ test_markdown_options_field_access(void)
     opts.prune_protection_selectors = NULL;
     opts.prune_protection_selector_len = 0;
     opts.memory_budget = 0;
-    opts.llm_provider = 0;
-    opts.chars_per_token_fixed = 0;
     opts.parse_timeout_ms = 0;
     opts.parser_memory_budget = 0;
 
