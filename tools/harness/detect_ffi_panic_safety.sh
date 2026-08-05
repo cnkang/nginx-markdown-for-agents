@@ -354,6 +354,14 @@ while IFS= read -r rs_file; do
                     version_accessor_pattern = "^pub(unsafe)?extern\"C\"fn" func_name "\\(\\)->[A-Za-z_][A-Za-z0-9_:]*\\{(return)?([A-Za-z_][A-Za-z0-9_]*::)*[A-Z][A-Z0-9_]*;?\\}$"
                     is_exact_version_accessor = (normalized_code ~ version_accessor_pattern)
 
+                    # The 4-tuple ABI handshake accessors (numeric version,
+                    # header hash, symbol-set hash, layout fingerprint) are
+                    # panic-free constant reads and classify as
+                    # safe_static_lookup under the same exact-const-body
+                    # guard as the version accessor.
+                    is_abi_tuple_accessor = (func_name ~ /_version$|_hash$|_fingerprint$/)
+                    is_exact_const_accessor = (is_exact_version_accessor)
+
                     # Classify
                     if (has_catch) {
                         category = "direct_catch"
@@ -366,6 +374,8 @@ while IFS= read -r rs_file; do
                     } else if (func_name ~ /_str$/ && !has_validate && !has_alloc && has_static_read) {
                         category = "safe_static_lookup"
                     } else if (func_name ~ /_metric_key$/ && !has_validate && !has_alloc && has_static_read) {
+                        category = "safe_static_lookup"
+                    } else if (is_abi_tuple_accessor && is_exact_const_accessor) {
                         category = "safe_static_lookup"
                     } else if (func_name ~ /_version$/ && is_exact_version_accessor) {
                         category = "safe_static_lookup"

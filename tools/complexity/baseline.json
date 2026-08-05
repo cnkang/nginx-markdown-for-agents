@@ -63,6 +63,23 @@
       "length": 72,
       "params": 1,
       "cognitive_complexity": 28
+    },
+    {
+      "file": "components/rust-converter/src/streaming_lifecycle/plan.rs",
+      "function": "lookup_plan_transition",
+      "ccn": 2,
+      "length": 262,
+      "params": 3
+    },
+    {
+      "file": "tools/harness/detect_ffi_dead_exports.py",
+      "function": "scan_c_callsites",
+      "cognitive_complexity": 25
+    },
+    {
+      "file": "tools/harness/detect_ffi_dead_exports.py",
+      "function": "classify_exports",
+      "cognitive_complexity": 29
     }
   ]
 }
