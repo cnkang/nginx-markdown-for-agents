@@ -209,6 +209,15 @@ class TestCheckerAdversarialInputs:
         assert rc == 1
         assert count == 1
 
+    def test_binary_multilayer_fuzz_seed_is_excluded(self) -> None:
+        checker = load_checker_module()
+        assert checker._should_skip_path(
+            Path(
+                "components/rust-converter/fuzz/corpus/"
+                "fuzz_multilayer_decode/basic.txt"
+            )
+        )
+
 
 class TestSonarConfiguration:
     """Intentional binary fixtures remain test-only exclusions."""

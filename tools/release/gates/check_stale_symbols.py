@@ -36,6 +36,7 @@ STALE_FIELDS = {
 # Paths allowed to contain stale symbols (migration docs, changelogs, ADRs, and rollout guides)
 WHITELIST_PATH_PREFIXES = (
     "docs/guides/MIGRATION-",
+    "docs/guides/0.9.2-breaking-changes.md",
     "docs/guides/CONFIGURATION.md",
     "docs/guides/ROLLOUT_COOKBOOK.md",
     "docs/guides/LARGE_RESPONSE_ROLLOUT.md",

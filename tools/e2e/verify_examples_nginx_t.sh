@@ -104,6 +104,19 @@ if [[ -n "${MODULE_SO}" && ! -f "${MODULE_SO}" ]]; then
   exit 2
 fi
 
+# GNU sed and BSD sed use different in-place-edit arguments. Keep the
+# verification wrapper runnable on both the Linux CI runner and macOS hosts.
+sed_in_place() {
+  local expression="$1"
+  local target="$2"
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    sed -i '' -E "${expression}" "${target}"
+  else
+    sed -i -E "${expression}" "${target}"
+  fi
+  return 0
+}
+
 # --- Runtime prefix ---
 RUNTIME_DIR="$(mktemp -d "${TMPDIR:-/tmp}/nginx-markdown-config-test.XXXXXX")"
 mkdir -p "${RUNTIME_DIR}/logs"
@@ -161,9 +174,9 @@ sandbox_conf() {
     -e 's|proxy_cache_path /var/cache/nginx/proxy|proxy_cache_path cache/proxy|' \
     "${src}" > "${dst}"
   if [[ -n "${MODULE_SO}" ]]; then
-    sed -i '' -E "s|^([[:space:]]*)load_module[[:space:]]+[^;]*;|\1load_module ${MODULE_SO};|" "${dst}"
+    sed_in_place "s|^([[:space:]]*)load_module[[:space:]]+[^;]*;|\1load_module ${MODULE_SO};|" "${dst}"
   else
-    sed -i '' -e '/^[[:space:]]*load_module[[:space:]]/s/^/#/' "${dst}"
+    sed_in_place '/^[[:space:]]*load_module[[:space:]]/s/^/#/' "${dst}"
   fi
   return 0
 }
@@ -342,13 +355,13 @@ if [[ -f "${CONFIGMAP_YAML}" ]]; then
     echo "}"
   } > "${PREPARED_CONF}"
   if [[ -n "${MODULE_SO}" ]]; then
-    sed -i '' -E "s|^([[:space:]]*)load_module[[:space:]]+[^;]*;|\1load_module ${MODULE_SO};|" \
+    sed_in_place "s|^([[:space:]]*)load_module[[:space:]]+[^;]*;|\1load_module ${MODULE_SO};|" \
       "${PREPARED_CONF}"
     if has_load_module "${PREPARED_CONF}"; then
       PREPARED_HANDLE=1
     fi
   else
-    sed -i '' -e '/^[[:space:]]*load_module[[:space:]]/s/^/#/' \
+    sed_in_place '/^[[:space:]]*load_module[[:space:]]/s/^/#/' \
       "${PREPARED_CONF}"
   fi
   check_conf "kubernetes/configmap (data section)" pass || true
