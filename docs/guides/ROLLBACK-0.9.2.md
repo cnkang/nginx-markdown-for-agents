@@ -3,9 +3,12 @@
 ## Overview
 
 This guide covers rolling back the 0.9.2 development candidate to a prior
-release. The candidate is intended to be non-breaking and has no known
-irreversible changes, but publication and artifact availability are separate
-release gates.
+release. 0.9.2 is a breaking release (see
+[0.9.2-breaking-changes.md](0.9.2-breaking-changes.md)), but it has no
+irreversible changes: rolling back the module binary restores the 0.9.1
+directive surface, and configurations migrated to the 25-directive contract
+remain valid on 0.9.1 only when they avoid 0.9.2-removed semantics.
+Publication and artifact availability are separate release gates.
 
 | Target | Section |
 |--------|---------|
