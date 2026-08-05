@@ -741,6 +741,7 @@ ngx_http_markdown_metrics_to_v1(
         return;
     }
 
+    /* Request outcomes: subtract fail-open responses from total failures. */
     v1->requests.converted = snapshot->conversions_succeeded;
     v1->requests.skipped_not_eligible = snapshot->skips.method
         + snapshot->skips.status
@@ -764,6 +765,7 @@ ngx_http_markdown_metrics_to_v1(
         snapshot->streaming.streaming_failure_postcommit_abort;
 #endif
 
+    /* Attempts and deliveries use the frozen engine-specific counters. */
     v1->attempts.full_buffer = snapshot->path_hits.fullbuffer
         + snapshot->path_hits.incremental;
 #ifdef MARKDOWN_STREAMING_ENABLED
@@ -820,6 +822,7 @@ ngx_http_markdown_metrics_to_v1(
         v1->duration_full_buffer.count = snapshot->conversions_succeeded
             + snapshot->conversions_failed;
     }
+    /* Preserve byte and inflight gauges after the histogram conversion. */
     v1->input_bytes = snapshot->input_bytes;
     v1->output_bytes = snapshot->output_bytes;
 #ifdef MARKDOWN_STREAMING_ENABLED
@@ -866,6 +869,7 @@ ngx_http_markdown_metrics_to_v1(
     v1->decompression.brotli_failure_io =
         snapshot->decompressions.brotli_failures.io;
 
+    /* Dynconf counters are copied without reinterpreting their failure axes. */
     v1->dynconf_reloads.success = snapshot->results.dynconf_reloads.success;
     v1->dynconf_reloads.failure_schema_version =
         snapshot->results.dynconf_reloads.failure_schema_version;
@@ -884,6 +888,7 @@ ngx_http_markdown_metrics_to_v1(
     v1->dynconf_reloads.failure_file_error =
         snapshot->results.dynconf_reloads.failure_file_error;
 
+    /* Build metadata is part of the public v1 response contract. */
     v1->build_info.version = (u_char *) "0.9.2";
     v1->build_info.nginx_version_text = (u_char *) NGINX_VERSION;
 #ifdef MARKDOWN_STREAMING_ENABLED

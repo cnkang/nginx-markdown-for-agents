@@ -23,7 +23,7 @@ import re
 import sys
 from pathlib import Path
 
-from hypothesis import given, settings, assume, example
+from hypothesis import given, settings, example
 from hypothesis import strategies as st
 
 # Ensure the tools package is importable

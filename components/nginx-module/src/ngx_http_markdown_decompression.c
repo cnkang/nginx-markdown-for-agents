@@ -63,6 +63,9 @@ ngx_http_markdown_collect_content_encoding(ngx_http_request_t *r,
     out->data = NULL;
     out->len = 0;
 
+    /* The first pass measures the combined field value and retains a direct
+     * view for the common single-header case. It also walks every list part,
+     * because NGINX may spill response headers into linked list segments. */
     /* Measure every active field line, including empty values. */
     match_count = 0;
     total_len = 0;
@@ -114,6 +117,8 @@ ngx_http_markdown_collect_content_encoding(ngx_http_request_t *r,
         return NGX_OK;
     }
 
+    /* Allocate exactly the measured size, then repeat the same complete-list
+     * walk to combine multiple field lines in their received order. */
     data = ngx_pnalloc(r->pool, total_len);
     if (data == NULL) {
         return NGX_ERROR;

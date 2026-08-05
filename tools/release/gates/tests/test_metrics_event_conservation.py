@@ -33,12 +33,12 @@ decompression_events_total, dynconf_reloads_total) and request counts.
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
 from typing import List
 
-from hypothesis import given, settings, assume
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 # Ensure the tools package is importable
@@ -509,11 +509,6 @@ def test_client_abort_no_delivery(requests):
 
     **Validates: Requirements 5.6**
     """
-    abort_count = sum(
-        1 for r in requests
-        if r.scenario == RequestScenario.CLIENT_ABORT
-    )
-
     snapshot = process_request_sequence(requests)
 
     # Aborted requests attempt conversion but never deliver
@@ -536,11 +531,6 @@ def test_streaming_multi_delivery_conservation(requests):
 
     **Validates: Requirements 5.6**
     """
-    streaming_count = sum(
-        1 for r in requests
-        if r.scenario == RequestScenario.STREAMING_CONVERT
-    )
-
     snapshot = process_request_sequence(requests)
 
     # Each streaming conversion produces exactly one delivery (not
@@ -598,11 +588,6 @@ def test_failed_open_attempt_no_delivery(requests):
 
     **Validates: Requirements 5.6**
     """
-    failed_open_count = sum(
-        1 for r in requests
-        if r.scenario == RequestScenario.DECOMPRESS_FAIL
-    )
-
     snapshot = process_request_sequence(requests)
 
     # Failed-open contribute to attempts but not deliveries

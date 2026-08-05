@@ -2680,7 +2680,10 @@ ngx_http_markdown_dynconf_apply_ffi_result(
 }
 
 
-/* Reload the bounded file, validate its JSON result, and publish it atomically. */
+/* Reload the bounded file, validate its JSON result, and publish it atomically.
+ * The staged snapshot and digest copies are request-independent, so all
+ * validation completes before active state or last-known-good state changes.
+ */
 static ngx_int_t
 ngx_http_markdown_dynconf_reload(
     ngx_http_markdown_dynconf_watcher_t *watcher,
@@ -2701,6 +2704,7 @@ ngx_http_markdown_dynconf_reload(
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
     }
 
+    /* Read and parse into a disposable FFI result before touching snapshots. */
     rc = ngx_http_markdown_dynconf_read_file(watcher, log, &data, &file_size);
     if (rc != NGX_OK) {
         watcher->last_result = rc;
@@ -2712,6 +2716,7 @@ ngx_http_markdown_dynconf_reload(
     ngx_free(data);
 
     if (result.error_code != DYNCONF_OK) {
+        /* Preserve the active snapshot when the candidate is invalid. */
         ngx_http_markdown_record_dynconf_reload(result.error_code);
         ngx_http_markdown_dynconf_record_error(watcher, &result);
         watcher->last_result = conf->advanced.dynconf_dry_run
@@ -2725,9 +2730,11 @@ ngx_http_markdown_dynconf_reload(
     }
 
     watcher->staging_snapshot = watcher->active_snapshot;
+    /* Apply only validated fields to the staging copy. */
     if (ngx_http_markdown_dynconf_apply_ffi_result(
             &watcher->staging_snapshot, &result) != NGX_OK)
     {
+        /* Invalid FFI values are a validation failure, not a partial reload. */
         ngx_http_markdown_record_dynconf_reload(DYNCONF_ERR_INVALID_TYPE);
         watcher->last_result = NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
         markdown_dynconf_result_free(&result);
@@ -2741,6 +2748,7 @@ ngx_http_markdown_dynconf_reload(
             next_active_digest, sizeof(next_active_digest),
             result.active_digest, result.active_digest_len) != NGX_OK)
     {
+        /* Digest truncation is a validation failure, not a partial reload. */
         ngx_http_markdown_record_dynconf_reload(DYNCONF_ERR_INTERNAL);
         watcher->last_result = NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
         markdown_dynconf_result_free(&result);
@@ -2748,6 +2756,7 @@ ngx_http_markdown_dynconf_reload(
     }
 
     if (conf->advanced.dynconf_dry_run) {
+        /* Dry-run records success without publishing the staged candidate. */
         ngx_http_markdown_record_dynconf_reload(DYNCONF_OK);
         watcher->last_result = NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_OK;
         watcher->last_error_len = 0;
@@ -2756,6 +2765,7 @@ ngx_http_markdown_dynconf_reload(
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_OK;
     }
 
+    /* Publish all correlated state together after every precondition passes. */
     if (watcher->generation > 0) {
         watcher->last_known_good = watcher->active_snapshot;
         watcher->lkg_valid = 1;
