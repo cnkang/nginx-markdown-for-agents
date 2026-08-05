@@ -7,7 +7,7 @@ truth implementations.
 
 This gate validates:
   1. Metrics renderer families match metrics-registry.json (delegates to
-     validate_metrics_registry_v1.py)
+     validate_metrics_registry.py)
   2. Diagnostics schema against the field contract artifact
   3. Dynconf schema against the Rust parser implementation (cross-checking
      known keys, types, ranges)
@@ -47,7 +47,7 @@ DIAGNOSTICS_SCHEMA = REPO_ROOT / "schemas" / "diagnostics.schema.json"
 
 # Tool paths
 METRICS_VALIDATOR = (
-    REPO_ROOT / "tools" / "release" / "gates" / "validate_metrics_registry_v1.py"
+    REPO_ROOT / "tools" / "release" / "gates" / "validate_metrics_registry.py"
 )
 REASON_CODEGEN = REPO_ROOT / "tools" / "reason-codegen" / "generate.py"
 
@@ -172,7 +172,7 @@ def gate_w2_artifact_structure() -> list:
 def gate_metrics_registry() -> list:
     """Run the metrics registry v1 validator (existing script)."""
     if not METRICS_VALIDATOR.exists():
-        return ["validate_metrics_registry_v1.py not found"]
+        return ["validate_metrics_registry.py not found"]
 
     result = subprocess.run(
         [sys.executable, str(METRICS_VALIDATOR)],

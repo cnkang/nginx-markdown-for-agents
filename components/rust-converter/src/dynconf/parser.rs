@@ -76,6 +76,16 @@ pub enum JsonValue {
     Object(Vec<(String, JsonValue)>),
 }
 
+type ParseResult = Result<JsonValue, DynconfParseError>;
+
+const JSON_OBJECT_START: u8 = b'{';
+const JSON_ARRAY_START: u8 = b'[';
+const JSON_STRING_START: u8 = b'"';
+const JSON_TRUE_START: u8 = b't';
+const JSON_FALSE_START: u8 = b'f';
+const JSON_NULL_START: u8 = b'n';
+const JSON_NEGATIVE: u8 = b'-';
+
 /// State tracker for budget-constrained JSON parsing.
 struct ParseState {
     /// Remaining tokens in the budget.
@@ -195,25 +205,44 @@ fn parse_value(state: &mut ParseState, depth: usize) -> Result<JsonValue, Dyncon
     state.skip_whitespace();
     state.consume_token()?;
 
-    match state.peek() {
-        None => Err(DynconfParseError::new(
+    if state.peek().is_none() {
+        return Err(DynconfParseError::new(
             DynconfParseErrorKind::InvalidJson,
             "unexpected end of input".to_string(),
-        )),
-        Some(b'{') => parse_object(state, depth),
-        Some(b'[') => parse_array(state, depth),
-        Some(b'"') => parse_string(state).map(JsonValue::String),
-        Some(b't') | Some(b'f') => parse_bool(state),
-        Some(b'n') => parse_null(state),
-        Some(b'-') | Some(b'0'..=b'9') => parse_number(state),
-        Some(c) => Err(DynconfParseError::new(
-            DynconfParseErrorKind::InvalidJson,
-            format!(
-                "unexpected character '{}' at position {}",
-                c as char, state.pos
-            ),
-        )),
+        ));
     }
+    let first = state.peek().unwrap();
+
+    dispatch(state, depth, first)
+}
+
+fn dispatch(state: &mut ParseState, depth: usize, first: u8) -> ParseResult {
+    if first == JSON_OBJECT_START {
+        return parse_object(state, depth);
+    }
+    if first == JSON_ARRAY_START {
+        return parse_array(state, depth);
+    }
+    if first == JSON_STRING_START {
+        return parse_string(state).map(JsonValue::String);
+    }
+    if first == JSON_TRUE_START || first == JSON_FALSE_START {
+        return parse_bool(state);
+    }
+    if first == JSON_NULL_START {
+        return parse_null(state);
+    }
+    if first == JSON_NEGATIVE || first.is_ascii_digit() {
+        return parse_number(state);
+    }
+
+    Err(DynconfParseError::new(
+        DynconfParseErrorKind::InvalidJson,
+        format!(
+            "unexpected character '{}' at position {}",
+            first as char, state.pos
+        ),
+    ))
 }
 
 fn parse_object(state: &mut ParseState, depth: usize) -> Result<JsonValue, DynconfParseError> {

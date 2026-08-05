@@ -58,139 +58,132 @@ def load_registry(repo_root):
         return json.load(f)
 
 
+VALID_TYPES = {"counter", "gauge", "histogram"}
+FORBIDDEN_LABELS = {"path", "uri", "host", "client", "query", "address"}
+
+
+def _validate_family_structure(family, seen_names):
+    """Validate one metric family and update the duplicate-name set."""
+    errors = []
+    name = family.get("name", "")
+    family_type = family.get("type", "")
+
+    if not name.startswith("nginx_markdown_"):
+        errors.append(f"Family '{name}' missing nginx_markdown_ prefix")
+    if family_type not in VALID_TYPES:
+        errors.append(f"Family '{name}' has invalid type '{family_type}'")
+    if name in seen_names:
+        errors.append(f"Duplicate family name: {name}")
+    seen_names.add(name)
+
+    if family_type == "histogram":
+        bucket_count = len(family.get("bucket_boundaries", []))
+        if bucket_count > 10:
+            errors.append(
+                f"Family '{name}' has {bucket_count} buckets (max 10)"
+            )
+
+    for label in family.get("labels", []):
+        label_name = label.get("name", "")
+        if label_name in FORBIDDEN_LABELS:
+            errors.append(
+                f"Family '{name}' has forbidden label '{label_name}'"
+            )
+    return errors
+
+
 def validate_registry_structure(registry):
     """Validate the registry artifact structure and constraints."""
     errors = []
-
-    # Schema version
     if registry.get("schema_version") != 1:
         errors.append("schema_version must be 1")
 
-    # Family count
     families = registry.get("families", [])
     if len(families) != 11:
-        errors.append(
-            f"Expected exactly 11 families, got {len(families)}"
-        )
-
-    # Valid Prometheus types
-    valid_types = {"counter", "gauge", "histogram"}
-
-    # Forbidden label names (unbounded cardinality)
-    forbidden_labels = {"path", "uri", "host", "client", "query", "address"}
+        errors.append(f"Expected exactly 11 families, got {len(families)}")
 
     seen_names = set()
-    for fam in families:
-        name = fam.get("name", "")
-        fam_type = fam.get("type", "")
-
-        # Prefix check
-        if not name.startswith("nginx_markdown_"):
-            errors.append(f"Family '{name}' missing nginx_markdown_ prefix")
-
-        # Type check
-        if fam_type not in valid_types:
-            errors.append(
-                f"Family '{name}' has invalid type '{fam_type}'"
-            )
-
-        # Duplicate check
-        if name in seen_names:
-            errors.append(f"Duplicate family name: {name}")
-        seen_names.add(name)
-
-        # Histogram bucket limit
-        if fam_type == "histogram":
-            buckets = fam.get("bucket_boundaries", [])
-            if len(buckets) > 10:
-                errors.append(
-                    f"Family '{name}' has {len(buckets)} buckets "
-                    f"(max 10)"
-                )
-
-        # Forbidden labels
-        for label in fam.get("labels", []):
-            label_name = label.get("name", "")
-            if label_name in forbidden_labels:
-                errors.append(
-                    f"Family '{name}' has forbidden label "
-                    f"'{label_name}'"
-                )
-
+    for family in families:
+        errors.extend(_validate_family_structure(family, seen_names))
     return errors
+
+
+def _validate_byte_counters(families):
+    """Validate the input/output byte metric types."""
+    errors = []
+    for name in (
+        "nginx_markdown_input_bytes_total",
+        "nginx_markdown_output_bytes_total",
+    ):
+        family = families.get(name)
+        if family and family["type"] != "counter":
+            short_name = name.removeprefix("nginx_markdown_")
+            errors.append(
+                f"{short_name} must be counter, not {family['type']}"
+            )
+    return errors
+
+
+def _validate_streaming_constraints(families):
+    """Validate the streaming transition label and its closed values."""
+    family = families.get("nginx_markdown_streaming_events_total")
+    if not family:
+        return []
+
+    errors = []
+    labels = family.get("labels", [])
+    label_names = [label.get("name") for label in labels]
+    if "event" in label_names:
+        errors.append(
+            "streaming_events_total uses 'event' label — must be 'transition'"
+        )
+    if "transition" not in label_names:
+        errors.append("streaming_events_total missing 'transition' label")
+
+    expected_values = {
+        "commit", "fallback", "safe_finish_start", "abort_start",
+        "resume_success", "resume_failure",
+    }
+    for label in labels:
+        if label.get("name") != "transition":
+            continue
+        actual_values = set(label.get("values", []))
+        if actual_values != expected_values:
+            errors.append(
+                "streaming_events_total transition values "
+                f"mismatch: expected {expected_values}, got {actual_values}"
+            )
+    return errors
+
+
+def _validate_build_info(families):
+    """Validate the build-info gauge contract."""
+    family = families.get("nginx_markdown_build_info")
+    if not family:
+        return []
+    errors = []
+    if family["type"] != "gauge":
+        errors.append(f"build_info must be gauge, not {family['type']}")
+    if family.get("value") != 1:
+        errors.append("build_info value must be 1")
+    return errors
+
+
+def _validate_inflight_gauge(families):
+    """Validate the live-state inflight gauge contract."""
+    family = families.get("nginx_markdown_inflight_requests")
+    if family and family["type"] != "gauge":
+        return [f"inflight_requests must be gauge, not {family['type']}"]
+    return []
 
 
 def validate_specific_constraints(registry):
     """Validate spec-specific constraints from requirements."""
-    errors = []
-    families = {f["name"]: f for f in registry.get("families", [])}
-
-    # input_bytes_total must be counter, NOT histogram (Req 5.2)
-    ibt = families.get("nginx_markdown_input_bytes_total")
-    if ibt and ibt["type"] != "counter":
-        errors.append(
-            "input_bytes_total must be counter, not "
-            f"{ibt['type']}"
-        )
-
-    # output_bytes_total must be counter, NOT histogram (Req 5.2)
-    obt = families.get("nginx_markdown_output_bytes_total")
-    if obt and obt["type"] != "counter":
-        errors.append(
-            "output_bytes_total must be counter, not "
-            f"{obt['type']}"
-        )
-
-    # streaming_events_total must use 'transition' label (Req 5.8)
-    se = families.get("nginx_markdown_streaming_events_total")
-    if se:
-        label_names = [l.get("name") for l in se.get("labels", [])]
-        if "event" in label_names:
-            errors.append(
-                "streaming_events_total uses 'event' label — "
-                "must be 'transition'"
-            )
-        if "transition" not in label_names:
-            errors.append(
-                "streaming_events_total missing 'transition' label"
-            )
-
-        # Verify closed allowlist values
-        for label in se.get("labels", []):
-            if label.get("name") == "transition":
-                expected_values = {
-                    "commit",
-                    "fallback",
-                    "safe_finish_start",
-                    "abort_start",
-                    "resume_success",
-                    "resume_failure",
-                }
-                actual_values = set(label.get("values", []))
-                if actual_values != expected_values:
-                    errors.append(
-                        "streaming_events_total transition values "
-                        f"mismatch: expected {expected_values}, "
-                        f"got {actual_values}"
-                    )
-
-    # build_info must be gauge with value=1 (Req 5.1)
-    bi = families.get("nginx_markdown_build_info")
-    if bi:
-        if bi["type"] != "gauge":
-            errors.append(
-                f"build_info must be gauge, not {bi['type']}"
-            )
-        if bi.get("value") != 1:
-            errors.append("build_info value must be 1")
-
-    # inflight_requests must be gauge (live state, Req 5.3)
-    ir = families.get("nginx_markdown_inflight_requests")
-    if ir and ir["type"] != "gauge":
-        errors.append(
-            f"inflight_requests must be gauge, not {ir['type']}"
-        )
-
+    families = {family["name"]: family for family in registry.get("families", [])}
+    errors = _validate_byte_counters(families)
+    errors.extend(_validate_streaming_constraints(families))
+    errors.extend(_validate_build_info(families))
+    errors.extend(_validate_inflight_gauge(families))
     return errors
 
 
@@ -268,7 +261,7 @@ def extract_renderer_label_names(renderer_content, family):
         if start < 0:
             return set()
         end = renderer_content.find(
-            "/* ================================================================",
+            "# HELP ",
             start + len(marker),
         )
         block = renderer_content[start:] if end < 0 else renderer_content[start:end]
@@ -302,80 +295,81 @@ def validate_no_synonym_duplicates(registry):
     return errors
 
 
+def _print_section_errors(errors, prefix="FAIL"):
+    """Print validation errors with the section's severity prefix."""
+    for error in errors:
+        print(f"  {prefix}: {error}")
+
+
+def _run_structure_section(registry):
+    print("[1/5] Validating registry structure...")
+    errors = validate_registry_structure(registry)
+    if errors:
+        _print_section_errors(errors)
+    else:
+        print("  PASS: 11 families, valid types, proper prefix")
+    return errors
+
+
+def _run_constraint_section(registry):
+    print("[2/5] Validating spec-specific constraints...")
+    errors = validate_specific_constraints(registry)
+    if errors:
+        _print_section_errors(errors)
+    else:
+        print("  PASS: bytes=counter, transition label, build_info=gauge")
+    return errors
+
+
+def _run_renderer_section(repo_root, registry):
+    print("[3/5] Validating renderer matches registry...")
+    errors = validate_renderer_matches_registry(repo_root, registry)
+    if errors:
+        _print_section_errors(errors)
+    else:
+        print("  PASS: Renderer emits exactly 11 registry families")
+    return errors
+
+
+def _run_synonym_section(registry):
+    print("[4/5] Checking for synonym/plural duplicates...")
+    errors = validate_no_synonym_duplicates(registry)
+    if errors:
+        _print_section_errors(errors, prefix="WARN")
+    else:
+        print("  PASS: No synonym or plural duplicates")
+    return errors
+
+
+def _run_format_section(registry):
+    print("[5/5] Validating format policy...")
+    fmt = registry.get("format")
+    if fmt != "prometheus_text_004":
+        error = f"Format must be prometheus_text_004, got {fmt}"
+        print(f"  FAIL: Format is '{fmt}'")
+        return [error]
+    print("  PASS: Prometheus text 0.0.4 only")
+    return []
+
+
 def main():
     """Run all metrics registry validation checks."""
     repo_root = find_repo_root()
     registry = load_registry(repo_root)
 
-    all_errors = []
-
     print("=== Metrics Registry v1 Release Gate ===")
     print()
-
-    # Structure validation
-    print("[1/5] Validating registry structure...")
-    structure_errors = validate_registry_structure(registry)
-    all_errors.extend(structure_errors)
-    if structure_errors:
-        for e in structure_errors:
-            print(f"  FAIL: {e}")
-    else:
-        print("  PASS: 11 families, valid types, proper prefix")
-
-    # Specific constraints
-    print("[2/5] Validating spec-specific constraints...")
-    constraint_errors = validate_specific_constraints(registry)
-    all_errors.extend(constraint_errors)
-    if constraint_errors:
-        for e in constraint_errors:
-            print(f"  FAIL: {e}")
-    else:
-        print(
-            "  PASS: bytes=counter, transition label, "
-            "build_info=gauge"
-        )
-
-    # Renderer match
-    print("[3/5] Validating renderer matches registry...")
-    renderer_errors = validate_renderer_matches_registry(
-        repo_root, registry
-    )
-    all_errors.extend(renderer_errors)
-    if renderer_errors:
-        for e in renderer_errors:
-            print(f"  FAIL: {e}")
-    else:
-        print("  PASS: Renderer emits exactly 11 registry families")
-
-    # No synonym duplicates
-    print("[4/5] Checking for synonym/plural duplicates...")
-    synonym_errors = validate_no_synonym_duplicates(registry)
-    all_errors.extend(synonym_errors)
-    if synonym_errors:
-        for e in synonym_errors:
-            print(f"  WARN: {e}")
-    else:
-        print("  PASS: No synonym or plural duplicates")
-
-    # Format-only check
-    print("[5/5] Validating format policy...")
-    fmt = registry.get("format")
-    if fmt != "prometheus_text_004":
-        all_errors.append(
-            f"Format must be prometheus_text_004, got {fmt}"
-        )
-        print(f"  FAIL: Format is '{fmt}'")
-    else:
-        print("  PASS: Prometheus text 0.0.4 only")
+    all_errors = []
+    all_errors.extend(_run_structure_section(registry))
+    all_errors.extend(_run_constraint_section(registry))
+    all_errors.extend(_run_renderer_section(repo_root, registry))
+    all_errors.extend(_run_synonym_section(registry))
+    all_errors.extend(_run_format_section(registry))
 
     print()
     if all_errors:
-        print(
-            f"FAILED: {len(all_errors)} error(s) found",
-            file=sys.stderr,
-        )
+        print(f"FAILED: {len(all_errors)} error(s) found", file=sys.stderr)
         return 1
-
     print("PASSED: All metrics registry v1 checks passed")
     return 0
 

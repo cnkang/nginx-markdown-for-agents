@@ -508,6 +508,177 @@ ngx_http_markdown_collect_decompression_snapshot(
         metrics->decompressions.brotli_failures.io;
 }
 
+static void
+ngx_http_markdown_collect_core_snapshot(
+    ngx_http_markdown_metrics_snapshot_t *snapshot,
+    const ngx_http_markdown_metrics_t *metrics)
+{
+    snapshot->conversions_attempted = metrics->conversions_attempted;
+    snapshot->conversions_succeeded = metrics->conversions_succeeded;
+    snapshot->conversions_failed = metrics->conversions_failed;
+    snapshot->conversions_bypassed = metrics->conversions_bypassed;
+    snapshot->failures_conversion = metrics->failures_conversion;
+    snapshot->failures_resource_limit = metrics->failures_resource_limit;
+    snapshot->failures_system = metrics->failures_system;
+    snapshot->conversion_time_sum_ms = metrics->conversion_time_sum_ms;
+    snapshot->input_bytes = metrics->input_bytes;
+    snapshot->output_bytes = metrics->output_bytes;
+    snapshot->conversion_latency.le_10ms = metrics->conversion_latency.le_10ms;
+    snapshot->conversion_latency.le_100ms =
+        metrics->conversion_latency.le_100ms;
+    snapshot->conversion_latency.le_1000ms =
+        metrics->conversion_latency.le_1000ms;
+    snapshot->conversion_latency.gt_1000ms =
+        metrics->conversion_latency.gt_1000ms;
+    ngx_http_markdown_collect_v1_latency_snapshot(snapshot, metrics);
+    ngx_http_markdown_collect_decompression_snapshot(snapshot, metrics);
+    snapshot->path_hits.fullbuffer = metrics->path_hits.fullbuffer;
+    snapshot->path_hits.incremental = metrics->path_hits.incremental;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    snapshot->path_hits.streaming = metrics->path_hits.streaming;
+#endif
+    snapshot->requests_entered = metrics->requests_entered;
+    snapshot->skips.config = metrics->skips.config;
+    snapshot->skips.method = metrics->skips.method;
+    snapshot->skips.status = metrics->skips.status;
+    snapshot->skips.content_type = metrics->skips.content_type;
+    snapshot->skips.size = metrics->skips.size;
+    snapshot->skips.streaming = metrics->skips.streaming;
+    snapshot->skips.auth = metrics->skips.auth;
+    snapshot->skips.range = metrics->skips.range;
+    snapshot->skips.accept = metrics->skips.accept;
+    snapshot->skips.no_accept = metrics->skips.no_accept;
+    snapshot->skips.conditional = metrics->skips.conditional;
+    snapshot->skips.compression_passthrough =
+        metrics->skips.compression_passthrough;
+}
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+static void
+ngx_http_markdown_collect_streaming_snapshot(
+    ngx_http_markdown_metrics_snapshot_t *snapshot,
+    const ngx_http_markdown_metrics_t *metrics)
+{
+    snapshot->streaming.requests_total = metrics->streaming.requests_total;
+    snapshot->streaming.fallback_total = metrics->streaming.fallback_total;
+    snapshot->streaming.succeeded_total = metrics->streaming.succeeded_total;
+    snapshot->streaming.failed_total = metrics->streaming.failed_total;
+    snapshot->streaming.postcommit_error_total =
+        metrics->streaming.postcommit_error_total;
+    snapshot->streaming.precommit_failopen_total =
+        metrics->streaming.precommit_failopen_total;
+    snapshot->streaming.precommit_reject_total =
+        metrics->streaming.precommit_reject_total;
+    snapshot->streaming.budget_exceeded_total =
+        metrics->streaming.budget_exceeded_total;
+#ifdef MARKDOWN_STREAMING_SHADOW_DEBUG
+    snapshot->streaming.shadow_total = metrics->streaming.shadow_total;
+    snapshot->streaming.shadow_diff_total =
+        metrics->streaming.shadow_diff_total;
+#endif
+    snapshot->streaming.last_ttfb_ms = metrics->streaming.last_ttfb_ms;
+    snapshot->streaming.last_peak_memory_bytes =
+        metrics->streaming.last_peak_memory_bytes;
+    snapshot->streaming.engine_choice.streaming =
+        metrics->streaming.engine_choice.streaming;
+    snapshot->streaming.engine_choice.full_buffer =
+        metrics->streaming.engine_choice.full_buffer;
+    snapshot->streaming.engine_choice.passthrough =
+        metrics->streaming.engine_choice.passthrough;
+    snapshot->streaming.engine_choice.not_eligible =
+        metrics->streaming.engine_choice.not_eligible;
+    snapshot->streaming.streaming_fallback_precommit_pass =
+        metrics->streaming.streaming_fallback_precommit_pass;
+    snapshot->streaming.streaming_fallback_precommit_reject =
+        metrics->streaming.streaming_fallback_precommit_reject;
+    snapshot->streaming.streaming_failure_postcommit_abort =
+        metrics->streaming.streaming_failure_postcommit_abort;
+    snapshot->streaming.streaming_failure_postcommit_safe_finish =
+        metrics->streaming.streaming_failure_postcommit_safe_finish;
+    snapshot->streaming.selection.candidate_total =
+        metrics->streaming.selection.candidate_total;
+    snapshot->streaming.selection.true_streaming_selected_total =
+        metrics->streaming.selection.true_streaming_selected_total;
+    snapshot->streaming.selection.output_bytes_total =
+        metrics->streaming.selection.output_bytes_total;
+    snapshot->streaming.selection.excluded_content_type_total =
+        metrics->streaming.selection.excluded_content_type_total;
+}
+#endif
+
+static void
+ngx_http_markdown_collect_result_snapshot(
+    ngx_http_markdown_metrics_snapshot_t *snapshot,
+    const ngx_http_markdown_metrics_t *metrics)
+{
+    snapshot->results.failopen_count = metrics->results.failopen_count;
+    snapshot->results.delivery_count = metrics->results.delivery_count;
+    snapshot->results.decision_count = metrics->results.decision_count;
+    snapshot->results.estimated_token_savings =
+        metrics->results.estimated_token_savings;
+    snapshot->results.parse_interrupts.parse_timeouts_total =
+        metrics->results.parse_interrupts.parse_timeouts_total;
+    snapshot->results.parse_interrupts.parse_budget_exceeded_total =
+        metrics->results.parse_interrupts.parse_budget_exceeded_total;
+    snapshot->results.replay_buffer_errors_total =
+        metrics->results.replay_buffer_errors_total;
+    snapshot->results.dynconf_reloads.success =
+        metrics->results.dynconf_reloads.success;
+    snapshot->results.dynconf_reloads.failure_schema_version =
+        metrics->results.dynconf_reloads.failure_schema_version;
+    snapshot->results.dynconf_reloads.failure_unknown_key =
+        metrics->results.dynconf_reloads.failure_unknown_key;
+    snapshot->results.dynconf_reloads.failure_duplicate_key =
+        metrics->results.dynconf_reloads.failure_duplicate_key;
+    snapshot->results.dynconf_reloads.failure_invalid_type =
+        metrics->results.dynconf_reloads.failure_invalid_type;
+    snapshot->results.dynconf_reloads.failure_out_of_range =
+        metrics->results.dynconf_reloads.failure_out_of_range;
+    snapshot->results.dynconf_reloads.failure_size_exceeded =
+        metrics->results.dynconf_reloads.failure_size_exceeded;
+    snapshot->results.dynconf_reloads.failure_parse_error =
+        metrics->results.dynconf_reloads.failure_parse_error;
+    snapshot->results.dynconf_reloads.failure_file_error =
+        metrics->results.dynconf_reloads.failure_file_error;
+#ifdef MARKDOWN_METRICS_PER_PATH_DEBUG
+    snapshot->per_path.path_entries = metrics->per_path.path_entries;
+    snapshot->per_path.path_conversions = metrics->per_path.path_conversions;
+    snapshot->per_path.path_conversion_time_sum_ms =
+        metrics->per_path.path_conversion_time_sum_ms;
+    snapshot->per_path.overflow_count = metrics->per_path.overflow_count;
+    snapshot->per_path.unretained_conversions =
+        metrics->per_path.unretained_conversions;
+    snapshot->per_path.unretained_conversion_time_sum_ms =
+        metrics->per_path.unretained_conversion_time_sum_ms;
+#endif
+}
+
+static void
+ngx_http_markdown_collect_performance_snapshot(
+    ngx_http_markdown_metrics_snapshot_t *snapshot,
+    const ngx_http_markdown_metrics_t *metrics)
+{
+    snapshot->perf.inflight.current =
+        (ngx_atomic_uint_t) ngx_http_markdown_inflight_current();
+    snapshot->perf.inflight.high_watermark =
+        (ngx_atomic_uint_t) ngx_http_markdown_inflight_high_watermark();
+    snapshot->perf.inflight.overload_total =
+        (ngx_atomic_uint_t) ngx_http_markdown_inflight_overload_total();
+    snapshot->perf.backpressure_total = metrics->perf.backpressure_total;
+    snapshot->perf.backpressure_resume_total =
+        metrics->perf.backpressure_resume_total;
+    snapshot->perf.pending_output_high_watermark_bytes =
+        metrics->perf.pending_output_high_watermark_bytes;
+    snapshot->perf.decompression_streaming_total =
+        metrics->perf.decompression_streaming_total;
+    snapshot->perf.decompression_fullbuffer_total =
+        metrics->perf.decompression_fullbuffer_total;
+    snapshot->perf.decompression_budget_exceeded_total =
+        metrics->perf.decompression_budget_exceeded_total;
+    snapshot->perf.zero_copy_output_total = metrics->perf.zero_copy_output_total;
+    snapshot->perf.copied_output_total = metrics->perf.copied_output_total;
+}
+
 /**
  * Capture a best-effort snapshot of the global metrics counters into the
  * provided snapshot structure.
@@ -539,171 +710,13 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
         return;
     }
 
-    snapshot->conversions_attempted = metrics->conversions_attempted;
-    snapshot->conversions_succeeded = metrics->conversions_succeeded;
-    snapshot->conversions_failed = metrics->conversions_failed;
-    snapshot->conversions_bypassed = metrics->conversions_bypassed;
-    snapshot->failures_conversion = metrics->failures_conversion;
-    snapshot->failures_resource_limit = metrics->failures_resource_limit;
-    snapshot->failures_system = metrics->failures_system;
-    snapshot->conversion_time_sum_ms = metrics->conversion_time_sum_ms;
-    snapshot->input_bytes = metrics->input_bytes;
-    snapshot->output_bytes = metrics->output_bytes;
-    snapshot->conversion_latency.le_10ms =
-        metrics->conversion_latency.le_10ms;
-    snapshot->conversion_latency.le_100ms =
-        metrics->conversion_latency.le_100ms;
-    snapshot->conversion_latency.le_1000ms =
-        metrics->conversion_latency.le_1000ms;
-    snapshot->conversion_latency.gt_1000ms =
-        metrics->conversion_latency.gt_1000ms;
-    ngx_http_markdown_collect_v1_latency_snapshot(snapshot, metrics);
-    ngx_http_markdown_collect_decompression_snapshot(snapshot, metrics);
-    snapshot->path_hits.fullbuffer = metrics->path_hits.fullbuffer;
-    snapshot->path_hits.incremental = metrics->path_hits.incremental;
+    ngx_http_markdown_collect_core_snapshot(snapshot, metrics);
+    ngx_http_markdown_collect_result_snapshot(snapshot, metrics);
 #ifdef MARKDOWN_STREAMING_ENABLED
-    snapshot->path_hits.streaming = metrics->path_hits.streaming;
+    ngx_http_markdown_collect_streaming_snapshot(snapshot, metrics);
 #endif
-    snapshot->requests_entered = metrics->requests_entered;
-    snapshot->skips.config = metrics->skips.config;
-    snapshot->skips.method = metrics->skips.method;
-    snapshot->skips.status = metrics->skips.status;
-    snapshot->skips.content_type = metrics->skips.content_type;
-    snapshot->skips.size = metrics->skips.size;
-    snapshot->skips.streaming = metrics->skips.streaming;
-    snapshot->skips.auth = metrics->skips.auth;
-    snapshot->skips.range = metrics->skips.range;
-    snapshot->skips.accept = metrics->skips.accept;
-    snapshot->skips.no_accept = metrics->skips.no_accept;
-    snapshot->skips.conditional = metrics->skips.conditional;
-    snapshot->skips.compression_passthrough =
-        metrics->skips.compression_passthrough;
-    snapshot->results.failopen_count = metrics->results.failopen_count;
-    snapshot->results.delivery_count = metrics->results.delivery_count;
-    snapshot->results.decision_count = metrics->results.decision_count;
-#ifdef MARKDOWN_STREAMING_ENABLED
-    snapshot->streaming.requests_total =
-        metrics->streaming.requests_total;
-    snapshot->streaming.fallback_total =
-        metrics->streaming.fallback_total;
-    snapshot->streaming.succeeded_total =
-        metrics->streaming.succeeded_total;
-    snapshot->streaming.failed_total =
-        metrics->streaming.failed_total;
-    snapshot->streaming.postcommit_error_total =
-        metrics->streaming.postcommit_error_total;
-    snapshot->streaming.precommit_failopen_total =
-        metrics->streaming.precommit_failopen_total;
-    snapshot->streaming.precommit_reject_total =
-        metrics->streaming.precommit_reject_total;
-    snapshot->streaming.budget_exceeded_total =
-        metrics->streaming.budget_exceeded_total;
-#ifdef MARKDOWN_STREAMING_SHADOW_DEBUG
-    snapshot->streaming.shadow_total =
-        metrics->streaming.shadow_total;
-    snapshot->streaming.shadow_diff_total =
-        metrics->streaming.shadow_diff_total;
-#endif
-    snapshot->streaming.last_ttfb_ms =
-        metrics->streaming.last_ttfb_ms;
-    snapshot->streaming.last_peak_memory_bytes =
-        metrics->streaming.last_peak_memory_bytes;
-    snapshot->streaming.engine_choice.streaming =
-        metrics->streaming.engine_choice.streaming;
-    snapshot->streaming.engine_choice.full_buffer =
-        metrics->streaming.engine_choice.full_buffer;
-    snapshot->streaming.engine_choice.passthrough =
-        metrics->streaming.engine_choice.passthrough;
-    snapshot->streaming.engine_choice.not_eligible =
-        metrics->streaming.engine_choice.not_eligible;
-    snapshot->streaming.streaming_fallback_precommit_pass =
-        metrics->streaming.streaming_fallback_precommit_pass;
-    snapshot->streaming.streaming_fallback_precommit_reject =
-        metrics->streaming.streaming_fallback_precommit_reject;
-    snapshot->streaming.streaming_failure_postcommit_abort =
-        metrics->streaming.streaming_failure_postcommit_abort;
-    snapshot->streaming.streaming_failure_postcommit_safe_finish =
-        metrics->streaming.streaming_failure_postcommit_safe_finish;
-    snapshot->streaming.selection.candidate_total =
-        metrics->streaming.selection.candidate_total;
-    snapshot->streaming.selection.true_streaming_selected_total =
-        metrics->streaming.selection.true_streaming_selected_total;
-    snapshot->streaming.selection.output_bytes_total =
-        metrics->streaming.selection.output_bytes_total;
-    snapshot->streaming.selection.excluded_content_type_total =
-        metrics->streaming.selection.excluded_content_type_total;
-#endif
-    snapshot->results.estimated_token_savings = metrics->results.estimated_token_savings;
 
-    snapshot->results.parse_interrupts.parse_timeouts_total =
-        metrics->results.parse_interrupts.parse_timeouts_total;
-    snapshot->results.parse_interrupts.parse_budget_exceeded_total =
-        metrics->results.parse_interrupts.parse_budget_exceeded_total;
-
-    snapshot->results.replay_buffer_errors_total =
-        metrics->results.replay_buffer_errors_total;
-    snapshot->results.dynconf_reloads.success =
-        metrics->results.dynconf_reloads.success;
-    snapshot->results.dynconf_reloads.failure_schema_version =
-        metrics->results.dynconf_reloads.failure_schema_version;
-    snapshot->results.dynconf_reloads.failure_unknown_key =
-        metrics->results.dynconf_reloads.failure_unknown_key;
-    snapshot->results.dynconf_reloads.failure_duplicate_key =
-        metrics->results.dynconf_reloads.failure_duplicate_key;
-    snapshot->results.dynconf_reloads.failure_invalid_type =
-        metrics->results.dynconf_reloads.failure_invalid_type;
-    snapshot->results.dynconf_reloads.failure_out_of_range =
-        metrics->results.dynconf_reloads.failure_out_of_range;
-    snapshot->results.dynconf_reloads.failure_size_exceeded =
-        metrics->results.dynconf_reloads.failure_size_exceeded;
-    snapshot->results.dynconf_reloads.failure_parse_error =
-        metrics->results.dynconf_reloads.failure_parse_error;
-    snapshot->results.dynconf_reloads.failure_file_error =
-        metrics->results.dynconf_reloads.failure_file_error;
-
-#ifdef MARKDOWN_METRICS_PER_PATH_DEBUG
-    snapshot->per_path.path_entries =
-        metrics->per_path.path_entries;
-    snapshot->per_path.path_conversions =
-        metrics->per_path.path_conversions;
-    snapshot->per_path.path_conversion_time_sum_ms =
-        metrics->per_path.path_conversion_time_sum_ms;
-    snapshot->per_path.overflow_count =
-        metrics->per_path.overflow_count;
-    snapshot->per_path.unretained_conversions =
-        metrics->per_path.unretained_conversions;
-    snapshot->per_path.unretained_conversion_time_sum_ms =
-        metrics->per_path.unretained_conversion_time_sum_ms;
-#endif /* MARKDOWN_METRICS_PER_PATH_DEBUG */
-
-    /*
-     * Inflight counter is per-worker (not in shared memory),
-     * so read directly from the global counter instance.
-     */
-    snapshot->perf.inflight.current =
-        (ngx_atomic_uint_t) ngx_http_markdown_inflight_current();
-    snapshot->perf.inflight.high_watermark =
-        (ngx_atomic_uint_t) ngx_http_markdown_inflight_high_watermark();
-    snapshot->perf.inflight.overload_total =
-        (ngx_atomic_uint_t) ngx_http_markdown_inflight_overload_total();
-
-    /* Performance metrics (backpressure, decompression path, output mode) */
-    snapshot->perf.backpressure_total =
-        metrics->perf.backpressure_total;
-    snapshot->perf.backpressure_resume_total =
-        metrics->perf.backpressure_resume_total;
-    snapshot->perf.pending_output_high_watermark_bytes =
-        metrics->perf.pending_output_high_watermark_bytes;
-    snapshot->perf.decompression_streaming_total =
-        metrics->perf.decompression_streaming_total;
-    snapshot->perf.decompression_fullbuffer_total =
-        metrics->perf.decompression_fullbuffer_total;
-    snapshot->perf.decompression_budget_exceeded_total =
-        metrics->perf.decompression_budget_exceeded_total;
-    snapshot->perf.zero_copy_output_total =
-        metrics->perf.zero_copy_output_total;
-    snapshot->perf.copied_output_total =
-        metrics->perf.copied_output_total;
+    ngx_http_markdown_collect_performance_snapshot(snapshot, metrics);
 }
 
 
