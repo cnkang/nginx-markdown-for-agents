@@ -62,6 +62,12 @@ SKIP_DIR_PARTS: frozenset[str] = frozenset({
     "venv", ".venv", ".pytest_cache", ".mypy_cache",
 })
 
+# This fuzz seed is a deliberately binary gzip stream despite its `.txt`
+# corpus name. It is an input fixture, not source text for Sonar's parser.
+BINARY_FIXTURE_PREFIXES: tuple[Path, ...] = (
+    Path("components/rust-converter/fuzz/corpus/fuzz_multilayer_decode"),
+)
+
 REPO_ROOT: Path = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST: Path = Path("tools/sonar/encoding_exceptions.json")
 
@@ -133,6 +139,11 @@ def _should_skip_path(path: Path) -> bool:
         return True
     # Brotli fixtures are binary by design.
     if path.suffix.lower() == ".br":
+        return True
+    if any(
+        path == prefix or prefix in path.parents
+        for prefix in BINARY_FIXTURE_PREFIXES
+    ):
         return True
     return False
 

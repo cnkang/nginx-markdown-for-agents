@@ -292,10 +292,12 @@ def test_production_example_gate_loads_dynamic_module_when_provided():
 
     assert "test-production-examples-nginx-t: SHELL := /bin/bash" in makefile
     assert 'module_so="$${MODULE_SO:-}"' in target
-    assert '-g "load_module $$module_so;"' in target
-    assert 'runtime_prefix="$${RUNNER_TEMP:-$${TMPDIR:-/tmp}}/' in target
-    assert 'mkdir -p "$$runtime_prefix/logs"' in target
-    assert '-p "$$runtime_prefix/"' in target
+    assert 'MODULE_SO="$$module_so"' in target
+    assert "bash tools/e2e/verify_examples_nginx_t.sh" in target
+    verifier = (
+        REPO_ROOT / "tools" / "e2e" / "verify_examples_nginx_t.sh"
+    ).read_text(encoding="utf-8")
+    assert '-g "load_module ${MODULE_SO};"' in verifier
 
 
 def test_production_example_gate_rewrites_privileged_listeners(tmp_path):
@@ -317,6 +319,10 @@ done
 if grep -Eq '^[[:space:]]*listen[[:space:]]+80[[:space:]]*;' "$config"; then
     echo "privileged listener remained in $config" >&2
     exit 42
+fi
+if grep -Eq '^[[:space:]]*markdown_(profile|metrics_format|metrics_per_path|metrics_per_path_cardinality|diagnostics_allow|buffer_chunked|streaming_shadow|streaming_zero_copy|llm_provider|chars_per_token|stream_types|stream_threshold|stream_precommit_buffer|stream_flush_min|parse_timeout|parser_budget|decompress_max_size|otel|otel_endpoint)[[:space:]]' "$config"; then
+    echo 'unknown directive' >&2
+    exit 1
 fi
 """,
         encoding="utf-8",
