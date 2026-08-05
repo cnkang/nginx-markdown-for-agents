@@ -783,7 +783,9 @@ ngx_http_markdown_handle_header_compression(
 {
     ngx_str_t  combined;
 
-    if (ctx->decompression.type == NGX_HTTP_MARKDOWN_COMPRESSION_NONE) {
+    if (ctx->decompression.type == NGX_HTTP_MARKDOWN_COMPRESSION_NONE
+        && r->headers_out.content_encoding == NULL)
+    {
         return 0;
     }
 

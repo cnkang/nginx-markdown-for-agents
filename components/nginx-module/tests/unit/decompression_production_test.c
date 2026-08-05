@@ -47,8 +47,20 @@ typedef struct {
     unsigned   hash;
 } ngx_table_elt_t;
 
+typedef struct ngx_list_part_s ngx_list_part_t;
+struct ngx_list_part_s {
+    ngx_table_elt_t  *elts;
+    ngx_uint_t        nelts;
+    ngx_list_part_t  *next;
+};
+
+typedef struct {
+    ngx_list_part_t  part;
+} ngx_list_t;
+
 typedef struct {
     ngx_table_elt_t  *content_encoding;
+    ngx_list_t        headers;
 } ngx_http_headers_out_t;
 
 struct ngx_log_s {
@@ -198,6 +210,26 @@ ngx_pfree(ngx_pool_t *pool, void *p)
 
 #include "../../src/ngx_http_markdown_decompression.c"
 
+/* The production unit links the C decompression implementation without the
+ * Rust static library.  Keep the FFI seam deterministic for the malformed
+ * empty-header regression exercised below. */
+uint8_t
+markdown_parse_encoding_chain(const uint8_t *value, size_t value_len,
+    FFIEncodingChainResult *result)
+{
+    if (result == NULL) {
+        return ENCODING_CHAIN_MALFORMED;
+    }
+    memset(result, 0, sizeof(*result));
+    if (value == NULL && value_len != 0) {
+        return DECOMP_CATEGORY_INVALID_ARGS;
+    }
+    if (value_len == 0) {
+        return ENCODING_CHAIN_MALFORMED;
+    }
+    return ENCODING_CHAIN_MALFORMED;
+}
+
 static ngx_log_t               g_log;
 static ngx_pool_t              g_pool;
 static ngx_connection_t        g_conn = { &g_log };
@@ -231,12 +263,39 @@ set_encoding(ngx_http_request_t *r, const char *value)
 
     if (value == NULL) {
         r->headers_out.content_encoding = NULL;
+        r->headers_out.headers.part.elts = NULL;
+        r->headers_out.headers.part.nelts = 0;
+        r->headers_out.headers.part.next = NULL;
         return;
     }
 
+    h.key.data = (u_char *) "Content-Encoding";
+    h.key.len = sizeof("Content-Encoding") - 1;
+    h.hash = 1;
     h.value.data = (u_char *) value;
     h.value.len = strlen(value);
     r->headers_out.content_encoding = &h;
+    r->headers_out.headers.part.elts = &h;
+    r->headers_out.headers.part.nelts = 1;
+    r->headers_out.headers.part.next = NULL;
+}
+
+static void
+set_encoding_headers(ngx_http_request_t *r, ngx_table_elt_t *headers,
+    ngx_uint_t count)
+{
+    ngx_uint_t i;
+
+    for (i = 0; i < count; i++) {
+        headers[i].key.data = (u_char *) "Content-Encoding";
+        headers[i].key.len = sizeof("Content-Encoding") - 1;
+        headers[i].hash = 1;
+    }
+
+    r->headers_out.content_encoding = count > 0 ? &headers[0] : NULL;
+    r->headers_out.headers.part.elts = headers;
+    r->headers_out.headers.part.nelts = count;
+    r->headers_out.headers.part.next = NULL;
 }
 
 static ngx_chain_t
@@ -456,6 +515,49 @@ test_detect_compression_variants(void)
     TEST_ASSERT(ngx_http_markdown_detect_compression(&r)
                 == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN,
                 "unknown encoding should be classified");
+}
+
+static void
+test_collect_content_encoding_repeated_fields(void)
+{
+    ngx_http_request_t  r;
+    ngx_table_elt_t     headers[2];
+    ngx_str_t           combined;
+    ngx_int_t           rc;
+
+    init_request(&r);
+    memset(headers, 0, sizeof(headers));
+    headers[0].value.data = (u_char *) "gzip";
+    headers[0].value.len = sizeof("gzip") - 1;
+    headers[1].value.data = (u_char *) "br";
+    headers[1].value.len = sizeof("br") - 1;
+    set_encoding_headers(&r, headers, 2);
+
+    rc = ngx_http_markdown_collect_content_encoding(&r, &combined);
+    TEST_ASSERT(rc == NGX_OK, "repeated Content-Encoding fields should collect");
+    TEST_ASSERT(combined.len == sizeof("gzip, br") - 1
+                && memcmp(combined.data, "gzip, br", combined.len) == 0,
+                "repeated Content-Encoding fields must retain wire order");
+    free(combined.data);
+
+    memset(headers, 0, sizeof(headers));
+    headers[0].value.data = NULL;
+    headers[0].value.len = 0;
+    set_encoding_headers(&r, headers, 1);
+    rc = ngx_http_markdown_collect_content_encoding(&r, &combined);
+    TEST_ASSERT(rc == NGX_OK && combined.data == NULL && combined.len == 0,
+                "an active empty Content-Encoding field must remain present");
+
+    {
+        ngx_http_markdown_ctx_t ctx;
+
+        memset(&ctx, 0, sizeof(ctx));
+        TEST_ASSERT(ngx_http_markdown_parse_encoding_chain_ffi(
+                    &r, &ctx, &combined) == ENCODING_CHAIN_MALFORMED,
+                    "an active empty Content-Encoding field must be malformed");
+    }
+
+    TEST_PASS("repeated Content-Encoding fields are collected");
 }
 
 static void
@@ -1502,6 +1604,7 @@ main(void)
     test_chain_size_invalid_reversed_buffers();
     test_calc_output_size_boundaries();
     test_detect_compression_variants();
+    test_collect_content_encoding_repeated_fields();
     test_dispatch_non_decompressing_cases();
     test_gzip_success();
     test_gzip_concatenated_members();

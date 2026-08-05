@@ -54,26 +54,20 @@ ngx_http_markdown_collect_content_encoding(ngx_http_request_t *r,
     ngx_list_part_t       *part;
     ngx_table_elt_t       *headers;
     ngx_uint_t             i;
+    ngx_uint_t             match_count;
     size_t                 total_len;
     u_char                *data;
     ngx_flag_t             first;
+    const ngx_str_t       *single_value;
 
     out->data = NULL;
     out->len = 0;
 
-    if (r->headers_out.content_encoding == NULL) {
-        return NGX_DECLINED;
-    }
-
-    /* Single field line fast path: the combined value is used as-is. */
-    if (r->headers_out.content_encoding->hash != 0) {
-        *out = r->headers_out.content_encoding->value;
-        return NGX_OK;
-    }
-
-    /* Multiple field lines: measure then copy (two passes). */
+    /* Measure every active field line, including empty values. */
+    match_count = 0;
     total_len = 0;
     first = 1;
+    single_value = NULL;
     part = &r->headers_out.headers.part;
 
     while (part != NULL) {
@@ -84,30 +78,40 @@ ngx_http_markdown_collect_content_encoding(ngx_http_request_t *r,
                 i++;
                 continue;
             }
-            if (headers[i].key.len == sizeof("Content-Encoding") - 1
+            if (headers[i].key.data != NULL
+                && headers[i].key.len == sizeof("Content-Encoding") - 1
                 && ngx_strncasecmp(headers[i].key.data,
                                    (u_char *) "Content-Encoding",
                                    sizeof("Content-Encoding") - 1) == 0)
             {
-                if (total_len > ((size_t) -1) - headers[i].value.len
-                    || (first == 0 && total_len > ((size_t) -1) - 2))
+                if (match_count == 0) {
+                    single_value = &headers[i].value;
+                }
+                if (first == 0) {
+                    if (total_len > ((size_t) -1) - 2) {
+                        return NGX_ERROR;
+                    }
+                    total_len += 2;
+                }
+                if (headers[i].value.len > ((size_t) -1) - total_len)
                 {
                     return NGX_ERROR;
                 }
-                if (first) {
-                    total_len += headers[i].value.len;
-                    first = 0;
-                } else {
-                    total_len += headers[i].value.len + 2;
-                }
+                total_len += headers[i].value.len;
+                first = 0;
+                match_count++;
             }
             i++;
         }
         part = part->next;
     }
 
-    if (first) {
+    if (match_count == 0) {
         return NGX_DECLINED;
+    }
+    if (match_count == 1) {
+        *out = *single_value;
+        return NGX_OK;
     }
 
     data = ngx_pnalloc(r->pool, total_len);
@@ -126,7 +130,8 @@ ngx_http_markdown_collect_content_encoding(ngx_http_request_t *r,
                 i++;
                 continue;
             }
-            if (headers[i].key.len == sizeof("Content-Encoding") - 1
+            if (headers[i].key.data != NULL
+                && headers[i].key.len == sizeof("Content-Encoding") - 1
                 && ngx_strncasecmp(headers[i].key.data,
                                    (u_char *) "Content-Encoding",
                                    sizeof("Content-Encoding") - 1) == 0)
@@ -179,6 +184,7 @@ ngx_http_markdown_parse_encoding_chain_ffi(ngx_http_request_t *r,
     FFIEncodingChainResult   result;
     u_char                   classification;
 
+    (void) r;
     ngx_memzero(&result, sizeof(result));
 
     classification = markdown_parse_encoding_chain(
