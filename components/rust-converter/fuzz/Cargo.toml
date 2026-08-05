@@ -10,6 +10,7 @@ license = "BSD-2-Clause"
 cargo-fuzz = true
 
 [dependencies]
+brotli = "8.0"
 flate2 = "1.0"
 libfuzzer-sys = "0.4"
 markup5ever_rcdom = "0.39"
@@ -91,6 +92,27 @@ bench = false
 [[bin]]
 name = "negotiation_and_headers"
 path = "fuzz_targets/negotiation_and_headers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_encoding_chain"
+path = "fuzz_targets/fuzz_encoding_chain.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_multilayer_decode"
+path = "fuzz_targets/fuzz_multilayer_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_trusted_proxy_cidr"
+path = "fuzz_targets/fuzz_trusted_proxy_cidr.rs"
 test = false
 doc = false
 bench = false
