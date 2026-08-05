@@ -1451,7 +1451,10 @@ mod tests {
 
     #[test]
     fn abi_layout_fingerprint_matches_constant() {
-        assert_eq!(markdown_abi_layout_fingerprint(), MARKDOWN_LAYOUT_FINGERPRINT);
+        assert_eq!(
+            markdown_abi_layout_fingerprint(),
+            MARKDOWN_LAYOUT_FINGERPRINT
+        );
     }
 
     #[test]

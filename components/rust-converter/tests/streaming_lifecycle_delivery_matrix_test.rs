@@ -154,13 +154,8 @@ mod delivery_matrix {
         // FINALIZE_CONVERTER success, no closing bytes → next_frame=SEND_TERMINAL
         let frame = make_frame(Action::FinalizeConverter, "PLAN-21");
         let outcome = ok_outcome(); // produced_closing_bytes = false
-        let result = apply_result(
-            StreamingState::Committed,
-            &frame,
-            &outcome,
-            &ctx_usable(),
-        )
-        .unwrap();
+        let result =
+            apply_result(StreamingState::Committed, &frame, &outcome, &ctx_usable()).unwrap();
         assert_eq!(result.new_state, StreamingState::PostCommitSafeFinish);
         let next = result.next_frame.unwrap();
         assert_eq!(next.action, Action::SendTerminal);
@@ -176,28 +171,27 @@ mod delivery_matrix {
         assert_eq!(term_result.new_state, StreamingState::Done);
         assert!(term_result.next_frame.is_none());
         // Verify latch_terminal_sent
-        assert!(term_result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::LatchTerminalSent));
+        assert!(
+            term_result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::LatchTerminalSent)
+        );
         // Verify EMIT_FAILURE_LEDGER
-        assert!(term_result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::EmitFailureLedger));
+        assert!(
+            term_result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::EmitFailureLedger)
+        );
     }
 
     #[test]
     fn group1_finalize_ok_no_closing_then_terminal_done() {
         let frame = make_frame(Action::FinalizeConverter, "PLAN-21");
         let outcome = ok_outcome();
-        let result = apply_result(
-            StreamingState::Committed,
-            &frame,
-            &outcome,
-            &ctx_usable(),
-        )
-        .unwrap();
+        let result =
+            apply_result(StreamingState::Committed, &frame, &outcome, &ctx_usable()).unwrap();
         let next = result.next_frame.unwrap();
 
         // Terminal send returns NGX_DONE
@@ -209,23 +203,20 @@ mod delivery_matrix {
         )
         .unwrap();
         assert_eq!(term_result.new_state, StreamingState::Done);
-        assert!(term_result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::LatchTerminalSent));
+        assert!(
+            term_result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::LatchTerminalSent)
+        );
     }
 
     #[test]
     fn group1_finalize_ok_no_closing_then_terminal_again() {
         let frame = make_frame(Action::FinalizeConverter, "PLAN-21");
         let outcome = ok_outcome();
-        let result = apply_result(
-            StreamingState::Committed,
-            &frame,
-            &outcome,
-            &ctx_usable(),
-        )
-        .unwrap();
+        let result =
+            apply_result(StreamingState::Committed, &frame, &outcome, &ctx_usable()).unwrap();
         let next = result.next_frame.unwrap();
 
         // Terminal send returns NGX_AGAIN
@@ -239,23 +230,20 @@ mod delivery_matrix {
         assert_eq!(term_result.new_state, StreamingState::PendingTerminal);
         assert!(term_result.next_frame.is_none());
         // No latch on NGX_AGAIN
-        assert!(!term_result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::LatchTerminalSent));
+        assert!(
+            !term_result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::LatchTerminalSent)
+        );
     }
 
     #[test]
     fn group1_finalize_ok_no_closing_then_terminal_error() {
         let frame = make_frame(Action::FinalizeConverter, "PLAN-21");
         let outcome = ok_outcome();
-        let result = apply_result(
-            StreamingState::Committed,
-            &frame,
-            &outcome,
-            &ctx_usable(),
-        )
-        .unwrap();
+        let result =
+            apply_result(StreamingState::Committed, &frame, &outcome, &ctx_usable()).unwrap();
         let next = result.next_frame.unwrap();
 
         // Terminal send returns definitive NGX_ERROR
@@ -269,15 +257,19 @@ mod delivery_matrix {
         assert_eq!(term_result.new_state, StreamingState::Aborted);
         assert!(term_result.next_frame.is_none());
         // SetSafeFinishTerminalSendFailed side effect
-        assert!(term_result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::SetSafeFinishTerminalSendFailed));
+        assert!(
+            term_result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::SetSafeFinishTerminalSendFailed)
+        );
         // No retry via abort path
-        assert!(!term_result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::RecordPostcommitAbort));
+        assert!(
+            !term_result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::RecordPostcommitAbort)
+        );
     }
 
     // ===================================================================
@@ -294,13 +286,8 @@ mod delivery_matrix {
             produced_closing_bytes: true,
             pending_kind: None,
         };
-        let result = apply_result(
-            StreamingState::Committed,
-            &frame,
-            &outcome,
-            &ctx_usable(),
-        )
-        .unwrap();
+        let result =
+            apply_result(StreamingState::Committed, &frame, &outcome, &ctx_usable()).unwrap();
         assert_eq!(result.new_state, StreamingState::PostCommitSafeFinish);
         let next = result.next_frame.unwrap();
         assert_eq!(next.action, Action::SendClosingOutput);
@@ -328,13 +315,8 @@ mod delivery_matrix {
             produced_closing_bytes: true,
             pending_kind: None,
         };
-        let result = apply_result(
-            StreamingState::Committed,
-            &frame,
-            &outcome,
-            &ctx_usable(),
-        )
-        .unwrap();
+        let result =
+            apply_result(StreamingState::Committed, &frame, &outcome, &ctx_usable()).unwrap();
         let next = result.next_frame.unwrap();
 
         // Closing output send NGX_AGAIN → PENDING_CLOSING_OUTPUT
@@ -345,10 +327,7 @@ mod delivery_matrix {
             &ctx_usable(),
         )
         .unwrap();
-        assert_eq!(
-            close_result.new_state,
-            StreamingState::PendingClosingOutput
-        );
+        assert_eq!(close_result.new_state, StreamingState::PendingClosingOutput);
         assert!(close_result.next_frame.is_none());
     }
 
@@ -362,13 +341,8 @@ mod delivery_matrix {
             produced_closing_bytes: true,
             pending_kind: None,
         };
-        let result = apply_result(
-            StreamingState::Committed,
-            &frame,
-            &outcome,
-            &ctx_usable(),
-        )
-        .unwrap();
+        let result =
+            apply_result(StreamingState::Committed, &frame, &outcome, &ctx_usable()).unwrap();
         let next = result.next_frame.unwrap();
 
         // Closing output send definitive NGX_ERROR → output-loss abort
@@ -381,18 +355,24 @@ mod delivery_matrix {
         .unwrap();
         assert_eq!(close_result.new_state, StreamingState::Aborted);
         assert!(close_result.next_frame.is_none());
-        assert!(close_result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::SetSafeFinishOutputLoss));
-        assert!(close_result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::StoreFailureLedger));
-        assert!(close_result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::EmitFailureLedger));
+        assert!(
+            close_result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::SetSafeFinishOutputLoss)
+        );
+        assert!(
+            close_result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::StoreFailureLedger)
+        );
+        assert!(
+            close_result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::EmitFailureLedger)
+        );
     }
 
     // ===================================================================
@@ -439,10 +419,11 @@ mod delivery_matrix {
         )
         .unwrap();
         assert_eq!(r3.new_state, StreamingState::Done);
-        assert!(r3
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::LatchTerminalSent));
+        assert!(
+            r3.side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::LatchTerminalSent)
+        );
     }
 
     #[test]
@@ -482,10 +463,11 @@ mod delivery_matrix {
         .unwrap();
         assert_eq!(r3.new_state, StreamingState::PendingTerminal);
         assert!(r3.next_frame.is_none());
-        assert!(!r3
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::LatchTerminalSent));
+        assert!(
+            !r3.side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::LatchTerminalSent)
+        );
     }
 
     #[test]
@@ -524,10 +506,11 @@ mod delivery_matrix {
         )
         .unwrap();
         assert_eq!(r3.new_state, StreamingState::Aborted);
-        assert!(r3
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::SetSafeFinishTerminalSendFailed));
+        assert!(
+            r3.side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::SetSafeFinishTerminalSendFailed)
+        );
     }
 
     // ===================================================================
@@ -559,10 +542,7 @@ mod delivery_matrix {
             &ctx_usable(),
         )
         .unwrap();
-        assert_eq!(
-            result.new_state,
-            StreamingState::PendingClosingOutput
-        );
+        assert_eq!(result.new_state, StreamingState::PendingClosingOutput);
         assert!(result.next_frame.is_none());
     }
 
@@ -577,10 +557,12 @@ mod delivery_matrix {
         )
         .unwrap();
         assert_eq!(result.new_state, StreamingState::Aborted);
-        assert!(result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::SetSafeFinishOutputLoss));
+        assert!(
+            result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::SetSafeFinishOutputLoss)
+        );
     }
 
     // ===================================================================
@@ -599,14 +581,18 @@ mod delivery_matrix {
         .unwrap();
         assert_eq!(result.new_state, StreamingState::Done);
         assert!(result.next_frame.is_none());
-        assert!(result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::LatchTerminalSent));
-        assert!(result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::EmitFailureLedger));
+        assert!(
+            result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::LatchTerminalSent)
+        );
+        assert!(
+            result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::EmitFailureLedger)
+        );
     }
 
     #[test]
@@ -621,10 +607,12 @@ mod delivery_matrix {
         .unwrap();
         assert_eq!(result.new_state, StreamingState::PendingTerminal);
         assert!(result.next_frame.is_none());
-        assert!(!result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::LatchTerminalSent));
+        assert!(
+            !result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::LatchTerminalSent)
+        );
     }
 
     #[test]
@@ -640,10 +628,12 @@ mod delivery_matrix {
         assert_eq!(result.new_state, StreamingState::Aborted);
         assert!(result.next_frame.is_none());
         // No retry - direct abort
-        assert!(!result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::LatchTerminalSent));
+        assert!(
+            !result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::LatchTerminalSent)
+        );
     }
 
     // ===================================================================
@@ -664,10 +654,12 @@ mod delivery_matrix {
         let next = result.next_frame.unwrap();
         assert_eq!(next.action, Action::SendAbortTerminal);
         // RecordPostcommitAbort side effect
-        assert!(result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::RecordPostcommitAbort));
+        assert!(
+            result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::RecordPostcommitAbort)
+        );
 
         // Send abort terminal OK → DONE + latch
         let abort_result = apply_result(
@@ -679,14 +671,18 @@ mod delivery_matrix {
         .unwrap();
         assert_eq!(abort_result.new_state, StreamingState::Done);
         assert!(abort_result.next_frame.is_none());
-        assert!(abort_result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::LatchTerminalSent));
-        assert!(abort_result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::EmitFailureLedger));
+        assert!(
+            abort_result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::LatchTerminalSent)
+        );
+        assert!(
+            abort_result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::EmitFailureLedger)
+        );
     }
 
     #[test]
@@ -701,10 +697,12 @@ mod delivery_matrix {
         .unwrap();
         assert_eq!(result.new_state, StreamingState::PendingAbortTerminal);
         assert!(result.next_frame.is_none());
-        assert!(!result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::LatchTerminalSent));
+        assert!(
+            !result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::LatchTerminalSent)
+        );
     }
 
     #[test]
@@ -720,19 +718,25 @@ mod delivery_matrix {
         assert_eq!(result.new_state, StreamingState::Aborted);
         assert!(result.next_frame.is_none());
         // No retry
-        assert!(!result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::LatchTerminalSent));
+        assert!(
+            !result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::LatchTerminalSent)
+        );
         // Store and emit
-        assert!(result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::StoreFailureLedger));
-        assert!(result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::EmitFailureLedger));
+        assert!(
+            result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::StoreFailureLedger)
+        );
+        assert!(
+            result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::EmitFailureLedger)
+        );
     }
 
     // ===================================================================
@@ -751,14 +755,18 @@ mod delivery_matrix {
         .unwrap();
         assert_eq!(result.new_state, StreamingState::Done);
         assert!(result.next_frame.is_none());
-        assert!(result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::LatchTerminalSent));
-        assert!(result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::EmitFailureLedger));
+        assert!(
+            result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::LatchTerminalSent)
+        );
+        assert!(
+            result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::EmitFailureLedger)
+        );
     }
 
     #[test]
@@ -773,10 +781,12 @@ mod delivery_matrix {
         .unwrap();
         assert_eq!(result.new_state, StreamingState::PendingAbortTerminal);
         assert!(result.next_frame.is_none());
-        assert!(!result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::LatchTerminalSent));
+        assert!(
+            !result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::LatchTerminalSent)
+        );
     }
 
     #[test]
@@ -792,14 +802,18 @@ mod delivery_matrix {
         assert_eq!(result.new_state, StreamingState::Aborted);
         assert!(result.next_frame.is_none());
         // No retry
-        assert!(!result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::LatchTerminalSent));
-        assert!(result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::StoreFailureLedger));
+        assert!(
+            !result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::LatchTerminalSent)
+        );
+        assert!(
+            result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::StoreFailureLedger)
+        );
     }
 
     // ===================================================================
@@ -859,16 +873,20 @@ mod delivery_matrix {
         )
         .unwrap();
         // Store ledger side effect
-        assert!(result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::StoreFailureLedger));
+        assert!(
+            result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::StoreFailureLedger)
+        );
         // Post-effect latch names the store command
-        assert!(result
-            .failure_updates
-            .post_effect
-            .set_ledger_stored_after
-            .is_some());
+        assert!(
+            result
+                .failure_updates
+                .post_effect
+                .set_ledger_stored_after
+                .is_some()
+        );
     }
 
     #[test]
@@ -884,14 +902,18 @@ mod delivery_matrix {
         assert_eq!(result.new_state, StreamingState::Aborted);
         assert!(result.next_frame.is_none());
         // Both store and emit
-        assert!(result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::StoreFailureLedger));
-        assert!(result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::EmitFailureLedger));
+        assert!(
+            result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::StoreFailureLedger)
+        );
+        assert!(
+            result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::EmitFailureLedger)
+        );
     }
 
     #[test]
@@ -921,12 +943,7 @@ mod delivery_matrix {
             produced_closing_bytes: false,
             pending_kind: None,
         };
-        let result = apply_result(
-            StreamingState::Committed,
-            &frame,
-            &outcome,
-            &ctx_usable(),
-        );
+        let result = apply_result(StreamingState::Committed, &frame, &outcome, &ctx_usable());
         assert!(result.is_err());
         match result.unwrap_err() {
             StateMachineError::InvariantViolation { message } => {
@@ -968,18 +985,24 @@ mod delivery_matrix {
         assert_eq!(result.new_state, StreamingState::Aborted);
         assert!(result.next_frame.is_none());
         // Emit + clear, no FailureRecord, no latch
-        assert!(result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::EmitFailureLedger));
-        assert!(result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::ClearInflightAndPending));
-        assert!(!result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::LatchTerminalSent));
+        assert!(
+            result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::EmitFailureLedger)
+        );
+        assert!(
+            result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::ClearInflightAndPending)
+        );
+        assert!(
+            !result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::LatchTerminalSent)
+        );
         // No FailureRecord created
         assert_eq!(result.failure_updates, FailureUpdates::NONE);
     }
@@ -1062,19 +1085,25 @@ mod delivery_matrix {
     /// Verify common CLIENT_ABORT side effect contract.
     fn verify_client_abort_side_effects(result: &ApplyResult) {
         // Emit + clear
-        assert!(result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::EmitFailureLedger));
-        assert!(result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::ClearInflightAndPending));
+        assert!(
+            result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::EmitFailureLedger)
+        );
+        assert!(
+            result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::ClearInflightAndPending)
+        );
         // Never latch terminal
-        assert!(!result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::LatchTerminalSent));
+        assert!(
+            !result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::LatchTerminalSent)
+        );
         // Never BEGIN_ABORT
         assert!(result.next_frame.is_none());
         // No FailureRecord creation
@@ -1122,13 +1151,7 @@ mod delivery_matrix {
 
         for (state, plan_id) in states {
             let frame = cleanup_frame(plan_id);
-            let result = apply_result(
-                state,
-                &frame,
-                &ok_outcome(),
-                &ctx_usable(),
-            )
-            .unwrap();
+            let result = apply_result(state, &frame, &ok_outcome(), &ctx_usable()).unwrap();
             // State preserved
             assert_eq!(
                 result.new_state, state,
@@ -1165,10 +1188,12 @@ mod delivery_matrix {
                 Some(OwnerTransition::StreamingToReleased)
             );
             // No latch, no downstream send, no BEGIN_ABORT
-            assert!(!result
-                .side_effects
-                .iter()
-                .any(|c| c.kind == SideEffectKind::LatchTerminalSent));
+            assert!(
+                !result
+                    .side_effects
+                    .iter()
+                    .any(|c| c.kind == SideEffectKind::LatchTerminalSent)
+            );
         }
     }
 
@@ -1191,10 +1216,12 @@ mod delivery_matrix {
             result.side_effects[0].kind,
             SideEffectKind::ClearInflightAndPending
         );
-        assert!(!result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::EmitFailureLedger));
+        assert!(
+            !result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::EmitFailureLedger)
+        );
     }
 
     // ===================================================================
@@ -1216,10 +1243,12 @@ mod delivery_matrix {
         assert_eq!(result.new_state, StreamingState::Aborted);
         assert!(result.next_frame.is_none());
         // Verify no BEGIN_ABORT in the chain
-        assert!(!result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::RecordPostcommitAbort));
+        assert!(
+            !result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::RecordPostcommitAbort)
+        );
     }
 
     /// Invariant: terminal-sent latch only after NGX_OK/NGX_DONE
@@ -1234,10 +1263,12 @@ mod delivery_matrix {
             &ctx_usable(),
         )
         .unwrap();
-        assert!(!result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::LatchTerminalSent));
+        assert!(
+            !result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::LatchTerminalSent)
+        );
 
         // NGX_ERROR: no latch
         let result2 = apply_result(
@@ -1247,10 +1278,12 @@ mod delivery_matrix {
             &ctx_usable(),
         )
         .unwrap();
-        assert!(!result2
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::LatchTerminalSent));
+        assert!(
+            !result2
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::LatchTerminalSent)
+        );
 
         // NGX_OK: HAS latch
         let result3 = apply_result(
@@ -1260,10 +1293,12 @@ mod delivery_matrix {
             &ctx_usable(),
         )
         .unwrap();
-        assert!(result3
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::LatchTerminalSent));
+        assert!(
+            result3
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::LatchTerminalSent)
+        );
     }
 
     /// Invariant: NGX_AGAIN transitions to pending states, never plain COMMITTED
@@ -1348,14 +1383,18 @@ mod delivery_matrix {
             &ctx_usable(),
         )
         .unwrap();
-        assert!(r_close
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::SetSafeFinishOutputLoss));
-        assert!(!r_close
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::SetSafeFinishTerminalSendFailed));
+        assert!(
+            r_close
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::SetSafeFinishOutputLoss)
+        );
+        assert!(
+            !r_close
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::SetSafeFinishTerminalSendFailed)
+        );
 
         // Terminal send error → SetSafeFinishTerminalSendFailed
         let term_frame = make_frame(Action::SendTerminal, "PLAN-21");
@@ -1366,14 +1405,18 @@ mod delivery_matrix {
             &ctx_usable(),
         )
         .unwrap();
-        assert!(r_term
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::SetSafeFinishTerminalSendFailed));
-        assert!(!r_term
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::SetSafeFinishOutputLoss));
+        assert!(
+            r_term
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::SetSafeFinishTerminalSendFailed)
+        );
+        assert!(
+            !r_term
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::SetSafeFinishOutputLoss)
+        );
     }
 
     /// Invariant: FailureLedger promote-or-delivery rules
@@ -1397,11 +1440,7 @@ mod delivery_matrix {
     fn invariant_ledger_delivery_when_primary_exists() {
         // Terminal send error with existing primary → goes to delivery
         let ledger = ledger_with_primary();
-        let frame = make_frame_with_ledger(
-            Action::SendTerminal,
-            "PLAN-20",
-            ledger,
-        );
+        let frame = make_frame_with_ledger(Action::SendTerminal, "PLAN-20", ledger);
         let result = apply_result(
             StreamingState::PostCommitSafeFinish,
             &frame,
@@ -1418,11 +1457,7 @@ mod delivery_matrix {
     fn invariant_ledger_secondary_for_finalize_when_primary_exists() {
         // FINALIZE_CONVERTER error with existing primary → secondary
         let ledger = ledger_with_primary();
-        let frame = make_frame_with_ledger(
-            Action::FinalizeConverter,
-            "PLAN-20",
-            ledger,
-        );
+        let frame = make_frame_with_ledger(Action::FinalizeConverter, "PLAN-20", ledger);
         let result = apply_result(
             StreamingState::Committed,
             &frame,
@@ -1455,13 +1490,7 @@ mod delivery_matrix {
                 reason: "reentry".to_string(),
                 failure_ledger: FailureLedger::empty(),
             };
-            let result = apply_result(
-                state,
-                &frame,
-                &ok_outcome(),
-                &ctx_usable(),
-            )
-            .unwrap();
+            let result = apply_result(state, &frame, &ok_outcome(), &ctx_usable()).unwrap();
             assert_eq!(result.new_state, state);
             assert!(result.next_frame.is_none());
             assert!(result.side_effects.is_empty());
@@ -1513,13 +1542,7 @@ mod delivery_matrix {
             StreamingState::PendingAbortTerminal,
         ] {
             let frame = cleanup_frame("PLAN-40");
-            let result = apply_result(
-                state,
-                &frame,
-                &ok_outcome(),
-                &ctx_usable(),
-            )
-            .unwrap();
+            let result = apply_result(state, &frame, &ok_outcome(), &ctx_usable()).unwrap();
             assert!(
                 result
                     .side_effects
@@ -1575,10 +1598,7 @@ mod delivery_matrix {
         match &emit.payload {
             SideEffectPayload::EmitFailureLedger(payload) => {
                 assert_eq!(payload.telemetry_scope, TelemetryScope::UnemittedSlots);
-                assert_eq!(
-                    payload.disposition,
-                    EmitFailureLedgerDisposition::Default
-                );
+                assert_eq!(payload.disposition, EmitFailureLedgerDisposition::Default);
             }
             _ => panic!("Expected EmitFailureLedger payload"),
         }
@@ -1600,10 +1620,7 @@ mod delivery_matrix {
         match &emit2.payload {
             SideEffectPayload::EmitFailureLedger(payload) => {
                 assert_eq!(payload.telemetry_scope, TelemetryScope::UnemittedSlots);
-                assert_eq!(
-                    payload.disposition,
-                    EmitFailureLedgerDisposition::Default
-                );
+                assert_eq!(payload.disposition, EmitFailureLedgerDisposition::Default);
             }
             _ => panic!("Expected EmitFailureLedger payload"),
         }
@@ -1623,13 +1640,7 @@ mod delivery_matrix {
         };
 
         // Step 1: FINALIZE_CONVERTER → PostCommitSafeFinish + SendClosingOutput
-        let r1 = apply_result(
-            StreamingState::Committed,
-            &frame,
-            &outcome,
-            &ctx_usable(),
-        )
-        .unwrap();
+        let r1 = apply_result(StreamingState::Committed, &frame, &outcome, &ctx_usable()).unwrap();
         assert_eq!(r1.new_state, StreamingState::PostCommitSafeFinish);
         let f2 = r1.next_frame.unwrap();
         assert_eq!(f2.action, Action::SendClosingOutput);
@@ -1656,10 +1667,11 @@ mod delivery_matrix {
         .unwrap();
         assert_eq!(r3.new_state, StreamingState::Done);
         assert!(r3.next_frame.is_none());
-        assert!(r3
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::LatchTerminalSent));
+        assert!(
+            r3.side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::LatchTerminalSent)
+        );
     }
 
     /// Full abort chain: FINALIZE_CONVERTER failure (downstream usable) →
@@ -1691,10 +1703,11 @@ mod delivery_matrix {
         assert_eq!(r2.new_state, StreamingState::PostCommitAbort);
         let f3 = r2.next_frame.unwrap();
         assert_eq!(f3.action, Action::SendAbortTerminal);
-        assert!(r2
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::RecordPostcommitAbort));
+        assert!(
+            r2.side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::RecordPostcommitAbort)
+        );
 
         // Step 3: SEND_ABORT_TERMINAL OK → Done + latch + emit
         let r3 = apply_result(
@@ -1706,10 +1719,11 @@ mod delivery_matrix {
         .unwrap();
         assert_eq!(r3.new_state, StreamingState::Done);
         assert!(r3.next_frame.is_none());
-        assert!(r3
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::LatchTerminalSent));
+        assert!(
+            r3.side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::LatchTerminalSent)
+        );
     }
 
     /// Verify NGX_DONE produces the same results as NGX_OK for terminal sends
@@ -1749,10 +1763,12 @@ mod delivery_matrix {
         )
         .unwrap();
         assert_eq!(r_done.new_state, StreamingState::Done);
-        assert!(r_done
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::LatchTerminalSent));
+        assert!(
+            r_done
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::LatchTerminalSent)
+        );
     }
 
     /// Verify RESUME_PENDING in non-pending state is an error

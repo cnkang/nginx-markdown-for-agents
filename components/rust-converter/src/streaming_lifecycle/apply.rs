@@ -29,17 +29,11 @@ pub fn apply_result(
         Action::RejectStatus => apply_reject_status(state, frame),
         Action::CommitHeaders => apply_commit_headers(state, frame, outcome),
         Action::SwitchFullBuffer => apply_switch_full_buffer(state, frame),
-        Action::FinalizeConverter => {
-            apply_finalize_converter(state, frame, outcome, ctx)
-        }
-        Action::SendClosingOutput => {
-            apply_send_closing_output(state, frame, outcome)
-        }
+        Action::FinalizeConverter => apply_finalize_converter(state, frame, outcome, ctx),
+        Action::SendClosingOutput => apply_send_closing_output(state, frame, outcome),
         Action::SendTerminal => apply_send_terminal(state, frame, outcome),
         Action::BeginAbort => apply_begin_abort(state, frame, outcome, ctx),
-        Action::SendAbortTerminal => {
-            apply_send_abort_terminal(state, frame, outcome)
-        }
+        Action::SendAbortTerminal => apply_send_abort_terminal(state, frame, outcome),
         Action::ResumePending => apply_resume_pending(state, frame, outcome),
         Action::Passthrough => apply_passthrough(state, frame),
     }
@@ -65,14 +59,12 @@ fn apply_none(
         }),
 
         /* STREAMING_CANDIDATE + STREAMING_START → PRE_COMMIT */
-        (StreamingState::StreamingCandidate, EventKind::StreamingStart) => {
-            Ok(ApplyResult {
-                new_state: StreamingState::PreCommit,
-                next_frame: None,
-                side_effects: vec![],
-                failure_updates: FailureUpdates::NONE,
-            })
-        }
+        (StreamingState::StreamingCandidate, EventKind::StreamingStart) => Ok(ApplyResult {
+            new_state: StreamingState::PreCommit,
+            next_frame: None,
+            side_effects: vec![],
+            failure_updates: FailureUpdates::NONE,
+        }),
 
         /* PRE_COMMIT + REPLAY_OVERFLOW → PRE_COMMIT_REPLAY_UNAVAILABLE */
         (StreamingState::PreCommit, EventKind::ReplayOverflow) => Ok(ApplyResult {
@@ -109,12 +101,10 @@ fn apply_none(
                         command_id: cmd_id.clone(),
                         kind: SideEffectKind::EmitFailureLedger,
                         execute_if: OwnerPredicate::OwnerIsStreaming,
-                        payload: SideEffectPayload::EmitFailureLedger(
-                            EmitFailureLedgerPayload {
-                                telemetry_scope: TelemetryScope::UnemittedSlots,
-                                disposition: EmitFailureLedgerDisposition::Default,
-                            },
-                        ),
+                        payload: SideEffectPayload::EmitFailureLedger(EmitFailureLedgerPayload {
+                            telemetry_scope: TelemetryScope::UnemittedSlots,
+                            disposition: EmitFailureLedgerDisposition::Default,
+                        }),
                         owner_transition: Some(OwnerTransition::StreamingToReleased),
                     },
                     SideEffectCommand {
@@ -134,10 +124,7 @@ fn apply_none(
             new_state: StreamingState::FullBufferFallback,
             next_frame: None,
             side_effects: vec![SideEffectCommand {
-                command_id: format!(
-                    "CMD_A{}-CLR",
-                    frame.transition_id.replace("PLAN-", "")
-                ),
+                command_id: format!("CMD_A{}-CLR", frame.transition_id.replace("PLAN-", "")),
                 kind: SideEffectKind::ClearInflightAndPending,
                 execute_if: OwnerPredicate::Always,
                 payload: SideEffectPayload::None,
@@ -157,12 +144,10 @@ fn apply_none(
                         command_id: cmd_id.clone(),
                         kind: SideEffectKind::EmitFailureLedger,
                         execute_if: OwnerPredicate::OwnerIsStreaming,
-                        payload: SideEffectPayload::EmitFailureLedger(
-                            EmitFailureLedgerPayload {
-                                telemetry_scope: TelemetryScope::UnemittedSlots,
-                                disposition: EmitFailureLedgerDisposition::Default,
-                            },
-                        ),
+                        payload: SideEffectPayload::EmitFailureLedger(EmitFailureLedgerPayload {
+                            telemetry_scope: TelemetryScope::UnemittedSlots,
+                            disposition: EmitFailureLedgerDisposition::Default,
+                        }),
                         owner_transition: Some(OwnerTransition::StreamingToReleased),
                     },
                     SideEffectCommand {
@@ -387,10 +372,7 @@ fn apply_finalize_converter(
                     reason: frame.reason.clone(),
                     failure_ledger: frame.failure_ledger.clone(),
                 };
-                let cmd_store = format!(
-                    "CMD_A{}-STORE",
-                    frame.transition_id.replace("PLAN-", "")
-                );
+                let cmd_store = format!("CMD_A{}-STORE", frame.transition_id.replace("PLAN-", ""));
                 Ok(ApplyResult {
                     new_state: StreamingState::PostCommitAbort,
                     next_frame: Some(next),
@@ -412,14 +394,8 @@ fn apply_finalize_converter(
                 })
             } else {
                 /* downstream NOT usable → direct ABORTED */
-                let cmd_store = format!(
-                    "CMD_A{}-STORE",
-                    frame.transition_id.replace("PLAN-", "")
-                );
-                let cmd_emit = format!(
-                    "CMD_A{}-EMIT",
-                    frame.transition_id.replace("PLAN-", "")
-                );
+                let cmd_store = format!("CMD_A{}-STORE", frame.transition_id.replace("PLAN-", ""));
+                let cmd_emit = format!("CMD_A{}-EMIT", frame.transition_id.replace("PLAN-", ""));
                 Ok(ApplyResult {
                     new_state: StreamingState::Aborted,
                     next_frame: None,
@@ -441,9 +417,7 @@ fn apply_finalize_converter(
                                     disposition: EmitFailureLedgerDisposition::Default,
                                 },
                             ),
-                            owner_transition: Some(
-                                OwnerTransition::StreamingToReleased,
-                            ),
+                            owner_transition: Some(OwnerTransition::StreamingToReleased),
                         },
                     ],
                     failure_updates: FailureUpdates {
@@ -532,10 +506,14 @@ fn apply_send_closing_output(
                 failure_site: Some(FailureSite::ClosingOutput),
             };
             let pre_effect = promote_or_delivery(&frame.failure_ledger, &record);
-            let cmd_store =
-                format!("CMD_A{}-CLOSE-STORE", frame.transition_id.replace("PLAN-", ""));
-            let cmd_emit =
-                format!("CMD_A{}-CLOSE-EMIT", frame.transition_id.replace("PLAN-", ""));
+            let cmd_store = format!(
+                "CMD_A{}-CLOSE-STORE",
+                frame.transition_id.replace("PLAN-", "")
+            );
+            let cmd_emit = format!(
+                "CMD_A{}-CLOSE-EMIT",
+                frame.transition_id.replace("PLAN-", "")
+            );
             Ok(ApplyResult {
                 new_state: StreamingState::Aborted,
                 next_frame: None,
@@ -558,12 +536,10 @@ fn apply_send_closing_output(
                         command_id: cmd_emit.clone(),
                         kind: SideEffectKind::EmitFailureLedger,
                         execute_if: OwnerPredicate::OwnerIsStreaming,
-                        payload: SideEffectPayload::EmitFailureLedger(
-                            EmitFailureLedgerPayload {
-                                telemetry_scope: TelemetryScope::UnemittedSlots,
-                                disposition: EmitFailureLedgerDisposition::Default,
-                            },
-                        ),
+                        payload: SideEffectPayload::EmitFailureLedger(EmitFailureLedgerPayload {
+                            telemetry_scope: TelemetryScope::UnemittedSlots,
+                            disposition: EmitFailureLedgerDisposition::Default,
+                        }),
                         owner_transition: Some(OwnerTransition::StreamingToReleased),
                     },
                 ],
@@ -612,12 +588,10 @@ fn apply_send_terminal(
                         command_id: cmd_emit.clone(),
                         kind: SideEffectKind::EmitFailureLedger,
                         execute_if: OwnerPredicate::OwnerIsStreaming,
-                        payload: SideEffectPayload::EmitFailureLedger(
-                            EmitFailureLedgerPayload {
-                                telemetry_scope: TelemetryScope::UnemittedSlots,
-                                disposition: EmitFailureLedgerDisposition::Default,
-                            },
-                        ),
+                        payload: SideEffectPayload::EmitFailureLedger(EmitFailureLedgerPayload {
+                            telemetry_scope: TelemetryScope::UnemittedSlots,
+                            disposition: EmitFailureLedgerDisposition::Default,
+                        }),
                         owner_transition: Some(OwnerTransition::StreamingToReleased),
                     },
                 ],
@@ -683,12 +657,10 @@ fn apply_send_terminal(
                         command_id: cmd_emit.clone(),
                         kind: SideEffectKind::EmitFailureLedger,
                         execute_if: OwnerPredicate::OwnerIsStreaming,
-                        payload: SideEffectPayload::EmitFailureLedger(
-                            EmitFailureLedgerPayload {
-                                telemetry_scope: TelemetryScope::UnemittedSlots,
-                                disposition: EmitFailureLedgerDisposition::Default,
-                            },
-                        ),
+                        payload: SideEffectPayload::EmitFailureLedger(EmitFailureLedgerPayload {
+                            telemetry_scope: TelemetryScope::UnemittedSlots,
+                            disposition: EmitFailureLedgerDisposition::Default,
+                        }),
                         owner_transition: Some(OwnerTransition::StreamingToReleased),
                     },
                 ],
@@ -778,12 +750,10 @@ fn apply_send_abort_terminal(
                         command_id: cmd_emit.clone(),
                         kind: SideEffectKind::EmitFailureLedger,
                         execute_if: OwnerPredicate::OwnerIsStreaming,
-                        payload: SideEffectPayload::EmitFailureLedger(
-                            EmitFailureLedgerPayload {
-                                telemetry_scope: TelemetryScope::UnemittedSlots,
-                                disposition: EmitFailureLedgerDisposition::Default,
-                            },
-                        ),
+                        payload: SideEffectPayload::EmitFailureLedger(EmitFailureLedgerPayload {
+                            telemetry_scope: TelemetryScope::UnemittedSlots,
+                            disposition: EmitFailureLedgerDisposition::Default,
+                        }),
                         owner_transition: Some(OwnerTransition::StreamingToReleased),
                     },
                 ],
@@ -842,12 +812,10 @@ fn apply_send_abort_terminal(
                         command_id: cmd_emit.clone(),
                         kind: SideEffectKind::EmitFailureLedger,
                         execute_if: OwnerPredicate::OwnerIsStreaming,
-                        payload: SideEffectPayload::EmitFailureLedger(
-                            EmitFailureLedgerPayload {
-                                telemetry_scope: TelemetryScope::UnemittedSlots,
-                                disposition: EmitFailureLedgerDisposition::Default,
-                            },
-                        ),
+                        payload: SideEffectPayload::EmitFailureLedger(EmitFailureLedgerPayload {
+                            telemetry_scope: TelemetryScope::UnemittedSlots,
+                            disposition: EmitFailureLedgerDisposition::Default,
+                        }),
                         owner_transition: Some(OwnerTransition::StreamingToReleased),
                     },
                 ],
@@ -882,20 +850,11 @@ fn apply_resume_pending(
     outcome: &ActionOutcome,
 ) -> Result<ApplyResult, StateMachineError> {
     match state {
-        StreamingState::PendingClosingOutput => {
-            apply_resume_closing_output(frame, outcome)
-        }
-        StreamingState::PendingTerminal => {
-            apply_resume_terminal(frame, outcome)
-        }
-        StreamingState::PendingAbortTerminal => {
-            apply_resume_abort_terminal(frame, outcome)
-        }
+        StreamingState::PendingClosingOutput => apply_resume_closing_output(frame, outcome),
+        StreamingState::PendingTerminal => apply_resume_terminal(frame, outcome),
+        StreamingState::PendingAbortTerminal => apply_resume_abort_terminal(frame, outcome),
         _ => Err(StateMachineError::InvariantViolation {
-            message: format!(
-                "RESUME_PENDING in non-pending state {:?}",
-                state
-            ),
+            message: format!("RESUME_PENDING in non-pending state {:?}", state),
         }),
     }
 }
@@ -969,12 +928,10 @@ fn apply_resume_closing_output(
                         command_id: cmd_emit.clone(),
                         kind: SideEffectKind::EmitFailureLedger,
                         execute_if: OwnerPredicate::OwnerIsStreaming,
-                        payload: SideEffectPayload::EmitFailureLedger(
-                            EmitFailureLedgerPayload {
-                                telemetry_scope: TelemetryScope::UnemittedSlots,
-                                disposition: EmitFailureLedgerDisposition::Default,
-                            },
-                        ),
+                        payload: SideEffectPayload::EmitFailureLedger(EmitFailureLedgerPayload {
+                            telemetry_scope: TelemetryScope::UnemittedSlots,
+                            disposition: EmitFailureLedgerDisposition::Default,
+                        }),
                         owner_transition: Some(OwnerTransition::StreamingToReleased),
                     },
                 ],
@@ -1022,12 +979,10 @@ fn apply_resume_terminal(
                         command_id: cmd_emit.clone(),
                         kind: SideEffectKind::EmitFailureLedger,
                         execute_if: OwnerPredicate::OwnerIsStreaming,
-                        payload: SideEffectPayload::EmitFailureLedger(
-                            EmitFailureLedgerPayload {
-                                telemetry_scope: TelemetryScope::UnemittedSlots,
-                                disposition: EmitFailureLedgerDisposition::Default,
-                            },
-                        ),
+                        payload: SideEffectPayload::EmitFailureLedger(EmitFailureLedgerPayload {
+                            telemetry_scope: TelemetryScope::UnemittedSlots,
+                            disposition: EmitFailureLedgerDisposition::Default,
+                        }),
                         owner_transition: Some(OwnerTransition::StreamingToReleased),
                     },
                 ],
@@ -1083,12 +1038,10 @@ fn apply_resume_terminal(
                         command_id: cmd_emit.clone(),
                         kind: SideEffectKind::EmitFailureLedger,
                         execute_if: OwnerPredicate::OwnerIsStreaming,
-                        payload: SideEffectPayload::EmitFailureLedger(
-                            EmitFailureLedgerPayload {
-                                telemetry_scope: TelemetryScope::UnemittedSlots,
-                                disposition: EmitFailureLedgerDisposition::Default,
-                            },
-                        ),
+                        payload: SideEffectPayload::EmitFailureLedger(EmitFailureLedgerPayload {
+                            telemetry_scope: TelemetryScope::UnemittedSlots,
+                            disposition: EmitFailureLedgerDisposition::Default,
+                        }),
                         owner_transition: Some(OwnerTransition::StreamingToReleased),
                     },
                 ],
@@ -1111,11 +1064,7 @@ fn apply_resume_abort_terminal(
     outcome: &ActionOutcome,
 ) -> Result<ApplyResult, StateMachineError> {
     /* Symmetric with SEND_ABORT_TERMINAL outcomes */
-    apply_send_abort_terminal(
-        StreamingState::PendingAbortTerminal,
-        frame,
-        outcome,
-    )
+    apply_send_abort_terminal(StreamingState::PendingAbortTerminal, frame, outcome)
 }
 
 /// Promote-or-delivery helper for failure record placement.
@@ -1243,10 +1192,12 @@ mod tests {
         .unwrap();
         assert_eq!(result.new_state, StreamingState::Done);
         assert!(result.next_frame.is_none());
-        assert!(result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::LatchTerminalSent));
+        assert!(
+            result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::LatchTerminalSent)
+        );
     }
 
     #[test]
@@ -1278,10 +1229,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result.new_state, StreamingState::Aborted);
-        assert!(result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::SetSafeFinishTerminalSendFailed));
+        assert!(
+            result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::SetSafeFinishTerminalSendFailed)
+        );
     }
 
     #[test]
@@ -1389,14 +1342,18 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result.new_state, StreamingState::Aborted);
-        assert!(result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::EmitFailureLedger));
-        assert!(result
-            .side_effects
-            .iter()
-            .any(|c| c.kind == SideEffectKind::ClearInflightAndPending));
+        assert!(
+            result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::EmitFailureLedger)
+        );
+        assert!(
+            result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::ClearInflightAndPending)
+        );
     }
 
     #[test]

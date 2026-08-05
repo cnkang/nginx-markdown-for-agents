@@ -8,8 +8,7 @@
 //! handling and body delivery are verified by protocol_correctness_test.c.
 
 use nginx_markdown_converter::decision::conditional::{
-    CacheValidation, ConditionalInput, ConditionalOutcome,
-    ConditionalReason, decide_conditional,
+    CacheValidation, ConditionalInput, ConditionalOutcome, ConditionalReason, decide_conditional,
 };
 use nginx_markdown_converter::header_plan::{HeaderOp, HeaderPlan};
 
@@ -59,7 +58,12 @@ fn scenario_01_200_fullbuffer_without_etag() {
 
     assert_eq!(plan.len(), 3);
     // No ETag placeholder when cache_validation is not full
-    assert!(!plan.ops.iter().any(|op| matches!(op, HeaderOp::SetEtagPlaceholder)));
+    assert!(
+        !plan
+            .ops
+            .iter()
+            .any(|op| matches!(op, HeaderOp::SetEtagPlaceholder))
+    );
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -163,7 +167,12 @@ fn scenario_08_head_streaming() {
         name: "Content-Length".to_string()
     }));
     // No ETag placeholder
-    assert!(!plan.ops.iter().any(|op| matches!(op, HeaderOp::SetEtagPlaceholder)));
+    assert!(
+        !plan
+            .ops
+            .iter()
+            .any(|op| matches!(op, HeaderOp::SetEtagPlaceholder))
+    );
 }
 
 /* ══════════════════════════════════════════════════════════════════

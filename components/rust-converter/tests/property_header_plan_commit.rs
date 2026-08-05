@@ -55,8 +55,7 @@ fn arb_header_plan() -> impl Strategy<Value = HeaderPlan> {
         // for_304: conditional response plan
         Just(HeaderPlan::for_304()),
         // for_head: HEAD response plan
-        (arb_content_type(), arb_has_etag())
-            .prop_map(|(ct, etag)| HeaderPlan::for_head(&ct, etag)),
+        (arb_content_type(), arb_has_etag()).prop_map(|(ct, etag)| HeaderPlan::for_head(&ct, etag)),
         // for_no_body: generic no-body plan
         Just(HeaderPlan::for_no_body()),
     ]
