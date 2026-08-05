@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/cnkang/nginx-markdown-for-agents/schemas/observation-state.schema.json",
+  "title": "Observation State",
+  "description": "Instance schema for the stability-observation state record (artifacts/release/0.9.2/observation-state.json). Records per-domain observation payloads (coverage, performance, fuzz, soak, security, signature, provenance, documentation, residual-risk) plus the current observation phase. Phase definitions, cadence, duration, and 1.0 exit thresholds are defined ONLY in Requirement 18 criterion 6; this schema references them by pointer and does not restate numeric thresholds.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "candidate_sha",
+    "phase",
+    "domains",
+    "observation_plan_reference"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "candidate_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$",
+      "description": "W5-frozen candidate SHA; must equal the release candidate manifest candidate_sha."
+    },
+    "phase": {
+      "enum": ["not_started", "phase_1_candidate_qualification", "phase_2_internal_canary", "phase_3_expanded_canary", "observation_complete"],
+      "description": "Current observation phase per Requirement 18 criterion 6."
+    },
+    "phase_started_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "observation_plan_reference": {
+      "type": "string",
+      "description": "Pointer to the single authoritative observation plan (Requirement 18 criterion 6)."
+    },
+    "domains": {
+      "type": "object",
+      "description": "Per-domain observation payloads. Each domain carries its own payload shape; thresholds are referenced, never restated.",
+      "additionalProperties": false,
+      "properties": {
+        "coverage": {
+          "type": "object",
+          "required": ["aggregate_pct", "critical_path_pct"],
+          "additionalProperties": true,
+          "properties": {
+            "aggregate_pct": { "type": "number" },
+            "critical_path_pct": { "type": "number" },
+            "report_ref": { "type": "string" }
+          }
+        },
+        "performance": {
+          "type": "object",
+          "required": ["per_scenario_budgets"],
+          "additionalProperties": true,
+          "properties": {
+            "per_scenario_budgets": { "type": "array", "items": { "type": "object" } },
+            "baseline_ref": { "type": "string" }
+          }
+        },
+        "fuzz": {
+          "type": "object",
+          "required": ["blocking_targets"],
+          "additionalProperties": true,
+          "properties": {
+            "blocking_targets": { "type": "array", "items": { "type": "object" } },
+            "campaign_ref": { "type": "string" }
+          }
+        },
+        "soak": {
+          "type": "object",
+          "required": ["runs"],
+          "additionalProperties": true,
+          "properties": {
+            "runs": { "type": "array", "items": { "type": "object" } },
+            "soak_ref": { "type": "string" }
+          }
+        },
+        "security": {
+          "type": "object",
+          "required": ["sast_status", "dependency_status"],
+          "additionalProperties": true,
+          "properties": {
+            "sast_status": { "enum": ["clear", "accepted_residual", "open"] },
+            "dependency_status": { "enum": ["clear", "accepted_residual", "open"] },
+            "scan_report_ref": { "type": "string" }
+          }
+        },
+        "signature": {
+          "type": "object",
+          "required": ["verified_artifact_count"],
+          "additionalProperties": true,
+          "properties": {
+            "verified_artifact_count": { "type": "integer", "minimum": 0 },
+            "signature_index_ref": { "type": "string" }
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "required": ["attestation_count"],
+          "additionalProperties": true,
+          "properties": {
+            "attestation_count": { "type": "integer", "minimum": 0 },
+            "provenance_index_ref": { "type": "string" }
+          }
+        },
+        "documentation": {
+          "type": "object",
+          "required": ["open_items"],
+          "additionalProperties": true,
+          "properties": {
+            "open_items": { "type": "integer", "minimum": 0 },
+            "audit_ref": { "type": "string" }
+          }
+        },
+        "residual-risk": {
+          "type": "object",
+          "required": ["records"],
+          "additionalProperties": true,
+          "properties": {
+            "records": { "type": "array", "items": { "type": "object" } }
+          }
+        }
+      }
+    }
+  }
+}
