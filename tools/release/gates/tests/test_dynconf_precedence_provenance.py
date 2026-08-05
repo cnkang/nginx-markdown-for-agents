@@ -141,25 +141,6 @@ def compute_block_mask(
     return mask
 
 
-def resolve_merged_static_value(
-    http_conf: ConfigLevel,
-    server_conf: ConfigLevel,
-    location_conf: ConfigLevel,
-    field_name: str,
-) -> int:
-    """Resolve the merged static value using NGINX merge semantics.
-
-    Location > Server > Http > Built-in default.
-    """
-    if location_conf.get(field_name) is not None:
-        return location_conf.get(field_name)
-    if server_conf.get(field_name) is not None:
-        return server_conf.get(field_name)
-    if http_conf.get(field_name) is not None:
-        return http_conf.get(field_name)
-    return BUILTIN_DEFAULTS[field_name]
-
-
 def resolve_effective(
     http_conf: ConfigLevel,
     server_conf: ConfigLevel,
@@ -180,12 +161,7 @@ def resolve_effective(
     # Step 1: Compute block mask
     mask = compute_block_mask(http_conf, server_conf, location_conf)
 
-    # Step 2: Determine the merged static value (levels 2, 4, 5)
-    merged_static = resolve_merged_static_value(
-        http_conf, server_conf, location_conf, field_name
-    )
-
-    # Step 3: Start with the merged static value and determine base provenance
+    # Step 2: Determine the static value and its base provenance
     if location_conf.get(field_name) is not None:
         value = location_conf.get(field_name)
         provenance = Provenance.STATIC
@@ -199,7 +175,7 @@ def resolve_effective(
         value = BUILTIN_DEFAULTS[field_name]
         provenance = Provenance.BUILTIN_DEFAULT
 
-    # Step 4: Apply dynconf overlay (only where block bit NOT set and key present)
+    # Step 3: Apply dynconf overlay (only where block bit NOT set and key present)
     if not mask.is_blocked(field_name) and dynconf is not None:
         dynconf_value = dynconf.get(field_name)
         if dynconf_value is not None:

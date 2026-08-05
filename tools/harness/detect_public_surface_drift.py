@@ -1104,16 +1104,9 @@ def check_directive_contract(inventory, actual_contract):
     active_fields = ("classification", "context", "args", "handler", "conf_offset",
                      "source_flags", "post", "otel_classification", "default",
                      "syntax", "status", "migration_target")
-    reject_fields = ("classification", "context", "args", "handler", "conf_offset",
-                     "source_flags", "post", "otel_classification", "status",
-                     "default", "syntax", "migration_target")
     active_entries = {
         name: entry for name, entry in entries.items()
         if entry.get("classification") != "reject_only"
-    }
-    reject_entries = {
-        name: entry for name, entry in entries.items()
-        if entry.get("classification") == "reject_only"
     }
     active_actual = {
         name: contract for name, contract in actual_contract.items()

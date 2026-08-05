@@ -267,7 +267,6 @@ def generate_rust_test_module() -> str:
 
 def generate_rust_all_array(reasons) -> str:
     """Generate the ALL constant array."""
-    count = len(reasons)
     lines = []
     lines.append("/// Array of all reason code variants for exhaustive iteration.")
     lines.append("///")
@@ -441,7 +440,6 @@ def generate_rust_impl_continued(reasons) -> str:
 
 def generate_rust_ffi(reasons) -> str:
     """Generate the FFI functions at the end of the Rust file."""
-    count = len(reasons)
     lines = []
 
     # markdown_reason_code_str

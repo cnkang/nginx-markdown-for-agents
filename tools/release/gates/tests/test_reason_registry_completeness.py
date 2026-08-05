@@ -21,7 +21,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from hypothesis import given, settings, assume
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 # Ensure the tools package is importable
