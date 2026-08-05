@@ -3,9 +3,8 @@
 #
 # Runs lizard (CCN/length/params) on C, Rust, and Python source,
 # complexipy (cognitive complexity) on Python tooling, and shellcheck
-# on shell scripts.  Compares violations against a checked-in baseline
-# to prevent new complexity growth without requiring immediate cleanup
-# of all historical complex functions.
+# on shell scripts.  Every reported violation fails the check; there is
+# no checked-in exception list or historical-complexity waiver.
 #
 # Output lands in target/complexity/ (not committed).
 #
@@ -31,14 +30,13 @@ mkdir -p "$OUTDIR"
 # ── Thresholds ──────────────────────────────────────────────────────
 # C: generous thresholds — NGINX glue layers have inherent complexity
 #    from lifecycle, error branches, macros, and state machines.
-#    Goal: prevent further growth, not zero out all complex functions.
 C_CCN_THRESHOLD=25
 C_LENGTH_THRESHOLD=180
 C_PARAMS_THRESHOLD=8
 
 # Rust: moderate thresholds — pure-logic functions should be simpler,
 #        but streaming state machines and HTML traversal are inherently
-#        complex.  Goal: catch new hot spots.
+#        complex.
 RUST_CCN_THRESHOLD=25
 RUST_LENGTH_THRESHOLD=200
 RUST_PARAMS_THRESHOLD=8
@@ -215,40 +213,22 @@ else
 fi
 echo ""
 
-# ── Baseline comparison ─────────────────────────────────────────────
-BASELINE="$SCRIPT_DIR/baseline.json"
-BASELINE_REPORT="$OUTDIR/baseline-report.txt"
-
-echo "--- Baseline Comparison ---"
-if [[ -f "$BASELINE" ]]; then
-    python3 "$SCRIPT_DIR/_compare_baseline.py" \
-        --baseline "$BASELINE" \
-        --lizard-c "$C_WARNINGS" \
-        --lizard-rust "$RUST_WARNINGS" \
-        --lizard-py "$PY_LIZARD_WARNINGS" \
-        --complexipy "$PY_COMPLEXIPY_OUT" \
-        --output "$BASELINE_REPORT"
-    baseline_rc=$?
-    echo "  Report: $BASELINE_REPORT"
-else
-    echo "  WARNING: baseline.json not found at $BASELINE — running without baseline gating" >&2
-    echo "  All violations are reported but not gated. Create a baseline with:" >&2
-    echo "    python3 tools/complexity/_generate_baseline.py" >&2
-    baseline_rc=0
-fi
-echo ""
-
 # ── Final summary ───────────────────────────────────────────────────
 echo "=== Complexity Check Summary ==="
 echo "Reports: $OUTDIR/"
 ls -la "$OUTDIR/" 2>/dev/null || true
 
-if [[ $baseline_rc -ne 0 ]]; then
+if [[ $c_count -ne 0 || $rust_count -ne 0 || $py_lizard_count -ne 0 ]]; then
     echo ""
-    echo "FAIL: complexity check found new violations not in baseline"
-    echo "  Review: $BASELINE_REPORT"
-    echo "  If the new violations are acceptable, update the baseline:"
-    echo "    python3 tools/complexity/_generate_baseline.py"
+    echo "FAIL: complexity check found lizard violations"
+    echo "  Review: $C_WARNINGS $RUST_WARNINGS $PY_LIZARD_WARNINGS"
+    exit 1
+fi
+
+if [[ ${complexipy_rc:-0} -ne 0 ]]; then
+    echo ""
+    echo "FAIL: complexipy found cognitive-complexity violations"
+    echo "  Review: $PY_COMPLEXIPY_OUT"
     exit 1
 fi
 

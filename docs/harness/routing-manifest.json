@@ -177,7 +177,7 @@
       "commands": [
         "make complexity-check"
       ],
-      "notes": "Runs lizard (CCN/length/params) on C/Rust/Python, complexipy (cognitive) on Python, shellcheck on shell. Baseline-gated: new violations fail, existing baseline violations that worsen produce warnings. See docs/harness/rules/complexity.md."
+      "notes": "Runs lizard (CCN/length/params) on C/Rust/Python, complexipy (cognitive) on Python, and shellcheck on shell. Every violation is blocking; no baseline exceptions are permitted. See docs/harness/rules/complexity.md."
     },
     "regex-security": {
       "phase": "cheap-blocker",

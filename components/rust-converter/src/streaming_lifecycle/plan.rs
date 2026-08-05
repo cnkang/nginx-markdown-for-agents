@@ -126,262 +126,171 @@ fn lookup_plan_transition(
     event: EventKind,
     ctx: &PlanContext,
 ) -> Result<PlanTransition, StateMachineError> {
-    /* Avoid glob imports to prevent ambiguity between
-     * StreamingState::NotEligible/Passthrough and EventKind/Action variants */
+    if event == EventKind::Cleanup {
+        return plan_action(
+            Action::None,
+            "cleanup",
+            &format!("PLAN-{}", cleanup_plan_id(state)),
+        );
+    }
 
-    match (state, event) {
-        /* PLAN-01: NOT_ELIGIBLE + ELIGIBLE → NONE */
-        (StreamingState::NotEligible, EventKind::Eligible) => Ok(PlanTransition {
-            action: Action::None,
-            action_payload: ActionPayload::NULL,
-            reason: "eligible".to_string(),
-            transition_id: "PLAN-01".to_string(),
-        }),
+    match state {
+        StreamingState::NotEligible => lookup_not_eligible(event),
+        StreamingState::StreamingCandidate => lookup_streaming_candidate(event, ctx),
+        StreamingState::PreCommit => lookup_pre_commit(event, ctx),
+        StreamingState::PreCommitReplayUnavailable => {
+            lookup_replay_unavailable(event, ctx)
+        }
+        StreamingState::Committed => lookup_committed(event, ctx),
+        StreamingState::PostCommitSafeFinish
+        | StreamingState::PostCommitAbort
+        | StreamingState::PendingClosingOutput
+        | StreamingState::PendingTerminal
+        | StreamingState::PendingAbortTerminal => lookup_pending(state, event),
+        StreamingState::Done | StreamingState::Aborted | StreamingState::FailedClosed => {
+            lookup_terminal(state, event)
+        }
+        _ => invalid_transition(state, event),
+    }
+}
 
-        /* PLAN-02: NOT_ELIGIBLE + NOT_ELIGIBLE → PASSTHROUGH */
-        (StreamingState::NotEligible, EventKind::NotEligible) => Ok(PlanTransition {
-            action: Action::Passthrough,
-            action_payload: ActionPayload::NULL,
-            reason: "not_eligible".to_string(),
-            transition_id: "PLAN-02".to_string(),
-        }),
+fn plan_action(
+    action: Action,
+    reason: &str,
+    transition_id: &str,
+) -> Result<PlanTransition, StateMachineError> {
+    Ok(PlanTransition {
+        action,
+        action_payload: ActionPayload::NULL,
+        reason: reason.to_string(),
+        transition_id: transition_id.to_string(),
+    })
+}
 
-        /* PLAN-03: STREAMING_CANDIDATE + STREAMING_START → NONE */
-        (StreamingState::StreamingCandidate, EventKind::StreamingStart) => Ok(PlanTransition {
-            action: Action::None,
-            action_payload: ActionPayload::NULL,
-            reason: "streaming_start".to_string(),
-            transition_id: "PLAN-03".to_string(),
-        }),
+fn invalid_transition(
+    state: StreamingState,
+    event: EventKind,
+) -> Result<PlanTransition, StateMachineError> {
+    Err(StateMachineError::InvalidTransition { state, event })
+}
 
-        /* PLAN-04: STREAMING_CANDIDATE + HARD_EXCLUDED → PASSTHROUGH */
-        (StreamingState::StreamingCandidate, EventKind::HardExcluded) => Ok(PlanTransition {
-            action: Action::Passthrough,
-            action_payload: ActionPayload::NULL,
-            reason: "hard_excluded".to_string(),
-            transition_id: "PLAN-04".to_string(),
-        }),
+fn lookup_not_eligible(event: EventKind) -> Result<PlanTransition, StateMachineError> {
+    match event {
+        EventKind::Eligible => plan_action(Action::None, "eligible", "PLAN-01"),
+        EventKind::NotEligible => plan_action(Action::Passthrough, "not_eligible", "PLAN-02"),
+        _ => invalid_transition(StreamingState::NotEligible, event),
+    }
+}
 
-        /* PLAN-05: STREAMING_CANDIDATE + FULL_DOC_FEATURE → SWITCH_FULL_BUFFER */
-        (StreamingState::StreamingCandidate, EventKind::FullDocFeature) => Ok(PlanTransition {
-            action: Action::SwitchFullBuffer,
-            action_payload: ActionPayload::NULL,
-            reason: "full_doc_feature".to_string(),
-            transition_id: "PLAN-05".to_string(),
-        }),
-
-        /* PLAN-06: STREAMING_CANDIDATE + STRICT_ETAG → SWITCH_FULL_BUFFER */
-        (StreamingState::StreamingCandidate, EventKind::StrictEtag) => Ok(PlanTransition {
-            action: Action::SwitchFullBuffer,
-            action_payload: ActionPayload::NULL,
-            reason: "strict_etag".to_string(),
-            transition_id: "PLAN-06".to_string(),
-        }),
-
-        /* PLAN-07: STREAMING_CANDIDATE + AUTO_RISK → SWITCH_FULL_BUFFER */
-        (StreamingState::StreamingCandidate, EventKind::AutoRisk) => Ok(PlanTransition {
-            action: Action::SwitchFullBuffer,
-            action_payload: ActionPayload::NULL,
-            reason: "auto_risk".to_string(),
-            transition_id: "PLAN-07".to_string(),
-        }),
-
-        /* PLAN-08: STREAMING_CANDIDATE + BUDGET_INIT_FAILURE → context-dependent */
-        (StreamingState::StreamingCandidate, EventKind::BudgetInitFailure) => {
+fn lookup_streaming_candidate(
+    event: EventKind,
+    ctx: &PlanContext,
+) -> Result<PlanTransition, StateMachineError> {
+    match event {
+        EventKind::StreamingStart => plan_action(Action::None, "streaming_start", "PLAN-03"),
+        EventKind::HardExcluded => plan_action(Action::Passthrough, "hard_excluded", "PLAN-04"),
+        EventKind::FullDocFeature => {
+            plan_action(Action::SwitchFullBuffer, "full_doc_feature", "PLAN-05")
+        }
+        EventKind::StrictEtag => plan_action(Action::SwitchFullBuffer, "strict_etag", "PLAN-06"),
+        EventKind::AutoRisk => plan_action(Action::SwitchFullBuffer, "auto_risk", "PLAN-07"),
+        EventKind::BudgetInitFailure => {
             plan_precommit_error_recovery(ctx, "budget_init_failure", "PLAN-08")
         }
+        _ => invalid_transition(StreamingState::StreamingCandidate, event),
+    }
+}
 
-        /* PLAN-09: PRE_COMMIT + REPLAY_OVERFLOW → NONE (state transition) */
-        (StreamingState::PreCommit, EventKind::ReplayOverflow) => Ok(PlanTransition {
-            action: Action::None,
-            action_payload: ActionPayload::NULL,
-            reason: "replay_overflow".to_string(),
-            transition_id: "PLAN-09".to_string(),
-        }),
-
-        /* PLAN-10: PRE_COMMIT + LOOK_BEHIND_OVERFLOW → NONE (state transition) */
-        (StreamingState::PreCommit, EventKind::LookBehindOverflow) => Ok(PlanTransition {
-            action: Action::None,
-            action_payload: ActionPayload::NULL,
-            reason: "look_behind_overflow".to_string(),
-            transition_id: "PLAN-10".to_string(),
-        }),
-
-        /* PLAN-11: PRE_COMMIT + PARSER_UNSUITABLE → context-dependent */
-        (StreamingState::PreCommit, EventKind::ParserUnsuitable) => {
+fn lookup_pre_commit(
+    event: EventKind,
+    ctx: &PlanContext,
+) -> Result<PlanTransition, StateMachineError> {
+    match event {
+        EventKind::ReplayOverflow => plan_action(Action::None, "replay_overflow", "PLAN-09"),
+        EventKind::LookBehindOverflow => {
+            plan_action(Action::None, "look_behind_overflow", "PLAN-10")
+        }
+        EventKind::ParserUnsuitable => {
             plan_precommit_fallback(ctx, "parser_unsuitable", "PLAN-11")
         }
-
-        /* PLAN-12: PRE_COMMIT + RESOURCE_LIMIT → context-dependent */
-        (StreamingState::PreCommit, EventKind::ResourceLimit) => {
-            plan_precommit_fallback(ctx, "resource_limit", "PLAN-12")
-        }
-
-        /* PLAN-13: PRE_COMMIT + ERROR → context-dependent */
-        (StreamingState::PreCommit, EventKind::Error) => {
-            plan_precommit_error_recovery(ctx, "error", "PLAN-13")
-        }
-
-        /* PLAN-14: PRE_COMMIT + COMMIT → COMMIT_HEADERS */
-        (StreamingState::PreCommit, EventKind::Commit) => Ok(PlanTransition {
-            action: Action::CommitHeaders,
-            action_payload: ActionPayload::NULL,
-            reason: "commit".to_string(),
-            transition_id: "PLAN-14".to_string(),
-        }),
-
-        /* PLAN-15: PRE_COMMIT_REPLAY_UNAVAILABLE + ERROR → context-dependent */
-        (StreamingState::PreCommitReplayUnavailable, EventKind::Error) => {
-            plan_replay_unavailable_error(ctx, "PLAN-15")
-        }
-
-        /* PLAN-16: PRE_COMMIT_REPLAY_UNAVAILABLE + RESOURCE_LIMIT → context-dep */
-        (StreamingState::PreCommitReplayUnavailable, EventKind::ResourceLimit) => {
-            plan_replay_unavailable_error(ctx, "PLAN-16")
-        }
-
-        /* PLAN-17: PRE_COMMIT_REPLAY_UNAVAILABLE + COMMIT → COMMIT_HEADERS */
-        (StreamingState::PreCommitReplayUnavailable, EventKind::Commit) => Ok(PlanTransition {
-            action: Action::CommitHeaders,
-            action_payload: ActionPayload::NULL,
-            reason: "commit".to_string(),
-            transition_id: "PLAN-17".to_string(),
-        }),
-
-        /* PLAN-18: PRE_COMMIT_REPLAY_UNAVAILABLE + PARSER_UNSUITABLE → ctx-dep */
-        (StreamingState::PreCommitReplayUnavailable, EventKind::ParserUnsuitable) => {
-            plan_replay_unavailable_error(ctx, "PLAN-18")
-        }
-
-        /* PLAN-19: COMMITTED + COMMIT (redundant commit) → invariant violation */
-        (StreamingState::Committed, EventKind::Commit) => {
-            Err(StateMachineError::InvariantViolation {
-                message: "COMMIT in COMMITTED state".to_string(),
-            })
-        }
-
-        /* PLAN-20: COMMITTED + ERROR → policy-dependent */
-        (StreamingState::Committed, EventKind::Error) => plan_postcommit_error(ctx, "PLAN-20"),
-
-        /* PLAN-21: COMMITTED + UPSTREAM_END → FINALIZE_CONVERTER */
-        (StreamingState::Committed, EventKind::UpstreamEnd) => Ok(PlanTransition {
-            action: Action::FinalizeConverter,
-            action_payload: ActionPayload::NULL,
-            reason: "upstream_end".to_string(),
-            transition_id: "PLAN-21".to_string(),
-        }),
-
-        /* PLAN-22: COMMITTED + CLIENT_ABORT → NONE (ABORTED) */
-        (StreamingState::Committed, EventKind::ClientAbort) => Ok(PlanTransition {
-            action: Action::None,
-            action_payload: ActionPayload::NULL,
-            reason: "client_abort".to_string(),
-            transition_id: "PLAN-22".to_string(),
-        }),
-
-        /* PLAN-23: POST_COMMIT_SAFE_FINISH + CLIENT_ABORT → NONE (ABORTED) */
-        (StreamingState::PostCommitSafeFinish, EventKind::ClientAbort) => Ok(PlanTransition {
-            action: Action::None,
-            action_payload: ActionPayload::NULL,
-            reason: "client_abort".to_string(),
-            transition_id: "PLAN-23".to_string(),
-        }),
-
-        /* PLAN-24: POST_COMMIT_ABORT + CLIENT_ABORT → NONE (ABORTED) */
-        (StreamingState::PostCommitAbort, EventKind::ClientAbort) => Ok(PlanTransition {
-            action: Action::None,
-            action_payload: ActionPayload::NULL,
-            reason: "client_abort".to_string(),
-            transition_id: "PLAN-24".to_string(),
-        }),
-
-        /* PLAN-25: PENDING_CLOSING_OUTPUT + CLIENT_ABORT → NONE (ABORTED) */
-        (StreamingState::PendingClosingOutput, EventKind::ClientAbort) => Ok(PlanTransition {
-            action: Action::None,
-            action_payload: ActionPayload::NULL,
-            reason: "client_abort".to_string(),
-            transition_id: "PLAN-25".to_string(),
-        }),
-
-        /* PLAN-26: PENDING_TERMINAL + CLIENT_ABORT → NONE (ABORTED) */
-        (StreamingState::PendingTerminal, EventKind::ClientAbort) => Ok(PlanTransition {
-            action: Action::None,
-            action_payload: ActionPayload::NULL,
-            reason: "client_abort".to_string(),
-            transition_id: "PLAN-26".to_string(),
-        }),
-
-        /* PLAN-27: PENDING_ABORT_TERMINAL + CLIENT_ABORT → NONE (ABORTED) */
-        (StreamingState::PendingAbortTerminal, EventKind::ClientAbort) => Ok(PlanTransition {
-            action: Action::None,
-            action_payload: ActionPayload::NULL,
-            reason: "client_abort".to_string(),
-            transition_id: "PLAN-27".to_string(),
-        }),
-
-        /* PLAN-28: PENDING_CLOSING_OUTPUT + RESUME_DRAIN → RESUME_PENDING */
-        (StreamingState::PendingClosingOutput, EventKind::ResumeDrain) => Ok(PlanTransition {
-            action: Action::ResumePending,
-            action_payload: ActionPayload::NULL,
-            reason: "resume_drain".to_string(),
-            transition_id: "PLAN-28".to_string(),
-        }),
-
-        /* PLAN-29: PENDING_TERMINAL + RESUME_DRAIN → RESUME_PENDING */
-        (StreamingState::PendingTerminal, EventKind::ResumeDrain) => Ok(PlanTransition {
-            action: Action::ResumePending,
-            action_payload: ActionPayload::NULL,
-            reason: "resume_drain".to_string(),
-            transition_id: "PLAN-29".to_string(),
-        }),
-
-        /* PLAN-30: PENDING_ABORT_TERMINAL + RESUME_DRAIN → RESUME_PENDING */
-        (StreamingState::PendingAbortTerminal, EventKind::ResumeDrain) => Ok(PlanTransition {
-            action: Action::ResumePending,
-            action_payload: ActionPayload::NULL,
-            reason: "resume_drain".to_string(),
-            transition_id: "PLAN-30".to_string(),
-        }),
-
-        /* PLAN-31: COMMITTED + UPSTREAM_END (alt: postcommit non-error finish)
-         * This is handled by PLAN-21. Error after UPSTREAM_END is a separate
-         * flow handled by apply_result chain. */
-
-        /* PLAN-32: DONE + BODY_FILTER_REENTRY → NONE (idempotent) */
-        (StreamingState::Done, EventKind::BodyFilterReentry) => Ok(PlanTransition {
-            action: Action::None,
-            action_payload: ActionPayload::NULL,
-            reason: "body_filter_reentry_after_terminal".to_string(),
-            transition_id: "PLAN-32".to_string(),
-        }),
-
-        /* PLAN-33: ABORTED + BODY_FILTER_REENTRY → NONE (idempotent) */
-        (StreamingState::Aborted, EventKind::BodyFilterReentry) => Ok(PlanTransition {
-            action: Action::None,
-            action_payload: ActionPayload::NULL,
-            reason: "body_filter_reentry_after_terminal".to_string(),
-            transition_id: "PLAN-33".to_string(),
-        }),
-
-        /* PLAN-33b: FAILED_CLOSED + BODY_FILTER_REENTRY → NONE (idempotent) */
-        (StreamingState::FailedClosed, EventKind::BodyFilterReentry) => Ok(PlanTransition {
-            action: Action::None,
-            action_payload: ActionPayload::NULL,
-            reason: "body_filter_reentry_after_terminal".to_string(),
-            transition_id: "PLAN-33b".to_string(),
-        }),
-
-        /* PLAN-34..PLAN-48: CLEANUP in every state (15 rows) */
-        (_, EventKind::Cleanup) => Ok(PlanTransition {
-            action: Action::None,
-            action_payload: ActionPayload::NULL,
-            reason: "cleanup".to_string(),
-            transition_id: format!("PLAN-{}", cleanup_plan_id(state)),
-        }),
-
-        /* All other (state, event) pairs are invalid */
-        _ => Err(StateMachineError::InvalidTransition { state, event }),
+        EventKind::ResourceLimit => plan_precommit_fallback(ctx, "resource_limit", "PLAN-12"),
+        EventKind::Error => plan_precommit_error_recovery(ctx, "error", "PLAN-13"),
+        EventKind::Commit => plan_action(Action::CommitHeaders, "commit", "PLAN-14"),
+        _ => invalid_transition(StreamingState::PreCommit, event),
     }
+}
+
+fn lookup_replay_unavailable(
+    event: EventKind,
+    ctx: &PlanContext,
+) -> Result<PlanTransition, StateMachineError> {
+    match event {
+        EventKind::Error => plan_replay_unavailable_error(ctx, "PLAN-15"),
+        EventKind::ResourceLimit => plan_replay_unavailable_error(ctx, "PLAN-16"),
+        EventKind::Commit => plan_action(Action::CommitHeaders, "commit", "PLAN-17"),
+        EventKind::ParserUnsuitable => plan_replay_unavailable_error(ctx, "PLAN-18"),
+        _ => invalid_transition(StreamingState::PreCommitReplayUnavailable, event),
+    }
+}
+
+fn lookup_committed(
+    event: EventKind,
+    ctx: &PlanContext,
+) -> Result<PlanTransition, StateMachineError> {
+    match event {
+        EventKind::Commit => Err(StateMachineError::InvariantViolation {
+            message: "COMMIT in COMMITTED state".to_string(),
+        }),
+        EventKind::Error => plan_postcommit_error(ctx, "PLAN-20"),
+        EventKind::UpstreamEnd => {
+            plan_action(Action::FinalizeConverter, "upstream_end", "PLAN-21")
+        }
+        EventKind::ClientAbort => plan_action(Action::None, "client_abort", "PLAN-22"),
+        _ => invalid_transition(StreamingState::Committed, event),
+    }
+}
+
+fn lookup_pending(
+    state: StreamingState,
+    event: EventKind,
+) -> Result<PlanTransition, StateMachineError> {
+    let transition_id = match (state, event) {
+        (StreamingState::PostCommitSafeFinish, EventKind::ClientAbort) => "PLAN-23",
+        (StreamingState::PostCommitAbort, EventKind::ClientAbort) => "PLAN-24",
+        (StreamingState::PendingClosingOutput, EventKind::ClientAbort) => "PLAN-25",
+        (StreamingState::PendingTerminal, EventKind::ClientAbort) => "PLAN-26",
+        (StreamingState::PendingAbortTerminal, EventKind::ClientAbort) => "PLAN-27",
+        (StreamingState::PendingClosingOutput, EventKind::ResumeDrain) => "PLAN-28",
+        (StreamingState::PendingTerminal, EventKind::ResumeDrain) => "PLAN-29",
+        (StreamingState::PendingAbortTerminal, EventKind::ResumeDrain) => "PLAN-30",
+        _ => return invalid_transition(state, event),
+    };
+    let (action, reason) = match event {
+        EventKind::ClientAbort => (Action::None, "client_abort"),
+        EventKind::ResumeDrain => (Action::ResumePending, "resume_drain"),
+        _ => return invalid_transition(state, event),
+    };
+    plan_action(action, reason, transition_id)
+}
+
+fn lookup_terminal(
+    state: StreamingState,
+    event: EventKind,
+) -> Result<PlanTransition, StateMachineError> {
+    if event != EventKind::BodyFilterReentry {
+        return invalid_transition(state, event);
+    }
+    let transition_id = match state {
+        StreamingState::Done => "PLAN-32",
+        StreamingState::Aborted => "PLAN-33",
+        StreamingState::FailedClosed => "PLAN-33b",
+        _ => return invalid_transition(state, event),
+    };
+    plan_action(
+        Action::None,
+        "body_filter_reentry_after_terminal",
+        transition_id,
+    )
 }
 
 /// Map each state to its CLEANUP Plan ID (PLAN-34 through PLAN-48).

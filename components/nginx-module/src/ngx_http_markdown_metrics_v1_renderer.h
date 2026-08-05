@@ -210,34 +210,12 @@ ngx_http_markdown_metrics_v1_render_histogram(
     return p;
 }
 
-/*
- * Render the 11 frozen metric families in Prometheus text 0.0.4 format.
- *
- * Writes HELP, TYPE, and metric lines for all 11 families into the
- * buffer between p and end. Returns a pointer past the last byte
- * written, or NULL if the buffer is exhausted.
- *
- * Parameters:
- *   p        - Start of writable buffer region
- *   end      - One past the end of the buffer
- *   snapshot - v1 metrics snapshot (exactly 11 families)
- *
- * Returns:
- *   Pointer past the last byte written, or NULL on buffer overflow
- */
 static u_char *
-ngx_http_markdown_metrics_v1_render(
+ngx_http_markdown_metrics_v1_render_families_1_to_3(
     u_char *p,
     u_char *end,
     const ngx_http_markdown_metrics_v1_snapshot_t *snapshot)
 {
-    if (p == NULL || end == NULL || snapshot == NULL) {
-        return NULL;
-    }
-
-    /* ================================================================
-     * Family 1: nginx_markdown_requests_total
-     * ================================================================ */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_requests_total "
         "Total requests with terminal outcome "
@@ -288,15 +266,10 @@ ngx_http_markdown_metrics_v1_render(
         return NULL;
     }
 
-    /* ================================================================
-     * Family 2: nginx_markdown_conversion_attempts_total
-     * ================================================================ */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_conversion_attempts_total "
-        "Total conversion attempts "
-        "(engine selection committed).\n"
-        "# TYPE nginx_markdown_conversion_attempts_total "
-        "counter\n"
+        "Total conversion attempts (engine selection committed).\n"
+        "# TYPE nginx_markdown_conversion_attempts_total counter\n"
         "nginx_markdown_conversion_attempts_total"
         "{engine=\"full_buffer\"} %uA\n"
         "nginx_markdown_conversion_attempts_total"
@@ -308,15 +281,11 @@ ngx_http_markdown_metrics_v1_render(
         return NULL;
     }
 
-    /* ================================================================
-     * Family 3: nginx_markdown_conversion_deliveries_total
-     * ================================================================ */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_conversion_deliveries_total "
         "Successful terminal deliveries of converted "
         "Markdown (downstream accepted last_buf).\n"
-        "# TYPE nginx_markdown_conversion_deliveries_total "
-        "counter\n"
+        "# TYPE nginx_markdown_conversion_deliveries_total counter\n"
         "nginx_markdown_conversion_deliveries_total"
         "{engine=\"full_buffer\"} %uA\n"
         "nginx_markdown_conversion_deliveries_total"
@@ -328,14 +297,19 @@ ngx_http_markdown_metrics_v1_render(
         return NULL;
     }
 
-    /* ================================================================
-     * Family 4: nginx_markdown_conversion_duration_seconds
-     * ================================================================ */
+    return p;
+}
+
+static u_char *
+ngx_http_markdown_metrics_v1_render_families_4_to_7(
+    u_char *p,
+    u_char *end,
+    const ngx_http_markdown_metrics_v1_snapshot_t *snapshot)
+{
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_conversion_duration_seconds "
         "Duration of conversion operations in seconds.\n"
-        "# TYPE nginx_markdown_conversion_duration_seconds "
-        "histogram\n");
+        "# TYPE nginx_markdown_conversion_duration_seconds histogram\n");
     if (p >= end) {
         return NULL;
     }
@@ -355,9 +329,6 @@ ngx_http_markdown_metrics_v1_render(
         return NULL;
     }
 
-    /* ================================================================
-     * Family 5: nginx_markdown_input_bytes_total
-     * ================================================================ */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_input_bytes_total "
         "Total input bytes read for conversion.\n"
@@ -369,13 +340,9 @@ ngx_http_markdown_metrics_v1_render(
         return NULL;
     }
 
-    /* ================================================================
-     * Family 6: nginx_markdown_output_bytes_total
-     * ================================================================ */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_output_bytes_total "
-        "Total output bytes delivered downstream "
-        "after conversion.\n"
+        "Total output bytes delivered downstream after conversion.\n"
         "# TYPE nginx_markdown_output_bytes_total counter\n"
         "nginx_markdown_output_bytes_total %uA\n"
         "\n",
@@ -384,13 +351,9 @@ ngx_http_markdown_metrics_v1_render(
         return NULL;
     }
 
-    /* ================================================================
-     * Family 7: nginx_markdown_inflight_requests
-     * ================================================================ */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_inflight_requests "
-        "Number of requests currently undergoing "
-        "conversion.\n"
+        "Number of requests currently undergoing conversion.\n"
         "# TYPE nginx_markdown_inflight_requests gauge\n"
         "nginx_markdown_inflight_requests %uA\n"
         "\n",
@@ -399,15 +362,19 @@ ngx_http_markdown_metrics_v1_render(
         return NULL;
     }
 
-    /* ================================================================
-     * Family 8: nginx_markdown_streaming_events_total
-     * ================================================================ */
+    return p;
+}
+
+static u_char *
+ngx_http_markdown_metrics_v1_render_families_8_to_9(
+    u_char *p,
+    u_char *end,
+    const ngx_http_markdown_metrics_v1_snapshot_t *snapshot)
+{
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_streaming_events_total "
-        "Streaming lifecycle transition events "
-        "(closed allowlist).\n"
-        "# TYPE nginx_markdown_streaming_events_total "
-        "counter\n"
+        "Streaming lifecycle transition events (closed allowlist).\n"
+        "# TYPE nginx_markdown_streaming_events_total counter\n"
         "nginx_markdown_streaming_events_total"
         "{transition=\"commit\",reason=\"converted\"} %uA\n"
         "nginx_markdown_streaming_events_total"
@@ -431,60 +398,40 @@ ngx_http_markdown_metrics_v1_render(
         return NULL;
     }
 
-    /* ================================================================
-     * Family 9: nginx_markdown_decompression_events_total
-     * ================================================================ */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_decompression_events_total "
-        "Decompression layer completion or failure "
-        "events.\n"
-        "# TYPE nginx_markdown_decompression_events_total "
-        "counter\n"
+        "Decompression layer completion or failure events.\n"
+        "# TYPE nginx_markdown_decompression_events_total counter\n"
         "nginx_markdown_decompression_events_total"
-        "{encoding=\"gzip\",outcome=\"success\","
-        "reason=\"ok\"} %uA\n"
+        "{encoding=\"gzip\",outcome=\"success\",reason=\"ok\"} %uA\n"
         "nginx_markdown_decompression_events_total"
-        "{encoding=\"gzip\",outcome=\"failure\","
-        "reason=\"budget_exceeded\"} %uA\n"
+        "{encoding=\"gzip\",outcome=\"failure\",reason=\"budget_exceeded\"} %uA\n"
         "nginx_markdown_decompression_events_total"
-        "{encoding=\"gzip\",outcome=\"failure\","
-        "reason=\"format_error\"} %uA\n"
+        "{encoding=\"gzip\",outcome=\"failure\",reason=\"format_error\"} %uA\n"
         "nginx_markdown_decompression_events_total"
-        "{encoding=\"gzip\",outcome=\"failure\","
-        "reason=\"truncated_input\"} %uA\n"
+        "{encoding=\"gzip\",outcome=\"failure\",reason=\"truncated_input\"} %uA\n"
         "nginx_markdown_decompression_events_total"
-        "{encoding=\"gzip\",outcome=\"failure\","
-        "reason=\"io_error\"} %uA\n"
+        "{encoding=\"gzip\",outcome=\"failure\",reason=\"io_error\"} %uA\n"
         "nginx_markdown_decompression_events_total"
-        "{encoding=\"deflate\",outcome=\"success\","
-        "reason=\"ok\"} %uA\n"
+        "{encoding=\"deflate\",outcome=\"success\",reason=\"ok\"} %uA\n"
         "nginx_markdown_decompression_events_total"
-        "{encoding=\"deflate\",outcome=\"failure\","
-        "reason=\"budget_exceeded\"} %uA\n"
+        "{encoding=\"deflate\",outcome=\"failure\",reason=\"budget_exceeded\"} %uA\n"
         "nginx_markdown_decompression_events_total"
-        "{encoding=\"deflate\",outcome=\"failure\","
-        "reason=\"format_error\"} %uA\n"
+        "{encoding=\"deflate\",outcome=\"failure\",reason=\"format_error\"} %uA\n"
         "nginx_markdown_decompression_events_total"
-        "{encoding=\"deflate\",outcome=\"failure\","
-        "reason=\"truncated_input\"} %uA\n"
+        "{encoding=\"deflate\",outcome=\"failure\",reason=\"truncated_input\"} %uA\n"
         "nginx_markdown_decompression_events_total"
-        "{encoding=\"deflate\",outcome=\"failure\","
-        "reason=\"io_error\"} %uA\n"
+        "{encoding=\"deflate\",outcome=\"failure\",reason=\"io_error\"} %uA\n"
         "nginx_markdown_decompression_events_total"
-        "{encoding=\"brotli\",outcome=\"success\","
-        "reason=\"ok\"} %uA\n"
+        "{encoding=\"brotli\",outcome=\"success\",reason=\"ok\"} %uA\n"
         "nginx_markdown_decompression_events_total"
-        "{encoding=\"brotli\",outcome=\"failure\","
-        "reason=\"budget_exceeded\"} %uA\n"
+        "{encoding=\"brotli\",outcome=\"failure\",reason=\"budget_exceeded\"} %uA\n"
         "nginx_markdown_decompression_events_total"
-        "{encoding=\"brotli\",outcome=\"failure\","
-        "reason=\"format_error\"} %uA\n"
+        "{encoding=\"brotli\",outcome=\"failure\",reason=\"format_error\"} %uA\n"
         "nginx_markdown_decompression_events_total"
-        "{encoding=\"brotli\",outcome=\"failure\","
-        "reason=\"truncated_input\"} %uA\n"
+        "{encoding=\"brotli\",outcome=\"failure\",reason=\"truncated_input\"} %uA\n"
         "nginx_markdown_decompression_events_total"
-        "{encoding=\"brotli\",outcome=\"failure\","
-        "reason=\"io_error\"} %uA\n"
+        "{encoding=\"brotli\",outcome=\"failure\",reason=\"io_error\"} %uA\n"
         "\n",
         snapshot->decompression.gzip_success,
         snapshot->decompression.gzip_failure_budget,
@@ -505,40 +452,37 @@ ngx_http_markdown_metrics_v1_render(
         return NULL;
     }
 
-    /* ================================================================
-     * Family 10: nginx_markdown_dynconf_reloads_total
-     * ================================================================ */
+    return p;
+}
+
+static u_char *
+ngx_http_markdown_metrics_v1_render_families_10_to_11(
+    u_char *p,
+    u_char *end,
+    const ngx_http_markdown_metrics_v1_snapshot_t *snapshot)
+{
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_dynconf_reloads_total "
         "Dynconf reload attempts by outcome.\n"
-        "# TYPE nginx_markdown_dynconf_reloads_total "
-        "counter\n"
+        "# TYPE nginx_markdown_dynconf_reloads_total counter\n"
         "nginx_markdown_dynconf_reloads_total"
         "{outcome=\"success\",reason=\"ok\"} %uA\n"
         "nginx_markdown_dynconf_reloads_total"
-        "{outcome=\"failure\","
-        "reason=\"schema_version\"} %uA\n"
+        "{outcome=\"failure\",reason=\"schema_version\"} %uA\n"
         "nginx_markdown_dynconf_reloads_total"
-        "{outcome=\"failure\","
-        "reason=\"unknown_key\"} %uA\n"
+        "{outcome=\"failure\",reason=\"unknown_key\"} %uA\n"
         "nginx_markdown_dynconf_reloads_total"
-        "{outcome=\"failure\","
-        "reason=\"duplicate_key\"} %uA\n"
+        "{outcome=\"failure\",reason=\"duplicate_key\"} %uA\n"
         "nginx_markdown_dynconf_reloads_total"
-        "{outcome=\"failure\","
-        "reason=\"invalid_type\"} %uA\n"
+        "{outcome=\"failure\",reason=\"invalid_type\"} %uA\n"
         "nginx_markdown_dynconf_reloads_total"
-        "{outcome=\"failure\","
-        "reason=\"out_of_range\"} %uA\n"
+        "{outcome=\"failure\",reason=\"out_of_range\"} %uA\n"
         "nginx_markdown_dynconf_reloads_total"
-        "{outcome=\"failure\","
-        "reason=\"size_exceeded\"} %uA\n"
+        "{outcome=\"failure\",reason=\"size_exceeded\"} %uA\n"
         "nginx_markdown_dynconf_reloads_total"
-        "{outcome=\"failure\","
-        "reason=\"parse_error\"} %uA\n"
+        "{outcome=\"failure\",reason=\"parse_error\"} %uA\n"
         "nginx_markdown_dynconf_reloads_total"
-        "{outcome=\"failure\","
-        "reason=\"file_error\"} %uA\n"
+        "{outcome=\"failure\",reason=\"file_error\"} %uA\n"
         "\n",
         snapshot->dynconf_reloads.success,
         snapshot->dynconf_reloads.failure_schema_version,
@@ -553,9 +497,6 @@ ngx_http_markdown_metrics_v1_render(
         return NULL;
     }
 
-    /* ================================================================
-     * Family 11: nginx_markdown_build_info
-     * ================================================================ */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_build_info "
         "Module build information (always 1).\n"
@@ -572,6 +513,53 @@ ngx_http_markdown_metrics_v1_render(
     }
 
     return p;
+}
+
+/*
+ * Render the 11 frozen metric families in Prometheus text 0.0.4 format.
+ *
+ * Writes HELP, TYPE, and metric lines for all 11 families into the
+ * buffer between p and end. Returns a pointer past the last byte
+ * written, or NULL if the buffer is exhausted.
+ *
+ * Parameters:
+ *   p        - Start of writable buffer region
+ *   end      - One past the end of the buffer
+ *   snapshot - v1 metrics snapshot (exactly 11 families)
+ *
+ * Returns:
+ *   Pointer past the last byte written, or NULL on buffer overflow
+ */
+static u_char *
+ngx_http_markdown_metrics_v1_render(
+    u_char *p,
+    u_char *end,
+    const ngx_http_markdown_metrics_v1_snapshot_t *snapshot)
+{
+    if (p == NULL || end == NULL || snapshot == NULL) {
+        return NULL;
+    }
+
+    p = ngx_http_markdown_metrics_v1_render_families_1_to_3(
+        p, end, snapshot);
+    if (p == NULL) {
+        return NULL;
+    }
+
+    p = ngx_http_markdown_metrics_v1_render_families_4_to_7(
+        p, end, snapshot);
+    if (p == NULL) {
+        return NULL;
+    }
+
+    p = ngx_http_markdown_metrics_v1_render_families_8_to_9(
+        p, end, snapshot);
+    if (p == NULL) {
+        return NULL;
+    }
+
+    return ngx_http_markdown_metrics_v1_render_families_10_to_11(
+        p, end, snapshot);
 }
 
 #endif /* NGX_HTTP_MARKDOWN_METRICS_V1_RENDERER_H */

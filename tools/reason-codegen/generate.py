@@ -284,9 +284,8 @@ def generate_rust_all_array(reasons) -> str:
     return "\n".join(lines)
 
 
-def generate_rust_impl(reasons) -> str:
-    """Generate the impl ReasonCode block with as_str, metric_key, etc."""
-    lines = []
+def _append_rust_as_str(lines, reasons):
+    """Append the Rust `as_str` method."""
     lines.append("impl ReasonCode {")
 
     # as_str
@@ -312,6 +311,29 @@ def generate_rust_impl(reasons) -> str:
     lines.append("    }")
     lines.append("")
 
+
+def _append_metric_family(lines, reasons, family, members):
+    """Append one grouped family arm to the Rust metric-key match."""
+    matching = [reason for reason in reasons if reason["key"] in members]
+    if not matching:
+        return
+    if len(matching) == 1:
+        variant = snake_to_pascal(matching[0]["key"])
+        lines.append(f'            ReasonCode::{variant} => "{family}",')
+        return
+    for index, reason in enumerate(matching):
+        variant = snake_to_pascal(reason["key"])
+        if index == 0:
+            lines.append(f"            ReasonCode::{variant}")
+        elif index < len(matching) - 1:
+            lines.append(f"            | ReasonCode::{variant}")
+        else:
+            lines.append(f'            | ReasonCode::{variant} => "{family}",')
+
+
+def _append_rust_metric_key(lines, reasons):
+    """Append the Rust `metric_key` method."""
+
     # metric_key
     lines.append("    /// Return the Prometheus metric key name for this reason code.")
     lines.append("    ///")
@@ -328,28 +350,19 @@ def generate_rust_impl(reasons) -> str:
     lines.append("    pub fn metric_key(self) -> &'static str {")
     lines.append("        match self {")
 
-    # Group by metric family
     for family, members in METRIC_FAMILIES.items():
-        # Find which reasons belong to this family
-        matching = [r for r in reasons if r["key"] in members]
-        if not matching:
-            continue
-        if len(matching) == 1:
-            variant = snake_to_pascal(matching[0]["key"])
-            lines.append(f'            ReasonCode::{variant} => "{family}",')
-        else:
-            for i, r in enumerate(matching):
-                variant = snake_to_pascal(r["key"])
-                if i == 0:
-                    lines.append(f"            ReasonCode::{variant}")
-                elif i < len(matching) - 1:
-                    lines.append(f"            | ReasonCode::{variant}")
-                else:
-                    lines.append(f'            | ReasonCode::{variant} => "{family}",')
+        _append_metric_family(lines, reasons, family, members)
 
     lines.append("        }")
     lines.append("    }")
     lines.append("")
+
+
+def generate_rust_impl(reasons) -> str:
+    """Generate the impl ReasonCode block with its first two methods."""
+    lines = []
+    _append_rust_as_str(lines, reasons)
+    _append_rust_metric_key(lines, reasons)
 
     return "\n".join(lines)
 
@@ -872,6 +885,54 @@ def check_drift(path: Path, content: str) -> bool:
     return True
 
 
+def _build_generated_outputs(reasons, hash_hex: str):
+    """Build the complete path/content set for generated artifacts."""
+    rust_content = format_rust_source(build_full_rust(reasons, hash_hex))
+    manifest_content = json.dumps(
+        generate_manifest(reasons, hash_hex), indent=2, ensure_ascii=False
+    ) + "\n"
+    listing_content = json.dumps(
+        generate_listing(hash_hex), indent=2, ensure_ascii=False
+    ) + "\n"
+    return [
+        (RUST_OUTPUT, rust_content),
+        (C_HEADER_OUTPUT, generate_c_header(reasons, hash_hex)),
+        (C_SOURCE_OUTPUT, generate_c_source(reasons, hash_hex)),
+        (MANIFEST_OUTPUT, manifest_content),
+        (LISTING_OUTPUT, listing_content),
+    ]
+
+
+def _check_generated_outputs(outputs):
+    """Check every generated artifact and return a process status."""
+    print("\nDrift check mode:")
+    all_ok = all(check_drift(path, content) for path, content in outputs)
+    if not all_ok:
+        print(
+            "\nERROR: Generated files are out of date. "
+            "Run: python3 tools/reason-codegen/generate.py",
+            file=sys.stderr,
+        )
+        return 1
+    print("\nAll generated files are up to date.")
+    return 0
+
+
+def _write_generated_outputs(outputs):
+    """Write changed generated artifacts and report the result."""
+    files_written = [
+        str(path.relative_to(REPO_ROOT))
+        for path, content in outputs
+        if write_if_changed(path, content)
+    ]
+    if not files_written:
+        print("\nAll files already up to date.")
+        return
+    print(f"\nWrote {len(files_written)} file(s):")
+    for path in files_written:
+        print(f"  {path}")
+
+
 def main():
     """Main entry point."""
     check_mode = "--check" in sys.argv
@@ -881,57 +942,12 @@ def main():
     hash_hex = source_hash(raw_bytes)
 
     print(f"Reason registry: {len(reasons)} entries, SHA-256: {hash_hex[:16]}...")
-
-    # Generate all content
-    rust_content = format_rust_source(build_full_rust(reasons, hash_hex))
-    c_header_content = generate_c_header(reasons, hash_hex)
-    c_source_content = generate_c_source(reasons, hash_hex)
-    manifest = generate_manifest(reasons, hash_hex)
-    listing = generate_listing(hash_hex)
-
-    manifest_content = json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
-    listing_content = json.dumps(listing, indent=2, ensure_ascii=False) + "\n"
-
+    outputs = _build_generated_outputs(reasons, hash_hex)
     if check_mode:
-        print("\nDrift check mode:")
-        all_ok = True
-        all_ok &= check_drift(RUST_OUTPUT, rust_content)
-        all_ok &= check_drift(C_HEADER_OUTPUT, c_header_content)
-        all_ok &= check_drift(C_SOURCE_OUTPUT, c_source_content)
-        all_ok &= check_drift(MANIFEST_OUTPUT, manifest_content)
-        all_ok &= check_drift(LISTING_OUTPUT, listing_content)
-
-        if not all_ok:
-            print(
-                "\nERROR: Generated files are out of date. "
-                "Run: python3 tools/reason-codegen/generate.py",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        else:
-            print("\nAll generated files are up to date.")
-            sys.exit(0)
-    else:
-        # Write mode
-        files_written = []
-        if write_if_changed(RUST_OUTPUT, rust_content):
-            files_written.append(str(RUST_OUTPUT.relative_to(REPO_ROOT)))
-        if write_if_changed(C_HEADER_OUTPUT, c_header_content):
-            files_written.append(str(C_HEADER_OUTPUT.relative_to(REPO_ROOT)))
-        if write_if_changed(C_SOURCE_OUTPUT, c_source_content):
-            files_written.append(str(C_SOURCE_OUTPUT.relative_to(REPO_ROOT)))
-        if write_if_changed(MANIFEST_OUTPUT, manifest_content):
-            files_written.append(str(MANIFEST_OUTPUT.relative_to(REPO_ROOT)))
-        if write_if_changed(LISTING_OUTPUT, listing_content):
-            files_written.append(str(LISTING_OUTPUT.relative_to(REPO_ROOT)))
-
-        if files_written:
-            print(f"\nWrote {len(files_written)} file(s):")
-            for f in files_written:
-                print(f"  {f}")
-        else:
-            print("\nAll files already up to date.")
+        return _check_generated_outputs(outputs)
+    _write_generated_outputs(outputs)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

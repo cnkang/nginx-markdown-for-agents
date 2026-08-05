@@ -103,7 +103,7 @@ policy. Do not expose it directly to the public network.
 From a repository checkout, the static and schema gates are:
 
 ```sh
-python3 tools/release/gates/validate_metrics_registry_v1.py
+python3 tools/release/gates/validate_metrics_registry.py
 python3 tools/release/gates/validate_schema_drift.py
 python3 tools/harness/detect_public_surface_drift.py
 ```
