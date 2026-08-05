@@ -186,7 +186,10 @@ jobs:
       contents: read
     env:
       RUST_TARGET: x86_64-unknown-linux-gnu
-      RUST_FEATURES: streaming,incremental
+      # Must match artifacts/release/0.9.2/official-build-feature-manifest.json
+      # (Task 8.12a); the baseline is approved only from the official frozen
+      # feature set (validate_official_feature_manifest.py enforces this).
+      RUST_FEATURES: streaming,incremental,prune_noise_regions
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -208,25 +211,21 @@ jobs:
           import json
           import os
 
-          with open("tools/release-matrix.json", encoding="utf-8") as handle:
-              data = json.load(handle)
+          # The canonical 0.9.2 performance environment (Task 8.12a) is the
+          # single source for the benchmark NGINX version; the legacy
+          # tools/release-matrix.json is the nginx.org platform matrix and is
+          # not authoritative for the 0.9.2 baseline.
+          with open(
+              "artifacts/spec62/wave4/canonical-performance-environment.json",
+              encoding="utf-8",
+          ) as handle:
+              env = json.load(handle)
 
-          owner = ".github/workflows/release-packages.yml"
-          versions = sorted(
-              {
-                  entry["nginx_version"]
-                  for entry in data.get("entries", [])
-                  if entry.get("owner_workflow") == owner
-                  and entry.get("support_tier") == "supported"
-                  and entry.get("libc") == "glibc"
-                  and entry.get("release_blocking") is True
-              },
-              key=lambda value: tuple(int(part) for part in value.split(".")),
-          )
-          if not versions:
-              raise SystemExit("no canonical release-blocking NGINX version")
+          version = env.get("nginx_version")
+          if not version:
+              raise SystemExit("canonical performance environment has no nginx_version")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"version={versions[0]}\n")
+              output.write(f"version={version}\n")
           PY
         shell: bash
 
