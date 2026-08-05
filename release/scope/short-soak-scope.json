@@ -1,0 +1,15 @@
+{
+  "schema_version": "spec62.wave5.short-soak-scope.v1",
+  "task": "10.4",
+  "note": "Unbound scope definition; carries no candidate SHA. Candidate-bound scenario identities are fixed by Task 10.7 in artifacts/release/0.9.2/short-soak-scenario-manifest.json.",
+  "duration_minutes": 30,
+  "concurrency": 16,
+  "corpus": ["small HTML", "medium HTML", "large HTML"],
+  "requirements": [
+    "zero errors",
+    "no crash/leak",
+    "no monotonic worker-RSS growth after drain",
+    "module-managed per-request peak memory <= scenario effective conversion_memory"
+  ],
+  "threshold_reference": "Requirement 18 Wave-6 qualification thresholds (not observation evidence; Requirement 18 criterion 6 thresholds are not restated here)"
+}
