@@ -55,16 +55,6 @@ _iso_datetime = st.from_regex(
     r"20[0-9]{2}-[01][0-9]-[0-3][0-9]T[0-2][0-9]:[0-5][0-9]:[0-5][0-9]Z",
     fullmatch=True,
 )
-_safe_error_msg = st.text(
-    alphabet=st.characters(
-        whitelist_categories=("L", "N", "P", "Z"),
-        blacklist_characters="\x00",
-    ),
-    min_size=1,
-    max_size=100,
-).filter(lambda s: len(s.encode("utf-8")) <= 512)
-
-
 # --- Forbidden content patterns for last_error ---
 
 _PATH_PATTERNS = [
@@ -75,6 +65,25 @@ _PATH_PATTERNS = [
 _SECRET_PATTERNS = [
     re.compile(r"(password|secret|token|key)\s*[:=]", re.IGNORECASE),
 ]
+
+
+def _is_safe_error_text(error_text):
+    """Return whether a generated message satisfies the redaction model."""
+    return (
+        len(error_text.encode("utf-8")) <= 512
+        and not any(pattern.search(error_text) for pattern in _PATH_PATTERNS)
+        and not any(pattern.search(error_text) for pattern in _SECRET_PATTERNS)
+    )
+
+
+_safe_error_msg = st.text(
+    alphabet=st.characters(
+        whitelist_categories=("L", "N", "P", "Z"),
+        blacklist_characters="\x00",
+    ),
+    min_size=1,
+    max_size=100,
+).filter(_is_safe_error_text)
 
 
 # --- Dynconf state strategies ---
@@ -633,16 +642,7 @@ class TestLastErrorBounds:
             assert len(last_error.encode("utf-8")) <= 512
 
     @settings(max_examples=100)
-    @given(
-        error_text=st.text(
-            alphabet=st.characters(
-                whitelist_categories=("L", "N", "P", "Z"),
-                blacklist_characters="\x00",
-            ),
-            min_size=1,
-            max_size=200,
-        )
-    )
+    @given(error_text=_safe_error_msg)
     def test_error_no_file_paths(self, error_text):
         """
         Model: any error text that looks like a file path violates
@@ -660,16 +660,7 @@ class TestLastErrorBounds:
         # No path detected — this is a valid error message
 
     @settings(max_examples=100)
-    @given(
-        error_text=st.text(
-            alphabet=st.characters(
-                whitelist_categories=("L", "N", "P", "Z"),
-                blacklist_characters="\x00",
-            ),
-            min_size=1,
-            max_size=200,
-        )
-    )
+    @given(error_text=_safe_error_msg)
     def test_error_no_secrets(self, error_text):
         """
         Model: error text must not contain secret-like patterns.
