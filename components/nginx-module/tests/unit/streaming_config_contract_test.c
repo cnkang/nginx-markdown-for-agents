@@ -664,7 +664,6 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     mcf->policy.conditional_requests = NGX_CONF_UNSET_UINT;
     mcf->policy.log_verbosity = NGX_CONF_UNSET_UINT;
     mcf->routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
-    
 
     /* v0.8.0 stream config fields */
     mcf->stream.policy = NGX_CONF_UNSET_UINT;
@@ -672,8 +671,7 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     mcf->stream.excluded_types = NGX_CONF_UNSET_PTR;
     mcf->stream.budget = NGX_CONF_UNSET_SIZE;
     mcf->stream.budget_explicit = -1;
-    
-    
+
 }
 
 /* ================================================================
