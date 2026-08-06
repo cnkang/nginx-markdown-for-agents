@@ -89,7 +89,7 @@ permissions: {}
 
 env:
   RUST_TOOLCHAIN: 1.97.0
-  RUST_FEATURES: streaming,incremental
+  RUST_FEATURES: streaming,incremental,prune_noise_regions
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────

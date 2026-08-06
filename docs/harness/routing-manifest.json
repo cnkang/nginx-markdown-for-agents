@@ -253,6 +253,41 @@
         "helm lint charts/nginx-markdown"
       ],
       "notes": "commands validate existing artifacts; build steps are in CI workflows release-deb.yml, release-rpm.yml, and release-packages.yml"
+    },
+    "release-candidate-evidence": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make release-candidate-evidence-check"
+      ],
+      "notes": "Validates the frozen release-candidate source SHA manifest: candidate SHA, branch, source-tree digest, required input existence and digests, W4 feature/FFI/environment digests, evidence-schema digests (fail-closed)"
+    },
+    "artifact-registry": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make artifact-registry-check"
+      ],
+      "notes": "Validates the candidate-bound release artifact index: candidate identity vs frozen manifest, per-artifact sha256/digest bindings, feature-manifest digest and ABI version consistency with official manifest and frozen ABI header, authoritative attempts"
+    },
+    "release-evidence-manifest": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make release-evidence-manifest-check"
+      ],
+      "notes": "Validates the final evidence manifest and observation-state record against the W5 evidence schemas: instance-schema conformance, candidate SHA equality, blocking-status derivation (no blocking pending, skips justified with policy reference)"
+    },
+    "fuzz-qualification": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make test-rust-fuzz-qualification"
+      ],
+      "notes": "Proves every blocking fuzz target ran at least 15 minutes or 100,000 executions (whichever is later) with fixed recorded seed, zero crashes, zero sanitizer findings; fixture mode for gate regression coverage"
+    },
+    "soak-qualification": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make test-e2e-rust-soak"
+      ],
+      "notes": "Proves the short-soak qualification contract (30 min at concurrency 16, zero errors, no monotonic worker-RSS growth after drain, per-request peak within conversion_memory); records duration, concurrency, RSS drain, per-request memory, error rate, latency"
     }
   },
   "risk_packs": [
@@ -608,7 +643,12 @@
         "v080-gates",
         "v092-gates",
         "release-quality",
-        "release-matrix"
+        "release-matrix",
+        "release-candidate-evidence",
+        "artifact-registry",
+        "release-evidence-manifest",
+        "fuzz-qualification",
+        "soak-qualification"
       ]
     },
     {

@@ -1,0 +1,20 @@
+{
+  "schema_version": "release.blocking-fuzz-targets.v1",
+  "candidate_sha": "9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d",
+  "targets": [
+    {
+      "name": "parser_html",
+      "seed": 12345,
+      "required_minutes": 15,
+      "required_executions": 100000,
+      "blocking": true
+    },
+    {
+      "name": "convert_html",
+      "seed": 12345,
+      "required_minutes": 15,
+      "required_executions": 100000,
+      "blocking": true
+    }
+  ]
+}

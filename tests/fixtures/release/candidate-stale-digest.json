@@ -1,0 +1,23 @@
+{
+  "schema_version": "release.candidate-evidence.v1",
+  "candidate_sha": "0000000000000000000000000000000000000000",
+  "created_at": "2026-08-05T12:00:00Z",
+  "entries": [
+    {
+      "id": "gate-unit-tests",
+      "gate": "unit-tests",
+      "status": "pass",
+      "blocking": true,
+      "evidence_ref": "artifacts/release/0.9.2/unit-test-report.json",
+      "checked_at": "2026-08-05T12:00:00Z"
+    },
+    {
+      "id": "gate-integration-tests",
+      "gate": "integration-tests",
+      "status": "pass",
+      "blocking": true,
+      "evidence_ref": "artifacts/release/0.9.2/integration-test-report.json",
+      "checked_at": "2026-08-05T12:01:00Z"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "schema_version": "release.soak-scenario-manifest.v1",
+  "candidate_sha": "9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d",
+  "duration_minutes": 30,
+  "concurrency": 16,
+  "corpus": [
+    {
+      "id": "small",
+      "conversion_memory_bytes": 33554432
+    },
+    {
+      "id": "medium",
+      "conversion_memory_bytes": 67108864
+    },
+    {
+      "id": "large",
+      "conversion_memory_bytes": 100663296
+    }
+  ],
+  "scenario_refs": [
+    "artifacts/spec62/wave5/short-soak-scope.json"
+  ]
+}
