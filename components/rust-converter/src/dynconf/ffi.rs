@@ -49,6 +49,9 @@ pub const DYNCONF_ERR_INTERNAL: u32 = 255;
 /// location-specific `static_config_manifest_v1` in canonical JSON order.
 /// Keeping the hash implementation on the Rust side avoids a second, subtly
 /// different SHA-256 implementation in the NGINX module.
+/// Invalid output-buffer arguments reuse `DYNCONF_ERR_INVALID_TYPE` for ABI
+/// compatibility; in this entry point that code means an FFI parameter error,
+/// not a JSON value-type mismatch.
 ///
 /// # Safety
 ///
