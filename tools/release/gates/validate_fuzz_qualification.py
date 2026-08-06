@@ -162,9 +162,9 @@ def _validate_target_entry(entry, index: int) -> str | None:
 def validate_target_manifest(data: dict) -> list[dict]:
     """Validate the blocking-fuzz-target manifest, returning target entries."""
     if not isinstance(data.get("schema_version"), str):
-        raise ValueError("malformed: manifest schema_version must be a string")
-    error = _check_candidate_sha(data.get("candidate_sha"),
-                                 "blocking-fuzz-target manifest")
+        raise ValueError(f"malformed: manifest schema_version must be a string")
+    MANIFEST_LABEL = "blocking-fuzz-target manifest"
+    error = _check_candidate_sha(data.get("candidate_sha"), MANIFEST_LABEL)
     if error:
         raise ValueError(error)
     targets = data.get("targets")
@@ -195,7 +195,10 @@ def _validate_seed_path(seed_path, target: str) -> str | None:
     if not isinstance(seed_path, str) or not seed_path:
         return f"malformed: seed_path for {target} must be a non-empty string"
     path = (REPO_ROOT / seed_path).resolve()
-    if not str(path).startswith(str(CORPUS_ROOT.resolve())):
+    corpus_resolved = CORPUS_ROOT.resolve()
+    try:
+        path.relative_to(corpus_resolved)
+    except ValueError:
         return f"malformed: seed_path for {target} escapes the corpus root"
     if not path.exists():
         return f"seed corpus for {target} does not exist on disk: {path}"
@@ -293,7 +296,7 @@ def _parse_fuzz_output(stdout: str, stderr: str) -> tuple[int, float, str | None
     executions = int(match.group(1)) if match else 0
     match = STAT_ELAPSED_PATTERN.search(combined)
     elapsed = float(match.group(1)) if match else 0.0
-    if elapsed == 0.0:
+    if elapsed <= 0.0:
         match = DONE_RUNS_PATTERN.search(combined)
         if match:
             elapsed = float(match.group(2))
@@ -482,11 +485,12 @@ def _handle_cargo_missing(args, candidate_sha: str,
 
 def run_real_gate(args) -> int:
     """Run every blocking fuzz target and persist the qualification record."""
-    manifest = load_json(Path(args.manifest), "blocking-fuzz-target manifest")
+    FUZZ_MANIFEST_LABEL = "blocking-fuzz-target manifest"
+    manifest = load_json(Path(args.manifest), FUZZ_MANIFEST_LABEL)
     targets = validate_target_manifest(manifest)
     blocking_names = {entry["name"] for entry in targets if entry["blocking"]}
     if not blocking_names:
-        raise ValueError("blocking-fuzz-target manifest contains no "
+        raise ValueError(f"{FUZZ_MANIFEST_LABEL} contains no "
                          "blocking targets")
     corpus_data = load_json(Path(args.corpus_manifest), "corpus-seed manifest")
     seeds = validate_corpus_seeds(corpus_data, manifest["candidate_sha"],

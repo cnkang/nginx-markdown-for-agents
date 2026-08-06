@@ -229,12 +229,22 @@ def _check_index_artifact(artifact: dict, index_pos: int, seen_ids: set,
 def _check_local_artifact_digest(artifact: dict, index_pos: int,
                                  reasons: list) -> None:
     """Verify digest against local bytes when the artifact is present."""
+    repo_resolved = REPO_ROOT.resolve()
+
+    def _contains(candidate: Path, label: str) -> None:
+        try:
+            candidate.relative_to(repo_resolved)
+        except ValueError:
+            reasons.append(
+                f"malformed: {label} escapes repository root")
+
     artifact_sha_value = artifact.get("artifact_sha256")
     artifact_type = artifact.get("artifact_type")
     artifact_path = artifact.get("artifact_id", "")
     if not artifact_sha_value or artifact_type not in ("deb", "rpm", "source"):
         return
     local = REPO_ROOT / artifact_path
+    _contains(local, f"artifacts[{index_pos}].artifact_id")
     if local.is_file():
         actual = "sha256:" + hashlib.sha256(
             local.read_bytes()).hexdigest()

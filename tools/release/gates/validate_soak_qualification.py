@@ -530,7 +530,8 @@ def real_main(args: argparse.Namespace) -> int:
     per_scenario = build_scenario_metrics(scenario_metrics)
 
     elapsed = time.time() - started
-    any_error = any(s["error_rate"] != 0.0 for s in per_scenario)
+    any_error = any(
+        s.get("error_rate", 0.0) > 0.0 for s in per_scenario)
     record = {
         "schema_version": RECORD_SCHEMA_VERSION,
         "candidate_sha": manifest["candidate_sha"],
