@@ -329,12 +329,13 @@ def wait_for_ready(url: str, timeout: int = 30) -> bool:
 
 def write_nginx_conf(runtime_dir: pathlib.Path, port: int, root: str, module_so: str | None) -> None:
     load_line = f"load_module {module_so};" if module_so else ""
+    (runtime_dir / "logs").mkdir(parents=True, exist_ok=True)
     conf = f"""worker_processes 1;
-error_log {runtime_dir / 'error.log'} notice;
+error_log {runtime_dir / 'logs' / 'error.log'} notice;
 pid {runtime_dir / 'nginx.pid'};
+{load_line}
 events {{ }}
 http {{
-    {load_line}
     server {{
         listen {port};
         root {root};
