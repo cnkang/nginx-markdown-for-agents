@@ -72,7 +72,7 @@ REQUIRED_SCENARIO_FIELDS = (
 )
 
 SHA256_RE = re.compile(r"^[0-9a-f]{40}$")
-AB_PCT_LINE_RE = re.compile(r"^\s*(?P<pct>\d+)%\s+(?P<ms>[0-9.]+)\s+ms$")
+AB_PCT_LINE_RE = re.compile(r"^\s*(?P<pct>\d+)%\s+(?P<ms>[0-9.]+)\s*(?:ms)?$")
 
 
 def utc_now() -> str:
