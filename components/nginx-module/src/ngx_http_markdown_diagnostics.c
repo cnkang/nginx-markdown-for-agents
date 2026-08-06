@@ -507,18 +507,14 @@ ngx_http_markdown_diagnostics_check_access(ngx_http_request_t *r)
 /*
  * Build the JSON diagnostics response.
  *
- * Constructs a JSON document with eleven top-level fields:
+ * Constructs a JSON document with seven top-level fields:
  *   - schema_version
- *   - config_snapshot
+ *   - product_version
+ *   - worker
+ *   - build
+ *   - configuration
+ *   - runtime
  *   - recent_decisions
- *   - metrics_snapshot
- *   - streaming_metrics (when streaming support is compiled in)
- *   - dynconf_state
- *   - streaming_config
- *   - profile
- *   - overridden_fields
- *   - forced_fields
- *   - effective_config
  *
  * Allocates the output buffer from the request pool.
  *
@@ -922,8 +918,9 @@ ngx_http_markdown_diagnostics_json_size(
      *
      * Sizing contract:
      *   NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE covers the fixed JSON
-     *   envelope (config_snapshot, metrics_snapshot, dynconf_state,
-     *   streaming_config sections, braces, keys, and whitespace).
+     *   envelope (schema_version, product_version, worker, build,
+     *   configuration, runtime, recent_decisions, braces, keys, and
+     *   whitespace).
      *   NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE covers one compact
      *   recent_decisions entry including separators and indentation.
      *   The total must be >= the actual rendered output; truncation

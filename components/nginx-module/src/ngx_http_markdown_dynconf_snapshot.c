@@ -220,15 +220,9 @@ ngx_http_markdown_streaming_policy_str(ngx_uint_t policy)
  * Reads all dynconf-relevant fields from the location config and
  * produces a JSON object fragment containing key-value pairs.
  *
- * The output contains active directive-shaped keys only.  Unified Config V2
- * limits are already represented by diagnostics.effective_config and are not
- * duplicated under removed directive names here:
- *   "config_snapshot": {
- *       "markdown_filter": "on",
- *       "markdown_streaming": "auto",
- *       "markdown_error_policy": "pass",
- *       ...
- *   }
+ * The output contains active directive-shaped keys only.  The caller embeds
+ * this fragment in the Diagnostics Schema v1 configuration.effective object;
+ * removed directive names and legacy diagnostics sections are not emitted.
  *
  * Parameters:
  *   pool    - Memory pool for buffer allocation

@@ -2,12 +2,11 @@
 #define NGX_HTTP_MARKDOWN_PROMETHEUS_IMPL_H
 
 /*
- * Prometheus text exposition format renderer.
+ * Legacy Prometheus text renderer retained only for bounded-renderer unit
+ * fixtures. Production requests use ngx_http_markdown_metrics_v1_renderer.h.
  *
- * WARNING: This header is an implementation detail of the main
- * translation unit (ngx_http_markdown_filter_module.c).  It must
- * NOT be included from any other .c file or used as a standalone
- * compilation unit.
+ * WARNING: This header is test-only compatibility code. It must not be
+ * included by the production translation unit or used as a public renderer.
  *
  * Renders a metrics snapshot as Prometheus text exposition format
  * (content type: text/plain; version=0.0.4; charset=utf-8).

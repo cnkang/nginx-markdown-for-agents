@@ -1421,7 +1421,7 @@ ngx_http_markdown_dynconf_parse_verbosity(u_char *value, size_t value_len,
  * Apply a single parsed key=value pair to a staging snapshot.
  *
  * Only runtime-safe fields are modified.  Fields that require
- * structural changes (content_types, stream_types, etc.) are
+ * structural changes (content_types, stream_excluded_types, etc.) are
  * not supported via dynamic config and must be changed via
  * nginx -s reload.
  *

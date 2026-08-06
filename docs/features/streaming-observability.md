@@ -1,181 +1,70 @@
-# Streaming Observability and Diagnostics
+# Streaming Observability
 
-> **0.9.0 Note**: The module-wide reason code registry has been renamed to
-> lowercase snake_case in 0.9.0. The streaming block reason codes documented
-> below (numeric codes 0–8) are a **separate system** used internally by the
-> streaming engine for routing decisions. They are not part of the unified
-> `ReasonCode` enum. See the
-> [Observability Schema v1](../architecture/observability-schema-v1.md) for
-> the unified reason code registry.
+**Status**: 0.9.2 production contract
 
-## Overview
+The 0.9.2 streaming lifecycle is represented by the frozen Prometheus and
+Diagnostics contracts. The former 0.8/0.9 streaming-specific metric families
+and diagnostics sections are not emitted.
 
-The streaming observability feature adds comprehensive metrics, structured
-logging, and diagnostics for the streaming conversion engine. This enables
-operators to monitor streaming performance, diagnose issues, and set up
-alerts based on stable reason codes.
+## Metrics
 
-**Requirement**: Streaming Observability and Diagnostics (v0.8.0)
+The endpoint is enabled with `markdown_metrics` and emits Prometheus text
+format 0.0.4. The complete family catalog is maintained in
+[Prometheus Metrics](../guides/prometheus-metrics.md). Streaming-specific
+observability is carried by:
 
----
+| Family | Labels | Meaning |
+|---|---|---|
+| `nginx_markdown_streaming_events_total` | `transition`, `reason` | Closed streaming lifecycle transitions. |
+| `nginx_markdown_conversion_attempts_total` | `engine` | At-most-once conversion attempts. |
+| `nginx_markdown_conversion_deliveries_total` | `engine` | Successful downstream delivery only. |
+| `nginx_markdown_output_bytes_total` | none | Converted bytes accepted downstream. |
+| `nginx_markdown_inflight_requests` | none | Requests still in the conversion pipeline. |
+| `nginx_markdown_requests_total` | `outcome`, `stage`, `reason` | Exactly one terminal outcome per decision-chain request. |
 
-## Metrics Reference
+The streaming transition allowlist is `commit`, `fallback`,
+`safe_finish_start`, `abort_start`, `resume_success`, and
+`resume_failure`. Label values are bounded registry values; raw paths, URIs,
+hosts, users, and profile names are never emitted.
 
-### Engine Choice Counters
+The counters follow these conservation rules:
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `nginx_markdown_streaming_engine_choice_total{engine="streaming"}` | counter | Requests using true streaming |
-| `nginx_markdown_streaming_engine_choice_total{engine="full_buffer"}` | counter | Requests routed to full-buffer |
-| `nginx_markdown_streaming_engine_choice_total{engine="passthrough"}` | counter | Requests marked passthrough |
-| `nginx_markdown_streaming_engine_choice_total{engine="not_eligible"}` | counter | Requests not eligible |
+- `conversion_attempts_total` increments at most once per request.
+- `conversion_deliveries_total` and output bytes increment only after the
+  downstream filter accepts the converted response.
+- failed-open, failed-closed, terminal abort, and client-abort paths do not
+  count as successful deliveries.
+- `inflight_requests` returns to zero after cleanup and quiescence.
+- `NGX_AGAIN` records pending work, not delivery.
 
-### Fallback Counters
+## Diagnostics
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `nginx_markdown_streaming_fallback_total{phase="precommit",action="pass"}` | counter | Pre-commit fallback with HTML pass-through |
-| `nginx_markdown_streaming_fallback_total{phase="precommit",action="reject"}` | counter | Pre-commit fallback with rejection |
+The diagnostics handler returns the strict Schema v1 response documented in
+[Observability Contract v1](../architecture/observability-schema-v1.md). It has
+no streaming-only top-level section. Runtime visibility is provided by the
+worker-local `runtime` counters and bounded `recent_decisions` entries.
 
-### Failure Counters
+Only GET and HEAD are accepted. HEAD computes the complete response length but
+sends no body; other methods return 405. Native NGINX allow/deny/auth
+directives can narrow access further but cannot broaden the handler's built-in
+internal boundary.
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `nginx_markdown_streaming_failure_total{phase="postcommit",action="abort"}` | counter | Post-commit abort |
-| `nginx_markdown_streaming_failure_total{phase="postcommit",action="safe_finish"}` | counter | Post-commit safe finish |
+## Decision reasons and troubleshooting
 
-### Performance Counters
+Streaming decisions use the canonical
+`components/rust-converter/reason_registry.toml` registry. Operator-visible
+keys are lowercase snake_case; unknown numeric values map to
+`internal_unknown` and are logged as an error.
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `nginx_markdown_streaming_candidate_total` | counter | Candidates evaluated |
-| `nginx_markdown_true_streaming_selected_total` | counter | Final streaming selections |
-| `nginx_markdown_streaming_output_bytes_total` | counter | Markdown bytes emitted |
-| `nginx_markdown_excluded_content_type_total` | counter | Excluded by content type |
+When fallback or resume-failure events increase:
 
----
+1. Inspect the `reason` label and corresponding decision log entry.
+2. Check cache-validation, content-encoding, content-type, and configured
+   `markdown_limits` values.
+3. Verify that the downstream filter is not applying sustained backpressure.
+4. Keep `markdown_error_policy` explicit when fail-open versus fail-closed
+   behavior matters.
 
-## Reason Code Reference
-
-Reason codes are stable string identifiers. They are additive only between
-versions; removal requires a major version bump.
-
-| Code | String | Engine Path | Description |
-|------|--------|-------------|-------------|
-| 0 | `streaming_block_full_cache_validation` | full_buffer | `cache_validation = full` forces full-buffer for ETag |
-| 1 | `streaming_block_content_encoding` | full_buffer | Content coding or validation mode is unsupported by streaming decompression |
-| 2 | `streaming_block_content_length_unknown` | full_buffer | `auto` mode cannot size response without `Content-Length` |
-| 3 | `streaming_block_range_request` | passthrough | `Range` request bypasses conversion |
-| 4 | `streaming_block_no_transform` | passthrough | `Cache-Control: no-transform` bypasses conversion |
-| 5 | `streaming_block_engine_off` | full_buffer | No streaming backend (policy `off` or engine `off`) |
-| 6 | `streaming_block_small_body` | full_buffer | `auto` mode response below streaming threshold |
-| 7 | `streaming_block_head_request` | passthrough | `HEAD` request: header decisions only, no body |
-| 8 | `streaming_block_304_response` | passthrough | `304 Not Modified` carries no body |
-
-**Note:** Reason codes are additive only. Removal requires a major version bump.
-
-These reason codes are defined in the NGINX C module configuration logic and reported through the unified diagnostics and metrics system. They are not part of the Rust `ReasonCode` enum in `components/rust-converter/src/decision/reason_code.rs`.
-
----
-
-## Structured Log Fields
-
-All streaming decision logs include these fields:
-
-| Field | Description | Values |
-|-------|-------------|--------|
-| `engine` | Engine selected | streaming, full_buffer, passthrough, rejected |
-| `phase` | Decision phase | header_filter, precommit, postcommit |
-| `committed` | Headers sent? | 0 (no), 1 (yes) |
-| `fallback_available` | Can fall back? | 0 (no), 1 (yes) |
-| `reason` | Reason code string | See table above |
-| `content_type` | Response Content-Type | e.g., text/html |
-| `content_length_known` | CL header present? | 0 (no), 1 (yes) |
-| `chunked` | Chunked transfer? | 0 (no), 1 (yes) |
-| `markdown_error_policy` | Error policy | `pass`, `fail_closed`, `status 429`, or `status 503` |
-
-### Log Levels
-
-- **Debug**: Normal engine choice decisions (zero cost in production)
-- **Info**: Precommit fallback events
-- **Error**: Post-commit failures (non-recoverable)
-
----
-
-## Diagnostics Endpoint
-
-When `markdown_diagnostics on` is configured, the `/nginx-markdown/diagnostics`
-endpoint includes streaming sections:
-
-### streaming_config
-
-```json
-{
-  "streaming_config": {
-    "policy": "auto",
-    "policy_source": "default",
-    "on_error": "pass",
-    "threshold": 1048576,
-    "precommit_buffer": 262144,
-    "flush_min": 16384,
-    "threshold_explicit": false
-  }
-}
-```
-
-`policy_source` is `configured`, `profile`, or `default`.
-`on_error` preserves the complete unified `markdown_error_policy` value:
-`pass`, `fail_closed`, `status 429`, or `status 503`.
-`threshold_explicit: false` means `markdown_stream_threshold` was not set
-explicitly.
-
-### streaming_metrics
-
-```json
-{
-  "streaming_metrics": {
-    "requests_total": 1234,
-    "succeeded_total": 1200,
-    "failed_total": 4,
-    "fallback_total": 30,
-    "candidate_total": 1500,
-    "output_bytes_total": 5678900,
-    "engine_choice_streaming": 1234,
-    "engine_choice_full_buffer": 266
-  }
-}
-```
-
----
-
-## Troubleshooting
-
-### High fallback rate
-
-If `nginx_markdown_streaming_fallback_total` is high relative to
-`nginx_markdown_streaming_candidate_total`:
-
-1. Check `reason` field in info-level logs for common patterns.
-2. Common causes: malformed HTML, exceeded budgets, excluded content types.
-3. Consider adjusting `markdown_stream_threshold` or
-   `markdown_error_policy`.
-
-### Post-commit failures
-
-If `nginx_markdown_streaming_failure_total{phase="postcommit"}` is non-zero:
-
-1. These are non-recoverable — headers were already sent.
-2. Check error-level logs for `reason` field.
-3. Common causes: parser budget exhaustion on complex pages, I/O timeouts.
-4. Consider increasing `markdown_parser_budget` for affected endpoints.
-
-### No streaming selections
-
-If `nginx_markdown_streaming_engine_choice_total{engine="streaming"}` is 0
-while `nginx_markdown_streaming_candidate_total` > 0:
-
-1. Check if `markdown_streaming` is set to `force` or `auto`.
-2. Verify `markdown_stream_threshold` is smaller than typical response sizes.
-3. Check the content coding and cache-validation mode: gzip, deflate, and
-   Brotli can stream when decompression is enabled and validation is not
-   `full`; unsupported codings do not use streaming decompression.
+See [Streaming Compatibility](STREAMING_COMPATIBILITY.md) for the supported
+request-path behavior and [Prometheus Metrics](../guides/prometheus-metrics.md)
+for the full family and histogram contract.

@@ -206,8 +206,6 @@ fn optional_utf8<'a>(
 ///     prune_protection_selectors: std::ptr::null(),
 ///     prune_protection_selector_len: 0,
 ///     memory_budget: 0,
-///     llm_provider: 0,
-///     chars_per_token_fixed: 0,
 ///     parse_timeout_ms: 0,
 ///     parser_memory_budget: 0,
 ///     flush_threshold: 0,
@@ -340,7 +338,7 @@ mod tests {
     }
 
     #[test]
-    fn test_chars_per_token_fixed_default() {
+    fn test_chars_per_token_default() {
         /* The obsolete FFI field was removed in 0.9.2; token estimation
          * always uses the fixed 4.0 ratio. */
         let options = test_options();
