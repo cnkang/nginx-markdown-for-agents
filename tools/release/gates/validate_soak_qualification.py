@@ -163,7 +163,8 @@ def validate_against_manifest(record: dict, manifest: dict) -> None:
     _validate_scalar(record, "concurrency", manifest["concurrency"])
 
 
-def validate_soak_outcome(record: dict, manifest: dict) -> None:
+def _check_scenario_rows(record: dict, manifest: dict) -> None:
+    """Every manifest corpus scenario must appear with zero errors."""
     scenario_ids = {s.get("id") for s in manifest["corpus"]}
     record_ids = {s.get("id") for s in record["per_scenario"]}
     if not scenario_ids.issubset(record_ids):
@@ -182,20 +183,30 @@ def validate_soak_outcome(record: dict, manifest: dict) -> None:
                 "ERROR: below-threshold: scenario "
                 f"{scenario.get('id')!r} error_rate {scenario.get('error_rate')!r}"
             )
+
+
+def _check_peak_memory(record: dict, manifest: dict) -> None:
+    """Per-request peak must stay within the scenario memory ceiling."""
+    if not record.get("module_managed_peak_observed"):
+        return
+    peak = record.get("per_request_peak_bytes")
+    ceiling = max(
+        (s.get("conversion_memory_bytes", 0) for s in manifest["corpus"]),
+        default=0,
+    )
+    if peak is not None and ceiling and peak > ceiling:
+        raise SystemExit(
+            f"ERROR: below-threshold: per-request peak {peak} > ceiling {ceiling}"
+        )
+
+
+def validate_soak_outcome(record: dict, manifest: dict) -> None:
+    _check_scenario_rows(record, manifest)
     if record.get("monotonic_growth_after_drain") is not False:
         raise SystemExit(
             "ERROR: below-threshold: monotonic worker-RSS growth after drain"
         )
-    if record.get("module_managed_peak_observed"):
-        peak = record.get("per_request_peak_bytes")
-        ceiling = max(
-            (s.get("conversion_memory_bytes", 0) for s in manifest["corpus"]),
-            default=0,
-        )
-        if peak is not None and ceiling and peak > ceiling:
-            raise SystemExit(
-                f"ERROR: below-threshold: per-request peak {peak} > ceiling {ceiling}"
-            )
+    _check_peak_memory(record, manifest)
     if record.get("status") != "pass":
         raise SystemExit(
             f"ERROR: blocking-pending: soak record status {record.get('status')!r}"
@@ -215,6 +226,33 @@ def fixture_main(args: argparse.Namespace) -> int:
     return 0
 
 
+def _ab_int(line: str, keyword: str) -> int:
+    """Parse an integer value from an ab summary line, or 0."""
+    if keyword not in line or "(" in line:
+        return 0
+    parts = line.split()
+    if len(parts) < 3:
+        return 0
+    try:
+        return int(parts[-1])
+    except ValueError:
+        return 0
+
+
+def _ab_float(line: str, keyword: str, offset: int = 0) -> float:
+    """Parse a float value from an ab summary line, or 0.0."""
+    if keyword not in line:
+        return 0.0
+    parts = line.split()
+    index = len(parts) - 2 - offset
+    if index < 0:
+        return 0.0
+    try:
+        return float(parts[index])
+    except ValueError:
+        return 0.0
+
+
 def parse_ab_report(output: str) -> dict:
     percentiles = {}
     failed = 0
@@ -224,27 +262,13 @@ def parse_ab_report(output: str) -> dict:
         match = AB_PCT_LINE_RE.match(line)
         if match:
             percentiles[int(match.group("pct"))] = float(match.group("ms"))
-        if "Failed requests" in line and "(" not in line:
-            parts = line.split()
-            if len(parts) >= 3:
-                try:
-                    failed = int(parts[-1])
-                except ValueError:
-                    failed = 0
-        if "Complete requests" in line:
-            parts = line.split()
-            if len(parts) >= 3:
-                try:
-                    completed = int(parts[-1])
-                except ValueError:
-                    completed = 0
-        if "Transfer rate" in line:
-            parts = line.split()
-            if len(parts) >= 4:
-                try:
-                    transfer_rate = float(parts[-2])
-                except ValueError:
-                    transfer_rate = 0.0
+            continue
+        if "Failed requests" in line:
+            failed = _ab_int(line, "Failed requests")
+        elif "Complete requests" in line:
+            completed = _ab_int(line, "Complete requests")
+        elif "Transfer rate" in line:
+            transfer_rate = _ab_float(line, "Transfer rate")
     return {
         "p50_ms": percentiles.get(50, 0.0),
         "p99_ms": percentiles.get(99, 0.0),
@@ -357,84 +381,144 @@ def find_worker_pid(runtime_dir: pathlib.Path) -> int:
                 pass
         time.sleep(0.5)
     return -1
+def run_load_loop(base_url: str, corpus: dict, worker_pid: int,
+                  duration: int, started: float, concurrency: int,
+                  runtime_dir: pathlib.Path) -> tuple:
+    """Run the sustained load loop, returning (rss_series, scenario_metrics)."""
+    finished = started + duration
+    rss_series = []
+    scenario_metrics = {sid: [] for sid in corpus}
+    chunk = 0
+    while time.time() < finished:
+        remaining = finished - time.time()
+        if remaining <= 0:
+            break
+        chunk_seconds = min(60, int(remaining) + 1)
+        for sid in corpus:
+            url = f"{base_url}/{corpus[sid]}"
+            report = run_ab_chunk(url, concurrency, chunk_seconds, runtime_dir)
+            scenario_metrics[sid].append(report)
+        if worker_pid > 0 and chunk % 6 == 0:
+            rss_series.append([round(time.time() - started, 1),
+                               read_worker_rss(worker_pid)])
+        chunk += 1
+    return rss_series, scenario_metrics
 
 
-def real_main(args: argparse.Namespace) -> int:
-    manifest = load_manifest(args.manifest)
+def measure_drain(worker_pid: int) -> tuple:
+    """Sample worker RSS after load; return (drain_delta_kb, monotonic)."""
+    time.sleep(30)
+    drain = []
+    for _ in range(3):
+        if worker_pid > 0:
+            drain.append(read_worker_rss(worker_pid))
+        time.sleep(5)
+    drain_delta = 0
+    if len(drain) >= 2:
+        drain_delta = max(drain) - min(drain)
+    monotonic = len(drain) >= 3 and drain[-1] > drain[0] + 1024
+    return drain_delta, monotonic
+
+
+def _avg(values: list, default: float = 0.0) -> float:
+    """Average a list of floats, or the default when empty."""
+    if not values:
+        return default
+    return round(sum(values) / len(values), 2)
+
+
+def _scenario_row(sid: str, reports: list) -> dict:
+    """Aggregate one scenario's ab reports into a record row."""
+    total_completed = sum(r.get("completed_requests", 0) for r in reports)
+    total_failed = sum(r.get("failed_requests", 0) for r in reports)
+    error_rate = total_failed / total_completed if total_completed else 1.0
+    p50s = [r.get("p50_ms", 0.0) for r in reports if r.get("p50_ms")]
+    p99s = [r.get("p99_ms", 0.0) for r in reports if r.get("p99_ms")]
+    rps = [r.get("rps", 0.0) for r in reports if r.get("rps")]
+    return {
+        "id": sid,
+        "completed_requests": total_completed,
+        "failed_requests": total_failed,
+        "error_rate": round(error_rate, 6),
+        "p50_ms": _avg(p50s),
+        "p99_ms": _avg(p99s),
+        "rps": _avg(rps),
+    }
+
+
+def build_scenario_metrics(scenario_metrics: dict) -> list:
+    """Aggregate ab reports per scenario into the qualification record rows."""
+    return [_scenario_row(sid, reports)
+            for sid, reports in scenario_metrics.items()]
+
+
+def handle_missing_nginx(args: argparse.Namespace, manifest: dict) -> int | None:
+    """Record a justified skip when NGINX_BIN is unavailable, or None to
+    continue. Returns an exit code when the soak cannot run."""
     nginx_bin = os.environ.get("NGINX_BIN", "")
-    if not nginx_bin or not pathlib.Path(nginx_bin).is_file():
-        if args.allow_skip_soak:
-            record = {
-                "schema_version": RECORD_SCHEMA_VERSION,
-                "candidate_sha": manifest["candidate_sha"],
-                "run_id": f"soak-{int(time.time())}",
-                "status": "skip",
-                "skip_reason": "NGINX_BIN not set or binary not found",
-                "policy_reference": "Requirement 18 Wave-6 qualification thresholds",
-            }
-            (args.record if args.output is None else args.output and pathlib.Path(args.output)).parent.mkdir(parents=True, exist_ok=True)
-            output_path = pathlib.Path(args.output or args.record)
-            output_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
-            print(f"SKIP: NGINX_BIN not set; skip recorded at {output_path}")
-            return 0
-        print(
-            "ERROR: NGINX_BIN not set or binary not found; "
-            "set NGINX_BIN (and MODULE_SO) or pass --allow-skip-soak",
-            file=sys.stderr,
-        )
-        return 1
+    if nginx_bin and pathlib.Path(nginx_bin).is_file():
+        return None
+    if args.allow_skip_soak:
+        record = {
+            "schema_version": RECORD_SCHEMA_VERSION,
+            "candidate_sha": manifest["candidate_sha"],
+            "run_id": f"soak-{int(time.time())}",
+            "status": "skip",
+            "skip_reason": "NGINX_BIN not set or binary not found",
+            "policy_reference": "Requirement 18 Wave-6 qualification thresholds",
+        }
+        output_path = pathlib.Path(args.output or args.record)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        print(f"SKIP: NGINX_BIN not set; skip recorded at {output_path}")
+        return 0
+    print(
+        "ERROR: NGINX_BIN not set or binary not found; "
+        "set NGINX_BIN (and MODULE_SO) or pass --allow-skip-soak",
+        file=sys.stderr,
+    )
+    return 1
 
-    module_so = os.environ.get("MODULE_SO", "")
-    port = 19200
-    base_url = f"http://127.0.0.1:{port}"
 
+def prepare_runtime(base_url: str, manifest: dict, module_so: str) -> tuple:
+    """Create the runtime dir, corpus, nginx config, and start nginx."""
     runtime_dir = pathlib.Path(
-        os.environ.get("SOAK_RUNTIME_DIR") or ""
-    ) if os.environ.get("SOAK_RUNTIME_DIR") else pathlib.Path(
-        f"/tmp/markdown-soak-{int(time.time())}"
+        os.environ.get("SOAK_RUNTIME_DIR") or f"/tmp/markdown-soak-{int(time.time())}"
     )
     runtime_dir.mkdir(parents=True, exist_ok=True)
     corpus = build_corpus(runtime_dir, manifest)
+    port = int(base_url.rsplit(":", 1)[1])
     write_nginx_conf(runtime_dir, port, str(runtime_dir / "html"), module_so or None)
-
+    nginx_bin = os.environ["NGINX_BIN"]
     nginx = subprocess.Popen(
         [nginx_bin, "-p", str(runtime_dir), "-c", "nginx.conf"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+    return runtime_dir, corpus, nginx
+
+
+def real_main(args: argparse.Namespace) -> int:
+    manifest = load_manifest(args.manifest)
+    skip_result = handle_missing_nginx(args, manifest)
+    if skip_result is not None:
+        return skip_result
+
+    module_so = os.environ.get("MODULE_SO", "")
+    port = 19200
+    base_url = f"http://127.0.0.1:{port}"
+    runtime_dir, corpus, nginx = prepare_runtime(base_url, manifest, module_so)
     try:
         if not wait_for_ready(f"{base_url}/{corpus['small']}"):
             print("ERROR: nginx did not become ready", file=sys.stderr)
             return 1
         worker_pid = find_worker_pid(runtime_dir)
-        duration = int(manifest["duration_minutes"] * 60)
         started = time.time()
-        finished = started + duration
-        rss_series = []
-        scenario_metrics = {sid: [] for sid in corpus}
-        chunk = 0
-        while time.time() < finished:
-            remaining = finished - time.time()
-            if remaining <= 0:
-                break
-            chunk_seconds = min(60, int(remaining) + 1)
-            for sid in corpus:
-                url = f"{base_url}/{corpus[sid]}"
-                report = run_ab_chunk(url, manifest["concurrency"], chunk_seconds, runtime_dir)
-                scenario_metrics[sid].append(report)
-            if worker_pid > 0 and chunk % 6 == 0:
-                rss_series.append([round(time.time() - started, 1), read_worker_rss(worker_pid)])
-            chunk += 1
-        time.sleep(30)
-        drain = []
-        for _ in range(3):
-            if worker_pid > 0:
-                drain.append(read_worker_rss(worker_pid))
-            time.sleep(5)
-        drain_delta = 0
-        if len(drain) >= 2:
-            drain_delta = max(drain) - min(drain)
-        monotonic = len(drain) >= 3 and drain[-1] > drain[0] + 1024
+        duration = int(manifest["duration_minutes"] * 60)
+        rss_series, scenario_metrics = run_load_loop(
+            base_url, corpus, worker_pid, duration, started,
+            manifest["concurrency"], runtime_dir)
+        drain_delta, monotonic = measure_drain(worker_pid)
     finally:
         nginx.terminate()
         try:
@@ -442,26 +526,7 @@ def real_main(args: argparse.Namespace) -> int:
         except subprocess.TimeoutExpired:
             nginx.kill()
 
-    per_scenario = []
-    for sid, reports in scenario_metrics.items():
-        total_completed = sum(r.get("completed_requests", 0) for r in reports)
-        total_failed = sum(r.get("failed_requests", 0) for r in reports)
-        error_rate = total_failed / total_completed if total_completed else 1.0
-        p50s = [r.get("p50_ms", 0.0) for r in reports if r.get("p50_ms")]
-        p99s = [r.get("p99_ms", 0.0) for r in reports if r.get("p99_ms")]
-        per_scenario.append(
-            {
-                "id": sid,
-                "completed_requests": total_completed,
-                "failed_requests": total_failed,
-                "error_rate": round(error_rate, 6),
-                "p50_ms": round(sum(p50s) / len(p50s), 2) if p50s else 0.0,
-                "p99_ms": round(sum(p99s) / len(p99s), 2) if p99s else 0.0,
-                "rps": round(sum(r.get("rps", 0.0) for r in reports) / len(reports), 2)
-                if reports
-                else 0.0,
-            }
-        )
+    per_scenario = build_scenario_metrics(scenario_metrics)
 
     elapsed = time.time() - started
     any_error = any(s["error_rate"] != 0.0 for s in per_scenario)

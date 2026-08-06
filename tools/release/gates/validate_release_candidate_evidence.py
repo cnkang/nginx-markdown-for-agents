@@ -140,6 +140,17 @@ def validate_manifest(manifest: dict, git_head: bool = False) -> list[str]:
         if field not in manifest:
             reasons.append(f"missing-observation: manifest missing {field}")
 
+    _check_manifest_identity(manifest, reasons)
+    _check_manifest_digest_fields(manifest, reasons)
+    _check_required_inputs(manifest, reasons)
+    _check_evidence_schemas(manifest, reasons)
+    _check_git_head(manifest, git_head, reasons)
+
+    return reasons
+
+
+def _check_manifest_identity(manifest: dict, reasons: list) -> None:
+    """Validate candidate SHA, branch, tree digest, and frozen_at."""
     sha = manifest.get("candidate_sha")
     if not isinstance(sha, str) or not CANDIDATE_SHA_PATTERN.fullmatch(sha):
         reasons.append(
@@ -163,6 +174,9 @@ def validate_manifest(manifest: dict, git_head: bool = False) -> list[str]:
         except ValueError:
             reasons.append("malformed: frozen_at is not ISO-8601")
 
+
+def _check_manifest_digest_fields(manifest: dict, reasons: list) -> None:
+    """Validate the W4 digest fields are strings."""
     for digest_field in (
         "feature_manifest_digest",
         "final_ffi_freeze_digest",
@@ -173,66 +187,77 @@ def validate_manifest(manifest: dict, git_head: bool = False) -> list[str]:
         if value is not None and not isinstance(value, str):
             reasons.append(f"malformed: {digest_field} must be a string")
 
+
+def _check_required_inputs(manifest: dict, reasons: list) -> None:
+    """Validate required inputs exist and their digests match."""
     required_inputs = manifest.get("required_inputs")
     input_digests = manifest.get("input_digests")
     if not isinstance(required_inputs, list) or not required_inputs:
         reasons.append("below-threshold: required_inputs must be a non-empty list")
-    elif not isinstance(input_digests, dict):
+        return
+    if not isinstance(input_digests, dict):
         reasons.append(
             "missing-observation: input_digests must be an object")
-    else:
-        if set(input_digests) != set(required_inputs):
+        return
+    if set(input_digests) != set(required_inputs):
+        reasons.append(
+            "missing-observation: input_digests keys must match "
+            "required_inputs exactly")
+    for input_path in required_inputs:
+        expected = input_digests.get(input_path)
+        if not isinstance(expected, str) or not DIGEST_PATTERN.fullmatch(expected):
             reasons.append(
-                "missing-observation: input_digests keys must match "
-                "required_inputs exactly")
-        for input_path in required_inputs:
-            expected = input_digests.get(input_path)
-            if not isinstance(expected, str) or not DIGEST_PATTERN.fullmatch(expected):
-                reasons.append(
-                    f"missing-observation: no digest for required input "
-                    f"{input_path!r}")
-                continue
-            input_file = REPO_ROOT / input_path
-            if not input_file.is_file():
-                reasons.append(
-                    f"missing-observation: required input missing: "
-                    f"{input_path}")
-                continue
-            actual = file_digest(input_file)
-            if actual != expected:
-                reasons.append(
-                    f"stale-digest: input {input_path} digest {actual} "
-                    f"!= recorded {expected}")
+                f"missing-observation: no digest for required input "
+                f"{input_path!r}")
+            continue
+        input_file = REPO_ROOT / input_path
+        if not input_file.is_file():
+            reasons.append(
+                f"missing-observation: required input missing: "
+                f"{input_path}")
+            continue
+        actual = file_digest(input_file)
+        if actual != expected:
+            reasons.append(
+                f"stale-digest: input {input_path} digest {actual} "
+                f"!= recorded {expected}")
 
+
+def _check_evidence_schemas(manifest: dict, reasons: list) -> None:
+    """Validate evidence schema digests when declared."""
     evidence_schema_digests = manifest.get("evidence_schema_digests")
-    if evidence_schema_digests is not None:
-        if not isinstance(evidence_schema_digests, dict):
+    if evidence_schema_digests is None:
+        return
+    if not isinstance(evidence_schema_digests, dict):
+        reasons.append(
+            "malformed: evidence_schema_digests must be an object")
+        return
+    for schema_path, expected in evidence_schema_digests.items():
+        schema_file = REPO_ROOT / schema_path
+        if not schema_file.is_file():
             reasons.append(
-                "malformed: evidence_schema_digests must be an object")
-        else:
-            for schema_path, expected in evidence_schema_digests.items():
-                schema_file = REPO_ROOT / schema_path
-                if not schema_file.is_file():
-                    reasons.append(
-                        f"missing-observation: evidence schema missing: "
-                        f"{schema_path}")
-                    continue
-                actual = file_digest(schema_file)
-                if actual != expected:
-                    reasons.append(
-                        f"stale-digest: evidence schema {schema_path} "
-                        f"digest {actual} != recorded {expected}")
+                f"missing-observation: evidence schema missing: "
+                f"{schema_path}")
+            continue
+        actual = file_digest(schema_file)
+        if actual != expected:
+            reasons.append(
+                f"stale-digest: evidence schema {schema_path} "
+                f"digest {actual} != recorded {expected}")
 
-    if git_head:
-        try:
-            head = git_head_sha()
-            if sha != head:
-                reasons.append(
-                    f"stale-digest: candidate_sha {sha} != git HEAD {head}")
-        except ValueError as exc:
-            reasons.append(str(exc))
 
-    return reasons
+def _check_git_head(manifest: dict, git_head: bool, reasons: list) -> None:
+    """Verify the candidate SHA equals git HEAD when requested."""
+    if not git_head:
+        return
+    try:
+        head = git_head_sha()
+        if manifest.get("candidate_sha") != head:
+            reasons.append(
+                f"stale-digest: candidate_sha {manifest.get('candidate_sha')} "
+                f"!= git HEAD {head}")
+    except ValueError as exc:
+        reasons.append(str(exc))
 
 
 def validate_record(record: dict, expected_sha: str | None = None) -> list[str]:
@@ -272,48 +297,47 @@ def validate_record(record: dict, expected_sha: str | None = None) -> list[str]:
         if not isinstance(entry, dict):
             reasons.append(f"malformed: entries[{index}] must be an object")
             continue
-
-        # Check required fields
-        for field in REQUIRED_ENTRY_FIELDS:
-            if field not in entry:
-                reasons.append(
-                    f"missing-observation: entries[{index}] missing {field}")
-
-        # Validate id uniqueness
-        entry_id = entry.get("id")
-        if entry_id is not None:
-            if entry_id in seen_ids:
-                reasons.append(
-                    f"malformed: duplicate entry id {entry_id!r}")
-            seen_ids.add(entry_id)
-
-        # Validate status
-        status = entry.get("status")
-        if status is not None and status not in VALID_STATUSES:
-            reasons.append(
-                f"malformed: entries[{index}] status {status!r} not in "
-                f"{VALID_STATUSES}")
-
-        # Validate blocking field
-        blocking = entry.get("blocking")
-        if blocking is not None and not isinstance(blocking, bool):
-            reasons.append(
-                f"malformed: entries[{index}] blocking must be a boolean")
-
-        # Blocking entries must be pass
-        if entry.get("blocking") is True:
-            if status == "pending":
-                reasons.append(
-                    f"blocking-pending: entries[{index}] "
-                    f"(gate={entry.get('gate')!r}) is blocking with "
-                    f"status=pending")
-            elif status == "fail":
-                reasons.append(
-                    f"blocking-pending: entries[{index}] "
-                    f"(gate={entry.get('gate')!r}) is blocking with "
-                    f"status=fail")
+        _check_entry(entry, index, seen_ids, reasons)
 
     return reasons
+
+
+def _check_entry(entry: dict, index: int, seen_ids: set, reasons: list) -> None:
+    """Validate one entries entry."""
+    for field in REQUIRED_ENTRY_FIELDS:
+        if field not in entry:
+            reasons.append(
+                f"missing-observation: entries[{index}] missing {field}")
+
+    entry_id = entry.get("id")
+    if entry_id is not None:
+        if entry_id in seen_ids:
+            reasons.append(
+                f"malformed: duplicate entry id {entry_id!r}")
+        seen_ids.add(entry_id)
+
+    status = entry.get("status")
+    if status is not None and status not in VALID_STATUSES:
+        reasons.append(
+            f"malformed: entries[{index}] status {status!r} not in "
+            f"{VALID_STATUSES}")
+
+    blocking = entry.get("blocking")
+    if blocking is not None and not isinstance(blocking, bool):
+        reasons.append(
+            f"malformed: entries[{index}] blocking must be a boolean")
+
+    if entry.get("blocking") is True:
+        if status == "pending":
+            reasons.append(
+                f"blocking-pending: entries[{index}] "
+                f"(gate={entry.get('gate')!r}) is blocking with "
+                f"status=pending")
+        elif status == "fail":
+            reasons.append(
+                f"blocking-pending: entries[{index}] "
+                f"(gate={entry.get('gate')!r}) is blocking with "
+                f"status=fail")
 
 
 def run_fixture_gate(args) -> int:

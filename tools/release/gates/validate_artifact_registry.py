@@ -175,62 +175,74 @@ def validate_index(index: dict, candidate_sha: str | None) -> list[str]:
         if not isinstance(artifact, dict):
             reasons.append(f"malformed: artifacts[{index_pos}] must be an object")
             continue
-
-        for field in INDEX_REQUIRED_ARTIFACT_FIELDS:
-            if field not in artifact:
-                reasons.append(
-                    f"missing-observation: artifacts[{index_pos}] missing "
-                    f"{field}")
-
-        artifact_id = artifact.get("artifact_id")
-        if artifact_id is not None:
-            if artifact_id in seen_ids:
-                reasons.append(
-                    f"blocking-pending: duplicate artifact id {artifact_id!r}")
-            seen_ids.add(artifact_id)
-
-        artifact_sha = artifact.get("artifact_sha256")
-        if artifact_sha is not None and not DIGEST_PATTERN.fullmatch(artifact_sha):
-            reasons.append(
-                f"below-threshold: artifacts[{index_pos}] artifact_sha256 "
-                f"{artifact_sha!r} is not valid sha256 format")
-
-        feature_digest = artifact.get("feature_manifest_digest")
-        if feature_digest is not None and feature_digest != expected_digest:
-            reasons.append(
-                f"stale-digest: artifacts[{index_pos}] "
-                f"feature_manifest_digest {feature_digest} != official "
-                f"{expected_digest}")
-
-        abi = artifact.get("abi_version")
-        if abi is not None and abi != expected_abi:
-            reasons.append(
-                f"stale-digest: artifacts[{index_pos}] abi_version {abi} "
-                f"!= frozen ABI {expected_abi}")
-
-        status = artifact.get("verification_status")
-        if status is not None and status not in VALID_VERIFICATION_STATUSES:
-            reasons.append(
-                f"malformed: artifacts[{index_pos}] verification_status "
-                f"{status!r} not in {VALID_VERIFICATION_STATUSES}")
-
-        artifact_sha_value = artifact.get("artifact_sha256")
-        artifact_type = artifact.get("artifact_type")
-        artifact_path = artifact.get("artifact_id", "")
-        if artifact_sha_value and artifact_type in ("deb", "rpm", "source"):
-            # For repository-tracked artifacts, verify the digest against
-            # the actual bytes when the artifact is present locally.
-            local = REPO_ROOT / artifact_path
-            if local.is_file():
-                actual = "sha256:" + hashlib.sha256(
-                    local.read_bytes()).hexdigest()
-                if actual != artifact_sha_value:
-                    reasons.append(
-                        f"stale-digest: artifacts[{index_pos}] local "
-                        f"artifact {artifact_path} digest {actual} != "
-                        f"recorded {artifact_sha_value}")
+        _check_index_artifact(artifact, index_pos, seen_ids, expected_digest,
+                              expected_abi, reasons)
 
     return reasons
+
+
+def _check_index_artifact(artifact: dict, index_pos: int, seen_ids: set,
+                          expected_digest: str, expected_abi: int,
+                          reasons: list) -> None:
+    """Validate one candidate artifact index row."""
+    for field in INDEX_REQUIRED_ARTIFACT_FIELDS:
+        if field not in artifact:
+            reasons.append(
+                f"missing-observation: artifacts[{index_pos}] missing "
+                f"{field}")
+
+    artifact_id = artifact.get("artifact_id")
+    if artifact_id is not None:
+        if artifact_id in seen_ids:
+            reasons.append(
+                f"blocking-pending: duplicate artifact id {artifact_id!r}")
+        seen_ids.add(artifact_id)
+
+    artifact_sha = artifact.get("artifact_sha256")
+    if artifact_sha is not None and not DIGEST_PATTERN.fullmatch(artifact_sha):
+        reasons.append(
+            f"below-threshold: artifacts[{index_pos}] artifact_sha256 "
+            f"{artifact_sha!r} is not valid sha256 format")
+
+    feature_digest = artifact.get("feature_manifest_digest")
+    if feature_digest is not None and feature_digest != expected_digest:
+        reasons.append(
+            f"stale-digest: artifacts[{index_pos}] "
+            f"feature_manifest_digest {feature_digest} != official "
+            f"{expected_digest}")
+
+    abi = artifact.get("abi_version")
+    if abi is not None and abi != expected_abi:
+        reasons.append(
+            f"stale-digest: artifacts[{index_pos}] abi_version {abi} "
+            f"!= frozen ABI {expected_abi}")
+
+    status = artifact.get("verification_status")
+    if status is not None and status not in VALID_VERIFICATION_STATUSES:
+        reasons.append(
+            f"malformed: artifacts[{index_pos}] verification_status "
+            f"{status!r} not in {VALID_VERIFICATION_STATUSES}")
+
+    _check_local_artifact_digest(artifact, index_pos, reasons)
+
+
+def _check_local_artifact_digest(artifact: dict, index_pos: int,
+                                 reasons: list) -> None:
+    """Verify digest against local bytes when the artifact is present."""
+    artifact_sha_value = artifact.get("artifact_sha256")
+    artifact_type = artifact.get("artifact_type")
+    artifact_path = artifact.get("artifact_id", "")
+    if not artifact_sha_value or artifact_type not in ("deb", "rpm", "source"):
+        return
+    local = REPO_ROOT / artifact_path
+    if local.is_file():
+        actual = "sha256:" + hashlib.sha256(
+            local.read_bytes()).hexdigest()
+        if actual != artifact_sha_value:
+            reasons.append(
+                f"stale-digest: artifacts[{index_pos}] local "
+                f"artifact {artifact_path} digest {actual} != "
+                f"recorded {artifact_sha_value}")
 
 
 def validate_record(record: dict, expected_sha: str | None = None) -> list[str]:
@@ -270,47 +282,52 @@ def validate_record(record: dict, expected_sha: str | None = None) -> list[str]:
         if not isinstance(artifact, dict):
             reasons.append(f"malformed: artifacts[{index}] must be an object")
             continue
-
-        # Check required fields
-        for field in REQUIRED_ARTIFACT_FIELDS:
-            if field not in artifact:
-                reasons.append(
-                    f"missing-observation: artifacts[{index}] missing {field}")
-
-        # Validate non-empty required string fields
-        for field in ("id", "path_or_url", "producer", "consumer", "retention"):
-            val = artifact.get(field)
-            if val is not None and (not isinstance(val, str) or not val):
-                reasons.append(
-                    f"malformed: artifacts[{index}].{field} must be "
-                    f"a non-empty string")
-
-        # Validate id uniqueness
-        artifact_id = artifact.get("id")
-        if artifact_id is not None:
-            if artifact_id in seen_ids:
-                reasons.append(
-                    f"blocking-pending: duplicate artifact id "
-                    f"{artifact_id!r}")
-            seen_ids.add(artifact_id)
-
-        # Validate storage_class
-        storage_class = artifact.get("storage_class")
-        if (storage_class is not None
-                and storage_class not in VALID_STORAGE_CLASSES):
-            reasons.append(
-                f"malformed: artifacts[{index}] storage_class "
-                f"{storage_class!r} not in {VALID_STORAGE_CLASSES}")
-
-        # Validate digest format
-        digest = artifact.get("digest")
-        if digest is not None:
-            if not isinstance(digest, str) or not DIGEST_PATTERN.fullmatch(digest):
-                reasons.append(
-                    f"below-threshold: artifacts[{index}] digest "
-                    f"{digest!r} is not valid sha256 format")
+        _check_registry_artifact(artifact, index, seen_ids, reasons)
 
     return reasons
+
+
+def _check_required_strings(artifact: dict, index: int, reasons: list) -> None:
+    """Required registry string fields must be non-empty."""
+    for field in ("id", "path_or_url", "producer", "consumer", "retention"):
+        val = artifact.get(field)
+        if val is not None and (not isinstance(val, str) or not val):
+            reasons.append(
+                f"malformed: artifacts[{index}].{field} must be "
+                f"a non-empty string")
+
+
+def _check_registry_artifact(artifact: dict, index: int, seen_ids: set,
+                             reasons: list) -> None:
+    """Validate one registry artifact record."""
+    for field in REQUIRED_ARTIFACT_FIELDS:
+        if field not in artifact:
+            reasons.append(
+                f"missing-observation: artifacts[{index}] missing {field}")
+
+    _check_required_strings(artifact, index, reasons)
+
+    artifact_id = artifact.get("id")
+    if artifact_id is not None:
+        if artifact_id in seen_ids:
+            reasons.append(
+                f"blocking-pending: duplicate artifact id "
+                f"{artifact_id!r}")
+        seen_ids.add(artifact_id)
+
+    storage_class = artifact.get("storage_class")
+    if (storage_class is not None
+            and storage_class not in VALID_STORAGE_CLASSES):
+        reasons.append(
+            f"malformed: artifacts[{index}] storage_class "
+            f"{storage_class!r} not in {VALID_STORAGE_CLASSES}")
+
+    digest = artifact.get("digest")
+    if digest is not None:
+        if not isinstance(digest, str) or not DIGEST_PATTERN.fullmatch(digest):
+            reasons.append(
+                f"below-threshold: artifacts[{index}] digest "
+                f"{digest!r} is not valid sha256 format")
 
 
 def run_fixture_gate(args) -> int:
