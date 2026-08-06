@@ -368,10 +368,60 @@ fn parse_string(state: &mut ParseState) -> Result<String, DynconfParseError> {
                 return invalid_json(format!("unescaped control character 0x{:02x} in string", b));
             }
             Some(b) => {
-                result.push(b as char);
+                append_raw_string_byte(state, &mut result, b)?;
             }
         }
     }
+}
+
+fn append_raw_string_byte(
+    state: &mut ParseState,
+    result: &mut String,
+    first: u8,
+) -> Result<(), DynconfParseError> {
+    if first.is_ascii() {
+        result.push(first as char);
+        return Ok(());
+    }
+
+    let start = state.pos.checked_sub(1).ok_or_else(|| {
+        DynconfParseError::new(
+            DynconfParseErrorKind::InvalidJson,
+            "invalid UTF-8 string position".to_string(),
+        )
+    })?;
+    let width = match first {
+        0xC2..=0xDF => 2,
+        0xE0..=0xEF => 3,
+        0xF0..=0xF4 => 4,
+        _ => return invalid_json("invalid UTF-8 leading byte in string"),
+    };
+    let end = start.checked_add(width).ok_or_else(|| {
+        DynconfParseError::new(
+            DynconfParseErrorKind::InvalidJson,
+            "invalid UTF-8 string length".to_string(),
+        )
+    })?;
+    if end > state.input.len()
+        || state.input[start + 1..end]
+            .iter()
+            .any(|byte| !(*byte & 0xC0 == 0x80))
+    {
+        return invalid_json("invalid UTF-8 continuation byte in string");
+    }
+
+    let character = std::str::from_utf8(&state.input[start..end])
+        .ok()
+        .and_then(|text| text.chars().next())
+        .ok_or_else(|| {
+            DynconfParseError::new(
+                DynconfParseErrorKind::InvalidJson,
+                "invalid UTF-8 codepoint in string".to_string(),
+            )
+        })?;
+    state.pos = end;
+    result.push(character);
+    Ok(())
 }
 
 fn invalid_json<T>(message: impl Into<String>) -> Result<T, DynconfParseError> {
@@ -468,9 +518,10 @@ fn parse_number(state: &mut ParseState) -> Result<JsonValue, DynconfParseError> 
     parse_fraction_part(state)?;
     parse_exponent_part(state)?;
 
-    let raw = std::str::from_utf8(&state.input[start..state.pos])
-        .unwrap()
-        .to_string();
+    let raw = match std::str::from_utf8(&state.input[start..state.pos]) {
+        Ok(raw) => raw.to_string(),
+        Err(_) => return invalid_json("invalid UTF-8 in number"),
+    };
     let value: f64 = raw.parse().map_err(|_| {
         DynconfParseError::new(
             DynconfParseErrorKind::InvalidJson,
