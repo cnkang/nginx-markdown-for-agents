@@ -186,9 +186,8 @@ jobs:
       contents: read
     env:
       RUST_TARGET: x86_64-unknown-linux-gnu
-      # Must match artifacts/release/0.9.2/official-build-feature-manifest.json
-      # (Task 8.12a); the baseline is approved only from the official frozen
-      # feature set (validate_official_feature_manifest.py enforces this).
+      # The feature list is reviewed source configuration; the release gate
+      # validates the corresponding generated manifest before publication.
       RUST_FEATURES: streaming,incremental,prune_noise_regions
     steps:
       - name: Checkout repository
@@ -211,12 +210,11 @@ jobs:
           import json
           import os
 
-          # The canonical 0.9.2 performance environment (Task 8.12a) is the
-          # single source for the benchmark NGINX version; the legacy
-          # tools/release-matrix.json is the nginx.org platform matrix and is
-          # not authoritative for the 0.9.2 baseline.
+          # The tracked performance environment is the single source for the
+          # benchmark NGINX version. The release matrix remains the supported
+          # platform matrix and is not the baseline selector.
           with open(
-              "artifacts/spec62/wave4/canonical-performance-environment.json",
+              "release/performance/canonical-environment.json",
               encoding="utf-8",
           ) as handle:
               env = json.load(handle)

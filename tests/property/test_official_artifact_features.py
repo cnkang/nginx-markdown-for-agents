@@ -1,4 +1,4 @@
-# Feature: spec62-wave5 — Property-based tests for official artifact feature-set consistency
+# Feature: official release artifact feature-set consistency
 """Property-based tests for official release artifact feature-set consistency
 (Property 27).
 
@@ -25,8 +25,6 @@ from __future__ import annotations
 import json
 import pathlib
 import re
-from itertools import combinations
-
 import pytest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -158,20 +156,15 @@ def test_custom_builds_never_disable_required_feature_via_no_default() -> None:
         )
 
 
-def test_no_feature_combination_matrix_anywhere() -> None:
-    """Property: official artifact producer workflows never use
-    ``--no-default-features`` (which would permit a feature subset).  The
-    assertion is repeated for each workflow only so every producer file is
-    exercised by the matrix runner."""
-    official_list = sorted(OFFICIAL_FEATURES)
-    for size in range(1, len(official_list)):
-        for combo in combinations(official_list, size):
-            subset = set(combo)
-            if subset == OFFICIAL_FEATURES:
-                continue
-            for workflow in OFFICIAL_PRODUCER_WORKFLOWS:
-                path = WORKFLOW_DIR / workflow
-                if not path.is_file():
-                    continue
-                text = path.read_text(encoding="utf-8")
-                assert "no-default-features" not in text
+@pytest.mark.parametrize("workflow", OFFICIAL_PRODUCER_WORKFLOWS)
+def test_official_producer_does_not_disable_required_features(workflow: str) -> None:
+    """Every explicit feature list contains the complete official set."""
+    path = WORKFLOW_DIR / workflow
+    if not path.is_file():
+        pytest.skip(f"{workflow} not present in this checkout")
+    text = path.read_text(encoding="utf-8")
+    assert "no-default-features" not in text
+    for features in _workflow_feature_flags(path):
+        assert features == set(OFFICIAL_FEATURES), (
+            f"{workflow} declares a feature subset: {sorted(features)}"
+        )

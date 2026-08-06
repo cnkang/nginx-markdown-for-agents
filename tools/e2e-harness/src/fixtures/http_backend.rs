@@ -183,7 +183,7 @@ fn behavior_response(
     }
 }
 
-/// Serve a multi-layer Content-Encoding chain response (Spec 62 Wave 4).
+/// Serve a multi-layer Content-Encoding chain response.
 ///
 /// The body is compressed by applying the chain in application order
 /// (first layer first, so the last layer is the outermost encoding), and

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fuzz qualification gate validator (W6 Task 12.2).
+"""Fuzz qualification gate validator.
 
 Real mode runs every blocking fuzz target with ``cargo +nightly fuzz``
 until BOTH floors from the blocking-fuzz-target manifest are met:
@@ -38,6 +38,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT / "tools"))
+
+from lib.path_validation import (  # noqa: E402
+    validate_filename_strict,
+    validate_read_path,
+    validate_write_path_within_root,
+)
 
 SCHEMA_VERSION = "release.fuzz-qualification.v1"
 DEFAULT_MANIFEST = "artifacts/release/0.9.2/blocking-fuzz-target-manifest.json"
@@ -51,6 +58,7 @@ SKIP_ENV = "RELEASE_GATE_ALLOW_SKIP_FUZZ"
 TIME_CONTINUATION_CEILING = 3600
 MAX_FUZZ_INVOCATIONS = 8
 INVOCATION_TIMEOUT_MARGIN = 900
+BLOCKING_FUZZ_TARGET_MANIFEST_LABEL = "blocking-fuzz-target manifest"
 
 CANDIDATE_SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
 STAT_EXECS_PATTERN = re.compile(r"stat::number_of_executed_units:\s*(\d+)")
@@ -107,10 +115,11 @@ def _run_id_from(started_at: str) -> str:
     return "fuzz-qualification-" + started_at.replace(":", "").replace("+00:00", "Z")
 
 
-def load_json(path: Path, label: str) -> dict:
+def load_json(path: str | Path, label: str) -> dict:
     """Load a JSON object, failing closed with a malformed reason."""
+    validated_path = validate_read_path(path, purpose=label)
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(validated_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError(
             f"malformed: unable to read {label} {path}: {exc}") from exc
@@ -156,15 +165,20 @@ def _validate_target_entry(entry, index: int) -> str | None:
             continue
         return (f"malformed: targets[{index}].{field} must be "
                 f"{description}")
+    try:
+        validate_filename_strict(entry["name"], purpose="fuzz target")
+    except ValueError as exc:
+        return f"malformed: targets[{index}].name is invalid: {exc}"
     return None
 
 
 def validate_target_manifest(data: dict) -> list[dict]:
     """Validate the blocking-fuzz-target manifest, returning target entries."""
     if not isinstance(data.get("schema_version"), str):
-        raise ValueError(f"malformed: manifest schema_version must be a string")
-    MANIFEST_LABEL = "blocking-fuzz-target manifest"
-    error = _check_candidate_sha(data.get("candidate_sha"), MANIFEST_LABEL)
+        raise ValueError("malformed: manifest schema_version must be a string")
+    error = _check_candidate_sha(
+        data.get("candidate_sha"), BLOCKING_FUZZ_TARGET_MANIFEST_LABEL
+    )
     if error:
         raise ValueError(error)
     targets = data.get("targets")
@@ -194,7 +208,11 @@ def _validate_seed_path(seed_path, target: str) -> str | None:
     """Return an error string when a seed path is outside the corpus or absent."""
     if not isinstance(seed_path, str) or not seed_path:
         return f"malformed: seed_path for {target} must be a non-empty string"
-    path = (REPO_ROOT / seed_path).resolve()
+    path = validate_read_path(
+        REPO_ROOT / seed_path,
+        must_exist=False,
+        purpose=f"seed corpus for {target}",
+    )
     corpus_resolved = CORPUS_ROOT.resolve()
     try:
         path.relative_to(corpus_resolved)
@@ -265,7 +283,10 @@ def _cargo_fuzz_available() -> bool:
 
 def _invoke_fuzz(target: str, flags: list[str], timeout: int) -> dict:
     """Run one cargo fuzz invocation, returning status and captured output."""
-    command = ["cargo", "+nightly", "fuzz", "run", target, "--", *flags]
+    validated_target = validate_filename_strict(target, purpose="fuzz target")
+    command = [
+        "cargo", "+nightly", "fuzz", "run", validated_target, "--", *flags
+    ]
     started = time.monotonic()
     try:
         result = subprocess.run(
@@ -327,7 +348,7 @@ def _soak_outcome(invocation: dict) -> tuple[int, float, str | None]:
     if invocation["returncode"] != 0:
         return executions, elapsed, (
             f"fuzz run failed with exit code {invocation['returncode']}")
-    if executions == 0 and elapsed == 0:
+    if executions == 0 and elapsed <= 0.0:
         return executions, elapsed, (
             "fuzz run produced no statistics; build may have failed")
     return executions, elapsed, None
@@ -341,6 +362,7 @@ def _run_target_soak(target: str, seed: int, required_executions: int,
     when only one floor is met, the remaining floor is chased with follow-up
     invocations until both are satisfied.
     """
+    validated_target = validate_filename_strict(target, purpose="fuzz target")
     total_executions = 0
     total_elapsed = 0.0
     log_parts = []
@@ -358,7 +380,7 @@ def _run_target_soak(target: str, seed: int, required_executions: int,
         if runs_remaining > 0:
             flags.insert(0, f"-runs={runs_remaining}")
         invocation = _invoke_fuzz(
-            target, flags, timeout=time_cap + INVOCATION_TIMEOUT_MARGIN)
+            validated_target, flags, timeout=time_cap + INVOCATION_TIMEOUT_MARGIN)
         log_parts.append(invocation["stdout"] + "\n" + invocation["stderr"])
         executions, elapsed, failure = _soak_outcome(invocation)
         total_executions += executions
@@ -369,19 +391,22 @@ def _run_target_soak(target: str, seed: int, required_executions: int,
         failure = (f"threshold not reached within "
                    f"{MAX_FUZZ_INVOCATIONS} invocations")
 
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_path.write_text("\n".join(log_parts), encoding="utf-8")
+    validated_log_path = validate_write_path_within_root(
+        log_path, REPO_ROOT, purpose="fuzz raw log"
+    )
+    validated_log_path.parent.mkdir(parents=True, exist_ok=True)
+    validated_log_path.write_text("\n".join(log_parts), encoding="utf-8")
     crashes, sanitizer_findings = _classify_finding(failure)
     status = "fail" if failure else "pass"
     return {
-        "target": target,
+        "target": validated_target,
         "seed": seed,
         "elapsed_seconds_total": round(total_elapsed, 3),
         "executions_total": total_executions,
         "crashes": crashes,
         "sanitizer_findings": sanitizer_findings,
-        "corpus_dir": str(CORPUS_ROOT / target),
-        "raw_log_ref": str(log_path.relative_to(REPO_ROOT)),
+        "corpus_dir": str(CORPUS_ROOT / validated_target),
+        "raw_log_ref": str(validated_log_path.relative_to(REPO_ROOT)),
         "status": status,
         "failure_reason": failure,
     }
@@ -435,8 +460,13 @@ def _compose_record(candidate_sha: str, blocking_names: set[str],
 
 def _write_record(record: dict, path: Path) -> None:
     """Persist the qualification record, creating parent directories."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    validated_path = validate_write_path_within_root(
+        path, REPO_ROOT, purpose="fuzz qualification record"
+    )
+    validated_path.parent.mkdir(parents=True, exist_ok=True)
+    validated_path.write_text(
+        json.dumps(record, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def _print_target(record: dict) -> None:
@@ -455,7 +485,10 @@ def _print_target(record: dict) -> None:
 
 def _record_output_path(args) -> Path:
     """Return the path where the real-mode record must be written."""
-    return Path(args.output) if args.output else Path(args.record)
+    raw_path = args.output if args.output else args.record
+    return validate_write_path_within_root(
+        raw_path, REPO_ROOT, purpose="fuzz qualification record"
+    )
 
 
 def _handle_cargo_missing(args, candidate_sha: str,
@@ -485,14 +518,13 @@ def _handle_cargo_missing(args, candidate_sha: str,
 
 def run_real_gate(args) -> int:
     """Run every blocking fuzz target and persist the qualification record."""
-    FUZZ_MANIFEST_LABEL = "blocking-fuzz-target manifest"
-    manifest = load_json(Path(args.manifest), FUZZ_MANIFEST_LABEL)
+    manifest = load_json(args.manifest, BLOCKING_FUZZ_TARGET_MANIFEST_LABEL)
     targets = validate_target_manifest(manifest)
     blocking_names = {entry["name"] for entry in targets if entry["blocking"]}
     if not blocking_names:
-        raise ValueError(f"{FUZZ_MANIFEST_LABEL} contains no "
+        raise ValueError(f"{BLOCKING_FUZZ_TARGET_MANIFEST_LABEL} contains no "
                          "blocking targets")
-    corpus_data = load_json(Path(args.corpus_manifest), "corpus-seed manifest")
+    corpus_data = load_json(args.corpus_manifest, "corpus-seed manifest")
     seeds = validate_corpus_seeds(corpus_data, manifest["candidate_sha"],
                                   blocking_names)
     if not _cargo_fuzz_available():
@@ -601,12 +633,12 @@ def validate_record(record: dict, manifest: dict) -> list[str]:
 
 def run_fixture_gate(args) -> int:
     """Validate a pre-made qualification record against the manifest."""
-    manifest = load_json(Path(args.manifest), "blocking-fuzz-target manifest")
+    manifest = load_json(args.manifest, BLOCKING_FUZZ_TARGET_MANIFEST_LABEL)
     validate_target_manifest(manifest)
     if not args.record_input:
         raise ValueError("malformed: --record-input is required in "
                          "fixture mode")
-    record = load_json(Path(args.record_input), "fuzz-qualification record")
+    record = load_json(args.record_input, "fuzz-qualification record")
     reasons = validate_record(record, manifest)
     if reasons:
         for reason in reasons:
@@ -627,7 +659,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.mode == "fixture":
             return run_fixture_gate(args)
         return run_real_gate(args)
-    except ValueError as exc:
+    except (FileNotFoundError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 

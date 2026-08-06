@@ -220,7 +220,7 @@ def test_property8_doc_surrounding_content_preservation(
 
 
 # ---------------------------------------------------------------------------
-# Unit tests — CLI argument parsing (Task 6.1)
+# Unit tests — CLI argument parsing
 # ---------------------------------------------------------------------------
 
 
@@ -420,7 +420,7 @@ def test_property10_idempotent_matrix_computation(versions):
 
 
 # ---------------------------------------------------------------------------
-# Unit Tests — CLI and orchestration (Task 6.4)
+# Unit Tests — CLI and orchestration
 # ---------------------------------------------------------------------------
 
 

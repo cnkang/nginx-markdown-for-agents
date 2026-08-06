@@ -1,4 +1,4 @@
-"""Integration tests for the module-level benchmark harness (Spec 59, task 1.3).
+"""Integration tests for the module-level benchmark harness.
 
 Tests:
   1. Validates the ``module_benchmark`` schema in ``perf/metrics-schema.json``

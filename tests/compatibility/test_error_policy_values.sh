@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Error Policy Value Acceptance Test (Spec 62 Wave 4, Property 26)
+# Error Policy Value Acceptance Test
 #
 # Validates `markdown_error_policy` value acceptance via `nginx -t`:
 #   - Accepted without error: pass, fail_closed, status 429, status 503

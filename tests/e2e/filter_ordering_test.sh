@@ -2,7 +2,7 @@
 # filter_ordering_test.sh — E2E test: filter ordering interactions.
 #
 # Verifies the markdown module's filter position relative to gzip, gunzip,
-# Brotli, and proxy_cache (Requirement 10.7, 15.3 / Task 6.17).
+# Brotli, and proxy_cache (Requirements 10.7 and 15.3).
 #
 # Prerequisites:
 #   - NGINX running with markdown module loaded

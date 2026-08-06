@@ -6,6 +6,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 from tools.release.gates import validate_fuzz_qualification as validator
 
 MANIFEST_FIXTURE = "fuzz-qualification-manifest.json"
@@ -124,6 +126,26 @@ def test_fixture_mode_requires_record_input(tmp_path: Path, monkeypatch,
 
     assert rc == 1
     assert "malformed" in captured.err
+
+
+def test_target_manifest_rejects_path_like_target_name() -> None:
+    """Manifest target names must not become command or path components."""
+    manifest = json.loads(
+        _fixture_path(MANIFEST_FIXTURE).read_text(encoding="utf-8")
+    )
+    manifest["targets"][0]["name"] = "../escape"
+
+    with pytest.raises(ValueError, match="invalid"):
+        validator.validate_target_manifest(manifest)
+
+
+def test_record_output_path_stays_within_repository(tmp_path: Path) -> None:
+    """Alternate real-mode output must not write outside the repository."""
+    args = type("Args", (), {"output": str(tmp_path / "record.json"),
+                              "record": "unused.json"})()
+
+    with pytest.raises(ValueError, match="escapes root"):
+        validator._record_output_path(args)
 
 
 def test_real_mode_rejects_malformed_manifest(tmp_path: Path, monkeypatch,

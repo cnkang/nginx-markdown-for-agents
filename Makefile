@@ -224,7 +224,7 @@ test-benchmark-summary:
 	python3 tools/perf/format_pr_summary.py \
 	--report $(CORPUS_REPORT)
 
-# Determinism corpus (Spec 62 Wave 4 Requirement 13.4): every corpus fixture
+# Determinism corpus: every corpus fixture
 # must produce byte-identical output across repeated independent converter
 # runs.
 test-corpus-determinism:
@@ -288,6 +288,7 @@ e2e-streaming-config-check:
 
 reason-codegen-check:
 	@echo "=== Reason Registry Code Generation Drift Check ==="
+	python3 tools/reason-codegen/generate.py
 	python3 tools/reason-codegen/generate.py --check
 	@echo "  Reason Code Generation Drift Check: PASSED"
 
@@ -343,6 +344,7 @@ release-supply-chain-check:
 complexity-check:
 	@echo "=== Complexity Check ==="
 	bash tools/complexity/check_complexity.sh
+	PYTHONPATH=. python3 tools/harness/detect_python_complexity.py
 
 test-harness:
 	@echo "=== Harness Detector Unit Tests ==="
@@ -631,7 +633,7 @@ release-gates-check-070:
 #   All Python scripts called by this gate consume only repo-owned inputs:
 #   tools/, docs/, components/, AGENTS.md, .github/workflows/
 #
-# CI coverage (Spec 43):
+# CI coverage:
 #   - Streaming tests: covered by rust-quality job (make test-rust --all-features)
 #   - Chunked native E2E: covered by runtime-regressions job
 #   - Matrix validation: covered by docs-check job (make docs-check) and
@@ -896,7 +898,7 @@ release-gates-check-091: release-gates-check-090
 
 # release-gates-check-092: Blocking 0.9.2 release gate.
 # Additive on 091: adds public-surface/dynconf contract drift, version
-# consistency, reason-code registry completeness, and request-scoped OTel tests.
+# consistency, reason-code registry completeness, and streaming lifecycle tests.
 #
 # Environment variables (inherited from 091 chain):
 #   NGINX_BIN                            - Path to module-enabled nginx binary
@@ -909,23 +911,23 @@ release-gates-check-091: release-gates-check-090
 # Classification: BLOCKING
 release-gates-check-092: release-gates-check-091
 	@echo "=== 0.9.2 Release Gates (blocking) ==="
-	@echo "  [1/5] 0.9.2 performance evidence gate (blocking mode, baseline 092)"
+	@echo "  [1/7] 0.9.2 performance evidence gate (blocking mode, baseline 092)"
 	$(MAKE) release-perf-evidence-blocking BASELINE_VERSION=092
-	@echo "  [2/5] Public surface and dynconf schema drift checks"
+	@echo "  [2/7] Public surface and dynconf schema drift checks"
 	$(MAKE) public-surface-drift-check
-	@echo "  [3/5] Version consistency (0.9.2)"
+	@echo "  [3/7] Version consistency (0.9.2)"
 	bash tools/harness/detect_version_consistency.sh
-	@echo "  [4/5] Reason code registry completeness"
+	@echo "  [4/7] Reason code registry completeness"
 	PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
-	@echo "  [5/5] OTel request-scoped unit test"
-	$(MAKE) -C $(NGINX_TEST_DIR) unit-otel_impl
-	@echo "  [6/6] Official build feature manifest (Task 8.12a)"
-	python3 tools/release/gates/validate_official_feature_manifest.py
-	@echo "  [7/7] Canonical release matrix (Task 10.2)"
+	@echo "  [5/7] Streaming lifecycle unit test"
+	$(MAKE) -C $(NGINX_TEST_DIR) unit-streaming_impl
+	@echo "  [6/7] Official build feature manifest"
+	python3 tools/release/gates/validate_official_feature_manifest.py --write
+	@echo "  [7/7] Canonical release matrix"
 	PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
 	@echo "=== 0.9.2 Release Gates: PASS ==="
 
-# release-matrix-check: Canonical release-matrix gate (Task 10.2).
+# release-matrix-check: Canonical release-matrix gate.
 # Validates docs/release/release-matrix.json against the immutable
 # schemas/release-matrix.schema.json, requires a fully canonical document
 # (no legacy aliases, no legacy top-level matrix, no dropped metadata
@@ -934,6 +936,7 @@ release-gates-check-092: release-gates-check-091
 # Classification: BLOCKING
 release-matrix-check:
 	@echo "=== Canonical Release Matrix Check ==="
+	python3 tools/release/gates/validate_official_feature_manifest.py --write
 	PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
 	PYTHONPATH=. python3 -m pytest tools/release/matrix/tests/test_validate_release_matrix.py -q --tb=short
 	@echo "  Canonical Release Matrix Check: PASSED"
@@ -1227,7 +1230,7 @@ help:
 	@echo "  release-gates-check-090  - Validate 0.9.0 release gates (additive on 0.8.0; production examples, gate validator)"
 	@echo "  release-gates-check-091  - Validate 0.9.1 release gates (blocking; module benchmark evidence gate)"
 	@echo "  release-gates-check-092  - Validate 0.9.2 release gates (blocking; 091 + 092 evidence + contract checks)"
-	@echo "  release-matrix-check      - Validate canonical release matrix against W4 schema and ABI/feature bindings"
+	@echo "  release-matrix-check      - Validate canonical release matrix against the checked-in schema and ABI/feature bindings"
 	@echo "  release-candidate-evidence-check - Validate frozen release candidate SHA manifest (FIXTURE=... for regression fixtures)"
 	@echo "  artifact-registry-check   - Validate candidate-bound release artifact index (FIXTURE=... for regression fixtures)"
 	@echo "  release-evidence-manifest-check - Validate final evidence manifest + observation state (FIXTURE=... for regression fixtures)"

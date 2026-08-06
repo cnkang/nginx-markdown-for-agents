@@ -19,7 +19,7 @@
     "candidate_sha": {
       "type": "string",
       "pattern": "^[0-9a-f]{40}$",
-      "description": "W5-frozen candidate SHA; must equal the release candidate manifest candidate_sha."
+      "description": "Frozen candidate SHA; must equal the release candidate manifest candidate_sha."
     },
     "phase": {
       "enum": ["not_started", "phase_1_candidate_qualification", "phase_2_internal_canary", "phase_3_expanded_canary", "observation_complete"],

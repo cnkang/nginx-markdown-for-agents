@@ -2,7 +2,7 @@
 #
 # Determinism Corpus Verification Script
 #
-# Verifies the Spec 62 Wave 4 output determinism contract (Requirement 13.4):
+# Verifies the output determinism contract (Requirement 13.4):
 # identical effective inputs produce byte-identical response bodies within
 # the same module version and build feature set.
 #

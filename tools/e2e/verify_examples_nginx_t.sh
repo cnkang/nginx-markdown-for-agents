@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Example configuration nginx -t verification (Spec 62 Wave 4, task 8.12).
+# Example configuration nginx -t verification.
 #
 # Validates that every example configuration and the 0.9.2 migration-guide
 # nginx examples produce the expected `nginx -t` result against a

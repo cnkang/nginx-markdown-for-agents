@@ -386,7 +386,7 @@ def test_registry_histogram_has_correct_boundaries():
 
     repo_root = Path(__file__).resolve().parent.parent.parent.parent.parent
     registry_path = (
-        repo_root / "artifacts" / "spec62" / "wave2"
+        repo_root / "artifacts" / "release" / "0.9.2"
         / "metrics-registry.json"
     )
     if not registry_path.exists():
@@ -418,7 +418,7 @@ def test_registry_histogram_is_only_histogram():
 
     repo_root = Path(__file__).resolve().parent.parent.parent.parent.parent
     registry_path = (
-        repo_root / "artifacts" / "spec62" / "wave2"
+        repo_root / "artifacts" / "release" / "0.9.2"
         / "metrics-registry.json"
     )
     if not registry_path.exists():

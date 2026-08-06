@@ -1,7 +1,7 @@
 {
-  "schema_version": "spec62.wave5.sanitizer-support-matrix.v1",
-  "task": "10.4",
-  "note": "Unbound scope definition; carries no candidate SHA and is not runtime evidence. Task 10.7 creates candidate-bound immutable copies.",
+  "schema_version": "release.scope.sanitizer-support-matrix.v1",
+  "scope_revision": "1",
+  "note": "Unbound scope definition; carries no candidate SHA and is not runtime evidence. The release workflow creates candidate-bound immutable copies.",
   "rows": [
     {
       "row_id": "asan-ubsan",
@@ -39,7 +39,7 @@
       "compiler": "clang",
       "blocking": false,
       "skip_reason": "macOS smoke runs are non-canonical development environments; the canonical sanitizer matrix runs on the Linux CI runner.",
-      "policy_reference": "Requirement 14 criterion 5 / canonical-performance-environment (Task 8.12a)"
+      "policy_reference": "Requirement 14 criterion 5 / canonical-performance-environment"
     }
   ]
 }

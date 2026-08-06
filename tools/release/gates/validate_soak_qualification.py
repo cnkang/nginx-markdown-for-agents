@@ -16,9 +16,8 @@ the same threshold semantics, used for gate regression coverage only.
 
 Failure semantics are fail-closed: any missing field, stale candidate
 SHA, below-threshold metric, blocking pending state, or missing
-observation is an ERROR and exits 1. This gate never reads `.kiro/` and
-does not encode Spec-specific counts; every threshold comes from the
-manifest.
+observation is an ERROR and exits 1. This gate never reads private
+planning inputs; every threshold comes from the manifest.
 
 Exit codes:
     0 - soak qualification passed (or justified skip with --allow-skip-soak)
@@ -34,16 +33,36 @@ import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 import time
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT / "tools"))
+
+from lib.path_validation import (  # noqa: E402
+    validate_filename_strict,
+    validate_read_path,
+    validate_write_path_within_root,
+)
 DEFAULT_MANIFEST = (
     REPO_ROOT / "artifacts" / "release" / "0.9.2" / "short-soak-scenario-manifest.json"
 )
 DEFAULT_RECORD = (
     REPO_ROOT / "artifacts" / "release" / "0.9.2" / "soak-qualification-record.json"
+)
+SOAK_RUNTIME_ROOT = REPO_ROOT / "build" / "soak-runtime"
+SOAK_PORT = 19200
+SOAK_SCENARIO_FILES = {
+    "small": "small.html",
+    "medium": "medium.html",
+    "large": "large.html",
+}
+FLOAT_EPSILON = 1e-9
+PEAK_MEMORY_MISSING_ERROR = (
+    "insufficient-data: module-managed per-request peak memory was not observed"
 )
 
 RECORD_SCHEMA_VERSION = "release.soak-qualification.v1"
@@ -58,6 +77,8 @@ REQUIRED_RECORD_FIELDS = (
     "rss_time_series",
     "worker_rss_drain_delta_kb",
     "monotonic_growth_after_drain",
+    "module_managed_peak_observed",
+    "per_request_peak_bytes",
     "status",
 )
 
@@ -79,9 +100,10 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def load_json(path: pathlib.Path, label: str) -> dict:
+def load_json(path: str | pathlib.Path, label: str) -> dict:
+    validated_path = validate_read_path(path, purpose=label)
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = json.loads(validated_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
         raise SystemExit(f"ERROR: {label} unreadable: {exc}") from exc
     if not isinstance(raw, dict):
@@ -90,8 +112,7 @@ def load_json(path: pathlib.Path, label: str) -> dict:
 
 
 def load_manifest(manifest_path: str) -> dict:
-    path = pathlib.Path(manifest_path).resolve()
-    manifest = load_json(path, "soak manifest")
+    manifest = load_json(manifest_path, "soak manifest")
     required = {"schema_version", "candidate_sha", "duration_minutes", "concurrency"}
     missing = required - set(manifest)
     if missing:
@@ -104,10 +125,28 @@ def load_manifest(manifest_path: str) -> dict:
         raise SystemExit("ERROR: soak manifest concurrency must be a positive integer")
     if not isinstance(manifest.get("corpus"), list) or not manifest["corpus"]:
         raise SystemExit("ERROR: soak manifest corpus must be a non-empty array")
-    for entry in manifest["corpus"]:
+    _validate_corpus_entries(manifest["corpus"])
+    return manifest
+
+
+def _validate_corpus_entries(entries: list[dict]) -> None:
+    """Validate the fixed scenario IDs used by corpus files and URLs."""
+    seen_ids = set()
+    for entry in entries:
         if not isinstance(entry, dict) or "id" not in entry:
             raise SystemExit("ERROR: soak manifest corpus entries need an id")
-    return manifest
+        scenario_id = entry["id"]
+        if (not isinstance(scenario_id, str)
+                or scenario_id not in SOAK_SCENARIO_FILES):
+            raise SystemExit(
+                "ERROR: soak manifest corpus id must be one of "
+                f"{sorted(SOAK_SCENARIO_FILES)}"
+            )
+        if scenario_id in seen_ids:
+            raise SystemExit(
+                f"ERROR: soak manifest corpus contains duplicate id {scenario_id!r}"
+            )
+        seen_ids.add(scenario_id)
 
 
 def _validate_scalar(record: dict, name: str, expected: object) -> None:
@@ -178,7 +217,9 @@ def _check_scenario_rows(record: dict, manifest: dict) -> None:
                 "ERROR: blocking-pending: scenario "
                 f"{scenario.get('id')!r} status {scenario.get('status')!r}"
             )
-        if scenario.get("error_rate", 0.0) != 0.0:
+        error_rate = scenario.get("error_rate", 0.0)
+        if (not isinstance(error_rate, (int, float))
+                or abs(error_rate) > FLOAT_EPSILON):
             raise SystemExit(
                 "ERROR: below-threshold: scenario "
                 f"{scenario.get('id')!r} error_rate {scenario.get('error_rate')!r}"
@@ -187,17 +228,27 @@ def _check_scenario_rows(record: dict, manifest: dict) -> None:
 
 def _check_peak_memory(record: dict, manifest: dict) -> None:
     """Per-request peak must stay within the scenario memory ceiling."""
-    if not record.get("module_managed_peak_observed"):
-        return
+    issue = _peak_memory_issue(record, manifest)
+    if issue:
+        raise SystemExit(f"ERROR: {issue}")
+
+
+def _peak_memory_issue(record: dict, manifest: dict) -> str | None:
+    """Return a fail-closed peak-memory issue, if the evidence is invalid."""
+    if record.get("module_managed_peak_observed") is not True:
+        return PEAK_MEMORY_MISSING_ERROR
     peak = record.get("per_request_peak_bytes")
+    if not isinstance(peak, int) or isinstance(peak, bool) or peak <= 0:
+        return PEAK_MEMORY_MISSING_ERROR
     ceiling = max(
         (s.get("conversion_memory_bytes", 0) for s in manifest["corpus"]),
         default=0,
     )
-    if peak is not None and ceiling and peak > ceiling:
-        raise SystemExit(
-            f"ERROR: below-threshold: per-request peak {peak} > ceiling {ceiling}"
-        )
+    if not isinstance(ceiling, int) or isinstance(ceiling, bool) or ceiling <= 0:
+        return "insufficient-data: scenario memory ceiling is missing"
+    if peak > ceiling:
+        return f"below-threshold: per-request peak {peak} > ceiling {ceiling}"
+    return None
 
 
 def validate_soak_outcome(record: dict, manifest: dict) -> None:
@@ -215,7 +266,7 @@ def validate_soak_outcome(record: dict, manifest: dict) -> None:
 
 def fixture_main(args: argparse.Namespace) -> int:
     manifest = load_manifest(args.manifest)
-    record = load_json(pathlib.Path(args.record_input), "soak record")
+    record = load_json(args.record_input, "soak record")
     validate_record_structure(record)
     validate_against_manifest(record, manifest)
     validate_soak_outcome(record, manifest)
@@ -253,6 +304,27 @@ def _ab_float(line: str, keyword: str, offset: int = 0) -> float:
         return 0.0
 
 
+def _validated_local_url(url: str) -> str:
+    """Allow only the local soak server and its fixed scenario files."""
+    parsed = urllib.parse.urlsplit(url)
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname != "127.0.0.1"
+        or parsed.port != SOAK_PORT
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError(f"invalid local soak URL: {url!r}")
+
+    path = urllib.parse.unquote(parsed.path.lstrip("/"))
+    validated_path = validate_filename_strict(path, purpose="soak URL path")
+    if validated_path not in SOAK_SCENARIO_FILES.values():
+        raise ValueError(f"invalid local soak URL path: {path!r}")
+    return f"http://127.0.0.1:{SOAK_PORT}/{validated_path}"
+
+
 def parse_ab_report(output: str) -> dict:
     percentiles = {}
     failed = 0
@@ -279,6 +351,10 @@ def parse_ab_report(output: str) -> dict:
 
 
 def run_ab_chunk(url: str, concurrency: int, seconds: int, output_dir: pathlib.Path) -> dict:
+    validated_url = _validated_local_url(url)
+    validated_output_dir = validate_write_path_within_root(
+        output_dir, REPO_ROOT, purpose="soak raw logs"
+    )
     ab = subprocess.run(
         [
             "/usr/sbin/ab",
@@ -287,7 +363,7 @@ def run_ab_chunk(url: str, concurrency: int, seconds: int, output_dir: pathlib.P
             "-c",
             str(concurrency),
             "-k",
-            url,
+            validated_url,
         ],
         capture_output=True,
         text=True,
@@ -295,8 +371,9 @@ def run_ab_chunk(url: str, concurrency: int, seconds: int, output_dir: pathlib.P
         timeout=seconds * 4,
     )
     report = parse_ab_report(ab.stdout or ab.stderr)
-    (output_dir / "raw").mkdir(parents=True, exist_ok=True)
-    (output_dir / "raw" / f"ab-{int(time.time())}.log").write_text(
+    raw_dir = validated_output_dir / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    (raw_dir / f"ab-{int(time.time())}.log").write_text(
         ab.stdout + "\n" + ab.stderr, encoding="utf-8"
     )
     report["_returncode"] = ab.returncode
@@ -316,10 +393,11 @@ def read_worker_rss(worker_pid: int) -> int:
 
 
 def wait_for_ready(url: str, timeout: int = 30) -> bool:
+    validated_url = _validated_local_url(url)
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
-            with urllib.request.urlopen(url, timeout=2) as response:
+            with urllib.request.urlopen(validated_url, timeout=2) as response:
                 if response.status == 200:
                     return True
         except (urllib.error.URLError, OSError):
@@ -327,23 +405,46 @@ def wait_for_ready(url: str, timeout: int = 30) -> bool:
     return False
 
 
+def _nginx_config_path(path: pathlib.Path, label: str) -> str:
+    """Reject path bytes that could change the generated NGINX config."""
+    text = str(path)
+    if any(char in text for char in "\r\n;{}"):
+        raise ValueError(f"invalid {label} for NGINX configuration")
+    return text
+
+
 def write_nginx_conf(runtime_dir: pathlib.Path, port: int, root: str, module_so: str | None) -> None:
-    load_line = f"load_module {module_so};" if module_so else ""
-    (runtime_dir / "logs").mkdir(parents=True, exist_ok=True)
+    validated_runtime_dir = validate_write_path_within_root(
+        runtime_dir, REPO_ROOT, purpose="soak runtime directory"
+    )
+    validated_root = validate_write_path_within_root(
+        root, REPO_ROOT, purpose="soak document root"
+    )
+    runtime_text = _nginx_config_path(validated_runtime_dir, "runtime directory")
+    root_text = _nginx_config_path(validated_root, "document root")
+    load_line = ""
+    if module_so:
+        validated_module = validate_read_path(module_so, purpose="MODULE_SO")
+        if not validated_module.is_file() or not os.access(validated_module, os.R_OK):
+            raise ValueError(f"MODULE_SO is not a readable file: {validated_module}")
+        load_line = (
+            f"load_module {_nginx_config_path(validated_module, 'MODULE_SO')};"
+        )
+    (validated_runtime_dir / "logs").mkdir(parents=True, exist_ok=True)
     conf = f"""worker_processes 1;
-error_log {runtime_dir / 'logs' / 'error.log'} notice;
-pid {runtime_dir / 'nginx.pid'};
+error_log {runtime_text}/logs/error.log notice;
+pid {runtime_text}/nginx.pid;
 {load_line}
 events {{ }}
 http {{
     server {{
         listen {port};
-        root {root};
+        root {root_text};
         markdown_filter on;
     }}
 }}
 """
-    (runtime_dir / "nginx.conf").write_text(conf, encoding="utf-8")
+    (validated_runtime_dir / "nginx.conf").write_text(conf, encoding="utf-8")
 
 
 def build_corpus(runtime_dir: pathlib.Path, manifest: dict) -> dict:
@@ -352,13 +453,13 @@ def build_corpus(runtime_dir: pathlib.Path, manifest: dict) -> dict:
     corpus = {}
     for entry in manifest["corpus"]:
         scenario_id = entry["id"]
-        name = f"{scenario_id}.html"
+        name = SOAK_SCENARIO_FILES[scenario_id]
         size = {"small": 4096, "medium": 204800, "large": 1048576}.get(scenario_id, 4096)
         block = (
             "<!DOCTYPE html>\n<html><head><title>Soak fixture</title></head><body>\n"
             + "\n".join(
                 f"<h2>Section {i}</h2>\n<p>Paragraph {i} with <b>bold</b> and "
-                f"<a href=\"/{scenario_id}.html\">link</a> text for conversion.</p>"
+                f"<a href=\"/{name}\">link</a> text for conversion.</p>"
                 for i in range(max(1, size // 200))
             )
             + "\n</body></html>\n"
@@ -382,9 +483,16 @@ def find_worker_pid(runtime_dir: pathlib.Path) -> int:
                 pass
         time.sleep(0.5)
     return -1
-def run_load_loop(base_url: str, corpus: dict, worker_pid: int,
-                  duration: int, started: float, concurrency: int,
-                  runtime_dir: pathlib.Path) -> tuple:
+
+
+def run_load_loop(
+    corpus: dict,
+    worker_pid: int,
+    duration: int,
+    started: float,
+    concurrency: int,
+    runtime_dir: pathlib.Path,
+) -> tuple:
     """Run the sustained load loop, returning (rss_series, scenario_metrics)."""
     finished = started + duration
     rss_series = []
@@ -396,7 +504,7 @@ def run_load_loop(base_url: str, corpus: dict, worker_pid: int,
             break
         chunk_seconds = min(60, int(remaining) + 1)
         for sid in corpus:
-            url = f"{base_url}/{corpus[sid]}"
+            url = f"http://127.0.0.1:{SOAK_PORT}/{corpus[sid]}"
             report = run_ab_chunk(url, concurrency, chunk_seconds, runtime_dir)
             scenario_metrics[sid].append(report)
         if worker_pid > 0 and chunk % 6 == 0:
@@ -453,11 +561,54 @@ def build_scenario_metrics(scenario_metrics: dict) -> list:
             for sid, reports in scenario_metrics.items()]
 
 
+def _validated_record_path(args: argparse.Namespace) -> pathlib.Path:
+    """Resolve the CLI-selected record path within the repository."""
+    return validate_write_path_within_root(
+        args.output or args.record,
+        REPO_ROOT,
+        purpose="soak qualification record",
+    )
+
+
+def _validated_nginx_binary() -> pathlib.Path | None:
+    """Resolve NGINX_BIN and reject traversal or non-executable files."""
+    raw_path = os.environ.get("NGINX_BIN", "")
+    if not raw_path:
+        return None
+    try:
+        resolved = validate_read_path(raw_path, purpose="NGINX_BIN")
+    except FileNotFoundError:
+        return None
+    if not resolved.is_file() or not os.access(resolved, os.X_OK):
+        return None
+    return resolved
+
+
+def _runtime_directory() -> pathlib.Path:
+    """Return a private runtime directory under the repository build tree."""
+    configured = os.environ.get("SOAK_RUNTIME_DIR")
+    if configured:
+        runtime_dir = validate_write_path_within_root(
+            configured, REPO_ROOT, purpose="SOAK_RUNTIME_DIR"
+        )
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        runtime_dir.chmod(0o700)
+        return runtime_dir
+
+    runtime_root = validate_write_path_within_root(
+        SOAK_RUNTIME_ROOT, REPO_ROOT, purpose="soak temporary root"
+    )
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    runtime_root.chmod(0o700)
+    return pathlib.Path(
+        tempfile.mkdtemp(prefix="markdown-soak-", dir=runtime_root)
+    )
+
+
 def handle_missing_nginx(args: argparse.Namespace, manifest: dict) -> int | None:
     """Record a justified skip when NGINX_BIN is unavailable, or None to
     continue. Returns an exit code when the soak cannot run."""
-    nginx_bin = os.environ.get("NGINX_BIN", "")
-    if nginx_bin and pathlib.Path(nginx_bin).is_file():
+    if _validated_nginx_binary() is not None:
         return None
     if args.allow_skip_soak:
         record = {
@@ -466,9 +617,9 @@ def handle_missing_nginx(args: argparse.Namespace, manifest: dict) -> int | None
             "run_id": f"soak-{int(time.time())}",
             "status": "skip",
             "skip_reason": "NGINX_BIN not set or binary not found",
-            "policy_reference": "Requirement 18 Wave-6 qualification thresholds",
+            "policy_reference": "release short-soak qualification thresholds",
         }
-        output_path = pathlib.Path(args.output or args.record)
+        output_path = _validated_record_path(args)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
         print(f"SKIP: NGINX_BIN not set; skip recorded at {output_path}")
@@ -483,16 +634,15 @@ def handle_missing_nginx(args: argparse.Namespace, manifest: dict) -> int | None
 
 def prepare_runtime(base_url: str, manifest: dict, module_so: str) -> tuple:
     """Create the runtime dir, corpus, nginx config, and start nginx."""
-    runtime_dir = pathlib.Path(
-        os.environ.get("SOAK_RUNTIME_DIR") or f"/tmp/markdown-soak-{int(time.time())}"
-    )
-    runtime_dir.mkdir(parents=True, exist_ok=True)
+    runtime_dir = _runtime_directory()
     corpus = build_corpus(runtime_dir, manifest)
     port = int(base_url.rsplit(":", 1)[1])
     write_nginx_conf(runtime_dir, port, str(runtime_dir / "html"), module_so or None)
-    nginx_bin = os.environ["NGINX_BIN"]
+    nginx_bin = _validated_nginx_binary()
+    if nginx_bin is None:
+        raise ValueError("NGINX_BIN is not a readable executable")
     nginx = subprocess.Popen(
-        [nginx_bin, "-p", str(runtime_dir), "-c", "nginx.conf"],
+        [str(nginx_bin), "-p", str(runtime_dir), "-c", "nginx.conf"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -506,7 +656,7 @@ def real_main(args: argparse.Namespace) -> int:
         return skip_result
 
     module_so = os.environ.get("MODULE_SO", "")
-    port = 19200
+    port = SOAK_PORT
     base_url = f"http://127.0.0.1:{port}"
     runtime_dir, corpus, nginx = prepare_runtime(base_url, manifest, module_so)
     try:
@@ -517,7 +667,7 @@ def real_main(args: argparse.Namespace) -> int:
         started = time.time()
         duration = int(manifest["duration_minutes"] * 60)
         rss_series, scenario_metrics = run_load_loop(
-            base_url, corpus, worker_pid, duration, started,
+            corpus, worker_pid, duration, started,
             manifest["concurrency"], runtime_dir)
         drain_delta, monotonic = measure_drain(worker_pid)
     finally:
@@ -556,10 +706,13 @@ def real_main(args: argparse.Namespace) -> int:
         failures.append("error_rate != 0")
     if monotonic:
         failures.append("monotonic RSS growth after drain")
+    peak_issue = _peak_memory_issue(record, manifest)
+    if peak_issue:
+        failures.append(peak_issue)
     if failures:
         record["status"] = "fail"
         record["errors"] = failures
-    output_path = pathlib.Path(args.output or args.record)
+    output_path = _validated_record_path(args)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     if failures:
@@ -583,12 +736,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.mode == "fixture":
-        if not args.record_input:
-            print("ERROR: fixture mode requires --record-input", file=sys.stderr)
-            return 2
-        return fixture_main(args)
-    return real_main(args)
+    try:
+        if args.mode == "fixture":
+            if not args.record_input:
+                print("ERROR: fixture mode requires --record-input", file=sys.stderr)
+                return 2
+            return fixture_main(args)
+        return real_main(args)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

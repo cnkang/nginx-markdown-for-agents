@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compute the 4-tuple ABI handshake identity hashes (Spec 62 Task 8.13).
+"""Compute the four ABI handshake identity hashes.
 
 Formulas (documented in components/rust-converter/src/ffi/abi.rs):
 
@@ -32,7 +32,7 @@ STREAMING_PATH = REPO_ROOT / "components" / "rust-converter" / "src" / "ffi" / "
 EXPORTS_PATH = REPO_ROOT / "components" / "rust-converter" / "src" / "ffi" / "exports.rs"
 HEADER_PATH = REPO_ROOT / "components" / "rust-converter" / "include" / "markdown_converter.h"
 HEADER_HASH_DEFINE = re.compile(
-    rb"(#define\s+MARKDOWN_HEADER_HASH\s+)[0-9]+(?:ull|ULL)?"
+    rb"(#define\s+MARKDOWN_HEADER_HASH\s+)\d+(?:ull|ULL)?"
 )
 
 
