@@ -4,8 +4,6 @@
 This standalone tool is the single code-generation entry point for all
 reason-code-derived artifacts. It reads the declarative registry and writes:
   - Rust enum + metadata (reason_code.rs)
-  - C header with #define constants (ngx_http_markdown_reason_generated.h)
-  - C accessor implementations (ngx_http_markdown_reason_generated.c)
   - Count/hash manifest JSON (reason-registry-report.json)
   - Generated-artifacts listing (generated-reason-artifacts.json)
 
@@ -33,20 +31,6 @@ REGISTRY_PATH = REPO_ROOT / "components" / "rust-converter" / "reason_registry.t
 # Output paths
 RUST_OUTPUT = (
     REPO_ROOT / "components" / "rust-converter" / "src" / "decision" / "reason_code.rs"
-)
-C_HEADER_OUTPUT = (
-    REPO_ROOT
-    / "components"
-    / "nginx-module"
-    / "src"
-    / "ngx_http_markdown_reason_generated.h"
-)
-C_SOURCE_OUTPUT = (
-    REPO_ROOT
-    / "components"
-    / "nginx-module"
-    / "src"
-    / "ngx_http_markdown_reason_generated.c"
 )
 MANIFEST_OUTPUT = (
     REPO_ROOT / "artifacts" / "release" / "0.9.2" / "reason-registry-report.json"
@@ -688,113 +672,6 @@ def generate_rust_tests_continued() -> str:
     return "\n".join(lines)
 
 
-def generate_c_header(reasons, hash_hex: str) -> str:
-    """Generate the C header with #define REASON_* constants."""
-    lines = []
-    lines.append(generate_do_not_edit_header(hash_hex, "c"))
-    lines.append("")
-    lines.append("#ifndef _NGX_HTTP_MARKDOWN_REASON_GENERATED_H_INCLUDED_")
-    lines.append("#define _NGX_HTTP_MARKDOWN_REASON_GENERATED_H_INCLUDED_")
-    lines.append("")
-    lines.append("")
-    lines.append("/*")
-    lines.append(" * Reason code discriminant constants matching the Rust ReasonCode enum.")
-    lines.append(" *")
-    lines.append(" * These are generated from components/rust-converter/reason_registry.toml")
-    lines.append(" * and must not be edited manually.")
-    lines.append(" */")
-    lines.append("")
-
-    # Find max key length for alignment
-    max_name_len = max(len("REASON_" + snake_to_upper(r["key"])) for r in reasons)
-
-    for r in reasons:
-        name = "REASON_" + snake_to_upper(r["key"])
-        padding = " " * (max_name_len - len(name) + 1)
-        lines.append(f"#define {name}{padding}{r['discriminant']}")
-
-    lines.append("")
-    lines.append(f"#define REASON_CODE_COUNT  {len(reasons)}")
-    lines.append("")
-    lines.append("")
-    lines.append("/*")
-    lines.append(" * Accessor function declarations.")
-    lines.append(" *")
-    lines.append(" * reason_code_str() returns the snake_case string for a discriminant.")
-    lines.append(" * reason_code_metric_key() returns the Prometheus metric family name.")
-    lines.append(" */")
-    lines.append("const char *reason_code_str(unsigned int code);")
-    lines.append("const char *reason_code_metric_key(unsigned int code);")
-    lines.append("")
-    lines.append("")
-    lines.append("#endif /* _NGX_HTTP_MARKDOWN_REASON_GENERATED_H_INCLUDED_ */")
-    lines.append("")
-
-    return "\n".join(lines)
-
-
-def generate_c_source(reasons, hash_hex: str) -> str:
-    """Generate the C accessor implementation file."""
-    lines = []
-    lines.append(generate_do_not_edit_header(hash_hex, "c"))
-    lines.append("")
-    lines.append('#include "ngx_http_markdown_reason_generated.h"')
-    lines.append("")
-    lines.append("#include <stddef.h>")
-    lines.append("")
-    lines.append("")
-    lines.append("/*")
-    lines.append(" * Static string table for reason code snake_case names.")
-    lines.append(" */")
-    lines.append("static const char *reason_code_strings[] = {")
-    for r in reasons:
-        lines.append(f'    "{r["key"]}",')
-    lines.append("};")
-    lines.append("")
-    lines.append("")
-    lines.append("/*")
-    lines.append(" * Static string table for reason code metric family names.")
-    lines.append(" */")
-    lines.append("static const char *reason_code_metric_keys[] = {")
-    for r in reasons:
-        family = get_metric_family(r["key"])
-        lines.append(f'    "{family}",')
-    lines.append("};")
-    lines.append("")
-    lines.append("")
-    lines.append("/*")
-    lines.append(" * Return the snake_case string for a reason code discriminant.")
-    lines.append(" *")
-    lines.append(" * Returns NULL if code is out of range.")
-    lines.append(" */")
-    lines.append("const char *")
-    lines.append("reason_code_str(unsigned int code)")
-    lines.append("{")
-    lines.append("    if (code >= REASON_CODE_COUNT) {")
-    lines.append("        return NULL;")
-    lines.append("    }")
-    lines.append("    return reason_code_strings[code];")
-    lines.append("}")
-    lines.append("")
-    lines.append("")
-    lines.append("/*")
-    lines.append(" * Return the Prometheus metric family name for a reason code discriminant.")
-    lines.append(" *")
-    lines.append(" * Returns NULL if code is out of range.")
-    lines.append(" */")
-    lines.append("const char *")
-    lines.append("reason_code_metric_key(unsigned int code)")
-    lines.append("{")
-    lines.append("    if (code >= REASON_CODE_COUNT) {")
-    lines.append("        return NULL;")
-    lines.append("    }")
-    lines.append("    return reason_code_metric_keys[code];")
-    lines.append("}")
-    lines.append("")
-
-    return "\n".join(lines)
-
-
 def generate_manifest(reasons, hash_hex: str) -> dict:
     """Generate the count/hash manifest."""
     min_disc = min(r["discriminant"] for r in reasons)
@@ -822,14 +699,6 @@ def generate_listing(hash_hex: str) -> dict:
             {
                 "path": "components/rust-converter/src/decision/reason_code.rs",
                 "description": "Rust enum with all metadata and FFI exports",
-            },
-            {
-                "path": "components/nginx-module/src/ngx_http_markdown_reason_generated.h",
-                "description": "C header with #define REASON_* constants and accessor decls",
-            },
-            {
-                "path": "components/nginx-module/src/ngx_http_markdown_reason_generated.c",
-                "description": "C accessor function implementations",
             },
             {
                 "path": "artifacts/release/0.9.2/reason-registry-report.json",
@@ -907,8 +776,6 @@ def _build_generated_outputs(reasons, hash_hex: str):
     ) + "\n"
     return [
         (RUST_OUTPUT, rust_content),
-        (C_HEADER_OUTPUT, generate_c_header(reasons, hash_hex)),
-        (C_SOURCE_OUTPUT, generate_c_source(reasons, hash_hex)),
         (MANIFEST_OUTPUT, manifest_content),
         (LISTING_OUTPUT, listing_content),
     ]
