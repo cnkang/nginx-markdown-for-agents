@@ -45,7 +45,7 @@ rollback-mutation fields are not part of v1.
 
 ## Prometheus Metrics v1
 
-The endpoint emits Prometheus text format 0.0.4 and exactly these eleven
+The endpoint emits Prometheus text format 0.0.4 and exactly these twelve
 families:
 
 ```text

@@ -6,7 +6,7 @@ Verifies that the v1 Prometheus renderer output matches the frozen
 metrics-registry.json exactly: no extra families, no missing families.
 
 This gate validates:
-  - The registry artifact is well-formed and contains exactly 11 families
+  - The registry artifact is well-formed and contains exactly 12 families
   - Family names use the nginx_markdown_ prefix
   - Types are valid Prometheus types (counter, gauge, histogram)
   - Histogram has <= 10 bucket boundaries
@@ -15,7 +15,7 @@ This gate validates:
   - input_bytes_total and output_bytes_total are counters (NOT histograms)
   - streaming_events_total uses label name 'transition' (NOT 'event')
   - build_info is a gauge (always 1)
-  - The renderer header emits exactly these 11 family names and label keys
+  - The renderer header emits exactly these 12 family names and label keys
 
 Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.7, 5.8
 """
@@ -99,8 +99,8 @@ def validate_registry_structure(registry):
         errors.append("schema_version must be 1")
 
     families = registry.get("families", [])
-    if len(families) != 11:
-        errors.append(f"Expected exactly 11 families, got {len(families)}")
+    if len(families) != 12:
+        errors.append(f"Expected exactly 12 families, got {len(families)}")
 
     seen_names = set()
     for family in families:
@@ -309,7 +309,7 @@ def _run_structure_section(registry):
     if errors:
         _print_section_errors(errors)
     else:
-        print("  PASS: 11 families, valid types, proper prefix")
+        print("  PASS: 12 families, valid types, proper prefix")
     return errors
 
 
@@ -329,7 +329,7 @@ def _run_renderer_section(repo_root, registry):
     if errors:
         _print_section_errors(errors)
     else:
-        print("  PASS: Renderer emits exactly 11 registry families")
+        print("  PASS: Renderer emits exactly 12 registry families")
     return errors
 
 

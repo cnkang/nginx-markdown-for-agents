@@ -1134,7 +1134,7 @@ Use this guidance at every observation checkpoint and whenever you need to asses
 ### Metrics to Monitor
 
 The module exposes `/markdown-metrics` as a localhost-only Prometheus text
-0.0.4 endpoint. It always emits the exact eleven families listed in the
+0.0.4 endpoint. It always emits the exact twelve families listed in the
 [Prometheus Metrics Guide](prometheus-metrics.md); the `Accept` header cannot
 select a legacy JSON or human-readable representation.
 

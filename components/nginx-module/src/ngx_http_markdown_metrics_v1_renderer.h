@@ -4,7 +4,7 @@
 /*
  * Metrics v1 Prometheus text 0.0.4 renderer.
  *
- * Emits exactly the 11 frozen metric families defined in the checked-in
+ * Emits exactly the 12 frozen metric families defined in the checked-in
  * 0.9.2 metrics registry.
  *
  * This renderer replaces ngx_http_markdown_prometheus_impl.h for the
@@ -16,7 +16,7 @@
  * NOT be included from any other .c file or used as a standalone
  * compilation unit.
  *
- * Family list (frozen, exactly 11):
+ * Family list (frozen, exactly 12):
  *   1. nginx_markdown_requests_total (counter)
  *   2. nginx_markdown_conversion_attempts_total (counter)
  *   3. nginx_markdown_conversion_deliveries_total (counter)
@@ -24,10 +24,11 @@
  *   5. nginx_markdown_input_bytes_total (counter)
  *   6. nginx_markdown_output_bytes_total (counter)
  *   7. nginx_markdown_inflight_requests (gauge)
- *   8. nginx_markdown_streaming_events_total (counter)
- *   9. nginx_markdown_decompression_events_total (counter)
- *  10. nginx_markdown_dynconf_reloads_total (counter)
- *  11. nginx_markdown_build_info (gauge)
+ *   8. nginx_markdown_streaming_peak_memory_bytes (gauge)
+ *   9. nginx_markdown_streaming_events_total (counter)
+ *  10. nginx_markdown_decompression_events_total (counter)
+ *  11. nginx_markdown_dynconf_reloads_total (counter)
+ *  12. nginx_markdown_build_info (gauge)
  *
  * No per-path labels. No URI labels. No JSON format. No multi-format.
  * All label sets are bounded and enumerable.
@@ -46,7 +47,7 @@ u_char *ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...);
  * v1 metrics snapshot structure.
  *
  * This is the reduced metrics structure that carries exactly the
- * data needed to render the 11 frozen families. The existing
+ * data needed to render the 12 frozen families. The existing
  * ngx_http_markdown_metrics_snapshot_t remains as an internal storage
  * shape for counter aggregation; it is not a public renderer or wire
  * contract. The v1 renderer reads from this v1 snapshot.
@@ -89,6 +90,8 @@ typedef struct {
     ngx_atomic_uint_t output_bytes;
 
     ngx_atomic_uint_t inflight;
+
+    ngx_atomic_uint_t streaming_peak_memory_bytes;
 
     struct {
         ngx_atomic_uint_t commit;
@@ -353,6 +356,18 @@ ngx_http_markdown_metrics_v1_render_families_4_to_7(
         return NULL;
     }
 
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_streaming_peak_memory_bytes "
+        "Last streaming conversion peak working-set estimate; "
+        "not process RSS.\n"
+        "# TYPE nginx_markdown_streaming_peak_memory_bytes gauge\n"
+        "nginx_markdown_streaming_peak_memory_bytes %uA\n"
+        "\n",
+        snapshot->streaming_peak_memory_bytes);
+    if (p >= end) {
+        return NULL;
+    }
+
     return p;
 }
 
@@ -507,16 +522,16 @@ ngx_http_markdown_metrics_v1_render_families_10_to_11(
 }
 
 /*
- * Render the 11 frozen metric families in Prometheus text 0.0.4 format.
+ * Render the 12 frozen metric families in Prometheus text 0.0.4 format.
  *
- * Writes HELP, TYPE, and metric lines for all 11 families into the
+ * Writes HELP, TYPE, and metric lines for all 12 families into the
  * buffer between p and end. Returns a pointer past the last byte
  * written, or NULL if the buffer is exhausted.
  *
  * Parameters:
  *   p        - Start of writable buffer region
  *   end      - One past the end of the buffer
- *   snapshot - v1 metrics snapshot (exactly 11 families)
+ *   snapshot - v1 metrics snapshot (exactly 12 families)
  *
  * Returns:
  *   Pointer past the last byte written, or NULL on buffer overflow
