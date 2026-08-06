@@ -1,6 +1,6 @@
 #![no_main]
 
-//! Fuzz target for the Content-Encoding chain parser (Spec 62 Wave 4).
+//! Fuzz target for the Content-Encoding chain parser.
 //!
 //! Feeds arbitrary bytes as a `Content-Encoding` header value into
 //! [`nginx_markdown_converter::encoding::parse_encoding_chain`].

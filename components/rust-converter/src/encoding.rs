@@ -1,7 +1,6 @@
 //! Content-Encoding chain parsing and multi-layer bounded decompression.
 //!
-//! This module implements the Spec 62 Wave 4 Content-Encoding chain
-//! contract (Requirement 12):
+//! This module implements the 0.9.2 Content-Encoding chain contract:
 //!
 //! - Parses the Content-Encoding header value as a comma-separated list of
 //!   encoding tokens, trimming only leading/trailing SP and HTAB.
@@ -99,30 +98,35 @@ fn scan_token(value: &[u8], token_start: usize) -> Option<usize> {
     let mut i = token_start;
     while i < value.len() {
         let c = value[i];
-        if c == b',' {
-            return Some(i);
+        match c {
+            b',' => return Some(i),
+            b' ' | b'\t' => return token_end_after_ows(value, i),
+            c if !is_tchar(c) => return None,
+            _ => i += 1,
         }
-        if c == b' ' || c == b'\t' {
-            let mut j = i;
-            while j < value.len() && (value[j] == b' ' || value[j] == b'\t') {
-                j += 1;
-            }
-            if j == value.len() {
-                /* Trailing whitespace after the last token: valid. */
-                return Some(i);
-            }
-            if value[j] == b',' {
-                /* Whitespace before a comma: valid. */
-                return Some(i);
-            }
-            return None;
-        }
-        if !is_tchar(c) {
-            return None;
-        }
-        i += 1;
     }
     Some(i)
+}
+
+fn token_end_after_ows(value: &[u8], whitespace_start: usize) -> Option<usize> {
+    let mut i = whitespace_start;
+    while i < value.len() && (value[i] == b' ' || value[i] == b'\t') {
+        i += 1;
+    }
+    (i == value.len() || value[i] == b',').then_some(whitespace_start)
+}
+
+fn parse_encoding_token(
+    value: &[u8],
+    token_start: usize,
+) -> Result<(Encoding, usize), ChainParseError> {
+    let token_end = scan_token(value, token_start).ok_or(ChainParseError::Malformed)?;
+    let token = &value[token_start..token_end];
+    if token.is_empty() || token.len() > MAX_TOKEN_LEN {
+        return Err(ChainParseError::Malformed);
+    }
+    let encoding = Encoding::from_token(token).ok_or(ChainParseError::UnknownToken)?;
+    Ok((encoding, token_end))
 }
 
 /// Parse a concatenated Content-Encoding header value into encoding layers
@@ -146,30 +150,10 @@ pub fn parse_encoding_chain(value: &[u8]) -> Result<Vec<Encoding>, ChainParseErr
     }
 
     loop {
-        let token_start = i;
-        let token_end = match scan_token(value, token_start) {
-            Some(end) => end,
-            None => return Err(ChainParseError::Malformed),
-        };
-
-        let token = &value[token_start..token_end];
-        if token.is_empty() {
-            return Err(ChainParseError::Malformed);
-        }
-        if token.len() > MAX_TOKEN_LEN {
-            return Err(ChainParseError::Malformed);
-        }
-
-        match Encoding::from_token(token) {
-            Some(enc) => {
-                layers.push(enc);
-                if enc != Encoding::Identity {
-                    non_identity += 1;
-                }
-            }
-            None => {
-                return Err(ChainParseError::UnknownToken);
-            }
+        let (encoding, token_end) = parse_encoding_token(value, i)?;
+        layers.push(encoding);
+        if encoding != Encoding::Identity {
+            non_identity += 1;
         }
 
         /* Consume trailing OWS and expect either a comma or the end. */
@@ -279,51 +263,60 @@ pub fn decode_chain(
     let mut cumulative = 0usize;
 
     /* Decode from the outermost layer (last declared) inward. */
-    for (idx, enc) in layers.iter().rev().enumerate() {
+    for enc in layers.iter().rev() {
         if *enc == Encoding::Identity {
             continue;
         }
         let input_len = current.len();
-
-        let decoded = if input_len == 0 {
-            /* Zero compressed input allows zero decoded output only. */
-            Vec::new()
-        } else {
-            let fmt = match enc {
-                Encoding::Gzip => crate::decompress::Format::Gzip,
-                Encoding::Deflate => crate::decompress::Format::Deflate,
-                Encoding::Br => crate::decompress::Format::Brotli,
-                Encoding::Identity => unreachable!("identity is skipped above"),
-            };
-            crate::decompress::decompress_bounded(&current, fmt, limits.max_output)
-                .map_err(map_decomp_error)?
-                .output
-        };
-
-        /* Ratio check: activates at the fixed threshold; overflow-safe
-         * comparison via saturating multiplication. */
-        if input_len >= RATIO_ACTIVATION_THRESHOLD {
-            let allowed = (input_len as u64).saturating_mul(limits.ratio);
-            if (decoded.len() as u64) > allowed {
-                return Err(ChainDecodeError::RatioExceeded);
-            }
-        } else if input_len == 0 && !decoded.is_empty() {
-            return Err(ChainDecodeError::RatioExceeded);
-        }
-
-        /* Cumulative budget across every non-identity intermediate output. */
-        cumulative = cumulative
-            .checked_add(decoded.len())
-            .ok_or(ChainDecodeError::BudgetExceeded)?;
-        if cumulative > limits.max_output {
-            return Err(ChainDecodeError::BudgetExceeded);
-        }
-
+        let decoded = decode_layer(&current, *enc, limits)?;
+        validate_decoded_layer(input_len, decoded.len(), &mut cumulative, limits)?;
         current = decoded;
-        let _ = idx;
     }
 
     Ok(current)
+}
+
+fn decode_layer(
+    input: &[u8],
+    encoding: Encoding,
+    limits: DecodeLimits,
+) -> Result<Vec<u8>, ChainDecodeError> {
+    if input.is_empty() {
+        return Ok(Vec::new());
+    }
+    let format = match encoding {
+        Encoding::Gzip => crate::decompress::Format::Gzip,
+        Encoding::Deflate => crate::decompress::Format::Deflate,
+        Encoding::Br => crate::decompress::Format::Brotli,
+        Encoding::Identity => unreachable!("identity is skipped above"),
+    };
+    crate::decompress::decompress_bounded(input, format, limits.max_output)
+        .map_err(map_decomp_error)
+        .map(|result| result.output)
+}
+
+fn validate_decoded_layer(
+    input_len: usize,
+    decoded_len: usize,
+    cumulative: &mut usize,
+    limits: DecodeLimits,
+) -> Result<(), ChainDecodeError> {
+    if input_len >= RATIO_ACTIVATION_THRESHOLD {
+        let allowed = (input_len as u64).saturating_mul(limits.ratio);
+        if (decoded_len as u64) > allowed {
+            return Err(ChainDecodeError::RatioExceeded);
+        }
+    } else if input_len == 0 && decoded_len != 0 {
+        return Err(ChainDecodeError::RatioExceeded);
+    }
+
+    *cumulative = cumulative
+        .checked_add(decoded_len)
+        .ok_or(ChainDecodeError::BudgetExceeded)?;
+    if *cumulative > limits.max_output {
+        return Err(ChainDecodeError::BudgetExceeded);
+    }
+    Ok(())
 }
 
 /// Map a single-layer decompression error to the chain classification.

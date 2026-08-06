@@ -35,7 +35,7 @@ use super::abi::MarkdownOptions;
 ///
 /// The heuristic is deterministic: `ceil(chars / 4.0)`.  No provider
 /// branding, no BPE tokenizer; retained as the single default source until
-/// the temporary FFI fields are frozen out in Task 8.13.
+/// the temporary FFI fields are frozen out by the current ABI contract.
 pub(crate) const DEFAULT_CHARS_PER_TOKEN: f32 = 4.0;
 
 /// Minimum allowed chars-per-token ratio.
@@ -259,9 +259,8 @@ pub(crate) fn decode_options(
         "prune_protection_selectors",
     )?;
 
-    /* Token estimation uses the fixed deterministic built-in ratio
-     * (markdown_chars_per_token was removed in 0.9.2; the FFI field was
-     * removed in the Wave 4 Task 8.13 freeze). */
+    /* Token estimation uses the fixed deterministic built-in ratio.
+     * The obsolete FFI field was removed in the current ABI freeze. */
     let raw_cpt = DEFAULT_CHARS_PER_TOKEN;
 
     /* Resolve parse_timeout: prefer parse_timeout_ms, fall back to timeout_ms */
@@ -342,8 +341,8 @@ mod tests {
 
     #[test]
     fn test_chars_per_token_fixed_default() {
-        /* markdown_chars_per_token was removed in 0.9.2 and its FFI field
-         * in Task 8.13; token estimation always uses the fixed 4.0 ratio. */
+        /* The obsolete FFI field was removed in 0.9.2; token estimation
+         * always uses the fixed 4.0 ratio. */
         let options = test_options();
         let decoded = decode_options(&options).unwrap();
         assert_f32_eq(decoded.chars_per_token, 4.0);

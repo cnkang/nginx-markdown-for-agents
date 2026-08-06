@@ -411,7 +411,7 @@ pub struct BaseUrlInput<'a> {
     pub direct_scheme: Option<&'a str>,
 }
 
-/// Pure base-URL trust decision (spec 62 Wave 4 multi-hop algorithm).
+/// Pure base-URL trust decision for the multi-hop forwarding algorithm.
 ///
 /// Same input → same output.  Implements the authoritative trusted-proxy
 /// decision algorithm of Requirement 13:
@@ -482,48 +482,57 @@ struct ForwardedElement {
 /// grammar (empty element, missing `=`, unbalanced quotes, duplicate
 /// parameters).
 fn parse_forwarded_elements(s: &str) -> Option<Vec<ForwardedElement>> {
-    let mut elements = Vec::new();
-    for raw in split_quoted(s, b',') {
-        let raw = raw.trim();
-        if raw.is_empty() {
-            return None;
-        }
-        let mut element = ForwardedElement::default();
-        let mut seen: Vec<String> = Vec::new();
-        let mut any_param = false;
-        for pair in split_quoted(raw, b';') {
-            let pair = pair.trim();
-            if pair.is_empty() {
-                if any_param {
-                    /* Empty parameter slot (e.g. trailing ';') is malformed. */
-                    return None;
-                }
-                continue;
+    let elements = split_quoted(s, b',')
+        .into_iter()
+        .map(|raw| {
+            let raw = raw.trim();
+            if raw.is_empty() {
+                None
+            } else {
+                parse_forwarded_element(raw)
             }
-            any_param = true;
-            let (key, value) = pair.split_once('=')?;
-            let key = key.trim().to_ascii_lowercase();
-            if key.is_empty() || seen.contains(&key) {
-                /* Duplicate parameters in one element are invalid. */
+        })
+        .collect::<Option<Vec<_>>>()?;
+    (!elements.is_empty()).then_some(elements)
+}
+
+fn parse_forwarded_element(raw: &str) -> Option<ForwardedElement> {
+    let mut element = ForwardedElement::default();
+    let mut seen: Vec<String> = Vec::new();
+    let mut any_param = false;
+    for pair in split_quoted(raw, b';') {
+        let pair = pair.trim();
+        if pair.is_empty() {
+            if any_param {
                 return None;
             }
-            seen.push(key.clone());
-            let value = unquote(value.trim())?;
-            match key.as_str() {
-                "for" => element.for_addr = Some(value.to_string()),
-                "proto" => element.proto = Some(value.to_ascii_lowercase()),
-                "host" => element.host = Some(value.to_string()),
-                /* Unknown extension parameters are ignored. */
-                _ => {}
-            }
+            continue;
         }
-        elements.push(element);
+        any_param = true;
+        parse_forwarded_pair(pair, &mut element, &mut seen)?;
     }
-    if elements.is_empty() {
-        None
-    } else {
-        Some(elements)
+    Some(element)
+}
+
+fn parse_forwarded_pair(
+    pair: &str,
+    element: &mut ForwardedElement,
+    seen: &mut Vec<String>,
+) -> Option<()> {
+    let (key, value) = pair.split_once('=')?;
+    let key = key.trim().to_ascii_lowercase();
+    if key.is_empty() || seen.contains(&key) {
+        return None;
     }
+    seen.push(key.clone());
+    let value = unquote(value.trim())?;
+    match key.as_str() {
+        "for" => element.for_addr = Some(value.to_string()),
+        "proto" => element.proto = Some(value.to_ascii_lowercase()),
+        "host" => element.host = Some(value.to_string()),
+        _ => {}
+    }
+    Some(())
 }
 
 /// Split a value on `sep`, honoring double-quoted strings.
@@ -600,10 +609,7 @@ fn unquote(value: &str) -> Option<String> {
 /// characters, malformed IPv6, and zone IDs.  A trailing dot is removed only
 /// for comparison, never emitted as metadata (applies to host forms).
 fn validate_forwarded_addr(addr: &str) -> Option<String> {
-    if addr.is_empty() {
-        return None;
-    }
-    if addr.bytes().any(|b| b < 0x20 || b == 0x7f) {
+    if addr.is_empty() || has_invalid_forwarded_characters(addr) {
         return None;
     }
     let lowered = addr.trim().to_ascii_lowercase();
@@ -635,26 +641,13 @@ fn validate_forwarded_addr(addr: &str) -> Option<String> {
 /// (1-65535) is accepted after the host form.  IDNA conversion is not
 /// performed.
 fn validate_forwarded_host(host: &str) -> Option<String> {
-    if host.is_empty() {
-        return None;
-    }
-    if host.bytes().any(|b| b < 0x20 || b == 0x7f) {
+    if host.is_empty() || has_invalid_forwarded_characters(host) {
         return None;
     }
     let lowered = host.trim().to_ascii_lowercase();
 
-    /* Bracketed IPv6 literal with optional :port. */
     if let Some(rest) = lowered.strip_prefix('[') {
-        let close = rest.find(']')?;
-        let addr = &rest[..close];
-        let after = &rest[close + 1..];
-        addr.parse::<Ipv6Addr>().ok()?;
-        if after.is_empty() {
-            return Some(format!("[{addr}]"));
-        }
-        let port = after.strip_prefix(':')?;
-        validate_port(port)?;
-        return Some(format!("[{addr}]:{port}"));
+        return validate_bracketed_host(rest);
     }
 
     if lowered.contains('[') || lowered.contains(']') {
@@ -676,7 +669,32 @@ fn validate_forwarded_host(host: &str) -> Option<String> {
         validate_port(p)?;
     }
 
-    /* ASCII DNS-label chain; trailing dot removed for comparison only. */
+    let trimmed = validate_dns_name(name)?;
+
+    match port {
+        Some(p) => Some(format!("{trimmed}:{p}")),
+        None => Some(trimmed.to_string()),
+    }
+}
+
+fn has_invalid_forwarded_characters(value: &str) -> bool {
+    value.bytes().any(|b| b < 0x20 || b == 0x7f)
+}
+
+fn validate_bracketed_host(rest: &str) -> Option<String> {
+    let close = rest.find(']')?;
+    let addr = &rest[..close];
+    let after = &rest[close + 1..];
+    addr.parse::<Ipv6Addr>().ok()?;
+    if after.is_empty() {
+        return Some(format!("[{addr}]"));
+    }
+    let port = after.strip_prefix(':')?;
+    validate_port(port)?;
+    Some(format!("[{addr}]:{port}"))
+}
+
+fn validate_dns_name(name: &str) -> Option<&str> {
     let trimmed = name.strip_suffix('.').unwrap_or(name);
     if trimmed.is_empty() {
         return None;
@@ -696,14 +714,7 @@ fn validate_forwarded_host(host: &str) -> Option<String> {
             return None;
         }
     }
-    if trimmed.len() > 253 {
-        return None;
-    }
-
-    match port {
-        Some(p) => Some(format!("{trimmed}:{p}")),
-        None => Some(trimmed.to_string()),
-    }
+    (trimmed.len() <= 253).then_some(trimmed)
 }
 
 /// Validate a forwarded scheme/proto value: only `http` / `https` are valid.
@@ -888,45 +899,52 @@ fn validate_xff_values(
     ports: &Option<Vec<String>>,
     metadata_present: bool,
 ) -> Result<Vec<String>, BaseUrlReason> {
-    if metadata_present {
-        if protos.is_none() || hosts.is_none() || ports.is_none() {
-            return Err(BaseUrlReason::XForwardedMismatch);
-        }
-        if protos.as_ref().unwrap().len() != addrs.len()
-            || hosts.as_ref().unwrap().len() != addrs.len()
-            || ports.as_ref().unwrap().len() != addrs.len()
-        {
-            return Err(BaseUrlReason::XForwardedMismatch);
-        }
-    }
+    let metadata =
+        validate_xff_metadata_layout(addrs.len(), protos, hosts, ports, metadata_present)?;
+    let validated = addrs
+        .iter()
+        .map(|addr| validate_forwarded_addr(addr))
+        .collect::<Option<Vec<_>>>()
+        .ok_or(BaseUrlReason::ForwardedInvalidValue)?;
 
-    let mut validated: Vec<String> = Vec::with_capacity(addrs.len());
-    for addr in addrs {
-        match validate_forwarded_addr(addr) {
-            Some(v) => validated.push(v),
-            None => return Err(BaseUrlReason::ForwardedInvalidValue),
-        }
-    }
-
-    if metadata_present {
-        for p in protos.as_ref().unwrap() {
-            if validate_proto(p).is_none() {
-                return Err(BaseUrlReason::ForwardedInvalidValue);
-            }
-        }
-        for h in hosts.as_ref().unwrap() {
-            if validate_forwarded_host(h).is_none() {
-                return Err(BaseUrlReason::ForwardedInvalidValue);
-            }
-        }
-        for p in ports.as_ref().unwrap() {
-            if validate_port(p).is_none() {
-                return Err(BaseUrlReason::ForwardedInvalidValue);
-            }
-        }
+    if let Some((protos, hosts, ports)) = metadata
+        && !validate_xff_metadata_values(protos, hosts, ports)
+    {
+        return Err(BaseUrlReason::ForwardedInvalidValue);
     }
 
     Ok(validated)
+}
+
+type ValidatedXffMetadata<'a> = (&'a [String], &'a [String], &'a [String]);
+
+fn validate_xff_metadata_layout<'a>(
+    addr_count: usize,
+    protos: &'a Option<Vec<String>>,
+    hosts: &'a Option<Vec<String>>,
+    ports: &'a Option<Vec<String>>,
+    metadata_present: bool,
+) -> Result<Option<ValidatedXffMetadata<'a>>, BaseUrlReason> {
+    if !metadata_present {
+        return Ok(None);
+    }
+    let (Some(protos), Some(hosts), Some(ports)) =
+        (protos.as_deref(), hosts.as_deref(), ports.as_deref())
+    else {
+        return Err(BaseUrlReason::XForwardedMismatch);
+    };
+    if protos.len() != addr_count || hosts.len() != addr_count || ports.len() != addr_count {
+        return Err(BaseUrlReason::XForwardedMismatch);
+    }
+    Ok(Some((protos, hosts, ports)))
+}
+
+fn validate_xff_metadata_values(protos: &[String], hosts: &[String], ports: &[String]) -> bool {
+    protos.iter().all(|proto| validate_proto(proto).is_some())
+        && hosts
+            .iter()
+            .all(|host| validate_forwarded_host(host).is_some())
+        && ports.iter().all(|port| validate_port(port).is_some())
 }
 
 /// Build the base URL from the selected hop index, taking host/proto/port

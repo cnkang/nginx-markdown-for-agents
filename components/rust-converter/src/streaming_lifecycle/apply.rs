@@ -10,7 +10,13 @@
 //! 4. Applies post-effect latches after command success
 //! 5. Commits new_state and constructs next_frame
 
-use super::types::*;
+use super::types::{
+    Action, ActionOutcome, ActionPayload, ApplyResult, EmitFailureLedgerDisposition,
+    EmitFailureLedgerPayload, ErrorOrigin, EventKind, FailureLedger, FailureRecord, FailureSite,
+    FailureUpdates, NgxResult, OwnerPredicate, OwnerTransition, PostEffect, PreEffect,
+    SideEffectCommand, SideEffectKind, SideEffectPayload, StateMachineError, StreamingState,
+    TelemetryScope, TransferMode, TransitionContext, TransitionFrame,
+};
 
 /// Execute the apply phase of the streaming lifecycle state machine.
 ///
@@ -1106,6 +1112,7 @@ fn promote_or_delivery(ledger: &FailureLedger, record: &FailureRecord) -> PreEff
 
 #[cfg(test)]
 mod tests {
+    use super::super::types::{EventEnvelope, PendingKind};
     use super::*;
 
     fn simple_frame(action: Action, transition_id: &str) -> TransitionFrame {

@@ -139,17 +139,32 @@ const STREAMING_BUFFER_MAX: u64 = 1_073_741_824;
 /// * `Ok(DynconfValue)` - The validated and typed configuration
 /// * `Err(DynconfParseError)` - The first validation failure encountered
 pub fn validate_dynconf(value: &JsonValue) -> Result<DynconfValue, DynconfParseError> {
-    let entries = match value {
-        JsonValue::Object(entries) => entries,
-        _ => {
-            return Err(DynconfParseError::new(
-                DynconfParseErrorKind::InvalidType,
-                "top-level value must be a JSON object".to_string(),
-            ));
-        }
+    let entries = object_entries(value)?;
+    validate_known_keys(entries)?;
+    validate_schema_version(entries)?;
+    let mut result = DynconfValue {
+        filter: None,
+        prune_noise: None,
+        log_verbosity: None,
+        error_policy: None,
+        streaming_buffer: None,
     };
 
-    // Check for unknown keys
+    validate_optional_fields(entries, &mut result)?;
+    Ok(result)
+}
+
+fn object_entries(value: &JsonValue) -> Result<&[(String, JsonValue)], DynconfParseError> {
+    match value {
+        JsonValue::Object(entries) => Ok(entries),
+        _ => Err(DynconfParseError::new(
+            DynconfParseErrorKind::InvalidType,
+            "top-level value must be a JSON object".to_string(),
+        )),
+    }
+}
+
+fn validate_known_keys(entries: &[(String, JsonValue)]) -> Result<(), DynconfParseError> {
     for (key, _) in entries {
         if !KNOWN_KEYS.contains(&key.as_str()) {
             return Err(DynconfParseError::new(
@@ -158,31 +173,29 @@ pub fn validate_dynconf(value: &JsonValue) -> Result<DynconfValue, DynconfParseE
             ));
         }
     }
+    Ok(())
+}
 
-    // Validate schema_version (required)
-    let schema_version_entry = entries.iter().find(|(k, _)| k == "schema_version");
+fn validate_schema_version(entries: &[(String, JsonValue)]) -> Result<(), DynconfParseError> {
+    let schema_version_entry = entries.iter().find(|(key, _)| key == "schema_version");
     match schema_version_entry {
-        None => {
-            return Err(DynconfParseError::new(
-                DynconfParseErrorKind::MissingSchemaVersion,
-                "required field 'schema_version' is missing".to_string(),
-            ));
-        }
-        Some((_, JsonValue::Number(val, raw))) => {
-            // Must be integer 1, no fractional part, no leading zeros
+        None => Err(DynconfParseError::new(
+            DynconfParseErrorKind::MissingSchemaVersion,
+            "required field 'schema_version' is missing".to_string(),
+        )),
+        Some((_, JsonValue::Number(value, raw))) => {
             if raw.contains('.') || raw.contains('e') || raw.contains('E') {
                 return Err(DynconfParseError::new(
                     DynconfParseErrorKind::InvalidSchemaVersion,
                     format!("schema_version must be integer 1, got '{}'", raw),
                 ));
             }
-            if *val != 1.0 {
+            if *value != 1.0 {
                 return Err(DynconfParseError::new(
                     DynconfParseErrorKind::InvalidSchemaVersion,
                     format!("schema_version must be 1, got {}", raw),
                 ));
             }
-            // Reject leading zeros (e.g., "01")
             let trimmed = raw.trim_start_matches('-');
             if trimmed.len() > 1 && trimmed.starts_with('0') {
                 return Err(DynconfParseError::new(
@@ -193,24 +206,19 @@ pub fn validate_dynconf(value: &JsonValue) -> Result<DynconfValue, DynconfParseE
                     ),
                 ));
             }
+            Ok(())
         }
-        Some((_, _)) => {
-            return Err(DynconfParseError::new(
-                DynconfParseErrorKind::InvalidSchemaVersion,
-                "schema_version must be an integer".to_string(),
-            ));
-        }
+        Some((_, _)) => Err(DynconfParseError::new(
+            DynconfParseErrorKind::InvalidSchemaVersion,
+            "schema_version must be an integer".to_string(),
+        )),
     }
+}
 
-    let mut result = DynconfValue {
-        filter: None,
-        prune_noise: None,
-        log_verbosity: None,
-        error_policy: None,
-        streaming_buffer: None,
-    };
-
-    // Validate optional fields
+fn validate_optional_fields(
+    entries: &[(String, JsonValue)],
+    result: &mut DynconfValue,
+) -> Result<(), DynconfParseError> {
     for (key, val) in entries {
         match key.as_str() {
             "schema_version" => { /* already validated */ }
@@ -232,8 +240,7 @@ pub fn validate_dynconf(value: &JsonValue) -> Result<DynconfValue, DynconfParseE
             _ => unreachable!("unknown keys already rejected above"),
         }
     }
-
-    Ok(result)
+    Ok(())
 }
 
 fn validate_filter(value: &JsonValue) -> Result<FilterValue, DynconfParseError> {

@@ -51,7 +51,7 @@ pub const MARKDOWN_HEADER_HASH: u64 = 0x6b020b103354c049;
 ///
 /// Detects additions, removals, or renames of FFI exports even when the
 /// numeric ABI version is unchanged. Computed from the canonical sorted
-/// newline-joined export names (47 entries as of the 0.9.2 Wave 4 freeze).
+/// newline-joined export names (47 entries in the 0.9.2 ABI).
 pub const MARKDOWN_SYMBOL_SET_HASH: u64 = 0x031d586bd1db8e49;
 
 /// SHA-256 truncated hash of the ABI struct layout inventory (LP64).

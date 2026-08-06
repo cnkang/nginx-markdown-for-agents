@@ -114,70 +114,62 @@ fn prepare_one(
     }
 
     match op {
-        HeaderOp::Set { name, value } => {
-            // Content-Type is handled specially (not a list entry in NGINX)
-            if name.eq_ignore_ascii_case("Content-Type") {
-                // Redirect to delete-all for Content-Type list entries
-                let match_indices: Vec<usize> = headers
-                    .headers
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, h)| h.active && h.name.eq_ignore_ascii_case(name))
-                    .map(|(i, _)| i)
-                    .collect();
-                if match_indices.is_empty() {
-                    return Ok(PreparedAction::Noop);
-                }
-                return Ok(PreparedAction::DeleteAll { match_indices });
-            }
-
-            // Look for existing header
-            if let Some(idx) = headers.find_active(name) {
-                Ok(PreparedAction::Overwrite {
-                    header_idx: idx,
-                    new_value: value.clone(),
-                })
-            } else {
-                // Push an inert slot (hash==0, invisible to observers)
-                let slot_idx = headers.headers.len();
-                headers.headers.push(SimHeader {
-                    name: String::new(),
-                    value: String::new(),
-                    active: false, // inert: hash == 0
-                });
-                Ok(PreparedAction::SetNew {
-                    slot_idx,
-                    new_key: name.clone(),
-                    new_value: value.clone(),
-                })
-            }
-        }
-        HeaderOp::Delete { name } => {
-            if let Some(idx) = headers.find_active(name) {
-                Ok(PreparedAction::Delete { header_idx: idx })
-            } else {
-                Ok(PreparedAction::Noop)
-            }
-        }
-        HeaderOp::DeleteAll { name } => {
-            let match_indices: Vec<usize> = headers
-                .headers
-                .iter()
-                .enumerate()
-                .filter(|(_, h)| h.active && h.name.eq_ignore_ascii_case(name))
-                .map(|(i, _)| i)
-                .collect();
-            if match_indices.is_empty() {
-                Ok(PreparedAction::Noop)
-            } else {
-                Ok(PreparedAction::DeleteAll { match_indices })
-            }
-        }
-        HeaderOp::SetEtagPlaceholder => {
-            // ETag placeholder: resolved by the C caller post-commit, no-op in plan
-            Ok(PreparedAction::Noop)
-        }
+        HeaderOp::Set { name, value } => Ok(prepare_set(headers, name, value)),
+        HeaderOp::Delete { name } => Ok(prepare_delete(headers, name)),
+        HeaderOp::DeleteAll { name } => Ok(prepare_delete_all(headers, name)),
+        HeaderOp::SetEtagPlaceholder => Ok(PreparedAction::Noop),
     }
+}
+
+fn prepare_set(headers: &mut SimHeadersOut, name: &str, value: &str) -> PreparedAction {
+    if name.eq_ignore_ascii_case("Content-Type") {
+        return prepare_delete_all(headers, name);
+    }
+
+    if let Some(idx) = headers.find_active(name) {
+        return PreparedAction::Overwrite {
+            header_idx: idx,
+            new_value: value.to_string(),
+        };
+    }
+
+    let slot_idx = headers.headers.len();
+    headers.headers.push(SimHeader {
+        name: String::new(),
+        value: String::new(),
+        active: false,
+    });
+    PreparedAction::SetNew {
+        slot_idx,
+        new_key: name.to_string(),
+        new_value: value.to_string(),
+    }
+}
+
+fn prepare_delete(headers: &SimHeadersOut, name: &str) -> PreparedAction {
+    match headers.find_active(name) {
+        Some(header_idx) => PreparedAction::Delete { header_idx },
+        None => PreparedAction::Noop,
+    }
+}
+
+fn prepare_delete_all(headers: &SimHeadersOut, name: &str) -> PreparedAction {
+    let match_indices = matching_header_indices(headers, name);
+    if match_indices.is_empty() {
+        PreparedAction::Noop
+    } else {
+        PreparedAction::DeleteAll { match_indices }
+    }
+}
+
+fn matching_header_indices(headers: &SimHeadersOut, name: &str) -> Vec<usize> {
+    headers
+        .headers
+        .iter()
+        .enumerate()
+        .filter(|(_, header)| header.active && header.name.eq_ignore_ascii_case(name))
+        .map(|(index, _)| index)
+        .collect()
 }
 
 /// Simulate the commit phase: apply all prepared actions via assignment only.

@@ -1172,7 +1172,7 @@ pub unsafe extern "C" fn markdown_decomp_result_init(result: *mut FFIDecompResul
     unsafe { ptr::write(result, std::mem::zeroed()) };
 }
 
-// ─── Content-Encoding chain FFI (Spec 62 Wave 4, Requirement 12) ─────────────
+// ─── Content-Encoding chain FFI ─────────────────────────────────────────────
 
 /// Parse a concatenated Content-Encoding header value into an encoding chain.
 ///
@@ -1213,20 +1213,11 @@ pub unsafe extern "C" fn markdown_parse_encoding_chain(
         return ENCODING_CHAIN_MALFORMED;
     }
     let result_ref = unsafe { &mut *result };
-    result_ref.classification = ENCODING_CHAIN_VALID;
-    result_ref.layer_count = 0;
-    result_ref.layers = [0u8; 3];
-    result_ref.identity_present = 0;
+    reset_encoding_chain_result(result_ref);
 
-    let value_slice = if value.is_null() {
-        if value_len != 0 {
-            return DECOMP_CATEGORY_INVALID_ARGS as u8;
-        }
-        &[]
-    } else if value_len == 0 {
-        &[]
-    } else {
-        unsafe { std::slice::from_raw_parts(value, value_len) }
+    let value_slice = match unsafe { encoding_chain_value_slice(value, value_len) } {
+        Ok(value_slice) => value_slice,
+        Err(code) => return code,
     };
 
     if value_slice.is_empty() {
@@ -1242,28 +1233,65 @@ pub unsafe extern "C" fn markdown_parse_encoding_chain(
 
     match outcome {
         Ok(Ok(layers)) => {
-            let mut non_identity = 0u32;
-            for enc in &layers {
-                if *enc == crate::encoding::Encoding::Identity {
-                    result_ref.identity_present = 1;
-                    continue;
-                }
-                if non_identity < 3 {
-                    result_ref.layers[non_identity as usize] = encoding_to_u8(*enc);
-                }
-                non_identity += 1;
-            }
-            result_ref.layer_count = non_identity;
+            write_encoding_chain_layers(result_ref, &layers);
             ENCODING_CHAIN_VALID
         }
-        Ok(Err(crate::encoding::ChainParseError::Malformed)) => ENCODING_CHAIN_MALFORMED,
-        Ok(Err(crate::encoding::ChainParseError::UnknownToken)) => ENCODING_CHAIN_UNKNOWN_TOKEN,
-        Ok(Err(crate::encoding::ChainParseError::DepthExceeded)) => ENCODING_CHAIN_DEPTH_EXCEEDED,
+        Ok(Err(error)) => encoding_chain_error_code(error),
         Err(_) => {
             /* Caught panic: fail closed as malformed; no decoder starts. */
             result_ref.classification = ENCODING_CHAIN_MALFORMED;
             ENCODING_CHAIN_MALFORMED
         }
+    }
+}
+
+fn reset_encoding_chain_result(result: &mut FFIEncodingChainResult) {
+    result.classification = ENCODING_CHAIN_VALID;
+    result.layer_count = 0;
+    result.layers = [0u8; 3];
+    result.identity_present = 0;
+}
+
+unsafe fn encoding_chain_value_slice<'a>(
+    value: *const u8,
+    value_len: usize,
+) -> Result<&'a [u8], u8> {
+    if value.is_null() {
+        if value_len != 0 {
+            return Err(DECOMP_CATEGORY_INVALID_ARGS as u8);
+        }
+        return Ok(&[]);
+    }
+    if value_len == 0 {
+        return Ok(&[]);
+    }
+    // SAFETY: The FFI caller provides a readable region of value_len bytes.
+    Ok(unsafe { std::slice::from_raw_parts(value, value_len) })
+}
+
+fn write_encoding_chain_layers(
+    result: &mut FFIEncodingChainResult,
+    layers: &[crate::encoding::Encoding],
+) {
+    let mut non_identity = 0u32;
+    for encoding in layers {
+        if *encoding == crate::encoding::Encoding::Identity {
+            result.identity_present = 1;
+        } else {
+            if non_identity < 3 {
+                result.layers[non_identity as usize] = encoding_to_u8(*encoding);
+            }
+            non_identity += 1;
+        }
+    }
+    result.layer_count = non_identity;
+}
+
+fn encoding_chain_error_code(error: crate::encoding::ChainParseError) -> u8 {
+    match error {
+        crate::encoding::ChainParseError::Malformed => ENCODING_CHAIN_MALFORMED,
+        crate::encoding::ChainParseError::UnknownToken => ENCODING_CHAIN_UNKNOWN_TOKEN,
+        crate::encoding::ChainParseError::DepthExceeded => ENCODING_CHAIN_DEPTH_EXCEEDED,
     }
 }
 
@@ -1337,9 +1365,7 @@ pub unsafe extern "C" fn markdown_decode_encoding_chain(
         return DECOMP_CATEGORY_INVALID_ARGS;
     }
     let result_ref = unsafe { &mut *result };
-    result_ref.output = ptr::null_mut();
-    result_ref.output_len = 0;
-    result_ref.error_category = 0;
+    reset_chain_decode_result(result_ref);
 
     if layer_count == 0 {
         /* No decoder work: identity-only chain. The caller already owns the
@@ -1349,40 +1375,21 @@ pub unsafe extern "C" fn markdown_decode_encoding_chain(
         return 0;
     }
     if layers.is_null() {
-        result_ref.error_category = DECOMP_CATEGORY_INVALID_ARGS;
-        return DECOMP_CATEGORY_INVALID_ARGS;
+        return set_chain_decode_error(result_ref, DECOMP_CATEGORY_INVALID_ARGS);
     }
     if layer_count > crate::encoding::MAX_DECODER_DEPTH as u32 {
-        result_ref.error_category = DECOMP_CATEGORY_INVALID_ARGS;
-        return DECOMP_CATEGORY_INVALID_ARGS;
+        return set_chain_decode_error(result_ref, DECOMP_CATEGORY_INVALID_ARGS);
     }
 
-    let input_slice = if input.is_null() {
-        if input_len != 0 {
-            result_ref.error_category = DECOMP_CATEGORY_INVALID_ARGS;
-            return DECOMP_CATEGORY_INVALID_ARGS;
-        }
-        &[]
-    } else if input_len == 0 {
-        &[]
-    } else {
-        unsafe { std::slice::from_raw_parts(input, input_len) }
+    let input_slice = match unsafe { chain_decode_input_slice(input, input_len) } {
+        Ok(input_slice) => input_slice,
+        Err(code) => return set_chain_decode_error(result_ref, code),
     };
 
-    let mut layer_vec = Vec::with_capacity(layer_count as usize);
-    for i in 0..layer_count as usize {
-        let code = unsafe { *layers.add(i) };
-        let enc = match code {
-            0 => crate::encoding::Encoding::Gzip,
-            1 => crate::encoding::Encoding::Deflate,
-            2 => crate::encoding::Encoding::Br,
-            _ => {
-                result_ref.error_category = DECOMP_CATEGORY_INVALID_ARGS;
-                return DECOMP_CATEGORY_INVALID_ARGS;
-            }
-        };
-        layer_vec.push(enc);
-    }
+    let layer_vec = match unsafe { decode_layer_codes(layers, layer_count) } {
+        Ok(layer_vec) => layer_vec,
+        Err(code) => return set_chain_decode_error(result_ref, code),
+    };
 
     let limits = crate::encoding::DecodeLimits { max_output, ratio };
 
@@ -1392,39 +1399,79 @@ pub unsafe extern "C" fn markdown_decode_encoding_chain(
 
     match outcome {
         Ok(Ok(decoded)) => {
-            let mut boxed = decoded.into_boxed_slice();
-            result_ref.output_len = boxed.len();
-            result_ref.error_category = 0;
-            if boxed.is_empty() {
-                result_ref.output = ptr::null_mut();
-            } else {
-                let ptr = boxed.as_mut_ptr();
-                std::mem::forget(boxed);
-                result_ref.output = ptr;
-            }
+            store_chain_decode_output(result_ref, decoded);
             0
         }
-        Ok(Err(e)) => {
-            let code = match e {
-                crate::encoding::ChainDecodeError::BudgetExceeded => {
-                    DECOMP_CATEGORY_BUDGET_EXCEEDED
-                }
-                crate::encoding::ChainDecodeError::RatioExceeded => DECOMP_CATEGORY_RATIO_EXCEEDED,
-                crate::encoding::ChainDecodeError::FormatError(_) => DECOMP_CATEGORY_FORMAT_ERROR,
-                crate::encoding::ChainDecodeError::TruncatedInput(_) => {
-                    DECOMP_CATEGORY_TRUNCATED_INPUT
-                }
-                crate::encoding::ChainDecodeError::IoError(_) => DECOMP_CATEGORY_IO_ERROR,
-            };
-            result_ref.error_category = code;
-            code
+        Ok(Err(e)) => set_chain_decode_error(result_ref, chain_decode_error_code(e)),
+        Err(_) => set_chain_decode_error(result_ref, DECOMP_CATEGORY_IO_ERROR),
+    }
+}
+
+fn reset_chain_decode_result(result: &mut FFIChainDecodeResult) {
+    result.output = ptr::null_mut();
+    result.output_len = 0;
+    result.error_category = 0;
+}
+
+fn set_chain_decode_error(result: &mut FFIChainDecodeResult, code: u32) -> u32 {
+    result.error_category = code;
+    code
+}
+
+unsafe fn chain_decode_input_slice<'a>(
+    input: *const u8,
+    input_len: usize,
+) -> Result<&'a [u8], u32> {
+    if input.is_null() {
+        if input_len != 0 {
+            return Err(DECOMP_CATEGORY_INVALID_ARGS);
         }
-        Err(_) => {
-            result_ref.output = ptr::null_mut();
-            result_ref.output_len = 0;
-            result_ref.error_category = DECOMP_CATEGORY_IO_ERROR;
-            DECOMP_CATEGORY_IO_ERROR
-        }
+        return Ok(&[]);
+    }
+    if input_len == 0 {
+        return Ok(&[]);
+    }
+    // SAFETY: The FFI caller provides a readable region of input_len bytes.
+    Ok(unsafe { std::slice::from_raw_parts(input, input_len) })
+}
+
+unsafe fn decode_layer_codes(
+    layers: *const u8,
+    layer_count: u32,
+) -> Result<Vec<crate::encoding::Encoding>, u32> {
+    let mut layer_vec = Vec::with_capacity(layer_count as usize);
+    for index in 0..layer_count as usize {
+        // SAFETY: The caller validated a non-NULL array with layer_count bytes.
+        let code = unsafe { *layers.add(index) };
+        let encoding = match code {
+            0 => crate::encoding::Encoding::Gzip,
+            1 => crate::encoding::Encoding::Deflate,
+            2 => crate::encoding::Encoding::Br,
+            _ => return Err(DECOMP_CATEGORY_INVALID_ARGS),
+        };
+        layer_vec.push(encoding);
+    }
+    Ok(layer_vec)
+}
+
+fn store_chain_decode_output(result: &mut FFIChainDecodeResult, decoded: Vec<u8>) {
+    let mut boxed = decoded.into_boxed_slice();
+    result.output_len = boxed.len();
+    if boxed.is_empty() {
+        return;
+    }
+    let output = boxed.as_mut_ptr();
+    std::mem::forget(boxed);
+    result.output = output;
+}
+
+fn chain_decode_error_code(error: crate::encoding::ChainDecodeError) -> u32 {
+    match error {
+        crate::encoding::ChainDecodeError::BudgetExceeded => DECOMP_CATEGORY_BUDGET_EXCEEDED,
+        crate::encoding::ChainDecodeError::RatioExceeded => DECOMP_CATEGORY_RATIO_EXCEEDED,
+        crate::encoding::ChainDecodeError::FormatError(_) => DECOMP_CATEGORY_FORMAT_ERROR,
+        crate::encoding::ChainDecodeError::TruncatedInput(_) => DECOMP_CATEGORY_TRUNCATED_INPUT,
+        crate::encoding::ChainDecodeError::IoError(_) => DECOMP_CATEGORY_IO_ERROR,
     }
 }
 

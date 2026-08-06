@@ -395,7 +395,7 @@ mod tests {
     use super::*;
 
     /* ====================================================================
-     * Task 2.8: 10 error class variants tests
+     * Error class variant tests
      * ==================================================================== */
 
     #[test]
@@ -448,7 +448,7 @@ mod tests {
     }
 
     /* ====================================================================
-     * Task 2.3: is_post_commit tests
+     * is_post_commit tests
      * ==================================================================== */
 
     #[test]
@@ -475,7 +475,7 @@ mod tests {
     }
 
     /* ====================================================================
-     * Task 2.9: Pre-commit error behavior tests (pass / status / fail_closed)
+     * Pre-commit error behavior tests (pass / status / fail_closed)
      * ==================================================================== */
 
     #[test]
@@ -552,7 +552,7 @@ mod tests {
     }
 
     /* ====================================================================
-     * Task 2.10: Post-commit forced TerminateConnection tests
+     * Post-commit forced TerminateConnection tests
      * ==================================================================== */
 
     #[test]
@@ -583,7 +583,7 @@ mod tests {
     }
 
     /* ====================================================================
-     * Task 2.11: error_to_reason_code mapping tests
+     * error_to_reason_code mapping tests
      * ==================================================================== */
 
     #[test]
@@ -667,7 +667,7 @@ mod tests {
     }
 
     /* ====================================================================
-     * Task 5.5: classify_error_code tests
+     * classify_error_code tests
      * ==================================================================== */
 
     #[test]

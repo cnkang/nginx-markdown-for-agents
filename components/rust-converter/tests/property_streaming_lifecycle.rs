@@ -1,23 +1,23 @@
-//! Wave 3 streaming lifecycle property tests.
+//! Streaming lifecycle property tests.
 //!
 //! This file covers:
-//! - Property 19: Post-commit status immutability (Task 6.15, Req 10.6, 15.6)
-//! - Property 20: Streaming state machine determinism (Task 6.13, Req 11.1)
-//! - Property 21: Single terminal state per request (Task 6.14, Req 11.2)
-//! - Property 30: Plan/Apply table full coverage (Task 6.18, Req 11.1,11.18-11.22,11.24)
-//! - Property 31: One-shot terminal invariants (Task 6.19, Req 11.2,11.16,11.18)
-//! - Property 32: Transformed validators on 304 (Task 6.20, Req 10.3,10.9)
+//! - Property 19: Post-commit status immutability (Req 10.6, 15.6)
+//! - Property 20: Streaming state machine determinism (Req 11.1)
+//! - Property 21: Single terminal state per request (Req 11.2)
+//! - Property 30: Plan/Apply table full coverage (Req 11.1,11.18-11.22,11.24)
+//! - Property 31: One-shot terminal invariants (Req 11.2,11.16,11.18)
+//! - Property 32: Transformed validators on 304 (Req 10.3,10.9)
 //! - Property 33: Precommit replay-unavailable and postcommit failure routing
-//!   (Task 6.21, Req 11.1,11.6,11.7,11.18,9.3)
-//! - Protocol closure tests (Task 6.22, Req 11.20-11.22,11.24)
-//! - Client-abort contract tests (Task 6.23, Req 11.21)
-//! - ActionOutcome strictness tests (Task 6.24, Req 11.19)
-//! - FailureLedger store/emit tests (Task 6.25, Req 11.11,11.18)
-//! - SideEffectCommand execution tests (Task 6.25a, Req 11.1,11.11,11.19,11.25)
-//! - TransitionFrame identity tests (Task 6.26, Req 11.1)
-//! - Normal streaming path tests (Task 6.27, Req 11.1)
-//! - Plan/Apply coverage tests (Task 6.28, Req 11.1,11.19)
-//! - PendingKind matching tests (Task 6.29, Req 11.19)
+//!   (Req 11.1,11.6,11.7,11.18,9.3)
+//! - Protocol closure tests (Req 11.20-11.22,11.24)
+//! - Client-abort contract tests (Req 11.21)
+//! - ActionOutcome strictness tests (Req 11.19)
+//! - FailureLedger store/emit tests (Req 11.11,11.18)
+//! - SideEffectCommand execution tests (Req 11.1,11.11,11.19,11.25)
+//! - TransitionFrame identity tests (Req 11.1)
+//! - Normal streaming path tests (Req 11.1)
+//! - Plan/Apply coverage tests (Req 11.1,11.19)
+//! - PendingKind matching tests (Req 11.19)
 //! - Protocol tests 6.30-6.53
 
 #![cfg(feature = "streaming")]
@@ -232,7 +232,7 @@ fn all_8_error_origins() -> [ErrorOrigin; 8] {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Property 20: Streaming state machine determinism (Task 6.13, Req 11.1)
+// Property 20: Streaming state machine determinism (Req 11.1)
 // ════════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -411,7 +411,7 @@ fn prop_20_chain_terminates_on_ngx_again() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Property 21: Single terminal state per request (Task 6.14, Req 11.2)
+// Property 21: Single terminal state per request (Req 11.2)
 // ════════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -487,7 +487,7 @@ fn prop_21_full_buffer_fallback_not_terminal() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Property 19: Post-commit status immutability (Task 6.15, Req 10.6, 15.6)
+// Property 19: Post-commit status immutability (Req 10.6, 15.6)
 // ════════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -604,7 +604,7 @@ fn prop_19_no_postcommit_state_modifies_headers() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Property 30: Plan/Apply table full coverage (Task 6.18)
+// Property 30: Plan/Apply table full coverage
 // ════════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -787,7 +787,7 @@ fn prop_30_client_abort_creates_no_failure_record() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Property 31: One-shot terminal invariants (Task 6.19)
+// Property 31: One-shot terminal invariants
 // ════════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -965,7 +965,7 @@ fn prop_31_begin_abort_chain_completes_with_consumed_handle() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Property 32: Transformed validators on 304 (Task 6.20, Req 10.3, 10.9)
+// Property 32: Transformed validators on 304 (Req 10.3, 10.9)
 // ════════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -1036,7 +1036,7 @@ fn prop_32_streaming_committed_never_retroactive_304() {
 
 // ════════════════════════════════════════════════════════════════════════════
 // Property 33: Precommit replay-unavailable and postcommit failure routing
-// (Task 6.21, Req 11.1, 11.6, 11.7, 11.18, 9.3)
+// (Req 11.1, 11.6, 11.7, 11.18, 9.3)
 // ════════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -1249,7 +1249,7 @@ fn prop_33_commit_headers_only_synthetic_ok() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Protocol closure tests (Task 6.22, Req 11.20-11.22, 11.24)
+// Protocol closure tests (Req 11.20-11.22, 11.24)
 // ════════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -1431,7 +1431,7 @@ fn proto_event_envelope_forbidden_records_rejected() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Client-abort contract tests (Task 6.23, Req 11.21)
+// Client-abort contract tests (Req 11.21)
 // ════════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -1510,7 +1510,7 @@ fn proto_client_abort_creates_no_failure_record() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// ActionOutcome strictness tests (Task 6.24, Req 11.19)
+// ActionOutcome strictness tests (Req 11.19)
 // ════════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -1631,7 +1631,7 @@ fn proto_begin_abort_only_synthetic_ok() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// FailureLedger store/emit tests (Task 6.25, Req 11.11, 11.18)
+// FailureLedger store/emit tests (Req 11.11, 11.18)
 // ════════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -1773,7 +1773,7 @@ fn proto_ledger_secondary_update_plan20() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// SideEffectCommand execution tests (Task 6.25a, Req 11.1, 11.11, 11.19, 11.25)
+// SideEffectCommand execution tests (Req 11.1, 11.11, 11.19, 11.25)
 // ════════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -1877,7 +1877,7 @@ fn proto_side_effect_post_effect_latch_references_resolve() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// TransitionFrame identity tests (Task 6.26, Req 11.1)
+// TransitionFrame identity tests (Req 11.1)
 // ════════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -1951,7 +1951,7 @@ fn proto_transition_frame_each_step_id_unique() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Normal streaming path tests (Task 6.27, Req 11.1)
+// Normal streaming path tests (Req 11.1)
 // ════════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -2068,7 +2068,7 @@ fn proto_no_continue_streaming_action() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Plan/Apply coverage tests (Task 6.28, Req 11.1, 11.19)
+// Plan/Apply coverage tests (Req 11.1, 11.19)
 // ════════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -2128,7 +2128,7 @@ fn proto_cleanup_has_individual_plan_ids() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// PendingKind matching tests (Task 6.29, Req 11.19)
+// PendingKind matching tests (Req 11.19)
 // ════════════════════════════════════════════════════════════════════════════
 
 #[test]

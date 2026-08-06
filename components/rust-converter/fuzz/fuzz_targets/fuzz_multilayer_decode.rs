@@ -1,6 +1,6 @@
 #![no_main]
 
-//! Fuzz target for multi-layer Content-Encoding decoding (Spec 62 Wave 4).
+//! Fuzz target for multi-layer Content-Encoding decoding.
 //!
 //! Derives a 1-3 layer encoding chain and a wire payload from arbitrary bytes,
 //! then drives [`nginx_markdown_converter::encoding::decode_chain`] with fixed
