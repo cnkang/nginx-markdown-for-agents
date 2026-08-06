@@ -591,7 +591,9 @@ def _write_record(record: dict, args: argparse.Namespace) -> pathlib.Path:
         resolved_candidate, REPO_ROOT, purpose=RECORD_OUTPUT_LABEL
     )
     validated_path.parent.mkdir(parents=True, exist_ok=True)
-    validated_path.write_text(  # NOSONAR: pythonsecurity:S2083; fixed output root and strict filename validation prevent CLI-selected targets
+    # NOSONAR suppression for pythonsecurity:S2083: the fixed output root and
+    # strict filename validation prevent CLI-selected targets.
+    validated_path.write_text(  # NOSONAR
         json.dumps(record, indent=2) + "\n", encoding="utf-8"
     )
     # SONAR_NOTE(S2083): Filename is allowlisted and the path is built from
