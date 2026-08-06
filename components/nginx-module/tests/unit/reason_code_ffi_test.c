@@ -211,6 +211,23 @@ test_bypass_no_transform_reverse_mapping(void)
 }
 
 
+/* Test: encoding_header_invalid maps to its canonical code (26). */
+static void
+test_encoding_header_invalid_reverse_mapping(void)
+{
+    ngx_int_t  code;
+
+    TEST_SUBSECTION("encoding_header_invalid reverse mapping");
+
+    code = ngx_http_markdown_diagnostics_reason_to_code(
+        "encoding_header_invalid");
+    TEST_ASSERT(code == 26,
+                "encoding_header_invalid should map to code 26");
+
+    TEST_PASS("encoding_header_invalid reverse mapping is correct");
+}
+
+
 /*
  * Test: invalid reason code returns NGX_DECLINED and zeroes ngx_str_t
  */
@@ -408,6 +425,7 @@ main(void)
 
     test_get_reason_code_str_valid();
     test_bypass_no_transform_reverse_mapping();
+    test_encoding_header_invalid_reverse_mapping();
     test_get_reason_code_str_invalid();
     test_get_reason_code_str_null_output();
     test_get_reason_code_metric_key_valid();

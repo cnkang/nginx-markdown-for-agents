@@ -139,12 +139,13 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
         ngx_http_markdown_literal("timeout"),
         ngx_http_markdown_literal("budget_exceeded"),
         ngx_http_markdown_literal("replay_error"),
-        /* Production failure outcomes for reason codes 20-24 */
+        /* Production failure outcomes for reason codes 20-26 */
         ngx_http_markdown_literal("overload"),
         ngx_http_markdown_literal("invalid_dynconf"),
         ngx_http_markdown_literal("degraded_snapshot"),
         ngx_http_markdown_literal("header_plan_apply_error"),
-        ngx_http_markdown_literal("streaming_mid_flight_error")
+        ngx_http_markdown_literal("streaming_mid_flight_error"),
+        ngx_http_markdown_literal("encoding_header_invalid")
     };
 
     if (reason_code == NULL || reason_code->len == 0) {
