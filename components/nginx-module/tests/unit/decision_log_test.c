@@ -214,6 +214,14 @@ is_failure_outcome(const ngx_str_t *reason_code)
         return 1;
     }
 
+    if (reason_code->len == 23
+        && ngx_strncmp(reason_code->data,
+                       (u_char *) "encoding_header_invalid",
+                       23) == 0)
+    {
+        return 1;
+    }
+
     /*
      * Legacy compatibility: "ELIGIBLE_FAILED" prefix (15 chars).
      * Legacy reason codes used uppercase prefixes; keep prefix semantics
