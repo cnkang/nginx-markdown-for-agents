@@ -526,6 +526,15 @@ ngx_http_markdown_manifest_field_limits(
 }
 
 
+/*
+ * Append effective policy values and explicitness flags to the manifest.
+ *
+ * The explicit mask preserves whether each value was configured directly,
+ * while the values are rendered from the effective configuration.
+ *
+ * Returns:
+ *     NGX_OK on success, or NGX_ERROR if a field cannot be appended.
+ */
 static ngx_int_t
 ngx_http_markdown_manifest_append_policy_fields(
     ngx_http_markdown_manifest_builder_t *builder,

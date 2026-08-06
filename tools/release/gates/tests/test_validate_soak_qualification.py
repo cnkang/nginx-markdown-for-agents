@@ -147,7 +147,7 @@ def test_real_mode_records_insufficient_peak_as_failure(
             pass
 
         def wait(self, timeout: int) -> None:
-            del timeout
+            pass
 
     monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(validator, "load_manifest", lambda path: manifest)
