@@ -253,7 +253,8 @@ impl Default for DecodeLimits {
 /// The cumulative output budget applies across every non-identity
 /// intermediate output. The per-layer ratio check activates only when that
 /// layer's compressed input is at least [`RATIO_ACTIVATION_THRESHOLD`] bytes;
-/// zero compressed input allows zero decoded output only.
+/// zero compressed input is accepted for the initial decoder only. An empty
+/// intermediate output cannot feed another decoder layer.
 pub fn decode_chain(
     encoded: &[u8],
     layers: &[Encoding],
@@ -261,16 +262,23 @@ pub fn decode_chain(
 ) -> Result<Vec<u8>, ChainDecodeError> {
     let mut current = encoded.to_vec();
     let mut cumulative = 0usize;
+    let mut has_decoded_layer = false;
 
     /* Decode from the outermost layer (last declared) inward. */
     for enc in layers.iter().rev() {
         if *enc == Encoding::Identity {
             continue;
         }
+        if has_decoded_layer && current.is_empty() {
+            return Err(ChainDecodeError::TruncatedInput(
+                "decoder input is empty after a prior layer".to_string(),
+            ));
+        }
         let input_len = current.len();
         let decoded = decode_layer(&current, *enc, limits)?;
         validate_decoded_layer(input_len, decoded.len(), &mut cumulative, limits)?;
         current = decoded;
+        has_decoded_layer = true;
     }
 
     Ok(current)
@@ -636,6 +644,21 @@ mod tests {
         /* Empty compressed input is a valid empty decode (no decoder work). */
         let out = decode_chain(&[], &[Encoding::Gzip], DecodeLimits::default()).unwrap();
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn empty_intermediate_layer_is_truncated() {
+        let compressed = gzip_compress(&[]);
+        let err = decode_chain(
+            &compressed,
+            &[Encoding::Deflate, Encoding::Gzip],
+            DecodeLimits::default(),
+        )
+        .unwrap_err();
+        match err {
+            ChainDecodeError::TruncatedInput(_) => {}
+            other => panic!("expected truncated input, got {:?}", other),
+        }
     }
 
     #[test]
