@@ -289,7 +289,7 @@ def test_manual_module_baseline_workflow_uses_canonical_native_runtime():
     assert "runs-on: ubuntu-24.04" in workflow
     assert '[[ "$(uname -m)" == "x86_64" ]]' in workflow
     assert "Determine canonical benchmark NGINX version" in workflow
-    assert "tools/release-matrix.json" in workflow
+    assert "release/performance/canonical-environment.json" in workflow
     assert "apache2-utils" in workflow
     assert "components: rustfmt,clippy" in workflow, (
         "Canonical job must install repository-required Rust components with "
