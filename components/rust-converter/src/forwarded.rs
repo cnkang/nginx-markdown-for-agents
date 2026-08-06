@@ -573,7 +573,6 @@ fn split_quoted(s: &str, sep: u8) -> Vec<String> {
 /// Returns `None` when the token has unbalanced quotes (a `"` appears
 /// without a matching closer, or a closer appears without an opener).
 fn unquote(value: &str) -> Option<String> {
-    let bytes = value.as_bytes();
     let mut out = String::with_capacity(value.len());
     let mut chars = value.chars().peekable();
     let mut in_quote = false;
@@ -599,7 +598,6 @@ fn unquote(value: &str) -> Option<String> {
     if in_quote || (closed && !out.is_empty() && out.bytes().any(|b| b == b'"')) {
         return None;
     }
-    let _ = bytes;
     Some(out)
 }
 
@@ -795,7 +793,7 @@ fn build_forwarded_decision(element: &ForwardedElement, input: &BaseUrlInput) ->
     let host = element
         .host
         .as_ref()
-        .map(|h| validate_forwarded_host(h).unwrap_or_default());
+        .and_then(|h| validate_forwarded_host(h));
 
     if let Some(h) = host {
         let scheme = match &element.proto {
@@ -877,7 +875,8 @@ fn decide_from_xforwarded(input: &BaseUrlInput, trusted: &[Cidr]) -> BaseUrlDeci
     };
 
     if metadata_present {
-        return build_xff_decision(idx, &protos, &hosts, &ports);
+        return build_xff_decision(idx, &protos, &hosts, &ports)
+            .unwrap_or_else(|| discard_forwarded_set(input, BaseUrlReason::ForwardedInvalidValue));
     }
 
     /* No metadata lists: use direct request metadata for scheme/host/port. */
@@ -954,25 +953,33 @@ fn build_xff_decision(
     protos: &Option<Vec<String>>,
     hosts: &Option<Vec<String>>,
     ports: &Option<Vec<String>>,
-) -> BaseUrlDecision {
-    let scheme =
-        validate_proto(&protos.as_ref().unwrap()[idx]).unwrap_or_else(|| "https".to_string());
-    let host = validate_forwarded_host(&hosts.as_ref().unwrap()[idx]).unwrap_or_default();
-    let port = ports.as_ref().unwrap()[idx].clone();
+) -> Option<BaseUrlDecision> {
+    let proto = protos.as_ref()?.get(idx)?;
+    let host_value = hosts.as_ref()?.get(idx)?;
+    let port = ports.as_ref()?.get(idx)?;
+    let scheme = validate_proto(proto)?;
+    let host = validate_forwarded_host(host_value)?;
+    validate_port(port)?;
 
     /* Host already carries a port (host:port form): X-Forwarded-Port is
      * redundant and must not be appended. */
-    let host_with_port = if host.contains(':') && !host.starts_with('[') {
+    let host_with_port = if host.starts_with('[') {
+        if host.ends_with(']') {
+            format!("{host}:{port}")
+        } else {
+            host
+        }
+    } else if host.contains(':') {
         host
     } else {
         format!("{host}:{port}")
     };
 
-    BaseUrlDecision {
+    Some(BaseUrlDecision {
         base_url: format!("{scheme}://{host_with_port}"),
         reason: BaseUrlReason::ForwardedHeaderTrusted,
         source: BaseUrlSource::XForwarded,
-    }
+    })
 }
 
 /// Discard the complete forwarded set and use direct peer/direct request
@@ -1396,6 +1403,58 @@ mod tests {
         assert_eq!(d.reason, BaseUrlReason::ForwardedHeaderTrusted);
         assert_eq!(d.source, BaseUrlSource::XForwarded);
         assert_eq!(d.base_url, "https://api.example.com:443");
+    }
+
+    #[test]
+    fn xff_ipv6_host_without_port_gets_forwarded_port() {
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.x_forwarded_for = Some("203.0.113.9");
+        input.x_forwarded_host = Some("[2001:db8::1]");
+        input.x_forwarded_proto = Some("https");
+        input.x_forwarded_port = Some("443");
+
+        let d = decide_base_url(&input, &t);
+
+        assert_eq!(d.base_url, "https://[2001:db8::1]:443");
+    }
+
+    #[test]
+    fn xff_ipv6_host_with_port_does_not_duplicate_port() {
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.x_forwarded_for = Some("203.0.113.9");
+        input.x_forwarded_host = Some("[2001:db8::1]:8443");
+        input.x_forwarded_proto = Some("https");
+        input.x_forwarded_port = Some("443");
+
+        let d = decide_base_url(&input, &t);
+
+        assert_eq!(d.base_url, "https://[2001:db8::1]:8443");
+    }
+
+    #[test]
+    fn xff_builder_revalidates_selected_port() {
+        let protos = Some(vec!["https".to_string()]);
+        let hosts = Some(vec!["example.com".to_string()]);
+        let ports = Some(vec!["0".to_string()]);
+
+        assert!(build_xff_decision(0, &protos, &hosts, &ports).is_none());
+    }
+
+    #[test]
+    fn forwarded_builder_rejects_invalid_host_without_empty_url() {
+        let input = trusted_input("10.1.2.3");
+        let element = ForwardedElement {
+            host: Some("invalid host".to_string()),
+            proto: Some("https".to_string()),
+            ..ForwardedElement::default()
+        };
+
+        let decision = build_forwarded_decision(&element, &input);
+
+        assert_eq!(decision.base_url, "http://origin.example.com");
+        assert!(!decision.base_url.contains("https://"));
     }
 
     /* Positive 2: metadata lists absent → direct request metadata. */
