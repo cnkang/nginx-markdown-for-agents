@@ -25,6 +25,14 @@ BASELINE_ACTION_WORKFLOWS = (
     Path(".github/workflows/sonarcloud.yml"),
 )
 NIGHTLY_ACTION_WORKFLOWS = (Path(".github/workflows/nightly-fuzz.yml"),)
+# Observation workflows run the full suite (exact toolchain) and fuzz
+# (nightly) jobs; each workflow must declare the exact toolchain at least
+# once and any additional toolchain declarations must be either the exact
+# channel or the nightly fuzz toolchain.
+OBSERVATION_ACTION_WORKFLOWS = (
+    Path(".github/workflows/nightly-observation.yml"),
+    Path(".github/workflows/weekly-observation.yml"),
+)
 RELEASE_WORKFLOWS = (
     Path(".github/workflows/release-packages.yml"),
     Path(".github/workflows/release-deb.yml"),
@@ -127,10 +135,39 @@ def _check_workflow_group(
                 )
 
 
+def _check_observation_workflows(root: Path, exact: str, errors: list[str]) -> None:
+    """Observation workflows must declare the exact toolchain and may also
+    declare the nightly fuzz toolchain for cargo-fuzz jobs."""
+    for relative_path in OBSERVATION_ACTION_WORKFLOWS:
+        content = _read_text(root, relative_path, errors)
+        if content is None:
+            continue
+        versions = ACTION_TOOLCHAIN_RE.findall(content)
+        if not versions:
+            errors.append(
+                f"{relative_path}: missing required toolchain declaration"
+            )
+            continue
+        if exact not in versions:
+            errors.append(
+                f"{relative_path}: must declare the exact toolchain {exact!r}"
+            )
+        unexpected = [
+            version for version in versions
+            if version != exact and version != "nightly"
+        ]
+        for version in unexpected:
+            errors.append(
+                f"{relative_path}: unexpected toolchain {version!r} "
+                f"(expected {exact!r} or 'nightly')"
+            )
+
+
 def _check_workflow_inventory(root: Path, errors: list[str]) -> None:
     """Reject newly added Rust-installing workflows outside the frozen policy."""
     workflow_dir = root / ".github" / "workflows"
     known = set(BASELINE_ACTION_WORKFLOWS + NIGHTLY_ACTION_WORKFLOWS)
+    known.update(OBSERVATION_ACTION_WORKFLOWS)
     known.update(RELEASE_WORKFLOWS)
     for path in sorted(workflow_dir.glob("*.y*ml")):
         content = path.read_text(encoding="utf-8")
@@ -214,6 +251,7 @@ def collect_errors(root: Path = REPO_ROOT) -> tuple[str | None, str | None, list
         "nightly toolchain",
         errors,
     )
+    _check_observation_workflows(root, exact, errors)
     _check_workflow_group(
         root,
         RELEASE_WORKFLOWS,
