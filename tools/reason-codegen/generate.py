@@ -206,7 +206,7 @@ def generate_rust(reasons, hash_hex: str) -> str:
     lines.append("")
 
     # Count constant
-    lines.append(f"/// Total number of reason code variants.")
+    lines.append("/// Total number of reason code variants.")
     lines.append("///")
     lines.append("/// This constant is used by the closure test to verify that all variants")
     lines.append("/// are accounted for in the `ALL` array. Update this when adding variants.")

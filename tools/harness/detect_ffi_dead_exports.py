@@ -126,7 +126,7 @@ def parse_header_exports(header_path: Path) -> list[str]:
     # Also catch return types we may have missed with the above pattern.
     # Use a broader fallback for any line that looks like a function declaration.
     broad_re = re.compile(
-        r"^[A-Za-z_].*?(markdown_\w+)\s*\(", re.MULTILINE
+        r"^[^\n]*(markdown_\w+)\s*\(", re.MULTILINE
     )
     for match in broad_re.finditer(text):
         name = match.group(1)

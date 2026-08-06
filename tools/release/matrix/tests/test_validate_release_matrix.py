@@ -10,7 +10,7 @@ import pytest
 from tools.release.matrix import validate_release_matrix as validator
 
 
-@pytest.fixture()
+@pytest.fixture
 def fake_matrix_root(tmp_path: Path) -> Path:
     """Materialize the repo surface the validator reads under tmp_path."""
     root = tmp_path

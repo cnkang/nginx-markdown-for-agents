@@ -93,8 +93,9 @@ resolve_nginx_bin() {
 }
 
 log_test() {
+  local desc="$1"
   TESTS_RUN=$((TESTS_RUN + 1))
-  printf "  [%03d] %s ... " "${TESTS_RUN}" "$1" >&2
+  printf "  [%03d] %s ... " "${TESTS_RUN}" "${desc}" >&2
 }
 
 log_pass() {
