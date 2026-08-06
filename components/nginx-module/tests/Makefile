@@ -22,7 +22,7 @@ endif
 endif
 SANITIZER_ENV ?= ASAN_OPTIONS=$(ASAN_OPTIONS_BASE) UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
 
-.PHONY: unit unit-smoke unit-clang-smoke unit-sanitize-smoke unit-otel_impl $(addprefix unit-,$(UNIT_NAMES)) integration-c integration-nginx e2e unit-coverage clean
+.PHONY: unit unit-smoke unit-clang-smoke unit-sanitize-smoke $(addprefix unit-,$(UNIT_NAMES)) integration-c integration-nginx e2e unit-coverage clean
 
 build/unit build/integration build/generated:
 	@mkdir -p $@
@@ -84,10 +84,6 @@ unit: $(UNIT_BINS)
 	  echo "Running $$t"; \
 	  "$$t"; \
 	done
-
-# Keep the release gate's historical name while exercising the surviving
-# request-scoped instrumentation coverage in the streaming implementation.
-unit-otel_impl: unit-streaming_impl
 
 # fast smoke subset used by top-level make test
 unit-smoke: build/unit/body_filter build/unit/eligibility build/unit/headers

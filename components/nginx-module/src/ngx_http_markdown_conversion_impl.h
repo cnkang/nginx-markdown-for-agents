@@ -98,7 +98,7 @@ ngx_http_markdown_request_header_matches(const ngx_table_elt_t *header,
 
 /* Find a request header value by name in the generic linked-list storage. */
 static const ngx_str_t *
-ngx_http_markdown_find_request_header_value(ngx_http_request_t *r,
+ngx_http_markdown_find_request_header_value(const ngx_http_request_t *r,
                                             const u_char *name,
                                             size_t name_len)
 {
@@ -106,7 +106,7 @@ ngx_http_markdown_find_request_header_value(ngx_http_request_t *r,
         return NULL;
     }
 
-    for (ngx_list_part_t *part = &r->headers_in.headers.part;
+    for (const ngx_list_part_t *part = &r->headers_in.headers.part;
          part != NULL;
          part = part->next)
     {
@@ -156,11 +156,11 @@ ngx_http_markdown_accumulate_header_value_len(ngx_uint_t match_count,
  */
 static ngx_int_t
 ngx_http_markdown_measure_request_header_values(
-    ngx_http_request_t *r, const u_char *name, size_t name_len,
+    const ngx_http_request_t *r, const u_char *name, size_t name_len,
     const ngx_str_t **single_value, ngx_uint_t *match_count,
     size_t *total_len)
 {
-    ngx_list_part_t       *part;
+    const ngx_list_part_t *part;
     const ngx_table_elt_t *headers;
 
     *single_value = NULL;
@@ -201,10 +201,10 @@ ngx_http_markdown_measure_request_header_values(
 /* Copy validated matching values to an exactly sized output buffer. */
 static void
 ngx_http_markdown_copy_request_header_values(
-    ngx_http_request_t *r, const u_char *name, size_t name_len,
+    const ngx_http_request_t *r, const u_char *name, size_t name_len,
     u_char *data)
 {
-    ngx_list_part_t       *part;
+    const ngx_list_part_t *part;
     const ngx_table_elt_t *headers;
     ngx_uint_t             copied;
     u_char                *p;
@@ -251,7 +251,8 @@ ngx_http_markdown_copy_request_header_values(
  * failure.
  */
 static ngx_int_t
-ngx_http_markdown_collect_request_header_values(ngx_http_request_t *r,
+ngx_http_markdown_collect_request_header_values(
+    const ngx_http_request_t *r,
                                                 const u_char *name,
                                                 size_t name_len,
                                                 ngx_str_t *out)
@@ -303,6 +304,38 @@ ngx_http_markdown_collect_request_header_values(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+
+static ngx_int_t
+ngx_http_markdown_collect_forwarding_header(
+    const ngx_http_request_t *r, const u_char *name, size_t name_len,
+    ngx_str_t *value, ngx_flag_t *present)
+{
+    ngx_int_t  rc;
+
+    rc = ngx_http_markdown_collect_request_header_values(
+        r, name, name_len, value);
+    if (rc == NGX_ERROR) {
+        return NGX_ERROR;
+    }
+    *present = (rc == NGX_OK);
+    return NGX_OK;
+}
+
+
+static void
+ngx_http_markdown_set_base_url_header(
+    const ngx_str_t *value, ngx_flag_t present,
+    const uint8_t **target, uintptr_t *target_len)
+{
+    if (!present) {
+        return;
+    }
+
+    *target = value->data != NULL
+        ? value->data : ngx_http_markdown_empty_header_value;
+    *target_len = value->len;
+}
+
 /*
  * Decide the validated "scheme://host" authority via the Rust trusted-proxy
  * decision (markdown_decide_base_url).
@@ -323,7 +356,7 @@ ngx_http_markdown_collect_request_header_values(ngx_http_request_t *r,
  *   NGX_OK on success, NGX_ERROR when the FFI rejects the inputs.
  */
 static ngx_int_t
-ngx_http_markdown_decide_base_authority(ngx_http_request_t *r,
+ngx_http_markdown_decide_base_authority(const ngx_http_request_t *r,
                                         u_char *out_buf,
                                         size_t out_cap,
                                         size_t *out_len)
@@ -336,7 +369,6 @@ ngx_http_markdown_decide_base_authority(ngx_http_request_t *r,
     ngx_str_t                             x_forwarded_port;
     FFIBaseUrlInput                       input;
     FFIBaseUrlDecision                    decision;
-    ngx_int_t                              header_rc;
     uint8_t                               rc;
     ngx_flag_t                             forwarded_present;
     ngx_flag_t                             x_forwarded_for_present;
@@ -346,49 +378,41 @@ ngx_http_markdown_decide_base_authority(ngx_http_request_t *r,
 
     mmcf = ngx_http_get_module_main_conf(r, ngx_http_markdown_filter_module);
 
-    header_rc = ngx_http_markdown_collect_request_header_values(
-        r, ngx_http_markdown_hdr_forwarded,
-        sizeof(ngx_http_markdown_hdr_forwarded) - 1, &forwarded);
-    if (header_rc == NGX_ERROR) {
+    if (ngx_http_markdown_collect_forwarding_header(
+            r, ngx_http_markdown_hdr_forwarded,
+            sizeof(ngx_http_markdown_hdr_forwarded) - 1,
+            &forwarded, &forwarded_present) != NGX_OK)
+    {
         return NGX_ERROR;
     }
-    forwarded_present = header_rc == NGX_OK;
-
-    header_rc = ngx_http_markdown_collect_request_header_values(
-        r, ngx_http_markdown_hdr_x_forwarded_for,
-        sizeof(ngx_http_markdown_hdr_x_forwarded_for) - 1,
-        &x_forwarded_for);
-    if (header_rc == NGX_ERROR) {
+    if (ngx_http_markdown_collect_forwarding_header(
+            r, ngx_http_markdown_hdr_x_forwarded_for,
+            sizeof(ngx_http_markdown_hdr_x_forwarded_for) - 1,
+            &x_forwarded_for, &x_forwarded_for_present) != NGX_OK)
+    {
         return NGX_ERROR;
     }
-    x_forwarded_for_present = header_rc == NGX_OK;
-
-    header_rc = ngx_http_markdown_collect_request_header_values(
-        r, ngx_http_markdown_hdr_x_forwarded_proto,
-        sizeof(ngx_http_markdown_hdr_x_forwarded_proto) - 1,
-        &x_forwarded_proto);
-    if (header_rc == NGX_ERROR) {
+    if (ngx_http_markdown_collect_forwarding_header(
+            r, ngx_http_markdown_hdr_x_forwarded_proto,
+            sizeof(ngx_http_markdown_hdr_x_forwarded_proto) - 1,
+            &x_forwarded_proto, &x_forwarded_proto_present) != NGX_OK)
+    {
         return NGX_ERROR;
     }
-    x_forwarded_proto_present = header_rc == NGX_OK;
-
-    header_rc = ngx_http_markdown_collect_request_header_values(
-        r, ngx_http_markdown_hdr_x_forwarded_host,
-        sizeof(ngx_http_markdown_hdr_x_forwarded_host) - 1,
-        &x_forwarded_host);
-    if (header_rc == NGX_ERROR) {
+    if (ngx_http_markdown_collect_forwarding_header(
+            r, ngx_http_markdown_hdr_x_forwarded_host,
+            sizeof(ngx_http_markdown_hdr_x_forwarded_host) - 1,
+            &x_forwarded_host, &x_forwarded_host_present) != NGX_OK)
+    {
         return NGX_ERROR;
     }
-    x_forwarded_host_present = header_rc == NGX_OK;
-
-    header_rc = ngx_http_markdown_collect_request_header_values(
-        r, ngx_http_markdown_hdr_x_forwarded_port,
-        sizeof(ngx_http_markdown_hdr_x_forwarded_port) - 1,
-        &x_forwarded_port);
-    if (header_rc == NGX_ERROR) {
+    if (ngx_http_markdown_collect_forwarding_header(
+            r, ngx_http_markdown_hdr_x_forwarded_port,
+            sizeof(ngx_http_markdown_hdr_x_forwarded_port) - 1,
+            &x_forwarded_port, &x_forwarded_port_present) != NGX_OK)
+    {
         return NGX_ERROR;
     }
-    x_forwarded_port_present = header_rc == NGX_OK;
 
     ngx_memzero(&input, sizeof(input));
 
@@ -408,31 +432,21 @@ ngx_http_markdown_decide_base_authority(ngx_http_request_t *r,
             mmcf->trusted_proxies_configured ? 1 : 0;
     }
 
-    if (forwarded_present) {
-        input.forwarded = forwarded.data != NULL
-            ? forwarded.data : ngx_http_markdown_empty_header_value;
-        input.forwarded_len = forwarded.len;
-    }
-    if (x_forwarded_for_present) {
-        input.x_forwarded_for = x_forwarded_for.data != NULL
-            ? x_forwarded_for.data : ngx_http_markdown_empty_header_value;
-        input.x_forwarded_for_len = x_forwarded_for.len;
-    }
-    if (x_forwarded_proto_present) {
-        input.x_forwarded_proto = x_forwarded_proto.data != NULL
-            ? x_forwarded_proto.data : ngx_http_markdown_empty_header_value;
-        input.x_forwarded_proto_len = x_forwarded_proto.len;
-    }
-    if (x_forwarded_host_present) {
-        input.x_forwarded_host = x_forwarded_host.data != NULL
-            ? x_forwarded_host.data : ngx_http_markdown_empty_header_value;
-        input.x_forwarded_host_len = x_forwarded_host.len;
-    }
-    if (x_forwarded_port_present) {
-        input.x_forwarded_port = x_forwarded_port.data != NULL
-            ? x_forwarded_port.data : ngx_http_markdown_empty_header_value;
-        input.x_forwarded_port_len = x_forwarded_port.len;
-    }
+    ngx_http_markdown_set_base_url_header(
+        &forwarded, forwarded_present,
+        &input.forwarded, &input.forwarded_len);
+    ngx_http_markdown_set_base_url_header(
+        &x_forwarded_for, x_forwarded_for_present,
+        &input.x_forwarded_for, &input.x_forwarded_for_len);
+    ngx_http_markdown_set_base_url_header(
+        &x_forwarded_proto, x_forwarded_proto_present,
+        &input.x_forwarded_proto, &input.x_forwarded_proto_len);
+    ngx_http_markdown_set_base_url_header(
+        &x_forwarded_host, x_forwarded_host_present,
+        &input.x_forwarded_host, &input.x_forwarded_host_len);
+    ngx_http_markdown_set_base_url_header(
+        &x_forwarded_port, x_forwarded_port_present,
+        &input.x_forwarded_port, &input.x_forwarded_port_len);
     if (r->headers_in.server.len > 0) {
         input.host = r->headers_in.server.data;
         input.host_len = r->headers_in.server.len;
@@ -1174,7 +1188,7 @@ ngx_http_markdown_per_path_lookup_and_update(
  */
 static void
 ngx_http_markdown_record_per_path_metrics(
-    ngx_http_request_t *r,
+    const ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf,
     ngx_msec_t elapsed_ms)
 {

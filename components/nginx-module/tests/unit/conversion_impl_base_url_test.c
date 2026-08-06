@@ -1197,7 +1197,8 @@ test_base_url_marshals_request_fields(void)
 /*
  * Test: an empty Forwarded field remains present across the C/FFI boundary.
  *
- * Spec 62 requires any present Forwarded field, including an empty one, to
+ * The current forwarding contract requires any present Forwarded field,
+ * including an empty one, to
  * suppress the X-Forwarded fallback after Rust classifies it as malformed.
  */
 static void

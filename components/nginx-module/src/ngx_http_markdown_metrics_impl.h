@@ -889,12 +889,12 @@ ngx_http_markdown_metrics_to_v1(
         snapshot->results.dynconf_reloads.failure_file_error;
 
     /* Build metadata is part of the public v1 response contract. */
-    v1->build_info.version = (u_char *) "0.9.2";
-    v1->build_info.nginx_version_text = (u_char *) NGINX_VERSION;
+    v1->build_info.version = (const u_char *) "0.9.2";
+    v1->build_info.nginx_version_text = (const u_char *) NGINX_VERSION;
 #ifdef MARKDOWN_STREAMING_ENABLED
-    v1->build_info.features = (u_char *) "streaming";
+    v1->build_info.features = (const u_char *) "streaming";
 #else
-    v1->build_info.features = (u_char *) "";
+    v1->build_info.features = (const u_char *) "";
 #endif
 }
 
@@ -962,7 +962,7 @@ ngx_http_markdown_metrics_validate_request(ngx_http_request_t *r)
  */
 static ngx_uint_t
 ngx_http_markdown_metrics_select_format(
-    ngx_http_request_t *r)
+    const ngx_http_request_t *r)
 {
     (void) r;
     return NGX_HTTP_MARKDOWN_METRICS_OUTPUT_PROMETHEUS;

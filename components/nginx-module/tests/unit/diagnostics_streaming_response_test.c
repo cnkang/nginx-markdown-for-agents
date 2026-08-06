@@ -5,7 +5,7 @@
  * streaming_config and streaming_metrics sections with the correct
  * field names when MARKDOWN_STREAMING_ENABLED is defined.
  *
- * Corresponds to streaming observability, task 6.2.
+ * Covers the streaming observability response contract.
  *
  * Rules: 8 (metric names match emitted keys), 9 (field names match).
  */

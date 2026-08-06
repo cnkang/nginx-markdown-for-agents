@@ -94,21 +94,33 @@ static ngx_http_markdown_metrics_t *ngx_http_markdown_metrics = NULL;
 /* ── Dynconf watcher struct (mirrors production) ──────────────── */
 
 typedef struct {
-    ngx_flag_t  active;
-    time_t      applied_mtime;
-    ngx_uint_t  version;
     time_t      last_mtime;
-    ngx_flag_t  lkg_valid;
-    time_t      lkg_mtime;
-    ngx_http_markdown_conf_t *conf;
+    time_t      applied_mtime;
+} ngx_http_markdown_dynconf_file_state_t;
+
+typedef struct {
     u_char      source_digest[72];
     u_char      active_digest[72];
     u_char      lkg_digest[72];
     ngx_uint_t  generation;
+    ngx_flag_t  lkg_valid;
+    time_t      lkg_mtime;
+} ngx_http_markdown_dynconf_digest_state_t;
+
+typedef struct {
+    ngx_uint_t  version;
     ngx_uint_t  last_result;
     time_t      last_success;
     u_char      last_error[513];
     size_t      last_error_len;
+} ngx_http_markdown_dynconf_diagnostic_state_t;
+
+typedef struct {
+    ngx_flag_t  active;
+    ngx_http_markdown_dynconf_file_state_t file_state;
+    ngx_http_markdown_dynconf_digest_state_t digest_state;
+    ngx_http_markdown_conf_t *conf;
+    ngx_http_markdown_dynconf_diagnostic_state_t diagnostic_state;
 } ngx_http_markdown_dynconf_watcher_t;
 
 static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher;
@@ -280,8 +292,8 @@ test_get_dynconf_state_active(void)
     memset(&ngx_http_markdown_dynconf_watcher, 0,
            sizeof(ngx_http_markdown_dynconf_watcher));
     ngx_http_markdown_dynconf_watcher.active = 1;
-    ngx_http_markdown_dynconf_watcher.applied_mtime = 1700000000;
-    ngx_http_markdown_dynconf_watcher.version = 5;
+    ngx_http_markdown_dynconf_watcher.file_state.applied_mtime = 1700000000;
+    ngx_http_markdown_dynconf_watcher.diagnostic_state.version = 5;
     /*
      * Regression (CMOD-4): last_mtime is the most recently *observed* file
      * mtime (updated even on a rejected reload); lkg_mtime is the mtime of
@@ -289,9 +301,9 @@ test_get_dynconf_state_active(void)
      * different here so the test fails if the accessor reads last_mtime
      * instead of lkg_mtime.
      */
-    ngx_http_markdown_dynconf_watcher.last_mtime = 1699999000;
-    ngx_http_markdown_dynconf_watcher.lkg_mtime = 1699998000;
-    ngx_http_markdown_dynconf_watcher.lkg_valid = 1;
+    ngx_http_markdown_dynconf_watcher.file_state.last_mtime = 1699999000;
+    ngx_http_markdown_dynconf_watcher.digest_state.lkg_mtime = 1699998000;
+    ngx_http_markdown_dynconf_watcher.digest_state.lkg_valid = 1;
 
     ngx_http_markdown_diagnostics_get_dynconf_state(&out);
 

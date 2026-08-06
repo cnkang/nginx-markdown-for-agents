@@ -4,8 +4,8 @@
 /*
  * Metrics v1 Prometheus text 0.0.4 renderer.
  *
- * Emits exactly the 11 frozen metric families defined in the
- * 0.9.2 Metrics Registry (artifacts/spec62/wave2/metrics-registry.json).
+ * Emits exactly the 11 frozen metric families defined in the checked-in
+ * 0.9.2 metrics registry.
  *
  * This renderer replaces ngx_http_markdown_prometheus_impl.h for the
  * 0.9.2 release. JSON and multi-format support are removed; the only
@@ -58,7 +58,6 @@ typedef struct {
 } ngx_http_markdown_metrics_v1_histogram_t;
 
 typedef struct {
-    /* Family 1: requests_total (counter) */
     struct {
         ngx_atomic_uint_t converted;
         ngx_atomic_uint_t skipped_not_eligible;
@@ -72,32 +71,25 @@ typedef struct {
         ngx_atomic_uint_t aborted;
     } requests;
 
-    /* Family 2: conversion_attempts_total (counter) */
     struct {
         ngx_atomic_uint_t full_buffer;
         ngx_atomic_uint_t streaming;
     } attempts;
 
-    /* Family 3: conversion_deliveries_total (counter) */
     struct {
         ngx_atomic_uint_t full_buffer;
         ngx_atomic_uint_t streaming;
     } deliveries;
 
-    /* Family 4: conversion_duration_seconds (histogram) */
     ngx_http_markdown_metrics_v1_histogram_t duration_full_buffer;
     ngx_http_markdown_metrics_v1_histogram_t duration_streaming;
 
-    /* Family 5: input_bytes_total (counter) */
     ngx_atomic_uint_t input_bytes;
 
-    /* Family 6: output_bytes_total (counter) */
     ngx_atomic_uint_t output_bytes;
 
-    /* Family 7: inflight_requests (gauge) */
     ngx_atomic_uint_t inflight;
 
-    /* Family 8: streaming_events_total (counter) */
     struct {
         ngx_atomic_uint_t commit;
         ngx_atomic_uint_t fallback;
@@ -107,7 +99,6 @@ typedef struct {
         ngx_atomic_uint_t resume_failure;
     } streaming_events;
 
-    /* Family 9: decompression_events_total (counter) */
     struct {
         ngx_atomic_uint_t gzip_success;
         ngx_atomic_uint_t gzip_failure_budget;
@@ -126,7 +117,6 @@ typedef struct {
         ngx_atomic_uint_t brotli_failure_io;
     } decompression;
 
-    /* Family 10: dynconf_reloads_total (counter) */
     struct {
         ngx_atomic_uint_t success;
         ngx_atomic_uint_t failure_schema_version;
@@ -139,11 +129,10 @@ typedef struct {
         ngx_atomic_uint_t failure_file_error;
     } dynconf_reloads;
 
-    /* Family 11: build_info (gauge, always 1) */
     struct {
-        u_char  *version;
-        u_char  *nginx_version_text;
-        u_char  *features;
+        const u_char  *version;
+        const u_char  *nginx_version_text;
+        const u_char  *features;
     } build_info;
 } ngx_http_markdown_metrics_v1_snapshot_t;
 
@@ -163,14 +152,16 @@ ngx_http_markdown_metrics_v1_render_histogram(
     ngx_atomic_uint_t  cumulative;
     ngx_atomic_uint_t  sum_seconds;
     ngx_atomic_uint_t  sum_frac;
-    ngx_uint_t         i;
 
     if (p == NULL || end == NULL || engine == NULL || histogram == NULL) {
         return NULL;
     }
 
     cumulative = 0;
-    for (i = 0; i < NGX_HTTP_MARKDOWN_METRICS_V1_BUCKET_COUNT; i++) {
+    for (ngx_uint_t i = 0;
+         i < NGX_HTTP_MARKDOWN_METRICS_V1_BUCKET_COUNT;
+         i++)
+    {
         cumulative += histogram->buckets[i];
         p = ngx_slprintf(p, end,
             "nginx_markdown_conversion_duration_seconds_bucket"
