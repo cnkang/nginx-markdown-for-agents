@@ -159,8 +159,10 @@ def test_custom_builds_never_disable_required_feature_via_no_default() -> None:
 
 
 def test_no_feature_combination_matrix_anywhere() -> None:
-    """Property: no CI matrix tests all feature flag combinations. Any
-    feature-flag matrix over subsets of the official set is forbidden."""
+    """Property: official artifact producer workflows never use
+    ``--no-default-features`` (which would permit a feature subset).  The
+    assertion is repeated for each workflow only so every producer file is
+    exercised by the matrix runner."""
     official_list = sorted(OFFICIAL_FEATURES)
     for size in range(1, len(official_list)):
         for combo in combinations(official_list, size):

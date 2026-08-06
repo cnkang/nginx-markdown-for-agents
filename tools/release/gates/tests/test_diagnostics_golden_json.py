@@ -649,11 +649,14 @@ class TestLastErrorBounds:
         the redaction contract.
         """
         # If the text contains path-like patterns, it would be invalid
+        # (the module must redact it). We verify the constraint by
+        # checking that none of the path patterns match.
         for pattern in _PATH_PATTERNS:
             if pattern.search(error_text):
-                # This text should NOT be used as last_error in production
-                # (the module must redact it). We verify the constraint.
-                assert True  # Pattern detected — confirms our detector works
+                assert False, (
+                    "error text contains a path-like pattern; "
+                    "production module must redact last_error"
+                )
                 return
         # No path detected — this is a valid error message
 
@@ -674,8 +677,10 @@ class TestLastErrorBounds:
         """
         for pattern in _SECRET_PATTERNS:
             if pattern.search(error_text):
-                # Production module must not emit this in last_error
-                assert True  # Constraint detector works
+                assert False, (
+                    "error text contains a secret-like pattern; "
+                    "production module must redact last_error"
+                )
                 return
 
     @settings(max_examples=50)
