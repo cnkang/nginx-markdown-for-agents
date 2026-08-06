@@ -37,8 +37,6 @@ ngx_http_markdown_arg_equals(
     const u_char *expected,
     size_t expected_len)
 {
-    size_t  i;
-
     if (arg == NULL || arg->data == NULL) {
         return 0;
     }
@@ -47,7 +45,7 @@ ngx_http_markdown_arg_equals(
         return 0;
     }
 
-    for (i = 0; i < expected_len; i++) {
+    for (size_t i = 0; i < expected_len; i++) {
         if (ngx_tolower(arg->data[i]) != ngx_tolower(expected[i])) {
             return 0;
         }
@@ -1641,10 +1639,12 @@ ngx_http_markdown_set_dynconf_path(ngx_conf_t *cf, ngx_command_t *cmd,
 
 /* Store an H-only dynconf flag in the default location configuration. */
 static char *
-ngx_http_markdown_dynconf_flag(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+ngx_http_markdown_dynconf_flag(ngx_conf_t *cf, ngx_command_t *cmd,
+    void *conf) /* NOSONAR: c:S995; NGINX callback signature requires
+                 * mutable command pointer */
 {
     ngx_http_markdown_conf_t  *mcf;
-    ngx_str_t                 *value;
+    const ngx_str_t           *value;
     ngx_flag_t                *slot;
 
     (void) conf;

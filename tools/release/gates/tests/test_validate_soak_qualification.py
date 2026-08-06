@@ -92,6 +92,17 @@ def test_runtime_directory_rejects_external_override(
         validator._runtime_directory()
 
 
+def test_record_output_path_rejects_external_override(tmp_path: Path) -> None:
+    """Qualification records must stay under the generated output root."""
+    args = type("Args", (), {
+        "output": str(tmp_path / "soak-record.json"),
+        "record": "unused.json",
+    })()
+
+    with pytest.raises(ValueError, match="escapes root"):
+        validator._validated_record_path(args)
+
+
 def test_negative_error_rate_is_not_treated_as_zero() -> None:
     """Non-zero floating-point error rates must fail the fixture gate."""
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
@@ -126,7 +137,9 @@ def test_real_mode_records_insufficient_peak_as_failure(
 ) -> None:
     """Real mode must write fail, not pass, without module peak evidence."""
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    record_path = tmp_path / "soak-record.json"
+    record_path = (
+        tmp_path / "artifacts" / "release" / "0.9.2" / "soak-record.json"
+    )
     runtime_dir = tmp_path / "runtime"
 
     class FakeNginx:
@@ -160,7 +173,7 @@ def test_real_mode_records_insufficient_peak_as_failure(
         (),
         {
             "manifest": str(MANIFEST),
-            "record": str(record_path),
+            "record": "artifacts/release/0.9.2/soak-record.json",
             "output": None,
             "allow_skip_soak": False,
         },

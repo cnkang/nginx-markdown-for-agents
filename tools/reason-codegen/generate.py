@@ -55,6 +55,19 @@ LISTING_OUTPUT = (
     REPO_ROOT / "artifacts" / "release" / "0.9.2" / "generated-reason-artifacts.json"
 )
 
+RUST_DOC_LINE = "    ///"
+RUST_DOC_EXAMPLES = "    /// # Examples"
+RUST_DOC_CODE_FENCE = "    /// ```"
+RUST_DOC_REASON_USE = (
+    "    /// use nginx_markdown_converter::decision::reason_code::ReasonCode;"
+)
+RUST_MATCH_SELF = "        match self {"
+RUST_NO_MANGLE = "#[unsafe(no_mangle)]"
+RUST_REASON_AS_STR = "            let s = rc.as_str();"
+RUST_OUT_LEN_GUARD = "            if !out_len.is_null() {"
+RUST_TEST_ATTRIBUTE = "    #[test]"
+RUST_ALL_LOOP = "        for rc in &ALL {"
+
 
 def load_registry():
     """Load and validate the reason registry TOML."""
@@ -274,7 +287,7 @@ def generate_rust_all_array(reasons) -> str:
     lines.append("/// The closure test verifies this invariant.")
     lines.append("///")
     lines.append("/// cbindgen:ignore")
-    lines.append(f"pub const ALL: [ReasonCode; REASON_CODE_COUNT] = [")
+    lines.append("pub const ALL: [ReasonCode; REASON_CODE_COUNT] = [")
     for r in reasons:
         variant = snake_to_pascal(r["key"])
         lines.append(f"    ReasonCode::{variant},")
@@ -289,20 +302,20 @@ def _append_rust_as_str(lines, reasons):
 
     # as_str
     lines.append("    /// Return the lowercase snake_case string representation.")
-    lines.append("    ///")
+    lines.append(RUST_DOC_LINE)
     lines.append("    /// This string is used in structured logs, diagnostics endpoints,")
     lines.append("    /// and as the label value in Prometheus metrics.")
-    lines.append("    ///")
-    lines.append("    /// # Examples")
-    lines.append("    ///")
-    lines.append("    /// ```")
-    lines.append("    /// use nginx_markdown_converter::decision::reason_code::ReasonCode;")
-    lines.append("    ///")
+    lines.append(RUST_DOC_LINE)
+    lines.append(RUST_DOC_EXAMPLES)
+    lines.append(RUST_DOC_LINE)
+    lines.append(RUST_DOC_CODE_FENCE)
+    lines.append(RUST_DOC_REASON_USE)
+    lines.append(RUST_DOC_LINE)
     lines.append('    /// assert_eq!(ReasonCode::Converted.as_str(), "converted");')
     lines.append('    /// assert_eq!(ReasonCode::Timeout.as_str(), "timeout");')
-    lines.append("    /// ```")
+    lines.append(RUST_DOC_CODE_FENCE)
     lines.append("    pub fn as_str(self) -> &'static str {")
-    lines.append("        match self {")
+    lines.append(RUST_MATCH_SELF)
     for r in reasons:
         variant = snake_to_pascal(r["key"])
         lines.append(f'            ReasonCode::{variant} => "{r["key"]}",')
@@ -335,19 +348,19 @@ def _append_rust_metric_key(lines, reasons):
 
     # metric_key
     lines.append("    /// Return the Prometheus metric key name for this reason code.")
-    lines.append("    ///")
-    lines.append("    /// # Examples")
-    lines.append("    ///")
-    lines.append("    /// ```")
-    lines.append("    /// use nginx_markdown_converter::decision::reason_code::ReasonCode;")
-    lines.append("    ///")
+    lines.append(RUST_DOC_LINE)
+    lines.append(RUST_DOC_EXAMPLES)
+    lines.append(RUST_DOC_LINE)
+    lines.append(RUST_DOC_CODE_FENCE)
+    lines.append(RUST_DOC_REASON_USE)
+    lines.append(RUST_DOC_LINE)
     lines.append("    /// assert_eq!(")
     lines.append('    ///     ReasonCode::Converted.metric_key(),')
     lines.append('    ///     "markdown_conversions_total"')
     lines.append("    /// );")
-    lines.append("    /// ```")
+    lines.append(RUST_DOC_CODE_FENCE)
     lines.append("    pub fn metric_key(self) -> &'static str {")
-    lines.append("        match self {")
+    lines.append(RUST_MATCH_SELF)
 
     for family, members in METRIC_FAMILIES.items():
         _append_metric_family(lines, reasons, family, members)
@@ -372,40 +385,40 @@ def generate_rust_impl_continued(reasons) -> str:
 
     # log_callsite
     lines.append("    /// Return the expected `log_decision()` callsite description.")
-    lines.append("    ///")
-    lines.append("    /// # Examples")
-    lines.append("    ///")
-    lines.append("    /// ```")
-    lines.append("    /// use nginx_markdown_converter::decision::reason_code::ReasonCode;")
-    lines.append("    ///")
+    lines.append(RUST_DOC_LINE)
+    lines.append(RUST_DOC_EXAMPLES)
+    lines.append(RUST_DOC_LINE)
+    lines.append(RUST_DOC_CODE_FENCE)
+    lines.append(RUST_DOC_REASON_USE)
+    lines.append(RUST_DOC_LINE)
     lines.append("    /// assert_eq!(")
     lines.append("    ///     ReasonCode::Converted.log_callsite(),")
     lines.append('    ///     "body_filter: after successful conversion and downstream NGX_OK"')
     lines.append("    /// );")
-    lines.append("    /// ```")
+    lines.append(RUST_DOC_CODE_FENCE)
     lines.append("    pub fn log_callsite(self) -> &'static str {")
-    lines.append("        match self {")
+    lines.append(RUST_MATCH_SELF)
     for r in reasons:
         variant = snake_to_pascal(r["key"])
         callsite = LOG_CALLSITES.get(r["key"], f"body_filter: {r['key']}")
         lines.append(f'            ReasonCode::{variant} => {{')
         lines.append(f'                "{callsite}"')
-        lines.append(f"            }}")
+        lines.append("            }")
     lines.append("        }")
     lines.append("    }")
     lines.append("")
 
     # discriminant
     lines.append("    /// Return the numeric discriminant value for FFI transport.")
-    lines.append("    ///")
-    lines.append("    /// # Examples")
-    lines.append("    ///")
-    lines.append("    /// ```")
-    lines.append("    /// use nginx_markdown_converter::decision::reason_code::ReasonCode;")
-    lines.append("    ///")
+    lines.append(RUST_DOC_LINE)
+    lines.append(RUST_DOC_EXAMPLES)
+    lines.append(RUST_DOC_LINE)
+    lines.append(RUST_DOC_CODE_FENCE)
+    lines.append(RUST_DOC_REASON_USE)
+    lines.append(RUST_DOC_LINE)
     lines.append("    /// assert_eq!(ReasonCode::Converted.discriminant(), 0);")
     lines.append("    /// assert_eq!(ReasonCode::Timeout.discriminant(), 9);")
-    lines.append("    /// ```")
+    lines.append(RUST_DOC_CODE_FENCE)
     lines.append("    pub fn discriminant(self) -> u32 {")
     lines.append("        self as u32")
     lines.append("    }")
@@ -413,17 +426,17 @@ def generate_rust_impl_continued(reasons) -> str:
 
     # from_discriminant
     lines.append("    /// Attempt to construct a `ReasonCode` from its numeric discriminant.")
-    lines.append("    ///")
+    lines.append(RUST_DOC_LINE)
     lines.append("    /// Returns `None` if the value does not correspond to a known variant.")
-    lines.append("    ///")
-    lines.append("    /// # Examples")
-    lines.append("    ///")
-    lines.append("    /// ```")
-    lines.append("    /// use nginx_markdown_converter::decision::reason_code::ReasonCode;")
-    lines.append("    ///")
+    lines.append(RUST_DOC_LINE)
+    lines.append(RUST_DOC_EXAMPLES)
+    lines.append(RUST_DOC_LINE)
+    lines.append(RUST_DOC_CODE_FENCE)
+    lines.append(RUST_DOC_REASON_USE)
+    lines.append(RUST_DOC_LINE)
     lines.append("    /// assert_eq!(ReasonCode::from_discriminant(0), Some(ReasonCode::Converted));")
     lines.append("    /// assert_eq!(ReasonCode::from_discriminant(255), None);")
-    lines.append("    /// ```")
+    lines.append(RUST_DOC_CODE_FENCE)
     lines.append("    pub fn from_discriminant(value: u32) -> Option<Self> {")
     lines.append("        match value {")
     for r in reasons:
@@ -438,7 +451,7 @@ def generate_rust_impl_continued(reasons) -> str:
     return "\n".join(lines)
 
 
-def generate_rust_ffi(reasons) -> str:
+def generate_rust_ffi() -> str:
     """Generate the FFI functions at the end of the Rust file."""
     lines = []
 
@@ -452,18 +465,18 @@ def generate_rust_ffi(reasons) -> str:
     lines.append("///")
     lines.append("/// The caller must ensure that `out_len` either is NULL or points to")
     lines.append("/// writable storage for a `usize`.")
-    lines.append("#[unsafe(no_mangle)]")
+    lines.append(RUST_NO_MANGLE)
     lines.append("pub unsafe extern \"C\" fn markdown_reason_code_str(code: u32, out_len: *mut usize) -> *const u8 {")
     lines.append("    match ReasonCode::from_discriminant(code) {")
     lines.append("        Some(rc) => {")
-    lines.append("            let s = rc.as_str();")
-    lines.append("            if !out_len.is_null() {")
+    lines.append(RUST_REASON_AS_STR)
+    lines.append(RUST_OUT_LEN_GUARD)
     lines.append("                unsafe { *out_len = s.len() };")
     lines.append("            }")
     lines.append("            s.as_ptr()")
     lines.append("        }")
     lines.append("        None => {")
-    lines.append("            if !out_len.is_null() {")
+    lines.append(RUST_OUT_LEN_GUARD)
     lines.append("                unsafe { *out_len = 0 };")
     lines.append("            }")
     lines.append("            std::ptr::null()")
@@ -482,7 +495,7 @@ def generate_rust_ffi(reasons) -> str:
     lines.append("///")
     lines.append("/// The caller must ensure that `out_len` either is NULL or points to")
     lines.append("/// writable storage for a `usize`.")
-    lines.append("#[unsafe(no_mangle)]")
+    lines.append(RUST_NO_MANGLE)
     lines.append("pub unsafe extern \"C\" fn markdown_reason_code_metric_key(")
     lines.append("    code: u32,")
     lines.append("    out_len: *mut usize,")
@@ -490,13 +503,13 @@ def generate_rust_ffi(reasons) -> str:
     lines.append("    match ReasonCode::from_discriminant(code) {")
     lines.append("        Some(rc) => {")
     lines.append("            let s = rc.metric_key();")
-    lines.append("            if !out_len.is_null() {")
+    lines.append(RUST_OUT_LEN_GUARD)
     lines.append("                unsafe { *out_len = s.len() };")
     lines.append("            }")
     lines.append("            s.as_ptr()")
     lines.append("        }")
     lines.append("        None => {")
-    lines.append("            if !out_len.is_null() {")
+    lines.append(RUST_OUT_LEN_GUARD)
     lines.append("                unsafe { *out_len = 0 };")
     lines.append("            }")
     lines.append("            std::ptr::null()")
@@ -509,7 +522,7 @@ def generate_rust_ffi(reasons) -> str:
     lines.append("/// Return the total number of defined reason codes.")
     lines.append("///")
     lines.append("/// C callers can use this to verify they handle all variants.")
-    lines.append("#[unsafe(no_mangle)]")
+    lines.append(RUST_NO_MANGLE)
     lines.append("pub extern \"C\" fn markdown_reason_code_count() -> u32 {")
     lines.append("    REASON_CODE_COUNT as u32")
     lines.append("}")
@@ -518,7 +531,7 @@ def generate_rust_ffi(reasons) -> str:
     return "\n".join(lines)
 
 
-def generate_rust_tests(reasons) -> str:
+def generate_rust_tests() -> str:
     """Generate the test module for the Rust file."""
     lines = []
     lines.append("#[cfg(test)]")
@@ -527,7 +540,7 @@ def generate_rust_tests(reasons) -> str:
     lines.append("    use std::collections::HashSet;")
     lines.append("")
     lines.append("    /// Verify that ALL array length matches REASON_CODE_COUNT.")
-    lines.append("    #[test]")
+    lines.append(RUST_TEST_ATTRIBUTE)
     lines.append("    fn test_all_array_length_matches_count() {")
     lines.append("        assert_eq!(")
     lines.append("            ALL.len(),")
@@ -539,31 +552,31 @@ def generate_rust_tests(reasons) -> str:
     lines.append("    }")
     lines.append("")
     lines.append("    /// Verify that every variant in ALL has a unique discriminant.")
-    lines.append("    #[test]")
+    lines.append(RUST_TEST_ATTRIBUTE)
     lines.append("    fn test_discriminants_unique() {")
     lines.append("        let mut seen = HashSet::new();")
-    lines.append("        for rc in &ALL {")
+    lines.append(RUST_ALL_LOOP)
     lines.append("            let d = rc.discriminant();")
     lines.append('            assert!(seen.insert(d), "Duplicate discriminant {} for {:?}", d, rc);')
     lines.append("        }")
     lines.append("    }")
     lines.append("")
     lines.append("    /// Verify that every variant in ALL has a unique string representation.")
-    lines.append("    #[test]")
+    lines.append(RUST_TEST_ATTRIBUTE)
     lines.append("    fn test_strings_unique() {")
     lines.append("        let mut seen = HashSet::new();")
-    lines.append("        for rc in &ALL {")
-    lines.append("            let s = rc.as_str();")
+    lines.append(RUST_ALL_LOOP)
+    lines.append(RUST_REASON_AS_STR)
     lines.append('            assert!(seen.insert(s), "Duplicate string \'{}\' for {:?}", s, rc);')
     lines.append("        }")
     lines.append("    }")
     lines.append("")
     lines.append("    /// Verify that all string representations are lowercase snake_case.")
-    lines.append("    #[test]")
+    lines.append(RUST_TEST_ATTRIBUTE)
     lines.append("    fn test_strings_are_lowercase_snake_case() {")
     lines.append('        let re = regex::Regex::new(r"^[a-z][a-z0-9_]*$").unwrap();')
-    lines.append("        for rc in &ALL {")
-    lines.append("            let s = rc.as_str();")
+    lines.append(RUST_ALL_LOOP)
+    lines.append(RUST_REASON_AS_STR)
     lines.append('            assert!(!s.is_empty(), "{:?} has empty string", rc);')
     lines.append("            assert!(")
     lines.append("                re.is_match(s),")
@@ -578,14 +591,14 @@ def generate_rust_tests(reasons) -> str:
     return "\n".join(lines)
 
 
-def generate_rust_tests_continued(reasons) -> str:
+def generate_rust_tests_continued() -> str:
     """Generate remaining test functions."""
     lines = []
     lines.append("    /// Verify that exactly 5 unified metric families are used.")
-    lines.append("    #[test]")
+    lines.append(RUST_TEST_ATTRIBUTE)
     lines.append("    fn test_metric_keys_unified_families() {")
     lines.append("        let mut families: HashSet<&str> = HashSet::new();")
-    lines.append("        for rc in &ALL {")
+    lines.append(RUST_ALL_LOOP)
     lines.append("            families.insert(rc.metric_key());")
     lines.append("        }")
     lines.append("        assert_eq!(")
@@ -597,9 +610,9 @@ def generate_rust_tests_continued(reasons) -> str:
     lines.append("    }")
     lines.append("")
     lines.append("    /// Verify round-trip: discriminant -> from_discriminant -> same variant.")
-    lines.append("    #[test]")
+    lines.append(RUST_TEST_ATTRIBUTE)
     lines.append("    fn test_from_discriminant_roundtrip() {")
-    lines.append("        for rc in &ALL {")
+    lines.append(RUST_ALL_LOOP)
     lines.append("            let d = rc.discriminant();")
     lines.append("            let recovered = ReasonCode::from_discriminant(d);")
     lines.append("            assert_eq!(recovered, Some(*rc));")
@@ -607,14 +620,14 @@ def generate_rust_tests_continued(reasons) -> str:
     lines.append("    }")
     lines.append("")
     lines.append("    /// Verify that from_discriminant returns None for invalid values.")
-    lines.append("    #[test]")
+    lines.append(RUST_TEST_ATTRIBUTE)
     lines.append("    fn test_from_discriminant_invalid() {")
     lines.append("        assert_eq!(ReasonCode::from_discriminant(255), None);")
     lines.append("        assert_eq!(ReasonCode::from_discriminant(u32::MAX), None);")
     lines.append("    }")
     lines.append("")
     lines.append("    /// Closure test: verify discriminant range is contiguous 0..COUNT-1.")
-    lines.append("    #[test]")
+    lines.append(RUST_TEST_ATTRIBUTE)
     lines.append("    fn test_discriminant_range_contiguous() {")
     lines.append("        let mut discriminants: Vec<u32> = ALL.iter().map(|rc| rc.discriminant()).collect();")
     lines.append("        discriminants.sort();")
@@ -624,9 +637,9 @@ def generate_rust_tests_continued(reasons) -> str:
     lines.append("    }")
     lines.append("")
     lines.append("    /// FFI function test: markdown_reason_code_str returns correct data.")
-    lines.append("    #[test]")
+    lines.append(RUST_TEST_ATTRIBUTE)
     lines.append("    fn test_ffi_reason_code_str() {")
-    lines.append("        for rc in &ALL {")
+    lines.append(RUST_ALL_LOOP)
     lines.append("            let mut len: usize = 0;")
     lines.append("            let ptr = unsafe { markdown_reason_code_str(rc.discriminant(), &mut len) };")
     lines.append('            assert!(!ptr.is_null(), "NULL returned for {:?}", rc);')
@@ -638,30 +651,30 @@ def generate_rust_tests_continued(reasons) -> str:
     lines.append("    }")
     lines.append("")
     lines.append("    /// FFI function test: markdown_reason_code_count returns correct value.")
-    lines.append("    #[test]")
+    lines.append(RUST_TEST_ATTRIBUTE)
     lines.append("    fn test_ffi_reason_code_count() {")
     lines.append("        assert_eq!(markdown_reason_code_count(), REASON_CODE_COUNT as u32);")
     lines.append("    }")
     lines.append("")
     lines.append("    /// Verify the enum size is suitable for FFI (repr(u8) single-byte).")
-    lines.append("    #[test]")
+    lines.append(RUST_TEST_ATTRIBUTE)
     lines.append("    fn test_enum_size_for_ffi() {")
     lines.append("        assert_eq!(std::mem::size_of::<ReasonCode>(), 1);")
     lines.append("        assert_eq!(std::mem::align_of::<ReasonCode>(), 1);")
     lines.append("    }")
     lines.append("")
     lines.append("    /// Verify that every variant has a non-empty log_callsite().")
-    lines.append("    #[test]")
+    lines.append(RUST_TEST_ATTRIBUTE)
     lines.append("    fn test_log_callsite_non_empty() {")
-    lines.append("        for rc in &ALL {")
+    lines.append(RUST_ALL_LOOP)
     lines.append('            assert!(!rc.log_callsite().is_empty(), "{:?} has empty log_callsite", rc);')
     lines.append("        }")
     lines.append("    }")
     lines.append("")
     lines.append("    /// Verify that log_callsite() descriptions indicate a valid filter phase.")
-    lines.append("    #[test]")
+    lines.append(RUST_TEST_ATTRIBUTE)
     lines.append("    fn test_log_callsite_has_valid_phase() {")
-    lines.append("        for rc in &ALL {")
+    lines.append(RUST_ALL_LOOP)
     lines.append("            let callsite = rc.log_callsite();")
     lines.append("            assert!(")
     lines.append('                callsite.starts_with("header_filter:") || callsite.starts_with("body_filter:"),')
@@ -794,7 +807,7 @@ def generate_manifest(reasons, hash_hex: str) -> dict:
         "total_count": len(reasons),
         "discriminant_range": {"min": min_disc, "max": max_disc},
         "metric_families": sorted(METRIC_FAMILIES.keys()),
-        "stages": sorted(set(r["default_stage"] for r in reasons)),
+        "stages": sorted({r["default_stage"] for r in reasons}),
     }
 
 
@@ -835,9 +848,9 @@ def build_full_rust(reasons, hash_hex: str) -> str:
     parts.append(generate_rust_all_array(reasons))
     parts.append(generate_rust_impl(reasons))
     parts.append(generate_rust_impl_continued(reasons))
-    parts.append(generate_rust_ffi(reasons))
-    parts.append(generate_rust_tests(reasons))
-    parts.append(generate_rust_tests_continued(reasons))
+    parts.append(generate_rust_ffi())
+    parts.append(generate_rust_tests())
+    parts.append(generate_rust_tests_continued())
     return "\n".join(parts)
 
 
@@ -936,7 +949,7 @@ def main():
     check_mode = "--check" in sys.argv
 
     # Load registry
-    data, reasons, raw_bytes = load_registry()
+    _, reasons, raw_bytes = load_registry()
     hash_hex = source_hash(raw_bytes)
 
     print(f"Reason registry: {len(reasons)} entries, SHA-256: {hash_hex[:16]}...")

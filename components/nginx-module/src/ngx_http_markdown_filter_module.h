@@ -1862,7 +1862,7 @@ ngx_int_t
 ngx_http_markdown_collect_content_encoding(ngx_http_request_t *r,
                                            ngx_str_t *out);
 u_char
-ngx_http_markdown_parse_encoding_chain_ffi(ngx_http_request_t *r,
+ngx_http_markdown_parse_encoding_chain_ffi(const ngx_http_request_t *r,
                                            ngx_http_markdown_ctx_t *ctx,
                                            const ngx_str_t *combined);
 

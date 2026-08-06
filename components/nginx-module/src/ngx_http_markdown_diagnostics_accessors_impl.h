@@ -634,6 +634,76 @@ ngx_http_markdown_manifest_append_policy_fields(
 }
 
 
+static void
+ngx_http_markdown_manifest_error_value(
+    const ngx_http_markdown_conf_t *conf,
+    const u_char **value, size_t *value_len)
+{
+    if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS) {
+        *value = (const u_char *) "pass";
+        *value_len = sizeof("pass") - 1;
+    } else if (conf->error_status == 429) {
+        *value = (const u_char *) "status 429";
+        *value_len = sizeof("status 429") - 1;
+    } else if (conf->error_status == 503) {
+        *value = (const u_char *) "status 503";
+        *value_len = sizeof("status 503") - 1;
+    } else {
+        *value = (const u_char *) "fail_closed";
+        *value_len = sizeof("fail_closed") - 1;
+    }
+}
+
+
+static void
+ngx_http_markdown_manifest_dynamic_value(
+    const ngx_http_markdown_conf_t *conf,
+    const u_char **value, size_t *value_len)
+{
+    if (conf->advanced.dynconf_enabled) {
+        *value = (const u_char *) "on";
+        *value_len = sizeof("on") - 1;
+    } else {
+        *value = (const u_char *) "off";
+        *value_len = sizeof("off") - 1;
+    }
+}
+
+
+static void
+ngx_http_markdown_manifest_filter_value(
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_str_t *complex_value,
+    const u_char **value, size_t *value_len)
+{
+    if (complex_value != NULL) {
+        *value = complex_value->data;
+        *value_len = complex_value->len;
+    } else if (ngx_http_markdown_effective_enabled(NULL, conf)) {
+        *value = (const u_char *) "on";
+        *value_len = sizeof("on") - 1;
+    } else {
+        *value = (const u_char *) "off";
+        *value_len = sizeof("off") - 1;
+    }
+}
+
+
+static void
+ngx_http_markdown_manifest_flavor_value(
+    const ngx_http_markdown_conf_t *conf,
+    const u_char **value, size_t *value_len)
+{
+    if (conf->flavor == NGX_HTTP_MARKDOWN_FLAVOR_GFM) {
+        *value = (const u_char *) "gfm";
+        *value_len = sizeof("gfm") - 1;
+    } else {
+        *value = (const u_char *) "commonmark";
+        *value_len = sizeof("commonmark") - 1;
+    }
+}
+
+
 static ngx_int_t
 ngx_http_markdown_manifest_append_runtime_fields(
     ngx_http_markdown_manifest_builder_t *builder,
@@ -656,45 +726,12 @@ ngx_http_markdown_manifest_append_runtime_fields(
         complex_value = &conf->enabled_complex->value;
     }
 
-    if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS) {
-        error_value = (const u_char *) "pass";
-        error_len = sizeof("pass") - 1;
-    } else if (conf->error_status == 429) {
-        error_value = (const u_char *) "status 429";
-        error_len = sizeof("status 429") - 1;
-    } else if (conf->error_status == 503) {
-        error_value = (const u_char *) "status 503";
-        error_len = sizeof("status 503") - 1;
-    } else {
-        error_value = (const u_char *) "fail_closed";
-        error_len = sizeof("fail_closed") - 1;
-    }
-    if (conf->advanced.dynconf_enabled) {
-        dynamic_value = (const u_char *) "on";
-        dynamic_len = sizeof("on") - 1;
-    } else {
-        dynamic_value = (const u_char *) "off";
-        dynamic_len = sizeof("off") - 1;
-    }
-
-    if (complex_value != NULL) {
-        filter_value = complex_value->data;
-        filter_len = complex_value->len;
-    } else if (conf->enabled) {
-        filter_value = (const u_char *) "on";
-        filter_len = sizeof("on") - 1;
-    } else {
-        filter_value = (const u_char *) "off";
-        filter_len = sizeof("off") - 1;
-    }
-
-    if (conf->flavor == NGX_HTTP_MARKDOWN_FLAVOR_GFM) {
-        flavor_value = (const u_char *) "gfm";
-        flavor_len = sizeof("gfm") - 1;
-    } else {
-        flavor_value = (const u_char *) "commonmark";
-        flavor_len = sizeof("commonmark") - 1;
-    }
+    ngx_http_markdown_manifest_error_value(conf, &error_value, &error_len);
+    ngx_http_markdown_manifest_dynamic_value(
+        conf, &dynamic_value, &dynamic_len);
+    ngx_http_markdown_manifest_filter_value(
+        conf, complex_value, &filter_value, &filter_len);
+    ngx_http_markdown_manifest_flavor_value(conf, &flavor_value, &flavor_len);
 
     if (ngx_http_markdown_manifest_field_string(
             builder, "dynamic_config", dynamic_value, dynamic_len,

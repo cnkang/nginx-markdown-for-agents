@@ -27,8 +27,6 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 NGINX_BIN="${NGINX_BIN:-}"
 KEEP_ARTIFACTS=0
 
@@ -104,10 +102,11 @@ log_pass() {
 }
 
 log_fail() {
+  local message="${1:-}"
   TESTS_FAILED=$((TESTS_FAILED + 1))
   echo "FAILED" >&2
-  if [[ -n "$1" ]]; then
-    echo "       $1" >&2
+  if [[ -n "${message}" ]]; then
+    echo "       ${message}" >&2
   fi
 }
 
@@ -136,8 +135,9 @@ events { worker_connections 64; }
 
 http {
     markdown_filter on;
-    ${policy_line}
-
+EOF
+  printf '    %s\n\n' "${policy_line}" >> "${conf_file}"
+  cat >> "${conf_file}" <<EOF
     server {
         listen 127.0.0.1:19998;
         location / {
