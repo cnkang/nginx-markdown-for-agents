@@ -62,6 +62,8 @@ SOAK_SCENARIO_FILES = {
     "medium": "medium.html",
     "large": "large.html",
 }
+SOAK_METRICS_PATH = "/markdown-metrics"
+METRICS_RESPONSE_MAX_BYTES = 64 * 1024
 FLOAT_EPSILON = 1e-9
 PEAK_MEMORY_MISSING_ERROR = (
     "insufficient-data: module-managed per-request peak memory was not observed"
@@ -96,6 +98,9 @@ REQUIRED_SCENARIO_FIELDS = (
 
 SHA256_RE = re.compile(r"^[0-9a-f]{40}$")
 AB_PCT_LINE_RE = re.compile(r"^\s*(?P<pct>\d+)%\s+(?P<ms>[0-9.]+)\s*(?:ms)?$")
+PEAK_MEMORY_METRIC_RE = re.compile(
+    r"^nginx_markdown_streaming_peak_memory_bytes\s+(?P<bytes>[0-9]+)$"
+)
 
 
 def utc_now() -> str:
@@ -327,6 +332,56 @@ def _validated_local_url(url: str) -> str:
     return f"http://127.0.0.1:{SOAK_PORT}/{validated_path}"
 
 
+def _validated_metrics_url(base_url: str) -> str:
+    """Build the fixed local metrics URL used for module observations."""
+    parsed = urllib.parse.urlsplit(base_url)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("invalid soak metrics URL port") from exc
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname != "127.0.0.1"
+        or port != SOAK_PORT
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in ("", "/")
+    ):
+        raise ValueError("invalid soak metrics URL")
+    return f"http://127.0.0.1:{SOAK_PORT}{SOAK_METRICS_PATH}"
+
+
+def _parse_peak_memory_metric(text: str) -> int | None:
+    """Parse one positive module-managed peak gauge from Prometheus text."""
+    for line in text.splitlines():
+        match = PEAK_MEMORY_METRIC_RE.fullmatch(line.strip())
+        if match:
+            peak = int(match.group("bytes"))
+            return peak if peak > 0 else None
+    return None
+
+
+def read_module_peak_memory(base_url: str) -> int | None:
+    """Read the bounded v1 Prometheus peak-memory gauge from local NGINX."""
+    url = _validated_metrics_url(base_url)
+    try:
+        with urllib.request.urlopen(url, timeout=5) as response:
+            if response.status != 200:
+                return None
+            payload = response.read(METRICS_RESPONSE_MAX_BYTES + 1)
+    except (OSError, UnicodeError, urllib.error.URLError):
+        return None
+    if len(payload) > METRICS_RESPONSE_MAX_BYTES:
+        return None
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    return _parse_peak_memory_metric(text)
+
+
 def parse_ab_report(output: str) -> dict:
     percentiles = {}
     failed = 0
@@ -443,6 +498,12 @@ http {{
         listen {port};
         root {root_text};
         markdown_filter on;
+        location = /markdown-metrics {{
+            markdown_metrics;
+            allow 127.0.0.1;
+            allow ::1;
+            deny all;
+        }}
     }}
 }}
 """
@@ -699,6 +760,7 @@ def real_main(args: argparse.Namespace) -> int:
             corpus, worker_pid, duration, started,
             manifest["concurrency"], runtime_dir)
         drain_delta, monotonic = measure_drain(worker_pid)
+        peak_memory_bytes = read_module_peak_memory(base_url)
     finally:
         nginx.terminate()
         try:
@@ -723,8 +785,8 @@ def real_main(args: argparse.Namespace) -> int:
         "rss_time_series": rss_series,
         "worker_rss_drain_delta_kb": drain_delta,
         "monotonic_growth_after_drain": monotonic,
-        "module_managed_peak_observed": False,
-        "per_request_peak_bytes": None,
+        "module_managed_peak_observed": peak_memory_bytes is not None,
+        "per_request_peak_bytes": peak_memory_bytes,
         "errors": [],
         "status": "pass",
     }

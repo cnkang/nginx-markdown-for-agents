@@ -82,6 +82,18 @@ def test_local_url_rejects_traversal() -> None:
         validator._validated_local_url("http://127.0.0.1:19200/../etc/passwd")
 
 
+def test_peak_memory_metric_parser_requires_positive_gauge() -> None:
+    body = (
+        "# TYPE nginx_markdown_streaming_peak_memory_bytes gauge\n"
+        "nginx_markdown_streaming_peak_memory_bytes 65536\n"
+    )
+    assert validator._parse_peak_memory_metric(body) == 65536
+    assert validator._parse_peak_memory_metric(
+        "nginx_markdown_streaming_peak_memory_bytes 0\n"
+    ) is None
+    assert validator._parse_peak_memory_metric("other_metric 65536\n") is None
+
+
 def test_runtime_directory_rejects_external_override(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -167,6 +179,7 @@ def test_real_mode_records_insufficient_peak_as_failure(
         ),
     )
     monkeypatch.setattr(validator, "measure_drain", lambda worker_pid: (0, False))
+    monkeypatch.setattr(validator, "read_module_peak_memory", lambda base_url: None)
 
     args = type(
         "Args",
