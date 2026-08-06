@@ -105,11 +105,13 @@ pub const POST_COMMIT_SAFE_FINISH: u32 = 3;
 #[cfg(feature = "streaming")]
 pub const POST_COMMIT_ABORT: u32 = 4;
 
-/// Decompression budget exceeded (decompressed output exceeds decompress_max_size).
+/// Decompression budget exceeded (decompressed output exceeds the
+/// `markdown_limits decompressed_size` ceiling).
 pub const ERROR_DECOMPRESSION_BUDGET_EXCEEDED: u32 = 9;
 /// Parse timeout: HTML parsing exceeded the configured deadline.
 pub const ERROR_PARSE_TIMEOUT: u32 = 10;
-/// Parse budget exceeded: parser memory allocation exceeded parser_memory_budget.
+/// Parse budget exceeded: parser memory allocation exceeded the
+/// `markdown_limits parser_memory` ceiling.
 pub const ERROR_PARSE_BUDGET_EXCEEDED: u32 = 11;
 /// Decompression format error (invalid or corrupt compressed data).
 #[allow(dead_code)]
@@ -240,20 +242,20 @@ pub struct MarkdownOptions {
     /// When non-zero, the HTML parser uses this deadline instead of the
     /// general `timeout_ms` field.  This allows operators to set a tighter
     /// parse-phase budget while keeping a longer overall conversion timeout.
-    /// Populated from the `markdown_parse_timeout` NGINX directive.
+    /// Populated from the `markdown_limits parser_timeout=<time>` setting.
     pub parse_timeout_ms: u32,
     /// Parser memory budget in bytes (0 = unlimited).
     ///
     /// When non-zero, the HTML parser is constrained to this memory
     /// allocation ceiling.  Exceeding the budget produces
     /// `ERROR_PARSE_BUDGET_EXCEEDED`.
-    /// Populated from the `markdown_parser_budget` NGINX directive.
+    /// Populated from the `markdown_limits parser_memory=<size>` setting.
     pub parser_memory_budget: u64,
     /// Streaming flush threshold in bytes (0 = use default threshold).
     ///
     /// Controls the minimum number of accumulated output bytes before
     /// the streaming emitter returns non-empty output to the C caller.
-    /// Populated from the `markdown_stream_flush_min` NGINX directive.
+    /// Populated from the `markdown_limits streaming_buffer=<size>` setting.
     pub flush_threshold: u32,
 }
 

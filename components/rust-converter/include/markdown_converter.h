@@ -310,7 +310,8 @@
 #endif
 
 /**
- * Decompression budget exceeded (decompressed output exceeds decompress_max_size).
+ * Decompression budget exceeded (decompressed output exceeds the
+ * `markdown_limits decompressed_size` ceiling).
  */
 #define ERROR_DECOMPRESSION_BUDGET_EXCEEDED 9
 
@@ -320,7 +321,8 @@
 #define ERROR_PARSE_TIMEOUT 10
 
 /**
- * Parse budget exceeded: parser memory allocation exceeded parser_memory_budget.
+ * Parse budget exceeded: parser memory allocation exceeded the
+ * `markdown_limits parser_memory` ceiling.
  */
 #define ERROR_PARSE_BUDGET_EXCEEDED 11
 
@@ -804,7 +806,7 @@ typedef struct MarkdownOptions {
    * When non-zero, the HTML parser uses this deadline instead of the
    * general `timeout_ms` field.  This allows operators to set a tighter
    * parse-phase budget while keeping a longer overall conversion timeout.
-   * Populated from the `markdown_parse_timeout` NGINX directive.
+   * Populated from the `markdown_limits parser_timeout=<time>` setting.
    */
   uint32_t parse_timeout_ms;
   /**
@@ -813,7 +815,7 @@ typedef struct MarkdownOptions {
    * When non-zero, the HTML parser is constrained to this memory
    * allocation ceiling.  Exceeding the budget produces
    * `ERROR_PARSE_BUDGET_EXCEEDED`.
-   * Populated from the `markdown_parser_budget` NGINX directive.
+   * Populated from the `markdown_limits parser_memory=<size>` setting.
    */
   uint64_t parser_memory_budget;
   /**
@@ -821,7 +823,7 @@ typedef struct MarkdownOptions {
    *
    * Controls the minimum number of accumulated output bytes before
    * the streaming emitter returns non-empty output to the C caller.
-   * Populated from the `markdown_stream_flush_min` NGINX directive.
+   * Populated from the `markdown_limits streaming_buffer=<size>` setting.
    */
   uint32_t flush_threshold;
 } MarkdownOptions;
