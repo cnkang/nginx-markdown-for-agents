@@ -1,11 +1,20 @@
-# Profile System Design
+# Profile System Design (Retired)
+
+> **Archived**: The `markdown_profile` directive and the profile system
+> described below were **removed in 0.9.2** (see
+> [MIGRATION-0.9.2.md](../guides/MIGRATION-0.9.2.md) and
+> [0.9.2-breaking-changes.md](../guides/0.9.2-breaking-changes.md)). This
+> document is retained as a historical design record of the pre-0.9.2
+> surface; it does not describe any active 0.9.2 behavior. The named profile
+> directive appears here only as an archived reference.
 
 | Field | Value |
 |-------|-------|
-| Version | 0.9.1 |
+| Version | 0.9.1 (historical) |
 | Feature | Profiles Production Defaults |
-| Status | Implemented |
+| Status | Retired in 0.9.2 |
 | Created | 2026-06-28 |
+| Retired | 2026-08-05 |
 
 ---
 
@@ -190,12 +199,13 @@ default argument" pattern.
 
 ## Related Documents
 
-- [Configuration Guide — Profiles section](../guides/CONFIGURATION.md#profiles)
-- [Deployment Examples — Profile-Based Deployments](../guides/DEPLOYMENT_EXAMPLES.md#profile-based-deployments-v090)
-- [Profile Inventory (field mapping)](profile-inventory.md)
+- [Profile Inventory (historical field mapping)](profile-inventory.md)
+- [MIGRATION-0.9.2.md](../guides/MIGRATION-0.9.2.md) — removed surface and replacement directives
+- [0.9.2-breaking-changes.md](../guides/0.9.2-breaking-changes.md) — breaking-change reference
 
 ## Document Updates
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-06 | Kang | Archived: profile system (including the markdown_profile directive) removed in 0.9.2; document retained as historical record |
 | 0.9.0 | 2026-06-28 | Kang | Initial creation |

@@ -293,16 +293,22 @@ markdown_buffer_chunked;        # Error: missing value
 
 ---
 
-### 14. markdown_stream_types (type [type ...])
+### 14. markdown_stream_types (removed in 0.9.2)
 
-**Valid configurations:**
+**Removed:** This directive was removed in 0.9.2. Configurations using it are
+rejected with the standard unknown-directive error at `nginx -t` time. See
+[MIGRATION-0.9.2.md](../guides/MIGRATION-0.9.2.md) for the replacement
+surface. Historical validation examples are retained below only as an
+archived record of the pre-0.9.2 surface.
+
+**Historical (pre-0.9.2) examples:**
 ```nginx
 markdown_stream_types text/event-stream;
 markdown_stream_types text/event-stream application/x-ndjson;
 markdown_stream_types text/event-stream application/stream+json;
 ```
 
-**Invalid configurations:**
+**Historical invalid examples:**
 ```nginx
 markdown_stream_types;          # Error: missing value (requires at least one type)
 markdown_stream_types "";       # Error: empty content type
@@ -310,7 +316,7 @@ markdown_stream_types plaintext; # Error: invalid format, must be "type/subtype"
 markdown_stream_types text;     # Error: invalid format, must be "type/subtype"
 ```
 
-**Expected behavior:**
+**Historical expected behavior:**
 - Default: NULL (no exclusions)
 - Context: http, server, location
 - Accepts multiple content types (space-separated)
