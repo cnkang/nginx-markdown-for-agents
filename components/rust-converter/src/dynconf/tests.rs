@@ -1,7 +1,20 @@
 //! Unit tests for the dynconf parser module.
 
-use super::parser::DynconfParseErrorKind;
+use super::parser::{DynconfParseErrorKind, JsonValue, parse_json_with_budget};
 use super::*;
+
+#[test]
+fn test_json_parser_preserves_utf8_string_values() {
+    let parsed = parse_json_with_budget(r#"{"message":"你好 é 🚀"}"#.as_bytes(), 8, 100).unwrap();
+
+    assert_eq!(
+        parsed,
+        JsonValue::Object(vec![(
+            "message".to_string(),
+            JsonValue::String("你好 é 🚀".to_string()),
+        )])
+    );
+}
 
 #[test]
 fn test_minimal_valid_document() {
