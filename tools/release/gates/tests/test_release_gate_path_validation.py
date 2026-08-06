@@ -8,8 +8,12 @@ from pathlib import Path
 import pytest
 
 from tools.release.gates import validate_artifact_registry as artifact_gate
+from tools.release.gates import validate_config_directives as config_gate
+from tools.release.gates import validate_fuzz_packaging as fuzz_gate
+from tools.release.gates import validate_metrics as metrics_gate
 from tools.release.gates import validate_release_candidate_evidence as candidate_gate
 from tools.release.gates import validate_release_evidence_manifest as evidence_gate
+from tools.release.gates import validate_reason_codes as reason_gate
 
 
 @pytest.mark.parametrize(
@@ -74,3 +78,22 @@ def test_candidate_digest_does_not_follow_external_symlink(
     )
 
     assert any("escapes repository root" in reason for reason in reasons)
+
+
+@pytest.mark.parametrize(
+    "gate",
+    (config_gate, fuzz_gate, metrics_gate, reason_gate),
+)
+def test_read_safe_rejects_project_prefix_sibling(
+    gate, tmp_path: Path, monkeypatch
+) -> None:
+    """A sibling such as repo-extra is outside the repository root."""
+    repo_root = tmp_path / "repo"
+    sibling = tmp_path / "repo-extra"
+    repo_root.mkdir()
+    sibling.mkdir()
+    candidate = sibling / "secret.txt"
+    candidate.write_text("outside", encoding="utf-8")
+    monkeypatch.setattr(gate, "PROJECT_ROOT", repo_root)
+
+    assert gate.read_safe(candidate) == ""

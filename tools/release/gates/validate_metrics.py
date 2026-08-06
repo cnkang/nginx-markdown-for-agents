@@ -171,7 +171,9 @@ class ValidationResult:
 def read_safe(path: Path) -> str:
     """Read file content safely, returning empty string if missing."""
     resolved = path.resolve()
-    if not str(resolved).startswith(str(PROJECT_ROOT)):
+    try:
+        resolved.relative_to(PROJECT_ROOT.resolve())
+    except ValueError:
         return ""
     return resolved.read_text(encoding="utf-8") if resolved.is_file() else ""
 
