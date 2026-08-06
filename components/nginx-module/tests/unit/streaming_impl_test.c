@@ -363,11 +363,6 @@ static uint32_t g_streaming_finalize_rc = ERROR_SUCCESS;
 static struct MarkdownResult g_streaming_finalize_result;
 static ngx_uint_t g_info_log_count = 0;
 static const char *g_last_info_log_fmt = NULL;
-static ngx_uint_t g_otel_span_start_calls = 0;
-static ngx_uint_t g_otel_str_attr_count = 0;
-static ngx_uint_t g_otel_uri_attr_seen = 0;
-static ngx_uint_t g_otel_uri_route_seen = 0;
-static ngx_uint_t g_otel_full_uri_seen = 0;
 
 /*
  * Production globals that must be defined for the streaming impl header to
@@ -1345,64 +1340,6 @@ ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
 #define ngx_atomic_fetch_add(p, v)  (*(p) += (v), *(p))
 #endif
 
-static ngx_inline void *
-ngx_http_markdown_otel_span_start(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf)
-{
-    (void) r;
-    (void) conf;
-    g_otel_span_start_calls++;
-    return NULL;
-}
-
-static ngx_inline void
-ngx_http_markdown_otel_set_str_attr(void *span,
-    const u_char *key, size_t key_len,
-    const u_char *val, size_t val_len)
-{
-    (void) span;
-
-    g_otel_str_attr_count++;
-    if (key_len == 3 && ngx_memcmp(key, "uri", 3) == 0) {
-        g_otel_uri_attr_seen = 1;
-    }
-    if (key_len == 9 && ngx_memcmp(key, "uri_route", 9) == 0) {
-        g_otel_uri_route_seen = 1;
-    }
-    if (val_len == sizeof("/private/customer/12345?token=secret") - 1
-        && ngx_memcmp(val, "/private/customer/12345?token=secret",
-                      val_len) == 0)
-    {
-        g_otel_full_uri_seen = 1;
-    }
-}
-
-static ngx_inline void
-ngx_http_markdown_otel_set_int_attr(void *span,
-    const u_char *key, size_t key_len,
-    int64_t val)
-{
-    (void) span;
-    (void) key;
-    (void) key_len;
-    (void) val;
-}
-
-static ngx_inline void
-ngx_http_markdown_otel_span_end(void *span)
-{
-    (void) span;
-}
-
-static ngx_inline void
-ngx_http_markdown_otel_span_export(void *span,
-    ngx_log_t *log, ngx_http_request_t *r)
-{
-    (void) span;
-    (void) log;
-    (void) r;
-}
-
 static ngx_inline void
 ngx_http_markdown_record_per_path_metrics(
     ngx_http_request_t *r,
@@ -1521,11 +1458,6 @@ reset_globals(void)
         sizeof(g_streaming_finalize_result));
     g_info_log_count = 0;
     g_last_info_log_fmt = NULL;
-    g_otel_span_start_calls = 0;
-    g_otel_str_attr_count = 0;
-    g_otel_uri_attr_seen = 0;
-    g_otel_uri_route_seen = 0;
-    g_otel_full_uri_seen = 0;
     /*
      * Tests frequently bind ngx_http_markdown_metrics to stack-local
      * storage; always clear it here so later tests cannot read a stale
