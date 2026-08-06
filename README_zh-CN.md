@@ -402,7 +402,7 @@ v0.9.2 分支目前是开发候选版本，尚未发布。这是 v1.0 前最后�
 v0.9.1 是 **v1.0 前最后一次基线收敛与兼容性重置**。它在性能就绪工作的基础上，完成 v1.0 冻结前最后一轮有意的源码构建与公共契约清理。v0.9.0 发布时原计划作为最后一个破坏性版本；由于 v1.0 尚未发布且采用规模仍有限，兼容性冻结窗口现明确延长至 v0.9.1。
 
 - **Rust 基线重置**：源码构建现在要求 Rust 1.97+；仓库、CI 和发布构建使用精确的 Rust 1.97.0 (MSRV 1.97)。预构建模块的用户不需要安装 Rust。
-- **单一流式控制**：`markdown_streaming off|auto|force` 现在是唯一处理路径选择器。重复的 `markdown_streaming_engine` 仅保留拒绝入口，并给出 off/auto/on 的精确迁移提示。
+- **单一流式控制**：`markdown_streaming off|auto|force` 现在是唯一处理路径选择器。重复的 `markdown_streaming_engine` 已移除；旧配置由 NGINX 标准 unknown-directive 错误识别。
 - **明确支持的 flavor**：`markdown_flavor` 仅支持 `commonmark` 和 `gfm`。实验性的 `mdx` 与 `org-mode` 从未有独立生产语义，现会被明确拒绝。
 - **自动零拷贝流式输出**：由缓冲区所有权和背压状态在内部选择安全的交付路径，不暴露零拷贝指令。
 - **流式解压路由（gzip + deflate + Brotli）**：显式设置 `markdown_streaming force`、`markdown_auto_decompress on` 且 `markdown_cache_validation` 不为 `full` 时，gzip、deflate（包括 zlib 封装 RFC 1950 和原始 RFC 1951 deflate）及 Brotli 响应通过流式引擎增量解压，无需强制全缓冲积攒。gzip member 边界和 trailer 会跨分块校验。Brotli 流式解压需要构建时的 `libbrotlidec`（通过 `NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off` 控制，官方构件默认启用）。
@@ -418,7 +418,7 @@ v0.9.1 是 **v1.0 前最后一次基线收敛与兼容性重置**。它在性能
 
 v0.9.1 发布后迈向 v1.0.0 正式版的演进方向：
 
-- **可观测性扩展**：稳定实验性的 OpenTelemetry 表面及其请求池作用域契约。
+- **可观测性互操作**：保持冻结的 Prometheus 与 Diagnostics 合同兼容外部监控系统，不再增加模块专用 OTel 指令。
 - **分发渠道拓宽**：将 APT 与 YUM 打包发布整合至标准的 Linux 发行版包索引中。
 - **诊断系统增强**：扩展 `nginx-markdown-doctor` CLI 工具与监控指标，提供实时转换监控。
 

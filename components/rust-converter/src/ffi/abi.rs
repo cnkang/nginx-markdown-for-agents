@@ -411,7 +411,7 @@ pub struct FFIEligibilityInput {
     pub content_types: *const FFIStr,
     /// Number of entries in `content_types`.
     pub content_types_count: usize,
-    /// Configured `markdown_stream_types` exclusions (NULL/0 = none).
+    /// Configured `markdown_stream_excluded_types` exclusions (NULL/0 = none).
     pub stream_types: *const FFIStr,
     /// Number of entries in `stream_types`.
     pub stream_types_count: usize,

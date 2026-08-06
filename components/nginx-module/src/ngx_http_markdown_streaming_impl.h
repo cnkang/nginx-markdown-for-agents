@@ -602,7 +602,7 @@ ngx_http_markdown_log_conditional_streaming(
  * 4. 304 Not Modified -> PATH_FULLBUFFER
  * 5. conditional_requests full_support -> PATH_FULLBUFFER
  * 6. Content-Type is text/event-stream -> PATH_FULLBUFFER
- * 7. stream_types exclusion match -> PATH_FULLBUFFER
+ * 7. stream_excluded_types exclusion match -> PATH_FULLBUFFER
  * 8. policy == force -> PATH_STREAMING
  * 9. policy == auto + CL >= NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT -> PATH_STREAMING
  * 10. policy == auto + chunked -> PATH_STREAMING

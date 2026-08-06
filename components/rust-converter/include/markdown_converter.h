@@ -969,7 +969,7 @@ typedef struct FFIEligibilityInput {
    */
   uintptr_t content_types_count;
   /**
-   * Configured `markdown_stream_types` exclusions (NULL/0 = none).
+   * Configured `markdown_stream_excluded_types` exclusions (NULL/0 = none).
    */
   const struct FFIStr *stream_types;
   /**

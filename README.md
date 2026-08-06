@@ -409,7 +409,7 @@ See the [0.9.2 release notes](docs/releases/0.9.2-release-notes.md),
 v0.9.1 is the **final pre-v1.0 baseline consolidation and compatibility reset**. It combines performance readiness with the last deliberate source-build and public-contract cleanup before the v1.0 freeze. v0.9.0 was intended to be the last breaking release; the freeze was extended through v0.9.1 while v1.0 remained unpublished and adoption was still limited.
 
 - **Rust baseline reset**: source builds now require Rust 1.97+; repository, CI, and release builds use exact Rust 1.97.0 (MSRV 1.97). Prebuilt module users do not need Rust.
-- **Single streaming control**: `markdown_streaming off|auto|force` is now the sole processing-path selector. The duplicate `markdown_streaming_engine` directive is reject-only with exact off/auto/on migration hints.
+- **Single streaming control**: `markdown_streaming off|auto|force` is now the sole processing-path selector. The duplicate `markdown_streaming_engine` directive is absent; use the standard NGINX unknown-directive error to identify stale configuration.
 - **Supported flavors clarified**: `markdown_flavor` supports `commonmark` and `gfm`. The experimental `mdx` and `org-mode` values are rejected because they never had distinct production conversion semantics.
 - **Automatic zero-copy streaming output**: buffer ownership and backpressure select the safe delivery path internally; no zero-copy directive is exposed.
 - **Streaming decompression routing (gzip + deflate + Brotli)**: with explicit `markdown_streaming force`, `markdown_auto_decompress on`, and `markdown_cache_validation` not `full`, gzip, deflate (both zlib-wrapped RFC 1950 and raw RFC 1951), and Brotli responses are decompressed incrementally through the streaming engine instead of forcing full-buffer accumulation. Gzip member boundaries and trailers are validated across chunks. Brotli streaming requires `libbrotlidec` at build time (controlled by `NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off`, enabled by default in official artifacts).
@@ -425,8 +425,9 @@ For the full list of changes across prior versions (including breaking configura
 
 Post-v0.9.1 and towards the v1.0.0 milestone:
 
-- **Observability Expansion**: Stabilize the experimental OpenTelemetry
-  surface and its request-scoped contract.
+- **Observability interoperability**: Keep the frozen Prometheus and
+  diagnostics contracts compatible with external monitoring systems without
+  adding module-specific OTel directives.
 - **Distribution Expansion**: Official APT and YUM packaging pipelines integrated into standard Linux package indexing.
 - **Diagnostic Enhancements**: Extending CLI `nginx-markdown-doctor` checks and telemetry metrics for real-time conversion monitoring.
 

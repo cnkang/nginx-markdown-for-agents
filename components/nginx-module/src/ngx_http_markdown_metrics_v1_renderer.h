@@ -47,9 +47,9 @@ u_char *ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...);
  *
  * This is the reduced metrics structure that carries exactly the
  * data needed to render the 11 frozen families. The existing
- * ngx_http_markdown_metrics_snapshot_t remains for backward
- * compatibility during the transition; the v1 renderer reads
- * from this v1 snapshot.
+ * ngx_http_markdown_metrics_snapshot_t remains as an internal storage
+ * shape for counter aggregation; it is not a public renderer or wire
+ * contract. The v1 renderer reads from this v1 snapshot.
  */
 typedef struct {
     ngx_atomic_uint_t buckets[NGX_HTTP_MARKDOWN_METRICS_V1_BUCKET_COUNT];

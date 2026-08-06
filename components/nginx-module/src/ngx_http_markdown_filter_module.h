@@ -609,7 +609,7 @@ typedef enum {
  * - generate_etag: 0 (off by default — ims_only mode)
  * - conditional_requests: NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE
  * - log_verbosity: NGX_HTTP_MARKDOWN_LOG_INFO
- * - stream_types: NULL (no exclusions by default)
+ * - stream_excluded_types: NULL (no exclusions by default)
  * - auto_decompress: 1 (on by default)
  * - decompress_max_size: same as max_size (inherited after memory_budget override)
  * - parse_timeout: 30000ms (30 seconds)
@@ -668,15 +668,11 @@ typedef struct {
 } ngx_http_markdown_advanced_cfg_t;
 
 /*
- * Resolved profile-default value bundle (0.9.0 profile expansion, spec 50).
+ * Retained zero-value compatibility bundle for the internal Config V2 FFI.
  *
- * Pure config-time data: each field carries the default value a given
- * profile contributes for the corresponding Config V2 directive.  The
- * merge logic feeds these values as the fallback "default" argument of the
- * standard ngx_conf_merge_* calls, so an explicit (or inherited-explicit)
- * directive always wins over the profile, and the profile in turn wins over
- * the built-in default.  For NGX_HTTP_MARKDOWN_PROFILE_NONE the fields equal
- * the built-in Config V2 defaults, making profile expansion a no-op.
+ * No public `markdown_profile` directive or request-path profile decision
+ * exists in 0.9.2.  The bundle is not populated by the active command table
+ * and remains only to keep the internal FFI layout stable.
  *
  * The bundle is value data only; it adds no request-path decision branch.
  */

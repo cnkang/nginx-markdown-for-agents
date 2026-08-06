@@ -5,7 +5,7 @@ This document contains detailed NGINX configuration examples, verification steps
 ## Table of Contents
 
 1. [NGINX Configuration Examples](#nginx-configuration-examples)
-2. [Profile-Based Deployments](#profile-based-deployments-v090)
+2. [Explicit Deployment Presets](#explicit-deployment-presets-v092)
 3. [Quick Verification (curl)](#quick-verification-curl)
 4. [Common Deployment Notes](#common-deployment-notes)
 5. [Common Issues Quick Reference](#common-issues-quick-reference)
@@ -382,7 +382,7 @@ http {
 
 #### Mixed explicit policies per location
 
-Different paths can use different profiles via NGINX inheritance:
+Different paths can use different explicit policies via NGINX inheritance:
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;

@@ -52,10 +52,9 @@ struct ngx_cycle_s;
  * function (or these constants) to compute expected buffer sizes.
  *
  * NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE:
- *   Covers the fixed-size JSON envelope: config_snapshot (dynconf
- *   snapshot serialization), metrics_snapshot (6 counters), dynconf_state
- *   (4 fields), streaming_config (7 fields), streaming_metrics
- *   (8 counters), section keys, braces, commas, and whitespace.
+ *   Covers the fixed-size JSON envelope: schema_version, product_version,
+ *   worker, build, configuration, runtime, recent_decisions, section keys,
+ *   braces, commas, and whitespace.
  *   Must be >= the maximum rendered size of all non-decision sections
  *   combined.
  *
@@ -155,13 +154,9 @@ void ngx_http_markdown_diagnostics_record(
 /*
  * HTTP content handler for the diagnostics endpoint.
  *
- * Responds with a JSON document containing:
- *   - config_snapshot: active directive-shaped location values; unified
- *     Config V2 limits are represented under effective_config
- *   - recent_decisions: ring buffer contents (newest first)
- *   - metrics_snapshot: current metrics counters
- *   - dynconf_state: dynamic configuration watcher state
- *   - streaming_config: streaming policy configuration
+ * Responds with the Diagnostics Schema v1 JSON document containing the
+ * worker-local worker/runtime state, build identity, configuration snapshot,
+ * and recent decision ring buffer.
  *
  * Access control: the diagnostics content handler runs in the NGINX content
  * phase, which executes AFTER the access phase.  Use native NGINX

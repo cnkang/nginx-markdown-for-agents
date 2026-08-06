@@ -612,8 +612,8 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *
      * Enable or disable the runtime diagnostics endpoint
      * (/nginx-markdown/diagnostics).  When enabled, the endpoint
-     * exposes config_snapshot, recent_decisions, and metrics_snapshot
-     * for operational introspection.
+     * exposes the Diagnostics Schema v1 fields: worker/build identity,
+     * configuration, runtime counters, and recent decisions.
      *
      * Access control: the diagnostics content handler runs in the
      * NGINX content phase, which executes AFTER the access phase.
@@ -621,7 +621,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * block to restrict access.
      *
      * Default: off
-     * Context: http, server, location
+     * Context: location
      *
      * Example:
      *   location /nginx-markdown/diagnostics {
