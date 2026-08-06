@@ -1217,13 +1217,17 @@ pub unsafe extern "C" fn markdown_parse_encoding_chain(
 
     let value_slice = match unsafe { encoding_chain_value_slice(value, value_len) } {
         Ok(value_slice) => value_slice,
-        Err(code) => return code,
+        Err(code) => {
+            result_ref.classification = code;
+            return code;
+        }
     };
 
     if value_slice.is_empty() {
         /* The C caller invokes this only for a present field.  A present
          * empty field is malformed grammar; an absent field never crosses
          * this boundary because the C collector returns NGX_DECLINED. */
+        result_ref.classification = ENCODING_CHAIN_MALFORMED;
         return ENCODING_CHAIN_MALFORMED;
     }
 
@@ -1236,7 +1240,11 @@ pub unsafe extern "C" fn markdown_parse_encoding_chain(
             write_encoding_chain_layers(result_ref, &layers);
             ENCODING_CHAIN_VALID
         }
-        Ok(Err(error)) => encoding_chain_error_code(error),
+        Ok(Err(error)) => {
+            let code = encoding_chain_error_code(error);
+            result_ref.classification = code;
+            code
+        }
         Err(_) => {
             /* Caught panic: fail closed as malformed; no decoder starts. */
             result_ref.classification = ENCODING_CHAIN_MALFORMED;
@@ -2725,9 +2733,11 @@ mod tests {
         let mut result: FFIEncodingChainResult = unsafe { std::mem::zeroed() };
         let classification = unsafe { markdown_parse_encoding_chain(ptr::null(), 5, &mut result) };
         assert_eq!(classification, DECOMP_CATEGORY_INVALID_ARGS as u8);
+        assert_eq!(result.classification, DECOMP_CATEGORY_INVALID_ARGS as u8);
         /* NULL with zero length represents a present empty field here. */
         let classification = unsafe { markdown_parse_encoding_chain(ptr::null(), 0, &mut result) };
         assert_eq!(classification, ENCODING_CHAIN_MALFORMED);
+        assert_eq!(result.classification, ENCODING_CHAIN_MALFORMED);
     }
 
     #[test]
