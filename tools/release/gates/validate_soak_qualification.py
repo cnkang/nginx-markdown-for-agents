@@ -54,6 +54,7 @@ DEFAULT_RECORD = (
     REPO_ROOT / "artifacts" / "release" / "0.9.2" / "soak-qualification-record.json"
 )
 RECORD_OUTPUT_ROOT = pathlib.Path("artifacts/release/0.9.2")
+RECORD_OUTPUT_LABEL = "soak qualification record"
 SOAK_RUNTIME_ROOT = REPO_ROOT / "build" / "soak-runtime"
 SOAK_PORT = 19200
 SOAK_SCENARIO_FILES = {
@@ -562,31 +563,40 @@ def build_scenario_metrics(scenario_metrics: dict) -> list:
             for sid, reports in scenario_metrics.items()]
 
 
-def _validated_record_path(args: argparse.Namespace) -> pathlib.Path:
-    """Return a safe record path under the generated release-output directory."""
-    raw_path = pathlib.Path(args.output or args.record)
-    if not raw_path.is_absolute():
-        raw_path = REPO_ROOT / raw_path
-    validated_input = validate_write_path_within_root(
-        raw_path, REPO_ROOT, purpose="soak qualification record"
-    )
-    relative_input = validated_input.relative_to(REPO_ROOT.resolve())
-    allowed_paths = {
-        pathlib.Path(relative_input.name),
-        RECORD_OUTPUT_ROOT / relative_input.name,
-    }
-    if relative_input not in allowed_paths:
+def _write_record(record: dict, args: argparse.Namespace) -> pathlib.Path:
+    """Persist a record below the fixed generated release-output directory."""
+    raw_output = pathlib.Path(args.output or args.record)
+    raw_name = raw_output.name
+    output_parts = raw_output.parts
+    if raw_name in {"", ".", ".."}:
+        raise ValueError(f"Invalid output filename for {RECORD_OUTPUT_LABEL}")
+    if not (len(output_parts) == 1
+            or (len(output_parts) == 4
+                and output_parts[:3] == RECORD_OUTPUT_ROOT.parts)):
         raise ValueError(
-            "soak qualification record must be a filename or a path under "
-            f"{RECORD_OUTPUT_ROOT}"
+            "Output path must be '<filename>' or "
+            "'artifacts/release/0.9.2/<filename>'"
         )
     safe_name = validate_filename_strict(
-        relative_input.name, purpose="soak qualification record"
+        raw_name, purpose=RECORD_OUTPUT_LABEL
     )
-    output_path = REPO_ROOT / RECORD_OUTPUT_ROOT / safe_name
-    return validate_write_path_within_root(
-        output_path, REPO_ROOT, purpose="soak qualification record"
+    candidate_output = REPO_ROOT / RECORD_OUTPUT_ROOT / safe_name
+    resolved_candidate = candidate_output.resolve(strict=False)
+    resolved_root = REPO_ROOT.resolve(strict=False)
+    if not resolved_candidate.is_relative_to(resolved_root):
+        raise ValueError(
+            f"Refusing to write outside repository root: {resolved_candidate}"
+        )
+    validated_path = validate_write_path_within_root(
+        resolved_candidate, REPO_ROOT, purpose=RECORD_OUTPUT_LABEL
     )
+    validated_path.parent.mkdir(parents=True, exist_ok=True)
+    validated_path.write_text(
+        json.dumps(record, indent=2) + "\n", encoding="utf-8"
+    )
+    # SONAR_NOTE(S2083): Filename is allowlisted and the path is built from
+    # the trusted generated-output root, so CLI input cannot select a target.
+    return validated_path
 
 
 def _validated_nginx_binary() -> pathlib.Path | None:
@@ -638,9 +648,7 @@ def handle_missing_nginx(args: argparse.Namespace, manifest: dict) -> int | None
             "skip_reason": "NGINX_BIN not set or binary not found",
             "policy_reference": "release short-soak qualification thresholds",
         }
-        output_path = _validated_record_path(args)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        output_path = _write_record(record, args)
         print(f"SKIP: NGINX_BIN not set; skip recorded at {output_path}")
         return 0
     print(
@@ -731,9 +739,7 @@ def real_main(args: argparse.Namespace) -> int:
     if failures:
         record["status"] = "fail"
         record["errors"] = failures
-    output_path = _validated_record_path(args)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    output_path = _write_record(record, args)
     if failures:
         for failure in failures:
             print(f"ERROR: soak failure: {failure}", file=sys.stderr)
