@@ -164,7 +164,7 @@ location = /markdown-metrics {
 ```
 
 Scrape with `Accept: text/plain; version=0.0.4`. The endpoint emits exactly
-the eleven frozen Prometheus families documented in
+the twelve frozen Prometheus families documented in
 [`prometheus-metrics.md`](prometheus-metrics.md). `markdown_diagnostics` is a
 read-only JSON endpoint for effective configuration, provenance, decisions,
 and bounded runtime state; it accepts only `GET` and `HEAD`.
@@ -239,4 +239,22 @@ versioned documents. Do not copy those examples into a 0.9.2 configuration.
 
 `markdown_streaming_auto_threshold` — REMOVED. Use the explicit
 `markdown_streaming off | auto | force` policy and the
+`markdown_limits streaming_buffer=` key instead.
+
+`markdown_decompress_max_size` — REMOVED. Use the
+`markdown_limits decompressed_size=` key instead.
+
+`markdown_parse_timeout` — REMOVED. Use the
+`markdown_limits parser_timeout=` key instead.
+
+`markdown_parser_budget` — REMOVED. Use the
+`markdown_limits parser_memory=` key instead.
+
+`markdown_stream_threshold` — REMOVED. Use the
+`markdown_limits streaming_buffer=` key instead.
+
+`markdown_stream_precommit_buffer` — REMOVED. Use the
+`markdown_limits streaming_buffer=` key instead.
+
+`markdown_stream_flush_min` — REMOVED. Use the
 `markdown_limits streaming_buffer=` key instead.

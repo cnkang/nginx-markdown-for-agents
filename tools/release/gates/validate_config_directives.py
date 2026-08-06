@@ -98,12 +98,36 @@ CURRENT_LIMIT_KEYS = [
     "max_inflight",
 ]
 
-# ── Removed directives (v0.8.0 cleanup) ────────────────────────────────────
+# ── Removed directives (0.9.2 public-surface freeze) ───────────────────────
 
 REMOVED_DIRECTIVES = [
     {
         "name": "markdown_streaming_auto_threshold",
         "doc_heading": "markdown_streaming_auto_threshold",
+    },
+    {
+        "name": "markdown_decompress_max_size",
+        "doc_heading": "markdown_decompress_max_size",
+    },
+    {
+        "name": "markdown_parse_timeout",
+        "doc_heading": "markdown_parse_timeout",
+    },
+    {
+        "name": "markdown_parser_budget",
+        "doc_heading": "markdown_parser_budget",
+    },
+    {
+        "name": "markdown_stream_threshold",
+        "doc_heading": "markdown_stream_threshold",
+    },
+    {
+        "name": "markdown_stream_precommit_buffer",
+        "doc_heading": "markdown_stream_precommit_buffer",
+    },
+    {
+        "name": "markdown_stream_flush_min",
+        "doc_heading": "markdown_stream_flush_min",
     },
 ]
 
@@ -145,7 +169,9 @@ class ValidationResult:
 def read_safe(path: Path) -> str:
     """Read a file only if it resolves within PROJECT_ROOT; return \'\' otherwise."""
     resolved = path.resolve()
-    if not str(resolved).startswith(str(PROJECT_ROOT)):
+    try:
+        resolved.relative_to(PROJECT_ROOT.resolve())
+    except ValueError:
         return ""
     if resolved.is_file():
         return resolved.read_text(encoding="utf-8")
