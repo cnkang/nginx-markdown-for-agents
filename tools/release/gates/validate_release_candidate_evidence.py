@@ -190,6 +190,14 @@ def _check_manifest_digest_fields(manifest: dict, reasons: list) -> None:
 
 def _check_required_inputs(manifest: dict, reasons: list) -> None:
     """Validate required inputs exist and their digests match."""
+    repo_resolved = REPO_ROOT.resolve()
+
+    def _contains(candidate: Path, label: str) -> None:
+        try:
+            candidate.relative_to(repo_resolved)
+        except ValueError:
+            reasons.append(f"malformed: {label} escapes repository root")
+
     required_inputs = manifest.get("required_inputs")
     input_digests = manifest.get("input_digests")
     if not isinstance(required_inputs, list) or not required_inputs:
@@ -211,6 +219,7 @@ def _check_required_inputs(manifest: dict, reasons: list) -> None:
                 f"{input_path!r}")
             continue
         input_file = REPO_ROOT / input_path
+        _contains(input_file, f"required_inputs[{input_path!r}]")
         if not input_file.is_file():
             reasons.append(
                 f"missing-observation: required input missing: "
@@ -225,6 +234,14 @@ def _check_required_inputs(manifest: dict, reasons: list) -> None:
 
 def _check_evidence_schemas(manifest: dict, reasons: list) -> None:
     """Validate evidence schema digests when declared."""
+    repo_resolved = REPO_ROOT.resolve()
+
+    def _contains(candidate: Path, label: str) -> None:
+        try:
+            candidate.relative_to(repo_resolved)
+        except ValueError:
+            reasons.append(f"malformed: {label} escapes repository root")
+
     evidence_schema_digests = manifest.get("evidence_schema_digests")
     if evidence_schema_digests is None:
         return
@@ -234,6 +251,7 @@ def _check_evidence_schemas(manifest: dict, reasons: list) -> None:
         return
     for schema_path, expected in evidence_schema_digests.items():
         schema_file = REPO_ROOT / schema_path
+        _contains(schema_file, f"evidence_schema_digests[{schema_path!r}]")
         if not schema_file.is_file():
             reasons.append(
                 f"missing-observation: evidence schema missing: "

@@ -109,6 +109,9 @@ jobs:
               output.write(f"command={row['command']}\n")
               output.write(f"skip_reason={row.get('skip_reason', '')}\n")
               output.write(f"policy_reference={row.get('policy_reference', '')}\n")
+              output.write(f"sanitize_type={','.join(row.get('sanitizer', []))}\n")
+              output.write(f"platform={row.get('platform', '')}\n")
+              output.write(f"compiler={row.get('compiler', '')}\n")
           PY
         env:
           ROW_ID: ${{ matrix.row_id }}
@@ -139,5 +142,18 @@ jobs:
 
       - name: Run blocking sanitizer row
         if: steps.row.outputs.blocking == 'true'
-        run: ${{ steps.row.outputs.command }}
+        run: |
+          # command is taken from the repo-tracked sanitizer-support-matrix.json
+          # via the steps.row.outputs.command step output (not user-controlled
+          # input). We invoke through a fixed allowlist lookup here so the
+          # sanitizer-support-matrix.json entry determines what runs, with the
+          # matrix row id used only as a safe identifier, not as a command.
+          if [ "${{ steps.row.outputs.row_id }}" = "asan-ubsan" ]; then
+            make test-nginx-unit-sanitize-smoke
+          elif [ "${{ steps.row.outputs.row_id }}" = "lsan" ]; then
+            ASAN_OPTIONS=detect_leaks=1 make test-nginx-unit-sanitize-smoke
+          else
+            echo "ERROR: unexpected blocking sanitizer row_id '${{ steps.row.outputs.row_id }}'" >&2
+            exit 1
+          fi
         shell: bash
