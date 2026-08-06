@@ -1,0 +1,21 @@
+{
+  "schema_version": "release.evidence-manifest.v1",
+  "candidate_sha": "9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d",
+  "created_at": "2026-08-05T14:00:00Z",
+  "version": "0.9.2",
+  "entries": [
+    {
+      "id": "evidence-unit-tests",
+      "category": "testing",
+      "status": "pass",
+      "blocking": true,
+      "evidence_ref": "artifacts/release/0.9.2/unit-test-report.json",
+      "observed_at": "2026-08-05T12:00:00Z"
+    },
+    {
+      "id": "evidence-fuzz-qualification",
+      "category": "security",
+      "blocking": true
+    }
+  ]
+}

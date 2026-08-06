@@ -90,8 +90,9 @@ repo-owned truth surfaces (`AGENTS.md`, `docs/harness/`, `tools/harness/`,
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-07-30 | Kang | Added diagnostics-access-phase verification family (verify-diagnostics-access-phase-e2e gate) |
+| 0.9.2 | 2026-08-06 | Kang | Added five generic pre-freeze release gate families: release-candidate-evidence, artifact-registry, release-evidence-manifest, fuzz-qualification, soak-qualification |
 | 0.9.2 | 2026-08-05 | Kang | Added release-matrix verification family (release-matrix-check gate) for canonical release matrix schema/ABI/feature binding validation |
+| 0.9.2 | 2026-07-30 | Kang | Added diagnostics-access-phase verification family (verify-diagnostics-access-phase-e2e gate) |
 | 0.8.3 | 2026-06-26 | Kang | Added version-consistency verification family and release-manifest verification |
 | 0.8.2 | 2026-06-13 | Codex | Added static security and supply-chain gate entrypoint |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |

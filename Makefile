@@ -68,6 +68,8 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         complexity-check \
 	docs-check license-check release-notes release-gates-check release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x         release-gates-check-090 release-gates-check-091 release-gates-check-092 release-gates-check-all release-gates-check-legacy release-gates-check-strict \
         release-matrix-check \
+        release-candidate-evidence-check artifact-registry-check release-evidence-manifest-check \
+        test-rust-fuzz-qualification test-e2e-rust-soak \
         perf-evidence-check \
         test-production-examples-nginx-t test-production-examples-e2e-smoke \
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
@@ -936,6 +938,61 @@ release-matrix-check:
 	PYTHONPATH=. python3 -m pytest tools/release/matrix/tests/test_validate_release_matrix.py -q --tb=short
 	@echo "  Canonical Release Matrix Check: PASSED"
 
+# release-candidate-evidence-check: Pre-freeze release candidate evidence gate.
+# Validates release-candidate evidence against the v1 schema.
+# FIXTURE mode: make release-candidate-evidence-check FIXTURE=path/to/fixture.json
+release-candidate-evidence-check:
+	@echo "=== Release Candidate Evidence Check ==="
+	@if [ -n "$(FIXTURE)" ]; then \
+		python3 tools/release/gates/validate_release_candidate_evidence.py --mode fixture --expected-sha 9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d --record-input "$(FIXTURE)"; \
+	else \
+		python3 tools/release/gates/validate_release_candidate_evidence.py --mode real; \
+	fi
+
+# artifact-registry-check: Pre-freeze artifact registry gate.
+# Validates artifact registry against the v1 schema.
+# FIXTURE mode: make artifact-registry-check FIXTURE=path/to/fixture.json
+artifact-registry-check:
+	@echo "=== Artifact Registry Check ==="
+	@if [ -n "$(FIXTURE)" ]; then \
+		python3 tools/release/gates/validate_artifact_registry.py --mode fixture --expected-sha 9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d --record-input "$(FIXTURE)"; \
+	else \
+		python3 tools/release/gates/validate_artifact_registry.py --mode real; \
+	fi
+
+# release-evidence-manifest-check: Pre-freeze release evidence manifest gate.
+# Validates release evidence manifest against the v1 schema.
+# FIXTURE mode: make release-evidence-manifest-check FIXTURE=path/to/fixture.json
+release-evidence-manifest-check:
+	@echo "=== Release Evidence Manifest Check ==="
+	@if [ -n "$(FIXTURE)" ]; then \
+		python3 tools/release/gates/validate_release_evidence_manifest.py --mode fixture --expected-sha 9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d --record-input "$(FIXTURE)"; \
+	else \
+		python3 tools/release/gates/validate_release_evidence_manifest.py --mode real; \
+	fi
+
+# test-rust-fuzz-qualification: Pre-freeze fuzz qualification gate.
+# Validates fuzz qualification evidence against manifest thresholds.
+# FIXTURE mode: make test-rust-fuzz-qualification FIXTURE=path/to/fixture.json
+test-rust-fuzz-qualification:
+	@echo "=== Fuzz Qualification Check ==="
+	@if [ -n "$(FIXTURE)" ]; then \
+		python3 tools/release/gates/validate_fuzz_qualification.py --mode fixture --manifest tests/fixtures/release/fuzz-qualification-manifest.json --record-input "$(FIXTURE)"; \
+	else \
+		python3 tools/release/gates/validate_fuzz_qualification.py --mode real; \
+	fi
+
+# test-e2e-rust-soak: Pre-freeze soak qualification gate.
+# Validates soak qualification evidence against manifest thresholds.
+# FIXTURE mode: make test-e2e-rust-soak FIXTURE=path/to/fixture.json
+test-e2e-rust-soak:
+	@echo "=== Soak Qualification Check ==="
+	@if [ -n "$(FIXTURE)" ]; then \
+		python3 tools/release/gates/validate_soak_qualification.py --mode fixture --manifest tests/fixtures/release/soak-qualification-manifest.json --record-input "$(FIXTURE)"; \
+	else \
+		python3 tools/release/gates/validate_soak_qualification.py --mode real; \
+	fi
+
 release-gates-check-all: release-gates-check release-gates-check-092
 	@echo "=== Release Gates: ALL PASS ==="
 
@@ -1171,6 +1228,11 @@ help:
 	@echo "  release-gates-check-091  - Validate 0.9.1 release gates (blocking; module benchmark evidence gate)"
 	@echo "  release-gates-check-092  - Validate 0.9.2 release gates (blocking; 091 + 092 evidence + contract checks)"
 	@echo "  release-matrix-check      - Validate canonical release matrix against W4 schema and ABI/feature bindings"
+	@echo "  release-candidate-evidence-check - Validate frozen release candidate SHA manifest (FIXTURE=... for regression fixtures)"
+	@echo "  artifact-registry-check   - Validate candidate-bound release artifact index (FIXTURE=... for regression fixtures)"
+	@echo "  release-evidence-manifest-check - Validate final evidence manifest + observation state (FIXTURE=... for regression fixtures)"
+	@echo "  test-rust-fuzz-qualification   - Fuzz qualification gate (15min or 100k execs per blocking target; FIXTURE=... for regression fixtures)"
+	@echo "  test-e2e-rust-soak        - Short-soak qualification gate (30min concurrency 16; FIXTURE=... for regression fixtures)"
 	@echo "  release-perf-evidence-blocking - Shared blocking evidence helper (requires BASELINE_VERSION)"
 	@echo "  perf-evidence-check      - Run performance evidence gate (non-blocking, report-only)"
 	@echo "  release-gates-check-all  - Run current baseline and 0.9.2 release gates"

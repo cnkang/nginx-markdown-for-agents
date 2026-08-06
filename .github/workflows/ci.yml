@@ -169,6 +169,7 @@ jobs:
               - 'tools/release/matrix/**'
               - 'tools/release-matrix.json'
               - 'tools/release/gates/**'
+              - 'tests/fixtures/**'
             corpus_tools:
               - 'tools/corpus/**'
             harness_tooling:
@@ -796,7 +797,10 @@ jobs:
     # no artifact exceeds scope. Also runs as part of docs-check via make docs-check.
     # validate_workflow_matrix_consumers.py consumes only repo-owned sources.
     needs: changes
-    if: needs.changes.outputs.matrix_release == 'true' || needs.changes.outputs.workflows == 'true'
+    if: >-
+      needs.changes.outputs.matrix_release == 'true' ||
+      needs.changes.outputs.workflows == 'true' ||
+      needs.changes.outputs.docs == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

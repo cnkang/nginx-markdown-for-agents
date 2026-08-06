@@ -25,6 +25,11 @@ This page is the readable overlay, not the machine-owned truth.
 | `release-governance` | focused semantic | `make release-gates-check-080`, `make release-gates-check`, `make release-gates-check-strict` |
 | `release-manifest` | focused semantic | `python3 packaging/scripts/test_release_manifest.py`, `make release-gates-check` |
 | `release-matrix` | focused semantic | `make release-matrix-check` |
+| `release-candidate-evidence` | focused semantic | `make release-candidate-evidence-check` |
+| `artifact-registry` | focused semantic | `make artifact-registry-check` |
+| `release-evidence-manifest` | focused semantic | `make release-evidence-manifest-check` |
+| `fuzz-qualification` | focused semantic | `make test-rust-fuzz-qualification` |
+| `soak-qualification` | focused semantic | `make test-e2e-rust-soak` |
 | `version-consistency` | focused semantic | `bash tools/harness/detect_version_consistency.sh`, `make harness-security-checks` |
 | `regex-security` | cheap blocker | `make regex-security-check` |
 | `e2e-streaming-config` | cheap blocker | `make e2e-streaming-config-check` |
@@ -91,6 +96,7 @@ Safety/engineering invariants always win; user-task controls scope and approach.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-06 | Kang | Added release-candidate-evidence, artifact-registry, release-evidence-manifest, fuzz-qualification, and soak-qualification verification families (five generic pre-freeze release gates) |
 | 0.9.2 | 2026-08-05 | Kang | Added release-matrix verification family (release-matrix-check gate) |
 | 0.8.3 | 2026-06-26 | Kang | Added release-manifest and version-consistency verification families |
 | 0.8.2 | 2026-06-13 | Codex | Added security-static and supply-chain verification families plus the security-static-supply-chain risk pack |
