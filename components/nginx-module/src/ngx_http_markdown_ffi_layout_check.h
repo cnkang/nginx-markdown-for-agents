@@ -272,6 +272,49 @@ _Static_assert(offsetof(FFIDecompResult, error_category) == 16,
     "FFIDecompResult.error_category offset must be 16");
 
 /* ----------------------------------------------------------------
+ * FFIDynconfResult layout (72 bytes on LP64).
+ *   error_code         : u32        offset  0, size 4
+ *   error_message      : *const u8  offset  8, size 8
+ *   error_message_len  : usize      offset 16, size 8
+ *   source_digest      : *const u8  offset 24, size 8
+ *   source_digest_len  : usize      offset 32, size 8
+ *   active_digest      : *const u8  offset 40, size 8
+ *   active_digest_len  : usize      offset 48, size 8
+ *   filter             : u8         offset 56, size 1
+ *   prune_noise        : u8         offset 57, size 1
+ *   log_verbosity      : u8         offset 58, size 1
+ *   error_policy       : u8         offset 59, size 1
+ *   streaming_buffer   : u64        offset 64, size 8
+ * Total: 72 bytes, align 8
+ * ---------------------------------------------------------------- */
+_Static_assert(sizeof(FFIDynconfResult) == 72,
+    "FFIDynconfResult size must match Rust (72 bytes on 64-bit)");
+_Static_assert(offsetof(FFIDynconfResult, error_code) == 0,
+    "FFIDynconfResult.error_code offset must be 0");
+_Static_assert(offsetof(FFIDynconfResult, error_message) == 8,
+    "FFIDynconfResult.error_message offset must be 8");
+_Static_assert(offsetof(FFIDynconfResult, error_message_len) == 16,
+    "FFIDynconfResult.error_message_len offset must be 16");
+_Static_assert(offsetof(FFIDynconfResult, source_digest) == 24,
+    "FFIDynconfResult.source_digest offset must be 24");
+_Static_assert(offsetof(FFIDynconfResult, source_digest_len) == 32,
+    "FFIDynconfResult.source_digest_len offset must be 32");
+_Static_assert(offsetof(FFIDynconfResult, active_digest) == 40,
+    "FFIDynconfResult.active_digest offset must be 40");
+_Static_assert(offsetof(FFIDynconfResult, active_digest_len) == 48,
+    "FFIDynconfResult.active_digest_len offset must be 48");
+_Static_assert(offsetof(FFIDynconfResult, filter) == 56,
+    "FFIDynconfResult.filter offset must be 56");
+_Static_assert(offsetof(FFIDynconfResult, prune_noise) == 57,
+    "FFIDynconfResult.prune_noise offset must be 57");
+_Static_assert(offsetof(FFIDynconfResult, log_verbosity) == 58,
+    "FFIDynconfResult.log_verbosity offset must be 58");
+_Static_assert(offsetof(FFIDynconfResult, error_policy) == 59,
+    "FFIDynconfResult.error_policy offset must be 59");
+_Static_assert(offsetof(FFIDynconfResult, streaming_buffer) == 64,
+    "FFIDynconfResult.streaming_buffer offset must be 64");
+
+/* ----------------------------------------------------------------
  * FFIEncodingChainResult layout (12 bytes on LP64).
  *   classification  : u8       offset  0, size 1
  *   (padding)                 offset  1..3

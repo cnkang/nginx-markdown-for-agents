@@ -30,7 +30,11 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 ABI_PATH = REPO_ROOT / "components" / "rust-converter" / "src" / "ffi" / "abi.rs"
 STREAMING_PATH = REPO_ROOT / "components" / "rust-converter" / "src" / "ffi" / "streaming.rs"
 EXPORTS_PATH = REPO_ROOT / "components" / "rust-converter" / "src" / "ffi" / "exports.rs"
+DYNCONF_FFI_PATH = REPO_ROOT / "components" / "rust-converter" / "src" / "dynconf" / "ffi.rs"
 HEADER_PATH = REPO_ROOT / "components" / "rust-converter" / "include" / "markdown_converter.h"
+FFI_EXPORT_RE = re.compile(
+    r'#\[unsafe\(no_mangle\)\]\s*pub\s+(?:unsafe\s+)?extern\s+"C"\s+fn\s+(\w+)'
+)
 HEADER_HASH_DEFINE = re.compile(
     rb"(#define\s+MARKDOWN_HEADER_HASH\s+)\d+(?:ull|ULL)?"
 )
@@ -51,27 +55,24 @@ def header_hash() -> int:
     return truncate8(hashlib.sha256(canonical).digest())
 
 
-def symbol_set_hash() -> int:
-    """Collect export names from the export modules (stable sorted set)."""
+def symbol_export_names() -> set[str]:
+    """Collect all C export names from the Rust FFI modules."""
     names = set()
-    for path in (EXPORTS_PATH,):
-        text = path.read_text(encoding="utf-8")
-        for match in re.finditer(
-            r'#\[unsafe\(no_mangle\)\]\s*pub\s+(?:unsafe\s+)?extern\s+"C"\s+fn\s+(\w+)',
-            text,
-        ):
-            names.add(match.group(1))
-    # Streaming/incremental FFI modules also export public symbols.
-    for extra in (
-        REPO_ROOT / "components" / "rust-converter" / "src" / "ffi" / "streaming.rs",
+    for path in (
+        EXPORTS_PATH,
+        STREAMING_PATH,
         REPO_ROOT / "components" / "rust-converter" / "src" / "ffi" / "incremental.rs",
+        DYNCONF_FFI_PATH,
     ):
-        text = extra.read_text(encoding="utf-8")
-        for match in re.finditer(
-            r'#\[unsafe\(no_mangle\)\]\s*pub\s+(?:unsafe\s+)?extern\s+"C"\s+fn\s+(\w+)',
-            text,
-        ):
+        text = path.read_text(encoding="utf-8")
+        for match in FFI_EXPORT_RE.finditer(text):
             names.add(match.group(1))
+    return names
+
+
+def symbol_set_hash() -> int:
+    """Hash the stable sorted set of all C export names."""
+    names = symbol_export_names()
     payload = "\n".join(sorted(names)).encode("utf-8")
     return truncate8(hashlib.sha256(payload).digest())
 
