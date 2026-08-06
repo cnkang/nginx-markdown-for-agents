@@ -861,7 +861,7 @@ ngx_http_markdown_trusted_proxies(ngx_conf_t *cf, ngx_command_t *cmd,
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
             "\"%V\" directive accepts at most %d entries, got %ui",
             &cmd->name,
-            (int) NGX_HTTP_MARKDOWN_TRUSTED_PROXIES_MAX,
+            (ngx_uint_t) NGX_HTTP_MARKDOWN_TRUSTED_PROXIES_MAX,
             cf->args->nelts - 1);
         markdown_trusted_proxies_free(set);
         return NGX_CONF_ERROR;

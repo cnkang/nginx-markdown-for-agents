@@ -694,10 +694,9 @@ ngx_http_markdown_diagnostics_fmt_decisions(
     const ngx_http_markdown_diag_state_t *state)
 {
     ngx_uint_t  count;
-    ngx_uint_t  i;
 
     count = ngx_http_markdown_diag_ring_valid_count(state, NULL);
-    for (i = 0; i < count; i++) {
+    for (ngx_uint_t i = 0; i < count; i++) {
         ngx_uint_t  idx;
         ngx_int_t   code;
         ngx_str_t   reason;
