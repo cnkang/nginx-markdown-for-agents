@@ -885,7 +885,7 @@ jobs:
           # legacy validator chain above.
           python3 tools/harness/detect_public_surface_drift.py
           PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
-          make -C components/nginx-module/tests unit-otel_impl
+          make -C components/nginx-module/tests unit-streaming_impl
           make docs-check
           bash tools/harness/detect_version_consistency.sh
           bash tools/release/gates/check_install_layout.sh dist/*.deb dist/*.rpm

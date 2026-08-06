@@ -541,6 +541,8 @@ def test_tag_workflow_uses_092_blocking_evidence() -> None:
     assert invocations == ["091", "092"], (
         "tag release-gate must run exactly 091 then 092 blocking evidence"
     )
+    assert "make -C components/nginx-module/tests unit-streaming_impl" in gate_block
+    assert "make -C components/nginx-module/tests unit-otel_impl" not in gate_block
     assert "RELEASE_GATE_ALLOW_SKIP_MODULE=1" not in gate_block, (
         "tag release-gate job must not default-skip module evidence"
     )
