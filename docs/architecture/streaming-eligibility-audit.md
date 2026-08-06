@@ -1,6 +1,6 @@
 # Streaming Eligibility Audit (0.9.2)
 
-This is the current implementation audit for the frozen Wave 0–2 contract.
+This is the current implementation audit for the frozen release contract.
 It records observable gates and their owning surfaces; internal heuristic
 thresholds are deliberately not configuration keys.
 
@@ -75,6 +75,6 @@ converted buffer.
 - Bounded resource state: `nginx_markdown_inflight_requests` and the
   `markdown_limits` configuration.
 
-The public metric registry and diagnostics schema are checked by the Wave 2
+The public metric registry and diagnostics schema are checked by the
 release gates. This document must remain explanatory and must not introduce a
 second configuration or metric vocabulary.

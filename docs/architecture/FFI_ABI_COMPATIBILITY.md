@@ -13,10 +13,10 @@ The generated `markdown_converter.h` is public source only so the bundled C
 module can compile. Its presence in the repository does not make arbitrary
 third-party C consumers a supported product surface.
 
-## v0.9.1 baseline reset
+## v0.9.2 bundled boundary
 
-v0.9.1 is the final coordinated pre-v1 reset. ABI version **1** is the new
-baseline. This reset:
+v0.9.1's ABI version **1** is historical. The 0.9.2 breaking surface update
+advances the bundled boundary to ABI version **2**. The earlier reset:
 
 - removes the unimplemented MDX and Org-mode flavor discriminants;
 - removes the unused Rust streaming-decision FFI model;
@@ -40,15 +40,15 @@ an older Rust archive or header with the new C module.
 Rust owns:
 
 ```text
-MARKDOWN_ABI_VERSION = 1
-MARKDOWN_HEADER_HASH = 0xda08899b74f14f7f
-MARKDOWN_SYMBOL_SET_HASH = 0x502a823d992f9f9f
-MARKDOWN_LAYOUT_FINGERPRINT = 0x82fbfcc59d6ce87f
+MARKDOWN_ABI_VERSION = 2
+MARKDOWN_HEADER_HASH = 0x6b020b103354c049
+MARKDOWN_SYMBOL_SET_HASH = 0x031d586bd1db8e49
+MARKDOWN_LAYOUT_FINGERPRINT = 0x9480cc234f4bee65
 
-markdown_abi_version() -> 1
-markdown_abi_header_hash() -> 0xda08899b74f14f7f
-markdown_abi_symbol_set_hash() -> 0x502a823d992f9f9f
-markdown_abi_layout_fingerprint() -> 0x82fbfcc59d6ce87f
+markdown_abi_version() -> 2
+markdown_abi_header_hash() -> 0x6b020b103354c049
+markdown_abi_symbol_set_hash() -> 0x031d586bd1db8e49
+markdown_abi_layout_fingerprint() -> 0x9480cc234f4bee65
 ```
 
 `cbindgen` emits all declarations into the generated header. During NGINX
@@ -78,7 +78,7 @@ semantically invalid.
 
 ### Before v1.0
 
-v0.9.1 is the last planned coordinated reset. Any further pre-v1 incompatible
+0.9.2 is the final planned pre-v1 breaking boundary. Any further incompatible
 change must be release-noted, increment `MARKDOWN_ABI_VERSION`, and update all
 Rust definitions, C consumers, headers, layout assertions, tests, and operator
 diagnostics in one change.

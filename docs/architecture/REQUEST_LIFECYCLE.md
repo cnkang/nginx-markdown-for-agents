@@ -1,6 +1,6 @@
 # Request Lifecycle (0.9.2)
 
-This document describes the request path at the Wave 0–2 freeze boundary.
+This document describes the request path at the frozen release-contract boundary.
 The important invariant is that eligibility, engine selection, streaming
 backpressure, and terminal metrics describe one request exactly once.
 
@@ -80,5 +80,5 @@ decompression events are recorded at their own bounded event points.
 
 Use diagnostics JSON to inspect the effective configuration and provenance.
 Use the Prometheus endpoint with `Accept: text/plain; version=0.0.4` to inspect
-the eleven frozen metric families. The Wave 2 schema, renderer, reason-code,
+the eleven frozen metric families. The schema, renderer, reason-code,
 and conservation gates are the authoritative compatibility checks.

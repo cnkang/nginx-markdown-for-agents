@@ -29,18 +29,17 @@ operations, architecture, and contributor-facing harness maintenance.
 
 ### Current Release Line 0.9.2
 
-**Status:** Development release line. 0.9.2 continues from the 0.9.1 stable
-baseline with harness consolidation, documentation corrections, and
-release-gate hardening. Development version metadata is 0.9.2. The release
-tag, GitHub Release, package assets, and checksums remain pending until the
-blocking gates pass. No breaking changes to public configuration, ABI, or
-runtime behavior.
+**Status:** Development release line. 0.9.2 is the final pre-1.0 breaking
+release, with the public configuration surface reduced from 63 directives to
+25 and the bundled FFI ABI at version 2. Development version metadata is
+0.9.2. The release tag, GitHub Release, package assets, and checksums remain
+pending until the blocking gates pass.
 
 #### 0.9.2 (current development)
 
-- **OTel ADR-0006 correction**: Factual fix — OTLP HTTP/JSON is the actual
-  implementation, not OTLP HTTP/protobuf. Protobuf is documented as a future
-  consideration.
+- **OTel removal**: The experimental OTel directives and implementation are
+  absent from the 0.9.2 production surface; ADR-0023 records conditions for a
+  possible future redesign.
 - **Release-gates-check-092**: Additive on 091; adds public-surface drift
   check, version consistency gate (0.9.2), and reason-code registry
   completeness gate.

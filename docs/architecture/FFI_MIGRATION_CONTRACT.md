@@ -1,4 +1,4 @@
-# FFI Migration Contract — v0.9.1 Baseline
+# FFI Migration Contract — Historical v0.9.1 Baseline
 
 ## Purpose and ownership
 
@@ -10,9 +10,11 @@ This is a bundled internal ABI, not an external converter SDK. The canonical
 declarations are Rust source plus the generated header; the NGINX module is the
 supported consumer.
 
-## ABI identity
+## Historical ABI identity
 
-The baseline identifier is `MARKDOWN_ABI_VERSION = 1`.
+The v0.9.1 baseline identifier was `MARKDOWN_ABI_VERSION = 1`. The current
+0.9.2 bundled boundary uses ABI version 2; see
+[FFI_ABI_COMPATIBILITY.md](FFI_ABI_COMPATIBILITY.md) for the active values.
 `markdown_abi_version()` returns the linked Rust value. NGINX checks it during
 preconfiguration and refuses directive parsing and startup on mismatch. Cargo
 package version is

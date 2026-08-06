@@ -169,7 +169,7 @@
       "commands": [
         "make release-matrix-check"
       ],
-      "notes": "Validates docs/release/release-matrix.json against the immutable W4 release-matrix schema, requires a fully canonical document (no legacy aliases or legacy top-level matrix), and binds every entry to the frozen ABI version and the official feature-manifest digest (Rule 62)"
+      "notes": "Validates docs/release/release-matrix.json against the immutable release-matrix schema, requires a fully canonical document (no legacy aliases or legacy top-level matrix), and binds every entry to the frozen ABI version and the official feature-manifest digest"
     },
     "version-consistency": {
       "phase": "focused-semantic",
@@ -259,7 +259,7 @@
       "commands": [
         "make release-candidate-evidence-check"
       ],
-      "notes": "Validates the frozen release-candidate source SHA manifest: candidate SHA, branch, source-tree digest, required input existence and digests, W4 feature/FFI/environment digests, evidence-schema digests (fail-closed)"
+      "notes": "Validates the frozen release-candidate source SHA manifest: candidate SHA, branch, source-tree digest, required input existence and digests, feature/FFI/environment digests, evidence-schema digests (fail-closed)"
     },
     "artifact-registry": {
       "phase": "focused-semantic",
@@ -273,7 +273,7 @@
       "commands": [
         "make release-evidence-manifest-check"
       ],
-      "notes": "Validates the final evidence manifest and observation-state record against the W5 evidence schemas: instance-schema conformance, candidate SHA equality, blocking-status derivation (no blocking pending, skips justified with policy reference)"
+      "notes": "Validates the final evidence manifest and observation-state record against the release evidence schemas: instance-schema conformance, candidate SHA equality, blocking-status derivation (no blocking pending, skips justified with policy reference)"
     },
     "fuzz-qualification": {
       "phase": "focused-semantic",
