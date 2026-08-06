@@ -12,8 +12,6 @@
 #
 # A build-time generator reads this file and produces:
 #   - components/rust-converter/src/decision/reason_code.rs (Rust enum + metadata)
-#   - C header with #define REASON_* constants
-#   - C accessor implementations
 #   - Metrics label arrays
 #   - Diagnostics field mappings
 #   - Count/hash manifest
