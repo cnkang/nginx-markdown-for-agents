@@ -770,11 +770,16 @@ def _dynconf_type_allowed(key):
 def _dynconf_contract_entry(key, has_per_key_staging, required, duplicate):
     """Build one dynamic-configuration contract from parser evidence."""
     typ, allowed = _dynconf_type_allowed(key)
+    if key == "schema_version":
+        inheritance = "none"
+    elif has_per_key_staging:
+        inheritance = "per-key"
+    else:
+        inheritance = "unknown"
     return {
         "name": key, "type": typ, "allowed_values": allowed,
         "default": "required" if required else "inherited",
-        "inheritance": "none" if key == "schema_version" else (
-            "per-key" if has_per_key_staging else "unknown"),
+        "inheritance": inheritance,
         "required": required, "dynamic": key != "schema_version",
         "unknown_key": "reject", "duplicate": duplicate,
     }

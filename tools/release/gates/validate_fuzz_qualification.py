@@ -59,6 +59,8 @@ TIME_CONTINUATION_CEILING = 3600
 MAX_FUZZ_INVOCATIONS = 8
 INVOCATION_TIMEOUT_MARGIN = 900
 BLOCKING_FUZZ_TARGET_MANIFEST_LABEL = "blocking-fuzz-target manifest"
+FUZZ_TARGET_LABEL = "fuzz target"
+RECORD_OUTPUT_ROOT = Path("artifacts/release/0.9.2")
 
 CANDIDATE_SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
 STAT_EXECS_PATTERN = re.compile(r"stat::number_of_executed_units:\s*(\d+)")
@@ -95,11 +97,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         default=str(REPO_ROOT / DEFAULT_MANIFEST))
     parser.add_argument("--corpus-manifest",
                         default=str(REPO_ROOT / DEFAULT_CORPUS_MANIFEST))
-    parser.add_argument("--record", default=str(REPO_ROOT / DEFAULT_RECORD))
+    parser.add_argument("--record", default=DEFAULT_RECORD)
     parser.add_argument("--record-input",
                         help="fixture mode: qualification record to validate")
-    parser.add_argument("--output",
-                        help="real mode: alternate path for the written record")
+    parser.add_argument(
+        "--output",
+        help="real mode: alternate filename under the release output directory",
+    )
     parser.add_argument("--allow-skip-fuzz", action="store_true",
                         help="exit 0 when cargo +nightly is unavailable")
     return parser
@@ -166,7 +170,7 @@ def _validate_target_entry(entry, index: int) -> str | None:
         return (f"malformed: targets[{index}].{field} must be "
                 f"{description}")
     try:
-        validate_filename_strict(entry["name"], purpose="fuzz target")
+        validate_filename_strict(entry["name"], purpose=FUZZ_TARGET_LABEL)
     except ValueError as exc:
         return f"malformed: targets[{index}].name is invalid: {exc}"
     return None
@@ -283,7 +287,7 @@ def _cargo_fuzz_available() -> bool:
 
 def _invoke_fuzz(target: str, flags: list[str], timeout: int) -> dict:
     """Run one cargo fuzz invocation, returning status and captured output."""
-    validated_target = validate_filename_strict(target, purpose="fuzz target")
+    validated_target = validate_filename_strict(target, purpose=FUZZ_TARGET_LABEL)
     command = [
         "cargo", "+nightly", "fuzz", "run", validated_target, "--", *flags
     ]
@@ -362,7 +366,7 @@ def _run_target_soak(target: str, seed: int, required_executions: int,
     when only one floor is met, the remaining floor is chased with follow-up
     invocations until both are satisfied.
     """
-    validated_target = validate_filename_strict(target, purpose="fuzz target")
+    validated_target = validate_filename_strict(target, purpose=FUZZ_TARGET_LABEL)
     total_executions = 0
     total_elapsed = 0.0
     log_parts = []
@@ -484,10 +488,29 @@ def _print_target(record: dict) -> None:
 
 
 def _record_output_path(args) -> Path:
-    """Return the path where the real-mode record must be written."""
-    raw_path = args.output if args.output else args.record
-    return validate_write_path_within_root(
+    """Return a safe record path under the generated release-output directory."""
+    raw_path = Path(args.output if args.output else args.record)
+    if not raw_path.is_absolute():
+        raw_path = REPO_ROOT / raw_path
+    validated_input = validate_write_path_within_root(
         raw_path, REPO_ROOT, purpose="fuzz qualification record"
+    )
+    relative_input = validated_input.relative_to(REPO_ROOT.resolve())
+    allowed_paths = {
+        Path(relative_input.name),
+        RECORD_OUTPUT_ROOT / relative_input.name,
+    }
+    if relative_input not in allowed_paths:
+        raise ValueError(
+            "fuzz qualification record must be a filename or a path under "
+            f"{RECORD_OUTPUT_ROOT}"
+        )
+    safe_name = validate_filename_strict(
+        relative_input.name, purpose="fuzz qualification record"
+    )
+    output_path = REPO_ROOT / RECORD_OUTPUT_ROOT / safe_name
+    return validate_write_path_within_root(
+        output_path, REPO_ROOT, purpose="fuzz qualification record"
     )
 
 

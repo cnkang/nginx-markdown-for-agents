@@ -53,6 +53,7 @@ DEFAULT_MANIFEST = (
 DEFAULT_RECORD = (
     REPO_ROOT / "artifacts" / "release" / "0.9.2" / "soak-qualification-record.json"
 )
+RECORD_OUTPUT_ROOT = pathlib.Path("artifacts/release/0.9.2")
 SOAK_RUNTIME_ROOT = REPO_ROOT / "build" / "soak-runtime"
 SOAK_PORT = 19200
 SOAK_SCENARIO_FILES = {
@@ -562,11 +563,29 @@ def build_scenario_metrics(scenario_metrics: dict) -> list:
 
 
 def _validated_record_path(args: argparse.Namespace) -> pathlib.Path:
-    """Resolve the CLI-selected record path within the repository."""
+    """Return a safe record path under the generated release-output directory."""
+    raw_path = pathlib.Path(args.output or args.record)
+    if not raw_path.is_absolute():
+        raw_path = REPO_ROOT / raw_path
+    validated_input = validate_write_path_within_root(
+        raw_path, REPO_ROOT, purpose="soak qualification record"
+    )
+    relative_input = validated_input.relative_to(REPO_ROOT.resolve())
+    allowed_paths = {
+        pathlib.Path(relative_input.name),
+        RECORD_OUTPUT_ROOT / relative_input.name,
+    }
+    if relative_input not in allowed_paths:
+        raise ValueError(
+            "soak qualification record must be a filename or a path under "
+            f"{RECORD_OUTPUT_ROOT}"
+        )
+    safe_name = validate_filename_strict(
+        relative_input.name, purpose="soak qualification record"
+    )
+    output_path = REPO_ROOT / RECORD_OUTPUT_ROOT / safe_name
     return validate_write_path_within_root(
-        args.output or args.record,
-        REPO_ROOT,
-        purpose="soak qualification record",
+        output_path, REPO_ROOT, purpose="soak qualification record"
     )
 
 
@@ -727,7 +746,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Soak qualification gate")
     parser.add_argument("--mode", choices=["real", "fixture"], default="real")
     parser.add_argument("--manifest", default=str(DEFAULT_MANIFEST))
-    parser.add_argument("--record", default=str(DEFAULT_RECORD))
+    parser.add_argument(
+        "--record", default=str(DEFAULT_RECORD.relative_to(REPO_ROOT))
+    )
     parser.add_argument("--record-input", default=None)
     parser.add_argument("--output", default=None)
     parser.add_argument("--allow-skip-soak", action="store_true")

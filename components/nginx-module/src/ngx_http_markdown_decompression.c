@@ -80,18 +80,15 @@ ngx_http_markdown_measure_content_encoding(
     ngx_http_request_t *r, const ngx_str_t **single_value,
     ngx_uint_t *match_count, size_t *total_len)
 {
-    ngx_list_part_t  *part;
-    ngx_table_elt_t  *headers;
-
     *single_value = NULL;
     *match_count = 0;
     *total_len = 0;
 
-    for (part = &r->headers_out.headers.part;
+    for (ngx_list_part_t *part = &r->headers_out.headers.part;
          part != NULL;
          part = part->next)
     {
-        headers = part->elts;
+        const ngx_table_elt_t *headers = part->elts;
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
             if (headers[i].hash == 0) {
                 continue;
@@ -120,16 +117,14 @@ ngx_http_markdown_measure_content_encoding(
 static void
 ngx_http_markdown_copy_content_encoding(ngx_http_request_t *r, u_char *data)
 {
-    ngx_list_part_t  *part;
-    ngx_table_elt_t  *headers;
     ngx_flag_t        first;
 
     first = 1;
-    for (part = &r->headers_out.headers.part;
+    for (ngx_list_part_t *part = &r->headers_out.headers.part;
          part != NULL;
          part = part->next)
     {
-        headers = part->elts;
+        const ngx_table_elt_t *headers = part->elts;
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
             if (headers[i].hash == 0) {
                 continue;
@@ -219,7 +214,7 @@ ngx_http_markdown_collect_content_encoding(ngx_http_request_t *r,
  * on FFI contract failure.
  */
 u_char
-ngx_http_markdown_parse_encoding_chain_ffi(ngx_http_request_t *r,
+ngx_http_markdown_parse_encoding_chain_ffi(const ngx_http_request_t *r,
                                            ngx_http_markdown_ctx_t *ctx,
                                            const ngx_str_t *combined)
 {
