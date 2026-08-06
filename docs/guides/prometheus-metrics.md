@@ -1,7 +1,7 @@
 # Prometheus Metrics Guide
 
 This guide describes the 0.9.2 production metrics contract. The endpoint emits
-only Prometheus text exposition format 0.0.4 and exactly the eleven families
+only Prometheus text exposition format 0.0.4 and exactly the twelve families
 listed below. The checked-in metrics registry is the machine-readable source
 for names, types, labels, and help text; the public inventory documents the
 operator-facing surface.
@@ -46,6 +46,7 @@ path, URI, host, profile, and per-path dimensions are not emitted.
 | `nginx_markdown_input_bytes_total` | counter | — | Input bytes read for conversion. |
 | `nginx_markdown_output_bytes_total` | counter | — | Converted bytes successfully delivered downstream. |
 | `nginx_markdown_inflight_requests` | gauge | — | Requests currently undergoing conversion. |
+| `nginx_markdown_streaming_peak_memory_bytes` | gauge | — | Peak working-set estimate from the most recent streaming conversion; not process RSS. |
 | `nginx_markdown_streaming_events_total` | counter | `transition`, `reason` | Closed streaming lifecycle transitions. |
 | `nginx_markdown_decompression_events_total` | counter | `encoding`, `outcome`, `reason` | Decompression completion and failure events. |
 | `nginx_markdown_dynconf_reloads_total` | counter | `outcome`, `reason` | Dynamic-configuration reload attempts. |
@@ -131,19 +132,19 @@ numeric reason codes map to `internal_unknown` and are logged as errors.
 ## Migration from earlier metric surfaces
 
 The 0.9.2 freeze removes legacy conversion, passthrough, per-path, streaming
-debug, last-observed gauge, JSON, and multi-format families. Update dashboards
-and alerts to the eleven families above; do not carry old family names into a
+debug, JSON, and multi-format families. Update dashboards and alerts to the
+twelve families above; do not carry old family names into a
 new 0.9.2 deployment. The detailed public compatibility inventory is
 [`docs/architecture/PUBLIC_SURFACE_INVENTORY.md`](../architecture/PUBLIC_SURFACE_INVENTORY.md).
 
 ## Stability policy
 
-The eleven-family set is frozen for 0.9.2. A future 1.x family addition
+The twelve-family set is frozen for 0.9.2. A future 1.x family addition
 requires a documented operator use case and a backward-compatible schema
 review. New labels must remain bounded and must not introduce path, URI, host,
 or other unbounded cardinality.
 
 | Version | Change |
 |---|---|
-| 0.9.2 | Replaced legacy multi-format metrics with the eleven-family Prometheus v1 contract. |
+| 0.9.2 | Replaced legacy multi-format metrics with the twelve-family Prometheus v1 contract. |
 | 0.9.1 | Previous release-line metric migration guidance. |

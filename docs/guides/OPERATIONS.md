@@ -55,7 +55,7 @@ This operational guide provides procedures for monitoring, troubleshooting, tuni
 
 ### Key Metrics to Monitor
 
-The endpoint emits exactly the eleven bounded Prometheus families defined in
+The endpoint emits exactly the twelve bounded Prometheus families defined in
 the [Prometheus Metrics Guide](prometheus-metrics.md). Monitor the labeled
 request outcomes, conversion attempts and successful deliveries, the duration
 histogram, byte counters, inflight gauge, streaming/decompression/dynconf

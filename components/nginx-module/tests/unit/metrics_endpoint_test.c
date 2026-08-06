@@ -21,6 +21,7 @@ typedef struct {
     } conversion_latency;
     unsigned long decompressions_attempted;
     unsigned long decompressions_succeeded;
+    unsigned long streaming_peak_memory_bytes;
 } metrics_t;
 
 typedef struct {
@@ -78,6 +79,9 @@ handle_metrics_request(const char *method, const char *remote_addr, const char *
              "# HELP nginx_markdown_inflight_requests in-flight requests\n"
              "# TYPE nginx_markdown_inflight_requests gauge\n"
              "nginx_markdown_inflight_requests 0\n"
+             "# HELP nginx_markdown_streaming_peak_memory_bytes peak streaming memory\n"
+             "# TYPE nginx_markdown_streaming_peak_memory_bytes gauge\n"
+             "nginx_markdown_streaming_peak_memory_bytes %lu\n"
              "# HELP nginx_markdown_streaming_events_total streaming events\n"
              "# TYPE nginx_markdown_streaming_events_total counter\n"
              "nginx_markdown_streaming_events_total{transition=\"commit\",reason=\"converted\"} 0\n"
@@ -91,7 +95,8 @@ handle_metrics_request(const char *method, const char *remote_addr, const char *
              "# TYPE nginx_markdown_build_info gauge\n"
              "nginx_markdown_build_info{version=\"test\",nginx_version=\"test\",features=\"\"} 1\n",
              m->conversions_succeeded, m->conversions_attempted, m->conversions_succeeded,
-             completed, m->decompressions_succeeded);
+             completed, m->streaming_peak_memory_bytes,
+             m->decompressions_succeeded);
     return out;
 }
 
@@ -109,6 +114,7 @@ sample_metrics(void)
     m.conversion_latency.gt_1000ms = 0;
     m.decompressions_attempted = 4;
     m.decompressions_succeeded = 3;
+    m.streaming_peak_memory_bytes = 65536;
     return m;
 }
 

@@ -121,7 +121,7 @@ selection surfaces are removed.
 
 ### Prometheus families currently emitted
 
-These 11 production names are the frozen registry:
+These 12 production names are the frozen registry:
 
 ```text
 nginx_markdown_requests_total
@@ -131,6 +131,7 @@ nginx_markdown_conversion_duration_seconds
 nginx_markdown_input_bytes_total
 nginx_markdown_output_bytes_total
 nginx_markdown_inflight_requests
+nginx_markdown_streaming_peak_memory_bytes
 nginx_markdown_streaming_events_total
 nginx_markdown_decompression_events_total
 nginx_markdown_dynconf_reloads_total

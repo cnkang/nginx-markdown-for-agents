@@ -827,6 +827,8 @@ ngx_http_markdown_metrics_to_v1(
     v1->output_bytes = snapshot->output_bytes;
 #ifdef MARKDOWN_STREAMING_ENABLED
     v1->output_bytes += snapshot->streaming.selection.output_bytes_total;
+    v1->streaming_peak_memory_bytes =
+        snapshot->streaming.last_peak_memory_bytes;
 #endif
     v1->inflight = snapshot->perf.inflight.current;
 

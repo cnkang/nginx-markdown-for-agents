@@ -6,7 +6,7 @@ For each histogram family, verify _bucket lines for all defined boundaries
 
 Uses hypothesis to generate arbitrary snapshot counter values for the
 conversion_duration_seconds histogram (the only histogram family in the
-frozen 11-family registry), then validates the rendered Prometheus text
+frozen 12-family registry), then validates the rendered Prometheus text
 output has correct structural completeness.
 
 Each property runs at least 100 iterations.
@@ -412,7 +412,7 @@ def test_registry_histogram_has_correct_boundaries():
 def test_registry_histogram_is_only_histogram():
     """
     Validate that conversion_duration_seconds is the ONLY histogram
-    family in the frozen 11-family registry.
+    family in the frozen 12-family registry.
     """
     import json
 

@@ -286,7 +286,7 @@ def test_final_inventory_rejects_migration_stubs() -> None:
 
 
 def test_final_inventory_requires_frozen_public_counts() -> None:
-    """The final inventory keeps the frozen 25/11 public counts."""
+    """The final inventory keeps the frozen 25/12 public counts."""
     inventory = copy.deepcopy(detector.load_inventory())
     inventory["directives"] = inventory["directives"][:-1]
     inventory["directive_count"] = 24
@@ -295,7 +295,7 @@ def test_final_inventory_requires_frozen_public_counts() -> None:
     errors = detector.validate_inventory_schema(inventory)
 
     assert "final 0.9.2 inventory must contain exactly 25 active directives" in errors
-    assert "final 0.9.2 inventory must contain exactly 11 metric families" in errors
+    assert "final 0.9.2 inventory must contain exactly 12 metric families" in errors
 
 
 def test_directive_metadata_drift_is_reported() -> None:
