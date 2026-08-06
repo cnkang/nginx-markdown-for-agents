@@ -1118,7 +1118,7 @@ main(void)
     test_command_table_count();
 
     printf("\n=== All context-negative property tests passed ===\n");
-    printf("\nSUMMARY: Wave 1 context contract is enforced: "
+    printf("\nSUMMARY: context contract is enforced: "
         "dynconf H-only, diagnostics L-only.\n");
 
     return 0;

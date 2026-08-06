@@ -76,7 +76,6 @@ ngx_http_markdown_stream_postcommit_safe_finish(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx)
 {
-    ngx_flag_t  first_safe_finish;
     ngx_int_t  rc;
 
     if (r == NULL || ctx == NULL) {
@@ -99,11 +98,11 @@ ngx_http_markdown_stream_postcommit_safe_finish(
         return NGX_ERROR;
     }
 
-    first_safe_finish =
-        (ctx->stream_sm.state == NGX_HTTP_MD_STATE_COMMITTED);
-    if (first_safe_finish) {
+#ifdef MARKDOWN_STREAMING_ENABLED
+    if (ctx->stream_sm.state == NGX_HTTP_MD_STATE_COMMITTED) {
         ngx_http_markdown_metrics_record_postcommit_safe_finish();
     }
+#endif
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "markdown postcommit safe_finish: "

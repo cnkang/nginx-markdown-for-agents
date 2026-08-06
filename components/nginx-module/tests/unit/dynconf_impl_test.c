@@ -931,7 +931,7 @@ test_check_file_changed(void)
     if (ngx_file_info((const u_char *) tmpfile, &fi) == NGX_FILE_ERROR) {
         TEST_FAIL("stat temp file failed");
     }
-    watcher.last_mtime = ngx_file_mtime(&fi) - 1;
+    watcher.file_state.last_mtime = ngx_file_mtime(&fi) - 1;
 
     rc = ngx_http_markdown_dynconf_check(&watcher, &g_log);
     TEST_ASSERT(rc == 1, "check detects mtime change");
@@ -1068,7 +1068,7 @@ test_start_success(void)
     TEST_ASSERT(watcher.active == 1, "watcher is active");
     TEST_ASSERT(watcher.timer != NULL, "timer allocated");
     TEST_ASSERT(watcher.path.len == strlen(tmpfile), "path copied");
-    TEST_ASSERT(watcher.last_mtime > 0, "mtime recorded");
+    TEST_ASSERT(watcher.file_state.last_mtime > 0, "mtime recorded");
     TEST_ASSERT(watcher.active_snapshot.valid == 1, "active snapshot valid");
     TEST_ASSERT(watcher.active_snapshot.enabled == 1, "active snapshot has enabled=1");
 
@@ -1097,7 +1097,7 @@ test_start_stat_fails(void)
     rc = ngx_http_markdown_dynconf_start(&watcher, &g_cycle, &path, &conf, &g_log);
     TEST_ASSERT(rc == NGX_OK, "start with nonexistent file still returns OK");
     TEST_ASSERT(watcher.active == 1, "watcher still becomes active");
-    TEST_ASSERT(watcher.last_mtime == 0, "mtime set to 0 on stat failure");
+    TEST_ASSERT(watcher.file_state.last_mtime == 0, "mtime set to 0 on stat failure");
 
     free(watcher.path.data);
     free(watcher.timer);
@@ -1148,9 +1148,9 @@ test_start_applies_existing_file_on_startup(void)
     TEST_ASSERT(watcher.active_snapshot.log_verbosity
                     == NGX_HTTP_MARKDOWN_LOG_DEBUG,
                 "active snapshot log_verbosity overridden to DEBUG by startup reload");
-    TEST_ASSERT(watcher.applied_mtime == watcher.last_mtime,
+    TEST_ASSERT(watcher.file_state.applied_mtime == watcher.file_state.last_mtime,
                 "applied_mtime equals last_mtime after successful startup reload");
-    TEST_ASSERT(watcher.version == 1,
+    TEST_ASSERT(watcher.diagnostic_state.version == 1,
                 "version incremented after startup reload");
 
     /* live conf should also reflect the applied values */
@@ -1203,11 +1203,11 @@ test_start_invalid_file_leaves_applied_mtime_zero(void)
     /* The initial reload should have failed; static conf preserved. */
     TEST_ASSERT(watcher.active_snapshot.prune_noise == 1,
                 "active snapshot prune_noise unchanged (1) after failed startup reload");
-    TEST_ASSERT(watcher.applied_mtime == 0,
+    TEST_ASSERT(watcher.file_state.applied_mtime == 0,
                 "applied_mtime is 0 after failed startup reload (triggers timer retry)");
-    TEST_ASSERT(watcher.last_mtime > 0,
+    TEST_ASSERT(watcher.file_state.last_mtime > 0,
                 "last_mtime recorded from stat (file exists)");
-    TEST_ASSERT(watcher.last_mtime != watcher.applied_mtime,
+    TEST_ASSERT(watcher.file_state.last_mtime != watcher.file_state.applied_mtime,
                 "last_mtime != applied_mtime triggers retry on next timer cycle");
 
     /* live conf unchanged */
@@ -1354,7 +1354,7 @@ test_timer_handler_change_detected(void)
     set_ngx_str(&watcher.path, tmpfile);
 
     if (ngx_file_info((const u_char *) tmpfile, &fi) != NGX_FILE_ERROR) {
-        watcher.last_mtime = ngx_file_mtime(&fi) - 1;
+        watcher.file_state.last_mtime = ngx_file_mtime(&fi) - 1;
     }
 
     memset(&ev, 0, sizeof(ev));
@@ -1364,7 +1364,7 @@ test_timer_handler_change_detected(void)
 
     ngx_http_markdown_dynconf_timer_handler(&ev);
 
-    TEST_ASSERT(watcher.version > 0,
+    TEST_ASSERT(watcher.diagnostic_state.version > 0,
                 "timer_handler: version incremented after reload");
     TEST_ASSERT(watcher.active_snapshot.enabled == 1,
                 "timer_handler: active_snapshot reflects new config");
@@ -1440,7 +1440,7 @@ test_reload_valid_file(void)
                 "reload valid file returns APPLIED");
     TEST_ASSERT(conf.enabled == 1, "enabled applied");
     TEST_ASSERT(conf.advanced.prune_noise == 0, "prune_noise applied");
-    TEST_ASSERT(watcher.version == 1, "version incremented");
+    TEST_ASSERT(watcher.diagnostic_state.version == 1, "version incremented");
 
     unlink(tmpfile);
     TEST_PASS("reload: valid file with multiple keys");
@@ -1699,13 +1699,13 @@ test_reload_invalid_line_rejects_all(void)
     set_ngx_str(&watcher.path, tmpfile);
     watcher.active_snapshot.valid = 1;
     watcher.active_snapshot.prune_noise = 0;
-    watcher.version = 0;
-    orig_version = watcher.version;
+    watcher.diagnostic_state.version = 0;
+    orig_version = watcher.diagnostic_state.version;
 
     rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE,
                 "reload with invalid line returns INVALID_FILE");
-    TEST_ASSERT(watcher.version == orig_version,
+    TEST_ASSERT(watcher.diagnostic_state.version == orig_version,
                 "version NOT incremented on invalid file");
     TEST_ASSERT(conf.advanced.prune_noise == 0,
                 "conf unchanged after invalid file (staged commit)");
@@ -1716,7 +1716,7 @@ test_reload_invalid_line_rejects_all(void)
 
 
 /*
- * schema_version validation tests (spec 45/53, task 2.8).
+ * schema_version validation tests for the dynamic configuration contract.
  */
 
 static void
@@ -1746,7 +1746,7 @@ test_reload_missing_schema_version_rejected(void)
     rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE,
                 "missing schema_version → INVALID_FILE");
-    TEST_ASSERT(watcher.version == 0,
+    TEST_ASSERT(watcher.diagnostic_state.version == 0,
                 "version not incremented");
 
     unlink(tmpfile);
@@ -2203,13 +2203,13 @@ test_reload_line_too_long(void)
     conf.enabled = 1;
     set_ngx_str(&watcher.path, tmpfile);
     watcher.active = 1;
-    watcher.version = 7;
-    orig_version = watcher.version;
+    watcher.diagnostic_state.version = 7;
+    orig_version = watcher.diagnostic_state.version;
 
     rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE,
                 "reload with too-long line returns INVALID_FILE");
-    TEST_ASSERT(watcher.version == orig_version,
+    TEST_ASSERT(watcher.diagnostic_state.version == orig_version,
                 "version unchanged after too-long line");
     TEST_ASSERT(conf.enabled == 1,
                 "conf fields unchanged after too-long line");
@@ -2246,14 +2246,14 @@ test_reload_lkg_preserved_on_success(void)
     watcher.active_snapshot.prune_noise = 1;
     watcher.active_snapshot.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
     watcher.active_snapshot.memory_budget = 64 * 1024;
-    watcher.lkg_valid = 0;
+    watcher.digest_state.lkg_valid = 0;
 
     rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
                 "reload returns APPLIED");
 
     /* LKG should now hold the previous active snapshot values */
-    TEST_ASSERT(watcher.lkg_valid == 1,
+    TEST_ASSERT(watcher.digest_state.lkg_valid == 1,
                 "lkg_valid set to 1 after successful reload");
     TEST_ASSERT(watcher.last_known_good.valid == 1,
                 "LKG snapshot marked valid");
@@ -2299,14 +2299,14 @@ test_reload_lkg_not_updated_on_failure(void)
     watcher.active_snapshot.valid = 1;
     watcher.active_snapshot.enabled = 1;
     watcher.active_snapshot.prune_noise = 1;
-    watcher.lkg_valid = 0;
+    watcher.digest_state.lkg_valid = 0;
 
     rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE,
                 "reload with unknown key returns INVALID_FILE");
 
     /* LKG should NOT be updated on failure */
-    TEST_ASSERT(watcher.lkg_valid == 0,
+    TEST_ASSERT(watcher.digest_state.lkg_valid == 0,
                 "lkg_valid remains 0 after failed reload");
 
     /* Active snapshot should be unchanged */
@@ -2338,7 +2338,7 @@ test_reload_lkg_successive_reloads(void)
     watcher.active_snapshot.enabled = 1;
     watcher.active_snapshot.prune_noise = 0;
     watcher.active_snapshot.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
-    watcher.lkg_valid = 0;
+    watcher.digest_state.lkg_valid = 0;
 
     /* First reload: set prune_noise=on */
     {
@@ -2352,7 +2352,7 @@ test_reload_lkg_successive_reloads(void)
     rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
                 "first reload APPLIED");
-    TEST_ASSERT(watcher.lkg_valid == 1,
+    TEST_ASSERT(watcher.digest_state.lkg_valid == 1,
                 "lkg_valid=1 after first reload");
     TEST_ASSERT(watcher.last_known_good.prune_noise == 0,
                 "LKG has prune_noise=0 (previous state)");
@@ -2374,7 +2374,7 @@ test_reload_lkg_successive_reloads(void)
 
     /* LKG should now hold the state from AFTER first reload
      * (prune_noise=1, log_verbosity=ERROR from first active) */
-    TEST_ASSERT(watcher.lkg_valid == 1,
+    TEST_ASSERT(watcher.digest_state.lkg_valid == 1,
                 "lkg_valid still 1 after second reload");
     TEST_ASSERT(watcher.last_known_good.prune_noise == 1,
                 "LKG has prune_noise=1 (state after first reload)");
@@ -2407,7 +2407,7 @@ test_reload_lkg_preserved_after_failed_reload(void)
     watcher.active_snapshot.valid = 1;
     watcher.active_snapshot.enabled = 1;
     watcher.active_snapshot.prune_noise = 0;
-    watcher.lkg_valid = 0;
+    watcher.digest_state.lkg_valid = 0;
 
     /* First reload: success → LKG populated */
     {
@@ -2421,7 +2421,7 @@ test_reload_lkg_preserved_after_failed_reload(void)
     rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
                 "first reload APPLIED");
-    TEST_ASSERT(watcher.lkg_valid == 1, "lkg_valid=1");
+    TEST_ASSERT(watcher.digest_state.lkg_valid == 1, "lkg_valid=1");
     TEST_ASSERT(watcher.last_known_good.prune_noise == 0,
                 "LKG has original prune_noise=0");
 
@@ -2438,7 +2438,7 @@ test_reload_lkg_preserved_after_failed_reload(void)
                 "second reload INVALID_FILE");
 
     /* LKG should still hold the state from before first reload */
-    TEST_ASSERT(watcher.lkg_valid == 1,
+    TEST_ASSERT(watcher.digest_state.lkg_valid == 1,
                 "lkg_valid still 1 after failed reload");
     TEST_ASSERT(watcher.last_known_good.prune_noise == 0,
                 "LKG prune_noise unchanged after failed reload");
@@ -2483,9 +2483,9 @@ test_dry_run_valid_file_returns_ok(void)
     watcher.active_snapshot.valid = 1;
     watcher.active_snapshot.enabled = 0;
     watcher.active_snapshot.prune_noise = 1;
-    watcher.version = 3;
-    orig_version = watcher.version;
-    watcher.lkg_valid = 0;
+    watcher.diagnostic_state.version = 3;
+    orig_version = watcher.diagnostic_state.version;
+    watcher.digest_state.lkg_valid = 0;
 
     rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_OK,
@@ -2498,11 +2498,11 @@ test_dry_run_valid_file_returns_ok(void)
                 "active_snapshot.prune_noise unchanged (still 1)");
 
     /* last_known_good must NOT be updated */
-    TEST_ASSERT(watcher.lkg_valid == 0,
+    TEST_ASSERT(watcher.digest_state.lkg_valid == 0,
                 "lkg_valid remains 0 (not updated in dry-run)");
 
     /* version must NOT be incremented */
-    TEST_ASSERT(watcher.version == orig_version,
+    TEST_ASSERT(watcher.diagnostic_state.version == orig_version,
                 "version not incremented in dry-run mode");
 
     /* live conf must NOT be modified */
@@ -2542,9 +2542,9 @@ test_dry_run_invalid_file_returns_fail(void)
     watcher.active_snapshot.valid = 1;
     watcher.active_snapshot.enabled = 1;
     watcher.active_snapshot.prune_noise = 1;
-    watcher.version = 5;
-    orig_version = watcher.version;
-    watcher.lkg_valid = 0;
+    watcher.diagnostic_state.version = 5;
+    orig_version = watcher.diagnostic_state.version;
+    watcher.digest_state.lkg_valid = 0;
 
     rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL,
@@ -2557,17 +2557,17 @@ test_dry_run_invalid_file_returns_fail(void)
                 "active_snapshot.prune_noise unchanged (still 1)");
 
     /* last_known_good must NOT be updated */
-    TEST_ASSERT(watcher.lkg_valid == 0,
+    TEST_ASSERT(watcher.digest_state.lkg_valid == 0,
                 "lkg_valid remains 0 (not updated in dry-run)");
 
     /* version must NOT be incremented */
-    TEST_ASSERT(watcher.version == orig_version,
+    TEST_ASSERT(watcher.diagnostic_state.version == orig_version,
                 "version not incremented on dry-run failure");
 
     /* validation result should have errors */
-    TEST_ASSERT(watcher.last_validation.total_errors > 0,
+    TEST_ASSERT(watcher.diagnostic_state.last_validation.total_errors > 0,
                 "last_validation.total_errors > 0");
-    TEST_ASSERT(watcher.last_validation.count > 0,
+    TEST_ASSERT(watcher.diagnostic_state.last_validation.count > 0,
                 "last_validation.count > 0");
 
     unlink(tmpfile);
@@ -2603,9 +2603,9 @@ test_dry_run_line_too_long(void)
     watcher.active_snapshot.valid = 1;
     watcher.active_snapshot.enabled = 1;
     watcher.active_snapshot.prune_noise = 1;
-    watcher.version = 6;
-    orig_version = watcher.version;
-    watcher.lkg_valid = 0;
+    watcher.diagnostic_state.version = 6;
+    orig_version = watcher.diagnostic_state.version;
+    watcher.digest_state.lkg_valid = 0;
 
     rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL,
@@ -2616,11 +2616,11 @@ test_dry_run_line_too_long(void)
                 "active_snapshot.enabled unchanged");
 
     /* version must NOT be incremented */
-    TEST_ASSERT(watcher.version == orig_version,
+    TEST_ASSERT(watcher.diagnostic_state.version == orig_version,
                 "version not incremented");
 
     /* validation result should have errors */
-    TEST_ASSERT(watcher.last_validation.total_errors > 0,
+    TEST_ASSERT(watcher.diagnostic_state.last_validation.total_errors > 0,
                 "last_validation.total_errors > 0");
 
     unlink(tmpfile);
@@ -2655,9 +2655,9 @@ test_dry_run_missing_schema_version_returns_fail(void)
     watcher.active_snapshot.valid = 1;
     watcher.active_snapshot.enabled = 1;
     watcher.active_snapshot.prune_noise = 1;
-    watcher.version = 5;
-    orig_version = watcher.version;
-    watcher.lkg_valid = 0;
+    watcher.diagnostic_state.version = 5;
+    orig_version = watcher.diagnostic_state.version;
+    watcher.digest_state.lkg_valid = 0;
 
     rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL,
@@ -2668,11 +2668,11 @@ test_dry_run_missing_schema_version_returns_fail(void)
                 "active_snapshot.enabled unchanged (still 1)");
 
     /* version must NOT be incremented */
-    TEST_ASSERT(watcher.version == orig_version,
+    TEST_ASSERT(watcher.diagnostic_state.version == orig_version,
                 "version not incremented on dry-run failure");
 
     /* validation result should have errors */
-    TEST_ASSERT(watcher.last_validation.total_errors > 0,
+    TEST_ASSERT(watcher.diagnostic_state.last_validation.total_errors > 0,
                 "last_validation.total_errors > 0");
 
     unlink(tmpfile);
@@ -2705,7 +2705,7 @@ test_dry_run_off_applies_normally(void)
     watcher.active_snapshot.valid = 1;
     watcher.active_snapshot.enabled = 0;
     watcher.active_snapshot.prune_noise = 1;
-    watcher.version = 0;
+    watcher.diagnostic_state.version = 0;
 
     rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
@@ -2718,7 +2718,7 @@ test_dry_run_off_applies_normally(void)
                 "active_snapshot.prune_noise updated to 0");
 
     /* version IS incremented */
-    TEST_ASSERT(watcher.version == 1,
+    TEST_ASSERT(watcher.diagnostic_state.version == 1,
                 "version incremented in normal mode");
 
     unlink(tmpfile);

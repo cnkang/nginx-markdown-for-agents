@@ -2,7 +2,7 @@
  * Test: copy_reduction
  *
  * Unit tests for the full-buffer compressed copy reduction paths
- * (Spec 62 / Design §5).
+ * (copy-reduction design contract).
  *
  * Feature: 0.9.1-performance-optimization
  * Validates: Requirements 5.1, 5.2, 5.3, 5.5

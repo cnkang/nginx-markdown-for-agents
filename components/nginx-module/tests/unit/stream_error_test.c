@@ -343,7 +343,7 @@ static void test_setup(void)
 
 /* --- pre-commit pass: replay HTML --- */
 
-static void test_task_6_1_precommit_pass_replay_html(void)
+static void test_precommit_pass_replay_html(void)
 {
     ngx_http_markdown_ctx_t ctx;
     ngx_http_markdown_conf_t conf;
@@ -542,7 +542,7 @@ static void test_precommit_pass_replay_preserves_existing_pending(void)
 
 /* --- pre-commit reject: return configured error_status --- */
 
-static void test_task_6_2_precommit_reject_status(void)
+static void test_precommit_reject_status(void)
 {
     ngx_http_markdown_ctx_t ctx;
     ngx_http_markdown_conf_t conf;
@@ -608,7 +608,7 @@ test_precommit_explicit_status_policies(void)
 
 /* --- post-commit pass: safe_finish --- */
 
-static void test_task_6_3_postcommit_pass_safe_finish(void)
+static void test_postcommit_pass_safe_finish(void)
 {
     ngx_http_markdown_ctx_t ctx;
     ngx_http_markdown_conf_t conf;
@@ -635,7 +635,7 @@ static void test_task_6_3_postcommit_pass_safe_finish(void)
 
 /* --- safe_finish send_terminal fails -> abort fallback --- */
 
-static void test_task_6_3_postcommit_pass_safe_finish_fails(void)
+static void test_postcommit_pass_safe_finish_fails(void)
 {
     ngx_http_markdown_ctx_t ctx;
     ngx_http_markdown_conf_t conf;
@@ -664,7 +664,7 @@ static void test_task_6_3_postcommit_pass_safe_finish_fails(void)
     TEST_PASS("post-commit pass: safe_finish fails -> abort fallback");
 }
 
-static void test_task_6_3_abort_fallback_returns_again(void)
+static void test_abort_fallback_returns_again(void)
 {
     ngx_http_markdown_ctx_t ctx;
     ngx_http_markdown_conf_t conf;
@@ -692,7 +692,7 @@ static void test_task_6_3_abort_fallback_returns_again(void)
 
 /* --- post-commit reject: abort --- */
 
-static void test_task_6_4_postcommit_reject_abort(void)
+static void test_postcommit_reject_abort(void)
 {
     ngx_http_markdown_ctx_t ctx;
     ngx_http_markdown_conf_t conf;
@@ -716,7 +716,7 @@ static void test_task_6_4_postcommit_reject_abort(void)
     TEST_PASS("post-commit reject: abort");
 }
 
-static void test_task_6_4_postcommit_abort_returns_again(void)
+static void test_postcommit_abort_returns_again(void)
 {
     ngx_http_markdown_ctx_t ctx;
     ngx_http_markdown_conf_t conf;
@@ -890,18 +890,18 @@ static void test_content_type_restored(void)
 int main(void)
 {
     TEST_SECTION("Stream Error Handler (streaming error policy integration)");
-    test_task_6_1_precommit_pass_replay_html();
+    test_precommit_pass_replay_html();
     test_precommit_uses_unified_pass_policy();
     test_precommit_uses_unified_reject_policy();
     test_precommit_pass_replay_html_backpressure();
     test_precommit_pass_replay_preserves_existing_pending();
-    test_task_6_2_precommit_reject_status();
+    test_precommit_reject_status();
     test_precommit_explicit_status_policies();
-    test_task_6_3_postcommit_pass_safe_finish();
-    test_task_6_3_postcommit_pass_safe_finish_fails();
-    test_task_6_3_abort_fallback_returns_again();
-    test_task_6_4_postcommit_reject_abort();
-    test_task_6_4_postcommit_abort_returns_again();
+    test_postcommit_pass_safe_finish();
+    test_postcommit_pass_safe_finish_fails();
+    test_abort_fallback_returns_again();
+    test_postcommit_reject_abort();
+    test_postcommit_abort_returns_again();
     test_null_parameters();
     test_passthrough_state();
     test_replay_chain_null();

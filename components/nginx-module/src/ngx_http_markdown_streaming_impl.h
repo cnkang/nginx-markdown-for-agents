@@ -2822,8 +2822,7 @@ ngx_http_markdown_streaming_map_finalize_decomp_error(
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total);
         ngx_http_markdown_record_decompression_failure_budget(
-            ctx != NULL ? ctx->decompression.type
-                         : NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN);
+            ctx->decompression.type);
         NGX_HTTP_MARKDOWN_METRIC_INC(
             perf.decompression_budget_exceeded_total);
         return ERROR_DECOMPRESSION_BUDGET_EXCEEDED;
@@ -2832,8 +2831,7 @@ ngx_http_markdown_streaming_map_finalize_decomp_error(
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.format_error_total);
         ngx_http_markdown_record_decompression_failure_format(
-            ctx != NULL ? ctx->decompression.type
-                         : NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN);
+            ctx->decompression.type);
         if (ctx->streaming.commit_state
             == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
         {
@@ -2845,8 +2843,7 @@ ngx_http_markdown_streaming_map_finalize_decomp_error(
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.truncated_input_total);
         ngx_http_markdown_record_decompression_failure_truncated(
-            ctx != NULL ? ctx->decompression.type
-                         : NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN);
+            ctx->decompression.type);
         if (ctx->streaming.commit_state
             == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
         {
@@ -2858,8 +2855,7 @@ ngx_http_markdown_streaming_map_finalize_decomp_error(
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.io_error_total);
         ngx_http_markdown_record_decompression_failure_io(
-            ctx != NULL ? ctx->decompression.type
-                         : NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN);
+            ctx->decompression.type);
         if (ctx->streaming.commit_state
             == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
         {

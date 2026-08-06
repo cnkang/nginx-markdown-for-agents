@@ -20,14 +20,14 @@
 #include <ngx_http.h>
 #include <time.h>
 
+#include "ngx_http_markdown_diagnostics.h"
+#include "ngx_http_markdown_dynconf_snapshot.h"
+#include "ngx_http_markdown_filter_module.h"
+
 /* Unit-test translation units may include system headers before this file. */
 #if !defined(_WIN32)
 extern struct tm *gmtime_r(const time_t *, struct tm *);
 #endif
-
-#include "ngx_http_markdown_diagnostics.h"
-#include "ngx_http_markdown_dynconf_snapshot.h"
-#include "ngx_http_markdown_filter_module.h"
 
 /*
  * Forward-declare the FFI wrapper for reason code string lookup.
@@ -765,7 +765,7 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     ngx_buf_t *b)
 {
     const ngx_http_markdown_conf_t  *conf;
-    ngx_http_markdown_diag_state_t  *state;
+    const ngx_http_markdown_diag_state_t  *state;
     ngx_http_markdown_diag_dynconf_t dynconf;
     ngx_http_markdown_diag_effective_t effective;
     ngx_http_markdown_diag_metrics_t metrics;

@@ -630,7 +630,7 @@ ngx_http_markdown_merge_advanced_values(ngx_http_markdown_conf_t *conf,
 
 /*
  * Map the C-side conditional_requests constant to the FFI cache_validation
- * discriminant (spec 50, task 7.1).
+ * discriminant used by the legacy compatibility path.
  *
  * C enum:  FULL_SUPPORT=0  IF_MODIFIED_SINCE=1  DISABLED=2
  * FFI u8:  Off=0           ImsOnly=1            Full=2

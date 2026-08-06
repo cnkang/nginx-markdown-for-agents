@@ -309,7 +309,7 @@ _Static_assert(offsetof(FFIChainDecodeResult, error_category) == 16,
     "FFIChainDecodeResult.error_category offset must be 16");
 
 /* ----------------------------------------------------------------
- * FFIBaseUrlInput layout (144 bytes on LP64) - spec 62 Wave 4.
+ * FFIBaseUrlInput layout (144 bytes on LP64) for the current ABI.
  *   source_ip             : *const u8                     offset   0
  *   source_ip_len         : usize                         offset   8
  *   trusted               : *const MarkdownTrustedProxies offset  16

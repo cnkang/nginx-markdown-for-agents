@@ -1,7 +1,7 @@
 /*
  * Test: perf_metrics
  *
- * Validates all 8 new performance metrics from Spec 64a:
+ * Validates all 8 performance metrics:
  *   - backpressure_total fires on NGX_AGAIN
  *   - backpressure_resume_total fires on drain NGX_OK
  *   - pending_output_high_watermark_bytes CAS gauge tracks max
@@ -561,7 +561,7 @@ int
 main(void)
 {
     printf("\n========================================\n");
-    printf("perf_metrics Tests (Spec 64a, Task 4.6)\n");
+    printf("perf_metrics Tests (runtime metric contract)\n");
     printf("========================================\n");
 
     test_backpressure_fires_on_ngx_again();

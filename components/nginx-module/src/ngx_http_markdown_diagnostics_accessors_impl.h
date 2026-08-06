@@ -99,50 +99,49 @@ ngx_http_markdown_diagnostics_get_dynconf_state(
         return;
     }
 
-    if (ngx_http_markdown_dynconf_watcher.last_mtime == 0
-        && ngx_http_markdown_dynconf_watcher.source_digest[0] == '\0')
+    if (ngx_http_markdown_dynconf_watcher.file_state.last_mtime == 0
+        && ngx_http_markdown_dynconf_watcher.digest_state.source_digest[0] == '\0')
     {
         out->state = NGX_HTTP_MARKDOWN_DIAG_DYNCONF_NO_FILE;
         return;
     }
 
-    result = ngx_http_markdown_dynconf_watcher.last_result;
+    result = ngx_http_markdown_dynconf_watcher.diagnostic_state.last_result;
     if (result == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE
         || result == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR
         || result == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL)
     {
-        out->state = ngx_http_markdown_dynconf_watcher.lkg_valid
+        out->state = ngx_http_markdown_dynconf_watcher.digest_state.lkg_valid
             ? NGX_HTTP_MARKDOWN_DIAG_DYNCONF_LKG_PRESERVED
             : NGX_HTTP_MARKDOWN_DIAG_DYNCONF_INVALID_NO_LKG;
-    } else if (ngx_http_markdown_dynconf_watcher.generation != 0) {
+    } else if (ngx_http_markdown_dynconf_watcher.digest_state.generation != 0) {
         out->state = NGX_HTTP_MARKDOWN_DIAG_DYNCONF_ACTIVE;
     } else {
         out->state = NGX_HTTP_MARKDOWN_DIAG_DYNCONF_NO_FILE;
     }
 
-    out->generation = ngx_http_markdown_dynconf_watcher.generation;
+    out->generation = ngx_http_markdown_dynconf_watcher.digest_state.generation;
     ngx_memcpy(out->source_digest,
-               ngx_http_markdown_dynconf_watcher.source_digest,
+               ngx_http_markdown_dynconf_watcher.digest_state.source_digest,
                sizeof(out->source_digest));
     ngx_memcpy(out->active_digest,
-               ngx_http_markdown_dynconf_watcher.active_digest,
+               ngx_http_markdown_dynconf_watcher.digest_state.active_digest,
                sizeof(out->active_digest));
     ngx_memcpy(out->lkg_digest,
-               ngx_http_markdown_dynconf_watcher.lkg_digest,
+               ngx_http_markdown_dynconf_watcher.digest_state.lkg_digest,
                sizeof(out->lkg_digest));
-    out->last_success = ngx_http_markdown_dynconf_watcher.last_success;
+    out->last_success = ngx_http_markdown_dynconf_watcher.diagnostic_state.last_success;
     out->has_last_success = out->last_success != 0;
-    if (ngx_http_markdown_dynconf_watcher.last_error_len > 0) {
-        size_t  i;
+    if (ngx_http_markdown_dynconf_watcher.diagnostic_state.last_error_len > 0) {
 
-        out->last_error_len = ngx_http_markdown_dynconf_watcher.last_error_len;
+        out->last_error_len = ngx_http_markdown_dynconf_watcher.diagnostic_state.last_error_len;
         if (out->last_error_len > sizeof(out->last_error) - 1) {
             out->last_error_len = sizeof(out->last_error) - 1;
         }
         ngx_memcpy(out->last_error,
-                   ngx_http_markdown_dynconf_watcher.last_error,
+                   ngx_http_markdown_dynconf_watcher.diagnostic_state.last_error,
                    out->last_error_len);
-        for (i = 0; i < out->last_error_len; i++) {
+        for (size_t i = 0; i < out->last_error_len; i++) {
             if (out->last_error[i] == '"'
                 || out->last_error[i] == '\\'
                 || out->last_error[i] < 0x20)
@@ -152,10 +151,10 @@ ngx_http_markdown_diagnostics_get_dynconf_state(
         }
         out->last_error[out->last_error_len] = '\0';
     }
-    out->active_mtime = ngx_http_markdown_dynconf_watcher.applied_mtime;
-    out->config_version = ngx_http_markdown_dynconf_watcher.version;
-    out->last_known_good_mtime = ngx_http_markdown_dynconf_watcher.lkg_mtime;
-    out->lkg_valid = ngx_http_markdown_dynconf_watcher.lkg_valid ? 1 : 0;
+    out->active_mtime = ngx_http_markdown_dynconf_watcher.file_state.applied_mtime;
+    out->config_version = ngx_http_markdown_dynconf_watcher.diagnostic_state.version;
+    out->last_known_good_mtime = ngx_http_markdown_dynconf_watcher.digest_state.lkg_mtime;
+    out->lkg_valid = ngx_http_markdown_dynconf_watcher.digest_state.lkg_valid ? 1 : 0;
 }
 
 
@@ -181,7 +180,7 @@ ngx_http_markdown_diagnostics_get_effective(
     }
 
     snapshot = (ngx_http_markdown_dynconf_watcher.active
-                && ngx_http_markdown_dynconf_watcher.generation != 0
+                && ngx_http_markdown_dynconf_watcher.digest_state.generation != 0
                 && ngx_http_markdown_dynconf_watcher.active_snapshot.valid)
         ? &ngx_http_markdown_dynconf_watcher.active_snapshot : NULL;
     ngx_memzero(&effective, sizeof(effective));
@@ -227,52 +226,83 @@ ngx_http_markdown_manifest_literal(
 
 
 static ngx_int_t
+ngx_http_markdown_manifest_append_json_char(
+    ngx_http_markdown_manifest_builder_t *builder, u_char ch)
+{
+    static const u_char  hex[] = "0123456789abcdef";
+    u_char               escaped;
+    size_t               required;
+
+    if (ch == '"' || ch == '\\') {
+        required = 2;
+    } else if (ch == '\b' || ch == '\f' || ch == '\n'
+               || ch == '\r' || ch == '\t')
+    {
+        required = 2;
+    } else if (ch < 0x20) {
+        required = 6;
+    } else {
+        required = 1;
+    }
+
+    if ((size_t) (builder->last - builder->pos) < required) {
+        return NGX_ERROR;
+    }
+
+    if (ch == '"' || ch == '\\') {
+        *builder->pos++ = '\\';
+        *builder->pos++ = ch;
+    } else if (ch == '\b' || ch == '\f' || ch == '\n'
+               || ch == '\r' || ch == '\t')
+    {
+        switch (ch) {
+        case '\b':
+            escaped = 'b';
+            break;
+        case '\f':
+            escaped = 'f';
+            break;
+        case '\n':
+            escaped = 'n';
+            break;
+        case '\r':
+            escaped = 'r';
+            break;
+        default:
+            escaped = 't';
+            break;
+        }
+        *builder->pos++ = '\\';
+        *builder->pos++ = escaped;
+    } else if (ch < 0x20) {
+        *builder->pos++ = '\\';
+        *builder->pos++ = 'u';
+        *builder->pos++ = '0';
+        *builder->pos++ = '0';
+        *builder->pos++ = hex[ch >> 4];
+        *builder->pos++ = hex[ch & 0x0f];
+    } else {
+        *builder->pos++ = ch;
+    }
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
 ngx_http_markdown_manifest_json_string(
     ngx_http_markdown_manifest_builder_t *builder,
     const u_char *data, size_t length)
 {
-    static const u_char  hex[] = "0123456789abcdef";
-    size_t               i;
-    u_char              ch;
-
     if (ngx_http_markdown_manifest_literal(builder, "\"") != NGX_OK) {
         return NGX_ERROR;
     }
 
-    for (i = 0; i < length; i++) {
-        ch = data[i];
-        if (ch == '"' || ch == '\\') {
-            if ((size_t) (builder->last - builder->pos) < 2) {
-                return NGX_ERROR;
-            }
-            *builder->pos++ = '\\';
-            *builder->pos++ = ch;
-        } else if (ch == '\b' || ch == '\f' || ch == '\n'
-                   || ch == '\r' || ch == '\t')
+    for (size_t i = 0; i < length; i++) {
+        if (ngx_http_markdown_manifest_append_json_char(
+                builder, data[i]) != NGX_OK)
         {
-            if ((size_t) (builder->last - builder->pos) < 2) {
-                return NGX_ERROR;
-            }
-            *builder->pos++ = '\\';
-            *builder->pos++ = ch == '\b' ? 'b'
-                : ch == '\f' ? 'f'
-                : ch == '\n' ? 'n'
-                : ch == '\r' ? 'r' : 't';
-        } else if (ch < 0x20) {
-            if ((size_t) (builder->last - builder->pos) < 6) {
-                return NGX_ERROR;
-            }
-            *builder->pos++ = '\\';
-            *builder->pos++ = 'u';
-            *builder->pos++ = '0';
-            *builder->pos++ = '0';
-            *builder->pos++ = hex[ch >> 4];
-            *builder->pos++ = hex[ch & 0x0f];
-        } else {
-            if (builder->pos == builder->last) {
-                return NGX_ERROR;
-            }
-            *builder->pos++ = ch;
+            return NGX_ERROR;
         }
     }
 
@@ -395,8 +425,7 @@ ngx_http_markdown_manifest_field_array(
     const ngx_array_t *array, const u_char *fallback, size_t fallback_len,
     ngx_flag_t explicit, ngx_flag_t first)
 {
-    ngx_uint_t  i;
-    ngx_str_t  *values;
+    const ngx_str_t  *values;
 
     if (!first && ngx_http_markdown_manifest_literal(builder, ",") != NGX_OK) {
         return NGX_ERROR;
@@ -418,7 +447,7 @@ ngx_http_markdown_manifest_field_array(
         }
     } else {
         values = array->elts;
-        for (i = 0; i < array->nelts; i++) {
+        for (ngx_uint_t i = 0; i < array->nelts; i++) {
             if (i != 0 && ngx_http_markdown_manifest_literal(builder, ",")
                 != NGX_OK)
             {
@@ -502,52 +531,101 @@ ngx_http_markdown_manifest_append_policy_fields(
     ngx_http_markdown_manifest_builder_t *builder,
     const ngx_http_markdown_conf_t *conf, ngx_uint_t explicit)
 {
-    if (ngx_http_markdown_manifest_field_string(builder, "accept",
-        conf->accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD
-            ? (const u_char *) "wildcard"
-            : conf->accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_FORCE
-                ? (const u_char *) "force" : (const u_char *) "strict",
-        conf->accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD ? 8
-            : conf->accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_FORCE ? 5 : 6,
-        explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_ACCEPT, 0) != NGX_OK
-        || ngx_http_markdown_manifest_field_array(builder, "auth_cookies",
-            conf->policy.auth_cookies, NULL, 0,
+    const u_char  *accept_value;
+    const u_char  *auth_value;
+    const u_char  *auto_value;
+    const u_char  *cache_value;
+    size_t         accept_len;
+    size_t         auth_len;
+    size_t         auto_len;
+    size_t         cache_len;
+
+    if (conf->accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD) {
+        accept_value = (const u_char *) "wildcard";
+        accept_len = sizeof("wildcard") - 1;
+    } else if (conf->accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_FORCE) {
+        accept_value = (const u_char *) "force";
+        accept_len = sizeof("force") - 1;
+    } else {
+        accept_value = (const u_char *) "strict";
+        accept_len = sizeof("strict") - 1;
+    }
+    if (conf->policy.auth_policy == NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY) {
+        auth_value = (const u_char *) "deny";
+        auth_len = sizeof("deny") - 1;
+    } else {
+        auth_value = (const u_char *) "allow";
+        auth_len = sizeof("allow") - 1;
+    }
+    if (conf->decompress.auto_decompress) {
+        auto_value = (const u_char *) "on";
+        auto_len = sizeof("on") - 1;
+    } else {
+        auto_value = (const u_char *) "off";
+        auto_len = sizeof("off") - 1;
+    }
+    if (conf->policy.conditional_requests
+        == NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT)
+    {
+        cache_value = (const u_char *) "full";
+        cache_len = sizeof("full") - 1;
+    } else if (conf->policy.conditional_requests
+               == NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE)
+    {
+        cache_value = (const u_char *) "ims_only";
+        cache_len = sizeof("ims_only") - 1;
+    } else {
+        cache_value = (const u_char *) "off";
+        cache_len = sizeof("off") - 1;
+    }
+
+    if (ngx_http_markdown_manifest_field_string(
+            builder, "accept", accept_value, accept_len,
+            explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_ACCEPT, 0)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_manifest_field_array(
+            builder, "auth_cookies", conf->policy.auth_cookies, NULL, 0,
             explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_AUTH_COOKIES, 0)
-            != NGX_OK
-        || ngx_http_markdown_manifest_field_string(builder, "auth_policy",
-            conf->policy.auth_policy == NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY
-                ? (const u_char *) "deny" : (const u_char *) "allow",
-            conf->policy.auth_policy == NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY
-                ? 4 : 5,
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_manifest_field_string(
+            builder, "auth_policy", auth_value, auth_len,
             explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_AUTH_POLICY, 0)
-            != NGX_OK
-        || ngx_http_markdown_manifest_field_string(builder, "auto_decompress",
-            conf->decompress.auto_decompress ? (const u_char *) "on"
-                : (const u_char *) "off", 2,
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_manifest_field_string(
+            builder, "auto_decompress", auto_value, auto_len,
             explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DECOMPRESS, 0)
-            != NGX_OK
-        || ngx_http_markdown_manifest_field_string(builder, "cache_validation",
-            conf->policy.conditional_requests
-                == NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT
-                ? (const u_char *) "full"
-                : conf->policy.conditional_requests
-                    == NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE
-                    ? (const u_char *) "ims_only" : (const u_char *) "off",
-            conf->policy.conditional_requests
-                == NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT ? 4
-                : conf->policy.conditional_requests
-                    == NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE
-                    ? 8 : 3,
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_manifest_field_string(
+            builder, "cache_validation", cache_value, cache_len,
             explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_CACHE, 0)
-            != NGX_OK
-        || ngx_http_markdown_manifest_field_array(builder, "content_types",
-            conf->routing.content_types, (const u_char *) "text/html", 9,
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_manifest_field_array(
+            builder, "content_types", conf->routing.content_types,
+            (const u_char *) "text/html", sizeof("text/html") - 1,
             explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_CONTENT, 0)
-            != NGX_OK
-        || ngx_http_markdown_manifest_field_bool(builder, "diagnostics",
-            conf->ops.diagnostics_enabled,
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_manifest_field_bool(
+            builder, "diagnostics", conf->ops.diagnostics_enabled,
             explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DIAGNOSTICS, 0)
-            != NGX_OK)
+        != NGX_OK)
     {
         return NGX_ERROR;
     }
@@ -562,52 +640,116 @@ ngx_http_markdown_manifest_append_runtime_fields(
     const ngx_http_markdown_conf_t *conf, ngx_uint_t explicit)
 {
     const ngx_str_t  *complex_value;
+    const u_char     *dynamic_value;
+    const u_char     *error_value;
+    const u_char     *filter_value;
+    const u_char     *flavor_value;
+    size_t            dynamic_len;
+    size_t            error_len;
+    size_t            filter_len;
+    size_t            flavor_len;
 
-    complex_value = (conf->enabled_source == NGX_HTTP_MARKDOWN_ENABLED_COMPLEX
-                     && conf->enabled_complex != NULL)
-        ? &conf->enabled_complex->value : NULL;
-    if (ngx_http_markdown_manifest_field_string(builder, "dynamic_config",
-        conf->advanced.dynconf_enabled ? (const u_char *) "on"
-            : (const u_char *) "off", 2,
-        explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DYNCONF, 0) != NGX_OK
-        || ngx_http_markdown_manifest_field_string(builder,
-            "dynamic_config_path", conf->advanced.dynconf_path.data != NULL
+    complex_value = NULL;
+    if (conf->enabled_source == NGX_HTTP_MARKDOWN_ENABLED_COMPLEX
+        && conf->enabled_complex != NULL)
+    {
+        complex_value = &conf->enabled_complex->value;
+    }
+
+    if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS) {
+        error_value = (const u_char *) "pass";
+        error_len = sizeof("pass") - 1;
+    } else if (conf->error_status == 429) {
+        error_value = (const u_char *) "status 429";
+        error_len = sizeof("status 429") - 1;
+    } else if (conf->error_status == 503) {
+        error_value = (const u_char *) "status 503";
+        error_len = sizeof("status 503") - 1;
+    } else {
+        error_value = (const u_char *) "fail_closed";
+        error_len = sizeof("fail_closed") - 1;
+    }
+    if (conf->advanced.dynconf_enabled) {
+        dynamic_value = (const u_char *) "on";
+        dynamic_len = sizeof("on") - 1;
+    } else {
+        dynamic_value = (const u_char *) "off";
+        dynamic_len = sizeof("off") - 1;
+    }
+
+    if (complex_value != NULL) {
+        filter_value = complex_value->data;
+        filter_len = complex_value->len;
+    } else if (conf->enabled) {
+        filter_value = (const u_char *) "on";
+        filter_len = sizeof("on") - 1;
+    } else {
+        filter_value = (const u_char *) "off";
+        filter_len = sizeof("off") - 1;
+    }
+
+    if (conf->flavor == NGX_HTTP_MARKDOWN_FLAVOR_GFM) {
+        flavor_value = (const u_char *) "gfm";
+        flavor_len = sizeof("gfm") - 1;
+    } else {
+        flavor_value = (const u_char *) "commonmark";
+        flavor_len = sizeof("commonmark") - 1;
+    }
+
+    if (ngx_http_markdown_manifest_field_string(
+            builder, "dynamic_config", dynamic_value, dynamic_len,
+            explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DYNCONF, 0)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_manifest_field_string(
+            builder, "dynamic_config_path",
+            conf->advanced.dynconf_path.data != NULL
                 ? conf->advanced.dynconf_path.data : (const u_char *) "",
             conf->advanced.dynconf_path.data != NULL
                 ? conf->advanced.dynconf_path.len : 0,
             explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DYNCONF, 0)
-            != NGX_OK
-        || ngx_http_markdown_manifest_field_string(builder, "dynconf_dry_run",
-            conf->advanced.dynconf_dry_run ? (const u_char *) "on"
-                : (const u_char *) "off", 2,
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_manifest_field_string(
+            builder, "dynconf_dry_run",
+            conf->advanced.dynconf_dry_run
+                ? (const u_char *) "on" : (const u_char *) "off",
+            conf->advanced.dynconf_dry_run ? sizeof("on") - 1
+                : sizeof("off") - 1,
             explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DRY_RUN, 0)
-            != NGX_OK
-        || ngx_http_markdown_manifest_field_string(builder, "error_policy",
-            conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS
-                ? (const u_char *) "pass"
-                : conf->error_status == 429 ? (const u_char *) "status 429"
-                : conf->error_status == 503 ? (const u_char *) "status 503"
-                : (const u_char *) "fail_closed",
-            conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS ? 4 : 10,
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_manifest_field_string(
+            builder, "error_policy", error_value, error_len,
             explicit & NGX_HTTP_MARKDOWN_EXPLICIT_ERROR_POLICY, 0)
-            != NGX_OK
-        || ngx_http_markdown_manifest_field_string(builder, "filter",
-            complex_value != NULL ? complex_value->data
-                : conf->enabled ? (const u_char *) "on"
-                : (const u_char *) "off",
-            complex_value != NULL ? complex_value->len : 2,
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_manifest_field_string(
+            builder, "filter", filter_value, filter_len,
             explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_FILTER, 0)
-            != NGX_OK
-        || ngx_http_markdown_manifest_field_string(builder, "flavor",
-            conf->flavor == NGX_HTTP_MARKDOWN_FLAVOR_GFM
-                ? (const u_char *) "gfm" : (const u_char *) "commonmark",
-            conf->flavor == NGX_HTTP_MARKDOWN_FLAVOR_GFM ? 3 : 10,
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_manifest_field_string(
+            builder, "flavor", flavor_value, flavor_len,
             explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_FLAVOR, 0)
-            != NGX_OK
-        || ngx_http_markdown_manifest_field_bool(builder, "front_matter",
-            conf->front_matter,
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_manifest_field_bool(
+            builder, "front_matter", conf->front_matter,
             explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_FRONT_MATTER, 0)
-            != NGX_OK)
+        != NGX_OK)
     {
         return NGX_ERROR;
     }
@@ -622,29 +764,45 @@ ngx_http_markdown_manifest_append_limit_fields(
     const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_main_conf_t *main_conf, ngx_uint_t explicit)
 {
-    if (ngx_http_markdown_manifest_field_limits(builder, conf,
-            explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_LIMITS, 0)
-        != NGX_OK
-        || ngx_http_markdown_manifest_field_string(builder, "log_verbosity",
-            conf->policy.log_verbosity == NGX_HTTP_MARKDOWN_LOG_ERROR
-                ? (const u_char *) "error"
-                : conf->policy.log_verbosity == NGX_HTTP_MARKDOWN_LOG_WARN
-                    ? (const u_char *) "warn"
-                    : conf->policy.log_verbosity
-                        == NGX_HTTP_MARKDOWN_LOG_DEBUG
-                        ? (const u_char *) "debug" : (const u_char *) "info",
-            conf->policy.log_verbosity == NGX_HTTP_MARKDOWN_LOG_ERROR ? 5
-                : conf->policy.log_verbosity == NGX_HTTP_MARKDOWN_LOG_WARN
-                    ? 4 : conf->policy.log_verbosity
-                        == NGX_HTTP_MARKDOWN_LOG_DEBUG ? 5 : 4,
-            explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_LOG, 0)
-            != NGX_OK
-        || ngx_http_markdown_manifest_field_bool(builder, "metrics",
-            conf->ops.metrics_enabled,
+    const u_char  *log_value;
+    size_t         log_len;
+
+    if (conf->policy.log_verbosity == NGX_HTTP_MARKDOWN_LOG_ERROR) {
+        log_value = (const u_char *) "error";
+        log_len = sizeof("error") - 1;
+    } else if (conf->policy.log_verbosity == NGX_HTTP_MARKDOWN_LOG_WARN) {
+        log_value = (const u_char *) "warn";
+        log_len = sizeof("warn") - 1;
+    } else if (conf->policy.log_verbosity == NGX_HTTP_MARKDOWN_LOG_DEBUG) {
+        log_value = (const u_char *) "debug";
+        log_len = sizeof("debug") - 1;
+    } else {
+        log_value = (const u_char *) "info";
+        log_len = sizeof("info") - 1;
+    }
+
+    if (ngx_http_markdown_manifest_field_limits(
+            builder, conf, explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_LIMITS,
+            0) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_manifest_field_string(
+            builder, "log_verbosity", log_value, log_len,
+            explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_LOG, 0) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_manifest_field_bool(
+            builder, "metrics", conf->ops.metrics_enabled,
             explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_METRICS, 0)
-            != NGX_OK
-        || ngx_http_markdown_manifest_field_number(builder, "metrics_shm_size",
-            (uint64_t) main_conf->metrics_shm_size, 0, 0) != NGX_OK)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_manifest_field_number(
+            builder, "metrics_shm_size", (uint64_t) main_conf->metrics_shm_size,
+            0, 0) != NGX_OK)
     {
         return NGX_ERROR;
     }
@@ -658,45 +816,78 @@ ngx_http_markdown_manifest_append_prune_fields(
     ngx_http_markdown_manifest_builder_t *builder,
     const ngx_http_markdown_conf_t *conf, ngx_uint_t explicit)
 {
-    if (ngx_http_markdown_manifest_field_bool(builder, "prune_noise",
-            conf->advanced.prune_noise,
+    const u_char  *protection_value;
+    const u_char  *selectors_value;
+    const u_char  *streaming_value;
+    size_t         protection_len;
+    size_t         selectors_len;
+    size_t         streaming_len;
+
+    if (conf->advanced.prune_protection_selectors != NULL) {
+        protection_value = conf->advanced.prune_protection_selectors->data;
+        protection_len = conf->advanced.prune_protection_selectors->len;
+    } else {
+        protection_value = (const u_char *) "";
+        protection_len = 0;
+    }
+    if (conf->advanced.prune_selectors != NULL) {
+        selectors_value = conf->advanced.prune_selectors->data;
+        selectors_len = conf->advanced.prune_selectors->len;
+    } else {
+        selectors_value = (const u_char *) "nav footer aside";
+        selectors_len = sizeof("nav footer aside") - 1;
+    }
+    if (conf->stream.policy == NGX_HTTP_MARKDOWN_STREAMING_OFF) {
+        streaming_value = (const u_char *) "off";
+        streaming_len = sizeof("off") - 1;
+    } else if (conf->stream.policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE) {
+        streaming_value = (const u_char *) "force";
+        streaming_len = sizeof("force") - 1;
+    } else {
+        streaming_value = (const u_char *) "auto";
+        streaming_len = sizeof("auto") - 1;
+    }
+
+    if (ngx_http_markdown_manifest_field_bool(
+            builder, "prune_noise", conf->advanced.prune_noise,
             explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_PRUNE, 0)
-        != NGX_OK
-        || ngx_http_markdown_manifest_field_string(builder,
-            "prune_protection_selectors",
-            conf->advanced.prune_protection_selectors != NULL
-                ? conf->advanced.prune_protection_selectors->data
-                : (const u_char *) "",
-            conf->advanced.prune_protection_selectors != NULL
-                ? conf->advanced.prune_protection_selectors->len : 0,
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_manifest_field_string(
+            builder, "prune_protection_selectors", protection_value,
+            protection_len,
             explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_PROTECTION, 0)
-            != NGX_OK
-        || ngx_http_markdown_manifest_field_string(builder, "prune_selectors",
-            conf->advanced.prune_selectors != NULL
-                ? conf->advanced.prune_selectors->data
-                : (const u_char *) "nav footer aside",
-            conf->advanced.prune_selectors != NULL
-                ? conf->advanced.prune_selectors->len : 16,
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_manifest_field_string(
+            builder, "prune_selectors", selectors_value, selectors_len,
             explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_SELECTORS, 0)
-            != NGX_OK
-        || ngx_http_markdown_manifest_field_array(builder,
-            "stream_excluded_types", conf->stream.excluded_types, NULL, 0,
-            explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_EXCLUDED, 0)
-            != NGX_OK
-        || ngx_http_markdown_manifest_field_string(builder, "streaming",
-            conf->stream.policy == NGX_HTTP_MARKDOWN_STREAMING_OFF
-                ? (const u_char *) "off"
-                : conf->stream.policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE
-                    ? (const u_char *) "force" : (const u_char *) "auto",
-            conf->stream.policy == NGX_HTTP_MARKDOWN_STREAMING_OFF ? 3
-                : conf->stream.policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE
-                    ? 5 : 4,
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_manifest_field_array(
+            builder, "stream_excluded_types", conf->stream.excluded_types,
+            NULL, 0, explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_EXCLUDED, 0)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_manifest_field_string(
+            builder, "streaming", streaming_value, streaming_len,
             explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_STREAM, 0)
-            != NGX_OK
-        || ngx_http_markdown_manifest_field_bool(builder, "token_estimate",
-            conf->token_estimate,
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_manifest_field_bool(
+            builder, "token_estimate", conf->token_estimate,
             explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_TOKEN, 0)
-            != NGX_OK)
+        != NGX_OK)
     {
         return NGX_ERROR;
     }
@@ -731,8 +922,8 @@ ngx_http_markdown_manifest_digest(
     const ngx_http_markdown_main_conf_t  *main_conf;
     ngx_http_markdown_manifest_builder_t  builder;
     u_char                                *manifest;
-    u_char                                *pos;
-    u_char                                *start;
+    const u_char                          *pos;
+    const u_char                          *start;
     u_char                                 digest[64];
     ngx_uint_t                             explicit;
 

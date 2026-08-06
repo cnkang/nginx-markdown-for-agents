@@ -25,9 +25,7 @@
  *
  * Parameters:
  *   arg          - argument to compare
- *   expected     - expected string bytes (mutable type to match
- *                  ngx_strncasecmp signature; callers pass
- *                  static u_char[] constants)
+ *   expected     - expected string bytes
  *   expected_len - length of expected string
  *
  * Returns:
@@ -36,9 +34,11 @@
 static ngx_int_t
 ngx_http_markdown_arg_equals(
     const ngx_str_t *arg,
-    u_char *expected,
+    const u_char *expected,
     size_t expected_len)
 {
+    size_t  i;
+
     if (arg == NULL || arg->data == NULL) {
         return 0;
     }
@@ -47,9 +47,13 @@ ngx_http_markdown_arg_equals(
         return 0;
     }
 
-    return ngx_strncasecmp(arg->data,
-                           expected,
-                           expected_len) == 0;
+    for (i = 0; i < expected_len; i++) {
+        if (ngx_tolower(arg->data[i]) != ngx_tolower(expected[i])) {
+            return 0;
+        }
+    }
+
+    return 1;
 }
 
 /*
@@ -1467,10 +1471,8 @@ ngx_http_markdown_metrics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void *co
         return NGX_CONF_ERROR;
     }
 
-    if (mcf != NULL) {
-        if (mcf->ops.metrics_enabled != NGX_CONF_UNSET) {
-            return "is duplicate";
-        }
+    if (mcf != NULL && mcf->ops.metrics_enabled != NGX_CONF_UNSET) {
+        return "is duplicate";
     }
 
     if (clcf->handler != NULL) {
@@ -1658,16 +1660,14 @@ ngx_http_markdown_dynconf_flag(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     if (cmd == NULL || cmd->name.data == NULL) {
         return NGX_CONF_ERROR;
     }
-    if (cmd->name.len == sizeof("markdown_dynamic_config") - 1
-        && ngx_strncasecmp(cmd->name.data,
-                           (u_char *) "markdown_dynamic_config",
-                           sizeof("markdown_dynamic_config") - 1) == 0)
+    if (ngx_http_markdown_arg_equals(
+            &cmd->name, (const u_char *) "markdown_dynamic_config",
+            sizeof("markdown_dynamic_config") - 1))
     {
         slot = &mcf->advanced.dynconf_enabled;
-    } else if (cmd->name.len == sizeof("markdown_dynconf_dry_run") - 1
-               && ngx_strncasecmp(cmd->name.data,
-                                  (u_char *) "markdown_dynconf_dry_run",
-                                  sizeof("markdown_dynconf_dry_run") - 1) == 0)
+    } else if (ngx_http_markdown_arg_equals(
+                   &cmd->name, (const u_char *) "markdown_dynconf_dry_run",
+                   sizeof("markdown_dynconf_dry_run") - 1))
     {
         slot = &mcf->advanced.dynconf_dry_run;
     } else {
@@ -1677,14 +1677,14 @@ ngx_http_markdown_dynconf_flag(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return "is duplicate";
     }
 
-    if (value[1].len == 2
-        && ngx_strncasecmp(value[1].data, (u_char *) "on", 2) == 0)
+    if (ngx_http_markdown_arg_equals(
+            &value[1], (const u_char *) "on", sizeof("on") - 1))
     {
         *slot = 1;
         return NGX_CONF_OK;
     }
-    if (value[1].len == 3
-        && ngx_strncasecmp(value[1].data, (u_char *) "off", 3) == 0)
+    if (ngx_http_markdown_arg_equals(
+            &value[1], (const u_char *) "off", sizeof("off") - 1))
     {
         *slot = 0;
         return NGX_CONF_OK;
