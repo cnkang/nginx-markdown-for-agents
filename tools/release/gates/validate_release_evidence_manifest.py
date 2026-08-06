@@ -118,48 +118,47 @@ def validate_record(record: dict, expected_sha: str | None = None) -> list[str]:
         if not isinstance(entry, dict):
             reasons.append(f"malformed: entries[{index}] must be an object")
             continue
-
-        # Check required fields
-        for field in REQUIRED_ENTRY_FIELDS:
-            if field not in entry:
-                reasons.append(
-                    f"missing-observation: entries[{index}] missing {field}")
-
-        # Validate id uniqueness
-        entry_id = entry.get("id")
-        if entry_id is not None:
-            if entry_id in seen_ids:
-                reasons.append(
-                    f"malformed: duplicate entry id {entry_id!r}")
-            seen_ids.add(entry_id)
-
-        # Validate status
-        status = entry.get("status")
-        if status is not None and status not in VALID_STATUSES:
-            reasons.append(
-                f"malformed: entries[{index}] status {status!r} not in "
-                f"{VALID_STATUSES}")
-
-        # Validate blocking field
-        blocking = entry.get("blocking")
-        if blocking is not None and not isinstance(blocking, bool):
-            reasons.append(
-                f"malformed: entries[{index}] blocking must be a boolean")
-
-        # Blocking entries must be pass
-        if entry.get("blocking") is True:
-            if status == "pending":
-                reasons.append(
-                    f"blocking-pending: entries[{index}] "
-                    f"(category={entry.get('category')!r}) is blocking with "
-                    f"status=pending")
-            elif status == "fail":
-                reasons.append(
-                    f"blocking-pending: entries[{index}] "
-                    f"(category={entry.get('category')!r}) is blocking with "
-                    f"status=fail")
+        _check_entry(entry, index, seen_ids, reasons)
 
     return reasons
+
+
+def _check_entry(entry: dict, index: int, seen_ids: set, reasons: list) -> None:
+    """Validate one evidence manifest entry."""
+    for field in REQUIRED_ENTRY_FIELDS:
+        if field not in entry:
+            reasons.append(
+                f"missing-observation: entries[{index}] missing {field}")
+
+    entry_id = entry.get("id")
+    if entry_id is not None:
+        if entry_id in seen_ids:
+            reasons.append(
+                f"malformed: duplicate entry id {entry_id!r}")
+        seen_ids.add(entry_id)
+
+    status = entry.get("status")
+    if status is not None and status not in VALID_STATUSES:
+        reasons.append(
+            f"malformed: entries[{index}] status {status!r} not in "
+            f"{VALID_STATUSES}")
+
+    blocking = entry.get("blocking")
+    if blocking is not None and not isinstance(blocking, bool):
+        reasons.append(
+            f"malformed: entries[{index}] blocking must be a boolean")
+
+    if entry.get("blocking") is True:
+        if status == "pending":
+            reasons.append(
+                f"blocking-pending: entries[{index}] "
+                f"(category={entry.get('category')!r}) is blocking with "
+                f"status=pending")
+        elif status == "fail":
+            reasons.append(
+                f"blocking-pending: entries[{index}] "
+                f"(category={entry.get('category')!r}) is blocking with "
+                f"status=fail")
 
 
 def run_fixture_gate(args) -> int:
@@ -180,6 +179,60 @@ def run_fixture_gate(args) -> int:
     return 0
 
 
+def _require_jsonschema() -> bool:
+    """Return True when jsonschema is importable; else report and return
+    False."""
+    try:
+        import jsonschema  # noqa: F401
+    except ImportError as exc:
+        print(
+            "ERROR: jsonschema required (pip install -r requirements-dev.txt)",
+            file=sys.stderr)
+        return False
+    return True
+
+
+def _validate_evidence_schema(manifest: dict, reasons: list) -> None:
+    """Validate the manifest instance against the W5 evidence schema."""
+    schema_path = REPO_ROOT / "schemas" / "final-evidence-manifest.schema.json"
+    if not schema_path.is_file():
+        reasons.append(
+            "missing-observation: final-evidence-manifest schema missing")
+        return
+    import jsonschema
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    try:
+        jsonschema.validate(instance=manifest, schema=schema)
+    except jsonschema.ValidationError as exc:
+        reasons.append(f"malformed: instance schema violation: {exc.message}")
+
+
+def _validate_observation_state(reasons: list) -> None:
+    """Validate the observation-state record against its schema when
+    present."""
+    obs_state_path = (
+        REPO_ROOT / "artifacts" / "release" / "0.9.2" / "observation-state.json"
+    )
+    if not obs_state_path.is_file():
+        return
+    obs_schema_path = REPO_ROOT / "schemas" / "observation-state.schema.json"
+    if not obs_schema_path.is_file():
+        reasons.append(
+            "missing-observation: observation-state schema missing")
+        return
+    import jsonschema
+    try:
+        obs = load_json(obs_state_path, "observation state")
+        obs_schema = json.loads(obs_schema_path.read_text(encoding="utf-8"))
+        jsonschema.validate(instance=obs, schema=obs_schema)
+    except (ValueError, json.JSONDecodeError) as exc:
+        reasons.append(f"malformed: observation-state invalid: {exc}")
+    except jsonschema.ValidationError as exc:
+        reasons.append(
+            f"malformed: observation-state schema violation: "
+            f"{exc.message}")
+
+
 def run_real_gate(args) -> int:
     """Validate the candidate-bound final evidence manifest and
     observation-state record against the W5 evidence schemas."""
@@ -193,47 +246,10 @@ def run_real_gate(args) -> int:
 
     manifest = load_json(manifest_path, "final evidence manifest")
     reasons = list(validate_record(manifest, expected_sha=args.expected_sha))
-
-    # Instance-schema validation against the W5-published evidence schemas.
-    try:
-        import jsonschema
-    except ImportError as exc:
-        print(
-            "ERROR: jsonschema required (pip install -r requirements-dev.txt)",
-            file=sys.stderr)
+    if not _require_jsonschema():
         return 1
-    schema_path = REPO_ROOT / "schemas" / "final-evidence-manifest.schema.json"
-    if not schema_path.is_file():
-        reasons.append(
-            "missing-observation: final-evidence-manifest schema missing")
-    else:
-        schema = json.loads(schema_path.read_text(encoding="utf-8"))
-        try:
-            jsonschema.validate(instance=manifest, schema=schema)
-        except jsonschema.ValidationError as exc:
-            reasons.append(f"malformed: instance schema violation: {exc.message}")
-
-    # observation-state record (when present) against its schema.
-    obs_state_path = REPO_ROOT / "artifacts" / "release" / "0.9.2" / "observation-state.json"
-    if obs_state_path.is_file():
-        obs_schema_path = (
-            REPO_ROOT / "schemas" / "observation-state.schema.json"
-        )
-        if not obs_schema_path.is_file():
-            reasons.append(
-                "missing-observation: observation-state schema missing")
-        else:
-            try:
-                obs = load_json(obs_state_path, "observation state")
-                obs_schema = json.loads(
-                    obs_schema_path.read_text(encoding="utf-8"))
-                jsonschema.validate(instance=obs, schema=obs_schema)
-            except (ValueError, json.JSONDecodeError) as exc:
-                reasons.append(f"malformed: observation-state invalid: {exc}")
-            except jsonschema.ValidationError as exc:
-                reasons.append(
-                    f"malformed: observation-state schema violation: "
-                    f"{exc.message}")
+    _validate_evidence_schema(manifest, reasons)
+    _validate_observation_state(reasons)
 
     if reasons:
         for reason in reasons:
