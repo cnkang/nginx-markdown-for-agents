@@ -1,7 +1,8 @@
 //! HTTP Representation Contract verification tests.
 //!
 //! Validates the 16-scenario HTTP representation truth table
-//! from the Design document (Task 6.7, Requirements 10.1-10.6, 10.8-10.10, 15.3).
+//! from the HTTP representation contract (Requirements 10.1-10.6, 10.8-10.10,
+//! 15.3).
 //!
 //! These tests verify the Rust-side contract for header plan construction
 //! and conditional request evaluation. The C module's `Vary: Accept`

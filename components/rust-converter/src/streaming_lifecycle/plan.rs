@@ -7,7 +7,10 @@
 //! transition frame.
 
 use super::policy::{EventFailurePolicy, event_failure_policy};
-use super::types::*;
+use super::types::{
+    Action, ActionPayload, EventEnvelope, EventKind, PlanContext, PlanDecision, PlanResult,
+    ResolvedErrorPolicy, StateMachineError, StreamingState, TransitionFrame, resolve_reject_status,
+};
 
 /// Execute the plan phase of the streaming lifecycle state machine.
 ///
@@ -443,6 +446,7 @@ fn plan_postcommit_error(
 
 #[cfg(test)]
 mod tests {
+    use super::super::types::{ErrorOrigin, FailureLedger, FailureRecord};
     use super::*;
 
     fn default_ctx() -> PlanContext {

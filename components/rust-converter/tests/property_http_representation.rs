@@ -1,8 +1,8 @@
 //! Property-based tests for the HTTP representation contract.
 //!
-//! Property 16: HTTP 200 conversion header contract (Task 6.8, Req 10.1)
-//! Property 17: HEAD response contract (Task 6.9, Req 10.2)
-//! Property 18: Bypass scenarios passthrough (Task 6.10, Req 10.4, 10.5)
+//! Property 16: HTTP 200 conversion header contract (Req 10.1)
+//! Property 17: HEAD response contract (Req 10.2)
+//! Property 18: Bypass scenarios passthrough (Req 10.4, 10.5)
 //!
 //! These properties verify the Rust-side `HeaderPlan` invariants that the
 //! C module relies on for HTTP representation correctness. The C-side

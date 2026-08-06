@@ -354,7 +354,6 @@ fn parse_array(state: &mut ParseState, depth: usize) -> Result<JsonValue, Dyncon
 }
 
 fn parse_string(state: &mut ParseState) -> Result<String, DynconfParseError> {
-    // Consume opening quote
     let q = state.advance();
     debug_assert_eq!(q, Some(b'"'));
 
@@ -362,89 +361,82 @@ fn parse_string(state: &mut ParseState) -> Result<String, DynconfParseError> {
 
     loop {
         match state.advance() {
-            None => {
-                return Err(DynconfParseError::new(
-                    DynconfParseErrorKind::InvalidJson,
-                    "unterminated string".to_string(),
-                ));
-            }
+            None => return invalid_json("unterminated string"),
             Some(b'"') => return Ok(result),
-            Some(b'\\') => {
-                match state.advance() {
-                    Some(b'"') => result.push('"'),
-                    Some(b'\\') => result.push('\\'),
-                    Some(b'/') => result.push('/'),
-                    Some(b'b') => result.push('\u{0008}'),
-                    Some(b'f') => result.push('\u{000C}'),
-                    Some(b'n') => result.push('\n'),
-                    Some(b'r') => result.push('\r'),
-                    Some(b't') => result.push('\t'),
-                    Some(b'u') => {
-                        let cp = parse_unicode_escape(state)?;
-                        // Handle surrogate pairs
-                        if (0xD800..=0xDBFF).contains(&cp) {
-                            // High surrogate, expect \uXXXX low surrogate
-                            if state.advance() != Some(b'\\') || state.advance() != Some(b'u') {
-                                return Err(DynconfParseError::new(
-                                    DynconfParseErrorKind::InvalidJson,
-                                    "expected low surrogate after high surrogate".to_string(),
-                                ));
-                            }
-                            let low = parse_unicode_escape(state)?;
-                            if !(0xDC00..=0xDFFF).contains(&low) {
-                                return Err(DynconfParseError::new(
-                                    DynconfParseErrorKind::InvalidJson,
-                                    "invalid low surrogate".to_string(),
-                                ));
-                            }
-                            let combined = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
-                            if let Some(c) = char::from_u32(combined) {
-                                result.push(c);
-                            } else {
-                                return Err(DynconfParseError::new(
-                                    DynconfParseErrorKind::InvalidJson,
-                                    "invalid unicode codepoint from surrogate pair".to_string(),
-                                ));
-                            }
-                        } else if (0xDC00..=0xDFFF).contains(&cp) {
-                            return Err(DynconfParseError::new(
-                                DynconfParseErrorKind::InvalidJson,
-                                "unexpected low surrogate without high surrogate".to_string(),
-                            ));
-                        } else if let Some(c) = char::from_u32(cp) {
-                            result.push(c);
-                        } else {
-                            return Err(DynconfParseError::new(
-                                DynconfParseErrorKind::InvalidJson,
-                                "invalid unicode codepoint".to_string(),
-                            ));
-                        }
-                    }
-                    Some(c) => {
-                        return Err(DynconfParseError::new(
-                            DynconfParseErrorKind::InvalidJson,
-                            format!("invalid escape sequence '\\{}'", c as char),
-                        ));
-                    }
-                    None => {
-                        return Err(DynconfParseError::new(
-                            DynconfParseErrorKind::InvalidJson,
-                            "unterminated escape sequence".to_string(),
-                        ));
-                    }
-                }
-            }
+            Some(b'\\') => parse_escape(state, &mut result)?,
             Some(b) if b < 0x20 => {
-                return Err(DynconfParseError::new(
-                    DynconfParseErrorKind::InvalidJson,
-                    format!("unescaped control character 0x{:02x} in string", b),
-                ));
+                return invalid_json(format!("unescaped control character 0x{:02x} in string", b));
             }
             Some(b) => {
                 result.push(b as char);
             }
         }
     }
+}
+
+fn invalid_json<T>(message: impl Into<String>) -> Result<T, DynconfParseError> {
+    Err(DynconfParseError::new(
+        DynconfParseErrorKind::InvalidJson,
+        message.into(),
+    ))
+}
+
+fn parse_escape(state: &mut ParseState, result: &mut String) -> Result<(), DynconfParseError> {
+    match state.advance() {
+        Some(b'"') => result.push('"'),
+        Some(b'\\') => result.push('\\'),
+        Some(b'/') => result.push('/'),
+        Some(b'b') => result.push('\u{0008}'),
+        Some(b'f') => result.push('\u{000C}'),
+        Some(b'n') => result.push('\n'),
+        Some(b'r') => result.push('\r'),
+        Some(b't') => result.push('\t'),
+        Some(b'u') => {
+            let codepoint = parse_unicode_escape(state)?;
+            append_unicode_escape(state, result, codepoint)?;
+        }
+        Some(c) => return invalid_json(format!("invalid escape sequence '\\{}'", c as char)),
+        None => return invalid_json("unterminated escape sequence"),
+    }
+    Ok(())
+}
+
+fn append_unicode_escape(
+    state: &mut ParseState,
+    result: &mut String,
+    codepoint: u32,
+) -> Result<(), DynconfParseError> {
+    if (0xD800..=0xDBFF).contains(&codepoint) {
+        return append_surrogate_pair(state, result, codepoint);
+    }
+    if (0xDC00..=0xDFFF).contains(&codepoint) {
+        return invalid_json("unexpected low surrogate without high surrogate");
+    }
+    let Some(character) = char::from_u32(codepoint) else {
+        return invalid_json("invalid unicode codepoint");
+    };
+    result.push(character);
+    Ok(())
+}
+
+fn append_surrogate_pair(
+    state: &mut ParseState,
+    result: &mut String,
+    high: u32,
+) -> Result<(), DynconfParseError> {
+    if state.advance() != Some(b'\\') || state.advance() != Some(b'u') {
+        return invalid_json("expected low surrogate after high surrogate");
+    }
+    let low = parse_unicode_escape(state)?;
+    if !(0xDC00..=0xDFFF).contains(&low) {
+        return invalid_json("invalid low surrogate");
+    }
+    let combined = 0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00);
+    let Some(character) = char::from_u32(combined) else {
+        return invalid_json("invalid unicode codepoint from surrogate pair");
+    };
+    result.push(character);
+    Ok(())
 }
 
 fn parse_unicode_escape(state: &mut ParseState) -> Result<u32, DynconfParseError> {
@@ -471,64 +463,10 @@ fn parse_unicode_escape(state: &mut ParseState) -> Result<u32, DynconfParseError
 fn parse_number(state: &mut ParseState) -> Result<JsonValue, DynconfParseError> {
     let start = state.pos;
 
-    // Optional leading minus
-    if state.peek() == Some(b'-') {
-        state.advance();
-    }
-
-    // Integer part
-    match state.peek() {
-        Some(b'0') => {
-            state.advance();
-            // After leading zero, only '.', 'e', 'E', or end of number
-            // No leading zeros like 01, 02, etc.
-        }
-        Some(b'1'..=b'9') => {
-            state.advance();
-            while let Some(b'0'..=b'9') = state.peek() {
-                state.advance();
-            }
-        }
-        _ => {
-            return Err(DynconfParseError::new(
-                DynconfParseErrorKind::InvalidJson,
-                format!("invalid number at position {}", state.pos),
-            ));
-        }
-    }
-
-    // Fractional part
-    if state.peek() == Some(b'.') {
-        state.advance();
-        let frac_start = state.pos;
-        while let Some(b'0'..=b'9') = state.peek() {
-            state.advance();
-        }
-        if state.pos == frac_start {
-            return Err(DynconfParseError::new(
-                DynconfParseErrorKind::InvalidJson,
-                "expected digit after decimal point".to_string(),
-            ));
-        }
-    }
-
-    // Exponent
-    if matches!(state.peek(), Some(b'e') | Some(b'E')) {
-        state.advance();
-        if matches!(state.peek(), Some(b'+') | Some(b'-')) {
-            state.advance();
-        }
-        let exp_start = state.pos;
-        while let Some(b'0'..=b'9') = state.peek() {
-            state.advance();
-        }
-        if state.pos == exp_start {
-            return Err(DynconfParseError::new(
-                DynconfParseErrorKind::InvalidJson,
-                "expected digit in exponent".to_string(),
-            ));
-        }
-    }
+    consume_number_sign(state);
+    parse_integer_part(state)?;
+    parse_fraction_part(state)?;
+    parse_exponent_part(state)?;
 
     let raw = std::str::from_utf8(&state.input[start..state.pos])
         .unwrap()
@@ -541,6 +479,61 @@ fn parse_number(state: &mut ParseState) -> Result<JsonValue, DynconfParseError> 
     })?;
 
     Ok(JsonValue::Number(value, raw))
+}
+
+fn consume_number_sign(state: &mut ParseState) {
+    if state.peek() == Some(b'-') {
+        state.advance();
+    }
+}
+
+fn parse_integer_part(state: &mut ParseState) -> Result<(), DynconfParseError> {
+    match state.peek() {
+        Some(b'0') => {
+            state.advance();
+        }
+        Some(b'1'..=b'9') => {
+            state.advance();
+            while let Some(b'0'..=b'9') = state.peek() {
+                state.advance();
+            }
+        }
+        _ => {
+            return invalid_json(format!("invalid number at position {}", state.pos));
+        }
+    }
+    Ok(())
+}
+
+fn parse_fraction_part(state: &mut ParseState) -> Result<(), DynconfParseError> {
+    if state.peek() == Some(b'.') {
+        state.advance();
+        let frac_start = state.pos;
+        while let Some(b'0'..=b'9') = state.peek() {
+            state.advance();
+        }
+        if state.pos == frac_start {
+            return invalid_json("expected digit after decimal point");
+        }
+    }
+    Ok(())
+}
+
+fn parse_exponent_part(state: &mut ParseState) -> Result<(), DynconfParseError> {
+    if matches!(state.peek(), Some(b'e') | Some(b'E')) {
+        state.advance();
+        if matches!(state.peek(), Some(b'+') | Some(b'-')) {
+            state.advance();
+        }
+        let exp_start = state.pos;
+        while let Some(b'0'..=b'9') = state.peek() {
+            state.advance();
+        }
+        if state.pos == exp_start {
+            return invalid_json("expected digit in exponent");
+        }
+    }
+    Ok(())
 }
 
 fn parse_bool(state: &mut ParseState) -> Result<JsonValue, DynconfParseError> {

@@ -217,7 +217,7 @@
  *
  * Detects additions, removals, or renames of FFI exports even when the
  * numeric ABI version is unchanged. Computed from the canonical sorted
- * newline-joined export names (47 entries as of the 0.9.2 Wave 4 freeze).
+ * newline-joined export names (47 entries in the 0.9.2 ABI).
  */
 #define MARKDOWN_SYMBOL_SET_HASH 224432776543964745
 

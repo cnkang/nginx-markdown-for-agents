@@ -1211,7 +1211,7 @@ mod tests {
     fn test_streaming_options_size() {
         use std::mem::size_of;
 
-        /* 88 bytes after the Wave 4 Task 8.13 FFI freeze removed the
+        /* 88 bytes after the current FFI freeze removed the
          * temporary llm_provider/chars_per_token_fixed u8 pair. */
         assert_eq!(size_of::<StreamingOptions>(), 88);
     }

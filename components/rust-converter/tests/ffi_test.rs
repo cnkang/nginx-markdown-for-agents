@@ -881,7 +881,7 @@ fn test_chars_per_token_affects_estimate() {
     );
 
     /* The markdown_chars_per_token override was removed in 0.9.2 and its
-     * FFI field in the Wave 4 Task 8.13 freeze: every conversion uses the
+     * FFI field removed by the current ABI freeze: every conversion uses the
      * same fixed deterministic 4.0 ratio, so identical inputs produce
      * identical token estimates. */
     assert_eq!(
