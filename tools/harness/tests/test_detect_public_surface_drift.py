@@ -122,6 +122,17 @@ def test_metric_cardinality_policy_drift_is_reported() -> None:
 def test_live_inventory_matches_all_extracted_surfaces() -> None:
     """The checked-in inventory must match the currently extracted surfaces."""
     inventory = detector.load_inventory()
+    live_directives = detector.extract_directive_contract_from_c()
+
+    assert len(inventory["directives"]) == 25
+    assert inventory["reject_only_directives"] == []
+    assert inventory["otel"]["directives"] == []
+    assert inventory["otel"]["reject_only"] == []
+    assert len(live_directives) == 25
+    assert all(
+        entry["classification"] == "active"
+        for entry in live_directives.values()
+    )
 
     assert detector.check_dynconf_keys(
         inventory, detector.extract_dynconf_keys_from_c()
@@ -259,7 +270,32 @@ def test_invalid_inventory_schema_reports_contract_fields() -> None:
         "metrics": [],
     })
 
-    assert "inventory missing top-level keys: contract_version, directives, ffi_abi_version, ffi_exports, otel, reason_codes, registry_count, reject_only_directives" in errors
+    assert "inventory missing top-level keys: contract_version, directive_count, directives, ffi_abi_version, ffi_exports, otel, reason_codes, registry_count, reject_only_directives" in errors
+
+
+def test_final_inventory_rejects_migration_stubs() -> None:
+    """The frozen 0.9.2 inventory cannot retain reject-only entries."""
+    inventory = copy.deepcopy(detector.load_inventory())
+    inventory["reject_only_directives"] = [{"name": "markdown_removed"}]
+    inventory["otel"]["reject_only"] = [{"name": "markdown_otel_removed"}]
+
+    errors = detector.validate_inventory_schema(inventory)
+
+    assert "final 0.9.2 inventory must contain zero reject-only directives" in errors
+    assert "final 0.9.2 inventory must contain zero reject-only OTel directives" in errors
+
+
+def test_final_inventory_requires_frozen_public_counts() -> None:
+    """The final inventory keeps the frozen 25/11 public counts."""
+    inventory = copy.deepcopy(detector.load_inventory())
+    inventory["directives"] = inventory["directives"][:-1]
+    inventory["directive_count"] = 24
+    inventory["metrics"] = inventory["metrics"][:-1]
+
+    errors = detector.validate_inventory_schema(inventory)
+
+    assert "final 0.9.2 inventory must contain exactly 25 active directives" in errors
+    assert "final 0.9.2 inventory must contain exactly 11 metric families" in errors
 
 
 def test_directive_metadata_drift_is_reported() -> None:

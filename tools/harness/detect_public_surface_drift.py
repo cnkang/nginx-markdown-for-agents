@@ -38,6 +38,8 @@ FFI_PATHS = (
 FFI_HEADER_PATH = os.path.join(ROOT, "components", "rust-converter", "include", "markdown_converter.h")
 COMMAND_REGISTRY_ERROR = "ngx_command_t registry is missing or unterminated"
 MIGRATION_PREFIX = "Migration:"
+FINAL_DIRECTIVE_COUNT = 25
+FINAL_METRIC_COUNT = 11
 
 DIRECTIVE_RE = re.compile(r'ngx_string\("(markdown_[^"\\]+)"\)')
 REASON_CODE_RE = re.compile(r'^\s+(\w+)\s*=\s*(\d+)\s*,', re.MULTILINE)
@@ -54,7 +56,7 @@ FFI_FN_RE = re.compile(
 
 REQUIRED_TOP_LEVEL = {
     "schema_version", "contract_version", "ffi_abi_version", "directives",
-    "reject_only_directives", "otel", "dynconf_keys", "metrics",
+    "directive_count", "reject_only_directives", "otel", "dynconf_keys", "metrics",
     "reason_codes", "ffi_exports", "registry_count",
 }
 DIRECTIVE_FIELDS = {
@@ -153,6 +155,26 @@ def _validate_inventory_header(inventory):
         errors.append("inventory ffi_abi_version must be an integer")
     if not isinstance(inventory.get("registry_count"), int):
         errors.append("inventory registry_count must be an integer")
+    if not isinstance(inventory.get("directive_count"), int):
+        errors.append("inventory directive_count must be an integer")
+    elif isinstance(inventory.get("directives"), list) and inventory.get(
+            "directive_count") != len(inventory["directives"]):
+        errors.append(
+            "inventory directive_count must equal active directive entries")
+    elif inventory.get("directive_count") != FINAL_DIRECTIVE_COUNT:
+        errors.append(
+            "final 0.9.2 inventory must contain exactly 25 active directives")
+    metrics = inventory.get("metrics")
+    if isinstance(metrics, list) and len(metrics) != FINAL_METRIC_COUNT:
+        errors.append(
+            "final 0.9.2 inventory must contain exactly 11 metric families")
+    if inventory.get("reject_only_directives") != []:
+        errors.append(
+            "final 0.9.2 inventory must contain zero reject-only directives")
+    otel = inventory.get("otel")
+    if isinstance(otel, dict) and otel.get("reject_only") != []:
+        errors.append(
+            "final 0.9.2 inventory must contain zero reject-only OTel directives")
     return errors
 
 
