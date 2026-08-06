@@ -790,6 +790,7 @@ fn decide_from_forwarded(input: &BaseUrlInput, trusted: &[Cidr]) -> BaseUrlDecis
 /// direct request Host is used; when it carries no proto, `https` is used
 /// for elements that declare a host (matching the existing spec 47 default).
 fn build_forwarded_decision(element: &ForwardedElement, input: &BaseUrlInput) -> BaseUrlDecision {
+    /* Revalidate the selected host as defense-in-depth for future callers. */
     let host = element
         .host
         .as_ref()

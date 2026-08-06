@@ -891,6 +891,8 @@ ngx_http_markdown_decompression_input(
 static ngx_int_t
 ngx_http_markdown_decompression_error(uint32_t ffi_rc)
 {
+    /* Invalid arguments and unknown FFI categories intentionally share the
+     * legacy I/O error path; no distinct local return code exists. */
     switch (ffi_rc) {
     case 101:
         return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;

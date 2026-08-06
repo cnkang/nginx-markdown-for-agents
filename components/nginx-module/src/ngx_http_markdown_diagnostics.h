@@ -78,7 +78,8 @@ struct ngx_cycle_s;
  * for diagnostic introspection.
  */
 typedef struct {
-    ngx_msec_t    timestamp;       /* Decision time (monotonic ms) */
+    /* Decision time (wall-clock seconds, cast to ngx_msec_t). */
+    ngx_msec_t    timestamp;
     ngx_int_t     reason_code;     /* Reason code enum value */
     ngx_msec_t    duration_ms;     /* Processing duration in ms */
 } ngx_http_markdown_diag_decision_t;
