@@ -33,6 +33,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -54,6 +55,7 @@ INVOCATION_TIMEOUT_MARGIN = 900
 CANDIDATE_SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
 STAT_EXECS_PATTERN = re.compile(r"stat::number_of_executed_units:\s*(\d+)")
 STAT_ELAPSED_PATTERN = re.compile(r"stat::elapsed_seconds:\s*([\d.]+)")
+DONE_RUNS_PATTERN = re.compile(r"Done\s+(\d+)\s+runs?\s+in\s+([\d.]+)\s+second")
 FAILURE_MARKER_PATTERN = re.compile(
     r"ERROR: libFuzzer|==ERROR: AddressSanitizer|SUMMARY: AddressSanitizer"
     r"|CRASH|runtime error:")
@@ -261,6 +263,7 @@ def _cargo_fuzz_available() -> bool:
 def _invoke_fuzz(target: str, flags: list[str], timeout: int) -> dict:
     """Run one cargo fuzz invocation, returning status and captured output."""
     command = ["cargo", "+nightly", "fuzz", "run", target, "--", *flags]
+    started = time.monotonic()
     try:
         result = subprocess.run(
             command, cwd=FUZZ_CRATE_DIR, capture_output=True, text=True,
@@ -270,7 +273,8 @@ def _invoke_fuzz(target: str, flags: list[str], timeout: int) -> dict:
     except OSError as exc:
         return {"returncode": -1, "stdout": "", "stderr": f"spawn failed: {exc}"}
     return {"returncode": result.returncode,
-            "stdout": result.stdout, "stderr": result.stderr}
+            "stdout": result.stdout, "stderr": result.stderr,
+            "wall_elapsed": time.monotonic() - started}
 
 
 def _marker_line(combined: str, start: int) -> str:
@@ -289,6 +293,10 @@ def _parse_fuzz_output(stdout: str, stderr: str) -> tuple[int, float, str | None
     executions = int(match.group(1)) if match else 0
     match = STAT_ELAPSED_PATTERN.search(combined)
     elapsed = float(match.group(1)) if match else 0.0
+    if elapsed == 0.0:
+        match = DONE_RUNS_PATTERN.search(combined)
+        if match:
+            elapsed = float(match.group(2))
     marker = FAILURE_MARKER_PATTERN.search(combined)
     finding = None
     if marker:
@@ -309,6 +317,8 @@ def _soak_outcome(invocation: dict) -> tuple[int, float, str | None]:
     """Return (executions, elapsed, failure) for one fuzz invocation."""
     executions, elapsed, finding = _parse_fuzz_output(
         invocation["stdout"], invocation["stderr"])
+    if elapsed <= 0.0:
+        elapsed = float(invocation.get("wall_elapsed", 0.0))
     if finding:
         return executions, elapsed, finding
     if invocation["returncode"] != 0:
@@ -340,8 +350,10 @@ def _run_target_soak(target: str, seed: int, required_executions: int,
             break
         time_cap = (seconds_remaining if seconds_remaining > 0
                     else TIME_CONTINUATION_CEILING)
-        flags = [f"-runs={runs_remaining}", f"-max_total_time={time_cap}",
-                 f"-seed={seed}", "-print_final_stats=1"]
+        flags = [f"-max_total_time={time_cap}", f"-seed={seed}",
+                 "-print_final_stats=1"]
+        if runs_remaining > 0:
+            flags.insert(0, f"-runs={runs_remaining}")
         invocation = _invoke_fuzz(
             target, flags, timeout=time_cap + INVOCATION_TIMEOUT_MARGIN)
         log_parts.append(invocation["stdout"] + "\n" + invocation["stderr"])
