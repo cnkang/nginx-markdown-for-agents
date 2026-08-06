@@ -591,7 +591,7 @@ def _write_record(record: dict, args: argparse.Namespace) -> pathlib.Path:
         resolved_candidate, REPO_ROOT, purpose=RECORD_OUTPUT_LABEL
     )
     validated_path.parent.mkdir(parents=True, exist_ok=True)
-    validated_path.write_text(
+    validated_path.write_text(  # NOSONAR: pythonsecurity:S2083; fixed output root and strict filename validation prevent CLI-selected targets
         json.dumps(record, indent=2) + "\n", encoding="utf-8"
     )
     # SONAR_NOTE(S2083): Filename is allowlisted and the path is built from
@@ -739,7 +739,7 @@ def real_main(args: argparse.Namespace) -> int:
     if failures:
         record["status"] = "fail"
         record["errors"] = failures
-    output_path = _write_record(record, args)
+    _write_record(record, args)
     if failures:
         for failure in failures:
             print(f"ERROR: soak failure: {failure}", file=sys.stderr)
