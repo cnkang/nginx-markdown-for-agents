@@ -383,7 +383,8 @@ make supply-chain
 ## What's New in v0.9.2 (development candidate)
 
 The 0.9.2 branch is a development candidate; it is not a published release.
-It keeps the 0.9.1 configuration and ABI surface while tightening contracts:
+It is the final pre-1.0 breaking release: the public configuration surface is
+reduced from 63 directives to 25 and the bundled FFI ABI advances to version 2.
 
 - **Read-only diagnostics**: `GET`/`HEAD` are supported and mutation requests,
   including `action=rollback`, are rejected. Restore dynconf by atomically
@@ -391,9 +392,9 @@ It keeps the 0.9.1 configuration and ABI surface while tightening contracts:
   prevents partial-file reads, but workers converge through independent
   watcher cycles; use diagnostics or request behavior to verify convergence,
   or a controlled NGINX reload for a strong synchronization boundary.
-- **Request-scoped OTel ownership**: spans and export subrequests use request
-  pools. No worker-owned queue, thread, timer, socket, or exit flush is
-  claimed or created.
+- **OTel surface removal**: the experimental OTel directives and implementation
+  are removed from 0.9.2. Deployments that need tracing should use NGINX's
+  native OTel integration or another external observability layer.
 - **Public-surface source metadata and ABI drift gate**: `make public-surface-drift-check`
   checks directive, dynconf, metric, reason-code, and FFI source metadata
   against the declared inventory. Runtime behavior is verified by the unit,

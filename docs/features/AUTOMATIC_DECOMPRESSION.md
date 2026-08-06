@@ -80,4 +80,4 @@ and [`CONFIGURATION.md`](../guides/CONFIGURATION.md) for operator syntax.
 
 | Version | Date | Changes |
 | --- | --- | --- |
-| 0.9.2 | 2026-08-04 | Align decompression controls and metrics with the frozen Wave 2 contract. |
+| 0.9.2 | 2026-08-04 | Align decompression controls and metrics with the frozen release contract. |

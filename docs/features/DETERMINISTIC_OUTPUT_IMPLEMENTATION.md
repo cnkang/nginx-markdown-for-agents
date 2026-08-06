@@ -310,7 +310,7 @@ cargo run --example deterministic_output
 - Consistent Markdown escaping
 - Consistent DOM attribute processing
 
-✅ **Task 2.13 Requirements**:
+✅ **Deterministic output requirements**:
 - Comprehensive tests for deterministic output ✅
 - Documentation of normalization rules ✅
 - Stable ETags and predictable output ✅

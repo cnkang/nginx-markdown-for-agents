@@ -379,16 +379,16 @@ make supply-chain
 
 ## v0.9.2 新特性（开发候选版本）
 
-v0.9.2 分支目前是开发候选版本，尚未发布。它保持 v0.9.1 的配置和
-ABI 公共表面，同时收紧以下契约：
+v0.9.2 分支目前是开发候选版本，尚未发布。这是 v1.0 前最后一次破坏性
+发布：公共配置从 63 条指令收敛为 25 条，绑定的 FFI ABI 升级到版本 2。
 
 - **只读诊断接口**：支持 `GET`/`HEAD`，包括 `action=rollback` 在内的
   变更请求都会被拒绝。恢复 dynconf 应原子替换被监视文件；LKG 继续用于
   失败重载保护。原子 rename 保证读取者看到完整的旧文件或新文件，
   但每个 worker 通过各自的 watcher cycle 收敛；应通过 diagnostics 或请求
   行为验证收敛，需要强同步边界时执行受控 NGINX reload。
-- **请求池作用域的 OTel 所有权**：span 和导出子请求使用请求池，不创建或
-  声称存在 worker-owned 队列、线程、定时器、socket 或退出时 flush。
+- **移除 OTel 表面**：实验性的 OTel 指令和实现已从 0.9.2 移除。需要
+  tracing 的部署应使用 NGINX 原生 OTel 集成或其他外部观测方案。
 - **公共表面源元数据与 ABI 漂移门禁**：`make public-surface-drift-check`
   将指令、dynconf、metrics、reason code 和 FFI 的源元数据与声明的清单
   进行校验。运行时行为由 unit、integration 和 E2E 测试套件验证，而非仅靠此门禁。

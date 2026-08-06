@@ -145,7 +145,7 @@ Operators can determine request state counts from metrics and logs:
 
 ## Reason Code Reference
 
-The complete set of 26 reason codes is defined in `components/rust-converter/src/decision/reason_code.rs` and mirrored in [Observability Schema v1](../architecture/observability-schema-v1.md). All `as_str()` values are lowercase snake_case. The table below maps the high-level decision outcomes described in this document to their reason codes; the full registry (including decompression, dynconf, and streaming sub-codes) lives in the schema document.
+The complete set of 27 reason codes is defined in `components/rust-converter/src/decision/reason_code.rs` and mirrored in [Observability Schema v1](../architecture/observability-schema-v1.md). All `as_str()` values are lowercase snake_case. The table below maps the high-level decision outcomes described in this document to their reason codes; the full registry (including decompression, dynconf, and streaming sub-codes) lives in the schema document.
 
 | Decision Outcome | Reason Code | Request State | Description |
 |---|---|---|---|

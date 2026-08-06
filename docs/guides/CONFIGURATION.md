@@ -1,6 +1,6 @@
 # Configuration Reference (0.9.2)
 
-This is the Wave 0–2 frozen configuration reference. The command table has 25
+This is the frozen configuration reference. The command table has 25
 active `markdown_*` directives. Resource limits use one `markdown_limits`
 directive with bounded key/value entries; dynamic configuration has its own
 five-key JSON overlay.

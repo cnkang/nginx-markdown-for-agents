@@ -12,7 +12,7 @@ runtime. A single directive `markdown_error_policy` covers all error paths
 # Context: http, server, location
 markdown_error_policy pass;            # Default: deliver original response
 markdown_error_policy status 429;      # Return explicit overload status
-markdown_error_policy status 503;      # Recommended for overload (with spec 52)
+markdown_error_policy status 503;      # Recommended for overload handling
 markdown_error_policy fail_closed;     # Return 502, never leak original content
 ```
 

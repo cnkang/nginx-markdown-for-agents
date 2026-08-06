@@ -2,14 +2,14 @@
 
 ## Status
 
-Accepted (0.9.0 contract freeze — Wave 1; gate implementation lands in Wave 7)
+Accepted (0.9.0 contract freeze; gate implementation follows in the release-hardening phase)
 
 ## Context
 
 Each release line has a versioned gate (`release-gates-check-070` …
 `-080`). 0.9.0 is a breaking production-readiness release and needs its own
 capstone gate. This ADR freezes the gate **name**, structure, and blocking
-semantics now (Wave 1) so downstream specs reference a stable target; the gate body is implemented in the
+semantics now so downstream plans reference a stable target; the gate body is implemented in the
 release-gates wave (final wave).
 
 ## Decision
@@ -96,4 +96,4 @@ Kang
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.9.1 | 2026-07-14 | Kang | Add `RELEASE_GATE_ALLOW_SKIP_MODULE=1` env-limited skip for `test-production-examples-nginx-t`, mirroring the 091 module-benchmark skip contract |
-| 0.9.0 | 2026-06-30 | Kang | Initial ADR — 0.9.0 gate name/structure/blocking-semantics freeze (body implemented in Wave 7) |
+| 0.9.0 | 2026-06-30 | Kang | Initial ADR — 0.9.0 gate name/structure/blocking-semantics freeze |

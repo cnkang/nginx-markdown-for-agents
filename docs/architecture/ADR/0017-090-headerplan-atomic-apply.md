@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (0.9.0 contract freeze — Wave 1)
+Accepted (0.9.0 contract freeze — initial contract phase)
 
 ## Context
 

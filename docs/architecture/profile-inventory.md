@@ -1,4 +1,4 @@
-# Profile Inventory — Historical Config V2 Field Mapping (Wave 0 archive)
+# Profile Inventory — Historical Config V2 Field Mapping (archive)
 
 | Field | Value |
 |-------|-------|
@@ -9,7 +9,7 @@
 
 ---
 
-This file preserves the pre-freeze profile-field map as Wave 0 evidence. The
+This file preserves the pre-freeze profile-field map as historical evidence. The
 `markdown_profile` directive and every opaque profile bundle described below
 are removed from 0.9.2 and must not appear in an active configuration. For the
 current command-table state and evidence-backed stability classification, use
@@ -103,8 +103,9 @@ Maps to two struct fields:
 
 ### Observability / Operations
 
-The implemented OTel tracing pair is experimental. Duplicate or unimplemented
-OTel controls are reject-only and therefore are not active profile fields.
+The OTel entries below describe the historical configuration surface. OTel
+was removed from the 0.9.2 production contract and these names are not active
+profile fields in the current module.
 
 | Directive | Default | Context | Notes |
 |-----------|---------|---------|-------|
@@ -225,7 +226,7 @@ merge_conf(cf, parent, child):
   7. apply_memory_budget_override           — budget → max_size when not explicit
   8. Resolve decompress.max_size default    — inherits max_size if still unset
   9. Validate decompress.max_size ≠ 0 when auto_decompress
-  10. Validate streaming vs cache_validation conflicts (spec 49)
+  10. Validate streaming vs cache-validation conflicts
   11. Log merged configuration
 ```
 

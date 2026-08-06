@@ -5,9 +5,9 @@
 This guide covers rolling back the 0.9.2 development candidate to a prior
 release. 0.9.2 is a breaking release (see
 [0.9.2-breaking-changes.md](0.9.2-breaking-changes.md)), but it has no
-irreversible changes: rolling back the module binary restores the 0.9.1
-directive surface, and configurations migrated to the 25-directive contract
-remain valid on 0.9.1 only when they avoid 0.9.2-removed semantics.
+on-disk data migration. Rolling back the module binary restores the 0.9.1
+directive surface only after the configuration is also restored; the 0.9.2
+25-directive configuration and ABI 2 are not compatible with a 0.9.1 binary.
 Publication and artifact availability are separate release gates.
 
 | Target | Section |
@@ -163,16 +163,17 @@ configuration.
 
 ## Known Irreversible Changes
 
-**None for 0.9.2.** All changes in 0.9.2 are additive or corrective:
+There is no irreversible on-disk state change, but the public configuration
+and bundled ABI changes are not reversible by swapping only the binary:
 
 - Diagnostics mapping fix is backward-compatible
-- C reason code constants are additive
-- OTel remains request-scoped with no worker-owned lifecycle state
+- C reason code constants include the 0.9.2 registry additions
+- OTel is removed from the 0.9.2 production surface
 - Dynconf diagnostics remains read-only; file restore is atomic and auditable
 - Public surface inventory is a build-time gate
 
-No data formats, on-disk state, or metric counters are changed in a way
-that cannot be reversed by downgrading the module binary.
+Restore the matching 0.9.1 configuration and binary together when rolling
+back. No data formats or on-disk state require a migration.
 
 ---
 
@@ -184,7 +185,7 @@ When rolling back from 0.9.2 to 0.9.1:
 |--------|--------|
 | `reason_to_code` mapping | `bypass_no_transform` entry removed from diagnostics JSON |
 | C reason code constants | Decompression series (4–11) constants unavailable in `components/nginx-module/src/ngx_http_markdown_reason.c` |
-| OTel ownership | Request-scoped in both versions; no worker-owned state is flushed |
+| OTel surface | Present in 0.9.1 documentation; removed from 0.9.2, so restore the old configuration before rollback |
 | Dynconf diagnostics | `POST action=rollback` is rejected; restore the watched file atomically |
 | `stream_state` logging | `PRE_COMMIT` fallthrough returns to silent behavior |
 | Prometheus metrics | No metric name or label changes — counters continue from their current values |
