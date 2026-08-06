@@ -13,8 +13,8 @@ This tool extends (not replaces) the existing public-surface/FFI drift tooling
 in detect_public_surface_drift.py. It reuses its FFI_PATHS and header parsing
 infrastructure.
 
-Wave 3 defines the interface and inventory structure.
-Wave 4 task 8.13 performs the final classification and actual removal.
+The inventory defines the interface and classification structure. Final
+classification and removal happen after the associated FFI changes settle.
 """
 
 from __future__ import annotations
@@ -125,10 +125,7 @@ def parse_header_exports(header_path: Path) -> list[str]:
             exports.append(name)
     # Also catch return types we may have missed with the above pattern.
     # Use a broader fallback for any line that looks like a function declaration.
-    broad_re = re.compile(
-        r"^[^\n]*(markdown_\w+)\s*\(", re.MULTILINE
-    )
-    for match in broad_re.finditer(text):
+    for match in CALLSITE_RE.finditer(text):
         name = match.group(1)
         if name not in exports:
             exports.append(name)
@@ -150,9 +147,12 @@ def scan_c_callsites(
     }
     """
     callsites: dict[str, list[dict[str, Any]]] = {}
+    validated_directory = validate_read_path(
+        directory, purpose="FFI callsite source directory"
+    )
     suffixes = {".c", ".h"} if include_headers else {".c"}
 
-    for path in sorted(directory.rglob("*")):
+    for path in sorted(validated_directory.rglob("*")):
         if path.suffix not in suffixes:
             continue
         # Skip the generated header itself — it declares, not calls.
@@ -174,7 +174,8 @@ def scan_c_callsites(
 def _read_text(path: Path) -> str | None:
     """Read a text file, returning None when unreadable."""
     try:
-        return path.read_text(encoding="utf-8")
+        validated_path = validate_read_path(path, purpose="FFI callsite source")
+        return validated_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return None
 
@@ -184,9 +185,9 @@ def _update_guard_stack(line: str, active_guards: list[str]) -> None:
     ifdef_match = IFDEF_RE.match(line)
     if ifdef_match:
         active_guards.append(ifdef_match.group(1))
-    elif ENDIF_RE.match(line):
-        if active_guards:
-            active_guards.pop()
+        return
+    if ENDIF_RE.match(line) and active_guards:
+        active_guards.pop()
 
 
 def _record_callsite(
@@ -211,11 +212,17 @@ def _record_callsite(
 def scan_test_references(test_directory: Path) -> set[str]:
     """Scan test files for references to markdown_* functions (stubs/mocks)."""
     references: set[str] = set()
-    for path in sorted(test_directory.rglob("*")):
+    validated_directory = validate_read_path(
+        test_directory, purpose="FFI test reference directory"
+    )
+    for path in sorted(validated_directory.rglob("*")):
         if path.suffix not in (".c", ".h"):
             continue
         try:
-            text = path.read_text(encoding="utf-8")
+            validated_path = validate_read_path(
+                path, purpose="FFI test reference source"
+            )
+            text = validated_path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
         for match in FN_POINTER_RE.finditer(text):
@@ -308,7 +315,7 @@ def build_inventory(
 ) -> dict[str, Any]:
     """Build the export/callsite inventory structure.
 
-    This is the Wave 3 interface definition. Task 8.13 in Wave 4 will:
+    This is the interface definition. The post-change audit will:
     1. Consume this inventory structure
     2. Perform final classification after all FFI changes are complete
     3. Remove confirmed dead exports
@@ -324,11 +331,11 @@ def build_inventory(
         summary[entry["classification"]] += 1
 
     return {
-        "schema_version": "0.9.2-wave3",
+        "schema_version": "0.9.2-ffi-inventory",
         "description": (
             "FFI export/callsite inventory for dead-export detection. "
-            "Wave 3 defines the interface; Wave 4 task 8.13 performs "
-            "final classification and removal after all FFI changes."
+            "Final classification and removal happen after all associated "
+            "FFI changes are complete."
         ),
         "audit_tool": "tools/harness/detect_ffi_dead_exports.py",
         "generated_header": str(
@@ -350,11 +357,10 @@ def build_inventory(
                 "No production or test-only references; candidate for removal"
             ),
         },
-        "deferred_to_task": "8.13",
+        "deferred_to": "post-change audit",
         "deferred_reason": (
-            "Final classification and removal deferred until Wave 4 task 8.13, "
-            "after encoding, trusted-proxy, token, and ownership FFI changes "
-            "are complete"
+            "Final classification and removal are deferred until encoding, "
+            "trusted-proxy, token, and ownership FFI changes are complete"
         ),
         "summary": summary,
         "total_exports": len(classifications),
@@ -393,7 +399,7 @@ def main() -> int:
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Exit nonzero if any dead exports are found (advisory, not blocking in W3)",
+        help="Exit nonzero if any dead exports are found (advisory, not blocking)",
     )
     parser.add_argument(
         "--summary",
@@ -404,7 +410,7 @@ def main() -> int:
 
     try:
         inventory = run_audit()
-    except (OSError, ValueError) as exc:
+    except OSError as exc:
         print("ERROR: {}".format(exc), file=sys.stderr)
         return 1
 

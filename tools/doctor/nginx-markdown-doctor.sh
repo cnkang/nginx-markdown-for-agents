@@ -556,25 +556,30 @@ check_rust_toolchain() {
         pinned_ok="true"
     fi
 
+    local escaped_rustc_version escaped_expected_msrv escaped_toolchain_file
+    escaped_rustc_version=$(json_escape "$rustc_version")
+    escaped_expected_msrv=$(json_escape "$expected_msrv")
+    escaped_toolchain_file=$(json_escape "$toolchain_file")
+
     if [[ "$msrv_ok" == "true" ]]; then
         if [[ -z "$toolchain_file" ]]; then
             emit_check "rust_toolchain" "pass" \
                 "rustc ${rustc_version} meets MSRV ${expected_msrv}" \
-                '{"rustc_version":"'"$rustc_version"'","msrv":"'"$expected_msrv"'"}'
+                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_expected_msrv"'"}'
         elif [[ "$pinned_ok" == "true" ]]; then
             emit_check "rust_toolchain" "pass" \
                 "rustc ${rustc_version} meets MSRV; repository pins exact toolchain ${toolchain_file}" \
-                '{"rustc_version":"'"$rustc_version"'","msrv":"'"$expected_msrv"'","pinned_channel":"'"$toolchain_file"'"}'
+                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_expected_msrv"'","pinned_channel":"'"$escaped_toolchain_file"'"}'
         else
             emit_check "rust_toolchain" "warn" \
                 "rustc ${rustc_version} meets MSRV but rust-toolchain.toml is not pinned to ${expected_msrv}" \
-                '{"rustc_version":"'"$rustc_version"'","msrv":"'"$expected_msrv"'","pinned_channel":"'"$toolchain_file"'"}' \
+                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_expected_msrv"'","pinned_channel":"'"$escaped_toolchain_file"'"}' \
                 "Set channel = \"${expected_msrv}\" in rust-toolchain.toml for reproducible release builds"
         fi
     else
         emit_check "rust_toolchain" "warn" \
             "rustc ${rustc_version:-unknown} is below the MSRV floor ${expected_msrv}" \
-            '{"rustc_version":"'"$rustc_version"'","msrv":"'"$expected_msrv"'"}' \
+            '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_expected_msrv"'"}' \
             "Install Rust ${expected_msrv} or newer (rustup toolchain install ${expected_msrv})"
     fi
     return 0

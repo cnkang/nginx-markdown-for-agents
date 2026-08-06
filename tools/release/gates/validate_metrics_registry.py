@@ -42,7 +42,7 @@ def find_repo_root():
 def load_registry(repo_root):
     """Load and parse the metrics registry artifact."""
     registry_path = (
-        repo_root / "artifacts" / "spec62" / "wave2" / "metrics-registry.json"
+        repo_root / "artifacts" / "release" / "0.9.2" / "metrics-registry.json"
     )
     if not registry_path.exists():
         print(
@@ -269,7 +269,9 @@ def extract_renderer_label_names(renderer_content, family):
 
     labels = set()
     for source in label_sources:
-        labels.update(re.findall(r"([A-Za-z_][A-Za-z0-9_]*)=\\\"", source))
+        labels.update(re.findall(
+            r"([A-Za-z_]\w*)=\\\"", source, flags=re.ASCII
+        ))
     if family == "nginx_markdown_conversion_duration_seconds":
         labels.discard("le")
     return labels

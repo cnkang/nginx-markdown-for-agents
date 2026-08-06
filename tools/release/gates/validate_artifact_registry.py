@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Artifact registry gate validator (Spec 62 Task 10.5).
+"""Artifact registry gate validator.
 
 Validates an artifact registry record against the v1 schema. The record
 binds a candidate SHA to a set of artifacts with storage class, producer,
@@ -7,7 +7,7 @@ consumer, and cryptographic digest information.
 
 Real mode validates the candidate-bound release artifact index
 (`artifacts/release/0.9.2/candidate-release-artifact-index.json`)
-produced by Task 10.7: candidate identity against the frozen
+produced by release tooling: candidate identity against the frozen
 release-candidate-sha-manifest, per-artifact digest/AIDB bindings,
 feature-manifest digest and ABI version consistency with the official
 manifest and frozen ABI header, and authoritative-attempt semantics.
@@ -36,6 +36,11 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT / "tools"))
+
+from lib.path_validation import (  # noqa: E402
+    validate_read_path,
+)
 
 SCHEMA_VERSION = "release.artifact-registry.v1"
 INDEX_SCHEMA_VERSION = "release.candidate-artifact-index.v1"
@@ -102,10 +107,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def load_json(path: Path, label: str) -> dict:
+def load_json(path: str | Path, label: str) -> dict:
     """Load a JSON object, failing closed with a malformed reason."""
+    validated_path = validate_read_path(path, purpose=label)
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(validated_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError(
             f"malformed: unable to read {label} {path}: {exc}") from exc
@@ -116,7 +122,8 @@ def load_json(path: Path, label: str) -> dict:
 
 def canonical_digest_of(path: Path) -> str:
     """Canonical-content digest of a JSON manifest file."""
-    doc = json.loads(path.read_text(encoding="utf-8"))
+    validated_path = validate_read_path(path, purpose="JSON digest input")
+    doc = json.loads(validated_path.read_text(encoding="utf-8"))
     canonical = json.dumps(doc, sort_keys=True, separators=(",", ":")).encode(
         "utf-8")
     return "sha256:" + hashlib.sha256(canonical).hexdigest()
@@ -129,7 +136,10 @@ def frozen_feature_digest() -> str:
 
 def frozen_abi_version() -> int:
     """MARKDOWN_ABI_VERSION from the generated header."""
-    text = ABI_HEADER_PATH.read_text(encoding="utf-8")
+    validated_path = validate_read_path(
+        ABI_HEADER_PATH, purpose="generated ABI header"
+    )
+    text = validated_path.read_text(encoding="utf-8")
     match = re.search(r"#define\s+MARKDOWN_ABI_VERSION\s+(\d+)", text)
     if not match:
         raise ValueError(
@@ -231,20 +241,32 @@ def _check_local_artifact_digest(artifact: dict, index_pos: int,
     """Verify digest against local bytes when the artifact is present."""
     repo_resolved = REPO_ROOT.resolve()
 
-    def _contains(candidate: Path, label: str) -> None:
+    def _contains(candidate: Path, label: str) -> bool:
         try:
             candidate.relative_to(repo_resolved)
         except ValueError:
             reasons.append(
                 f"malformed: {label} escapes repository root")
+            return False
+        return True
 
     artifact_sha_value = artifact.get("artifact_sha256")
     artifact_type = artifact.get("artifact_type")
     artifact_path = artifact.get("artifact_id", "")
     if not artifact_sha_value or artifact_type not in ("deb", "rpm", "source"):
         return
-    local = REPO_ROOT / artifact_path
-    _contains(local, f"artifacts[{index_pos}].artifact_id")
+    if not isinstance(artifact_path, str) or not artifact_path:
+        reasons.append(
+            f"malformed: artifacts[{index_pos}].artifact_id must be a path"
+        )
+        return
+    local = validate_read_path(
+        REPO_ROOT / artifact_path,
+        must_exist=False,
+        purpose=f"artifacts[{index_pos}].artifact_id",
+    )
+    if not _contains(local, f"artifacts[{index_pos}].artifact_id"):
+        return
     if local.is_file():
         actual = "sha256:" + hashlib.sha256(
             local.read_bytes()).hexdigest()
@@ -346,7 +368,7 @@ def run_fixture_gate(args) -> int:
         raise ValueError(
             "malformed: --record-input is required in fixture mode")
 
-    record = load_json(Path(args.record_input), "artifact registry record")
+    record = load_json(args.record_input, "artifact registry record")
     reasons = validate_record(record, expected_sha=args.expected_sha)
 
     if reasons:
@@ -360,25 +382,16 @@ def run_fixture_gate(args) -> int:
 
 def run_real_gate(args) -> int:
     """Validate the candidate-bound release artifact index."""
-    index_path = Path(args.index)
-    if not index_path.is_file():
-        print(
-            f"ERROR: malformed: candidate artifact index missing: "
-            f"{index_path}",
-            file=sys.stderr)
-        return 1
+    index_path = validate_read_path(
+        args.index, purpose="candidate artifact index"
+    )
 
     candidate_sha = None
-    candidate_manifest_path = Path(args.candidate_manifest)
-    if candidate_manifest_path.is_file():
-        candidate = load_json(candidate_manifest_path, "candidate manifest")
-        candidate_sha = candidate.get("candidate_sha")
-    else:
-        print(
-            f"ERROR: malformed: frozen candidate manifest missing: "
-            f"{candidate_manifest_path}",
-            file=sys.stderr)
-        return 1
+    candidate_manifest_path = validate_read_path(
+        args.candidate_manifest, purpose="candidate manifest"
+    )
+    candidate = load_json(candidate_manifest_path, "candidate manifest")
+    candidate_sha = candidate.get("candidate_sha")
 
     index = load_json(index_path, "candidate artifact index")
     reasons = validate_index(index, candidate_sha)
@@ -402,7 +415,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.mode == "fixture":
             return run_fixture_gate(args)
         return run_real_gate(args)
-    except ValueError as exc:
+    except (FileNotFoundError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 

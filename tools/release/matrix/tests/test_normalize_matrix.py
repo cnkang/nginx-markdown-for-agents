@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Regression tests for the release-matrix normalization entry point
-(Spec 62 Task 8.12c, Rule 62).
+(release-matrix normalization contract).
 
 Run:
     python3 -m pytest tools/release/matrix/tests/test_normalize_matrix.py -q

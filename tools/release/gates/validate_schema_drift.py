@@ -2,7 +2,7 @@
 """Schema drift gate validator.
 
 Fail closed on any schema, registry, generated-artifact, or official-field-
-contract mismatch across Wave 2 artifacts and their corresponding source-of-
+contract mismatch across release artifacts and their corresponding source-of-
 truth implementations.
 
 This gate validates:
@@ -12,7 +12,7 @@ This gate validates:
   3. Dynconf schema against the Rust parser implementation (cross-checking
      known keys, types, ranges)
   4. Reason codegen drift (calls generate.py --check)
-  5. All consumed W2 artifacts exist and have valid structure
+  5. All consumed release artifacts exist and have valid structure
 
 Requirements: 15.8, 15.12
 
@@ -33,13 +33,13 @@ if str(REPO_ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "tools"))
 from lib.path_validation import validate_read_path  # noqa: E402
 
-# Wave 2 artifact paths
-W2_DIR = REPO_ROOT / "artifacts" / "spec62" / "wave2"
-METRICS_REGISTRY = W2_DIR / "metrics-registry.json"
-DIAGNOSTICS_FIELD_CONTRACT = W2_DIR / "diagnostics-field-contract.json"
-DYNCONF_PRECEDENCE_REPORT = W2_DIR / "dynconf-precedence-report.json"
-REASON_REGISTRY_REPORT = W2_DIR / "reason-registry-report.json"
-GENERATED_REASON_ARTIFACTS = W2_DIR / "generated-reason-artifacts.json"
+# Release artifact paths
+RELEASE_ARTIFACT_DIR = REPO_ROOT / "artifacts" / "release" / "0.9.2"
+METRICS_REGISTRY = RELEASE_ARTIFACT_DIR / "metrics-registry.json"
+DIAGNOSTICS_FIELD_CONTRACT = RELEASE_ARTIFACT_DIR / "diagnostics-field-contract.json"
+DYNCONF_PRECEDENCE_REPORT = RELEASE_ARTIFACT_DIR / "dynconf-precedence-report.json"
+REASON_REGISTRY_REPORT = RELEASE_ARTIFACT_DIR / "reason-registry-report.json"
+GENERATED_REASON_ARTIFACTS = RELEASE_ARTIFACT_DIR / "generated-reason-artifacts.json"
 
 # Schema paths
 DYNCONF_SCHEMA = REPO_ROOT / "schemas" / "dynconf.schema.json"
@@ -51,8 +51,8 @@ METRICS_VALIDATOR = (
 )
 REASON_CODEGEN = REPO_ROOT / "tools" / "reason-codegen" / "generate.py"
 
-# Expected W2 artifacts (must all exist and be valid JSON)
-W2_ARTIFACTS = [
+# Expected release artifacts (must all exist and be valid JSON)
+RELEASE_ARTIFACTS = [
     DYNCONF_PRECEDENCE_REPORT,
     METRICS_REGISTRY,
     REASON_REGISTRY_REPORT,
@@ -68,20 +68,20 @@ def _load_json(path: Path) -> dict:
         return json.load(f)
 
 
-def gate_w2_artifact_existence() -> list:
-    """Verify all W2 artifacts exist and are valid JSON objects."""
+def gate_release_artifact_existence() -> list:
+    """Verify all release artifacts exist and are valid JSON objects."""
     errors = []
-    for artifact_path in W2_ARTIFACTS:
+    for artifact_path in RELEASE_ARTIFACTS:
         rel = artifact_path.relative_to(REPO_ROOT)
         if not artifact_path.exists():
-            errors.append(f"Missing W2 artifact: {rel}")
+            errors.append(f"Missing release artifact: {rel}")
             continue
         try:
             data = _load_json(artifact_path)
             if not isinstance(data, dict):
-                errors.append(f"W2 artifact is not a JSON object: {rel}")
+                errors.append(f"Release artifact is not a JSON object: {rel}")
         except (json.JSONDecodeError, OSError) as exc:
-            errors.append(f"W2 artifact unreadable: {rel}: {exc}")
+            errors.append(f"Release artifact unreadable: {rel}: {exc}")
     return errors
 
 
@@ -124,8 +124,8 @@ def _check_generated_artifacts_structure(listing: dict) -> list:
     return errors
 
 
-def gate_w2_artifact_structure() -> list:
-    """Validate structural invariants of each W2 artifact."""
+def gate_release_artifact_structure() -> list:
+    """Validate structural invariants of each release artifact."""
     errors = []
 
     if METRICS_REGISTRY.exists():
@@ -425,8 +425,8 @@ def main() -> int:
     print()
 
     gates = [
-        ("Validating W2 artifact existence and structure",
-         lambda: gate_w2_artifact_existence() + gate_w2_artifact_structure()),
+        ("Validating release artifact existence and structure",
+         lambda: gate_release_artifact_existence() + gate_release_artifact_structure()),
         ("Validating metrics registry drift",
          gate_metrics_registry),
         ("Validating diagnostics field contract",

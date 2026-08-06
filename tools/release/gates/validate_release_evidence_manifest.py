@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Release evidence manifest gate validator (Spec 62 Task 10.5).
+"""Release evidence manifest gate validator.
 
 Validates a final release evidence manifest against the v1 schema. The
 manifest binds a candidate SHA and version to a set of evidence entries,
@@ -29,6 +29,9 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT / "tools"))
+
+from lib.path_validation import validate_read_path  # noqa: E402
 
 SCHEMA_VERSION = "release.evidence-manifest.v1"
 
@@ -65,10 +68,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def load_json(path: Path, label: str) -> dict:
+def load_json(path: str | Path, label: str) -> dict:
     """Load a JSON object, failing closed with a malformed reason."""
+    validated_path = validate_read_path(path, purpose=label)
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(validated_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError(
             f"malformed: unable to read {label} {path}: {exc}") from exc
@@ -167,7 +171,7 @@ def run_fixture_gate(args) -> int:
         raise ValueError(
             "malformed: --record-input is required in fixture mode")
 
-    record = load_json(Path(args.record_input), "release evidence manifest")
+    record = load_json(args.record_input, "release evidence manifest")
     reasons = validate_record(record, expected_sha=args.expected_sha)
 
     if reasons:
@@ -184,7 +188,7 @@ def _require_jsonschema() -> bool:
     False."""
     try:
         import jsonschema  # noqa: F401
-    except ImportError as exc:
+    except ImportError:
         print(
             "ERROR: jsonschema required (pip install -r requirements-dev.txt)",
             file=sys.stderr)
@@ -193,15 +197,15 @@ def _require_jsonschema() -> bool:
 
 
 def _validate_evidence_schema(manifest: dict, reasons: list) -> None:
-    """Validate the manifest instance against the W5 evidence schema."""
+    """Validate the manifest instance against the release evidence schema."""
     schema_path = REPO_ROOT / "schemas" / "final-evidence-manifest.schema.json"
     if not schema_path.is_file():
         reasons.append(
             "missing-observation: final-evidence-manifest schema missing")
         return
     import jsonschema
-    schema = json.loads(schema_path.read_text(encoding="utf-8"))
     try:
+        schema = load_json(schema_path, "final evidence manifest schema")
         jsonschema.validate(instance=manifest, schema=schema)
     except jsonschema.ValidationError as exc:
         reasons.append(f"malformed: instance schema violation: {exc.message}")
@@ -223,9 +227,9 @@ def _validate_observation_state(reasons: list) -> None:
     import jsonschema
     try:
         obs = load_json(obs_state_path, "observation state")
-        obs_schema = json.loads(obs_schema_path.read_text(encoding="utf-8"))
+        obs_schema = load_json(obs_schema_path, "observation state schema")
         jsonschema.validate(instance=obs, schema=obs_schema)
-    except (ValueError, json.JSONDecodeError) as exc:
+    except ValueError as exc:
         reasons.append(f"malformed: observation-state invalid: {exc}")
     except jsonschema.ValidationError as exc:
         reasons.append(
@@ -250,14 +254,10 @@ def _resolve_expected_sha(args) -> str | None:
 
 def run_real_gate(args) -> int:
     """Validate the candidate-bound final evidence manifest and
-    observation-state record against the W5 evidence schemas."""
-    manifest_path = Path(args.manifest)
-    if not manifest_path.is_file():
-        print(
-            f"ERROR: malformed: final evidence manifest missing: "
-            f"{manifest_path}",
-            file=sys.stderr)
-        return 1
+    observation-state record against the release evidence schemas."""
+    manifest_path = validate_read_path(
+        args.manifest, purpose="final evidence manifest"
+    )
 
     manifest = load_json(manifest_path, "final evidence manifest")
     reasons = []
@@ -289,7 +289,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.mode == "fixture":
             return run_fixture_gate(args)
         return run_real_gate(args)
-    except ValueError as exc:
+    except (FileNotFoundError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 

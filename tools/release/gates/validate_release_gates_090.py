@@ -272,7 +272,7 @@ def _check_removed_directives(content: str, removed: list) -> list:
     The 0.9.2 reset deliberately removes these names from ``ngx_command_t``.
     NGINX then provides the standard unknown-directive error.  Older versions
     of this validator required reject-only stubs, which contradicted the
-    frozen Wave 1 command table and also matched migration comments rather
+    frozen command table and also matched migration comments rather
     than the live registry.
     """
     missing = []

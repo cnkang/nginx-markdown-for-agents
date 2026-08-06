@@ -49,10 +49,10 @@ C_SOURCE_OUTPUT = (
     / "ngx_http_markdown_reason_generated.c"
 )
 MANIFEST_OUTPUT = (
-    REPO_ROOT / "artifacts" / "spec62" / "wave2" / "reason-registry-report.json"
+    REPO_ROOT / "artifacts" / "release" / "0.9.2" / "reason-registry-report.json"
 )
 LISTING_OUTPUT = (
-    REPO_ROOT / "artifacts" / "spec62" / "wave2" / "generated-reason-artifacts.json"
+    REPO_ROOT / "artifacts" / "release" / "0.9.2" / "generated-reason-artifacts.json"
 )
 
 
@@ -819,7 +819,7 @@ def generate_listing(hash_hex: str) -> dict:
                 "description": "C accessor function implementations",
             },
             {
-                "path": "artifacts/spec62/wave2/reason-registry-report.json",
+                "path": "artifacts/release/0.9.2/reason-registry-report.json",
                 "description": "Count/hash manifest for drift detection",
             },
         ],

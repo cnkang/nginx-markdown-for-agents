@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # detect_workflow_input_injection.sh — Detect GitHub Actions workflow input injection
 #
-# Rule (security-cwe, ci-gating): Direct interpolation of GitHub Actions inputs/outputs
-# into shell run blocks allows command injection via crafted input values.
+# Rule (security-cwe, ci-gating): Direct interpolation of GitHub Actions inputs or
+# command-bearing step outputs into shell run blocks allows command injection via
+# crafted values.
 # Inputs must be routed through environment variables and referenced only as
 # env vars in shell scripts, never via ${{ inputs.* }} or ${{ github.event.* }}
 # direct interpolation in run blocks.
@@ -10,6 +11,7 @@
 # This detector flags:
 #   - ${{ inputs.* }} used directly inside run: blocks without env routing
 #   - ${{ github.event.* }} used directly inside run: blocks without env routing
+#   - ${{ steps.*.outputs.command }} used directly inside run: blocks
 #
 # Allowlist: ${{ inputs.* }} used inside env: blocks is safe and not flagged.
 #   ${{ github.sha }}, ${{ github.ref }}, and ${{ github.event_name }} are
@@ -77,6 +79,14 @@ while IFS= read -r -d '' file; do
             continue
         fi
 
+        # An inline run command is also shell source and needs the same
+        # interpolation checks as a multiline run block.
+        if [[ "$line" =~ ^[[:space:]]*run:[[:space:]]+.+ ]] || \
+           [[ "$line" =~ ^[[:space:]]*-[[:space:]]*run:[[:space:]]+.+ ]]; then
+            in_run_block=1
+            in_env_block=0
+        fi
+
         # Detect env: blocks (which are safe for input interpolation)
         if [[ "$line" =~ ^[[:space:]]*env:[[:space:]]*$ ]] || \
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*env:[[:space:]]*$ ]]; then
@@ -112,6 +122,15 @@ while IFS= read -r -d '' file; do
                 echo "ERROR: ${rel_path}:${line_num}: github.event.inputs.* directly interpolated in run block" >&2
                 echo "  ${line}" >&2
                 echo "  Fix: route through env: INPUT_VAR: \${{ github.event.inputs.var }} and use \${INPUT_VAR}" >&2
+                findings=$((findings + 1))
+            fi
+
+            # Command outputs are executable data and must use a fixed
+            # allowlist rather than entering the shell source text.
+            if [[ "$line" =~ \$\{\{[[:space:]]*steps\.[a-zA-Z_][a-zA-Z0-9_-]*\.outputs\.command[[:space:]]*\}\} ]]; then
+                echo "ERROR: ${rel_path}:${line_num}: command output directly interpolated in run block" >&2
+                echo "  ${line}" >&2
+                echo "  Fix: map a fixed identifier through env and a shell case statement" >&2
                 findings=$((findings + 1))
             fi
         fi

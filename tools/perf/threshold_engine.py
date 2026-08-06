@@ -534,7 +534,7 @@ def main(argv=None):
 
 
 # ---------------------------------------------------------------------------
-# Module-level threshold evaluation (Spec 65 / Requirement 9.1, 9.6)
+# Module-level threshold evaluation (Requirements 9.1 and 9.6)
 # ---------------------------------------------------------------------------
 
 # Default module-level thresholds used when the "module_level" section is

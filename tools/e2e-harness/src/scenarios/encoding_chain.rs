@@ -1,4 +1,4 @@
-//! Multi-layer Content-Encoding chain coverage (Spec 62 Wave 4).
+//! Multi-layer Content-Encoding chain coverage.
 //!
 //! Validates Requirement 12:
 //! - 2-layer and 3-layer chains decode correctly through bounded full-buffer

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Canonical release-matrix validation gate (Task 10.2).
+"""Canonical release-matrix validation gate.
 
 Validates that the sole repository-owned release matrix
 (`docs/release/release-matrix.json`, schema version 1) is:
@@ -72,7 +72,7 @@ def _load_json(path: pathlib.Path, label: str) -> dict:
 def feature_manifest_digest() -> str:
     """Official feature-manifest digest.
 
-    The digest convention (Task 8.12a / W4 artifact family) is the SHA-256
+    The digest convention for official artifacts is the SHA-256
     of the canonical UTF-8 JSON serialization of the manifest content
     (sorted keys, compact separators), NOT the raw file-byte digest. The
     canonical-performance-environment, performance-baseline-approval, and

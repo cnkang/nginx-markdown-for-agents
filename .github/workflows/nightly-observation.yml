@@ -104,9 +104,14 @@ jobs:
           row = next((r for r in rows if r.get("row_id") == row_id), None)
           if row is None:
               raise SystemExit(f"matrix row {row_id!r} not found in release/scope/sanitizer-support-matrix.json")
+          expected_commands = {
+              "asan-ubsan": "make test-nginx-unit-sanitize-smoke",
+              "lsan": "ASAN_OPTIONS=detect_leaks=1 make test-nginx-unit-sanitize-smoke",
+          }
+          if row.get("blocking") and row.get("command") != expected_commands.get(row_id):
+              raise SystemExit(f"unexpected command for blocking row {row_id!r}")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"blocking={row['blocking']}\n")
-              output.write(f"command={row['command']}\n")
               output.write(f"skip_reason={row.get('skip_reason', '')}\n")
               output.write(f"policy_reference={row.get('policy_reference', '')}\n")
               output.write(f"sanitize_type={','.join(row.get('sanitizer', []))}\n")
@@ -119,17 +124,20 @@ jobs:
 
       - name: Verify non-blocking row has justified skip
         if: steps.row.outputs.blocking == 'false'
+        env:
+          SKIP_REASON: ${{ steps.row.outputs.skip_reason }}
+          POLICY_REFERENCE: ${{ steps.row.outputs.policy_reference }}
         run: |
-          test -n "${{ steps.row.outputs.skip_reason }}" || {
+          if [[ -z "${SKIP_REASON}" ]]; then
             echo "ERROR: non-blocking sanitizer row must carry an explicit skip_reason" >&2
             exit 1
-          }
-          test -n "${{ steps.row.outputs.policy_reference }}" || {
+          fi
+          if [[ -z "${POLICY_REFERENCE}" ]]; then
             echo "ERROR: non-blocking sanitizer row must carry a policy_reference" >&2
             exit 1
-          }
-          echo "SKIP (justified): ${{ steps.row.outputs.skip_reason }}"
-          echo "policy_reference: ${{ steps.row.outputs.policy_reference }}"
+          fi
+          printf 'SKIP (justified): %s\n' "${SKIP_REASON}"
+          printf 'policy_reference: %s\n' "${POLICY_REFERENCE}"
         shell: bash
 
       - name: Install sanitizer build dependencies
@@ -142,18 +150,19 @@ jobs:
 
       - name: Run blocking sanitizer row
         if: steps.row.outputs.blocking == 'true'
+        env:
+          SANITIZER_ROW_ID: ${{ matrix.row_id }}
         run: |
-          # command is taken from the repo-tracked sanitizer-support-matrix.json
-          # via the steps.row.outputs.command step output (not user-controlled
-          # input). We invoke through a fixed allowlist lookup here so the
-          # sanitizer-support-matrix.json entry determines what runs, with the
-          # matrix row id used only as a safe identifier, not as a command.
-          if [ "${{ steps.row.outputs.row_id }}" = "asan-ubsan" ]; then
-            make test-nginx-unit-sanitize-smoke
-          elif [ "${{ steps.row.outputs.row_id }}" = "lsan" ]; then
-            ASAN_OPTIONS=detect_leaks=1 make test-nginx-unit-sanitize-smoke
-          else
-            echo "ERROR: unexpected blocking sanitizer row_id '${{ steps.row.outputs.row_id }}'" >&2
-            exit 1
-          fi
+          case "${SANITIZER_ROW_ID}" in
+            asan-ubsan)
+              make test-nginx-unit-sanitize-smoke
+              ;;
+            lsan)
+              ASAN_OPTIONS=detect_leaks=1 make test-nginx-unit-sanitize-smoke
+              ;;
+            *)
+              echo "ERROR: unexpected blocking sanitizer row_id '${SANITIZER_ROW_ID}'" >&2
+              exit 1
+              ;;
+          esac
         shell: bash

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Release candidate evidence gate validator (Spec 62 Task 10.5).
+"""Release candidate evidence gate validator.
 
 Validates a release-candidate evidence record against the v1 schema.
 The record binds a candidate SHA to a set of gate entries, each with a
@@ -8,7 +8,7 @@ no blocking entry may be pending.
 
 Real mode validates the candidate-bound release-candidate-sha-manifest
 (`artifacts/release/0.9.2/release-candidate-sha-manifest.json`) produced
-by Task 10.6: candidate SHA format, branch, source-tree digest, required
+by release tooling: candidate SHA format, branch, source-tree digest, required
 input existence, and per-input sha256 digests. When run inside the
 repository worktree at the freeze point, the candidate SHA is verified
 against `git rev-parse HEAD`.
@@ -35,10 +35,13 @@ import json
 import re
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT / "tools"))
+
+from lib.path_validation import validate_read_path  # noqa: E402
 
 SCHEMA_VERSION = "release.candidate-evidence.v1"
 MANIFEST_SCHEMA_VERSION = "release.candidate-sha-manifest.v1"
@@ -95,10 +98,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def load_json(path: Path, label: str) -> dict:
+def load_json(path: str | Path, label: str) -> dict:
     """Load a JSON object, failing closed with a malformed reason."""
+    validated_path = validate_read_path(path, purpose=label)
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(validated_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError(
             f"malformed: unable to read {label} {path}: {exc}") from exc
@@ -109,7 +113,8 @@ def load_json(path: Path, label: str) -> dict:
 
 def file_digest(path: Path) -> str:
     """Return the sha256 digest of a file (canonical-content format)."""
-    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    validated_path = validate_read_path(path, purpose="release evidence input")
+    return "sha256:" + hashlib.sha256(validated_path.read_bytes()).hexdigest()
 
 
 def git_head_sha() -> str:
@@ -176,7 +181,7 @@ def _check_manifest_identity(manifest: dict, reasons: list) -> None:
 
 
 def _check_manifest_digest_fields(manifest: dict, reasons: list) -> None:
-    """Validate the W4 digest fields are strings."""
+    """Validate the release digest fields are strings."""
     for digest_field in (
         "feature_manifest_digest",
         "final_ffi_freeze_digest",
@@ -188,15 +193,50 @@ def _check_manifest_digest_fields(manifest: dict, reasons: list) -> None:
             reasons.append(f"malformed: {digest_field} must be a string")
 
 
+def _check_required_input(
+        input_path, expected: object, repo_resolved: Path, reasons: list
+) -> None:
+    """Validate one required input and its recorded digest."""
+    if not isinstance(input_path, str) or not input_path:
+        reasons.append(
+            "malformed: required_inputs entries must be non-empty strings"
+        )
+        return
+    if not isinstance(expected, str) or not DIGEST_PATTERN.fullmatch(expected):
+        reasons.append(
+            f"missing-observation: no digest for required input "
+            f"{input_path!r}"
+        )
+        return
+    input_file = validate_read_path(
+        REPO_ROOT / input_path,
+        must_exist=False,
+        purpose=f"required input {input_path}",
+    )
+    try:
+        input_file.relative_to(repo_resolved)
+    except ValueError:
+        reasons.append(
+            f"malformed: required_inputs[{input_path!r}] "
+            "escapes repository root"
+        )
+        return
+    if not input_file.is_file():
+        reasons.append(
+            f"missing-observation: required input missing: {input_path}"
+        )
+        return
+    actual = file_digest(input_file)
+    if actual != expected:
+        reasons.append(
+            f"stale-digest: input {input_path} digest {actual} "
+            f"!= recorded {expected}"
+        )
+
+
 def _check_required_inputs(manifest: dict, reasons: list) -> None:
     """Validate required inputs exist and their digests match."""
     repo_resolved = REPO_ROOT.resolve()
-
-    def _contains(candidate: Path, label: str) -> None:
-        try:
-            candidate.relative_to(repo_resolved)
-        except ValueError:
-            reasons.append(f"malformed: {label} escapes repository root")
 
     required_inputs = manifest.get("required_inputs")
     input_digests = manifest.get("input_digests")
@@ -212,35 +252,22 @@ def _check_required_inputs(manifest: dict, reasons: list) -> None:
             "missing-observation: input_digests keys must match "
             "required_inputs exactly")
     for input_path in required_inputs:
-        expected = input_digests.get(input_path)
-        if not isinstance(expected, str) or not DIGEST_PATTERN.fullmatch(expected):
-            reasons.append(
-                f"missing-observation: no digest for required input "
-                f"{input_path!r}")
-            continue
-        input_file = REPO_ROOT / input_path
-        _contains(input_file, f"required_inputs[{input_path!r}]")
-        if not input_file.is_file():
-            reasons.append(
-                f"missing-observation: required input missing: "
-                f"{input_path}")
-            continue
-        actual = file_digest(input_file)
-        if actual != expected:
-            reasons.append(
-                f"stale-digest: input {input_path} digest {actual} "
-                f"!= recorded {expected}")
+        expected = (input_digests.get(input_path)
+                    if isinstance(input_path, str) else None)
+        _check_required_input(input_path, expected, repo_resolved, reasons)
 
 
 def _check_evidence_schemas(manifest: dict, reasons: list) -> None:
     """Validate evidence schema digests when declared."""
     repo_resolved = REPO_ROOT.resolve()
 
-    def _contains(candidate: Path, label: str) -> None:
+    def _contains(candidate: Path, label: str) -> bool:
         try:
             candidate.relative_to(repo_resolved)
         except ValueError:
             reasons.append(f"malformed: {label} escapes repository root")
+            return False
+        return True
 
     evidence_schema_digests = manifest.get("evidence_schema_digests")
     if evidence_schema_digests is None:
@@ -250,8 +277,20 @@ def _check_evidence_schemas(manifest: dict, reasons: list) -> None:
             "malformed: evidence_schema_digests must be an object")
         return
     for schema_path, expected in evidence_schema_digests.items():
-        schema_file = REPO_ROOT / schema_path
-        _contains(schema_file, f"evidence_schema_digests[{schema_path!r}]")
+        if not isinstance(schema_path, str) or not schema_path:
+            reasons.append(
+                "malformed: evidence schema paths must be non-empty strings"
+            )
+            continue
+        schema_file = validate_read_path(
+            REPO_ROOT / schema_path,
+            must_exist=False,
+            purpose=f"evidence schema {schema_path}",
+        )
+        if not _contains(
+            schema_file, f"evidence_schema_digests[{schema_path!r}]"
+        ):
+            continue
         if not schema_file.is_file():
             reasons.append(
                 f"missing-observation: evidence schema missing: "
@@ -363,7 +402,7 @@ def run_fixture_gate(args) -> int:
     if not args.record_input:
         raise ValueError("malformed: --record-input is required in fixture mode")
 
-    record = load_json(Path(args.record_input), "candidate evidence record")
+    record = load_json(args.record_input, "candidate evidence record")
     reasons = validate_record(record, expected_sha=args.expected_sha)
 
     if reasons:
@@ -377,13 +416,9 @@ def run_fixture_gate(args) -> int:
 
 def run_real_gate(args) -> int:
     """Validate the candidate-bound release-candidate-sha-manifest."""
-    manifest_path = Path(args.manifest)
-    if not manifest_path.is_file():
-        print(
-            f"ERROR: malformed: candidate sha manifest missing: "
-            f"{manifest_path}",
-            file=sys.stderr)
-        return 1
+    manifest_path = validate_read_path(
+        args.manifest, purpose="candidate SHA manifest"
+    )
 
     manifest = load_json(manifest_path, "candidate sha manifest")
     reasons = validate_manifest(manifest, git_head=args.git_head)
@@ -407,7 +442,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.mode == "fixture":
             return run_fixture_gate(args)
         return run_real_gate(args)
-    except ValueError as exc:
+    except (FileNotFoundError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 

@@ -58,7 +58,7 @@ def test_version_classification_correctness(minor, patch):
 
 
 @pytest.mark.skipif(
-    um.filter_versions is None, reason="filter_versions not yet implemented (Task 1.4)"
+    um.filter_versions is None, reason="filter_versions is not implemented"
 )
 @given(
     versions=st.lists(_nginx_version, min_size=0, max_size=30),

@@ -7,6 +7,7 @@ tooling under tools/corpus changes.
 from __future__ import annotations
 
 from fnmatch import fnmatchcase
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -185,6 +186,21 @@ def _module_baseline_job(text: str) -> str:
     """Return only the canonical module-baseline job block."""
     start = text.index("\n  module-baseline-092:")
     return text[start:]
+
+
+def test_nightly_perf_uses_tracked_canonical_environment() -> None:
+    """The nightly baseline must read reviewed environment metadata."""
+    repo_root = _repo_root()
+    environment_path = repo_root / "release" / "performance" / (
+        "canonical-environment.json"
+    )
+    environment = json.loads(environment_path.read_text(encoding="utf-8"))
+
+    assert environment["schema_version"] == 1
+    assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", environment["nginx_version"])
+    block = _module_baseline_job(_nightly_perf_text())
+    assert "release/performance/canonical-environment.json" in block
+    assert "artifacts/" not in block
 
 
 def test_nightly_perf_generates_raw_baseline() -> None:
@@ -450,8 +466,11 @@ def test_pr_ci_has_blocking_092_contract_checks() -> None:
     assert "bash tools/harness/detect_version_consistency.sh" in text, (
         "PR CI must block on version consistency"
     )
-    assert "make -C components/nginx-module/tests unit-otel_impl" in text, (
-        "PR CI must block on the OTel request-scoped unit test"
+    assert "make reason-codegen-check" in text, (
+        "PR CI must generate and validate reason-code artifacts"
+    )
+    assert "make -C components/nginx-module/tests unit-streaming_impl" in text, (
+        "PR CI must block on the streaming lifecycle unit test"
     )
 
 

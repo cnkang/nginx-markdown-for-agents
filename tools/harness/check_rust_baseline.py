@@ -135,31 +135,32 @@ def _check_workflow_group(
                 )
 
 
-def _check_observation_workflows(root: Path, exact: str, errors: list[str]) -> None:
-    """Observation workflows must declare the exact toolchain and may also
-    declare the nightly fuzz toolchain for cargo-fuzz jobs."""
-    for relative_path in OBSERVATION_ACTION_WORKFLOWS:
-        content = _read_text(root, relative_path, errors)
-        if content is None:
-            continue
-        versions = ACTION_TOOLCHAIN_RE.findall(content)
-        if not versions:
-            errors.append(
-                f"{relative_path}: missing required toolchain declaration"
-            )
-            continue
-        if exact not in versions:
-            errors.append(
-                f"{relative_path}: must declare the exact toolchain {exact!r}"
-            )
-        unexpected = [
-            version for version in versions
-            if version != exact and version != "nightly"
-        ]
-        for version in unexpected:
+def _check_observation_versions(
+    relative_path: Path, versions: list[str], exact: str, errors: list[str]
+) -> None:
+    """Validate one observation workflow's declared compiler channels."""
+    if not versions:
+        errors.append(f"{relative_path}: missing required toolchain declaration")
+        return
+    if exact not in versions:
+        errors.append(
+            f"{relative_path}: must declare the exact toolchain {exact!r}"
+        )
+    for version in versions:
+        if version != exact and version != "nightly":
             errors.append(
                 f"{relative_path}: unexpected toolchain {version!r} "
                 f"(expected {exact!r} or 'nightly')"
+            )
+
+
+def _check_observation_workflows(root: Path, exact: str, errors: list[str]) -> None:
+    """Observation workflows use the exact channel, plus optional nightly."""
+    for relative_path in OBSERVATION_ACTION_WORKFLOWS:
+        content = _read_text(root, relative_path, errors)
+        if content is not None:
+            _check_observation_versions(
+                relative_path, ACTION_TOOLCHAIN_RE.findall(content), exact, errors
             )
 
 

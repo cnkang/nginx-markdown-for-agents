@@ -2,7 +2,7 @@
   "schema_version": "release.signing-policy.v1",
   "title": "0.9.2 Release Signing Policy (frozen)",
   "frozen_at": "2026-08-05",
-  "owner_task": "spec62 Task 10.3 (Wave 5)",
+  "owner": "release engineering",
   "status": "frozen",
   "note": "Private keys and key material are NEVER included in this policy or any repository artifact. This policy defines the mechanism, identity binding, and verification contract only.",
   "artifact_types": {
@@ -82,6 +82,6 @@
   },
   "policy_reference_notes": [
     "Requirement 14 criterion 4: GPG for source/DEB/RPM; Cosign/Sigstore identity-bound signatures for OCI; checksum/provenance for Homebrew without detached GPG",
-    "Task 10.7 is the sole producer of candidate-bound signatures for the frozen candidate SHA; failed/superseded attempts retain unique run_id and are never promoted"
+    "The release workflow is the sole producer of candidate-bound signatures for the frozen candidate SHA; failed or superseded attempts retain unique run_id and are never promoted"
   ]
 }

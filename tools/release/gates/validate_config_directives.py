@@ -57,7 +57,7 @@ CONFIGURATION_MD = PROJECT_ROOT / "docs" / "guides" / "CONFIGURATION.md"
 # ── Current public command registry (0.9.2 freeze) ────────────────────────
 
 # The 0.9.2 freeze deliberately removes the old one-directive-per-limit
-# surface.  Keep this list aligned with the checked-in Wave 1 command table;
+# surface.  Keep this list aligned with the checked-in command table;
 # nested resource limits are validated separately below.
 CURRENT_DIRECTIVES = [
     "markdown_filter",
@@ -350,14 +350,14 @@ def validate_all(result: ValidationResult) -> None:
         / "ngx_http_markdown_config_handlers_impl.h"
     )
 
-    # Wave 1 freezes the command table as a single 25-entry public surface.
+    # The command table is a single 25-entry public surface.
     # Validate both registration and documentation without reviving the old
     # one-directive-per-budget assumptions.
     for name in CURRENT_DIRECTIVES:
         check_directive_in_source(name, directives_src, result)
         check_directive_in_docs(name, name, docs, result)
 
-    # Wave 1/2 freeze the eight nested resource-limit keys.
+    # The public contract freezes the eight nested resource-limit keys.
     for key in CURRENT_LIMIT_KEYS:
         check_limit_key(key, handler_src, docs, result)
 

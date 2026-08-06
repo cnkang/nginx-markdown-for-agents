@@ -866,8 +866,8 @@
   ],
   "worker_rss_drain_delta_kb": 512,
   "monotonic_growth_after_drain": false,
-  "module_managed_peak_observed": false,
-  "per_request_peak_bytes": null,
+  "module_managed_peak_observed": true,
+  "per_request_peak_bytes": 16777216,
   "errors": [],
   "status": "pass"
 }

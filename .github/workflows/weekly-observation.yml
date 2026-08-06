@@ -89,7 +89,7 @@ jobs:
             make test-e2e-rust-soak
           else
             echo "SKIP (justified): no module-enabled nginx binary available (NGINX_BIN unset)" >&2
-            echo "policy_reference: Requirement 18 Wave-6 qualification thresholds (short soak)" >&2
+            echo "policy_reference: Requirement 18 qualification thresholds (short soak)" >&2
           fi
         shell: bash
 

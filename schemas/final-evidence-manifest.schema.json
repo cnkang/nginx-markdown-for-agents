@@ -21,7 +21,7 @@
     "candidate_sha": {
       "type": "string",
       "pattern": "^[0-9a-f]{40}$",
-      "description": "W5-frozen release candidate source SHA; must equal artifacts/release/0.9.2/release-candidate-sha-manifest.json candidate_sha."
+      "description": "Frozen release candidate source SHA; must equal artifacts/release/0.9.2/release-candidate-sha-manifest.json candidate_sha."
     },
     "evidence_schema_digest": {
       "type": "string",

@@ -107,7 +107,31 @@ fi
 # Remove vulnerable file for next test
 rm -f "${wf_dir}/vulnerable.yml"
 
-# Test 3: Empty workflows dir -> PASS
+# Test 3: Command output directly in run block -> FAIL
+cat >"${wf_dir}/command-output.yml" <<'Y'
+name: command-output
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - id: resolve
+        run: echo 'command=make test' >> "$GITHUB_OUTPUT"
+      - name: Run
+        run: ${{ steps.resolve.outputs.command }}
+Y
+
+${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 1 ]]; then
+    pass "command output interpolation detected"
+else
+    fail "command output interpolation detected" "expected exit 1, got ${exit_code}"
+    cat "${output_file}" >&2
+fi
+
+rm -f "${wf_dir}/command-output.yml"
+
+# Test 4: Empty workflows dir -> PASS
 empty_dir="${tmp_dir}/empty-wf"
 mkdir -p "${empty_dir}"
 ${DETECTOR} "${empty_dir}" >"${output_file}" 2>&1

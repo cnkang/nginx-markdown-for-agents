@@ -40,7 +40,7 @@ pub enum RouteBehavior {
         chunk_size: usize,
         fault: BrotliFault,
     },
-    /// Multi-layer Content-Encoding chain response (Spec 62 Wave 4).
+    /// Multi-layer Content-Encoding chain response.
     ///
     /// `chain` lists encodings in application order (first applied first);
     /// the wire body is produced by applying the chain, and the

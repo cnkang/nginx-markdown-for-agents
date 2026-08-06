@@ -1,4 +1,4 @@
-# Feature: spec62-wave4 — Property-based tests for error policy value acceptance
+# Property-based tests for error policy value acceptance.
 """Property-based tests for the error policy value set (Property 26).
 
 These tests encode the documented `markdown_error_policy` value contract

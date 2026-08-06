@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the official build feature manifest (Spec 62 Task 8.12a).
+"""Validate the official build feature manifest.
 
 Checks that `artifacts/release/0.9.2/official-build-feature-manifest.json`
 is exactly the three-key object `{"incremental": true, "streaming": true,
@@ -19,6 +19,7 @@ import hashlib
 import json
 import pathlib
 import sys
+from argparse import ArgumentParser
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 MANIFEST_PATH = (
@@ -68,7 +69,40 @@ def load_cargo_toml(failures: list) -> str:
         return ""
 
 
-def main() -> int:
+def write_manifest() -> int:
+    """Create the ignored build artifact after checking its source inputs."""
+    failures: list[str] = []
+    check_cargo_features(load_cargo_toml(failures), failures)
+    if failures:
+        for failure in failures:
+            print(f"ERROR: {failure}", file=sys.stderr)
+        return 1
+
+    try:
+        MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
+        MANIFEST_PATH.write_text(
+            json.dumps(EXPECTED, sort_keys=True) + "\n", encoding="utf-8"
+        )
+    except OSError as exc:
+        print(f"ERROR: feature manifest could not be written: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"Generated official build feature manifest: {MANIFEST_PATH}")
+    return 0
+
+
+def main(argv=None) -> int:
+    parser = ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--write",
+        action="store_true",
+        help="Create the ignored build artifact before validating it.",
+    )
+    args = parser.parse_args(argv)
+
+    if args.write and write_manifest() != 0:
+        return 1
+
     failures = []
 
     if not MANIFEST_PATH.is_file():

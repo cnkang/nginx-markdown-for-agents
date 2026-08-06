@@ -657,7 +657,6 @@ class TestLastErrorBounds:
                     "error text contains a path-like pattern; "
                     "production module must redact last_error"
                 )
-                return
         # No path detected — this is a valid error message
 
     @settings(max_examples=100)
@@ -681,7 +680,6 @@ class TestLastErrorBounds:
                     "error text contains a secret-like pattern; "
                     "production module must redact last_error"
                 )
-                return
 
     @settings(max_examples=50)
     @given(dynconf=_dynconf_invalid_without_lkg())

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Single normalization entry point for release-matrix consumers (Spec 62
-Task 8.12c / Rule 62).
+"""Single normalization entry point for release-matrix consumers.
 
 All matrix consumers (loader, validation, sort, diff) MUST resolve aliased
 keys through this module so `nginx`/`nginx_version`, `os`/`os_type`, and

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Release-matrix schema drift gate (Spec 62 Task 8.12c).
+"""Release-matrix schema drift gate.
 
 Validates that:
 1. `schemas/release-matrix.schema.json` exists, is valid JSON, declares
@@ -123,9 +123,8 @@ def main() -> int:
 
     digest = schema_digest()
     print(f"release-matrix schema digest: {digest}")
-    print("producer: spec62 Task 8.12c")
-    print("consumers: spec62 Task 10.2 (docs/release/release-matrix.json), "
-          "tools/release/matrix/*, release-matrix workflows")
+    print("producer: checked-in release matrix schema")
+    print("consumers: documentation, matrix tools, and release workflows")
 
     if failures:
         for failure in failures:
