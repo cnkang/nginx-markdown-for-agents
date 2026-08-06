@@ -233,6 +233,21 @@ def _validate_observation_state(reasons: list) -> None:
             f"{exc.message}")
 
 
+def _resolve_expected_sha(args) -> str | None:
+    """Resolve the frozen candidate SHA from the release-candidate-sha
+    manifest, or use the explicit --expected-sha when given."""
+    if args.expected_sha:
+        return args.expected_sha
+    candidate_path = (
+        REPO_ROOT / "artifacts" / "release" / "0.9.2"
+        / "release-candidate-sha-manifest.json"
+    )
+    if not candidate_path.is_file():
+        return None
+    candidate = load_json(candidate_path, "release candidate manifest")
+    return candidate.get("candidate_sha")
+
+
 def run_real_gate(args) -> int:
     """Validate the candidate-bound final evidence manifest and
     observation-state record against the W5 evidence schemas."""
@@ -245,7 +260,12 @@ def run_real_gate(args) -> int:
         return 1
 
     manifest = load_json(manifest_path, "final evidence manifest")
-    reasons = list(validate_record(manifest, expected_sha=args.expected_sha))
+    reasons = []
+    expected_sha = _resolve_expected_sha(args)
+    if expected_sha and manifest.get("candidate_sha") != expected_sha:
+        reasons.append(
+            f"stale-digest: candidate_sha {manifest.get('candidate_sha')} "
+            f"!= frozen candidate {expected_sha}")
     if not _require_jsonschema():
         return 1
     _validate_evidence_schema(manifest, reasons)
