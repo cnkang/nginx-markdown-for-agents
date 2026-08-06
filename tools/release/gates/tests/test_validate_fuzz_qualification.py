@@ -144,8 +144,8 @@ def test_record_output_path_stays_within_repository(tmp_path: Path) -> None:
     args = type("Args", (), {"output": str(tmp_path / "record.json"),
                               "record": "unused.json"})()
 
-    with pytest.raises(ValueError, match="escapes root"):
-        validator._record_output_path(args)
+    with pytest.raises(ValueError, match="Output path"):
+        validator._write_record({}, args)
 
 
 def test_real_mode_rejects_malformed_manifest(tmp_path: Path, monkeypatch,

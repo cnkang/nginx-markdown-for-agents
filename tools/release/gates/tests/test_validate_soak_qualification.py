@@ -99,8 +99,8 @@ def test_record_output_path_rejects_external_override(tmp_path: Path) -> None:
         "record": "unused.json",
     })()
 
-    with pytest.raises(ValueError, match="escapes root"):
-        validator._validated_record_path(args)
+    with pytest.raises(ValueError, match="Output path"):
+        validator._write_record({}, args)
 
 
 def test_negative_error_rate_is_not_treated_as_zero() -> None:

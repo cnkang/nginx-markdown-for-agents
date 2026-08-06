@@ -60,6 +60,7 @@ MAX_FUZZ_INVOCATIONS = 8
 INVOCATION_TIMEOUT_MARGIN = 900
 BLOCKING_FUZZ_TARGET_MANIFEST_LABEL = "blocking-fuzz-target manifest"
 FUZZ_TARGET_LABEL = "fuzz target"
+RECORD_OUTPUT_LABEL = "fuzz qualification record"
 RECORD_OUTPUT_ROOT = Path("artifacts/release/0.9.2")
 
 CANDIDATE_SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
@@ -462,15 +463,40 @@ def _compose_record(candidate_sha: str, blocking_names: set[str],
     }
 
 
-def _write_record(record: dict, path: Path) -> None:
-    """Persist the qualification record, creating parent directories."""
+def _write_record(record: dict, args) -> Path:
+    """Persist a record below the fixed generated release-output directory."""
+    raw_output = Path(args.output if args.output else args.record)
+    raw_name = raw_output.name
+    output_parts = raw_output.parts
+    if raw_name in {"", ".", ".."}:
+        raise ValueError(f"Invalid output filename for {RECORD_OUTPUT_LABEL}")
+    if not (len(output_parts) == 1
+            or (len(output_parts) == 4
+                and output_parts[:3] == RECORD_OUTPUT_ROOT.parts)):
+        raise ValueError(
+            "Output path must be '<filename>' or "
+            "'artifacts/release/0.9.2/<filename>'"
+        )
+    safe_name = validate_filename_strict(
+        raw_name, purpose=RECORD_OUTPUT_LABEL
+    )
+    candidate_output = REPO_ROOT / RECORD_OUTPUT_ROOT / safe_name
+    resolved_candidate = candidate_output.resolve(strict=False)
+    resolved_root = REPO_ROOT.resolve(strict=False)
+    if not resolved_candidate.is_relative_to(resolved_root):
+        raise ValueError(
+            f"Refusing to write outside repository root: {resolved_candidate}"
+        )
     validated_path = validate_write_path_within_root(
-        path, REPO_ROOT, purpose="fuzz qualification record"
+        resolved_candidate, REPO_ROOT, purpose=RECORD_OUTPUT_LABEL
     )
     validated_path.parent.mkdir(parents=True, exist_ok=True)
     validated_path.write_text(
         json.dumps(record, indent=2) + "\n", encoding="utf-8"
     )
+    # SONAR_NOTE(S2083): Filename is allowlisted and the path is built from
+    # the trusted generated-output root, so CLI input cannot select a target.
+    return validated_path
 
 
 def _print_target(record: dict) -> None:
@@ -485,33 +511,6 @@ def _print_target(record: dict) -> None:
     else:
         line += f": {record.get('failure_reason', 'failed')}"
     print(line)
-
-
-def _record_output_path(args) -> Path:
-    """Return a safe record path under the generated release-output directory."""
-    raw_path = Path(args.output if args.output else args.record)
-    if not raw_path.is_absolute():
-        raw_path = REPO_ROOT / raw_path
-    validated_input = validate_write_path_within_root(
-        raw_path, REPO_ROOT, purpose="fuzz qualification record"
-    )
-    relative_input = validated_input.relative_to(REPO_ROOT.resolve())
-    allowed_paths = {
-        Path(relative_input.name),
-        RECORD_OUTPUT_ROOT / relative_input.name,
-    }
-    if relative_input not in allowed_paths:
-        raise ValueError(
-            "fuzz qualification record must be a filename or a path under "
-            f"{RECORD_OUTPUT_ROOT}"
-        )
-    safe_name = validate_filename_strict(
-        relative_input.name, purpose="fuzz qualification record"
-    )
-    output_path = REPO_ROOT / RECORD_OUTPUT_ROOT / safe_name
-    return validate_write_path_within_root(
-        output_path, REPO_ROOT, purpose="fuzz qualification record"
-    )
 
 
 def _handle_cargo_missing(args, candidate_sha: str,
@@ -530,8 +529,7 @@ def _handle_cargo_missing(args, candidate_sha: str,
                              started_at)
     record["blocking_pass"] = False
     record["skip_reason"] = skip_reason
-    out_path = _record_output_path(args)
-    _write_record(record, out_path)
+    out_path = _write_record(record, args)
     for entry in per_target:
         _print_target(entry)
     print(f"WARNING: fuzz qualification skipped ({SKIP_ENV}=1); record "
@@ -564,8 +562,7 @@ def run_real_gate(args) -> int:
         _print_target(record)
     record = _compose_record(manifest["candidate_sha"], blocking_names,
                              per_target, started_at)
-    out_path = _record_output_path(args)
-    _write_record(record, out_path)
+    out_path = _write_record(record, args)
     if record["blocking_pass"]:
         print(f"PASS: fuzz qualification complete; record written to "
               f"{out_path}")

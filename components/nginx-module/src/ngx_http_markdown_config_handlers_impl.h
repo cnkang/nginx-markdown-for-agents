@@ -1639,9 +1639,10 @@ ngx_http_markdown_set_dynconf_path(ngx_conf_t *cf, ngx_command_t *cmd,
 
 /* Store an H-only dynconf flag in the default location configuration. */
 static char *
-ngx_http_markdown_dynconf_flag(ngx_conf_t *cf, ngx_command_t *cmd,
-    void *conf) /* NOSONAR: c:S995; NGINX callback signature requires
-                 * mutable command pointer */
+ngx_http_markdown_dynconf_flag(ngx_conf_t *cf,
+    ngx_command_t *cmd, /* NOSONAR: c:S995; NGINX callback signature
+                          * requires mutable command pointer */
+    void *conf)
 {
     ngx_http_markdown_conf_t  *mcf;
     const ngx_str_t           *value;
