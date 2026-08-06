@@ -162,6 +162,10 @@ EOF
 sandbox_conf() {
   local src="$1"
   local dst="$2"
+  local event_type="epoll"
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    event_type="kqueue"
+  fi
   sed -E \
     -e 's/^([[:space:]]*)listen[[:space:]]+80([[:space:];])/\1listen 18180\2/' \
     -e 's/^([[:space:]]*)listen[[:space:]]+443[[:space:]]+ssl[[:space:]]+http2;/\1listen 18180;/' \
@@ -172,6 +176,17 @@ sandbox_conf() {
     -e 's|pid /var/run/nginx.pid|pid logs/nginx.pid|' \
     -e 's|include[[:space:]]+/etc/nginx/mime.types|include mime.types|' \
     -e 's|proxy_cache_path /var/cache/nginx/proxy|proxy_cache_path cache/proxy|' \
+    -e "s|^([[:space:]]*)use[[:space:]]+epoll;|\\1use ${event_type};|" \
+    -e 's|proxy_pass[[:space:]]+http://backend;|proxy_pass http://127.0.0.1:8080;|' \
+    -e 's|server[[:space:]]+backend1.example.com:8080;|server 127.0.0.1:8081;|' \
+    -e 's|server[[:space:]]+backend2.example.com:8080;|server 127.0.0.1:8082;|' \
+    -e 's|server[[:space:]]+backend1:8080|server 127.0.0.1:8081|' \
+    -e 's|server[[:space:]]+backend2:8080|server 127.0.0.1:8082|' \
+    -e '/^[[:space:]]*ssl_protocols[[:space:]]/s/^/#/' \
+    -e '/^[[:space:]]*ssl_ciphers[[:space:]]/s/^/#/' \
+    -e '/^[[:space:]]*ssl_prefer_server_ciphers[[:space:]]/s/^/#/' \
+    -e '/^[[:space:]]*ssl_session_cache[[:space:]]/s/^/#/' \
+    -e '/^[[:space:]]*ssl_session_timeout[[:space:]]/s/^/#/' \
     "${src}" > "${dst}"
   if [[ -n "${MODULE_SO}" ]]; then
     sed_in_place "s|^([[:space:]]*)load_module[[:space:]]+[^;]*;|\1load_module ${MODULE_SO};|" "${dst}"
@@ -344,8 +359,8 @@ if [[ -f "${CONFIGMAP_YAML}" ]]; then
     echo "worker_processes 1;"
     echo "error_log logs/error.log crit;"
     echo "pid logs/nginx.pid;"
-    echo "events { worker_connections 64; }"
     cat "${CM_MAIN}"
+    echo "events { worker_connections 64; }"
     echo "http {"
     cat "${CM_HTTP}"
     echo "    server {"
