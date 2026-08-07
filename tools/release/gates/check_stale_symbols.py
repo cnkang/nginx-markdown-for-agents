@@ -28,7 +28,7 @@ STALE_SYMBOLS = [
     "markdown_large_body_threshold",
 ]
 
-# ponytail: check naked fields in harness docs, but exclude risk-packs to avoid noise
+# check naked fields in harness docs, but exclude risk-packs to avoid noise
 STALE_FIELDS = {
     "docs/harness/rules/": ["memory_budget", "streaming_budget"],
 }
@@ -63,7 +63,7 @@ SCAN_PATH_PREFIXES = (
     "tools/e2e/",
     "tests/e2e/",
 )
-# ponytail: exclude script itself from scanning
+# exclude script itself from scanning
 # (implicitly handled by SCAN_PATH_PREFIXES not including tools/)
 
 GIT_TIMEOUT_SECONDS = 15

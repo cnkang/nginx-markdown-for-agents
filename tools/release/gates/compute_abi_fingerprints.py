@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Compute the four ABI handshake identity hashes.
+"""Compute the three ABI handshake identity hashes (the fourth identity,
+MARKDOWN_ABI_VERSION, is a plain constant).
 
 Formulas (documented in components/rust-converter/src/ffi/abi.rs):
 

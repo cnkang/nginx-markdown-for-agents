@@ -2,6 +2,11 @@
 #
 # Configuration Migration Test: 0.6.x → 0.8.0 Semantic Equivalence
 #
+# NOTE: The filename retains the historical "070" suffix even though the test
+# validates against the 0.8.0 module; it was introduced when the 0.7.0 release
+# line was current and has been extended ever since. The filename is kept for
+# compatibility with existing CI references.
+#
 # Validates that all configuration directives available in 0.6.x are still
 # accepted by the 0.8.0 module without errors (where not intentionally removed),
 # and that removed directives are properly rejected by nginx -t.
@@ -516,7 +521,8 @@ validate_config 55 "markdown_content_types" \
     markdown_content_types text/html application/xhtml+xml;" || true
 
 # ============================================================
-# Section 16: New 0.7.0 directives (must not break 0.6.x configs)
+# Section 16: New 0.7.0 directives (still accepted by the 0.8.0 module;
+# must not break 0.6.x configs)
 # ============================================================
 echo "" >&2
 echo "--- Section 16: New 0.7.0 Directives (coexistence) ---" >&2

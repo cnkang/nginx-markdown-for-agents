@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-detect_doc_sync.py — Documentation Synchronization Detection (Rule 9, 10)
+detect_doc_sync.py — Documentation Synchronization Detection (Rule 9, 49)
 
 Rule 9 (docs-tooling): Documentation must reflect the actual implementation.
-Rule 10 (docs-tooling): API documentation must be kept in sync with the API.
+Rule 49 (docs-tooling): THIRD-PARTY-NOTICES must stay in sync with resolved
+  dependency versions.
 
 This detector blocks when it finds documentation drift. It is intentionally
 conservative to avoid false positives.

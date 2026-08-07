@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Fuzz and packaging infrastructure validator for v0.7.0 release gates.
+Fuzz and packaging infrastructure validator for v0.7.0 release gates. 由 0.7.0 引入，被 0.8.0+ 门禁复用
 
 Validates the 11-item checklist from v0.7.0 fuzz and packaging infrastructure requirements (Requirement 2):
 

@@ -205,7 +205,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: failed to load report: {e}", file=sys.stderr)
         return 1
 
-    # ponytail: automatically determine whether it is module or corpus report and validate
+    # automatically determine whether it is module or corpus report and validate
     if "module_benchmark" in report:
         errors = validate_module_benchmark(report)
     else:
