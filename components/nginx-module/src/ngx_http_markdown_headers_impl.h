@@ -532,7 +532,7 @@ typedef struct {
 
 typedef struct {
     ngx_http_headers_out_t  headers_out;
-    ngx_flag_t              allow_ranges;
+    unsigned int            allow_ranges;
     ngx_http_markdown_header_snapshot_entry_t  *entries;
     ngx_uint_t              entry_count;
 #ifndef NGX_HTTP_MARKDOWN_HEADERS_STANDALONE_TYPES_H
@@ -553,7 +553,7 @@ ngx_http_markdown_header_snapshot_prepare(
 
     memset(snapshot, 0, sizeof(*snapshot));
     snapshot->headers_out = r->headers_out;
-    snapshot->allow_ranges = r->allow_ranges;
+    snapshot->allow_ranges = r->allow_ranges ? 1U : 0U;
 #ifndef NGX_HTTP_MARKDOWN_HEADERS_STANDALONE_TYPES_H
     snapshot->original_last = r->headers_out.headers.last;
     if (snapshot->original_last != NULL) {

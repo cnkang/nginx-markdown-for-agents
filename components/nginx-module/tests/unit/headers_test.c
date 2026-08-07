@@ -730,6 +730,7 @@ test_update_headers_prepare_failure_rolls_back(void)
     etag = push_header(&r, "ETag", "\"upstream\"");
     r.headers_out.content_encoding = content_encoding;
     r.headers_out.etag = etag;
+    r.allow_ranges = 1;
     original_nelts = r.headers_out.headers.part.nelts;
     before[0] = *(ngx_table_elt_t *) r.headers_out.headers.part.elts;
     before[1] = ((ngx_table_elt_t *) r.headers_out.headers.part.elts)[1];
@@ -749,6 +750,8 @@ test_update_headers_prepare_failure_rolls_back(void)
                 "failed prepare must restore Content-Encoding pointer");
     TEST_ASSERT(r.headers_out.etag == etag,
                 "failed prepare must restore ETag pointer");
+    TEST_ASSERT(r.allow_ranges == 1,
+                "failed prepare must restore allow_ranges");
 
     free_request(&r);
     TEST_PASS("Header prepare failure is atomic");
