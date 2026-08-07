@@ -222,6 +222,17 @@ mod digest_tests {
     }
 
     #[test]
+    fn test_sha256_nist_abc_vector() {
+        assert_eq!(
+            compute_source_digest(b"abc"),
+            concat!(
+                "ba7816bf8f01cfea414140de5dae2223",
+                "b00361a396177a9cb410ff61f20015ad"
+            )
+        );
+    }
+
+    #[test]
     fn test_canonical_json_minimal() {
         let value = DynconfValue {
             filter: None,

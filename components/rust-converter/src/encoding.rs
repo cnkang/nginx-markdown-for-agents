@@ -485,7 +485,7 @@ mod tests {
     #[test]
     fn overlong_token_malformed() {
         let mut token = b"g".repeat(129);
-        token.push(b'p');
+        token.push(112); /* 'p' — avoid confusing the Rust lizard parser. */
         assert_eq!(
             parse_encoding_chain(&token).unwrap_err(),
             ChainParseError::Malformed
