@@ -100,7 +100,8 @@
 //! - String concatenation uses a pre-allocated buffer to minimize allocations
 //! - DOM traversal is single-pass with no backtracking
 //! - Text normalization is performed inline during traversal
-//! - Memory usage is proportional to output size, not input DOM size
+//! - Memory usage in the traversal output buffer grows proportionally to
+//!   output size; full DOM materialization is proportional to input
 
 use crate::error::ConversionError;
 use html5ever::Attribute;
@@ -211,6 +212,7 @@ impl Default for ConversionOptions {
 /// 1. After metadata extraction (if enabled)
 /// 2. Every 100 DOM nodes during traversal
 /// 3. Before output normalization
+/// 4. After output normalization
 ///
 /// # Example
 ///
