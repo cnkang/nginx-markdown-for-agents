@@ -705,6 +705,55 @@ test_update_headers_skips_invalidated_accept_ranges(void)
     TEST_PASS("Invalidated Accept-Ranges entries are skipped");
 }
 
+static void
+test_update_headers_prepare_failure_rolls_back(void)
+{
+    ngx_http_request_t       r = new_request();
+    ngx_http_markdown_conf_t conf;
+    MarkdownResult           result;
+    ngx_table_elt_t           *content_encoding;
+    ngx_table_elt_t           *etag;
+    ngx_table_elt_t            before[2];
+    ngx_uint_t                 original_nelts;
+
+    TEST_SUBSECTION("Header prepare failure restores the original response");
+
+    memset(&conf, 0, sizeof(conf));
+    conf.policy.generate_etag = 1;
+
+    memset(&result, 0, sizeof(result));
+    result.markdown_len = 10;
+    result.etag = (uint8_t *) "\"new-etag\"";
+    result.etag_len = sizeof("\"new-etag\"") - 1;
+
+    content_encoding = push_header(&r, "Content-Encoding", "gzip");
+    etag = push_header(&r, "ETag", "\"upstream\"");
+    r.headers_out.content_encoding = content_encoding;
+    r.headers_out.etag = etag;
+    original_nelts = r.headers_out.headers.part.nelts;
+    before[0] = *(ngx_table_elt_t *) r.headers_out.headers.part.elts;
+    before[1] = ((ngx_table_elt_t *) r.headers_out.headers.part.elts)[1];
+
+    /* Force the P2 ETag list push to fail after P1 has applied its plan. */
+    r.headers_out.headers.nalloc = original_nelts;
+
+    TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf)
+                    == NGX_ERROR,
+                "ETag prepare failure should abort header update");
+    TEST_ASSERT(r.headers_out.headers.part.nelts == original_nelts,
+                "failed prepare must restore header-list cardinality");
+    TEST_ASSERT(memcmp(r.headers_out.headers.part.elts, before,
+                       sizeof(before)) == 0,
+                "failed prepare must restore existing header entries");
+    TEST_ASSERT(r.headers_out.content_encoding == content_encoding,
+                "failed prepare must restore Content-Encoding pointer");
+    TEST_ASSERT(r.headers_out.etag == etag,
+                "failed prepare must restore ETag pointer");
+
+    free_request(&r);
+    TEST_PASS("Header prepare failure is atomic");
+}
+
 int
 main(void)
 {
@@ -722,6 +771,7 @@ main(void)
     test_update_headers_creates_vary_after_invalidated_only();
     test_update_headers_removes_duplicate_content_encoding();
     test_update_headers_skips_invalidated_accept_ranges();
+    test_update_headers_prepare_failure_rolls_back();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

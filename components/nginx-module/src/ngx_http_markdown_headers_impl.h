@@ -476,10 +476,11 @@ ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r)
  *     - Vary: Accept lookup, dedup, and append allocation
  *     - X-Markdown-Tokens header allocation and value formatting
  *     - Cache-Control auth modification allocation
- *     No pre-existing r->headers_out field is mutated during prepare.
- *     On ANY failure, response headers remain in their original
- *     unmodified state, Rust-owned plan resources are freed, and
- *     `header_plan_apply_error` is logged.
+ *     A bounded transaction snapshot is taken before the first operation.
+ *     Helpers may use inert list slots or legacy in-place auth rewrites
+ *     during prepare, but ANY failure restores the snapshot exactly.
+ *     Rust-owned plan resources are freed and `header_plan_apply_error` is
+ *     logged.
  *
  *   COMMIT PHASE — pointer/scalar assignment only, zero allocations,
  *     unconditional success after successful prepare:
@@ -506,9 +507,128 @@ ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r)
  *
  * Returns:
  *   NGX_OK    on success (all headers committed)
- *   NGX_ERROR on prepare failure (headers unchanged, plan freed,
+ *   NGX_ERROR on prepare failure (headers restored, plan freed,
  *             header_plan_apply_error logged)
  */
+
+/*
+ * Bounded transaction snapshot for full-buffer header preparation.
+ *
+ * The individual header helpers have their own prepare/commit behavior, but
+ * the full-buffer path combines several helpers and the authentication
+ * policy still has legacy in-place rewrites.  Snapshot all existing header
+ * entries and dedicated response fields before the first helper so any
+ * prepare failure can restore the exact pre-conversion representation.
+ * Newly pushed list slots are made unreachable by restoring the saved list
+ * metadata.  The snapshot is bounded to keep request-path allocation
+ * explicit and predictable.
+ */
+#define NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_MAX_ENTRIES  1024
+
+typedef struct {
+    ngx_table_elt_t  *header;
+    ngx_table_elt_t   saved;
+} ngx_http_markdown_header_snapshot_entry_t;
+
+typedef struct {
+    ngx_http_headers_out_t  headers_out;
+    ngx_flag_t              allow_ranges;
+    ngx_http_markdown_header_snapshot_entry_t  *entries;
+    ngx_uint_t              entry_count;
+#ifndef NGX_HTTP_MARKDOWN_HEADERS_STANDALONE_TYPES_H
+    ngx_list_part_t        *original_last;
+    ngx_uint_t              original_last_nelts;
+#endif
+} ngx_http_markdown_header_snapshot_t;
+
+
+static ngx_int_t
+ngx_http_markdown_header_snapshot_prepare(
+    ngx_http_request_t *r,
+    ngx_http_markdown_header_snapshot_t *snapshot)
+{
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *headers;
+    ngx_uint_t        count;
+
+    memset(snapshot, 0, sizeof(*snapshot));
+    snapshot->headers_out = r->headers_out;
+    snapshot->allow_ranges = r->allow_ranges;
+#ifndef NGX_HTTP_MARKDOWN_HEADERS_STANDALONE_TYPES_H
+    snapshot->original_last = r->headers_out.headers.last;
+    if (snapshot->original_last != NULL) {
+        snapshot->original_last_nelts = snapshot->original_last->nelts;
+    }
+#endif
+
+    count = 0;
+    for (part = &r->headers_out.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        if (part->nelts > NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_MAX_ENTRIES
+            - count)
+        {
+            return NGX_ERROR;
+        }
+        count += part->nelts;
+    }
+
+    snapshot->entry_count = count;
+    if (count == 0) {
+        return NGX_OK;
+    }
+
+    snapshot->entries = ngx_pnalloc(r->pool,
+        (size_t) count * sizeof(ngx_http_markdown_header_snapshot_entry_t));
+    if (snapshot->entries == NULL) {
+        return NGX_ERROR;
+    }
+
+    count = 0;
+    for (part = &r->headers_out.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        if (part->nelts > 0 && part->elts == NULL) {
+            return NGX_ERROR;
+        }
+
+        headers = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            snapshot->entries[count].header = &headers[i];
+            snapshot->entries[count].saved = headers[i];
+            count++;
+        }
+    }
+
+    return NGX_OK;
+}
+
+
+static void
+ngx_http_markdown_header_snapshot_restore(
+    ngx_http_request_t *r,
+    const ngx_http_markdown_header_snapshot_t *snapshot)
+{
+    if (snapshot == NULL) {
+        return;
+    }
+
+#ifndef NGX_HTTP_MARKDOWN_HEADERS_STANDALONE_TYPES_H
+    if (snapshot->original_last != NULL) {
+        snapshot->original_last->nelts = snapshot->original_last_nelts;
+    }
+#endif
+
+    r->headers_out = snapshot->headers_out;
+    r->allow_ranges = snapshot->allow_ranges;
+
+    for (ngx_uint_t i = 0; i < snapshot->entry_count; i++) {
+        *snapshot->entries[i].header = snapshot->entries[i].saved;
+    }
+}
+
 
 /*
  * Prepared state for the full-coverage commit phase.
@@ -778,11 +898,21 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
                                  const struct MarkdownResult *result,
                                  const ngx_http_markdown_conf_t *conf)
 {
-    ngx_int_t                             rc;
+    ngx_int_t                              rc;
     struct FFIHeaderPlan                   plan;
     ngx_http_markdown_fullcov_prepared_t   prep;
+    ngx_http_markdown_header_snapshot_t    snapshot;
 
     if (r == NULL || result == NULL || conf == NULL) {
+        return NGX_ERROR;
+    }
+
+    if (ngx_http_markdown_header_snapshot_prepare(r, &snapshot)
+        != NGX_OK)
+    {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "markdown: header_plan_apply_error: "
+            "header snapshot prepare failed");
         return NGX_ERROR;
     }
 
@@ -808,6 +938,7 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: header_plan_apply_error: "
             "FFI plan prepare aborted");
+        ngx_http_markdown_header_snapshot_restore(r, &snapshot);
         return NGX_ERROR;
     }
 
@@ -817,6 +948,7 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: header_plan_apply_error: "
             "ETag prepare failed");
+        ngx_http_markdown_header_snapshot_restore(r, &snapshot);
         return NGX_ERROR;
     }
 
@@ -826,6 +958,7 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: header_plan_apply_error: "
             "Vary prepare failed");
+        ngx_http_markdown_header_snapshot_restore(r, &snapshot);
         return NGX_ERROR;
     }
 
@@ -835,6 +968,7 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: header_plan_apply_error: "
             "token header prepare failed");
+        ngx_http_markdown_header_snapshot_restore(r, &snapshot);
         return NGX_ERROR;
     }
 
@@ -846,6 +980,7 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                 "markdown: header_plan_apply_error: "
                 "Cache-Control auth modification failed");
+            ngx_http_markdown_header_snapshot_restore(r, &snapshot);
             return NGX_ERROR;
         }
     }

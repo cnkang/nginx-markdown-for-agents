@@ -518,13 +518,10 @@ ngx_http_markdown_streaming_cleanup(void *data)
 
 static ngx_int_t
 ngx_http_markdown_is_excluded_stream_type(
-    ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf)
+    ngx_http_request_t *r)
 {
     static u_char  sse_type[] = "text/event-stream";
     static u_char  ndjson_type[] = "application/x-ndjson";
-
-    (void) conf;
 
     if (r->headers_out.content_type.data == NULL) {
         return 0;
@@ -687,8 +684,7 @@ ngx_http_markdown_select_processing_path(
     }
 
     /* Rule 7: stream_excluded_types + built-in hard exclusions */
-    if (ngx_http_markdown_is_excluded_stream_type(
-            r, conf)
+    if (ngx_http_markdown_is_excluded_stream_type(r)
         || ngx_http_markdown_stream_type_excluded(
                &r->headers_out.content_type, conf))
     {

@@ -1947,11 +1947,39 @@ test_trusted_proxies_handler(void)
     /* invalid CIDR -> golden error (push returns INVALID_CIDR). */
     memset(&g_main_conf, 0, sizeof(g_main_conf));
     g_trusted_push_rc = TRUSTED_PROXIES_PUSH_INVALID_CIDR;
+    ngx_uint_t free_before_invalid = g_trusted_free_calls;
     set_arg(&values[1], "not-a-cidr");
     setup_cf(&cf, &args, values, 2);
     cf.cmd_type = NGX_HTTP_MAIN_CONF;
     rc = ngx_http_markdown_trusted_proxies(&cf, &cmd, &g_main_conf);
     TEST_ASSERT(rc == NGX_CONF_ERROR, "invalid CIDR should be rejected");
+    TEST_ASSERT(g_trusted_cleanup.handler != NULL,
+                "invalid CIDR should leave the registered cleanup armed");
+    g_trusted_cleanup.handler(g_trusted_cleanup.data);
+    TEST_ASSERT(g_trusted_free_calls == free_before_invalid + 1,
+                "invalid CIDR handle must be freed exactly once by cleanup");
+
+    /* More than the bounded maximum must fail before creating a Rust handle. */
+    {
+        ngx_str_t many_values[66];
+        ngx_uint_t new_before_max = g_trusted_new_calls;
+        ngx_uint_t free_before_max = g_trusted_free_calls;
+
+        memset(&g_main_conf, 0, sizeof(g_main_conf));
+        set_arg(&many_values[0], "markdown_trusted_proxies");
+        for (ngx_uint_t i = 1; i < 66; i++) {
+            set_arg(&many_values[i], "10.0.0.0/8");
+        }
+        setup_cf(&cf, &args, many_values, 66);
+        cf.cmd_type = NGX_HTTP_MAIN_CONF;
+        rc = ngx_http_markdown_trusted_proxies(&cf, &cmd, &g_main_conf);
+        TEST_ASSERT(rc == NGX_CONF_ERROR,
+                    "more than the maximum CIDRs should be rejected");
+        TEST_ASSERT(g_trusted_new_calls == new_before_max,
+                    "maximum-count rejection must precede handle creation");
+        TEST_ASSERT(g_trusted_free_calls == free_before_max,
+                    "maximum-count rejection must not register a handle");
+    }
 
     g_trusted_push_rc = TRUSTED_PROXIES_PUSH_OK;
 
