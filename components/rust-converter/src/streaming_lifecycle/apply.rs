@@ -9,6 +9,16 @@
 //! 3. Records EXECUTED or SKIPPED_OWNER_MISMATCH
 //! 4. Applies post-effect latches after command success
 //! 5. Commits new_state and constructs next_frame
+//!
+//! Action handlers are grouped by lifecycle responsibility:
+//! - bookkeeping: `apply_none`, `apply_pass_html`, `apply_reject_status`,
+//!   and `apply_passthrough`
+//! - pre-commit routing: `apply_commit_headers` and
+//!   `apply_switch_full_buffer`
+//! - terminal output: `apply_finalize_converter`,
+//!   `apply_send_closing_output`, and `apply_send_terminal`
+//! - failure and resume: `apply_begin_abort`, `apply_send_abort_terminal`,
+//!   and `apply_resume_pending`
 
 use super::types::{
     Action, ActionOutcome, ActionPayload, ApplyResult, EmitFailureLedgerDisposition,

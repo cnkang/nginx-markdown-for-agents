@@ -334,7 +334,7 @@ pub fn classify_error_code(error_code: u32) -> ErrorClass {
         3 | 10 => ErrorClass::Timeout,
 
         /* Memory/budget exceeded: memory_limit, budget_exceeded,
-         * decompression_budget, parse_budget */
+         * decompression_budget_exceeded, parse_budget_exceeded */
         4 | 6 | 9 | 11 => ErrorClass::MemoryBudgetExceeded,
 
         /* Streaming fallback: engine downgrade (pre-commit).
