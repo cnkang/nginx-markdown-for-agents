@@ -22,10 +22,24 @@ observability is carried by:
 | `nginx_markdown_inflight_requests` | none | Requests still in the conversion pipeline. |
 | `nginx_markdown_requests_total` | `outcome`, `stage`, `reason` | Exactly one terminal outcome per decision-chain request. |
 
-The streaming transition allowlist is `commit`, `fallback`,
-`safe_finish_start`, `abort_start`, `resume_success`, and
-`resume_failure`. Label values are bounded registry values; raw paths, URIs,
-hosts, users, and profile names are never emitted.
+The renderer emits a fixed transition allowlist: `commit`, `fallback`,
+`safe_finish_start`, `abort_start`, `resume_success`, and `resume_failure`.
+The `reason` label is a fixed compile-time binding to the canonical reason
+key; it is not looked up dynamically from the registry at render time.  The
+internal C path-selection enum is not used for this family.
+
+The six series currently map to the following snapshot counters:
+
+| Transition | Fixed reason | Snapshot source | Contract note |
+|---|---|---|---|
+| `commit` | `converted` | `streaming.succeeded_total` | Shares its value with `resume_success`. |
+| `fallback` | `precommit_html_error` | `streaming.fallback_total` | Counts pre-commit fallback decisions. |
+| `safe_finish_start` | `converted` | `streaming_failure_postcommit_safe_finish` | Counts entry into safe-finish handling, not converted deliveries. |
+| `abort_start` | `streaming_mid_flight_error` | `streaming_failure_postcommit_abort` | Counts protocol-safe abort attempts. |
+| `resume_success` | `converted` | `streaming.succeeded_total` | Shares its value with `commit`. |
+| `resume_failure` | `streaming_mid_flight_error` | `streaming.failed_total` | Independent from `abort_start`; it is not an abort counter. |
+
+Raw paths, URIs, hosts, users, and profile names are never emitted.
 
 The counters follow these conservation rules:
 
