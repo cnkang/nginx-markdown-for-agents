@@ -74,7 +74,7 @@ bounded diagnostics state.
 The OTel directives and implementation are removed from the 0.9.2 production
 surface. There is no experimental or reject-only OTel command-table entry;
 NGINX's standard unknown-directive error is the expected migration behavior.
-ADR-0023 records the conditions required for a future 1.x reintroduction.
+ADR-0027 records the conditions required for a future 1.x reintroduction.
 
 ### Reject-only migration directives
 
@@ -86,7 +86,7 @@ unknown-directive error at `nginx -t` time.
 |----------------|------------------------------------|
 | Legacy size/time/error/cache/trusted-proxy directives | Use the corresponding `markdown_limits`, `markdown_error_policy`, `markdown_cache_validation`, or `markdown_trusted_proxies` contract. |
 | `markdown_streaming_engine` | Use `markdown_streaming off|auto|force`; the old directive is absent. |
-| OTel directives | No 0.9.2 replacement; follow ADR-0023 before any future 1.x design. |
+| OTel directives | No 0.9.2 replacement; follow ADR-0027 before any future 1.x design. |
 
 ## Diagnostics JSON Contract
 
@@ -188,7 +188,7 @@ and the metrics endpoint E2E scenario. The declarative source is
 
 ## OTel Contract
 
-OTel is removed from the 0.9.2 production surface. ADR-0023 records the
+OTel is removed from the 0.9.2 production surface. ADR-0027 records the
 worker-owned lifecycle, bounded queue, retry/backoff, timeout, shutdown-flush,
 and collector-backed E2E conditions required before a future 1.x reintroduction.
 

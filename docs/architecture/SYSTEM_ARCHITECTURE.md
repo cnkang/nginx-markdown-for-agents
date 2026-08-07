@@ -227,16 +227,17 @@ full-buffer and incremental streaming FFI entrypoints.
 ### Processing-Path Selection and Defaults
 `markdown_streaming` defaults to `auto`. In auto mode, known small
 responses remain on the full-buffer path while large or chunked responses can
-enter the streaming path. The default threshold is
-`markdown_stream_threshold` (default `1m`). The v0.6.x
-`markdown_streaming_auto_threshold` directive has been removed;
-use `markdown_stream_threshold` directly.
+enter the streaming path. The threshold is fixed internally at 1 MiB —
+it is not a directive. The v0.6.x
+`markdown_streaming_auto_threshold` directive and the v0.9.2-removed
+`markdown_stream_threshold` directive have no replacement; the internal
+threshold is not operator-configurable.
 
 ### Streaming Body Filter
 The streaming body filter consumes upstream buffers incrementally and emits
 Markdown chunks without making the complete response body the default working
 set. Before any Markdown output is committed, the module can replay the
-original HTML from `markdown_stream_precommit_buffer` if conversion fails.
+original HTML from `markdown_limits streaming_buffer=` if conversion fails.
 After commit, failures are terminal because the response representation has
 already changed.
 
@@ -288,15 +289,15 @@ validation, and Markdown link label/destination escaping for injection
 prevention.
 
 ### Bounded Decompression
-`markdown_decompress_max_size` directive limits decompressed output
-independently from `markdown_limits memory=<size>`, preventing zip-bomb attacks.
-`DecompressionBudgetExceeded` (FFI code 9) is classified as
+The `markdown_limits decompressed_size=` key limits decompressed output
+independently from `markdown_limits conversion_memory=`, preventing zip-bomb
+attacks. `DecompressionBudgetExceeded` (FFI code 9) is classified as
 `resource_limit` in C.
 
 ### Parser Timeout and Budget
-`markdown_parse_timeout` (default 30s) and `markdown_parser_budget`
-(default 64m) directives limit parsing time and memory. New error codes
-`ParseTimeout` (10) and `ParseBudgetExceeded` (11) map to
+The `markdown_limits parser_timeout=` (default 10s) and `markdown_limits
+parser_memory=` (default 32m) keys limit parsing time and memory. Error codes
+`Timeout` (9) and `BudgetExceeded` (10) map to
 `resource_limit`.
 
 ### Diagnostics Endpoint (`ngx_http_markdown_diagnostics.c`)
@@ -306,7 +307,7 @@ decision summaries (reason codes, durations), and a metrics snapshot.
 Access is restricted by `allow` CIDR configuration; external access is
 denied by default.
 
-### Dynconf Dry-run and Last-Known-Good (`ngx_http_markdown_dynconf.c`)
+### Dynconf Dry-run and Last-Known-Good (`ngx_http_markdown_dynconf_snapshot.c`)
 `markdown_dynconf_dry_run on` validates a new configuration file on HUP
 without replacing the active snapshot. Validation results include line
 numbers, field names, and error reasons. On successful reload, the
@@ -328,19 +329,48 @@ exports (wrapped C-side by `ngx_http_markdown_get_reason_code_str()` and
 `#define` constants are removed; all consumers go through the FFI accessor.
 This ensures Rust enum, C usage, docs, and metrics labels stay aligned.
 
-### Header Plan Atomic Application (`ngx_http_markdown_ffi_helpers.c`)
+### Header Plan Atomic Application (`ngx_http_markdown_header_plan.c`)
 The C module applies `FFIHeaderPlan` operations (set, delete, modify)
 atomically: all header mutations succeed or all are rolled back. This
 prevents partial header state when an allocation failure occurs mid-plan.
 The plan is built by Rust and returned as a single FFI struct; C iterates
 the operation list and applies changes to `r->headers_out`.
 
-## v0.9.1 Feature Set
+## v0.9.2 Current State
 
-v0.9.1 introduces critical performance and robustness enhancements to the conversion pipeline:
+v0.9.2 is the final pre-1.0 breaking release. It consolidates the public
+surface before the 1.0 LTS compatibility freeze:
+
+- **Directive consolidation**: The configuration surface is reduced from 63
+  directives to 25. All reject-only migration stubs and the
+  `markdown_streaming_zero_copy`, per-path metrics, shadow comparison,
+  profile, and OTel directives are removed; removed names fail `nginx -t`
+  with the standard `unknown directive` error.
+- **`markdown_limits` keys**: conversion_timeout, parser_timeout,
+  conversion_memory, parser_memory, streaming_buffer, decompressed_size,
+  decompression_ratio, and max_inflight replace the former standalone
+  limit directives.
+- **Metrics freeze**: The production endpoint emits the twelve-family v1
+  contract (see [observability-schema-v1.md](observability-schema-v1.md));
+  legacy multi-format, per-path, shadow, and debug families are removed.
+- **Streaming threshold**: The streaming auto-route threshold is fixed
+  internally at 1 MiB and is not operator-configurable.
+- **ABI and FFI**: The bundled Rust/C boundary is at ABI version 2.
+
+The sections below describe subsystems and prior release lines; where they
+describe directives that no longer exist in 0.9.2, treat the behavior as
+historical.
+
+## v0.9.1 Feature Set (historical)
+
+v0.9.1 introduced critical performance and robustness enhancements to the conversion pipeline:
 
 ### Zero-Copy Output
 To reduce CPU overhead and memory pressure in high-throughput streaming paths, 0.9.1 introduces a zero-copy output mechanism. When `markdown_streaming_zero_copy` is enabled, the module can deliver converted chunks directly to the NGINX response chain with minimal internal copying.
+
+> **0.9.2**: `markdown_streaming_zero_copy` was removed. Zero-copy delivery is
+> now selected automatically from buffer ownership and backpressure state and
+> is not operator-configurable.
 
 ### Streaming Decompression
 Streaming conversion now supports on-the-fly gzip, deflate, and Brotli

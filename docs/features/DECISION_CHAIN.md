@@ -7,7 +7,7 @@ Every request that reaches the Markdown filter module passes through an ordered 
 Reason codes are the canonical, machine-readable outcome identifiers. They are emitted in two places and use the **same lowercase snake_case strings** everywhere:
 
 - Decision log entries: `markdown: reason=<code> ...` (see `components/nginx-module/src/ngx_http_markdown_decision_log_impl.h`)
-- Prometheus metrics labels (`reason="<code>"`, see `components/nginx-module/src/ngx_http_markdown_prometheus_impl.h`)
+- Prometheus metrics labels (`reason="<code>"`, see `components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h`)
 
 The single source of truth for the reason code list is `components/rust-converter/src/decision/reason_code.rs`, mirrored in [Observability Schema v1](../architecture/observability-schema-v1.md). This document describes the check order, what each check evaluates, and how outcomes are determined. Rollout procedures are in the [Rollout Cookbook](../guides/ROLLOUT_COOKBOOK.md); rollback procedures are in the [Rollback Guide](../guides/ROLLBACK_GUIDE.md).
 
@@ -110,7 +110,7 @@ Use `fail_closed` only when you need strict guarantees that clients never receiv
 
 ## Failure Sub-Classification
 
-When conversion fails (either `failed_open` or `failed_closed`), the module also records a failure sub-classification that provides more detail about what went wrong. These appear as a separate `category=` field in decision log entries and as distinct `reason` label values on the `nginx_markdown_failures_total` metric. They do not change the primary outcome (`failed_open` or `failed_closed`), which is determined solely by the `markdown_error_policy` setting.
+When conversion fails (either `failed_open` or `failed_closed`), the module also records a failure sub-classification that provides more detail about what went wrong. These appear as a separate `category=` field in decision log entries and as distinct `reason` label values on the `nginx_markdown_requests_total` metric. They do not change the primary outcome (`failed_open` or `failed_closed`), which is determined solely by the `markdown_error_policy` setting.
 
 | Failure Reason Code | Meaning |
 |---------------------|---------|
@@ -132,16 +132,16 @@ Every request that enters the decision chain ends up in one of four mutually exc
 | Request State | Reason Codes | Meaning |
 |---------------|-------------|---------|
 | NOT_ENABLED | `disabled` | Module is disabled for this scope. The request was never evaluated for eligibility. |
-| SKIPPED | `not_eligible`, `skipped_accept`, `skipped_no_accept`, `skipped_accept_reject`, `bypass_no_transform` | Module is enabled but the request did not pass one of the eligibility checks. |
+| SKIPPED | `not_eligible`, `skipped_accept`, `skipped_no_accept`, `skipped_accept_reject`, `skipped_conditional`, `bypass_no_transform` | Module is enabled but the request did not pass one of the eligibility checks. |
 | CONVERTED | `converted` | All checks passed and conversion succeeded. |
 | FAILED | `failed_open`, `failed_closed` | All checks passed, conversion was attempted, but it did not succeed. |
 
 Operators can determine request state counts from metrics and logs:
 - NOT_ENABLED: count of `reason="disabled"` in decision log entries (`grep "reason=disabled" error.log`)
 - SKIPPED: count of `reason="not_eligible"`, `reason="skipped_*"` in decision log entries
-- CONVERTED: `nginx_markdown_conversions_total` metric
-- FAILED_OPEN: `nginx_markdown_failopen_total` (`failed_open`)
-- FAILED_CLOSED: `nginx_markdown_failures_total{reason="failed_closed"}` (`failed_closed`)
+- CONVERTED: `nginx_markdown_requests_total{outcome="converted"}` metric (successful deliveries are additionally tracked by `nginx_markdown_conversion_deliveries_total`)
+- FAILED_OPEN: `nginx_markdown_requests_total{outcome="failed_open"}` (`failed_open`)
+- FAILED_CLOSED: `nginx_markdown_requests_total{outcome="failed_closed"}` (`failed_closed`)
 
 ## Reason Code Reference
 
@@ -173,12 +173,12 @@ The complete set of 27 reason codes is defined in `components/rust-converter/src
 |------------------------|-------------|
 | `replay_error` | Fail-open replay buffer init or append failure; sets `precommit_error` flag (prevents duplicate finalize calls) |
 | `failopen_completed` | Once-then-skip flag preventing duplicate `ngx_http_finalize_request` calls within a request lifetime |
-| `decompression_budget_exceeded` | Decompression budget (`markdown_decompress_max_size`) exceeded; classified as a decompression error |
+| `decompression_budget_exceeded` | Decompression budget (`markdown_limits decompressed_size=`) exceeded; classified as a decompression error |
 | `decompression_format_error` | Compressed input has invalid format (not valid gzip/deflate/brotli) |
 | `decompression_truncated_input` | Compressed input was truncated (incomplete stream) |
 | `decompression_io_error` | I/O error during decompression operation |
-| `timeout` | Parser execution exceeded `markdown_parse_timeout` (default 30s) |
-| `budget_exceeded` | Parser memory exceeded `markdown_parser_budget` (default 64m) |
+| `timeout` | Parser execution exceeded `markdown_limits parser_timeout=` (default 10s) |
+| `budget_exceeded` | Parser memory exceeded `markdown_limits parser_memory=` (default 32m) |
 | `overload` | Inflight guard rejected the request |
 | `invalid_dynconf` / `degraded_snapshot` | Dynamic configuration error / degraded snapshot |
 | `header_plan_apply_error` | Header plan apply error |

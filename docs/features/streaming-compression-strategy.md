@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document describes how the 0.9.1 streaming conversion engine handles
+This document describes how the 0.9.2 streaming conversion engine handles
 compressed upstream responses, including its relationship to bounded
 full-buffer decompression.
 
@@ -19,7 +19,7 @@ default in official release artifacts via `NGX_MARKDOWN_BROTLI_STREAMING=on`).
 When `NGX_HTTP_BROTLI` is not defined, Brotli falls back to bounded full-buffer
 decompression via the Rust FFI path.
 
-| Encoding | Streaming-eligible conditions | 0.9.1 path |
+| Encoding | Streaming-eligible conditions | 0.9.2 path |
 |----------|-------------------------------|------------|
 | identity | streaming selected | streaming conversion |
 | deflate RFC 1950 | auto decompress on; cache validation not `full` | streaming decompression |
@@ -102,7 +102,7 @@ resume.
 
 ## Rationale
 
-The 0.9.1 boundary is based on validated decoder lifecycles:
+The 0.9.2 boundary is based on validated decoder lifecycles:
 
 - Operates within bounded memory (no full-response buffering).
 - Handles chunk boundaries that may split compressed frames.

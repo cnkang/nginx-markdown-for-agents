@@ -30,7 +30,7 @@ markdown_filter;            # Error: missing value
 
 ### 2. markdown_limits memory=<size> (size)
 
-> **0.9.0**: `markdown_max_size` is retired; use `markdown_limits memory=<size>`.
+> **0.9.0**: `markdown_max_size` is retired; use `markdown_limits conversion_memory=`.
 
 **Valid configurations:**
 ```nginx
@@ -56,7 +56,7 @@ markdown_limits memory;          # Error: missing value
 
 ### 3. markdown_limits timeout=<time> (time)
 
-> **0.9.0**: `markdown_timeout` is retired; use `markdown_limits timeout=<time>`.
+> **0.9.0**: `markdown_timeout` is retired; use `markdown_limits conversion_timeout=`.
 
 **Valid configurations:**
 ```nginx
