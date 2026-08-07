@@ -385,6 +385,13 @@ void
 ngx_http_markdown_diagnostics_collect_metrics(
     ngx_http_markdown_diag_metrics_t *out)
 {
+    /*
+     * Zero the full struct first: the JSON builder renders every field
+     * (including inflight/pending_output), so unset members would leak
+     * indeterminate stack values.  The production accessor memzeros too
+     * (diagnostics_accessors_impl.h).
+     */
+    memset(out, 0, sizeof(*out));
     out->conversions_total = 7;
     out->delivery_total = 6;
     out->requests_total = 9;

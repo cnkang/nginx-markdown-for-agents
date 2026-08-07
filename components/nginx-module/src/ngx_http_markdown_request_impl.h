@@ -74,7 +74,8 @@ static ngx_int_t ngx_http_markdown_handle_ctx_alloc_failure(
     ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_effective_conf_t *eff);
 static ngx_int_t ngx_http_markdown_handle_encoding_collection_failure(
-    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_effective_conf_t *eff);
 static void ngx_http_markdown_init_ctx(ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx, ngx_flag_t filter_enabled);
@@ -283,10 +284,22 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
 static ngx_int_t
 ngx_http_markdown_handle_encoding_collection_failure(
     ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_effective_conf_t *eff)
 {
     ngx_int_t  rc;
+
+    /*
+     * Mark the request ineligible and record the error before any
+     * policy dispatch.  Without this the body filter would convert
+     * the still-compressed body under the intact Content-Encoding
+     * header and would double-count conversions_attempted (Rule 38).
+     */
+    ctx->eligible = 0;
+    ctx->headers_forwarded = 1;
+    ctx->error.last_category = NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
+    ctx->error.has_category = 1;
 
     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                   "markdown: failed to collect Content-Encoding header, "
@@ -853,7 +866,7 @@ ngx_http_markdown_handle_header_compression(
         collect_rc = ngx_http_markdown_collect_content_encoding(r, &combined);
         if (collect_rc == NGX_ERROR) {
             *rc = ngx_http_markdown_handle_encoding_collection_failure(
-                r, conf, ctx->effective_conf);
+                r, ctx, conf, ctx->effective_conf);
             return 1;
         }
         if (collect_rc != NGX_OK) {
