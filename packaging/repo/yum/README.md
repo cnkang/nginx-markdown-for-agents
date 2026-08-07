@@ -1,12 +1,12 @@
 # nginx-markdown-for-agents YUM/DNF Repository
 
-This is the YUM/DNF package repository for `nginx-module-markdown`, an NGINX
+This is the YUM/DNF package repository for `nginx-module-markdown-for-agents`, an NGINX
 dynamic filter module that serves Markdown to AI agents while keeping HTML for
 normal clients.
 
 > **Note**: This is a self-hosted, unofficial repository template. It is not
 > part of Fedora, EPEL, AlmaLinux, Amazon Linux, or any other official
-> distribution archive. For the public v0.7.0 release channel, use the GitHub
+> distribution archive. For the latest GitHub Release artifacts, use the GitHub
 > Release RPM artifacts with `SHA256SUMS`; `pkg.example.com` and the commands
 > below are operator examples for repositories you publish yourself.
 
@@ -92,7 +92,7 @@ curl -H "Accept: text/markdown" http://localhost/
 
 | Package | Description |
 |---------|-------------|
-| `nginx-module-markdown` | NGINX dynamic module for HTML-to-Markdown conversion |
+| `nginx-module-markdown-for-agents` | NGINX dynamic module for HTML-to-Markdown conversion |
 
 Each package is built for a specific NGINX ABI version. The RPM dependency
 system ensures you can only install packages compatible with your NGINX build.
@@ -146,7 +146,7 @@ sudo rpm --import https://pkg.example.com/nginx-markdown/gpg.key
 
 ```bash
 # Check a single package signature
-rpm -K nginx-module-markdown-*.rpm
+rpm -K nginx-module-markdown-for-agents-*.rpm
 
 # Verify the repomd.xml signature
 gpg --verify repodata/repomd.xml.asc repodata/repomd.xml
@@ -196,7 +196,7 @@ If you encounter dependency errors:
 1. Verify your NGINX version: `nginx -V`
 2. Check the package requires a matching ABI version:
    ```bash
-   rpm -qpR nginx-module-markdown-*.rpm | grep nginx-abi
+   rpm -qpR nginx-module-markdown-for-agents-*.rpm | grep nginx-abi
    ```
 3. See the [troubleshooting guide](../../docs/guides/PACKAGE_INSTALLATION.md)
 

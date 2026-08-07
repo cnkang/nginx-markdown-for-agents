@@ -56,7 +56,7 @@ nfpm package --packager rpm --target "dist/nginx-module-markdown-for-agents-${PK
 
 ### Extending the Configuration
 
-The nFPM config consumes the installation layout from 0.7.0 release package naming and layout. To add new
+The nFPM config consumes the installation layout from the current release line package naming and layout. To add new
 files to the package, append entries to the `contents` list in `nfpm.yaml`.
 No structural changes are needed when the build matrix is extended — the
 environment variables handle parameterization.
@@ -72,8 +72,8 @@ Validates that a package installs correctly and the module loads in NGINX.
 packaging/scripts/smoke-test-basic.sh PACKAGE_FILE NGINX_VERSION
 
 # Examples
-packaging/scripts/smoke-test-basic.sh dist/nginx-module-markdown-for-agents_0.8.3_nginx-1.26.3_amd64.deb 1.26.3
-packaging/scripts/smoke-test-basic.sh dist/nginx-module-markdown-for-agents-0.8.3-nginx1.26.3-1.x86_64.rpm 1.26.3
+packaging/scripts/smoke-test-basic.sh dist/nginx-module-markdown-for-agents_0.9.2_nginx-1.26.3_amd64.deb 1.26.3
+packaging/scripts/smoke-test-basic.sh dist/nginx-module-markdown-for-agents-0.9.2-nginx1.26.3-1.x86_64.rpm 1.26.3
 ```
 
 The script:

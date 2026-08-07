@@ -256,6 +256,7 @@ public-surface-drift-check:
 	python3 tools/harness/detect_public_surface_drift.py
 
 schema-drift-check:
+	python3 tools/release/gates/generate_schema_artifacts.py
 	python3 tools/release/gates/validate_schema_drift.py
 
 harness-check-full:
@@ -316,6 +317,7 @@ harness-security-checks:
 	PYTHONPATH=. python3 tools/harness/detect_forward_decl_order.py components/nginx-module/src --strict
 	PYTHONPATH=. python3 tools/harness/detect_duplicate_code.py components/nginx-module/src --strict
 	PYTHONPATH=. python3 tools/harness/detect_orphan_comment_close.py
+	PYTHONPATH=. python3 tools/harness/detect_ffi_dead_exports.py --check
 	bash tools/harness/detect_ifdef_guard_visibility.sh
 	bash tools/harness/detect_workflow_input_injection.sh
 	bash tools/harness/detect_hardcoded_http_status.sh
@@ -532,12 +534,12 @@ release-gates-check-070:
 				esac; \
 				echo "  [install-layout] No packages found; building local $$nfpm_arch DEB/RPM with nFPM..."; \
 				mkdir -p dist; \
-				PKG_VERSION=$${PKG_VERSION:-0.7.0} NGINX_VERSION=$${NGINX_VERSION:-1.26.3} NFPM_ARCH=$$nfpm_arch \
+				PKG_VERSION=$${PKG_VERSION:-0.9.2} NGINX_VERSION=$${NGINX_VERSION:-1.26.3} NFPM_ARCH=$$nfpm_arch \
 					nfpm package --config packaging/nfpm/nfpm.yaml --packager deb \
-					--target dist/nginx-module-markdown-for-agents_$${PKG_VERSION:-0.7.0}_nginx-$${NGINX_VERSION:-1.26.3}_$${nfpm_arch}.deb; \
-				PKG_VERSION=$${PKG_VERSION:-0.7.0} NGINX_VERSION=$${NGINX_VERSION:-1.26.3} NFPM_ARCH=$$nfpm_arch \
+					--target dist/nginx-module-markdown-for-agents_$${PKG_VERSION:-0.9.2}_nginx-$${NGINX_VERSION:-1.26.3}_$${nfpm_arch}.deb; \
+				PKG_VERSION=$${PKG_VERSION:-0.9.2} NGINX_VERSION=$${NGINX_VERSION:-1.26.3} NFPM_ARCH=$$nfpm_arch \
 					nfpm package --config packaging/nfpm/nfpm.yaml --packager rpm \
-					--target dist/nginx-module-markdown-for-agents-$${PKG_VERSION:-0.7.0}-nginx$${NGINX_VERSION:-1.26.3}-1.$${rpm_arch}.rpm; \
+					--target dist/nginx-module-markdown-for-agents-$${PKG_VERSION:-0.9.2}-nginx$${NGINX_VERSION:-1.26.3}-1.$${rpm_arch}.rpm; \
 			else \
 				echo "FAIL: no package files in dist/ and nfpm is unavailable." >&2; \
 				echo "  To fix, either:" >&2; \
@@ -916,6 +918,7 @@ release-gates-check-092: release-gates-check-091
 	$(MAKE) release-perf-evidence-blocking BASELINE_VERSION=092
 	@echo "  [2/7] Public surface and dynconf schema drift checks"
 	$(MAKE) public-surface-drift-check
+	$(MAKE) schema-drift-check
 	@echo "  [3/7] Version consistency (0.9.2)"
 	bash tools/harness/detect_version_consistency.sh
 	@echo "  [4/7] Reason code registry completeness"
