@@ -607,7 +607,7 @@ def _scenario_metrics(
     """Assemble the stable metric payload for one scenario."""
     rps, p50, p95, p99 = performance
     (perf, streaming, streaming_hits, fullbuffer_hits, streaming_ratio,
-     fullbuffer_ratio), requests_total, failopen_total, fallback_rate, _ = path
+     fullbuffer_ratio), requests_total, _, fallback_rate, _ = path
     decomp_streaming, decomp_fullbuffer = _decompression_path_metrics(
         data.compression, perf, streaming_hits
     )
