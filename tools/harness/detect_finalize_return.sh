@@ -72,7 +72,7 @@ while IFS= read -r file; do
                 VIOLATIONS=$((VIOLATIONS + 1))
                 ;;
         esac
-    done < <(grep -n 'ngx_http_finalize_request' "$file" 2>/dev/null | grep -v '^\s*/\*\|^\s*\*\|^\s*//' || true)
+    done < <(grep -n 'ngx_http_finalize_request' "$file" 2>/dev/null | grep -v '^[[:space:]]*/\*\|^[[:space:]]*\*\|^[[:space:]]*//' || true)
 done < <(grep -rl 'ngx_http_finalize_request' "$SRC_DIR" 2>/dev/null || true)
 
 if [[ "$VIOLATIONS" -gt 0 ]]; then

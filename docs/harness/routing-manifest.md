@@ -22,6 +22,10 @@ This page is the readable overlay, not the machine-owned truth.
 | `v090-gates` | focused semantic | `make release-gates-check-090` |
 | `v091-gates` | focused semantic | `make release-gates-check-091`, `make perf-evidence-check` |
 | `v092-gates` | focused semantic | `make release-gates-check-092` |
+| `public-surface-drift` | focused semantic | `make public-surface-drift-check` |
+| `schema-drift` | focused semantic | `make schema-drift-check` |
+| `reason-codegen` | focused semantic | `make reason-codegen-check` |
+| `observation` | report-oriented | `nightly-observation.yml`, `weekly-observation.yml` (release evidence and matrix drift, pinned SHAs) |
 | `release-governance` | focused semantic | `make release-gates-check-080`, `make release-gates-check`, `make release-gates-check-strict` |
 | `release-manifest` | focused semantic | `python3 packaging/scripts/test_release_manifest.py`, `make release-gates-check` |
 | `release-matrix` | focused semantic | `make release-matrix-check` |

@@ -119,8 +119,11 @@ When version inconsistency is detected:
 
 ## Integration
 This detector is integrated into:
-- `make harness-security-checks`: Runs as part of the standard harness check suite
-- `make harness-check`: Validates harness synchronization (includes version consistency)
+- `make harness-security-checks`: Runs as part of the harness security check suite
+- `make release-gates-check-092`: Blocking step of the current 0.9.2 release gate
+- CI `release-092-contract-gates` job: Runs version consistency on PRs
+- `make harness-check` does not run this detector; use `make harness-check-full`
+  for the full suite including security checks
 
 ## Example Output
 ```text

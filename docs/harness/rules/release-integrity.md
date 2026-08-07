@@ -99,7 +99,7 @@ the invariant the seven commits collectively established.
 
 ---
 
-### 62. Release matrix key normalization invariant
+## Rule 62: Release matrix key normalization invariant
 
 Historical issue chain (release-matrix key normalization): `59fbc06e`
 (`entries` key support), `018e3483` (required keys check), `9c74af50`

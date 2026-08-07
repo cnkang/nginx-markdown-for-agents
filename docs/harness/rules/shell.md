@@ -90,5 +90,6 @@ Required:
 - Rationale: BRE/ERE confusion caused the `detect_header_hash_filter.sh`
   detector to silently produce false negatives (the `\s` pattern matched
   nothing on macOS BSD grep), allowing Rule 40 violations to go undetected.
-- Verification: `grep -rn '\\s\|\\d\|\\w' tools/harness/detect_*.sh` must
-  return zero hits.
+- Verification: `grep -rn '\\s\|\\d\|\\w' tools/harness/detect_*.sh | grep -E 'grep|sed|awk'` must
+  return zero hits (Python `re` patterns inside detectors are exempt: they use
+  Python regex semantics, not POSIX ERE).
