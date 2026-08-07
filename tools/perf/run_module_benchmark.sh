@@ -373,6 +373,10 @@ http {
         location /markdown-metrics {
             markdown_metrics;
         }
+
+        location = /nginx-markdown/diagnostics {
+            markdown_diagnostics;
+        }
     }
 }
 CONFEOF
@@ -948,6 +952,14 @@ run_scenario() {
   local metrics_file="$NGINX_WORKDIR/${SC_NAME}_metrics.json"
   printf '%s\n' "$metrics_json" > "$metrics_file"
 
+  # Fetch structured diagnostics for counters that are intentionally not part
+  # of the frozen Prometheus v1 surface.
+  log "  Fetching structured NGINX diagnostics..."
+  local diagnostics_json
+  diagnostics_json="$(curl -s "http://127.0.0.1:${NGINX_PORT}/nginx-markdown/diagnostics" || echo '')"
+  local diagnostics_file="$NGINX_WORKDIR/${SC_NAME}_diagnostics.json"
+  printf '%s\n' "$diagnostics_json" > "$diagnostics_file"
+
   # Run after the metrics snapshot so the probe cannot contaminate evidence.
   log "  Running response correctness probe..."
   local probe_json
@@ -958,7 +970,7 @@ run_scenario() {
   local scenario_json
   scenario_json="$(parse_load_gen_results "$raw_output" "$SC_NAME" "$SC_PROFILE" \
     "$SC_COMPRESSION" "$SC_TRANSFER" "$SC_CONCURRENCY" "$rss_after" \
-    "$ttfb_file" "$metrics_file" "$fixture_bytes" \
+    "$ttfb_file" "$metrics_file" "$diagnostics_file" "$fixture_bytes" \
     "$rss_baseline" "$rss_peak" "$ITERATIONS" "$load_gen_exit")"
 
   scenario_json="$(python3 - "$scenario_json" "$probe_json" \
@@ -998,9 +1010,10 @@ MERGE_PYEOF
 #   $7  - worker RSS in KB (post-run)
 #   $8  - path to TTFB JSON (from measure_ttfb)
 #   $9  - path to NGINX metrics JSON
-#   $10 - actual input fixture size in bytes
-#   $11 - baseline worker RSS in KB (before load)
-#   $12 - peak worker RSS in KB (during load, sampled in background)
+#   $10 - path to NGINX diagnostics JSON
+#   $11 - actual input fixture size in bytes
+#   $12 - baseline worker RSS in KB (before load)
+#   $13 - peak worker RSS in KB (during load, sampled in background)
 parse_load_gen_results() {
   local raw_file="$1"
   local name="$2"
@@ -1011,23 +1024,29 @@ parse_load_gen_results() {
   local rss_kb="$7"
   local ttfb_file="${8:-}"
   local metrics_file="${9:-}"
-  local input_bytes="${10:-0}"
-  local rss_baseline_kb="${11:-0}"
-  local rss_peak_kb="${12:-0}"
-  local iterations="${13:-0}"
-  local load_gen_exit="${14:-1}"
+  local diagnostics_file="${10:-}"
+  local input_bytes="${11:-0}"
+  local rss_baseline_kb="${12:-0}"
+  local rss_peak_kb="${13:-0}"
+  local iterations="${14:-0}"
+  local load_gen_exit="${15:-1}"
 
   python3 - "$raw_file" "$name" "$profile" "$compression" "$transfer" \
     "$concurrency" "$rss_kb" "$LOAD_GEN" "$ttfb_file" "$metrics_file" \
-    "$input_bytes" "$rss_baseline_kb" "$rss_peak_kb" "$iterations" \
-    "$load_gen_exit" "$REPO_ROOT" <<'PYEOF'
+    "$diagnostics_file" "$input_bytes" "$rss_baseline_kb" "$rss_peak_kb" \
+    "$iterations" "$load_gen_exit" "$REPO_ROOT" <<'PYEOF'
 import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, sys.argv[16])
+sys.path.insert(0, sys.argv[17])
 
-from tools.perf.benchmark_validation import ScenarioResultInput, build_scenario_result, parse_prometheus_metrics
+from tools.perf.benchmark_validation import (
+    ScenarioResultInput,
+    build_scenario_result,
+    merge_diagnostics_metrics,
+    parse_prometheus_metrics,
+)
 
 
 def read_metrics_file(path):
@@ -1041,6 +1060,19 @@ def read_metrics_file(path):
         return {}
 
 
+def read_diagnostics_file(path):
+    try:
+        content = Path(path).read_text(encoding="utf-8")
+        value = json.loads(content)
+        return value if isinstance(value, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+nginx_metrics = read_metrics_file(sys.argv[10])
+merge_diagnostics_metrics(nginx_metrics, read_diagnostics_file(sys.argv[11]))
+
+
 result = build_scenario_result(ScenarioResultInput(
     raw_content=Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace"),
     name=sys.argv[2],
@@ -1051,12 +1083,12 @@ result = build_scenario_result(ScenarioResultInput(
     worker_rss_kb=int(sys.argv[7]),
     load_generator=sys.argv[8],
     ttfb=json.loads(Path(sys.argv[9]).read_text(encoding="utf-8")),
-    nginx_metrics=read_metrics_file(sys.argv[10]),
-    input_bytes=int(sys.argv[11]),
-    baseline_rss_kb=int(sys.argv[12]),
-    peak_rss_kb=int(sys.argv[13]),
-    iterations=int(sys.argv[14]),
-    load_exit_code=int(sys.argv[15]),
+    nginx_metrics=nginx_metrics,
+    input_bytes=int(sys.argv[12]),
+    baseline_rss_kb=int(sys.argv[13]),
+    peak_rss_kb=int(sys.argv[14]),
+    iterations=int(sys.argv[15]),
+    load_exit_code=int(sys.argv[16]),
 ))
 print(json.dumps(result))
 PYEOF
