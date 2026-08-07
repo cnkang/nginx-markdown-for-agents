@@ -67,7 +67,7 @@ struct ngx_cycle_s;
  * must be updated.  Truncation is detected at runtime by build_json and
  * returns NGX_ERROR (500) rather than serving incomplete JSON.
  */
-#define NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE    34392
+#define NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE    34608
 #define NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE 192
 
 
@@ -273,9 +273,12 @@ typedef struct {
     ngx_atomic_uint_t  backpressure_total;
     ngx_atomic_uint_t  inflight;
     ngx_atomic_uint_t  pending_output;
+    ngx_atomic_uint_t  streaming_requests_total;
+    ngx_atomic_uint_t  precommit_failopen_total;
+    ngx_atomic_uint_t  zero_copy_output_total;
+    ngx_atomic_uint_t  copied_output_total;
 #ifdef MARKDOWN_STREAMING_ENABLED
     /* Streaming metrics (streaming observability) */
-    ngx_atomic_uint_t  streaming_requests_total;
     ngx_atomic_uint_t  streaming_succeeded_total;
     ngx_atomic_uint_t  streaming_failed_total;
     ngx_atomic_uint_t  streaming_fallback_total;

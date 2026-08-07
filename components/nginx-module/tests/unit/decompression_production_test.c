@@ -561,6 +561,32 @@ test_collect_content_encoding_repeated_fields(void)
 }
 
 static void
+test_collect_content_encoding_allocation_failure(void)
+{
+    ngx_http_request_t  r;
+    ngx_table_elt_t     headers[2];
+    ngx_str_t           combined;
+    ngx_int_t           rc;
+
+    init_request(&r);
+    memset(headers, 0, sizeof(headers));
+    headers[0].value.data = (u_char *) "gzip";
+    headers[0].value.len = sizeof("gzip") - 1;
+    headers[1].value.data = (u_char *) "br";
+    headers[1].value.len = sizeof("br") - 1;
+    set_encoding_headers(&r, headers, 2);
+
+    g_pnalloc_fail_count = 1;
+    rc = ngx_http_markdown_collect_content_encoding(&r, &combined);
+    TEST_ASSERT(rc == NGX_ERROR,
+                "combined Content-Encoding allocation failure must be fatal");
+    TEST_ASSERT(combined.data == NULL && combined.len == 0,
+                "failed Content-Encoding collection must clear its output");
+
+    TEST_PASS("Content-Encoding allocation failures are reported");
+}
+
+static void
 test_dispatch_non_decompressing_cases(void)
 {
     ngx_http_request_t r;
@@ -1605,6 +1631,7 @@ main(void)
     test_calc_output_size_boundaries();
     test_detect_compression_variants();
     test_collect_content_encoding_repeated_fields();
+    test_collect_content_encoding_allocation_failure();
     test_dispatch_non_decompressing_cases();
     test_gzip_success();
     test_gzip_concatenated_members();

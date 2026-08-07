@@ -73,6 +73,9 @@ static void ngx_http_markdown_bind_request_snapshot(
 static ngx_int_t ngx_http_markdown_handle_ctx_alloc_failure(
     ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_effective_conf_t *eff);
+static ngx_int_t ngx_http_markdown_handle_encoding_collection_failure(
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff);
 static void ngx_http_markdown_init_ctx(ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx, ngx_flag_t filter_enabled);
 static void ngx_http_markdown_log_failure_decision(
@@ -262,6 +265,58 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
             r->connection->log));
     rc = ngx_http_next_header_filter(r);
     /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
+    if (rc == NGX_OK || rc == NGX_DONE) {
+        ngx_http_markdown_metric_inc_failopen(conf);
+    }
+    return rc;
+}
+
+
+/*
+ * Handle failure while combining repeated Content-Encoding fields.
+ *
+ * The combined value is request-pool allocated.  Treating an allocation
+ * failure as a missing header would leave the request on the normal decode
+ * path with incomplete encoding metadata, so it must use the same explicit
+ * system-error policy as other header-phase failures.
+ */
+static ngx_int_t
+ngx_http_markdown_handle_encoding_collection_failure(
+    ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff)
+{
+    ngx_int_t  rc;
+
+    ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                  "markdown: failed to collect Content-Encoding header, "
+                  "category=system");
+
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
+    NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
+
+    if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown: Content-Encoding header collection failed, "
+                      "rejecting (fail-closed)");
+        ngx_http_markdown_log_decision_with_category(
+            r, conf, eff,
+            ngx_http_markdown_reason_failed_closed(),
+            ngx_http_markdown_reason_from_error_category(
+                NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
+        return (ngx_int_t) conf->error_status;
+    }
+
+    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                  "markdown: Content-Encoding header collection failed, "
+                  "returning original content (fail-open)");
+    ngx_http_markdown_log_decision_with_category(
+        r, conf, eff,
+        ngx_http_markdown_reason_failed_open(),
+        ngx_http_markdown_reason_from_error_category(
+            NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
+    rc = ngx_http_next_header_filter(r);
     if (rc == NGX_OK || rc == NGX_DONE) {
         ngx_http_markdown_metric_inc_failopen(conf);
     }
@@ -791,10 +846,19 @@ ngx_http_markdown_handle_header_compression(
 
     /* Parse the complete chain grammar during precommit, before any
      * decoding or error-policy dispatch (Requirement 12.7). */
-    if (ngx_http_markdown_collect_content_encoding(r, &combined)
-        == NGX_OK)
     {
+        ngx_int_t  collect_rc;
         u_char  classification;
+
+        collect_rc = ngx_http_markdown_collect_content_encoding(r, &combined);
+        if (collect_rc == NGX_ERROR) {
+            *rc = ngx_http_markdown_handle_encoding_collection_failure(
+                r, conf, ctx->effective_conf);
+            return 1;
+        }
+        if (collect_rc != NGX_OK) {
+            goto encoding_policy;
+        }
 
         classification = ngx_http_markdown_parse_encoding_chain_ffi(
             r, ctx, &combined);
@@ -827,6 +891,7 @@ ngx_http_markdown_handle_header_compression(
         }
     }
 
+encoding_policy:
     if (!conf->decompress.auto_decompress) {
         ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
                      "markdown: Content-Encoding present "

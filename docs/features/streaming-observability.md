@@ -42,7 +42,9 @@ The counters follow these conservation rules:
 The diagnostics handler returns the strict Schema v1 response documented in
 [Observability Contract v1](../architecture/observability-schema-v1.md). It has
 no streaming-only top-level section. Runtime visibility is provided by the
-worker-local `runtime` counters and bounded `recent_decisions` entries.
+worker-local `runtime` counters, bounded `recent_decisions` entries, and the
+optional `runtime.module_metrics` evidence counters. Those counters are read
+directly by the benchmark harness; they are not inferred from engine labels.
 
 Only GET and HEAD are accepted. HEAD computes the complete response length but
 sends no body; other methods return 405. Native NGINX allow/deny/auth
