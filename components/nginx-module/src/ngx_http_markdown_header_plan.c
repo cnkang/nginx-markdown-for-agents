@@ -46,6 +46,10 @@
 
 /*
  * Operation type constants matching FFIHeaderEntry.op_type.
+ *
+ * PLAN_OP_MODIFY (2) is the C-side alias of the FFI
+ * "set-etag-placeholder" op; the C side treats its zeroed
+ * entries as a no-op and sets the real ETag independently.
  */
 #define NGX_HTTP_MARKDOWN_PLAN_OP_SET     0
 #define NGX_HTTP_MARKDOWN_PLAN_OP_DELETE  1

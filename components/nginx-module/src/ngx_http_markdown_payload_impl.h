@@ -1266,13 +1266,15 @@ ngx_http_markdown_decompress_via_rust(
  *   2. Invoke the Rust FFI bounded decompressor (or C fallback).
  *   3. Apply the decompressed output back into ctx->buffer.
  *
- * On every failure class the function follows a fail-open strategy:
- * it logs the error, increments the appropriate metrics, and returns
- * the original (still-compressed) content to the downstream filter
- * chain rather than rejecting the request.  This is intentional --
- * the caller (body filter) must not block or abort the request when
- * decompression is unavailable or fails; the content is forwarded
- * as-is so the client can still receive a response.
+ * Failure handling is routed by the error policy:
+ *   - on_error == PASS: fail-open — the function logs the error,
+ *     increments the appropriate metrics, and returns the original
+ *     (still-compressed) content to the downstream filter chain
+ *     rather than rejecting the request; the content is forwarded
+ *     as-is so the client can still receive a response.
+ *   - on_error == REJECT: fail-closed — the function returns the
+ *     configured error status (conf->error_status) instead of
+ *     forwarding the compressed content.
  *
  * Parameters:
  *   r    - NGINX request (used for pool allocation and logging)

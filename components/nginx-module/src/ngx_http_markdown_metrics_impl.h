@@ -2171,7 +2171,7 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
         return rc;
     }
 
-    /* Negotiate the response format before discarding any request body. */
+    /* Select the frozen response format before discarding any request body. */
     format = ngx_http_markdown_metrics_select_format(r);
 
     rc = ngx_http_discard_request_body(r);

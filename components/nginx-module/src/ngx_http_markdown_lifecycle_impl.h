@@ -99,8 +99,7 @@ ngx_http_markdown_filter_init(ngx_conf_t *cf)
 
 /**
  * Initialize per-worker markdown resources: allocate a converter, attach the
- * shared metrics zone, optionally start the dynamic configuration watcher, and
- * apply any configured per-path metrics cardinality.
+ * shared metrics zone, and optionally start the dynamic configuration watcher.
  *
  * If the metrics shared-memory zone is unavailable or the converter cannot be
  * created, initialization fails.
@@ -184,11 +183,6 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
             /* Non-fatal: worker continues without hot-reload. */
         }
 
-        /*
-         * Wire per-path cardinality limit from the main configuration
-         * into the shared metrics struct.  This is a global (http-level)
-         * setting because the SHM metrics struct is process-wide.
-         */
         /*
          * Per-path metrics removed from production in 0.9.2
          * (unbounded cardinality risk).

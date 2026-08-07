@@ -15,7 +15,7 @@ static ngx_str_t ngx_http_markdown_eligible_str = ngx_string("eligible");
 static ngx_str_t ngx_http_markdown_ineligible_method_str =
     ngx_string("ineligible: method not GET/HEAD");
 static ngx_str_t ngx_http_markdown_ineligible_status_str =
-    ngx_string("ineligible: status not 200");
+    ngx_string("ineligible: status not 200 (206 -> range)");
 static ngx_str_t ngx_http_markdown_ineligible_content_type_str =
     ngx_string("ineligible: content-type not text/html");
 static ngx_str_t ngx_http_markdown_ineligible_size_str =

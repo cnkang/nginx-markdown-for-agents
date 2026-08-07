@@ -1250,21 +1250,6 @@ ngx_http_markdown_ensure_private_on_entry(ngx_http_request_t *r,
 }
 
 /*
- * Rewrite all Cache-Control entries that contain "public" to use "private".
- *
- * Iterates the NGINX header linked list.  For each Cache-Control entry
- * that contains "public", strips it and appends "private".  For entries
- * that lack both "public" and "private", appends ", private".
- *
- * Parameters:
- *   r       - the HTTP request (pool used for allocation, logging)
- *   headers - the outgoing headers list to rewrite
- *
- * Returns:
- *   NGX_OK    - all entries updated successfully
- *   NGX_ERROR - allocation failed on any entry
- */
-/*
  * Trampoline that adapts the 2-arg ensure_private_on_entry to the
  * 3-arg ngx_http_markdown_cc_visitor_t signature (ctx is unused).
  */

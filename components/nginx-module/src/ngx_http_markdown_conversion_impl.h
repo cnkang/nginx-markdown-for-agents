@@ -1175,11 +1175,9 @@ ngx_http_markdown_per_path_lookup_and_update(
 /*
  * Record per-path metrics for a successful conversion.
  *
- * Looks up the request URI in the shared RB-tree.  If the path
- * is not found and the tree is below cardinality_limit, allocates
- * a new node from the slab pool and inserts it.  If at capacity,
- * increments overflow_count.  Updates per-path and aggregate
- * counters under the slab pool mutex.
+ * No-op placeholder since 0.9.2 (per-path metrics removed;
+ * the directive was deleted).  Retained only to keep the
+ * call sites stable across releases.
  *
  * Parameters:
  *   r          - the HTTP request (provides r->uri as the path key)
