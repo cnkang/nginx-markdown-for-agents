@@ -60,10 +60,29 @@ struct ngx_http_markdown_effective_conf_s {
     ngx_uint_t   enabled_source;
     ngx_flag_t   prune_noise;
     ngx_uint_t   log_verbosity;
+    ngx_uint_t   error_policy;
+    ngx_uint_t   error_status;
     size_t       memory_budget;
+    size_t       streaming_buffer;
 #ifdef MARKDOWN_STREAMING_ENABLED
     size_t       streaming_budget;
 #endif
+    /*
+     * Per-field provenance after precedence resolution (0.9.2).
+     *
+     * Records the source of each dynconf-mutable field's effective
+     * value: 0=static, 1=dynconf, 2=request_variable.
+     * Only filter may be request_variable; others are static|dynconf.
+     */
+    ngx_uint_t   filter_provenance;
+    ngx_uint_t   prune_noise_provenance;
+    ngx_uint_t   log_verbosity_provenance;
+    ngx_uint_t   error_policy_provenance;
+    ngx_uint_t   streaming_buffer_provenance;
+    /*
+     * Copy of the location's dynconf block mask for diagnostics.
+     */
+    ngx_uint_t   block_mask;
 };
 
 typedef struct ngx_http_markdown_effective_conf_s
@@ -74,17 +93,11 @@ ngx_int_t ngx_http_markdown_next_body_filter(ngx_http_request_t *r,
     ngx_chain_t *in);
 
 /*
- * Forward declaration for OTel span type.
- * Full definition is in ngx_http_markdown_otel_impl.h.
- */
-typedef struct ngx_http_markdown_otel_span_s  ngx_http_markdown_otel_span_t;
-
-
-/*
  * Processing path constants for threshold router
  */
 #define NGX_HTTP_MARKDOWN_PATH_FULLBUFFER   0  /* Full-buffer path */
 #define NGX_HTTP_MARKDOWN_PATH_INCREMENTAL  1  /* Incremental path */
+#define NGX_HTTP_MARKDOWN_TRUSTED_PROXIES_MAX  64  /* Requirement 13.1 */
 #define NGX_HTTP_MARKDOWN_PATH_STREAMING    2  /* Streaming path */
 
 /*
@@ -147,10 +160,12 @@ typedef struct ngx_http_markdown_otel_span_s  ngx_http_markdown_otel_span_t;
     (2 * 1024 * 1024)
 
 /*
- * Streaming engine reason codes (streaming observability).
+ * Streaming engine path-selection states (internal implementation state).
  *
- * Stable identifiers explaining why a particular engine path was chosen.
- * Additive only — removal requires major version bump.
+ * These values explain why a particular engine path was chosen inside the C
+ * streaming router.  They are not entries in the canonical Rust reason
+ * registry and are not a Prometheus or JSON label contract.  Operator-visible
+ * outcome reasons must use the canonical reason accessors instead.
  */
 typedef enum {
     /* Engine choice: true streaming */
@@ -185,11 +200,10 @@ typedef enum {
 } ngx_http_markdown_stream_reason_e;
 
 /*
- * Map streaming reason code to its stable string identifier.
+ * Map an internal streaming path state to its debug-log string.
  *
- * Returns a static NUL-terminated string suitable for logs,
- * JSON output, and Prometheus labels.  Unknown values return
- * "unknown".
+ * The returned strings are for internal diagnostics only.  Unknown values
+ * return "unknown".
  */
 static ngx_inline const char *
 ngx_http_markdown_stream_reason_str(
@@ -292,7 +306,7 @@ typedef enum {
 typedef enum {
     NGX_HTTP_MD_ACTION_NONE = 0,
     NGX_HTTP_MD_ACTION_PASS_HTML,
-    NGX_HTTP_MD_ACTION_REJECT_502,
+    NGX_HTTP_MD_ACTION_REJECT_STATUS,
     NGX_HTTP_MD_ACTION_COMMIT_HEADERS,
     NGX_HTTP_MD_ACTION_CONTINUE_STREAMING,
     NGX_HTTP_MD_ACTION_SWITCH_FULL_BUFFER,
@@ -337,21 +351,10 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_STREAMING_FORCE  2
 
 /*
- * Production-profile constants (markdown_profile directive, 0.9.0).
- *
- * markdown_profile strict_cache|balanced|streaming_first selects a preset
- * bundle of Config V2 defaults.  A profile only supplies DEFAULTS: an
- * explicit directive (at the same or an inheriting scope) always overrides
- * the profile value.  NONE means no markdown_profile is in effect, in which
- * case the built-in Config V2 defaults apply unchanged.
- *
- * The names are frozen for the 1.0 stability contract; new profiles may be
- * added after 1.0 but existing names/semantics must not change.
+ * Profile constants removed in 0.9.2; retained as a zero-value sentinel
+ * for diagnostics compatibility only.
  */
 #define NGX_HTTP_MARKDOWN_PROFILE_NONE             0
-#define NGX_HTTP_MARKDOWN_PROFILE_STRICT_CACHE     1
-#define NGX_HTTP_MARKDOWN_PROFILE_BALANCED         2
-#define NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST  3
 
 #define NGX_HTTP_MARKDOWN_EXPLICIT_LIMIT_MEMORY      0x0001
 #define NGX_HTTP_MARKDOWN_EXPLICIT_LIMIT_TIMEOUT     0x0002
@@ -360,6 +363,66 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_EXPLICIT_CACHE_VALIDATION  0x0010
 #define NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_POLICY     0x0020
 #define NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_BUDGET     0x0080
+
+/* Canonical static-manifest explicitness bits. */
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_FILTER       0x00000100
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_LIMITS       0x00000200
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_FLAVOR       0x00000400
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_TOKEN        0x00000800
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_FRONT_MATTER 0x00001000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_ACCEPT       0x00002000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_AUTH_POLICY  0x00004000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_AUTH_COOKIES 0x00008000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_CACHE         0x00010000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_STREAM       0x00020000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_LOG           0x00040000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_CONTENT      0x00080000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_PRUNE        0x00100000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_SELECTORS    0x00200000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_PROTECTION   0x00400000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DECOMPRESS   0x00800000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DYNCONF      0x01000000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DRY_RUN      0x02000000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DIAGNOSTICS  0x04000000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_EXCLUDED     0x08000000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_METRICS       0x10000000
+
+/*
+ * Dynconf block mask bit definitions (0.9.2 precedence model).
+ *
+ * Each bit corresponds to one dynconf-mutable field.  When the bit
+ * is set in a location's block mask, the dynconf overlay for that
+ * field is blocked — the server/location explicit static value
+ * takes precedence (tier 2 over tier 3).
+ *
+ * Bits are set during config parsing when a server or location block
+ * explicitly configures the field.  An explicit setting in the http
+ * block does NOT set the bit (http is the baseline that dynconf
+ * overrides).  Bits propagate from parent to child via OR during
+ * merge: a server that blocks a field blocks it for all child
+ * locations unless the child explicitly configures the field (which
+ * keeps the bit set with the child's own value).
+ */
+#define NGX_HTTP_MARKDOWN_BLOCK_FILTER           (1 << 0)
+#define NGX_HTTP_MARKDOWN_BLOCK_PRUNE_NOISE      (1 << 1)
+#define NGX_HTTP_MARKDOWN_BLOCK_LOG_VERBOSITY    (1 << 2)
+#define NGX_HTTP_MARKDOWN_BLOCK_ERROR_POLICY     (1 << 3)
+#define NGX_HTTP_MARKDOWN_BLOCK_STREAMING_BUFFER (1 << 4)
+
+/*
+ * Total number of dynconf-mutable fields (block mask width).
+ */
+#define NGX_HTTP_MARKDOWN_DYNCONF_FIELD_COUNT    5
+
+/*
+ * Field provenance constants (0.9.2 effective_conf).
+ *
+ * Records the source of each dynconf-mutable field's effective
+ * value after five-tier precedence resolution.
+ */
+#define NGX_HTTP_MARKDOWN_PROVENANCE_STATIC           0
+#define NGX_HTTP_MARKDOWN_PROVENANCE_DYNCONF          1
+#define NGX_HTTP_MARKDOWN_PROVENANCE_REQUEST_VARIABLE 2
 
 /*
  * Threshold off sentinel — used in merge and path selection logic.
@@ -413,8 +476,10 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_MAX_INFLIGHT_DEFAULT  64
 
 /*
- * Default streaming threshold for v0.8.0 stream.threshold field (1 MiB).
- * Responses with Content-Length >= this threshold use streaming mode.
+ * Default streaming threshold (1 MiB) — fixed internal constant.
+ * Responses with Content-Length >= this threshold use streaming mode
+ * in auto mode.  Previously operator-configurable; now internalized
+ * as a non-configurable heuristic.
  */
 #define NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT \
     (1024 * 1024)
@@ -426,6 +491,48 @@ typedef struct {
  */
 #define NGX_HTTP_MARKDOWN_STREAM_BUDGET_DEFAULT \
     (2 * 1024 * 1024)
+
+/*
+ * Unified resource-limits structure (0.9.2 markdown_limits key=value).
+ *
+ * Single source of truth for all resource-limit configuration.
+ * Populated by the markdown_limits directive handler; merged per-key
+ * from parent blocks.  Runtime consumers read from this structure
+ * via the loc_conf.
+ */
+typedef struct {
+    ngx_msec_t    conversion_timeout;   /* NGX_CONF_UNSET_MSEC */
+    ngx_msec_t    parser_timeout;       /* NGX_CONF_UNSET_MSEC */
+    size_t        conversion_memory;    /* NGX_CONF_UNSET_SIZE */
+    size_t        parser_memory;        /* NGX_CONF_UNSET_SIZE */
+    size_t        streaming_buffer;     /* NGX_CONF_UNSET_SIZE */
+    size_t        decompressed_size;    /* NGX_CONF_UNSET_SIZE */
+    ngx_uint_t    decompression_ratio;  /* NGX_CONF_UNSET_UINT */
+    ngx_uint_t    max_inflight;         /* NGX_CONF_UNSET_UINT */
+    ngx_flag_t    configured;            /* directive present in this block */
+} ngx_http_markdown_limits_t;
+
+/*
+ * Defaults for the unified limits (0.9.2 frozen contract).
+ */
+#define NGX_HTTP_MARKDOWN_LIMITS_CONVERSION_TIMEOUT_DEFAULT  30000
+#define NGX_HTTP_MARKDOWN_LIMITS_PARSER_TIMEOUT_DEFAULT      10000
+#define NGX_HTTP_MARKDOWN_LIMITS_CONVERSION_MEMORY_DEFAULT \
+    (64 * 1024 * 1024)
+#define NGX_HTTP_MARKDOWN_LIMITS_PARSER_MEMORY_DEFAULT \
+    (32 * 1024 * 1024)
+#define NGX_HTTP_MARKDOWN_LIMITS_STREAMING_BUFFER_DEFAULT \
+    (2 * 1024 * 1024)
+#define NGX_HTTP_MARKDOWN_LIMITS_DECOMPRESSED_SIZE_DEFAULT \
+    (10 * 1024 * 1024)
+#define NGX_HTTP_MARKDOWN_LIMITS_DECOMPRESSION_RATIO_DEFAULT  100
+#define NGX_HTTP_MARKDOWN_LIMITS_MAX_INFLIGHT_DEFAULT         64
+
+/*
+ * Fixed internal streaming flush minimum (16k).
+ * Previously the markdown_stream_flush_min directive; now internalized.
+ */
+#define NGX_HTTP_MARKDOWN_STREAM_FLUSH_MIN_FIXED  16384
 
 /*
  * Configuration constants for flavor directive
@@ -458,10 +565,7 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_LOG_DEBUG  3  /* Debug and above */
 
 /*
- * Configuration constants for metrics_format directive
  */
-#define NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO        0  /* JSON or plain-text (default) */
-#define NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS   1  /* Prometheus text exposition */
 
 /*
  * Configuration source for markdown_filter directive
@@ -506,30 +610,22 @@ typedef enum {
  * - generate_etag: 0 (off by default — ims_only mode)
  * - conditional_requests: NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE
  * - log_verbosity: NGX_HTTP_MARKDOWN_LOG_INFO
- * - buffer_chunked: 1 (on by default)
- * - stream_types: NULL (no exclusions by default)
+ * - stream_excluded_types: NULL (no exclusions by default)
  * - auto_decompress: 1 (on by default)
  * - decompress_max_size: same as max_size (inherited after memory_budget override)
  * - parse_timeout: 30000ms (30 seconds)
  * - parser_budget: 64MB (64 * 1024 * 1024 bytes)
  * - large_body_threshold: NGX_HTTP_MARKDOWN_THRESHOLD_OFF
- * - ops.metrics_format: NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO
  * - ops.diagnostics_enabled: 0 (off by default)
  * - advanced.dynconf_dry_run: 0 (off by default)
  *
  * Streaming defaults when MARKDOWN_STREAMING_ENABLED is compiled in:
  * - stream.budget: NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT
  * - on_error: NGX_HTTP_MARKDOWN_ON_ERROR_PASS
- * - stream.shadow: 0 (off by default)
- * - stream.threshold: NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT (1m)
  *
  * v0.8.0 streaming config defaults (streaming configuration directives):
  * - stream.policy: auto
- * - stream.threshold: NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT (1m)
- * - stream.precommit_buffer: 262144 (256k)
- * - stream.flush_min: 16384 (16k)
  * - stream.excluded_types: NULL
- * - stream.zero_copy: 0 (off by default)
  */
 /* sonarcloud-c:S1820: intentionally exceeded; fields are already logically
  * grouped via the ops sub-struct and #ifdef-gated streaming section.  Further
@@ -551,41 +647,36 @@ typedef struct {
     ngx_str_t   *prune_selectors;           /* markdown_prune_selectors (default: built-in list) */
     ngx_str_t   *prune_protection_selectors; /* markdown_prune_protection_selectors (default: empty) */
     size_t       memory_budget;             /* internal/dynconf memory budget (static directive removed in 0.9.0) */
-    ngx_uint_t   llm_provider;              /* markdown_llm_provider (default: 0=default) */
-    ngx_uint_t   chars_per_token_fixed;     /* markdown_chars_per_token (default: 0=use provider) */
     ngx_flag_t   dynconf_enabled;           /* markdown_dynamic_config on|off (default: off) */
     ngx_str_t    dynconf_path;              /* markdown_dynamic_config_path (default: empty) */
     ngx_flag_t   dynconf_dry_run;           /* markdown_dynconf_dry_run on|off (default: off) */
+    /*
+     * Per-field dynconf block mask (0.9.2 precedence model).
+     *
+     * One bit per dynconf-mutable field:
+     *   bit 0: filter         (NGX_HTTP_MARKDOWN_BLOCK_FILTER)
+     *   bit 1: prune_noise    (NGX_HTTP_MARKDOWN_BLOCK_PRUNE_NOISE)
+     *   bit 2: log_verbosity  (NGX_HTTP_MARKDOWN_BLOCK_LOG_VERBOSITY)
+     *   bit 3: error_policy   (NGX_HTTP_MARKDOWN_BLOCK_ERROR_POLICY)
+     *   bit 4: streaming_buffer (NGX_HTTP_MARKDOWN_BLOCK_STREAMING_BUFFER)
+     *
+     * Bit is set when a server/location block explicitly configures
+     * that field.  Propagated from parent to child via OR during merge.
+     * An explicit http-block setting does NOT set the bit.
+     */
+    ngx_uint_t   dynconf_block_mask;
+    ngx_uint_t   static_explicit_mask;
 } ngx_http_markdown_advanced_cfg_t;
 
 /*
- * Resolved profile-default value bundle (markdown_profile, 0.9.0, spec 50).
+ * Retained zero-value compatibility bundle for the internal Config V2 FFI.
  *
- * Pure config-time data: each field carries the default value a given
- * profile contributes for the corresponding Config V2 directive.  The
- * merge logic feeds these values as the fallback "default" argument of the
- * standard ngx_conf_merge_* calls, so an explicit (or inherited-explicit)
- * directive always wins over the profile, and the profile in turn wins over
- * the built-in default.  For NGX_HTTP_MARKDOWN_PROFILE_NONE the fields equal
- * the built-in Config V2 defaults, making profile expansion a no-op.
+ * No public `markdown_profile` directive or request-path profile decision
+ * exists in 0.9.2.  The bundle is not populated by the active command table
+ * and remains only to keep the internal FFI layout stable.
  *
  * The bundle is value data only; it adds no request-path decision branch.
  */
-typedef struct {
-    ngx_uint_t   accept_policy;            /* markdown_accept */
-    ngx_uint_t   conditional_requests;     /* markdown_cache_validation mode */
-    ngx_flag_t   generate_etag;            /* markdown_cache_validation ETag */
-    ngx_uint_t   streaming_policy;         /* markdown_streaming */
-    size_t       limits_memory;            /* markdown_limits memory= */
-    ngx_msec_t   limits_timeout;           /* markdown_limits timeout= */
-    size_t       limits_streaming_buffer;  /* markdown_limits streaming_buffer= */
-    ngx_uint_t   limits_max_inflight;      /* markdown_limits max_inflight= */
-    ngx_uint_t   error_policy;             /* markdown_error_policy (on_error) */
-    ngx_uint_t   auth_policy;              /* markdown_auth_policy */
-    ngx_uint_t   flavor;                   /* markdown_flavor */
-    ngx_flag_t   diagnostics;              /* markdown_diagnostics */
-} ngx_http_markdown_profile_defaults_t;
-
 typedef struct {
     ngx_flag_t   enabled;              /* markdown_filter static resolved value */
     ngx_uint_t   enabled_source;       /* markdown_filter source (static|complex|unset) */
@@ -599,10 +690,8 @@ typedef struct {
     ngx_flag_t   front_matter;         /* markdown_front_matter on|off (default: off) */
     ngx_uint_t   accept_policy;        /* markdown_accept strict|wildcard|force (default: strict) */
     ngx_http_markdown_policy_cfg_t policy;
-    ngx_flag_t   buffer_chunked;       /* markdown_buffer_chunked on|off (default: on) */
 
     struct {
-        ngx_array_t *stream_types;         /* markdown_stream_types exclusion list */
         ngx_array_t *content_types;        /* markdown_content_types allowlist */
         size_t       large_body_threshold; /* markdown_large_body_threshold */
         ngx_uint_t   max_inflight;         /* markdown_limits max_inflight */
@@ -617,9 +706,9 @@ typedef struct {
      */
     struct {
         ngx_flag_t   auto_decompress;      /* markdown_auto_decompress on|off (default: on) */
-        size_t       max_size;             /* markdown_decompress_max_size (default: same as max_size) */
-        ngx_msec_t   parse_timeout;        /* markdown_parse_timeout (default: 30000ms) */
-        size_t       parser_budget;        /* markdown_parser_budget (default: 64MB) */
+        size_t       max_size;             /* markdown_limits decompressed_size (default: same as max_size) */
+        ngx_msec_t   parse_timeout;        /* markdown_limits parser_timeout (default: 30000ms) */
+        size_t       parser_budget;        /* markdown_limits parser_memory (default: 64MB) */
         ngx_flag_t   max_size_explicit;    /* 1 if operator set markdown_limits memory at this or parent level */
     } decompress;
 
@@ -631,13 +720,14 @@ typedef struct {
      * enforced by static analysis (SonarCloud rule c:S1820).
      */
     struct {
-        ngx_uint_t   metrics_format;       /* markdown_metrics_format auto|prometheus (default: auto) */
-        ngx_flag_t   metrics_per_path;    /* markdown_metrics_per_path on|off (default: off) */
         ngx_flag_t   diagnostics_enabled; /* markdown_diagnostics on|off (default: off) */
-        ngx_array_t *diagnostics_allow;   /* markdown_diagnostics_allow CIDR list (default: NULL = loopback only) */
-        ngx_flag_t   otel_enabled;       /* markdown_otel on|off (default: off) */
-        ngx_str_t    otel_endpoint;      /* internal URI for OTel subrequest export */
+        ngx_flag_t   metrics_enabled;     /* markdown_metrics endpoint enabled */
     } ops;
+
+    /*
+     * Unified resource limits (0.9.2 markdown_limits key=value).
+     */
+    ngx_http_markdown_limits_t  limits;
 
     /*
      * Unified streaming configuration (v0.8.0+).
@@ -648,15 +738,9 @@ typedef struct {
     struct {
         ngx_uint_t    policy;              /* markdown_streaming off|auto|force */
         ngx_flag_t    policy_explicit;     /* 1 if operator set markdown_streaming */
-        size_t        threshold;           /* markdown_stream_threshold (default: 1m) */
-        ngx_flag_t    threshold_explicit;  /* 1 if operator set markdown_stream_threshold */
-        size_t        precommit_buffer;    /* markdown_stream_precommit_buffer (default: 256k) */
-        size_t        flush_min;           /* markdown_stream_flush_min (default: 16k) */
         ngx_array_t  *excluded_types;      /* markdown_stream_excluded_types (default: NULL) */
         size_t        budget;              /* markdown_limits streaming_buffer (default: 2m) */
         ngx_flag_t    budget_explicit;     /* 1 if operator set streaming_buffer */
-        ngx_flag_t    shadow;              /* markdown_streaming_shadow on|off */
-        ngx_flag_t    zero_copy;           /* markdown_streaming_zero_copy on|off (default: off) */
     } stream;
 
     /*
@@ -664,20 +748,6 @@ typedef struct {
      */
     ngx_http_markdown_advanced_cfg_t advanced;
 
-    /*
-     * Production-profile selection (markdown_profile, 0.9.0, spec 50).
-     *
-     * Grouped into a sub-struct so the parent stays logically organized
-     * (sonarcloud-c:S1820 is already intentionally exceeded; see the
-     * struct-level note above).  The profile only supplies defaults; its
-     * values are fed as the fallback default of the standard merge calls.
-     */
-    struct {
-        ngx_uint_t   name;                      /* NGX_HTTP_MARKDOWN_PROFILE_* (default: NONE) */
-        ngx_flag_t   set;                       /* 1 if markdown_profile set at this scope (duplicate guard) */
-        ngx_flag_t   cache_validation_explicit; /* 1 if markdown_cache_validation set (this or ancestor) */
-        ngx_uint_t   explicit_mask;             /* profile-managed directives set here or by an ancestor */
-    } profile;
 } ngx_http_markdown_conf_t;
 
 
@@ -708,45 +778,24 @@ ngx_http_markdown_effective_body_buffer_limit(
 
 static ngx_inline void
 ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
-    const ngx_http_markdown_conf_t *prev,
-    const ngx_http_markdown_profile_defaults_t *profile_defaults,
-    ngx_flag_t profile_differs)
+    const ngx_http_markdown_conf_t *prev)
 {
 /*
  * Helper macro: merge a single stream configuration field.
  * If the current value equals the unset sentinel, inherit from
- * the previous level or fall back to the profile/compile-time default.
- *
- * When profile_differs is true, the parent's profile-generated value
- * is bypassed unless the parent explicit-mask records an operator directive.
+ * the previous level or fall back to the compile-time default.
  */
-#define NGX_MD_MERGE_STREAM(field, type, unset, dflt, explicit_bit)           \
+#define NGX_MD_MERGE_STREAM(field, type, unset, dflt)                         \
     do {                                                                      \
         if (conf->stream.field == (type) (unset)) {                          \
-            if (!profile_differs) {                                          \
-                conf->stream.field = (prev->stream.field != (type) (unset))   \
-                    ? prev->stream.field : (dflt);                           \
-            } else {                                                          \
-                conf->stream.field =                                          \
-                    (prev->stream.field != (type) (unset)                     \
-                     && ((explicit_bit) == 0                                  \
-                         || (prev->profile.explicit_mask & (explicit_bit))))  \
-                    ? prev->stream.field : (dflt);                           \
-            }                                                                \
+            conf->stream.field = (prev->stream.field != (type) (unset))       \
+                ? prev->stream.field : (dflt);                               \
         }                                                                    \
     } while (0)
 
     NGX_MD_MERGE_STREAM(policy, ngx_uint_t, -1,
-                        profile_defaults->streaming_policy,
-                        NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_POLICY);
-    NGX_MD_MERGE_STREAM(policy_explicit, ngx_flag_t, -1, 0,
-                        NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_POLICY);
-    NGX_MD_MERGE_STREAM(threshold, size_t, -1,
-                        NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT,
-                        0);
-    NGX_MD_MERGE_STREAM(threshold_explicit, ngx_flag_t, -1, 0, 0);
-    NGX_MD_MERGE_STREAM(precommit_buffer, size_t, -1, 262144, 0);
-    NGX_MD_MERGE_STREAM(flush_min, size_t, -1, 16384, 0);
+                        NGX_HTTP_MARKDOWN_STREAMING_OFF);
+    NGX_MD_MERGE_STREAM(policy_explicit, ngx_flag_t, -1, 0);
 
     if (conf->stream.excluded_types == (ngx_array_t *) -1) {
         conf->stream.excluded_types =
@@ -754,13 +803,8 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
                 ? prev->stream.excluded_types : NULL;
     }
 
-    NGX_MD_MERGE_STREAM(budget, size_t, -1,
-                        profile_defaults->limits_streaming_buffer,
-                        NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_BUDGET);
-    NGX_MD_MERGE_STREAM(budget_explicit, ngx_flag_t, -1, 0,
-                        NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_BUDGET);
-    NGX_MD_MERGE_STREAM(shadow, ngx_flag_t, -1, 0, 0);
-    NGX_MD_MERGE_STREAM(zero_copy, ngx_flag_t, -1, 0, 0);
+    NGX_MD_MERGE_STREAM(budget, size_t, -1, 2 * 1024 * 1024);
+    NGX_MD_MERGE_STREAM(budget_explicit, ngx_flag_t, -1, 0);
 
 #undef NGX_MD_MERGE_STREAM
 }
@@ -789,7 +833,6 @@ typedef struct {
     ngx_str_t       dynconf_first_path;      /* Path value from the first directive (for diagnostics) */
     /* Merged config that owns the unique dynconf path. */
     ngx_http_markdown_conf_t *dynconf_owner_conf;
-    ngx_uint_t      metrics_per_path_cardinality; /* markdown_metrics_per_path_cardinality (default: 100, global) */
     /*
      * spec 47: http-only trusted-proxy CIDR set for forwarded-header trust.
      * trusted_proxies is a Rust-owned opaque handle (NULL when the directive
@@ -800,6 +843,7 @@ typedef struct {
      */
     struct MarkdownTrustedProxies *trusted_proxies;
     ngx_flag_t      trusted_proxies_configured;
+    ngx_array_t    *trusted_proxies_manifest;
 } ngx_http_markdown_main_conf_t;
 
 /* Return the merged config selected to own the per-worker dynconf watcher. */
@@ -942,6 +986,9 @@ typedef struct {
         ngx_flag_t                            done;      /* Whether decompression completed */
         size_t                                compressed_size;   /* Size before decompression */
         size_t                                decompressed_size; /* Size after decompression */
+        ngx_uint_t                            layer_count; /* Non-identity layers (0..3) */
+        u_char                                layers[3];  /* Layer codes in application order */
+        ngx_flag_t                            chain_parsed; /* Chain grammar validated */
     } decompression;
 
     /*
@@ -955,9 +1002,6 @@ typedef struct {
         ngx_http_markdown_error_category_t    last_category;
         ngx_flag_t                           has_category;
     } error;
-
-    /* OpenTelemetry span for per-request conversion tracing */
-    ngx_http_markdown_otel_span_t        *otel_span;
 
     /*
      * v0.8.0 streaming state machine context (streaming fallback state machine).
@@ -1285,6 +1329,31 @@ typedef struct {
     } conversion_latency;
 
     /*
+     * Frozen v1 histogram storage, split by conversion engine.  The
+     * legacy aggregate above remains for the pre-v1 JSON/text helpers;
+     * these bounded fields provide the engine label required by the
+     * Prometheus v1 contract without per-request or per-path state.
+     */
+    struct {
+        struct {
+            ngx_atomic_t  le_10ms;
+            ngx_atomic_t  le_100ms;
+            ngx_atomic_t  le_1000ms;
+            ngx_atomic_t  gt_1000ms;
+            ngx_atomic_t  sum_ms;
+            ngx_atomic_t  count;
+        } full_buffer;
+        struct {
+            ngx_atomic_t  le_10ms;
+            ngx_atomic_t  le_100ms;
+            ngx_atomic_t  le_1000ms;
+            ngx_atomic_t  gt_1000ms;
+            ngx_atomic_t  sum_ms;
+            ngx_atomic_t  count;
+        } streaming;
+    } conversion_latency_v1;
+
+    /*
      * Decompression metrics.
      *
      * Grouped into an anonymous sub-struct so that the parent
@@ -1304,6 +1373,24 @@ typedef struct {
         ngx_atomic_t  format_error_total;     /* Invalid compression format */
         ngx_atomic_t  truncated_input_total;  /* Truncated compressed input */
         ngx_atomic_t  io_error_total;         /* Decompression I/O error */
+        struct {
+            ngx_atomic_t  budget;
+            ngx_atomic_t  format;
+            ngx_atomic_t  truncated;
+            ngx_atomic_t  io;
+        } gzip_failures;
+        struct {
+            ngx_atomic_t  budget;
+            ngx_atomic_t  format;
+            ngx_atomic_t  truncated;
+            ngx_atomic_t  io;
+        } deflate_failures;
+        struct {
+            ngx_atomic_t  budget;
+            ngx_atomic_t  format;
+            ngx_atomic_t  truncated;
+            ngx_atomic_t  io;
+        } brotli_failures;
     } decompressions;
 
     /*
@@ -1346,8 +1433,10 @@ typedef struct {
         ngx_atomic_t  precommit_failopen_total;  /* Pre-Commit fail-open */
         ngx_atomic_t  precommit_reject_total;    /* Pre-Commit fail-closed */
         ngx_atomic_t  budget_exceeded_total;     /* Memory budget exceeded */
-        ngx_atomic_t  shadow_total;              /* Shadow mode runs */
-        ngx_atomic_t  shadow_diff_total;         /* Shadow output diffs */
+#ifdef MARKDOWN_STREAMING_SHADOW_DEBUG
+        ngx_atomic_t  shadow_total;              /* Shadow mode runs (debug only) */
+        ngx_atomic_t  shadow_diff_total;         /* Shadow output diffs (debug only) */
+#endif
         ngx_atomic_t  last_ttfb_ms;              /* Last streaming TTFB (milliseconds) */
         ngx_atomic_t  last_peak_memory_bytes;    /* Last streaming peak estimate (bytes; not RSS) */
 
@@ -1416,6 +1505,18 @@ typedef struct {
         ngx_atomic_t  replay_buffer_errors_total;
 
         struct {
+            ngx_atomic_t  success;
+            ngx_atomic_t  failure_schema_version;
+            ngx_atomic_t  failure_unknown_key;
+            ngx_atomic_t  failure_duplicate_key;
+            ngx_atomic_t  failure_invalid_type;
+            ngx_atomic_t  failure_out_of_range;
+            ngx_atomic_t  failure_size_exceeded;
+            ngx_atomic_t  failure_parse_error;
+            ngx_atomic_t  failure_file_error;
+        } dynconf_reloads;
+
+        struct {
             ngx_atomic_t  parse_timeouts_total;
             ngx_atomic_t  parse_budget_exceeded_total;
         } parse_interrupts;
@@ -1442,29 +1543,10 @@ typedef struct {
     } perf;
 
     /*
-     * Per-path metrics.
-     *
-     * When markdown_metrics_per_path is enabled, URI paths are
-     * tracked individually in an RB-tree allocated from the slab
-     * allocator.  Each node holds per-path conversion and timing
-     * counters.  The tree is protected by the slab pool mutex.
-     *
-     * cardinality_limit caps the number of distinct paths stored;
-     * overflow_count tracks conversions not retained because either
-     * cardinality or the retained-path length cap was reached.  The
-     * unretained counters also include slab allocation failures so every
-     * aggregate conversion remains represented by the __other__ pseudo-path.
-     * Aggregate counters (path_conversions, path_conversion_time_sum_ms)
-     * accumulate across all per-path nodes for fast rendering
-     * without tree traversal.
-     *
-     * NGX_HTTP_MARKDOWN_PER_PATH_MAX_RETAINED_LEN caps individual URI
-     * path length stored in the shared-memory RB-tree.  This local cap
-     * prevents a handful of very long paths from exhausting slab space
-     * despite cardinality_limit.  1024 covers structured routing paths.
-     * If larger paths are ever needed, promote to a full
-     * markdown_metrics_per_path_path_max_len directive.
+     * Per-path metrics (removed in 0.9.2 — unbounded cardinality risk).
+     * Retained under debug guard for development diagnostics only.
      */
+#ifdef MARKDOWN_METRICS_PER_PATH_DEBUG
 
 #define NGX_HTTP_MARKDOWN_PER_PATH_MAX_RETAINED_LEN  1024
     struct {
@@ -1478,7 +1560,11 @@ typedef struct {
         ngx_atomic_t       unretained_conversions;
         ngx_atomic_t       unretained_conversion_time_sum_ms;
     } per_path;
+#endif /* MARKDOWN_METRICS_PER_PATH_DEBUG */
 } ngx_http_markdown_metrics_t;
+
+/* Called by the production dynconf watcher after each reload attempt. */
+void ngx_http_markdown_record_dynconf_reload(ngx_uint_t error_code);
 
 /*
  * Cross-translation-unit metric ownership helpers used by postcommit output.
@@ -1490,15 +1576,14 @@ typedef struct {
 void ngx_http_markdown_metrics_record_postcommit_pending(size_t bytes);
 void ngx_http_markdown_metrics_record_postcommit_copied_delivery(size_t bytes);
 void ngx_http_markdown_metrics_record_postcommit_abort(void);
+void ngx_http_markdown_metrics_record_postcommit_safe_finish(void);
 
 /*
  * Per-path metric node stored in the shared RB-tree.
- *
- * rbnode.key holds a hash of the path for O(1) first-level
- * lookup; collisions are resolved by comparing path_len then
- * path bytes.  The path string is slab-owned and must be
- * freed with ngx_slab_free() when the node is removed.
+ * Removed from production in 0.9.2 (unbounded cardinality risk).
+ * Retained under debug guard for development diagnostics only.
  */
+#ifdef MARKDOWN_METRICS_PER_PATH_DEBUG
 typedef struct {
     ngx_rbtree_node_t  rbnode;
     ngx_uint_t         path_len;
@@ -1507,6 +1592,7 @@ typedef struct {
     ngx_atomic_t       conversion_time_sum_ms;
     ngx_atomic_t       entries;
 } ngx_http_markdown_path_metric_node_t;
+#endif /* MARKDOWN_METRICS_PER_PATH_DEBUG */
 
 /* Module declaration */
 extern ngx_module_t ngx_http_markdown_filter_module;
@@ -1612,6 +1698,7 @@ const ngx_str_t *ngx_http_markdown_reason_failed_open(void);
 
 /* Return the ELIGIBLE_FAILED_CLOSED reason code */
 const ngx_str_t *ngx_http_markdown_reason_failed_closed(void);
+const ngx_str_t *ngx_http_markdown_reason_header_plan_apply_err(void);
 
 /* Return the SKIP_ACCEPT reason code (not in eligibility enum) */
 const ngx_str_t *ngx_http_markdown_reason_skip_accept(void);
@@ -1627,6 +1714,7 @@ const ngx_str_t *ngx_http_markdown_reason_skip_conditional(void);
 
 /* Return the BYPASS_NO_TRANSFORM reason code (RFC 9111 §5.2.2.6) */
 const ngx_str_t *ngx_http_markdown_reason_bypass_no_transform(void);
+const ngx_str_t *ngx_http_markdown_reason_encoding_header_invalid(void);
 
 /* Return the compressed-response passthrough reason in every build mode. */
 const ngx_str_t *ngx_http_markdown_reason_streaming_skip_compressed(void);
@@ -1641,7 +1729,9 @@ const ngx_str_t *ngx_http_markdown_reason_streaming_skip_unsupported(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_budget_exceeded(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_precommit_failopen(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_precommit_reject(void);
+#ifdef MARKDOWN_STREAMING_SHADOW_DEBUG
 const ngx_str_t *ngx_http_markdown_reason_streaming_shadow(void);
+#endif
 const ngx_str_t *ngx_http_markdown_reason_eligible_streaming_auto(void);
 const ngx_str_t *ngx_http_markdown_reason_eligible_fullbuffer_auto(void);
 #endif /* MARKDOWN_STREAMING_ENABLED */
@@ -1766,6 +1856,13 @@ ngx_flag_t ngx_http_markdown_has_no_transform(ngx_http_request_t *r);
 /* Detect compression type from Content-Encoding header */
 ngx_http_markdown_compression_type_e
 ngx_http_markdown_detect_compression(ngx_http_request_t *r);
+ngx_int_t
+ngx_http_markdown_collect_content_encoding(ngx_http_request_t *r,
+                                           ngx_str_t *out);
+u_char
+ngx_http_markdown_parse_encoding_chain_ffi(const ngx_http_request_t *r,
+                                           ngx_http_markdown_ctx_t *ctx,
+                                           const ngx_str_t *combined);
 
 /* Decompress gzip/deflate compressed data using zlib */
 ngx_int_t
@@ -1803,14 +1900,15 @@ ngx_http_markdown_decompress(ngx_http_request_t *r,
 #define NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR     -101
 #define NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT  -102
 #define NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR         -103
+#define NGX_HTTP_MARKDOWN_DECOMP_RATIO_EXCEEDED   -104
 #define NGX_HTTP_MARKDOWN_DECOMP_OVERFLOW_ERROR   -105
 
 /*
  * Internal return code for conditional-request Bypass outcome
  * (ConditionalOutcome::Bypass = 2).  The C caller should deliver the
- * upstream response unmodified.  Value -104 avoids collision with
- * NGX_OK (0), NGX_ERROR (-1), NGX_AGAIN (-2), NGX_DONE (-4),
- * NGX_DECLINED (-5), and the decomp codes above.
+ * upstream response unmodified.  Value -104 is intentionally reused from
+ * the decompression return-code domain; callers inspect it only in the
+ * conditional-decision stage and never compare it with decomp results.
  */
 #define NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT     -104
 

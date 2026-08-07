@@ -1,5 +1,32 @@
 # Deterministic Markdown Output
 
+## Output Determinism Policy
+
+**Contract:** within the same module version and build feature set, identical
+effective inputs produce byte-identical response bodies.
+
+**Determinism identity:** the effective input tuple is defined as the
+upstream HTML bytes plus every explicit conversion option — base URL,
+content type, markdown flavor, pruning configuration, front matter mode,
+token-estimate mode, and any other explicit conversion option. Two requests
+that agree on every element of this tuple must produce byte-identical
+response bodies.
+
+**Unrelated request headers are NOT part of the determinism identity.** The
+`Accept`, `User-Agent`, `Accept-Language`, and other request headers that do
+not participate in the effective input tuple may vary freely between runs
+without affecting the response body.
+
+**Version compatibility policy:** the 1.x compatibility policy does NOT
+promise byte-for-byte output stability across patch versions. Correctness,
+security, and standards-conformance fixes MAY alter non-critical byte layout
+after golden/semantic diff review. Consumers that rely on exact bytes across
+module upgrades must pin the module version.
+
+**Verification:** a determinism corpus in CI (`make test-corpus-determinism`)
+converts every fixture in `tests/corpus/` twice in independent converter
+processes and requires byte-identical output (`perf/reports/corpus-determinism-report.json`).
+
 ## Overview
 
 The NGINX Markdown Converter implements comprehensive output normalization to ensure **deterministic Markdown generation**. This means that converting identical HTML input multiple times will always produce byte-for-byte identical Markdown output.

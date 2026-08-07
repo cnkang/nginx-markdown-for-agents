@@ -27,14 +27,6 @@ static ngx_command_t commands[] = {
         0,
         NULL
     },
-    {
-        ngx_string("markdown_streaming_engine"),
-        NGX_CONF_TAKE1,
-        ngx_http_markdown_reject_streaming_engine,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        0,
-        NULL
-    },
 };
 """,
     )
@@ -79,18 +71,21 @@ ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 | `markdown_streaming_engine off;` | `markdown_streaming off;` |
 | `markdown_streaming_engine auto;` | `markdown_streaming auto;` |
 | `markdown_streaming_engine on;` | `markdown_streaming force;` |
+
+The requested policy is `markdown_streaming off | auto | force`.
+`markdown_limits conversion_memory=64m conversion_timeout=10s` sets the
+conversion budget; `markdown_limits streaming_buffer=2m` bounds streaming.
 """,
     )
     _write(
         root,
         detector.PUBLIC_INVENTORY_PATH,
         """
-There are 2 `markdown_*` command-table entries: 1 active parser entries and
-1 reject-only migration entries.
+There are 1 `markdown_*` command-table entries: 1 active parser entries and
+0 reject-only migration entries.
 
 ### Reject-only migration directives
 
-| `markdown_streaming_engine` | `markdown_streaming` |
 """,
     )
     _write(root, detector.STREAMING_TROUBLESHOOTING_PATH, "canonical example\n")
@@ -118,23 +113,6 @@ def test_public_config_contract_accepts_canonical_fixture(tmp_path: Path) -> Non
     _write_valid_fixture(tmp_path)
 
     assert detector.check_public_config_contract(tmp_path) == []
-
-
-def test_reject_only_directive_cannot_bind_enum_slot(tmp_path: Path) -> None:
-    _write_valid_fixture(tmp_path)
-    path = tmp_path / detector.DIRECTIVES_PATH
-    content = path.read_text(encoding="utf-8").replace(
-        "ngx_http_markdown_reject_streaming_engine,\n"
-        "        NGX_HTTP_LOC_CONF_OFFSET,\n        0,\n        NULL",
-        "ngx_conf_set_enum_slot,\n        NGX_HTTP_LOC_CONF_OFFSET,\n"
-        "        offsetof(conf_t, stream_engine),\n        stream_engine_values",
-    )
-    path.write_text(content, encoding="utf-8")
-
-    errors = detector.check_public_config_contract(tmp_path)
-
-    assert any("must bind only" in error for error in errors)
-    assert any("must not bind an enum table" in error for error in errors)
 
 
 def test_removed_production_symbol_is_blocked_in_untracked_file(tmp_path: Path) -> None:
@@ -193,16 +171,19 @@ def test_flavor_handler_cannot_reactivate_mdx(tmp_path: Path) -> None:
 
 
 def test_configuration_guide_requires_exact_on_to_force_mapping(tmp_path: Path) -> None:
+    """The configuration guide must keep the frozen streaming policy
+    fragment exactly; replacing `force` with `on` violates the contract."""
     _write_valid_fixture(tmp_path)
     path = tmp_path / detector.CONFIGURATION_GUIDE_PATH
     content = path.read_text(encoding="utf-8").replace(
-        "markdown_streaming force;", "markdown_streaming on;"
+        "markdown_streaming off | auto | force",
+        "markdown_streaming off | auto | on",
     )
     path.write_text(content, encoding="utf-8")
 
     errors = detector.check_public_config_contract(tmp_path)
 
-    assert any("on -> markdown_streaming force" in error for error in errors)
+    assert any("missing frozen explicit contract fragment" in error for error in errors)
 
 
 def test_public_inventory_counts_must_match_directive_table(tmp_path: Path) -> None:
@@ -210,7 +191,7 @@ def test_public_inventory_counts_must_match_directive_table(tmp_path: Path) -> N
     path = tmp_path / detector.PUBLIC_INVENTORY_PATH
     path.write_text(
         path.read_text(encoding="utf-8").replace(
-            "2 `markdown_*`", "3 `markdown_*`"
+            "1 `markdown_*`", "3 `markdown_*`"
         ),
         encoding="utf-8",
     )

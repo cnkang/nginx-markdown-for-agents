@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "nginx_version": "1.30.4",
+  "runner": "ubuntu-24.04",
+  "architecture": "x86_64",
+  "rust_toolchain": "1.97.0"
+}

@@ -1,4 +1,4 @@
-# Version Planning: v0.9.1 Baseline Consolidation and v1.0 Freeze
+# Version Planning: v0.9.2 Development and v1.0 Freeze
 
 ## Purpose
 
@@ -9,15 +9,43 @@ compatibility or release scope.
 
 ## Current Release State
 
-- v0.9.1 has been released as the final pre-v1.0 baseline-consolidation and
-  compatibility-reset release.
-- The intended v1.0 contract freeze begins following the v0.9.1 release.
+- v0.9.2 is the current development release line, building on the v0.9.1
+  baseline-consolidation and compatibility-reset release.
+- Development version metadata is already 0.9.2; release publication, tag,
+  assets, and checksums remain pending release-gate evidence.
+- The intended v1.0 contract freeze begins following the v0.9.2 release.
 
 At the time v0.9.0 shipped, it was intended to be the last breaking release
 before v1.0. That freeze was deliberately extended through v0.9.1 because v1.0
 had not shipped, adoption remained limited, and the final toolchain,
 dependency, configuration, and ABI audit found cleanup worth completing before
 the long-lived compatibility contract begins.
+
+## v0.9.2 Release Objective
+
+The release delivers harness consolidation, documentation corrections, and
+release-gate hardening on top of the v0.9.1 stable baseline. No breaking
+changes to public configuration, ABI, or runtime behavior.
+
+### Scope
+
+- OTel ADR-0006 factual correction (OTLP HTTP/JSON, not protobuf) and explicit
+  request-pool ownership with no worker-exit cleanup claim.
+- Dynconf diagnostics remains read-only; operators restore a previous valid
+  file atomically and rely on LKG protection for invalid reloads.
+- Release-gates-check-092 target with public-surface drift, version
+  consistency, and reason-code registry completeness gates.
+- VERSION_PLANNING / PROJECT_STATUS 0.9.2 sections.
+- README consistency verification (English ↔ Chinese).
+- Streaming reason code normalization documentation (UPPERCASE C-only
+  codes documented as known inconsistency, migration to lowercase
+  snake_case deferred to 1.x Rust enum migration).
+
+### Release Evidence
+
+v0.9.2 remains a development candidate until the exact branch head passes the
+release-gates-check-092 evidence chain and the release artifacts are reviewed.
+Passing local gates alone does not declare a published stable release.
 
 ## v0.9.1 Release Objective
 
@@ -75,7 +103,7 @@ long-term support.
 
 ## v1.0 Contract Freeze
 
-After v0.9.1 is published, v1.0 preparation is a stabilization phase rather
+After v0.9.2 is published, v1.0 preparation is a stabilization phase rather
 than another baseline reset.
 
 ### Freeze Rules
@@ -150,4 +178,5 @@ evidence, not active compatibility rules.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-07-30 | Kang | Added v0.9.2 release objective section (harness consolidation, documentation corrections, release-gate hardening) |
 | 0.9.1 | 2026-07-14 | Codex | Replaced obsolete 0.4-to-0.6 planning with the final pre-v1.0 baseline, freeze, and post-v1.0 compatibility contract |

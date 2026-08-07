@@ -24,7 +24,8 @@ PROPERTIES = REPO_ROOT / ".sonarcloud.properties"
 def load_checker_module():
     """Load the checker directly so tmp_path cases do not touch repository data."""
     spec = importlib.util.spec_from_file_location("encoding_checker_test", CHECKER)
-    assert spec and spec.loader
+    assert spec is not None
+    assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -65,7 +66,9 @@ class TestExceptionManifest:
     def test_latin1_has_reason(self) -> None:
         manifest = self._load()
         info = manifest["tests/corpus/encoding/latin1.html"]
-        assert isinstance(info.get("reason"), str) and len(info["reason"]) > 0
+        reason = info.get("reason")
+        assert isinstance(reason, str)
+        assert len(reason) > 0
 
     def test_latin1_is_not_valid_utf8(self) -> None:
         path = REPO_ROOT / "tests" / "corpus" / "encoding" / "latin1.html"
@@ -208,6 +211,15 @@ class TestCheckerAdversarialInputs:
         rc, count = checker._audit_generated({})
         assert rc == 1
         assert count == 1
+
+    def test_binary_multilayer_fuzz_seed_is_excluded(self) -> None:
+        checker = load_checker_module()
+        assert checker._should_skip_path(
+            Path(
+                "components/rust-converter/fuzz/corpus/"
+                "fuzz_multilayer_decode/basic.txt"
+            )
+        )
 
 
 class TestSonarConfiguration:

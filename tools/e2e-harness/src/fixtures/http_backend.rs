@@ -5,7 +5,9 @@
 
 #![allow(dead_code)]
 
-use crate::fixtures::{BrotliFault, FixtureResponse, FixtureSpec, RouteBehavior};
+use crate::fixtures::{
+    BrotliFault, EncodingFault, EncodingLayer, FixtureResponse, FixtureSpec, RouteBehavior,
+};
 use anyhow::{Context, Result};
 use axum::Router;
 use axum::body::{Body, Bytes};
@@ -173,7 +175,140 @@ fn behavior_response(
             chunk_size,
             fault,
         } => brotli_response(method, body, *chunk_size, fault),
+        RouteBehavior::EncodingChain {
+            body,
+            chain,
+            fault,
+        } => encoding_chain_response(method, body, chain, fault),
     }
+}
+
+/// Serve a multi-layer Content-Encoding chain response.
+///
+/// The body is compressed by applying the chain in application order
+/// (first layer first, so the last layer is the outermost encoding), and
+/// the `Content-Encoding` header lists the layer tokens in application
+/// order.  `identity` layers perform no compression and no decompression.
+fn encoding_chain_response(
+    method: Method,
+    source: &str,
+    chain: &[EncodingLayer],
+    fault: &EncodingFault,
+) -> axum::response::Response {
+    let (mut bytes, tokens) = match encoding_chain_fixture_bytes(source, chain, fault) {
+        Ok(pair) => pair,
+        Err(error) => {
+            return plain_response(
+                method,
+                500,
+                "text/plain",
+                &format!("fixture chain compression failed: {error}"),
+            );
+        }
+    };
+    if matches!(fault, EncodingFault::Truncated) && bytes.len() > 8 {
+        bytes.truncate(bytes.len() - 8);
+    }
+    let encoding_value = tokens.join(", ");
+    let body = if method == Method::HEAD {
+        Body::empty()
+    } else {
+        Body::from(bytes)
+    };
+
+    axum::response::Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "text/html; charset=UTF-8")
+        .header("Content-Encoding", encoding_value)
+        .body(body)
+        .unwrap_or_else(|error| {
+            plain_response(
+                Method::GET,
+                500,
+                "text/plain",
+                &format!("fixture chain response failed: {error}"),
+            )
+        })
+}
+
+/// Produce the wire bytes and the Content-Encoding token list for a chain.
+fn encoding_chain_fixture_bytes(
+    source: &str,
+    chain: &[EncodingLayer],
+    fault: &EncodingFault,
+) -> Result<(Vec<u8>, Vec<String>)> {
+    let mut tokens: Vec<String> = Vec::with_capacity(chain.len());
+    let mut bytes = source.as_bytes().to_vec();
+    for layer in chain {
+        match layer {
+            EncodingLayer::Identity => tokens.push("identity".to_string()),
+            EncodingLayer::Gzip => {
+                tokens.push("gzip".to_string());
+                bytes = gzip_bytes(&bytes)?;
+            }
+            EncodingLayer::Deflate => {
+                tokens.push("deflate".to_string());
+                bytes = deflate_bytes(&bytes)?;
+            }
+            EncodingLayer::Br => {
+                tokens.push("br".to_string());
+                bytes = brotli_bytes(&bytes)?;
+            }
+        }
+    }
+    match fault {
+        EncodingFault::MalformedGrammar => {
+            /* Replace the separator between the first two tokens with a
+             * malformed grammar: "gzip,,deflate". */
+            let joined = tokens.join(", ");
+            let broken = joined.replace(", ", ",,");
+            return Ok((bytes, vec![broken]));
+        }
+        EncodingFault::UnknownToken => {
+            tokens.push("zstd".to_string());
+        }
+        EncodingFault::DepthOverflow => {
+            for _ in 0..3 {
+                tokens.push("gzip".to_string());
+                bytes = gzip_bytes(&bytes)?;
+            }
+        }
+        EncodingFault::None | EncodingFault::Truncated => {}
+    }
+    Ok((bytes, tokens))
+}
+
+fn gzip_bytes(data: &[u8]) -> Result<Vec<u8>> {
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder
+        .write_all(data)
+        .context("gzip fixture compression failed")?;
+    encoder.finish().context("gzip fixture finish failed")
+}
+
+fn deflate_bytes(data: &[u8]) -> Result<Vec<u8>> {
+    use flate2::Compression;
+    use flate2::write::DeflateEncoder;
+
+    let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+    encoder
+        .write_all(data)
+        .context("deflate fixture compression failed")?;
+    encoder.finish().context("deflate fixture finish failed")
+}
+
+fn brotli_bytes(data: &[u8]) -> Result<Vec<u8>> {
+    let mut output = Vec::new();
+    {
+        let mut writer = brotli::CompressorWriter::new(&mut output, 4096, 5, 22);
+        writer
+            .write_all(data)
+            .context("brotli fixture compression failed")?;
+    }
+    Ok(output)
 }
 
 fn brotli_response(
@@ -269,14 +404,15 @@ fn scenario_response(
     }
     if path == "/md/test.html" {
         state.converted_total.fetch_add(1, Ordering::Relaxed);
-        return markdown_response(
+        /* Serve HTML so the module performs the conversion and records
+         * outcome="converted" in nginx_markdown_requests_total. */
+        return html_response(
             method,
             200,
-            "# metrics converted",
+            "<html><body><h1>metrics converted</h1></body></html>",
             true,
             Some("\"converted-test-etag\""),
             Some("Accept"),
-            Some("public, max-age=60"),
         );
     }
     if path == "/no-wildcard/html" {
@@ -486,36 +622,56 @@ fn status_code_response(method: Method, status_code: u16) -> axum::response::Res
 fn metrics_response(
     state: Arc<FixtureState>,
     method: Method,
-    headers: HeaderMap,
+    _headers: HeaderMap,
 ) -> axum::response::Response {
-    let accept = header_value(&headers, "Accept").unwrap_or_default();
     let total = state.total_requests.load(Ordering::Relaxed);
     let converted = state.converted_total.load(Ordering::Relaxed);
     let skipped = total.saturating_sub(converted);
-
-    if accept.contains("application/json") {
-        let body = serde_json::json!({
-            "total_requests": total,
-            "converted_total": converted,
-            "skipped_total": skipped
-        })
-        .to_string();
-        return plain_response(method, 200, "application/json", &body);
-    }
-
     let body = format!(
-        "# HELP nginx_markdown_total_requests Total requests observed\n\
-# TYPE nginx_markdown_total_requests counter\n\
-nginx_markdown_total_requests {}\n\
-# HELP nginx_markdown_converted_total Converted requests observed\n\
-# TYPE nginx_markdown_converted_total counter\n\
-nginx_markdown_converted_total {}\n\
-# HELP nginx_markdown_skipped_total Skipped requests observed\n\
-# TYPE nginx_markdown_skipped_total counter\n\
-nginx_markdown_skipped_total {}\n",
-        total, converted, skipped
+        "# HELP nginx_markdown_requests_total Requests entering the decision chain\n\
+# TYPE nginx_markdown_requests_total counter\n\
+nginx_markdown_requests_total{{outcome=\"converted\",stage=\"delivery\",reason=\"none\"}} {}\n\
+nginx_markdown_requests_total{{outcome=\"skipped\",stage=\"eligibility\",reason=\"not_eligible\"}} {}\n\
+# HELP nginx_markdown_conversion_attempts_total Conversion attempts\n\
+# TYPE nginx_markdown_conversion_attempts_total counter\n\
+nginx_markdown_conversion_attempts_total{{engine=\"full_buffer\"}} {}\n\
+# HELP nginx_markdown_conversion_deliveries_total Successful converted deliveries\n\
+# TYPE nginx_markdown_conversion_deliveries_total counter\n\
+nginx_markdown_conversion_deliveries_total{{engine=\"full_buffer\"}} {}\n\
+# HELP nginx_markdown_conversion_duration_seconds Conversion duration\n\
+# TYPE nginx_markdown_conversion_duration_seconds histogram\n\
+nginx_markdown_conversion_duration_seconds_bucket{{engine=\"full_buffer\",le=\"+Inf\"}} {}\n\
+nginx_markdown_conversion_duration_seconds_sum{{engine=\"full_buffer\"}} 0\n\
+nginx_markdown_conversion_duration_seconds_count{{engine=\"full_buffer\"}} {}\n\
+# HELP nginx_markdown_input_bytes_total Input bytes\n\
+# TYPE nginx_markdown_input_bytes_total counter\n\
+nginx_markdown_input_bytes_total {}\n\
+# HELP nginx_markdown_output_bytes_total Output bytes\n\
+# TYPE nginx_markdown_output_bytes_total counter\n\
+nginx_markdown_output_bytes_total {}\n\
+# HELP nginx_markdown_inflight_requests In-flight conversions\n\
+# TYPE nginx_markdown_inflight_requests gauge\n\
+nginx_markdown_inflight_requests 0\n\
+# HELP nginx_markdown_streaming_events_total Streaming lifecycle events\n\
+# TYPE nginx_markdown_streaming_events_total counter\n\
+nginx_markdown_streaming_events_total{{transition=\"commit\",reason=\"none\"}} 0\n\
+# HELP nginx_markdown_decompression_events_total Decompression events\n\
+# TYPE nginx_markdown_decompression_events_total counter\n\
+nginx_markdown_decompression_events_total{{encoding=\"gzip\",outcome=\"success\",reason=\"none\"}} 0\n\
+# HELP nginx_markdown_dynconf_reloads_total Dynamic configuration reloads\n\
+# TYPE nginx_markdown_dynconf_reloads_total counter\n\
+nginx_markdown_dynconf_reloads_total{{outcome=\"success\",reason=\"none\"}} 0\n\
+# HELP nginx_markdown_build_info Build information\n\
+# TYPE nginx_markdown_build_info gauge\n\
+nginx_markdown_build_info{{version=\"test\",nginx_version=\"test\",features=\"\"}} 1\n",
+        converted, skipped, converted, converted, converted, converted, converted, converted,
     );
-    plain_response(method, 200, "text/plain", &body)
+    plain_response(
+        method,
+        200,
+        "text/plain; version=0.0.4; charset=utf-8",
+        &body,
+    )
 }
 
 fn header_value(headers: &HeaderMap, name: &str) -> Option<String> {
@@ -618,3 +774,90 @@ fn header_value_or_empty(value: &str) -> HeaderValue {
 use futures_util::stream;
 use std::convert::Infallible;
 use std::io::Write;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chain_tokens_and_wire_bytes_match_application_order() {
+        let source = "<html><body>chain fixture</body></html>";
+        let chain = vec![
+            EncodingLayer::Gzip,
+            EncodingLayer::Deflate,
+            EncodingLayer::Br,
+        ];
+        let (bytes, tokens) =
+            encoding_chain_fixture_bytes(source, &chain, &EncodingFault::None).unwrap();
+        assert_eq!(tokens, vec!["gzip", "deflate", "br"]);
+        /* The wire body is the outer (br) layer: decompressing br must
+         * reveal deflate(gzip(source)). */
+        let mut out = Vec::new();
+        {
+            let mut reader = brotli::Decompressor::new(bytes.as_slice(), 4096);
+            std::io::Read::read_to_end(&mut reader, &mut out).unwrap();
+        }
+        let mut deflated = Vec::new();
+        {
+            let mut decoder = flate2::read::DeflateDecoder::new(out.as_slice());
+            std::io::Read::read_to_end(&mut decoder, &mut deflated).unwrap();
+        }
+        let mut gunzipped = Vec::new();
+        {
+            let mut decoder = flate2::read::MultiGzDecoder::new(deflated.as_slice());
+            std::io::Read::read_to_end(&mut decoder, &mut gunzipped).unwrap();
+        }
+        assert_eq!(gunzipped, source.as_bytes());
+    }
+
+    #[test]
+    fn identity_layers_are_transparent() {
+        let source = "<html><body>identity</body></html>";
+        let chain = vec![EncodingLayer::Identity, EncodingLayer::Gzip];
+        let (bytes, tokens) =
+            encoding_chain_fixture_bytes(source, &chain, &EncodingFault::None).unwrap();
+        assert_eq!(tokens, vec!["identity", "gzip"]);
+        let mut out = Vec::new();
+        {
+            let mut decoder = flate2::read::MultiGzDecoder::new(bytes.as_slice());
+            std::io::Read::read_to_end(&mut decoder, &mut out).unwrap();
+        }
+        assert_eq!(out, source.as_bytes());
+    }
+
+    #[test]
+    fn malformed_grammar_fault_breaks_the_encoding_value() {
+        let source = "<html><body>malformed</body></html>";
+        let chain = vec![EncodingLayer::Gzip, EncodingLayer::Deflate];
+        let (bytes, tokens) =
+            encoding_chain_fixture_bytes(source, &chain, &EncodingFault::MalformedGrammar).unwrap();
+        assert!(!bytes.is_empty());
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0], "gzip,,deflate");
+    }
+
+    #[test]
+    fn unknown_token_fault_appends_unsupported_token() {
+        let source = "<html><body>unknown</body></html>";
+        let chain = vec![EncodingLayer::Gzip];
+        let (_, tokens) =
+            encoding_chain_fixture_bytes(source, &chain, &EncodingFault::UnknownToken).unwrap();
+        assert_eq!(tokens, vec!["gzip", "zstd"]);
+    }
+
+    #[test]
+    fn depth_overflow_fault_exceeds_three_layers() {
+        let source = "<html><body>depth</body></html>";
+        let chain = vec![EncodingLayer::Gzip];
+        let (bytes, tokens) =
+            encoding_chain_fixture_bytes(source, &chain, &EncodingFault::DepthOverflow).unwrap();
+        /* 1 base layer + 3 fault layers = 4 non-identity layers > 3. */
+        assert_eq!(tokens.len(), 4);
+        let mut out = Vec::new();
+        {
+            let mut decoder = flate2::read::MultiGzDecoder::new(bytes.as_slice());
+            std::io::Read::read_to_end(&mut decoder, &mut out).unwrap();
+        }
+        assert!(!out.is_empty());
+    }
+}

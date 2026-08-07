@@ -13,10 +13,10 @@ The generated `markdown_converter.h` is public source only so the bundled C
 module can compile. Its presence in the repository does not make arbitrary
 third-party C consumers a supported product surface.
 
-## v0.9.1 baseline reset
+## v0.9.2 bundled boundary
 
-v0.9.1 is the final coordinated pre-v1 reset. ABI version **1** is the new
-baseline. This reset:
+v0.9.1's ABI version **1** is historical. The 0.9.2 breaking surface update
+advances the bundled boundary to ABI version **2**. The earlier reset:
 
 - removes the unimplemented MDX and Org-mode flavor discriminants;
 - removes the unused Rust streaming-decision FFI model;
@@ -40,15 +40,29 @@ an older Rust archive or header with the new C module.
 Rust owns:
 
 ```text
-MARKDOWN_ABI_VERSION = 1
-markdown_abi_version() -> 1
+MARKDOWN_ABI_VERSION = 2
+MARKDOWN_HEADER_HASH = 0x5345ff0aa2768d82
+MARKDOWN_SYMBOL_SET_HASH = 0x480d8b73c3163e17
+MARKDOWN_LAYOUT_FINGERPRINT = 0x27accfa463b60c3b
+
+markdown_abi_version() -> 2
+markdown_abi_header_hash() -> 0x5345ff0aa2768d82
+markdown_abi_symbol_set_hash() -> 0x480d8b73c3163e17
+markdown_abi_layout_fingerprint() -> 0x27accfa463b60c3b
 ```
 
-`cbindgen` emits both declarations into the generated header. During NGINX
-preconfiguration, the C module calls `markdown_abi_version()` and compares the
-result with its generated-header `MARKDOWN_ABI_VERSION`. A mismatch logs a
-critical configuration error and makes `nginx -t`/startup fail. This check runs
-before the module installs its header and body filters.
+`cbindgen` emits all declarations into the generated header. During NGINX
+preconfiguration, the C module calls all four accessors and compares each
+result with its generated-header constant. Each independent mismatch logs a
+critical configuration error. If any tuple element mismatches, startup fails
+with `NGX_ERROR`. This 4-tuple handshake runs before the module installs its
+header and body filters or invokes any business FFI call.
+
+The three fingerprint values detect drift even when the numeric ABI version
+has not been incremented:
+- **header hash**: detects header regeneration or content changes
+- **symbol set hash**: detects export additions, removals, or renames
+- **layout fingerprint**: detects struct size changes or struct set changes
 
 `nginx-markdown-doctor` also checks that the module contains the
 `markdown_abi_version` symbol. The doctor symbol check is diagnostic; the
@@ -64,7 +78,7 @@ semantically invalid.
 
 ### Before v1.0
 
-v0.9.1 is the last planned coordinated reset. Any further pre-v1 incompatible
+0.9.2 is the final planned pre-v1 breaking boundary. Any further incompatible
 change must be release-noted, increment `MARKDOWN_ABI_VERSION`, and update all
 Rust definitions, C consumers, headers, layout assertions, tests, and operator
 diagnostics in one change.

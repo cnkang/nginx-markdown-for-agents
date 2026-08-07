@@ -73,13 +73,14 @@ static void ngx_http_markdown_bind_request_snapshot(
 static ngx_int_t ngx_http_markdown_handle_ctx_alloc_failure(
     ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_effective_conf_t *eff);
+static ngx_int_t ngx_http_markdown_handle_encoding_collection_failure(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff);
 static void ngx_http_markdown_init_ctx(ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx, ngx_flag_t filter_enabled);
 static void ngx_http_markdown_log_failure_decision(
     ngx_http_request_t *r, const ngx_http_markdown_ctx_t *ctx,
-    const ngx_http_markdown_conf_t *conf);
-static ngx_int_t ngx_http_markdown_handle_unsupported_compression(
-    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf);
 static void ngx_http_markdown_log_decision_with_category(
     ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
@@ -100,6 +101,7 @@ const ngx_str_t *ngx_http_markdown_reason_from_error_category(
 const ngx_str_t *ngx_http_markdown_reason_converted(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_skip_compressed(void);
 const ngx_str_t *ngx_http_markdown_reason_bypass_no_transform(void);
+const ngx_str_t *ngx_http_markdown_reason_encoding_header_invalid(void);
 const ngx_str_t *ngx_http_markdown_reason_overload(void);
 const ngx_str_t *ngx_http_markdown_reason_invalid_dynconf(void);
 const ngx_str_t *ngx_http_markdown_reason_degraded_snapshot(void);
@@ -205,69 +207,6 @@ ngx_http_markdown_bind_request_snapshot(
 
 
 /*
- * Handle unsupported compression format detected during header phase.
- *
- * Marks the request as ineligible, records error metrics, emits a
- * decision log entry, and applies the configured error strategy.
- *
- * Parameters:
- *   r    - NGINX request structure
- *   ctx  - per-request module context
- *   conf - module location configuration
- *
- * Returns:
- *   NGX_HTTP_BAD_GATEWAY on fail-closed
- *   Result of ngx_http_next_header_filter on fail-open
- */
-static ngx_int_t
-ngx_http_markdown_handle_unsupported_compression(
-    ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx,
-    const ngx_http_markdown_conf_t *conf)
-{
-    ngx_int_t  rc;
-
-    ctx->eligible = 0;
-    ctx->error.last_category =
-        NGX_HTTP_MARKDOWN_ERROR_CONVERSION;
-    ctx->error.has_category = 1;
-
-    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
-    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
-    NGX_HTTP_MARKDOWN_METRIC_INC(failures_conversion);
-
-    if (conf->on_error
-        == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-    {
-        ngx_log_error(NGX_LOG_WARN,
-            r->connection->log, 0,
-            "markdown: unsupported "
-            "compression format, "
-            "rejecting (fail-closed)");
-        ngx_http_markdown_log_failure_decision(
-            r, ctx, conf);
-        return (ngx_int_t) conf->error_status;
-    }
-
-    ngx_log_error(NGX_LOG_WARN,
-        r->connection->log, 0,
-        "markdown: unsupported "
-        "compression format, "
-        "returning original content "
-        "(fail-open)");
-    ngx_http_markdown_log_failure_decision(
-        r, ctx, conf);
-    ctx->headers_forwarded = 1;
-    rc = ngx_http_next_header_filter(r);
-    /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
-    if (rc == NGX_OK || rc == NGX_DONE) {
-        ngx_http_markdown_metric_inc_failopen(conf);
-    }
-    return rc;
-}
-
-
-/*
  * Handle context allocation failure in header filter.
  *
  * Records metrics, emits decision log with the effective conf view
@@ -327,6 +266,70 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
             r->connection->log));
     rc = ngx_http_next_header_filter(r);
     /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
+    if (rc == NGX_OK || rc == NGX_DONE) {
+        ngx_http_markdown_metric_inc_failopen(conf);
+    }
+    return rc;
+}
+
+
+/*
+ * Handle failure while combining repeated Content-Encoding fields.
+ *
+ * The combined value is request-pool allocated.  Treating an allocation
+ * failure as a missing header would leave the request on the normal decode
+ * path with incomplete encoding metadata, so it must use the same explicit
+ * system-error policy as other header-phase failures.
+ */
+static ngx_int_t
+ngx_http_markdown_handle_encoding_collection_failure(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff)
+{
+    ngx_int_t  rc;
+
+    /*
+     * Mark the request ineligible and record the error before any
+     * policy dispatch.  Without this the body filter would convert
+     * the still-compressed body under the intact Content-Encoding
+     * header and would double-count conversions_attempted (Rule 38).
+     */
+    ctx->eligible = 0;
+    ctx->headers_forwarded = 1;
+    ctx->error.last_category = NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
+    ctx->error.has_category = 1;
+
+    ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                  "markdown: failed to collect Content-Encoding header, "
+                  "category=system");
+
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
+    NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
+
+    if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown: Content-Encoding header collection failed, "
+                      "rejecting (fail-closed)");
+        ngx_http_markdown_log_decision_with_category(
+            r, conf, eff,
+            ngx_http_markdown_reason_failed_closed(),
+            ngx_http_markdown_reason_from_error_category(
+                NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
+        return (ngx_int_t) conf->error_status;
+    }
+
+    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                  "markdown: Content-Encoding header collection failed, "
+                  "returning original content (fail-open)");
+    ngx_http_markdown_log_decision_with_category(
+        r, conf, eff,
+        ngx_http_markdown_reason_failed_open(),
+        ngx_http_markdown_reason_from_error_category(
+            NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
+    rc = ngx_http_next_header_filter(r);
     if (rc == NGX_OK || rc == NGX_DONE) {
         ngx_http_markdown_metric_inc_failopen(conf);
     }
@@ -637,6 +640,26 @@ ngx_http_markdown_route_streaming_compression(
         return 0;
     }
 
+    /* Multi-layer chains (2 or 3) decode via bounded full-buffer only
+     * (Requirement 12.6); streaming decompression is single-layer only. */
+    if (ctx->decompression.layer_count > 1) {
+        ctx->processing_path = NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
+        ctx->streaming.reason = NGX_HTTP_MARKDOWN_STREAM_REASON_COMPRESSED;
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            streaming.engine_choice.full_buffer);
+
+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+            "markdown: multi-layer encoding chain (%ui layers) "
+            "routed to full-buffer decode", ctx->decompression.layer_count);
+        ngx_http_markdown_log_streaming_decision(
+            r, conf, ctx, "full_buffer");
+        ngx_http_markdown_log_decision(
+            r, conf, ctx->effective_conf,
+            ngx_http_markdown_reason_streaming_skip_compressed());
+
+        return 1;
+    }
+
     if (ctx->decompression.type
         == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
         || ctx->decompression.type
@@ -723,10 +746,101 @@ ngx_http_markdown_update_deferred_body_path(
 #endif
 
 /*
+ * Handle a malformed Content-Encoding chain during outer precommit routing.
+ *
+ * Emits the canonical ENCODING_HEADER_INVALID reason (stage=decompression,
+ * error_origin=format), starts no decoder, and mutates no response header.
+ * The reconstructed PASS outcome returns the original encoded response
+ * unchanged; a non-PASS policy uses its resolved reject status.
+ *
+ * Parameters:
+ *   r    - NGINX request structure
+ *   ctx  - per-request module context
+ *   conf - module location configuration
+ *
+ * Returns:
+ *   conf->error_status on fail-closed
+ *   Result of ngx_http_next_header_filter on fail-open
+ */
+static ngx_int_t
+ngx_http_markdown_handle_encoding_header_invalid(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf)
+{
+    ngx_int_t  rc;
+
+    ctx->eligible = 0;
+    ctx->error.last_category = NGX_HTTP_MARKDOWN_ERROR_CONVERSION;
+    ctx->error.has_category = 1;
+
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
+    NGX_HTTP_MARKDOWN_METRIC_INC(failures_conversion);
+
+    ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
+        ngx_http_markdown_reason_encoding_header_invalid());
+
+    if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                      "markdown: malformed Content-Encoding "
+                      "chain, rejecting with status %ui",
+                      conf->error_status);
+        return (ngx_int_t) conf->error_status;
+    }
+
+    ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                  "markdown: malformed Content-Encoding "
+                  "chain, returning original encoded content");
+    ctx->headers_forwarded = 1;
+    rc = ngx_http_next_header_filter(r);
+    /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
+    if (rc == NGX_OK || rc == NGX_DONE) {
+        ngx_http_markdown_metric_inc_failopen(conf);
+    }
+    return rc;
+}
+
+/*
+ * Handle a capability bypass of the Content-Encoding chain.
+ *
+ * Applies to syntactically valid unknown tokens and to chains with more
+ * than three non-identity layers: the entire conversion is bypassed during
+ * precommit, the original response passes through unchanged, and no
+ * error-policy dispatch occurs (Requirement 12.3/12.7).
+ */
+static ngx_int_t
+ngx_http_markdown_handle_encoding_passthrough(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    ngx_int_t *rc)
+{
+    ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
+                  "markdown: Content-Encoding chain not "
+                  "supported, bypassing conversion "
+                  "(passthrough)");
+
+    ctx->eligible = 0;
+    ctx->headers_forwarded = 1;
+    NGX_HTTP_MARKDOWN_METRIC_INC(skips.compression_passthrough);
+    ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
+        ngx_http_markdown_reason_bypass_no_transform());
+    *rc = ngx_http_next_header_filter(r);
+    return 1;
+}
+
+/*
  * Handle Content-Encoding before path selection.  Returns non-zero when the
  * caller must return *rc to the next header filter or an unsupported-format
  * policy result; known formats remain on the normal path with decompression
  * marked as required.
+ *
+ * The chain grammar is parsed via the Rust FFI chain parser.  Malformed
+ * grammar routes through ENCODING_HEADER_INVALID with no decoder; unknown
+ * tokens and depth-overflow chains bypass the entire conversion with no
+ * error-policy dispatch; valid chains proceed to streaming (single layer)
+ * or bounded full-buffer (multi-layer) decoding.
  */
 static ngx_flag_t
 ngx_http_markdown_handle_header_compression(
@@ -735,10 +849,62 @@ ngx_http_markdown_handle_header_compression(
     const ngx_http_markdown_conf_t *conf,
     ngx_int_t *rc)
 {
-    if (ctx->decompression.type == NGX_HTTP_MARKDOWN_COMPRESSION_NONE) {
+    ngx_str_t  combined;
+
+    if (ctx->decompression.type == NGX_HTTP_MARKDOWN_COMPRESSION_NONE
+        && r->headers_out.content_encoding == NULL)
+    {
         return 0;
     }
 
+    /* Parse the complete chain grammar during precommit, before any
+     * decoding or error-policy dispatch (Requirement 12.7). */
+    {
+        ngx_int_t  collect_rc;
+        u_char  classification;
+
+        collect_rc = ngx_http_markdown_collect_content_encoding(r, &combined);
+        if (collect_rc == NGX_ERROR) {
+            *rc = ngx_http_markdown_handle_encoding_collection_failure(
+                r, ctx, conf, ctx->effective_conf);
+            return 1;
+        }
+        if (collect_rc != NGX_OK) {
+            goto encoding_policy;
+        }
+
+        classification = ngx_http_markdown_parse_encoding_chain_ffi(
+            r, ctx, &combined);
+
+        if (classification == ENCODING_CHAIN_MALFORMED) {
+            *rc = ngx_http_markdown_handle_encoding_header_invalid(
+                r, ctx, conf);
+            return 1;
+        }
+
+        if (classification == ENCODING_CHAIN_UNKNOWN_TOKEN
+            || classification == ENCODING_CHAIN_DEPTH_EXCEEDED)
+        {
+            return ngx_http_markdown_handle_encoding_passthrough(
+                r, ctx, conf, rc);
+        }
+
+        if (classification != ENCODING_CHAIN_VALID) {
+            /* FFI contract failure: treat as malformed (fail closed). */
+            *rc = ngx_http_markdown_handle_encoding_header_invalid(
+                r, ctx, conf);
+            return 1;
+        }
+
+        /* A valid chain with only identity layers performs no decoder work:
+         * conversion proceeds without decompression. */
+        if (ctx->decompression.layer_count == 0) {
+            ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_NONE;
+            return 0;
+        }
+    }
+
+encoding_policy:
     if (!conf->decompress.auto_decompress) {
         ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
                      "markdown: Content-Encoding present "
@@ -754,16 +920,12 @@ ngx_http_markdown_handle_header_compression(
         return 1;
     }
 
-    if (ctx->decompression.type == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN) {
-        *rc = ngx_http_markdown_handle_unsupported_compression(r, ctx, conf);
-        return 1;
-    }
-
     ctx->decompression.needed = 1;
-    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown: decompression detected "
-                  "compression type: %d",
-                  ctx->decompression.type);
+                  "compression type: %d, layers: %ui",
+                  ctx->decompression.type,
+                  ctx->decompression.layer_count);
     return 0;
 }
 
@@ -817,15 +979,8 @@ ngx_http_markdown_select_header_path(
     }
 #else
 #ifndef MARKDOWN_STREAMING_ENABLED
-    if (conf->stream.threshold_explicit
-        && r->method != NGX_HTTP_HEAD
-        && r->headers_out.status != NGX_HTTP_NOT_MODIFIED)
-    {
-        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                     "markdown: markdown_stream_threshold is set, "
-                     "but streaming support was not compiled in; using "
-                     "full-buffer path");
-    }
+    /* No threshold_explicit warning needed - threshold is now internalized */
+    (void) conf;
 #endif
 #endif
 

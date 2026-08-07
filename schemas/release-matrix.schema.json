@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/cnkang/nginx-markdown-for-agents/schemas/release-matrix.schema.json",
+  "title": "Release Matrix (schema version 1)",
+  "description": "Canonical release matrix contract for 0.9.2+. schema_version is the integer 1; the top-level 'entries' array is canonical. Legacy aliases are accepted only as documented below and all consumers MUST normalize through tools/release/matrix/normalize_matrix.py. Fail-closed rules: a legacy top-level 'matrix' present together with 'entries' is rejected; unknown top-level keys are rejected; an entry that carries both a canonical key and its legacy alias with different values is rejected.",
+  "type": "object",
+  "required": ["schema_version", "entries"],
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Canonical schema version. Integer 1; legacy string versions like \"1.0\" are rejected."
+    },
+    "entries": {
+      "type": "array",
+      "description": "Canonical release matrix rows.",
+      "items": {
+        "$ref": "#/$defs/entry"
+      }
+    },
+    "matrix": {
+      "type": "array",
+      "description": "SOLE accepted legacy top-level alias for 'entries'. Rejected (fail-closed) when 'entries' is also present.",
+      "items": {
+        "$ref": "#/$defs/legacy_entry"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "description": "A single release matrix row using canonical keys.",
+      "required": [
+        "nginx_version",
+        "os",
+        "libc",
+        "target",
+        "artifact_type",
+        "feature_manifest_digest",
+        "abi_version"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "nginx_version": {
+          "type": "string",
+          "description": "Canonical NGINX version, e.g. \"1.26.3\"."
+        },
+        "os": {
+          "type": "string",
+          "description": "Canonical operating system family, e.g. \"ubuntu-24.04\" or \"linux\"."
+        },
+        "libc": {
+          "type": "string",
+          "description": "Canonical libc, e.g. \"glibc\" or \"musl\"."
+        },
+        "target": {
+          "type": "string",
+          "description": "Canonical Rust target triple, e.g. \"x86_64-unknown-linux-gnu\"."
+        },
+        "artifact_type": {
+          "type": "string",
+          "description": "Artifact kind: deb, rpm, oci, homebrew, source, bottle."
+        },
+        "feature_manifest_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "Digest of artifacts/release/0.9.2/official-build-feature-manifest.json."
+        },
+        "abi_version": {
+          "type": "integer",
+          "description": "Final frozen FFI ABI version."
+        }
+      }
+    },
+    "legacy_entry": {
+      "type": "object",
+      "description": "A legacy-format matrix row using the sole accepted legacy aliases. Normalization maps nginx->nginx_version, os_type->os, arch->target.",
+      "anyOf": [
+        {
+          "required": ["nginx_version", "os", "libc", "target", "artifact_type"]
+        },
+        {
+          "required": ["nginx", "os_type", "arch", "artifact_type"]
+        }
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "nginx": {
+          "type": "string",
+          "description": "Legacy alias for nginx_version."
+        },
+        "nginx_version": {
+          "type": "string",
+          "description": "Canonical nginx version."
+        },
+        "os": {
+          "type": "string",
+          "description": "Canonical OS family."
+        },
+        "os_type": {
+          "type": "string",
+          "description": "Legacy alias for os."
+        },
+        "libc": {
+          "type": "string",
+          "description": "Canonical libc."
+        },
+        "target": {
+          "type": "string",
+          "description": "Canonical Rust target triple."
+        },
+        "arch": {
+          "type": "string",
+          "description": "Legacy alias for target."
+        },
+        "artifact_type": {
+          "type": "string",
+          "description": "Artifact kind."
+        }
+      }
+    }
+  }
+}

@@ -161,8 +161,8 @@ structures and NGINX SHM APIs.
 | `unit/metrics_collection_test.c` | Metrics counter increment paths via `NGX_HTTP_MARKDOWN_METRIC_INC` |
 | `unit/metrics_decompression_test.c` | Decompression metrics accounting in the metrics struct |
 | `unit/metrics_endpoint_test.c` | Metrics endpoint handler, response rendering, content-length correctness |
-| `unit/metrics_format_select_test.c` | Metrics format content negotiation in C (JSON vs plain-text vs Prometheus) |
-| `unit/metrics_output_test.c` | Metrics output rendering for all three formats |
+| `unit/metrics_format_select_test.c` | Frozen Prometheus-only metrics format selection |
+| `unit/metrics_output_test.c` | Bounded internal renderer output and Prometheus response rendering |
 | `unit/metrics_snapshot_new_fields_test.c` | Metrics snapshot field coverage for new fields — guards against snapshot drift |
 | `unit/prometheus_format_test.c` | Prometheus text format rendering in C |
 | `unit/prometheus_per_path_test.c` | Per-path Prometheus metric labeling |
@@ -264,7 +264,7 @@ If the answer is yes, the test is a candidate for the Rust E2E harness.
 - Does a `GET` request with `If-None-Match: <etag>` return `304 Not Modified`
   when the ETag matches?
 - Does the metrics endpoint return a valid Prometheus exposition format when
-  `Accept: text/plain` is sent?
+  `Accept: text/plain; version=0.0.4` is sent?
 - Does a request with an auth cookie receive a `Cache-Control: no-store`
   response header?
 - Does a `HEAD` request return the same headers as the corresponding `GET`

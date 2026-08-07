@@ -126,7 +126,7 @@ the request passes through without ever reaching the streaming path selector.
 - **Ordering**: Executes at step 4, inside eligibility check.
 - **Note**: When Content-Length is absent (chunked), the check passes and size
   enforcement is deferred to the body filter (budget tracking during streaming
-  feed calls -- covered by Requirement 1 / Task 2).
+  feed calls -- covered by the streaming input contract.
 - **Verdict**: CONFIRMED -- static limit checked before streaming; dynamic
   budget enforced during streaming (separate concern).
 
@@ -194,13 +194,13 @@ No gaps found. No remediation needed for this property.
 
 ---
 
-## Task 1.3 Remediation Assessment
+## Remediation Assessment
 
 | Field | Value |
 |-------|-------|
 | Date | 2026-06-05 |
 | Result | **No code changes needed** |
-| Reviewer | Agent (streaming security enforcement task 1.3) |
+| Reviewer | Streaming security enforcement review |
 
 ### Function: `ngx_http_markdown_stream_type_excluded()`
 

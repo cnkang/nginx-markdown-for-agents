@@ -75,6 +75,14 @@ ngx_http_markdown_metrics_record_postcommit_abort(void)
         streaming.streaming_failure_postcommit_abort);
 }
 
+/* Record the first transition into the post-commit safe-finish path. */
+void
+ngx_http_markdown_metrics_record_postcommit_safe_finish(void)
+{
+    NGX_HTTP_MARKDOWN_METRIC_INC(
+        streaming.streaming_failure_postcommit_safe_finish);
+}
+
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
 #endif /* NGX_HTTP_MARKDOWN_POSTCOMMIT_METRICS_IMPL_H */

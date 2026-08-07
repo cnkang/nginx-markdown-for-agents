@@ -31,6 +31,8 @@ regex = "1.10"
 httpdate = "1.0"
 # Deterministic Brotli-compressed upstream fixtures.
 brotli = "8.0.4"
+# Deterministic gzip/deflate fixtures for multi-layer encoding chains.
+flate2 = "1.0"
 # Stream fixture bodies in controlled wire-sized chunks.
 futures-util = "0.3"
 # Constrain the slow-reader socket receive buffer for backpressure evidence.

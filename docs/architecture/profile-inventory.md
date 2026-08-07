@@ -1,31 +1,36 @@
-# Profile Inventory — Config V2 Field Mapping (Profiles, Wave 0)
+# Profile Inventory — Historical Config V2 Field Mapping (archive)
 
 | Field | Value |
 |-------|-------|
-| Version | 0.9.1 |
-| Feature | Profiles Production Defaults |
-| Status | Inventory |
+| Version | 0.9.1 (historical input) |
+| Feature | Retired profile bundles |
+| Status | Archive; not an active 0.9.2 contract |
 | Created | 2026-06-28 |
 
 ---
 
-This file is a profile-field map, not the 1.0 compatibility inventory. For
-active versus reject-only command-table state and evidence-backed stability
-classification, use
+This file preserves the pre-freeze profile-field map as historical evidence. The
+`markdown_profile` directive and every opaque profile bundle described below
+are removed from 0.9.2 and must not appear in an active configuration. For the
+current command-table state and evidence-backed stability classification, use
 [PUBLIC_SURFACE_INVENTORY.md](PUBLIC_SURFACE_INVENTORY.md). In particular,
-parser-stored OTel placeholders are not proof of production behavior.
+parser-stored OTel placeholders are not proof of production behavior. For
+current explicit replacement snippets, use the
+[configuration guide](../guides/CONFIGURATION.md#minimal-configuration)
+and [migration guide](../guides/MIGRATION-0.9.2.md).
 
-## 1. Active Config V2 Directives with Defaults
+## 1. Historical Config V2 Directives with Defaults
 
-Directives below are the **active** Config V2 directives registered in
+Directives below were the **active** Config V2 directives registered in
 `ngx_http_markdown_config_directives_impl.h`. Legacy reject-only stubs
 (markdown_max_size, markdown_timeout, markdown_streaming_budget,
 markdown_on_error, markdown_streaming_on_error, markdown_etag,
 markdown_etag_policy, markdown_conditional_requests, markdown_on_wildcard,
 markdown_trust_forwarded_headers, markdown_forwarded_headers,
 markdown_large_body_threshold, markdown_streaming_engine,
-markdown_memory_budget) are excluded — they emit
-`NGX_CONF_ERROR` with a migration hint and execute no behavior.
+markdown_memory_budget) are excluded. This historical list predates the
+0.9.2 removal of all migration stubs; the 0.9.2 binary emits NGINX's standard
+unknown-directive error for removed names.
 
 ### Core Conversion Directives
 
@@ -98,8 +103,9 @@ Maps to two struct fields:
 
 ### Observability / Operations
 
-The implemented OTel tracing pair is experimental. Duplicate or unimplemented
-OTel controls are reject-only and therefore are not active profile fields.
+The OTel entries below describe the historical configuration surface. OTel
+was removed from the 0.9.2 production contract and these names are not active
+profile fields in the current module.
 
 | Directive | Default | Context | Notes |
 |-----------|---------|---------|-------|
@@ -110,7 +116,6 @@ OTel controls are reject-only and therefore are not active profile fields.
 | `markdown_metrics_per_path_cardinality` | 100 | http | Global |
 | `markdown_metrics_shm_size` | 8×pagesize | http | Global |
 | `markdown_diagnostics` | off | http, server, location | on\|off |
-| `markdown_diagnostics_allow` | (loopback only) | http, server, location | CIDR |
 | `markdown_otel` | off | http, server, location | on\|off |
 | `markdown_otel_endpoint` | (empty) | http, server, location | Internal URI |
 
@@ -148,8 +153,13 @@ Reject-only OTel names (not active profile fields):
 
 | Directive | Default | Context | Notes |
 |-----------|---------|---------|-------|
-| `markdown_llm_provider` | default | http, server, location | Provider enum |
-| `markdown_chars_per_token` | 0 (use provider default) | http, server, location | Fixed-point ×10 |
+| `markdown_token_estimate` | off | http, server, location | on\|off; emits `X-Markdown-Tokens` (decimal integer token count) |
+
+`markdown_llm_provider` and `markdown_chars_per_token` were removed in
+0.9.2: token estimation uses a fixed deterministic heuristic with a
+built-in 4.0 chars/token default, no provider brands.  The matching FFI
+fields (`llm_provider`, `chars_per_token_fixed`) are retained temporarily
+for ABI stability until the final FFI freeze.
 
 ---
 
@@ -186,7 +196,7 @@ profile):
 - `metrics_*`, `otel_*` — observability plumbing
 - `prune_*` — content surgery, site-specific
 - `dynconf_*` — operational plumbing
-- `llm_provider`, `chars_per_token` — estimation tuning
+- `llm_provider`, `chars_per_token` — estimation tuning (directives removed in 0.9.2; FFI fields retained until 8.13 freeze)
 - `decompress.*`, `parse_timeout`, `parser_budget` — hard safety caps
 - `log_verbosity` — debugging
 
@@ -216,7 +226,7 @@ merge_conf(cf, parent, child):
   7. apply_memory_budget_override           — budget → max_size when not explicit
   8. Resolve decompress.max_size default    — inherits max_size if still unset
   9. Validate decompress.max_size ≠ 0 when auto_decompress
-  10. Validate streaming vs cache_validation conflicts (spec 49)
+  10. Validate streaming vs cache-validation conflicts
   11. Log merged configuration
 ```
 

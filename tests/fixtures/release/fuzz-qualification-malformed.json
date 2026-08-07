@@ -1,0 +1,1 @@
+{"schema_version": "release.fuzz-qualification.v1", "candidate_sha": "9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d", "per_target": [{"target": "parser_html", "seed": 12345, "elapsed_seconds_total": 950,

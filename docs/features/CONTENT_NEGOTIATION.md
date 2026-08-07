@@ -173,14 +173,17 @@ Not all requests are eligible for conversion. The module checks:
 - `image/png` → Not eligible
 
 ### Response Size
-- The module uses a streaming-default routing strategy:
-  - **Full-buffer engine**: Responses within `markdown_limits memory=<size>` are eligible for conversion.
-  - **Streaming engine**: Responses exceeding `markdown_stream_threshold` are routed to the streaming converter, which processes chunks incrementally and is bounded by streaming memory budgets rather than `markdown_limits memory=<size>`.
+- The module uses the selected `markdown_streaming off|auto|force` mode:
+  - **Full-buffer engine**: Responses within `markdown_limits conversion_memory=<size>` are eligible for conversion.
+  - **Streaming engine**: `auto` uses the internal bounded routing heuristic;
+    `force` selects streaming where the request is otherwise eligible. The
+    working buffer is bounded by `markdown_limits streaming_buffer=<size>`.
 - Responses that exceed all applicable limits → Not eligible (passthrough)
 
 ### Other Conditions
 - Range requests → Not eligible (bypass)
-- Chunked responses with streaming types → May be bypassed (see `markdown_stream_types`)
+- Chunked responses with excluded content types → May be bypassed (see
+  `markdown_stream_excluded_types`)
 
 ## Testing Content Negotiation
 
@@ -347,7 +350,7 @@ Check:
 1. `markdown_filter on` is set
 2. Client sends `Accept: text/markdown`
 3. Response is `200 OK` with `Content-Type: text/html`
-4. Response size is within `markdown_limits memory=<size>`
+4. Response size is within `markdown_limits conversion_memory=<size>`
 
 Debug with verbose curl:
 ```bash

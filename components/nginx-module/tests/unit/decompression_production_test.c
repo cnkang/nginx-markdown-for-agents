@@ -47,8 +47,20 @@ typedef struct {
     unsigned   hash;
 } ngx_table_elt_t;
 
+typedef struct ngx_list_part_s ngx_list_part_t;
+struct ngx_list_part_s {
+    ngx_table_elt_t  *elts;
+    ngx_uint_t        nelts;
+    ngx_list_part_t  *next;
+};
+
+typedef struct {
+    ngx_list_part_t  part;
+} ngx_list_t;
+
 typedef struct {
     ngx_table_elt_t  *content_encoding;
+    ngx_list_t        headers;
 } ngx_http_headers_out_t;
 
 struct ngx_log_s {
@@ -198,6 +210,26 @@ ngx_pfree(ngx_pool_t *pool, void *p)
 
 #include "../../src/ngx_http_markdown_decompression.c"
 
+/* The production unit links the C decompression implementation without the
+ * Rust static library.  Keep the FFI seam deterministic for the malformed
+ * empty-header regression exercised below. */
+uint8_t
+markdown_parse_encoding_chain(const uint8_t *value, size_t value_len,
+    FFIEncodingChainResult *result)
+{
+    if (result == NULL) {
+        return ENCODING_CHAIN_MALFORMED;
+    }
+    memset(result, 0, sizeof(*result));
+    if (value == NULL && value_len != 0) {
+        return DECOMP_CATEGORY_INVALID_ARGS;
+    }
+    if (value_len == 0) {
+        return ENCODING_CHAIN_MALFORMED;
+    }
+    return ENCODING_CHAIN_MALFORMED;
+}
+
 static ngx_log_t               g_log;
 static ngx_pool_t              g_pool;
 static ngx_connection_t        g_conn = { &g_log };
@@ -231,12 +263,39 @@ set_encoding(ngx_http_request_t *r, const char *value)
 
     if (value == NULL) {
         r->headers_out.content_encoding = NULL;
+        r->headers_out.headers.part.elts = NULL;
+        r->headers_out.headers.part.nelts = 0;
+        r->headers_out.headers.part.next = NULL;
         return;
     }
 
+    h.key.data = (u_char *) "Content-Encoding";
+    h.key.len = sizeof("Content-Encoding") - 1;
+    h.hash = 1;
     h.value.data = (u_char *) value;
     h.value.len = strlen(value);
     r->headers_out.content_encoding = &h;
+    r->headers_out.headers.part.elts = &h;
+    r->headers_out.headers.part.nelts = 1;
+    r->headers_out.headers.part.next = NULL;
+}
+
+static void
+set_encoding_headers(ngx_http_request_t *r, ngx_table_elt_t *headers,
+    ngx_uint_t count)
+{
+    ngx_uint_t i;
+
+    for (i = 0; i < count; i++) {
+        headers[i].key.data = (u_char *) "Content-Encoding";
+        headers[i].key.len = sizeof("Content-Encoding") - 1;
+        headers[i].hash = 1;
+    }
+
+    r->headers_out.content_encoding = count > 0 ? &headers[0] : NULL;
+    r->headers_out.headers.part.elts = headers;
+    r->headers_out.headers.part.nelts = count;
+    r->headers_out.headers.part.next = NULL;
 }
 
 static ngx_chain_t
@@ -456,6 +515,245 @@ test_detect_compression_variants(void)
     TEST_ASSERT(ngx_http_markdown_detect_compression(&r)
                 == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN,
                 "unknown encoding should be classified");
+}
+
+static void
+test_collect_content_encoding_repeated_fields(void)
+{
+    ngx_http_request_t  r;
+    ngx_table_elt_t     headers[2];
+    ngx_str_t           combined;
+    ngx_int_t           rc;
+
+    init_request(&r);
+    memset(headers, 0, sizeof(headers));
+    headers[0].value.data = (u_char *) "gzip";
+    headers[0].value.len = sizeof("gzip") - 1;
+    headers[1].value.data = (u_char *) "br";
+    headers[1].value.len = sizeof("br") - 1;
+    set_encoding_headers(&r, headers, 2);
+
+    rc = ngx_http_markdown_collect_content_encoding(&r, &combined);
+    TEST_ASSERT(rc == NGX_OK, "repeated Content-Encoding fields should collect");
+    TEST_ASSERT(combined.len == sizeof("gzip, br") - 1
+                && memcmp(combined.data, "gzip, br", combined.len) == 0,
+                "repeated Content-Encoding fields must retain wire order");
+    free(combined.data);
+
+    memset(headers, 0, sizeof(headers));
+    headers[0].value.data = NULL;
+    headers[0].value.len = 0;
+    set_encoding_headers(&r, headers, 1);
+    rc = ngx_http_markdown_collect_content_encoding(&r, &combined);
+    TEST_ASSERT(rc == NGX_OK && combined.data == NULL && combined.len == 0,
+                "an active empty Content-Encoding field must remain present");
+
+    {
+        ngx_http_markdown_ctx_t ctx;
+
+        memset(&ctx, 0, sizeof(ctx));
+        TEST_ASSERT(ngx_http_markdown_parse_encoding_chain_ffi(
+                    &r, &ctx, &combined) == ENCODING_CHAIN_MALFORMED,
+                    "an active empty Content-Encoding field must be malformed");
+    }
+
+    TEST_PASS("repeated Content-Encoding fields are collected");
+}
+
+static void
+test_collect_content_encoding_allocation_failure(void)
+{
+    ngx_http_request_t  r;
+    ngx_table_elt_t     headers[2];
+    ngx_str_t           combined;
+    ngx_int_t           rc;
+
+    init_request(&r);
+    memset(headers, 0, sizeof(headers));
+    headers[0].value.data = (u_char *) "gzip";
+    headers[0].value.len = sizeof("gzip") - 1;
+    headers[1].value.data = (u_char *) "br";
+    headers[1].value.len = sizeof("br") - 1;
+    set_encoding_headers(&r, headers, 2);
+
+    g_pnalloc_fail_count = 1;
+    rc = ngx_http_markdown_collect_content_encoding(&r, &combined);
+    TEST_ASSERT(rc == NGX_ERROR,
+                "combined Content-Encoding allocation failure must be fatal");
+    TEST_ASSERT(combined.data == NULL && combined.len == 0,
+                "failed Content-Encoding collection must clear its output");
+
+    TEST_PASS("Content-Encoding allocation failures are reported");
+}
+
+/*
+ * Regression: Content-Encoding collection failure must mark the request
+ * ineligible and record the error category BEFORE any error-policy
+ * dispatch.
+ *
+ * Production: ngx_http_markdown_handle_encoding_collection_failure() in
+ * ngx_http_markdown_request_impl.h.  request_impl.h has NGINX-internal
+ * dependencies unavailable to the unit harness (see effective_conf_test.c),
+ * so this test drives the REAL collector boundary and models the handler
+ * dispatch with the same state-first ordering.  Keep this model in sync
+ * with request_impl.h; any change to the handler ordering must update it.
+ *
+ * The bug: the fail-open branch dispatched the downstream header filter
+ * without clearing ctx->eligible and without recording the error category.
+ * The body filter then fed the still-compressed body to the Markdown
+ * converter under the intact Content-Encoding header and incremented
+ * conversions_attempted a second time.  With the fixed state the body
+ * filter takes the passthrough branch and skips conversion work.
+ */
+static ngx_int_t
+model_encoding_collection_failure_dispatch(ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf, ngx_int_t downstream_result,
+    unsigned int *downstream_invocations, unsigned int *failopen_delivery)
+{
+    /* Mirrors request_impl.h: state first, then policy dispatch. */
+    ctx->eligible = 0;
+    ctx->headers_forwarded = 1;
+    ctx->error.last_category = NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
+    ctx->error.has_category = 1;
+
+    if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
+        return (ngx_int_t) conf->error_status;
+    }
+
+    (*downstream_invocations)++;
+    /* Rule 38: failopen is a delivery counter, incremented only after
+     * the downstream filter confirms delivery (NGX_OK or NGX_DONE). */
+    if (downstream_result == NGX_OK || downstream_result == NGX_DONE) {
+        (*failopen_delivery)++;
+    }
+    return downstream_result;
+}
+
+static void
+model_body_filter_decision(ngx_http_markdown_ctx_t *ctx,
+    unsigned int *conversions_attempted, unsigned int *conversions_bypassed)
+{
+    /* Mirrors request_impl.h body filter: ineligible requests take the
+     * passthrough branch; bypass is counted only when no error category
+     * was already recorded. */
+    if (!ctx->eligible) {
+        if (!ctx->conversion.bypass_counted && !ctx->error.has_category) {
+            (*conversions_bypassed)++;
+            ctx->conversion.bypass_counted = 1;
+        }
+        return;
+    }
+
+    ctx->conversion.attempted = 1;
+    (*conversions_attempted)++;
+}
+
+static void
+test_collection_failure_handler_dispatch(void)
+{
+    ngx_http_request_t  r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_table_elt_t  headers[2];
+    ngx_str_t  combined;
+    ngx_int_t  rc;
+    unsigned int  downstream_invocations;
+    unsigned int  failopen_delivery;
+    unsigned int  conversions_attempted;
+    unsigned int  conversions_bypassed;
+
+    TEST_SUBSECTION("Content-Encoding collection failure dispatch");
+
+    /* Real collector boundary: repeated fields plus forced pool failure. */
+    init_request(&r);
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.eligible = 1;
+    memset(headers, 0, sizeof(headers));
+    headers[0].value.data = (u_char *) "gzip";
+    headers[0].value.len = sizeof("gzip") - 1;
+    headers[1].value.data = (u_char *) "br";
+    headers[1].value.len = sizeof("br") - 1;
+    set_encoding_headers(&r, headers, 2);
+
+    g_pnalloc_fail_count = 1;
+    rc = ngx_http_markdown_collect_content_encoding(&r, &combined);
+    TEST_ASSERT(rc == NGX_ERROR,
+                "collection must fail on allocation failure");
+
+    /* Fail-open policy: state set before downstream dispatch. */
+    conf = g_conf;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.error_status = 502;
+    downstream_invocations = 0;
+    failopen_delivery = 0;
+    conversions_attempted = 0;
+    conversions_bypassed = 0;
+
+    rc = model_encoding_collection_failure_dispatch(&ctx, &conf, NGX_OK,
+        &downstream_invocations, &failopen_delivery);
+    TEST_ASSERT(rc == NGX_OK,
+                "fail-open dispatch should return the downstream result");
+    TEST_ASSERT(!ctx.eligible,
+                "fail-open must clear eligible before dispatch");
+    TEST_ASSERT(ctx.headers_forwarded,
+                "fail-open must mark headers as forwarded");
+    TEST_ASSERT(ctx.error.has_category,
+                "fail-open must record an error category");
+    TEST_ASSERT(ctx.error.last_category
+                    == NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
+                "fail-open must record the system category");
+    TEST_ASSERT(downstream_invocations == 1,
+                "fail-open must invoke downstream exactly once");
+    TEST_ASSERT(failopen_delivery == 1,
+                "failopen delivery counted only after downstream NGX_OK");
+
+    model_body_filter_decision(&ctx, &conversions_attempted,
+        &conversions_bypassed);
+    TEST_ASSERT(conversions_attempted == 0 && !ctx.conversion.attempted,
+                "body filter must not attempt conversion after failure");
+    TEST_ASSERT(conversions_bypassed == 0,
+                "recorded error category must suppress bypass counting");
+
+    /* Downstream NGX_AGAIN must not count as delivery (Rule 38). */
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.eligible = 1;
+    downstream_invocations = 0;
+    failopen_delivery = 0;
+    rc = model_encoding_collection_failure_dispatch(&ctx, &conf, NGX_AGAIN,
+        &downstream_invocations, &failopen_delivery);
+    TEST_ASSERT(rc == NGX_AGAIN,
+                "downstream NGX_AGAIN must be propagated");
+    TEST_ASSERT(downstream_invocations == 1,
+                "downstream invoked once on NGX_AGAIN");
+    TEST_ASSERT(failopen_delivery == 0,
+                "NGX_AGAIN must not count as fail-open delivery");
+
+    /* Fail-closed policy: state set, no downstream dispatch. */
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.eligible = 1;
+    downstream_invocations = 0;
+    failopen_delivery = 0;
+    conversions_attempted = 0;
+    conversions_bypassed = 0;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    rc = model_encoding_collection_failure_dispatch(&ctx, &conf, NGX_OK,
+        &downstream_invocations, &failopen_delivery);
+    TEST_ASSERT(rc == (ngx_int_t) 502,
+                "fail-closed must return the configured error status");
+    TEST_ASSERT(!ctx.eligible && ctx.headers_forwarded
+                && ctx.error.has_category,
+                "fail-closed must record ineligible and error state");
+    TEST_ASSERT(downstream_invocations == 0,
+                "fail-closed must not invoke downstream");
+    TEST_ASSERT(failopen_delivery == 0,
+                "fail-closed must not count a fail-open delivery");
+
+    model_body_filter_decision(&ctx, &conversions_attempted,
+        &conversions_bypassed);
+    TEST_ASSERT(conversions_attempted == 0,
+                "fail-closed leaves no conversion work for the body filter");
+
+    TEST_PASS("collection failure handler dispatch covered");
 }
 
 static void
@@ -1502,6 +1800,9 @@ main(void)
     test_chain_size_invalid_reversed_buffers();
     test_calc_output_size_boundaries();
     test_detect_compression_variants();
+    test_collect_content_encoding_repeated_fields();
+    test_collect_content_encoding_allocation_failure();
+    test_collection_failure_handler_dispatch();
     test_dispatch_non_decompressing_cases();
     test_gzip_success();
     test_gzip_concatenated_members();

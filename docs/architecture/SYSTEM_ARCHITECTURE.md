@@ -117,6 +117,19 @@ That keeps the contract easier to reason about:
 
 This reduces coupling and makes it easier to test each side independently.
 
+### FFI Classification: INTERNAL_ONLY
+
+The FFI boundary is classified as `INTERNAL_ONLY`. Rust/C struct layouts,
+function signatures, and numeric constants may change between any two versions
+without notice. The Rust static library and NGINX module are released as one
+product; this project does not publish the generated header as a third-party
+SDK or promise ABI compatibility to external callers.
+
+A 4-tuple ABI handshake executes during module preconfiguration, before any
+business FFI call: `(numeric_abi_version, generated_header_hash,
+exported_symbol_set_hash, abi_layout_fingerprint)`. On any mismatch, NGINX
+logs each independent failure and refuses to start (`NGX_ERROR`).
+
 ## Request Flow
 
 For an eligible Markdown request, the runtime flow is:
@@ -297,9 +310,14 @@ denied by default.
 `markdown_dynconf_dry_run on` validates a new configuration file on HUP
 without replacing the active snapshot. Validation results include line
 numbers, field names, and error reasons. On successful reload, the
-previous active snapshot is preserved as last-known-good (LKG). Manual
-rollback restores `active_snapshot` from LKG. `applied_mtime` updates
-only after successful application (Rule 35).
+previous active snapshot is preserved as last-known-good (LKG) for diagnostics
+and failed-reload protection. There is no worker-local runtime restore API;
+operators restore a prior valid file atomically and let the normal watcher
+validate and apply it. Atomic rename prevents partial-file reads, but each
+worker has its own watcher cycle and may briefly expose a different
+`config_version`; diagnostics or request behavior verifies convergence. A
+controlled NGINX reload is the strong synchronization boundary.
+`applied_mtime` updates only after successful application (Rule 35).
 
 ### Reason Code FFI Accessor (`reason_code.rs` + FFI)
 Reason codes are defined as a Rust enum (single source of truth). C

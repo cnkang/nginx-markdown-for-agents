@@ -363,11 +363,6 @@ static uint32_t g_streaming_finalize_rc = ERROR_SUCCESS;
 static struct MarkdownResult g_streaming_finalize_result;
 static ngx_uint_t g_info_log_count = 0;
 static const char *g_last_info_log_fmt = NULL;
-static ngx_uint_t g_otel_span_start_calls = 0;
-static ngx_uint_t g_otel_str_attr_count = 0;
-static ngx_uint_t g_otel_uri_attr_seen = 0;
-static ngx_uint_t g_otel_uri_route_seen = 0;
-static ngx_uint_t g_otel_full_uri_seen = 0;
 
 /*
  * Production globals that must be defined for the streaming impl header to
@@ -397,6 +392,107 @@ ngx_module_t ngx_http_markdown_filter_module = { 0 };
 
 #define NGX_HTTP_MARKDOWN_METRIC_INC(field)                                          \
     NGX_HTTP_MARKDOWN_METRIC_ADD(field, 1)
+
+static void
+ngx_http_markdown_record_decompression_success_metrics(
+    const ngx_http_markdown_ctx_t *ctx)
+{
+    if (ctx == NULL) {
+        return;
+    }
+
+    NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.succeeded);
+    switch (ctx->decompression.type) {
+    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.gzip);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.deflate);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.brotli);
+        break;
+    default:
+        break;
+    }
+}
+
+static void
+ngx_http_markdown_record_decompression_failure_budget(
+    ngx_http_markdown_compression_type_e type)
+{
+    switch (type) {
+    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.gzip_failures.budget);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.deflate_failures.budget);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.brotli_failures.budget);
+        break;
+    default:
+        break;
+    }
+}
+
+static void
+ngx_http_markdown_record_decompression_failure_format(
+    ngx_http_markdown_compression_type_e type)
+{
+    switch (type) {
+    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.gzip_failures.format);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.deflate_failures.format);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.brotli_failures.format);
+        break;
+    default:
+        break;
+    }
+}
+
+static void
+ngx_http_markdown_record_decompression_failure_truncated(
+    ngx_http_markdown_compression_type_e type)
+{
+    switch (type) {
+    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.gzip_failures.truncated);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            decompressions.deflate_failures.truncated);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.brotli_failures.truncated);
+        break;
+    default:
+        break;
+    }
+}
+
+static void
+ngx_http_markdown_record_decompression_failure_io(
+    ngx_http_markdown_compression_type_e type)
+{
+    switch (type) {
+    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.gzip_failures.io);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.deflate_failures.io);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.brotli_failures.io);
+        break;
+    default:
+        break;
+    }
+}
 
 #define NGX_HTTP_MARKDOWN_METRIC_WATERMARK(field, value)                             \
     do {                                                                             \
@@ -1088,8 +1184,30 @@ ngx_int_t
 ngx_http_markdown_stream_type_excluded(const ngx_str_t *content_type,
     const ngx_http_markdown_conf_t *conf)
 {
-    UNUSED(content_type);
-    UNUSED(conf);
+    const ngx_str_t  *entry;
+    ngx_uint_t        i;
+
+    if (content_type == NULL || content_type->len == 0
+        || content_type->data == NULL)
+    {
+        return 0;
+    }
+
+    if (conf == NULL || conf->stream.excluded_types == NULL) {
+        return 0;
+    }
+
+    entry = conf->stream.excluded_types->elts;
+    for (i = 0; i < conf->stream.excluded_types->nelts; i++) {
+        if (content_type->len == entry[i].len
+            && ngx_strncasecmp(content_type->data,
+                               entry[i].data,
+                               entry[i].len) == 0)
+        {
+            return 1;
+        }
+    }
+
     return 0;
 }
 
@@ -1222,70 +1340,6 @@ ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
 #define ngx_atomic_fetch_add(p, v)  (*(p) += (v), *(p))
 #endif
 
-static ngx_inline ngx_http_markdown_otel_span_t *
-ngx_http_markdown_otel_span_start(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf)
-{
-    static ngx_http_markdown_otel_span_t span;
-
-    (void) r;
-    if (conf == NULL || conf->ops.otel_enabled == 0) {
-        return NULL;
-    }
-
-    ngx_memzero(&span, sizeof(span));
-    g_otel_span_start_calls++;
-    return &span;
-}
-
-static ngx_inline void
-ngx_http_markdown_otel_set_str_attr(ngx_http_markdown_otel_span_t *span,
-    const u_char *key, size_t key_len,
-    const u_char *val, size_t val_len)
-{
-    (void) span;
-
-    g_otel_str_attr_count++;
-    if (key_len == 3 && ngx_memcmp(key, "uri", 3) == 0) {
-        g_otel_uri_attr_seen = 1;
-    }
-    if (key_len == 9 && ngx_memcmp(key, "uri_route", 9) == 0) {
-        g_otel_uri_route_seen = 1;
-    }
-    if (val_len == sizeof("/private/customer/12345?token=secret") - 1
-        && ngx_memcmp(val, "/private/customer/12345?token=secret",
-                      val_len) == 0)
-    {
-        g_otel_full_uri_seen = 1;
-    }
-}
-
-static ngx_inline void
-ngx_http_markdown_otel_set_int_attr(ngx_http_markdown_otel_span_t *span,
-    const u_char *key, size_t key_len,
-    int64_t val)
-{
-    (void) span;
-    (void) key;
-    (void) key_len;
-    (void) val;
-}
-
-static ngx_inline void
-ngx_http_markdown_otel_span_end(ngx_http_markdown_otel_span_t *span)
-{
-    (void) span;
-}
-
-static ngx_inline void
-ngx_http_markdown_otel_span_export(ngx_http_markdown_otel_span_t *span,
-    ngx_log_t *log, ngx_http_request_t *r)
-{
-    (void) span;
-    (void) log;
-    (void) r;
-}
-
 static ngx_inline void
 ngx_http_markdown_record_per_path_metrics(
     ngx_http_request_t *r,
@@ -1404,11 +1458,6 @@ reset_globals(void)
         sizeof(g_streaming_finalize_result));
     g_info_log_count = 0;
     g_last_info_log_fmt = NULL;
-    g_otel_span_start_calls = 0;
-    g_otel_str_attr_count = 0;
-    g_otel_uri_attr_seen = 0;
-    g_otel_uri_route_seen = 0;
-    g_otel_full_uri_seen = 0;
     /*
      * Tests frequently bind ngx_http_markdown_metrics to stack-local
      * storage; always clear it here so later tests cannot read a stale
@@ -1488,7 +1537,7 @@ init_request_ctx_conf(ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
 
     ctx->request = r;
     ctx->processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
-    conf->stream.precommit_buffer = 256 * 1024;
+    conf->limits.streaming_buffer = 256 * 1024;
 }
 
 /*
@@ -1616,7 +1665,6 @@ test_cleanup_does_not_free_shared_temporary_buffer(void)
  * - SSE content-type routes to full-buffer
  * - excluded stream_types prefix routes to full-buffer
  * - policy=force with no exclusions routes to streaming
- * - non-matching stream_types keeps streaming enabled
  * - NULL content-type data does not trigger exclusions
  * - if_modified_since_only conditional mode keeps streaming
  * - auto with small content-length routes to full-buffer
@@ -1642,7 +1690,6 @@ test_select_processing_path(void)
     init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
 
     conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
-    conf.stream.threshold = 1024;
     conf.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
     conf.routing.large_body_threshold = 1024;
     r.headers_out.content_type = (ngx_str_t) { 9, (u_char *) "text/html" };
@@ -1686,15 +1733,15 @@ test_select_processing_path(void)
         "SSE should preserve excluded_content_type reason");
 
     r.headers_out.content_type = (ngx_str_t) { 9, (u_char *) "text/html" };
-    excluded[0] = (ngx_str_t) { 4, (u_char *) "text" };
+    excluded[0] = (ngx_str_t) { 9, (u_char *) "text/html" };
     arr.elts = excluded;
     arr.nelts = 1;
-    conf.routing.stream_types = &arr;
+    conf.stream.excluded_types = &arr;
     selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
     TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
         "excluded stream_types should route full-buffer");
 
-    conf.routing.stream_types = NULL;
+    conf.stream.excluded_types = NULL;
     conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
     selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
     TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
@@ -1705,21 +1752,12 @@ test_select_processing_path(void)
     /* Switch back to auto for remaining tests */
     conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
 
-    excluded[0] = (ngx_str_t) { 11, (u_char *) "application" };
-    arr.elts = excluded;
-    arr.nelts = 1;
-    conf.routing.stream_types = &arr;
-    r.headers_out.content_type = (ngx_str_t) { 9, (u_char *) "text/html" };
-    selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
-    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
-        "non-matching stream_types should keep streaming enabled");
-
+    r.headers_out.content_length_n = -1;
     r.headers_out.content_type = (ngx_str_t) { 0, NULL };
     selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
     TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
         "NULL content-type data should not trigger exclusions");
 
-    conf.routing.stream_types = NULL;
     r.headers_out.content_type = (ngx_str_t) { 9, (u_char *) "text/html" };
     conf.policy.conditional_requests =
         NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE;
@@ -1741,8 +1779,7 @@ test_select_processing_path(void)
     TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
         "auto without content-length should route streaming");
 
-    r.headers_out.content_length_n = 2048;
-    conf.stream.threshold = 1024;
+    r.headers_out.content_length_n = 1048576;
     selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
     TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
         "auto with large CL should route streaming");
@@ -2538,26 +2575,6 @@ test_init_handle_and_chunk_result_helpers(void)
         "init_handle should mark conversion attempted");
 
     ctx.streaming.handle = NULL;
-    ctx.streaming.prebuffer_initialized = 0;
-    ctx.streaming.failopen_replay_initialized = 0;
-    ctx.conversion.attempted = 0;
-    conf.ops.otel_enabled = 1;
-    r.uri.data = (u_char *) "/private/customer/12345?token=secret";
-    r.uri.len = sizeof("/private/customer/12345?token=secret") - 1;
-    rc = ngx_http_markdown_streaming_init_handle(&r, &ctx, &conf);
-    TEST_ASSERT(rc == NGX_OK,
-        "init_handle should succeed when OTel is enabled");
-    TEST_ASSERT(g_otel_span_start_calls == 1,
-        "OTel enabled should start a span");
-    TEST_ASSERT(g_otel_uri_route_seen == 1,
-        "OTel enabled should emit the redacted URI route label");
-    TEST_ASSERT(g_otel_uri_attr_seen == 0,
-        "OTel enabled should not emit a full URI attribute");
-    TEST_ASSERT(g_otel_full_uri_seen == 0,
-        "OTel enabled should not copy the full request URI");
-    conf.ops.otel_enabled = 0;
-
-    ctx.streaming.handle = NULL;
     g_prepare_options_rc = NGX_ERROR;
     rc = ngx_http_markdown_streaming_init_handle(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_DECLINED,
@@ -2947,8 +2964,8 @@ test_commit_feed_and_finalize_core_paths(void)
  *
  * When FFI feed succeeds (ERROR_SUCCESS) and commit_state == POST,
  * but C-side output construction fails (ngx_calloc_buf, ngx_palloc,
- * ngx_alloc_chain_link, or zero-copy factory failure), the failure
- * must enter the unified post-commit failure lifecycle:
+ * or ngx_alloc_chain_link), the failure must enter the unified
+ * post-commit failure lifecycle:
  *   - input_disposition = TERMINAL
  *   - postcommit_error_total += 1
  *   - streaming.failed_total += 1
@@ -2961,13 +2978,9 @@ test_commit_feed_and_finalize_core_paths(void)
  *   A: pool-copy ngx_calloc_buf failure
  *   B: pool-copy ngx_palloc (data) failure
  *   C: pool-copy ngx_alloc_chain_link failure
- *   D: zero-copy factory failure before ownership transfer + fallback fail
- *   E: zero-copy factory failure after ownership transfer
- *   F: zero-copy factory succeeds, chain-link allocation fails
  *
  * Covers: ngx_http_markdown_streaming_handle_success_output,
- *         ngx_http_markdown_streaming_send_feed_output,
- *         ngx_http_markdown_streaming_send_zero_copy_feed_output
+ *         ngx_http_markdown_streaming_send_feed_output
  */
 static void
 test_postcommit_output_construction_failures(void)
@@ -2995,7 +3008,6 @@ test_postcommit_output_construction_failures(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x30;
-    conf.stream.zero_copy = 0;
     g_next_body_filter_rc = NGX_OK;
     g_calloc_buf_fail_once = 1;
     free_before = g_output_free_calls;
@@ -3030,7 +3042,6 @@ test_postcommit_output_construction_failures(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x31;
-    conf.stream.zero_copy = 0;
     g_next_body_filter_rc = NGX_OK;
     /*
      * ngx_calloc_buf succeeds but the subsequent ngx_palloc for data
@@ -3068,7 +3079,6 @@ test_postcommit_output_construction_failures(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x32;
-    conf.stream.zero_copy = 0;
     g_next_body_filter_rc = NGX_OK;
     g_alloc_chain_fail_once = 1;
     free_before = g_output_free_calls;
@@ -3091,110 +3101,6 @@ test_postcommit_output_construction_failures(void)
         "case C: conversions_failed must be 1");
     TEST_ASSERT(g_output_free_calls == free_before + 1,
         "case C: Rust buffer must be freed exactly once");
-
-    /* --- Case D: zero-copy factory fail before ownership + fallback fail --- */
-    reset_globals();
-    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
-    ngx_memzero(&metrics, sizeof(metrics));
-    ngx_http_markdown_metrics = &metrics;
-
-    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
-    ctx.streaming.handle = (struct StreamingConverterHandle *)
-        (uintptr_t) 0x33;
-    conf.stream.zero_copy = 1;
-    g_next_body_filter_rc = NGX_OK;
-    g_calloc_buf_fail_once = 1;
-    g_palloc_fail_once = 1;
-    free_before = g_output_free_calls;
-
-    rc = ngx_http_markdown_streaming_handle_feed_result(
-        &r, &ctx, &conf, ERROR_SUCCESS, out_data, 5);
-
-    TEST_ASSERT(rc == NGX_ERROR,
-        "case D: output-loss must return NGX_ERROR");
-    TEST_ASSERT(ctx.streaming.classify.input_disposition
-        == NGX_HTTP_MD_INPUT_TERMINAL,
-        "case D: input_disposition must be TERMINAL");
-    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
-        "case D: failure_recorded must be 1");
-    TEST_ASSERT(metrics.streaming.postcommit_error_total == 1,
-        "case D: postcommit_error_total must be 1");
-    TEST_ASSERT(metrics.conversions_failed == 1,
-        "case D: conversions_failed must be 1");
-    TEST_ASSERT(g_output_free_calls == free_before + 1,
-        "case D: Rust buffer freed exactly once (by fallback path)");
-
-    /* --- Case E: zero-copy factory fail after ownership transfer --- */
-    reset_globals();
-    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
-    ngx_memzero(&metrics, sizeof(metrics));
-    ngx_http_markdown_metrics = &metrics;
-    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
-    ctx.streaming.handle = (struct StreamingConverterHandle *)
-        (uintptr_t) 0x34;
-    conf.stream.zero_copy = 1;
-    g_next_body_filter_rc = NGX_OK;
-    /*
-     * Simulate factory failure after ownership transfer:
-     * ngx_calloc_buf succeeds but ngx_pool_cleanup_add fails.
-     * The factory frees the Rust buffer itself and sets
-     * owner_transferred = 1, returning NULL.
-     * No pool-copy fallback is attempted.
-     */
-    g_pool_cleanup_fail_once = 1;
-    free_before = g_output_free_calls;
-
-    rc = ngx_http_markdown_streaming_handle_feed_result(
-        &r, &ctx, &conf, ERROR_SUCCESS, out_data, 5);
-
-    TEST_ASSERT(rc == NGX_ERROR,
-        "case E: output-loss must return NGX_ERROR");
-    TEST_ASSERT(ctx.streaming.classify.input_disposition
-        == NGX_HTTP_MD_INPUT_TERMINAL,
-        "case E: input_disposition must be TERMINAL");
-    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
-        "case E: failure_recorded must be 1");
-    TEST_ASSERT(metrics.streaming.postcommit_error_total == 1,
-        "case E: postcommit_error_total must be 1");
-    TEST_ASSERT(metrics.conversions_failed == 1,
-        "case E: conversions_failed must be 1");
-    TEST_ASSERT(g_output_free_calls == free_before + 1,
-        "case E: Rust buffer freed exactly once (by factory)");
-
-    /* --- Case F: zero-copy factory succeeds, chain-link fails --- */
-    reset_globals();
-    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
-    ngx_memzero(&metrics, sizeof(metrics));
-    ngx_http_markdown_metrics = &metrics;
-    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
-    ctx.streaming.handle = (struct StreamingConverterHandle *)
-        (uintptr_t) 0x35;
-    conf.stream.zero_copy = 1;
-    g_next_body_filter_rc = NGX_OK;
-    /*
-     * Zero-copy factory succeeds (cleanup registered, ownership
-     * transferred).  The subsequent ngx_alloc_chain_link fails.
-     * Ownership is with pool cleanup — no caller-side free.
-     */
-    g_alloc_chain_fail_once = 1;
-    free_before = g_output_free_calls;
-
-    rc = ngx_http_markdown_streaming_handle_feed_result(
-        &r, &ctx, &conf, ERROR_SUCCESS, out_data, 5);
-
-    TEST_ASSERT(rc == NGX_ERROR,
-        "case F: output-loss must return NGX_ERROR");
-    TEST_ASSERT(ctx.streaming.classify.input_disposition
-        == NGX_HTTP_MD_INPUT_TERMINAL,
-        "case F: input_disposition must be TERMINAL");
-    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
-        "case F: failure_recorded must be 1");
-    TEST_ASSERT(metrics.streaming.postcommit_error_total == 1,
-        "case F: postcommit_error_total must be 1");
-    TEST_ASSERT(metrics.conversions_failed == 1,
-        "case F: conversions_failed must be 1");
-    TEST_ASSERT(metrics.perf.zero_copy_output_total == 0,
-        "case F: no delivery metrics for undelivered chunk");
 
     TEST_PASS("post-commit output construction failure lifecycle covered");
 }
@@ -3234,7 +3140,6 @@ test_postcommit_ngx_done_is_delivery_success(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x50;
-    conf.stream.zero_copy = 0;
     g_next_body_filter_rc = NGX_DONE;
 
     rc = ngx_http_markdown_streaming_handle_feed_result(
@@ -3296,7 +3201,6 @@ test_postcommit_downstream_failure_classification(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x51;
-    conf.stream.zero_copy = 0;
     /* Downstream body filter returns definitive failure */
     g_next_body_filter_rc = NGX_ERROR;
     free_before = g_output_free_calls;
@@ -3383,7 +3287,6 @@ test_postcommit_output_loss_no_safe_finish(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x52;
-    conf.stream.zero_copy = 0;
     g_next_body_filter_rc = NGX_OK;
     /* Force allocation failure so the chunk is lost */
     g_calloc_buf_fail_once = 1;
@@ -3475,7 +3378,6 @@ test_postcommit_output_loss_body_filter_reentry_is_idempotent(void)
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x53;
-    conf.stream.zero_copy = 0;
     conf.max_size = 0;
 
     first_buf.pos = first_data;
@@ -3536,184 +3438,6 @@ test_postcommit_output_loss_body_filter_reentry_is_idempotent(void)
         "body-filter re-entry must not emit a terminal chain");
 
     TEST_PASS("output-loss production body-filter re-entry is idempotent");
-}
-
-/*
- * The normal selector avoids zero-copy while output is already pending, so
- * inject the conflict at the production ownership boundary: downstream
- * returns NGX_AGAIN, then the test stub publishes an existing pending anchor
- * immediately before save_pending().  This drives the real zero-copy sender,
- * save_pending guard, hard-abort path, and pool cleanup ownership.
- */
-static void
-test_zero_copy_pending_conflict_is_invariant_output_loss(void)
-{
-    ngx_http_request_t          r;
-    ngx_http_markdown_ctx_t     ctx;
-    ngx_http_markdown_conf_t    conf;
-    ngx_pool_t                  pool;
-    ngx_connection_t            conn;
-    ngx_log_t                   log;
-    ngx_event_t                 read_event;
-    ngx_http_markdown_metrics_t metrics;
-    ngx_chain_t                 first;
-    ngx_chain_t                 retained;
-    ngx_chain_t                 reentry;
-    ngx_buf_t                   first_buf;
-    ngx_buf_t                   retained_buf;
-    ngx_buf_t                   reentry_buf;
-    u_char                      first_data[] = "first";
-    u_char                      output_data[] = "zero-copy";
-    u_char                      retained_data[] = "retained";
-    u_char                      reentry_data[] = "reentry";
-    ngx_int_t                   rc;
-
-    TEST_SUBSECTION("zero-copy pending conflict classification");
-    reset_globals();
-    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
-    ngx_memzero(&metrics, sizeof(metrics));
-    ngx_memzero(&first_buf, sizeof(first_buf));
-    ngx_memzero(&retained_buf, sizeof(retained_buf));
-    ngx_memzero(&reentry_buf, sizeof(reentry_buf));
-    ngx_http_markdown_metrics = &metrics;
-
-    ctx.eligible = 1;
-    ctx.headers_forwarded = 1;
-    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
-    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
-    ctx.streaming.handle = (struct StreamingConverterHandle *)
-        (uintptr_t) 0x54;
-    conf.stream.zero_copy = 1;
-    conf.max_size = 0;
-    g_next_body_filter_rc = NGX_AGAIN;
-    g_inject_pending_conflict_once = 1;
-
-    first_buf.pos = first_data;
-    first_buf.last = first_data + sizeof(first_data) - 1;
-    first.buf = &first_buf;
-    first.next = NULL;
-
-    retained_buf.pos = retained_data;
-    retained_buf.last = retained_data + sizeof(retained_data) - 1;
-    retained.buf = &retained_buf;
-    retained.next = NULL;
-    ctx.streaming.pending_input.head = &retained;
-    ctx.streaming.pending_input.tail = &retained;
-    ctx.streaming.pending_input.bytes = sizeof(retained_data) - 1;
-    ctx.streaming.pending_input.links = 1;
-
-    ctx.streaming.pending_meta.has_data = 1;
-    ctx.streaming.pending_meta.bytes = 17;
-    ctx.streaming.pending_meta.zero_copy = 1;
-    ctx.streaming.pending_meta.main_terminal = 1;
-    ctx.streaming.pending_meta.subrequest_terminal = 1;
-    ctx.streaming.completion.finalize_after_pending = 1;
-    ctx.streaming.completion.finalize_pending_lastbuf = 1;
-    ctx.streaming.completion.pending_terminal_metrics = 1;
-    ctx.streaming.completion.pending_failopen_delivery = 1;
-    ctx.streaming.completion.postcommit_error_after_pending = 1;
-    ctx.streaming.completion.postcommit_error_code = ERROR_INTERNAL;
-    ctx.streaming.completion.failopen_abort_after_pending = 1;
-    ctx.streaming.completion.failopen_abort_error_code = ERROR_INTERNAL;
-    ctx.streaming.completion.upstream_terminal_seen = 1;
-    r.buffered = NGX_HTTP_MARKDOWN_BUFFERED;
-
-    g_streaming_feed_rc = ERROR_SUCCESS;
-    g_streaming_feed_out_data = output_data;
-    g_streaming_feed_out_len = sizeof(output_data) - 1;
-
-    rc = ngx_http_markdown_streaming_body_filter(&r, &first);
-
-    TEST_ASSERT(rc == NGX_ERROR,
-        "zero-copy pending conflict must hard-abort");
-    TEST_ASSERT(ctx.streaming.classify.last_send_failure_origin
-        == NGX_HTTP_MD_SEND_ORIGIN_INVARIANT,
-        "zero-copy save_pending failure must be INVARIANT");
-    TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_POST_COMMIT_ABORT,
-        "zero-copy invariant must enter POST_COMMIT_ABORT");
-    TEST_ASSERT(ctx.streaming.classify.input_disposition
-        == NGX_HTTP_MD_INPUT_TERMINAL,
-        "zero-copy invariant must latch terminal input disposition");
-    TEST_ASSERT(ctx.streaming.handle == NULL && g_abort_calls == 1,
-        "zero-copy invariant must abort the Rust handle exactly once");
-    TEST_ASSERT(ctx.streaming.pending_output == NULL,
-        "fatal output loss must detach the pending output anchor");
-    TEST_ASSERT(ctx.streaming.pending_meta.has_data == 0
-        && ctx.streaming.pending_meta.bytes == 0
-        && ctx.streaming.pending_meta.zero_copy == 0
-        && ctx.streaming.pending_meta.main_terminal == 0
-        && ctx.streaming.pending_meta.subrequest_terminal == 0,
-        "fatal output loss must clear all pending output metadata");
-    TEST_ASSERT(ctx.streaming.pending_input.head == NULL
-        && ctx.streaming.pending_input.tail == NULL
-        && ctx.streaming.pending_input.bytes == 0
-        && ctx.streaming.pending_input.links == 0
-        && retained_buf.pos == retained_buf.last,
-        "fatal output loss must abandon and clear pending input");
-    TEST_ASSERT(ctx.streaming.completion.finalize_after_pending == 0
-        && ctx.streaming.completion.finalize_pending_lastbuf == 0
-        && ctx.streaming.completion.pending_terminal_metrics == 0
-        && ctx.streaming.completion.pending_failopen_delivery == 0
-        && ctx.streaming.completion.postcommit_error_after_pending == 0
-        && ctx.streaming.completion.postcommit_error_code == ERROR_SUCCESS
-        && ctx.streaming.completion.failopen_abort_after_pending == 0
-        && ctx.streaming.completion.failopen_abort_error_code == ERROR_SUCCESS
-        && ctx.streaming.completion.upstream_terminal_seen == 0,
-        "fatal output loss must clear every pending continuation latch");
-    TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0,
-        "fatal output loss must clear the module buffered bit");
-    TEST_ASSERT(ctx.streaming.reason
-        == NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_PARSE_ERROR,
-        "zero-copy invariant uses generic non-resource parse reason");
-    TEST_ASSERT(metrics.failures_conversion == 1
-        && metrics.failures_resource_limit == 0
-        && metrics.streaming.budget_exceeded_total == 0,
-        "zero-copy invariant must be conversion, not resource failure");
-    TEST_ASSERT(metrics.streaming.postcommit_error_total == 1
-        && metrics.streaming.failed_total == 1
-        && metrics.conversions_failed == 1
-        && metrics.streaming.streaming_failure_postcommit_abort == 0,
-        "zero-copy invariant failure metrics must be exactly once");
-    TEST_ASSERT(g_output_free_calls == 0,
-        "transferred zero-copy output must remain pool-cleanup owned");
-    TEST_ASSERT(pool.cleanups != NULL && pool.cleanups->handler != NULL,
-        "zero-copy output must register a pool cleanup");
-    TEST_ASSERT(g_next_body_filter_calls == 1
-        && g_safe_finish_calls == 0,
-        "zero-copy invariant must not send closing or terminal output");
-
-    rc = ngx_http_markdown_streaming_body_filter(&r, NULL);
-    TEST_ASSERT(rc == NGX_OK,
-        "NULL re-entry after hard abort must finish without resuming output");
-    TEST_ASSERT(g_next_body_filter_calls == 1
-        && metrics.perf.backpressure_resume_total == 0,
-        "NULL re-entry must not call downstream or record a resume");
-
-    reentry_buf.pos = reentry_data;
-    reentry_buf.last = reentry_data + sizeof(reentry_data) - 1;
-    reentry.buf = &reentry_buf;
-    reentry.next = NULL;
-
-    rc = ngx_http_markdown_streaming_body_filter(&r, &reentry);
-    TEST_ASSERT(rc == NGX_OK && reentry_buf.pos == reentry_buf.last,
-        "non-NULL re-entry must abandon input without NGX_AGAIN");
-    TEST_ASSERT(g_streaming_feed_calls == 1
-        && g_next_body_filter_calls == 1,
-        "non-NULL re-entry must not recreate Rust or call downstream");
-    TEST_ASSERT(metrics.streaming.postcommit_error_total == 1
-        && metrics.streaming.failed_total == 1
-        && metrics.conversions_failed == 1
-        && metrics.failures_conversion == 1
-        && metrics.failures_resource_limit == 0,
-        "re-entry must preserve exactly-once failure accounting");
-    TEST_ASSERT(g_abort_calls == 1 && g_safe_finish_calls == 0,
-        "re-entry must not repeat abort or send closing output");
-
-    pool.cleanups->handler(pool.cleanups->data);
-    TEST_ASSERT(g_output_free_calls == 1,
-        "pool cleanup must free transferred zero-copy output exactly once");
-
-    TEST_PASS("zero-copy pending conflict is invariant output loss");
 }
 
 /*
@@ -4021,7 +3745,6 @@ test_process_chain_and_body_filter_deep_paths(void)
     ctx.streaming.failopen_replay_initialized = 0;
     ctx.streaming.completion.finalize_after_pending = 0;
     ctx.failopen_completed = 0;
-    conf.stream.zero_copy = 0;
     in_buf.pos = chunk_data;
     in_buf.last = chunk_data + 5;
     in_buf.last_buf = 0;
@@ -4330,7 +4053,7 @@ test_streaming_gap_branches(void)
     in.buf = &in_buf;
     in.next = NULL;
     ctx.eligible = 1;
-    conf.stream.precommit_buffer = 0;
+    conf.limits.streaming_buffer = 0;
     g_prepare_options_rc = NGX_OK;
     g_new_with_code_rc = ERROR_SUCCESS;
     g_new_with_code_null_handle = 0;
@@ -6811,7 +6534,6 @@ main(void)
     test_postcommit_downstream_failure_classification();
     test_postcommit_output_loss_no_safe_finish();
     test_postcommit_output_loss_body_filter_reentry_is_idempotent();
-    test_zero_copy_pending_conflict_is_invariant_output_loss();
     test_output_loss_unknown_origin_is_internal_failure();
     test_process_chain_and_body_filter_deep_paths();
     test_streaming_gap_branches();

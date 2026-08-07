@@ -256,6 +256,8 @@ http {
     keepalive_timeout  5;
     gzip_http_version 1.0;
     markdown_trusted_proxies 127.0.0.1/32 ::1/128;
+    markdown_dynamic_config on;
+    markdown_dynamic_config_path ${RUNTIME}/conf/markdown-dynconf.conf;
 
     # ── Primary server: full feature set ────────────────────────────
     server {
@@ -274,13 +276,10 @@ http {
             markdown_filter on;
             markdown_accept wildcard;
             markdown_cache_validation full;
-            markdown_otel on;
             markdown_log_verbosity debug;
             markdown_token_estimate on;
             markdown_error_policy pass;
-            markdown_limits memory=1m timeout=5s;
-            markdown_dynamic_config on;
-            markdown_dynamic_config_path ${RUNTIME}/conf/markdown-dynconf.conf;
+            markdown_limits conversion_memory=1m parser_memory=1m streaming_buffer=64k conversion_timeout=5s parser_timeout=5s;
         }
 
         location /auth {
@@ -355,19 +354,19 @@ http {
 
         location /diagnostics {
             markdown_diagnostics on;
-            markdown_diagnostics_allow 127.0.0.1;
-            markdown_diagnostics_allow 127.0.0.1/24;
-            markdown_diagnostics_allow ::1;
+            allow 127.0.0.1;
+            allow ::1;
+            deny all;
         }
 
         location /diagnostics-forbidden {
             markdown_diagnostics on;
-            markdown_diagnostics_allow 10.0.0.0/8;
+            allow 10.0.0.0/8;
+            deny all;
         }
 
         location /metrics-prometheus {
             markdown_metrics;
-            markdown_metrics_format prometheus;
         }
 
         location /gfm {
@@ -385,18 +384,13 @@ http {
         location /small-limit {
             root html;
             markdown_filter on;
-            markdown_limits memory=100;
+            markdown_limits conversion_memory=64k parser_memory=64k streaming_buffer=64k;
         }
 
         location /log-error {
             root html;
             markdown_filter on;
             markdown_log_verbosity error;
-        }
-
-        location /metrics-auto {
-            markdown_metrics;
-            markdown_metrics_format auto;
         }
 
         # Proxy to compressed backend (exercises decompression path)
@@ -407,7 +401,7 @@ http {
             markdown_accept wildcard;
             markdown_log_verbosity debug;
             markdown_error_policy pass;
-            markdown_limits memory=1m;
+            markdown_limits conversion_memory=1m parser_memory=1m streaming_buffer=64k;
         }
 
         # Gzip under streaming-enabled location (incremental decompression)
@@ -420,7 +414,7 @@ http {
             markdown_cache_validation off;
             markdown_error_policy pass;
             markdown_log_verbosity debug;
-            markdown_limits memory=1m;
+            markdown_limits conversion_memory=1m parser_memory=1m streaming_buffer=64k;
         }
 
         # Streaming + gzip proxy + tiny budget + reject
@@ -431,7 +425,7 @@ http {
             markdown_accept wildcard;
             markdown_streaming force;
             markdown_cache_validation off;
-            markdown_limits streaming_buffer=1 memory=1m;
+            markdown_limits streaming_buffer=64k conversion_memory=1m parser_memory=1m;
             markdown_error_policy fail_closed;
             markdown_log_verbosity debug;
         }
@@ -547,7 +541,7 @@ http {
             markdown_filter on;
             markdown_streaming force;
             markdown_cache_validation off;
-            markdown_limits streaming_buffer=1;
+            markdown_limits streaming_buffer=64k conversion_memory=64k parser_memory=64k;
             markdown_log_verbosity debug;
             markdown_error_policy pass;
         }
@@ -557,7 +551,7 @@ http {
             markdown_filter on;
             markdown_streaming force;
             markdown_cache_validation off;
-            markdown_limits streaming_buffer=1;
+            markdown_limits streaming_buffer=64k conversion_memory=64k parser_memory=64k;
             markdown_error_policy fail_closed;
             markdown_log_verbosity debug;
         }
@@ -604,7 +598,7 @@ http {
             markdown_filter on;
             markdown_streaming force;
             markdown_cache_validation off;
-            markdown_limits streaming_buffer=10m memory=10m;
+            markdown_limits streaming_buffer=10m conversion_memory=10m parser_memory=10m;
             markdown_token_estimate on;
             markdown_log_verbosity debug;
             markdown_error_policy pass;
@@ -628,7 +622,7 @@ http {
             markdown_accept wildcard;
             markdown_streaming force;
             markdown_cache_validation off;
-            markdown_limits streaming_buffer=10m memory=10m;
+            markdown_limits streaming_buffer=10m conversion_memory=10m parser_memory=10m;
             markdown_error_policy pass;
             markdown_token_estimate on;
             markdown_log_verbosity debug;
@@ -816,11 +810,14 @@ cp "${RUNTIME}/html/streaming/table.html" "${RUNTIME}/html/streaming-large-budge
 cp "${RUNTIME}/html/streaming/table.html" "${RUNTIME}/html/streaming-on-error-reject/table.html"
 
 cat > "${RUNTIME}/conf/markdown-dynconf.conf" <<'EOF'
-markdown_filter=on
-prune_noise=on
-log_verbosity=debug
-streaming_budget=4k
-memory_budget=8m
+{
+  "schema_version": 1,
+  "filter": "on",
+  "prune_noise": "on",
+  "log_verbosity": "debug",
+  "error_policy": "pass",
+  "streaming_buffer": 65536
+}
 EOF
 
 echo "==> Starting NGINX on 127.0.0.1:${PORT}"
@@ -853,11 +850,14 @@ curl -sS -H "${ACCEPT_MARKDOWN}" \
 
 # Dynconf watcher/reload path.
 cat > "${RUNTIME}/conf/markdown-dynconf.conf" <<'EOF'
-markdown_filter=on
-prune_noise=off
-log_verbosity=info
-streaming_budget=2k
-memory_budget=4m
+{
+  "schema_version": 1,
+  "filter": "on",
+  "prune_noise": "off",
+  "log_verbosity": "info",
+  "error_policy": "pass",
+  "streaming_buffer": 131072
+}
 EOF
 sleep 2
 curl -sS -H "${ACCEPT_MARKDOWN}" "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  dynconf reload trigger: HTTP %{http_code}\n"
@@ -1205,16 +1205,10 @@ curl -sS -H "${ACCEPT_MARKDOWN}" \
 
 # ── Metrics scenarios (Req 5) — after conversion scenarios ──────────
 
-# Prometheus format
+# Frozen Prometheus text 0.0.4 endpoint
 curl -sS "http://127.0.0.1:${PORT}/metrics-prometheus" -o /dev/null -w "  metrics prometheus: HTTP %{http_code}\n"
 curl -sS -H 'Accept: text/plain; version=0.0.4' \
   "http://127.0.0.1:${PORT}/metrics-prometheus" -o /dev/null -w "  metrics prometheus accept-v0.0.4: HTTP %{http_code}\n"
-
-# Auto format (plain text)
-curl -sS -H 'Accept: text/plain' "http://127.0.0.1:${PORT}/metrics-auto" -o /dev/null -w "  metrics auto text: HTTP %{http_code}\n"
-
-# Auto format (JSON)
-curl -sS -H 'Accept: application/json' "http://127.0.0.1:${PORT}/metrics-auto" -o /dev/null -w "  metrics auto json: HTTP %{http_code}\n"
 
 # Default metrics endpoint
 curl -sS "http://127.0.0.1:${PORT}/metrics" -o /dev/null -w "  metrics default: HTTP %{http_code}\n"
@@ -1373,15 +1367,15 @@ curl -sS -H 'Accept: ' \
 
 # ── Extended Prometheus scenarios (coverage for ngx_http_markdown_prometheus_impl.h) ──
 
-# Prometheus: Accept text/plain; version=0.0.4 (explicit openmetrics)
+# Prometheus: explicit text 0.0.4 Accept
 curl -sS -H 'Accept: text/plain; version=0.0.4' \
   "http://127.0.0.1:${PORT}/metrics-prometheus" -o /dev/null -w "  prometheus openmetrics: HTTP %{http_code}\n"
 
-# Prometheus: Accept openmetrics-text (v1.0.0)
+# Prometheus: arbitrary Accept still returns the frozen format
 curl -sS -H 'Accept: application/openmetrics-text; version=1.0.0' \
-  "http://127.0.0.1:${PORT}/metrics-prometheus" -o /dev/null -w "  prometheus openmetrics-v1: HTTP %{http_code}\n"
+  "http://127.0.0.1:${PORT}/metrics-prometheus" -o /dev/null -w "  prometheus arbitrary-accept: HTTP %{http_code}\n"
 
-# Prometheus: no Accept header (default text/plain for prometheus format)
+# Prometheus: no Accept header
 curl -sS "http://127.0.0.1:${PORT}/metrics-prometheus" -o /dev/null -w "  prometheus no-accept: HTTP %{http_code}\n"
 
 # Prometheus: after streaming conversion (populates streaming metrics)
@@ -1391,7 +1385,7 @@ curl -sS -H "${ACCEPT_MARKDOWN}" \
   "http://127.0.0.1:${PORT}/streaming/large.html" -o /dev/null -w "  pre-streaming large: HTTP %{http_code}\n"
 curl -sS "http://127.0.0.1:${PORT}/metrics-prometheus" -o /dev/null -w "  prometheus after streaming: HTTP %{http_code}\n"
 
-# Prometheus: Accept application/json on prometheus endpoint (json override)
+# Prometheus: removed JSON Accept cannot select another wire format
 curl -sS -H 'Accept: application/json' \
   "http://127.0.0.1:${PORT}/metrics-prometheus" -o /dev/null -w "  prometheus json override: HTTP %{http_code}\n"
 
@@ -1538,15 +1532,15 @@ if ! env NGINX_BIN="${REUSE_NGINX_BIN}" RUN_1G_GET=0 \
 fi
 
 echo "==> Running huge-body allowed native e2e coverage (skip 1GB GET)"
-# --markdown-max-size 1536m allows bodies up to 1.5 GiB, while the explicit
-# 1 GiB parser budget keeps the independent parser limit above the 100 MiB
-# conversion fixture's estimated working set.
+# --markdown-max-size 1g reaches the frozen maximum body budget, while the
+# explicit 1 GiB parser budget keeps the independent parser limit above the
+# 100 MiB conversion fixture's estimated working set.
 if ! env NGINX_BIN="${REUSE_NGINX_BIN}" RUN_1G_GET=0 \
     MARKDOWN_PARSER_BUDGET=1024m \
     bash "${WORKSPACE_ROOT}/tools/e2e/verify_huge_body_allowed_native_e2e.sh" \
     --port 18293 \
     --skip-1g-get \
-    --markdown-max-size 1536m; then
+    --markdown-max-size 1g; then
     echo "  WARNING: huge-body allowed native e2e coverage run failed; continuing" >&2
 fi
 

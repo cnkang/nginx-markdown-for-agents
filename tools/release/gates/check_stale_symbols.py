@@ -36,6 +36,7 @@ STALE_FIELDS = {
 # Paths allowed to contain stale symbols (migration docs, changelogs, ADRs, and rollout guides)
 WHITELIST_PATH_PREFIXES = (
     "docs/guides/MIGRATION-",
+    "docs/guides/0.9.2-breaking-changes.md",
     "docs/guides/CONFIGURATION.md",
     "docs/guides/ROLLOUT_COOKBOOK.md",
     "docs/guides/LARGE_RESPONSE_ROLLOUT.md",
@@ -45,6 +46,8 @@ WHITELIST_PATH_PREFIXES = (
     "docs/guides/ROLLBACK_GUIDE.md",
     "docs/guides/prometheus-metrics.md",
     "docs/guides/streaming-troubleshooting.md",
+    # The public-surface inventory records retired directives as migration data.
+    "docs/harness/public-surface-inventory.json",
     "CHANGELOG.md",
     "docs/architecture/ADR/",
 )
@@ -52,7 +55,7 @@ WHITELIST_PATH_PREFIXES = (
 SCAN_PATH_PREFIXES = (
     ".github/workflows/",
     "docs/harness/",
-    "docs/release/",
+    "docs/releases/",
     "docs/guides/",
     "docs/operations/",
     "examples/production/",

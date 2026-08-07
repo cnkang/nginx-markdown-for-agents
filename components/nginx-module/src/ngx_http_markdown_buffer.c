@@ -21,7 +21,7 @@ static ngx_int_t ngx_http_markdown_buffer_ensure_capacity(ngx_http_markdown_buff
  *
  * Initializes the buffer structure and registers request-pool cleanup.
  * The backing store is allocated lazily on first append (and grows on demand)
- * while enforcing the configured markdown_max_size limit.
+ * while enforcing the configured buffer-size limit.
  *
  * Parameters:
  *   buf      - Buffer structure to initialize

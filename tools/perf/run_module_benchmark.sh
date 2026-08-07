@@ -178,6 +178,34 @@ fi
 # Pre-flight: required tools
 ###############################################################################
 
+required_commands=(
+  awk
+  cat
+  cp
+  cut
+  head
+  mkdir
+  mktemp
+  rm
+  sleep
+  tr
+  wc
+)
+for required_command in "${required_commands[@]}"; do
+  if ! command -v "$required_command" >/dev/null 2>&1; then
+    die "required command is missing: $required_command"
+  fi
+done
+
+# RSS is optional for lifecycle execution, but a report without RSS evidence
+# must fail the evidence gate rather than inventing a memory measurement.
+RSS_SUPPORTED=1
+if ! command -v ps >/dev/null 2>&1 \
+    || ! ps -o rss= -p "$$" >/dev/null 2>&1; then
+  RSS_SUPPORTED=0
+  log "RSS sampling unavailable; memory evidence will fail closed"
+fi
+
 if ! command -v python3 >/dev/null 2>&1; then
   die "python3 is required for the upstream mock server"
 fi
@@ -281,15 +309,16 @@ generate_nginx_conf() {
         proxy_http_version 1.1;
         proxy_buffering off;
         proxy_set_header Connection \"\";
-        markdown_profile streaming_first;
-        markdown_streaming_zero_copy on;"
+        markdown_streaming force;"
       ;;
     strict_cache)
       profile_directives="
-        markdown_cache_validation full;"
+        markdown_cache_validation full;
+        markdown_streaming off;"
       ;;
     balanced)
-      profile_directives=""
+      profile_directives="
+        markdown_streaming auto;"
       ;;
     *)
       log "warning: unknown profile '$profile', using balanced"
@@ -336,13 +365,17 @@ http {
             # The 1 MiB Brotli fixture can expand from one very small wire
             # chunk. Keep both conversion and pre-commit replay buffers large
             # enough for that valid first batch while retaining hard caps.
-            markdown_limits memory=64m timeout=2s streaming_buffer=16m max_inflight=64;
-            markdown_stream_precommit_buffer 16m;
+            markdown_limits conversion_memory=64m conversion_timeout=2s
+                parser_timeout=2s streaming_buffer=16m max_inflight=64;
             $profile_directives
         }
 
         location /markdown-metrics {
             markdown_metrics;
+        }
+
+        location = /nginx-markdown/diagnostics {
+            markdown_diagnostics;
         }
     }
 }
@@ -562,8 +595,15 @@ PROBE_PYEOF
 # Worker RSS measurement
 ###############################################################################
 
-# get_worker_rss returns the RSS in KB of the NGINX worker process.
+# get_worker_rss returns the RSS in KB of the NGINX worker process.  It emits
+# zero when the platform cannot provide RSS; downstream evidence validation
+# treats that sentinel as missing evidence.
 get_worker_rss() {
+  if [[ "$RSS_SUPPORTED" -eq 0 ]]; then
+    echo "0"
+    return 0
+  fi
+
   if [[ -z "$NGINX_PID" ]]; then
     echo "0"
     return 0
@@ -633,6 +673,11 @@ sample_rss_background() {
 
   : > "$peak_file"
   echo "0" > "$peak_file"
+
+  if [[ "$RSS_SUPPORTED" -eq 0 ]]; then
+    # Preserve the zero sentinel so missing memory evidence fails closed.
+    return 0
+  fi
 
   local peak=0
   while true; do
@@ -903,9 +948,17 @@ run_scenario() {
   # Fetch real NGINX metrics from metrics endpoint
   log "  Fetching real NGINX metrics..."
   local metrics_json
-  metrics_json="$(curl -s -H 'Accept: application/json' "http://127.0.0.1:${NGINX_PORT}/markdown-metrics" || echo '{}')"
+  metrics_json="$(curl -s -H 'Accept: text/plain; version=0.0.4' "http://127.0.0.1:${NGINX_PORT}/markdown-metrics" || echo '')"
   local metrics_file="$NGINX_WORKDIR/${SC_NAME}_metrics.json"
   printf '%s\n' "$metrics_json" > "$metrics_file"
+
+  # Fetch structured diagnostics for counters that are intentionally not part
+  # of the frozen Prometheus v1 surface.
+  log "  Fetching structured NGINX diagnostics..."
+  local diagnostics_json
+  diagnostics_json="$(curl -s "http://127.0.0.1:${NGINX_PORT}/nginx-markdown/diagnostics" || echo '')"
+  local diagnostics_file="$NGINX_WORKDIR/${SC_NAME}_diagnostics.json"
+  printf '%s\n' "$diagnostics_json" > "$diagnostics_file"
 
   # Run after the metrics snapshot so the probe cannot contaminate evidence.
   log "  Running response correctness probe..."
@@ -917,7 +970,7 @@ run_scenario() {
   local scenario_json
   scenario_json="$(parse_load_gen_results "$raw_output" "$SC_NAME" "$SC_PROFILE" \
     "$SC_COMPRESSION" "$SC_TRANSFER" "$SC_CONCURRENCY" "$rss_after" \
-    "$ttfb_file" "$metrics_file" "$fixture_bytes" \
+    "$ttfb_file" "$metrics_file" "$diagnostics_file" "$fixture_bytes" \
     "$rss_baseline" "$rss_peak" "$ITERATIONS" "$load_gen_exit")"
 
   scenario_json="$(python3 - "$scenario_json" "$probe_json" \
@@ -957,9 +1010,10 @@ MERGE_PYEOF
 #   $7  - worker RSS in KB (post-run)
 #   $8  - path to TTFB JSON (from measure_ttfb)
 #   $9  - path to NGINX metrics JSON
-#   $10 - actual input fixture size in bytes
-#   $11 - baseline worker RSS in KB (before load)
-#   $12 - peak worker RSS in KB (during load, sampled in background)
+#   $10 - path to NGINX diagnostics JSON
+#   $11 - actual input fixture size in bytes
+#   $12 - baseline worker RSS in KB (before load)
+#   $13 - peak worker RSS in KB (during load, sampled in background)
 parse_load_gen_results() {
   local raw_file="$1"
   local name="$2"
@@ -970,30 +1024,53 @@ parse_load_gen_results() {
   local rss_kb="$7"
   local ttfb_file="${8:-}"
   local metrics_file="${9:-}"
-  local input_bytes="${10:-0}"
-  local rss_baseline_kb="${11:-0}"
-  local rss_peak_kb="${12:-0}"
-  local iterations="${13:-0}"
-  local load_gen_exit="${14:-1}"
+  local diagnostics_file="${10:-}"
+  local input_bytes="${11:-0}"
+  local rss_baseline_kb="${12:-0}"
+  local rss_peak_kb="${13:-0}"
+  local iterations="${14:-0}"
+  local load_gen_exit="${15:-1}"
 
   python3 - "$raw_file" "$name" "$profile" "$compression" "$transfer" \
     "$concurrency" "$rss_kb" "$LOAD_GEN" "$ttfb_file" "$metrics_file" \
-    "$input_bytes" "$rss_baseline_kb" "$rss_peak_kb" "$iterations" \
-    "$load_gen_exit" "$REPO_ROOT" <<'PYEOF'
+    "$diagnostics_file" "$input_bytes" "$rss_baseline_kb" "$rss_peak_kb" \
+    "$iterations" "$load_gen_exit" "$REPO_ROOT" <<'PYEOF'
 import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, sys.argv[16])
+sys.path.insert(0, sys.argv[17])
 
-from tools.perf.benchmark_validation import ScenarioResultInput, build_scenario_result
+from tools.perf.benchmark_validation import (
+    ScenarioResultInput,
+    build_scenario_result,
+    merge_diagnostics_metrics,
+    parse_prometheus_metrics,
+)
 
 
-def read_json_file(path):
+def read_metrics_file(path):
     try:
-        return json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        content = Path(path).read_text(encoding="utf-8")
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            return parse_prometheus_metrics(content)
+    except OSError:
         return {}
+
+
+def read_diagnostics_file(path):
+    try:
+        content = Path(path).read_text(encoding="utf-8")
+        value = json.loads(content)
+        return value if isinstance(value, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+nginx_metrics = read_metrics_file(sys.argv[10])
+merge_diagnostics_metrics(nginx_metrics, read_diagnostics_file(sys.argv[11]))
 
 
 result = build_scenario_result(ScenarioResultInput(
@@ -1005,13 +1082,13 @@ result = build_scenario_result(ScenarioResultInput(
     concurrency=int(sys.argv[6]),
     worker_rss_kb=int(sys.argv[7]),
     load_generator=sys.argv[8],
-    ttfb=read_json_file(sys.argv[9]),
-    nginx_metrics=read_json_file(sys.argv[10]),
-    input_bytes=int(sys.argv[11]),
-    baseline_rss_kb=int(sys.argv[12]),
-    peak_rss_kb=int(sys.argv[13]),
-    iterations=int(sys.argv[14]),
-    load_exit_code=int(sys.argv[15]),
+    ttfb=json.loads(Path(sys.argv[9]).read_text(encoding="utf-8")),
+    nginx_metrics=nginx_metrics,
+    input_bytes=int(sys.argv[12]),
+    baseline_rss_kb=int(sys.argv[13]),
+    peak_rss_kb=int(sys.argv[14]),
+    iterations=int(sys.argv[15]),
+    load_exit_code=int(sys.argv[16]),
 ))
 print(json.dumps(result))
 PYEOF

@@ -3,9 +3,7 @@
  *
  * Validates the v0.8.0 streaming configuration directives (streaming configuration directives):
  * - Valid values for each directive (5.1)
- * - v0.8.0 stream_engine_handler direct tests (5.1b)
  * - Invalid values rejected (5.2)
- * - v0.8.0 stream_engine_handler rejection tests (5.2b)
  * - Allocation failure paths (5.2c)
  * - Default inheritance (5.3)
  * - Reserved directive rejected (5.4)
@@ -574,125 +572,11 @@ find_directive(const char *name)
 }
 
 static int command_table_contains(const char *name);
-
-static ngx_command_t *
-stream_engine_directive(void)
-{
-    ngx_command_t *cmd;
-
-    cmd = find_directive("markdown_streaming_engine");
-    TEST_ASSERT(cmd != NULL,
-        "markdown_streaming_engine directive should be registered");
-    TEST_ASSERT(cmd->set != NULL,
-        "markdown_streaming_engine directive should have setter");
-    TEST_ASSERT(cmd->set == ngx_http_markdown_reject_streaming_engine,
-        "markdown_streaming_engine should use the reject-only handler");
-    TEST_ASSERT(cmd->offset == 0,
-        "removed markdown_streaming_engine should not target config state");
-    TEST_ASSERT(cmd->post == NULL,
-        "removed markdown_streaming_engine should not expose an enum table");
-
-    return cmd;
-}
-
 static ngx_command_t *
 streaming_zero_copy_directive(void)
 {
-    ngx_command_t *cmd;
-
-    TEST_ASSERT(command_table_contains("markdown_streaming_zero_copy"),
-        "markdown_streaming_zero_copy should exist in production command table");
-
-    cmd = find_directive("markdown_streaming_zero_copy");
-    TEST_ASSERT(cmd != NULL,
-        "markdown_streaming_zero_copy directive should be registered");
-    TEST_ASSERT(cmd->set == ngx_conf_set_flag_slot,
-        "markdown_streaming_zero_copy should use ngx_conf_set_flag_slot");
-    TEST_ASSERT((cmd->type & NGX_HTTP_MAIN_CONF) != 0,
-        "markdown_streaming_zero_copy should allow HTTP context");
-    TEST_ASSERT((cmd->type & NGX_HTTP_SRV_CONF) != 0,
-        "markdown_streaming_zero_copy should allow server context");
-    TEST_ASSERT((cmd->type & NGX_HTTP_LOC_CONF) != 0,
-        "markdown_streaming_zero_copy should allow location context");
-    TEST_ASSERT((cmd->type & NGX_CONF_FLAG) != 0,
-        "markdown_streaming_zero_copy should be an NGX_CONF_FLAG");
-    TEST_ASSERT(cmd->offset
-            == offsetof(ngx_http_markdown_conf_t, stream.zero_copy),
-        "markdown_streaming_zero_copy offset should target stream.zero_copy");
-
-    return cmd;
-}
-
-static void
-test_otel_directive_contract(void)
-{
-    static const char *reject_only[] = {
-        "markdown_otel_tracing",
-        "markdown_otel_metrics",
-        "markdown_otel_service_name",
-        "markdown_otel_span_buffer_size",
-        "markdown_otel_export_timeout"
-    };
-    ngx_command_t     *cmd;
-    size_t             i;
-
-    TEST_SUBSECTION("OTel directive runtime contract");
-
-    cmd = find_directive("markdown_otel");
-    TEST_ASSERT(cmd != NULL, "markdown_otel should be registered");
-    TEST_ASSERT(cmd->set == ngx_conf_set_flag_slot,
-        "markdown_otel should remain the tracing enable switch");
-    TEST_ASSERT(cmd->offset
-            == offsetof(ngx_http_markdown_conf_t, ops.otel_enabled),
-        "markdown_otel should target ops.otel_enabled");
-
-    cmd = find_directive("markdown_otel_endpoint");
-    TEST_ASSERT(cmd != NULL, "markdown_otel_endpoint should be registered");
-    TEST_ASSERT(cmd->set == ngx_conf_set_str_slot,
-        "markdown_otel_endpoint should remain the export URI setter");
-    TEST_ASSERT(cmd->offset
-            == offsetof(ngx_http_markdown_conf_t, ops.otel_endpoint),
-        "markdown_otel_endpoint should target ops.otel_endpoint");
-
-    for (i = 0; i < sizeof(reject_only) / sizeof(reject_only[0]); i++) {
-        cmd = find_directive(reject_only[i]);
-        TEST_ASSERT(cmd != NULL,
-            "incomplete OTel directive should retain a parser entry");
-        TEST_ASSERT(cmd->offset == 0,
-            "reject-only OTel directive must not target config state");
-        TEST_ASSERT(cmd->post != NULL,
-            "reject-only OTel directive should provide an operator hint");
-        TEST_ASSERT(cmd->set != ngx_conf_set_flag_slot
-                && cmd->set != ngx_conf_set_str_slot
-                && cmd->set != ngx_conf_set_num_slot
-                && cmd->set != ngx_conf_set_msec_slot,
-            "incomplete OTel directive must not use an accepting slot setter");
-        TEST_ASSERT(cmd->set(NULL, cmd, NULL) == NGX_CONF_ERROR,
-            "reject-only OTel directive must fail nginx -t dispatch");
-    }
-
-    TEST_ASSERT(strstr((const char *)
-                find_directive("markdown_otel_tracing")->post,
-                "markdown_otel on|off") != NULL,
-        "duplicate tracing directive should name markdown_otel migration");
-    TEST_ASSERT(strstr((const char *)
-                find_directive("markdown_otel_metrics")->post,
-                "not implemented") != NULL,
-        "OTel metrics directive should explain it is not implemented");
-    TEST_ASSERT(strstr((const char *)
-                find_directive("markdown_otel_service_name")->post,
-                "not implemented") != NULL,
-        "service name directive should explain it is not implemented");
-    TEST_ASSERT(strstr((const char *)
-                find_directive("markdown_otel_span_buffer_size")->post,
-                "not implemented") != NULL,
-        "span buffer directive should explain it is not implemented");
-    TEST_ASSERT(strstr((const char *)
-                find_directive("markdown_otel_export_timeout")->post,
-                "not implemented") != NULL,
-        "export timeout directive should explain it is not implemented");
-
-    TEST_PASS("OTel directive surface matches runtime implementation");
+    /* Directive removed in 0.9.2. */
+    return NULL;
 }
 
 static void
@@ -728,7 +612,7 @@ test_dynconf_directives_support_published_contexts(void)
     ngx_command_t     *cmd;
     size_t             i;
 
-    TEST_SUBSECTION("dynconf directives support published contexts");
+    TEST_SUBSECTION("dynconf directives enforce the published HTTP-only context");
 
     for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
         cmd = find_directive(names[i]);
@@ -736,13 +620,13 @@ test_dynconf_directives_support_published_contexts(void)
             "dynconf directive should be registered");
         TEST_ASSERT((cmd->type & NGX_HTTP_MAIN_CONF) != 0,
             "dynconf directive should allow HTTP context");
-        TEST_ASSERT((cmd->type & NGX_HTTP_SRV_CONF) != 0,
-            "dynconf directive should allow server context");
-        TEST_ASSERT((cmd->type & NGX_HTTP_LOC_CONF) != 0,
-            "dynconf directive should allow location context");
+        TEST_ASSERT((cmd->type & NGX_HTTP_SRV_CONF) == 0,
+            "dynconf directive should reject server context");
+        TEST_ASSERT((cmd->type & NGX_HTTP_LOC_CONF) == 0,
+            "dynconf directive should reject location context");
     }
 
-    TEST_PASS("dynconf directives preserve all published contexts");
+    TEST_PASS("dynconf directives enforce HTTP-only context");
 }
 
 static void
@@ -779,22 +663,15 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     mcf->routing.content_types = NGX_CONF_UNSET_PTR;
     mcf->policy.conditional_requests = NGX_CONF_UNSET_UINT;
     mcf->policy.log_verbosity = NGX_CONF_UNSET_UINT;
-    mcf->routing.stream_types = NGX_CONF_UNSET_PTR;
     mcf->routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
-    mcf->ops.metrics_format = NGX_CONF_UNSET_UINT;
 
     /* v0.8.0 stream config fields */
     mcf->stream.policy = NGX_CONF_UNSET_UINT;
     mcf->stream.policy_explicit = -1;
-    mcf->stream.threshold = NGX_CONF_UNSET_SIZE;
-    mcf->stream.threshold_explicit = -1;
-    mcf->stream.precommit_buffer = NGX_CONF_UNSET_SIZE;
-    mcf->stream.flush_min = NGX_CONF_UNSET_SIZE;
     mcf->stream.excluded_types = NGX_CONF_UNSET_PTR;
     mcf->stream.budget = NGX_CONF_UNSET_SIZE;
     mcf->stream.budget_explicit = -1;
-    mcf->stream.shadow = -1;
-    mcf->stream.zero_copy = NGX_CONF_UNSET;
+
 }
 
 /* ================================================================
@@ -815,66 +692,11 @@ test_valid_values(void)
     setup_cf(&cf, &args, values, 2);
     g_compile_complex_rc = NGX_OK;
 
-    /* markdown_stream_threshold: 1m */
-    init_conf(&mcf);
-    set_arg(&cmd.name, "markdown_stream_threshold");
-    set_arg(&values[0], "markdown_stream_threshold");
-    set_arg(&values[1], "1m");
-    rc = ngx_http_markdown_stream_threshold_handler(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK,
-        "stream_threshold '1m' should be accepted");
-    TEST_ASSERT(mcf.stream.threshold == 1048576,
-        "stream_threshold '1m' should parse to 1048576");
-
-    /* markdown_stream_threshold: 512k */
-    init_conf(&mcf);
-    set_arg(&values[1], "512k");
-    rc = ngx_http_markdown_stream_threshold_handler(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK,
-        "stream_threshold '512k' should be accepted");
-    TEST_ASSERT(mcf.stream.threshold == 512 * 1024,
-        "stream_threshold '512k' should parse to 524288");
-
-    /* markdown_stream_precommit_buffer: positive sizes only */
-    init_conf(&mcf);
-    set_arg(&cmd.name, "markdown_stream_precommit_buffer");
-    set_arg(&values[0], "markdown_stream_precommit_buffer");
-    set_arg(&values[1], "256k");
-    rc = ngx_http_markdown_stream_precommit_buffer_handler(
-        &cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK,
-        "precommit_buffer '256k' should be accepted");
-    TEST_ASSERT(mcf.stream.precommit_buffer == 256 * 1024,
-        "precommit_buffer '256k' should parse to 262144");
-
-    init_conf(&mcf);
-    set_arg(&values[1], "128k");
-    rc = ngx_http_markdown_stream_precommit_buffer_handler(
-        &cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK,
-        "precommit_buffer '128k' should be accepted");
-    TEST_ASSERT(mcf.stream.precommit_buffer == 128 * 1024,
-        "precommit_buffer '128k' should parse to 131072");
-
-    /* markdown_stream_flush_min: 16k */
-    init_conf(&mcf);
-    set_arg(&cmd.name, "markdown_stream_flush_min");
-    set_arg(&values[0], "markdown_stream_flush_min");
-    set_arg(&values[1], "16k");
-    rc = ngx_http_markdown_stream_flush_min_handler(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK,
-        "stream_flush_min '16k' should be accepted");
-    TEST_ASSERT(mcf.stream.flush_min == 16 * 1024,
-        "stream_flush_min '16k' should parse to 16384");
-
-    /* markdown_stream_flush_min: 32k */
-    init_conf(&mcf);
-    set_arg(&values[1], "32k");
-    rc = ngx_http_markdown_stream_flush_min_handler(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK,
-        "stream_flush_min '32k' should be accepted");
-    TEST_ASSERT(mcf.stream.flush_min == 32 * 1024,
-        "stream_flush_min '32k' should parse to 32768");
+    /*
+     * markdown_stream_threshold, markdown_stream_precommit_buffer,
+     * and markdown_stream_flush_min directives have been removed
+     * in 0.9.2 (internalized).  Only excluded_types remains.
+     */
 
     /* markdown_stream_excluded_types: space-separated MIME types */
     init_conf(&mcf);
@@ -894,79 +716,10 @@ test_valid_values(void)
     TEST_PASS("5.1 Valid values accepted for all directives");
 }
 
-/* ================================================================
- * 5.1b removed stream_engine values
- * ================================================================ */
-static void
-test_stream_engine_values_rejected(void)
-{
-    ngx_conf_t               cf;
-    ngx_array_t              args;
-    ngx_str_t                values[2];
-    ngx_command_t            *cmd;
-    ngx_http_markdown_conf_t mcf;
-    char                    *rc;
-
-    TEST_SUBSECTION("removed stream_engine value migrations");
-
-    setup_cf(&cf, &args, values, 2);
-    cmd = stream_engine_directive();
-    set_arg(&values[0], "markdown_streaming_engine");
-
-    init_conf(&mcf);
-    set_arg(&values[1], "off");
-    rc = cmd->set(&cf, cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "legacy off should require migration to markdown_streaming off");
-
-    set_arg(&values[1], "auto");
-    rc = cmd->set(&cf, cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "legacy auto should require migration to markdown_streaming auto");
-
-    set_arg(&values[1], "on");
-    rc = cmd->set(&cf, cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "legacy on should require migration to markdown_streaming force");
-    TEST_ASSERT(mcf.stream.policy == NGX_CONF_UNSET_UINT,
-        "removed directive must not alias markdown_streaming");
-
-    TEST_PASS("5.1b removed stream_engine values require migration");
-}
-
 static void
 test_streaming_zero_copy_flag_values(void)
 {
-    ngx_conf_t               cf;
-    ngx_array_t              args;
-    ngx_str_t                values[2];
-    ngx_command_t            *cmd;
-    ngx_http_markdown_conf_t mcf;
-    char                    *rc;
-
-    TEST_SUBSECTION("markdown_streaming_zero_copy flag values");
-
-    setup_cf(&cf, &args, values, 2);
-    cmd = streaming_zero_copy_directive();
-    set_arg(&values[0], "markdown_streaming_zero_copy");
-
-    init_conf(&mcf);
-    set_arg(&values[1], "on");
-    rc = cmd->set(&cf, cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK,
-        "markdown_streaming_zero_copy on should be accepted");
-    TEST_ASSERT(mcf.stream.zero_copy == 1,
-        "markdown_streaming_zero_copy on should set stream.zero_copy to 1");
-
-    init_conf(&mcf);
-    set_arg(&values[1], "off");
-    rc = cmd->set(&cf, cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK,
-        "markdown_streaming_zero_copy off should be accepted");
-    TEST_ASSERT(mcf.stream.zero_copy == 0,
-        "markdown_streaming_zero_copy off should set stream.zero_copy to 0");
-
-    TEST_PASS("markdown_streaming_zero_copy flag values parsed");
+    /* Removed in 0.9.2 */
 }
 
 /* ================================================================
@@ -979,7 +732,6 @@ test_invalid_values(void)
     ngx_array_t              args;
     ngx_str_t                values[2];
     ngx_command_t             cmd;
-    ngx_command_t            *engine_cmd;
     ngx_http_markdown_conf_t mcf;
     const char              *rc;
 
@@ -988,71 +740,10 @@ test_invalid_values(void)
     setup_cf(&cf, &args, values, 2);
     g_compile_complex_rc = NGX_OK;
 
-    /* markdown_streaming_engine: invalid_value */
-    init_conf(&mcf);
-    engine_cmd = stream_engine_directive();
-    set_arg(&values[0], "markdown_streaming_engine");
-    set_arg(&values[1], "invalid_value");
-    rc = engine_cmd->set(&cf, engine_cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "stream_engine_handler 'invalid_value' should be rejected");
-
-    /* markdown_streaming_engine: yes */
-    init_conf(&mcf);
-    set_arg(&values[1], "yes");
-    rc = engine_cmd->set(&cf, engine_cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "stream_engine_handler 'yes' should be rejected");
-
-    /* markdown_stream_threshold: 0 (must be > 0) */
-    init_conf(&mcf);
-    set_arg(&cmd.name, "markdown_stream_threshold");
-    set_arg(&values[0], "markdown_stream_threshold");
-    set_arg(&values[1], "0");
-    rc = ngx_http_markdown_stream_threshold_handler(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "stream_threshold '0' should be rejected (must be > 0)");
-
-    /* markdown_stream_threshold: invalid */
-    init_conf(&mcf);
-    set_arg(&values[1], "invalid");
-    rc = ngx_http_markdown_stream_threshold_handler(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "stream_threshold 'invalid' should be rejected");
-
-    /* markdown_stream_precommit_buffer: 0 (replay invariant) */
-    init_conf(&mcf);
-    set_arg(&cmd.name, "markdown_stream_precommit_buffer");
-    set_arg(&values[0], "markdown_stream_precommit_buffer");
-    set_arg(&values[1], "0");
-    rc = ngx_http_markdown_stream_precommit_buffer_handler(
-        &cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "precommit_buffer '0' should be rejected");
-
-    /* markdown_stream_precommit_buffer: invalid */
-    init_conf(&mcf);
-    set_arg(&values[1], "invalid");
-    rc = ngx_http_markdown_stream_precommit_buffer_handler(
-        &cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "precommit_buffer 'invalid' should be rejected");
-
-    /* markdown_stream_flush_min: 0 (must be > 0) */
-    init_conf(&mcf);
-    set_arg(&cmd.name, "markdown_stream_flush_min");
-    set_arg(&values[0], "markdown_stream_flush_min");
-    set_arg(&values[1], "0");
-    rc = ngx_http_markdown_stream_flush_min_handler(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "stream_flush_min '0' should be rejected (must be > 0)");
-
-    /* markdown_stream_flush_min: bad */
-    init_conf(&mcf);
-    set_arg(&values[1], "bad");
-    rc = ngx_http_markdown_stream_flush_min_handler(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "stream_flush_min 'bad' should be rejected");
+    /*
+     * Tests for markdown_stream_threshold, markdown_stream_precommit_buffer,
+     * and markdown_stream_flush_min removed — directives internalized in 0.9.2.
+     */
 
     /* markdown_stream_excluded_types: invalid (no slash) */
     init_conf(&mcf);
@@ -1087,96 +778,10 @@ test_invalid_values(void)
     TEST_PASS("5.2 Invalid values correctly rejected");
 }
 
-/* ================================================================
- * 5.2b v0.8.0 stream_engine_handler rejection
- * ================================================================ */
-static void
-test_stream_engine_handler_rejection(void)
-{
-    ngx_conf_t               cf;
-    ngx_array_t              args;
-    ngx_str_t                values[2];
-    ngx_command_t            *cmd;
-    ngx_http_markdown_conf_t mcf;
-    char                    *rc;
-
-    TEST_SUBSECTION("v0.8.0 stream_engine_handler rejection");
-
-    setup_cf(&cf, &args, values, 2);
-    cmd = stream_engine_directive();
-    set_arg(&values[0], "markdown_streaming_engine");
-
-    /* Invalid value: "yes" */
-    init_conf(&mcf);
-    set_arg(&values[1], "yes");
-    rc = cmd->set(&cf, cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "stream_engine_handler 'yes' should return NGX_CONF_ERROR");
-    TEST_ASSERT(mcf.stream.policy == NGX_CONF_UNSET_UINT,
-        "invalid legacy value should leave streaming policy unchanged");
-
-    /* Invalid value: "always" */
-    init_conf(&mcf);
-    set_arg(&values[1], "always");
-    rc = cmd->set(&cf, cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "stream_engine_handler 'always' should return NGX_CONF_ERROR");
-
-    /* Invalid value: empty string */
-    init_conf(&mcf);
-    set_arg(&values[1], "");
-    rc = cmd->set(&cf, cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "stream_engine_handler '' should return NGX_CONF_ERROR");
-
-    /* Repeated removed directives must still fail and never become aliases. */
-    init_conf(&mcf);
-    set_arg(&values[1], "on");
-    rc = cmd->set(&cf, cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "first removed stream_engine directive should fail");
-
-    set_arg(&values[1], "off");
-    rc = cmd->set(&cf, cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "repeated removed stream_engine directive should fail");
-    TEST_ASSERT(mcf.stream.policy == NGX_CONF_UNSET_UINT,
-        "repeated removed directive must not mutate streaming policy");
-
-    TEST_PASS("5.2b removed stream_engine never aliases active policy");
-}
-
 static void
 test_streaming_zero_copy_rejects_invalid_value(void)
 {
-    ngx_conf_t               cf;
-    ngx_array_t              args;
-    ngx_str_t                values[2];
-    ngx_command_t            *cmd;
-    ngx_http_markdown_conf_t mcf;
-    char                    *rc;
-
-    TEST_SUBSECTION("markdown_streaming_zero_copy invalid value rejected");
-
-    setup_cf(&cf, &args, values, 2);
-    cmd = streaming_zero_copy_directive();
-    set_arg(&values[0], "markdown_streaming_zero_copy");
-
-    init_conf(&mcf);
-    set_arg(&values[1], "yes");
-    rc = cmd->set(&cf, cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "markdown_streaming_zero_copy yes should be rejected");
-    TEST_ASSERT(mcf.stream.zero_copy == NGX_CONF_UNSET,
-        "invalid zero_copy value should leave stream.zero_copy unset");
-
-    init_conf(&mcf);
-    set_arg(&values[1], "invalid");
-    rc = cmd->set(&cf, cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "markdown_streaming_zero_copy invalid should be rejected");
-
-    TEST_PASS("markdown_streaming_zero_copy rejects invalid values");
+    /* Removed in 0.9.2 */
 }
 
 /* ================================================================
@@ -1220,27 +825,7 @@ static void
 merge_stream_config(ngx_http_markdown_conf_t *child,
     const ngx_http_markdown_conf_t *parent)
 {
-    ngx_flag_t                          stream_threshold_set;
-    ngx_flag_t                          stream_budget_set;
-    ngx_http_markdown_profile_defaults_t defaults;
-
-    stream_threshold_set = (child->stream.threshold != NGX_CONF_UNSET_SIZE);
-    stream_budget_set = (child->stream.budget != NGX_CONF_UNSET_SIZE);
-
-    /* Zero-initialize to avoid undefined fields if merge reads more later */
-    memset(&defaults, 0, sizeof(defaults));
-    defaults.streaming_policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
-    defaults.limits_streaming_buffer =
-        NGX_HTTP_MARKDOWN_STREAM_BUDGET_DEFAULT;
-    defaults.error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
-
-    ngx_http_markdown_merge_stream_values(child, parent, &defaults, 0);
-    if (stream_threshold_set) {
-        child->stream.threshold_explicit = 1;
-    }
-    if (stream_budget_set) {
-        child->stream.budget_explicit = 1;
-    }
+    ngx_http_markdown_merge_stream_values(child, parent);
 }
 
 static int
@@ -1274,57 +859,29 @@ test_default_inheritance(void)
     init_conf(&child);
     merge_stream_config(&child, &parent);
 
-    TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_AUTO,
-        "default streaming policy should be auto");
-    TEST_ASSERT(child.stream.threshold == 1048576,
-        "default threshold should be 1m (1048576)");
-    TEST_ASSERT(child.stream.precommit_buffer == 262144,
-        "default precommit_buffer should be 256k (262144)");
-    TEST_ASSERT(child.stream.flush_min == 16384,
-        "default flush_min should be 16k (16384)");
+    TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_OFF,
+        "default streaming policy should be off");
     TEST_ASSERT(child.stream.excluded_types == NULL,
         "default excluded_types should be NULL");
-    TEST_ASSERT(child.stream.zero_copy == 0,
-        "default zero_copy should remain off after merge");
 
     /* Test 2: Parent sets value, child inherits */
     init_conf(&parent);
     init_conf(&child);
     parent.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
-    parent.stream.threshold = 512 * 1024;
-    parent.stream.precommit_buffer = 128 * 1024;
-    parent.stream.flush_min = 32 * 1024;
-    parent.stream.zero_copy = 1;
     merge_stream_config(&child, &parent);
 
     TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE,
         "child should inherit streaming policy from parent");
-    TEST_ASSERT(child.stream.threshold == 512 * 1024,
-        "child should inherit threshold from parent");
-    TEST_ASSERT(child.stream.precommit_buffer == 128 * 1024,
-        "child should inherit precommit_buffer from parent");
-    TEST_ASSERT(child.stream.flush_min == 32 * 1024,
-        "child should inherit flush_min from parent");
-    TEST_ASSERT(child.stream.zero_copy == 1,
-        "child should inherit zero_copy from parent");
 
     /* Test 3: Child overrides parent */
     init_conf(&parent);
     init_conf(&child);
     parent.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
-    parent.stream.threshold = 2 * 1024 * 1024;
-    parent.stream.zero_copy = 1;
     child.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_OFF;
-    child.stream.threshold = 256 * 1024;
-    child.stream.zero_copy = 0;
     merge_stream_config(&child, &parent);
 
     TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_OFF,
         "child streaming policy override should be preserved");
-    TEST_ASSERT(child.stream.threshold == 256 * 1024,
-        "child threshold override should be preserved");
-    TEST_ASSERT(child.stream.zero_copy == 0,
-        "child zero_copy override should be preserved");
 
     TEST_ASSERT(NGX_HTTP_MARKDOWN_STREAMING_OFF == 0,
         "STREAMING_OFF must be 0");
@@ -1536,67 +1093,18 @@ test_hard_exclusions_with_parameters(void)
 
 
 /* ================================================================
- * 5.8 stream.threshold defaults and override
- *
- * Tests that the stream.threshold default is preserved when no
- * directive is explicitly set, and that explicit overrides are
- * correctly inherited from parent and applied from child.
+ * Threshold is now internalized as a fixed 1 MiB constant (0.9.2).
+ * This test validates the constant value.
  * ================================================================ */
 static void
 test_stream_threshold_defaults_and_override(void)
 {
-    ngx_http_markdown_conf_t parent;
-    ngx_http_markdown_conf_t child;
+    TEST_SUBSECTION("stream threshold internalized (0.9.2)");
 
-    TEST_SUBSECTION("stream.threshold defaults and override");
+    TEST_ASSERT(NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT == 1048576,
+        "internalized stream threshold must be 1 MiB");
 
-    /*
-     * Test 1: No directives set at all.
-     * stream.threshold must remain at the 0.8.0 default (1m).
-     */
-    init_conf(&parent);
-    init_conf(&child);
-
-    merge_stream_config(&child, &parent);
-
-    TEST_ASSERT(child.stream.threshold
-        == NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT,
-        "default threshold must remain 1m (1048576) when no "
-        "directive was explicitly set");
-
-    /*
-     * Test 2: Operator explicitly sets markdown_stream_threshold 64k.
-     */
-    init_conf(&parent);
-    init_conf(&child);
-
-    parent.stream.threshold = 64 * 1024;
-    parent.stream.threshold_explicit = 1;
-    child.stream.threshold = 64 * 1024;
-    child.stream.threshold_explicit = 1;
-
-    merge_stream_config(&child, &parent);
-
-    TEST_ASSERT(child.stream.threshold == 64 * 1024,
-        "explicit stream.threshold 64k must be preserved");
-
-    /*
-     * Test 3: Child overrides parent threshold.
-     */
-    init_conf(&parent);
-    init_conf(&child);
-
-    parent.stream.threshold = 64 * 1024;
-    parent.stream.threshold_explicit = 1;
-    child.stream.threshold = 512 * 1024;
-    child.stream.threshold_explicit = 1;
-
-    merge_stream_config(&child, &parent);
-
-    TEST_ASSERT(child.stream.threshold == 512 * 1024,
-        "explicit child stream.threshold must override parent");
-
-    TEST_PASS("5.8 stream.threshold defaults and override correct");
+    TEST_PASS("threshold internalization verified");
 }
 
 
@@ -1611,13 +1119,10 @@ main(void)
     memset(&g_main_conf, 0, sizeof(g_main_conf));
 
     test_valid_values();
-    test_stream_engine_values_rejected();
     test_streaming_zero_copy_flag_values();
-    test_otel_directive_contract();
     test_trusted_proxies_http_only_command_contract();
     test_dynconf_directives_support_published_contexts();
     test_invalid_values();
-    test_stream_engine_handler_rejection();
     test_streaming_zero_copy_rejects_invalid_value();
     test_allocation_failure();
     test_default_inheritance();

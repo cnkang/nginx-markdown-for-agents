@@ -130,7 +130,7 @@ pub struct StreamingConverter {
     /// Tracks cumulative input bytes fed to the converter and rejects when
     /// the total exceeds this limit. Uses input size as a proxy for parser
     /// memory pressure (matching the full-buffer path). Populated from the
-    /// `markdown_parser_budget` NGINX directive via FFI.
+    /// `markdown_limits parser_memory=` limit via FFI.
     parser_budget: u64,
     /// Cumulative input bytes fed to the converter (for parser budget enforcement).
     cumulative_input_bytes: u64,

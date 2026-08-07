@@ -368,7 +368,7 @@ def test_known_sections_complete():
 
 
 def test_section_registry_matches_task_spec():
-    """Verify the section registry matches task 2.5 spec requirements."""
+    """Verify the section registry matches the documented requirements."""
     assert rmd.SECTION_REGISTRY["README.md"] == ["support-matrix"]
     assert rmd.SECTION_REGISTRY["docs/COMPATIBILITY.md"] == ["compatibility-matrix"]
     assert rmd.SECTION_REGISTRY["docs/guides/INSTALLATION.md"] == ["installation-matrix"]

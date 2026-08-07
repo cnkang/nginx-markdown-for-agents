@@ -15,6 +15,8 @@
 #include <limits.h>
 #include <zlib.h>
 
+#include "markdown_converter.h"
+
 #ifndef NGX_MAX_SIZE_T_VALUE
 #define NGX_MAX_SIZE_T_VALUE ((size_t) -1)
 #endif
@@ -29,6 +31,231 @@
 static u_char ngx_http_markdown_encoding_gzip[] = "gzip";
 static u_char ngx_http_markdown_encoding_deflate[] = "deflate";
 static u_char ngx_http_markdown_encoding_br[] = "br";
+static u_char ngx_http_markdown_content_encoding_header[] =
+    "Content-Encoding";
+
+static ngx_flag_t ngx_http_markdown_is_content_encoding_header(
+    const ngx_table_elt_t *header);
+static ngx_int_t ngx_http_markdown_measure_content_encoding(
+    ngx_http_request_t *r, const ngx_str_t **single_value,
+    ngx_uint_t *match_count, size_t *total_len);
+static ngx_int_t ngx_http_markdown_add_content_encoding_length(
+    size_t value_len, ngx_uint_t match_count, size_t *total_len);
+static void ngx_http_markdown_copy_content_encoding(
+    ngx_http_request_t *r, u_char *data);
+
+
+static ngx_flag_t
+ngx_http_markdown_is_content_encoding_header(const ngx_table_elt_t *header)
+{
+    return header != NULL && header->hash != 0
+           && header->key.data != NULL
+           && header->key.len == sizeof("Content-Encoding") - 1
+           && ngx_strncasecmp(header->key.data,
+                              ngx_http_markdown_content_encoding_header,
+                              sizeof("Content-Encoding") - 1) == 0;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_add_content_encoding_length(
+    size_t value_len, ngx_uint_t match_count, size_t *total_len)
+{
+    if (match_count != 0) {
+        if (*total_len > ((size_t) -1) - 2) {
+            return NGX_ERROR;
+        }
+        *total_len += 2;
+    }
+    if (value_len > ((size_t) -1) - *total_len) {
+        return NGX_ERROR;
+    }
+    *total_len += value_len;
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_measure_content_encoding(
+    ngx_http_request_t *r, const ngx_str_t **single_value,
+    ngx_uint_t *match_count, size_t *total_len)
+{
+    *single_value = NULL;
+    *match_count = 0;
+    *total_len = 0;
+
+    for (ngx_list_part_t *part = &r->headers_out.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        const ngx_table_elt_t *headers = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash == 0) {
+                continue;
+            }
+            if (!ngx_http_markdown_is_content_encoding_header(&headers[i])) {
+                continue;
+            }
+
+            if (*match_count == 0) {
+                *single_value = &headers[i].value;
+            }
+            if (ngx_http_markdown_add_content_encoding_length(
+                    headers[i].value.len, *match_count, total_len)
+                != NGX_OK)
+            {
+                return NGX_ERROR;
+            }
+            (*match_count)++;
+        }
+    }
+
+    return NGX_OK;
+}
+
+
+static void
+ngx_http_markdown_copy_content_encoding(ngx_http_request_t *r, u_char *data)
+{
+    ngx_flag_t        first;
+
+    first = 1;
+    for (ngx_list_part_t *part = &r->headers_out.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        const ngx_table_elt_t *headers = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash == 0) {
+                continue;
+            }
+            if (!ngx_http_markdown_is_content_encoding_header(&headers[i])) {
+                continue;
+            }
+            if (!first) {
+                *data++ = ',';
+                *data++ = ' ';
+            }
+            ngx_memcpy(data, headers[i].value.data, headers[i].value.len);
+            data += headers[i].value.len;
+            first = 0;
+        }
+    }
+}
+
+/*
+ * Collect all Content-Encoding response header fields in received order.
+ *
+ * The values are concatenated with a comma+space separator, matching the
+ * RFC 9110 field-line combination semantics, and returned as a pool-owned
+ * string. A single field line remains a zero-copy view into NGINX response
+ * header storage.
+ *
+ * No separate per-header cap is applied: the total is bounded by the
+ * header storage NGINX itself accepted (large_client_header_buffers and
+ * the module's accepted header size limits).
+ *
+ * Returns NGX_OK with `out` populated, NGX_DECLINED when no Content-Encoding
+ * field exists, or NGX_ERROR for allocation failure.
+ */
+ngx_int_t
+ngx_http_markdown_collect_content_encoding(ngx_http_request_t *r,
+                                           ngx_str_t *out)
+{
+    ngx_uint_t        match_count;
+    size_t             total_len;
+    u_char            *data;
+    const ngx_str_t  *single_value;
+
+    out->data = NULL;
+    out->len = 0;
+
+    if (ngx_http_markdown_measure_content_encoding(
+            r, &single_value, &match_count, &total_len) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    if (match_count == 0) {
+        return NGX_DECLINED;
+    }
+    if (match_count == 1) {
+        *out = *single_value;
+        return NGX_OK;
+    }
+
+    data = ngx_pnalloc(r->pool, total_len);
+    if (data == NULL) {
+        return NGX_ERROR;
+    }
+
+    ngx_http_markdown_copy_content_encoding(r, data);
+
+    out->data = data;
+    out->len = total_len;
+    return NGX_OK;
+}
+
+/*
+ * Parse the Content-Encoding chain grammar and populate the request
+ * context decompression state.
+ *
+ * Calls the Rust FFI chain parser on the concatenated header value. The
+ * classification outcome decides precommit routing:
+ *
+ *   VALID            - ctx->decompression.layer_count and layers[] hold the
+ *                      non-identity decoder list in application order
+ *   MALFORMED        - canonical ENCODING_HEADER_INVALID (stage=decompression,
+ *                      error_origin=format); no decoder is started
+ *   UNKNOWN_TOKEN    - capability bypass (passthrough, no error policy)
+ *   DEPTH_EXCEEDED   - capability bypass (passthrough, no error policy)
+ *
+ * Returns the ENCODING_CHAIN_* classification, or DECOMP_CATEGORY_INVALID_ARGS
+ * on FFI contract failure.
+ */
+u_char
+ngx_http_markdown_parse_encoding_chain_ffi(const ngx_http_request_t *r,
+                                           ngx_http_markdown_ctx_t *ctx,
+                                           const ngx_str_t *combined)
+{
+    FFIEncodingChainResult   result;
+    u_char                   classification;
+
+    (void) r;
+    ngx_memzero(&result, sizeof(result));
+
+    classification = markdown_parse_encoding_chain(
+        (const uint8_t *) combined->data, combined->len, &result);
+
+    ctx->decompression.chain_parsed = 1;
+    ctx->decompression.layer_count = result.layer_count;
+    ngx_memcpy(ctx->decompression.layers, result.layers,
+               sizeof(ctx->decompression.layers));
+
+    if (classification == ENCODING_CHAIN_VALID) {
+        if (result.layer_count == 0) {
+            return ENCODING_CHAIN_VALID;
+        }
+        /* Map the first layer to the legacy type enum for routing
+         * compatibility (single-layer streaming path). */
+        switch (result.layers[0]) {
+        case 0:
+            ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_GZIP;
+            break;
+        case 1:
+            ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE;
+            break;
+        case 2:
+            ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI;
+            break;
+        default:
+            ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN;
+            break;
+        }
+    }
+
+    return classification;
+}
 
 /*
  * Detect compression type from Content-Encoding header

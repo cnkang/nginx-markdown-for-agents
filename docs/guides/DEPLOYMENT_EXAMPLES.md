@@ -5,7 +5,7 @@ This document contains detailed NGINX configuration examples, verification steps
 ## Table of Contents
 
 1. [NGINX Configuration Examples](#nginx-configuration-examples)
-2. [Profile-Based Deployments](#profile-based-deployments-v090)
+2. [Explicit Deployment Presets](#explicit-deployment-presets-v092)
 3. [Quick Verification (curl)](#quick-verification-curl)
 4. [Common Deployment Notes](#common-deployment-notes)
 5. [Common Issues Quick Reference](#common-issues-quick-reference)
@@ -164,7 +164,7 @@ http {
 
     markdown_filter on;
     markdown_error_policy pass;
-    markdown_limits memory=10m timeout=5s;
+    markdown_limits conversion_memory=10m conversion_timeout=5s parser_timeout=5s;
 
     server {
         listen 80;
@@ -284,28 +284,29 @@ See [examples/nginx-configs/](../../examples/nginx-configs/) for copy-paste-read
 - [Production Full](../../examples/nginx-configs/04-production-full.conf)
 - [High Performance](../../examples/nginx-configs/05-high-performance.conf)
 
-### Profile-Based Deployments (v0.9.0+)
+### Explicit Deployment Presets (v0.9.2)
 
-Profiles provide production-tuned defaults. Pick a profile, then override only
-what your deployment requires.
+The 0.9.2 public surface has no opaque profile directive. The following
+presets spell out the retained directives so they remain auditable in
+`nginx -T`.
 
-#### balanced — General-Purpose Deployment
-
-Recommended starting point for most sites. IMS-only caching avoids ETag
-computation overhead while streaming remains available for large responses.
+#### General-purpose deployment
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
 
 http {
-    markdown_profile balanced;
-
     upstream backend {
         server 127.0.0.1:8080;
     }
 
     server {
         listen 80;
+
+        markdown_cache_validation ims_only;
+        markdown_streaming auto;
+        markdown_limits conversion_memory=64m conversion_timeout=30s
+            parser_timeout=10s max_inflight=64;
 
         location /docs/ {
             markdown_filter on;
@@ -315,7 +316,7 @@ http {
 }
 ```
 
-#### strict_cache — CDN / Caching Proxy
+#### Strict cache validation — CDN / caching proxy
 
 Full ETag-based conditional request support. Streaming is disabled (forced off)
 so the module can generate a transformed ETag for the complete Markdown output.
@@ -324,7 +325,6 @@ so the module can generate a transformed ETag for the complete Markdown output.
 load_module modules/ngx_http_markdown_filter_module.so;
 
 http {
-    markdown_profile strict_cache;
     markdown_trusted_proxies 10.0.0.0/8 172.16.0.0/12;
 
     upstream backend {
@@ -334,18 +334,22 @@ http {
     server {
         listen 80;
 
+        markdown_cache_validation full;
+        markdown_streaming off;
+        markdown_limits conversion_memory=128m conversion_timeout=10s
+            parser_timeout=10s max_inflight=32;
+
         location /docs/ {
             markdown_filter on;
-            # Profile provides: cache_validation full, streaming off
             # Override memory limit for large doc pages
-            markdown_limits memory=16m;
+            markdown_limits conversion_memory=16m;
             proxy_pass http://backend;
         }
     }
 }
 ```
 
-#### streaming_first — AI Agent Workloads
+#### Streaming-first — AI agent workloads
 
 Optimized for large document conversion with AI agent consumers. Aggressive
 streaming, wildcard Accept negotiation, no caching overhead.
@@ -354,8 +358,6 @@ streaming, wildcard Accept negotiation, no caching overhead.
 load_module modules/ngx_http_markdown_filter_module.so;
 
 http {
-    markdown_profile streaming_first;
-
     upstream backend {
         server 127.0.0.1:8080;
     }
@@ -363,10 +365,14 @@ http {
     server {
         listen 80;
 
+        markdown_accept wildcard;
+        markdown_cache_validation off;
+        markdown_streaming force;
+        markdown_limits conversion_memory=256m conversion_timeout=30s
+            parser_timeout=10s streaming_buffer=16m max_inflight=128;
+
         location /api/docs/ {
             markdown_filter on;
-            # Profile provides: streaming force, cache_validation off,
-            #                    accept wildcard
             markdown_limits streaming_buffer=512k;
             proxy_pass http://backend;
         }
@@ -374,37 +380,47 @@ http {
 }
 ```
 
-#### Mixed Profiles per Location
+#### Mixed explicit policies per location
 
-Different paths can use different profiles via NGINX inheritance:
+Different paths can use different explicit policies via NGINX inheritance:
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
 
 http {
-    markdown_profile balanced;
-
     upstream docs_backend { server 127.0.0.1:8080; }
     upstream api_backend  { server 127.0.0.1:9090; }
 
     server {
         listen 80;
 
+        markdown_cache_validation ims_only;
+        markdown_streaming auto;
+        markdown_limits conversion_memory=64m conversion_timeout=30s
+            parser_timeout=10s max_inflight=64;
+
         # Public docs: full caching for CDN
         location /docs/ {
-            markdown_profile strict_cache;
+            markdown_cache_validation full;
+            markdown_streaming off;
+            markdown_limits conversion_memory=128m conversion_timeout=10s
+                parser_timeout=10s max_inflight=32;
             markdown_filter on;
             proxy_pass http://docs_backend;
         }
 
         # API reference: streaming for large specs
         location /api/reference/ {
-            markdown_profile streaming_first;
+            markdown_accept wildcard;
+            markdown_cache_validation off;
+            markdown_streaming force;
+            markdown_limits conversion_memory=256m conversion_timeout=30s
+                parser_timeout=10s streaming_buffer=16m max_inflight=128;
             markdown_filter on;
             proxy_pass http://api_backend;
         }
 
-        # Blog: balanced (inherited from http)
+            # Blog inherits the general-purpose policy from the server.
         location /blog/ {
             markdown_filter on;
             proxy_pass http://docs_backend;

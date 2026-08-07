@@ -11,13 +11,14 @@ steering files.
 
 ## Current Assessment
 
-As of the **current release line (0.9.1)**, the project includes a
+As of the **current release line (0.9.2)**, the project includes a
 streaming-default conversion model with full-buffer fallback,
 Rust-first
 architecture modules for Accept negotiation, conditional requests, decision
 logic, and header plan application, independent decompression budget with parse
-timeout and parser budget directives, runtime diagnostics endpoint, dynconf
-dry-run and last-known-good rollback, DEB/RPM packaging pipeline, Kubernetes
+timeout and parser budget directives, read-only runtime diagnostics endpoint,
+dynconf dry-run and last-known-good failed-reload protection with atomic file
+restore, DEB/RPM packaging pipeline, Kubernetes
 deployment examples, FFI ABI layout verification, CI supply-chain hardening,
 supplemental static security checks, report-oriented supply-chain visibility, and a
 repo-owned harness for agent workflow governance. Core features are
@@ -26,12 +27,27 @@ fuzz-oriented validation entrypoints, and harness-specific validation
 entrypoints, along with documentation covering installation, configuration,
 operations, architecture, and contributor-facing harness maintenance.
 
-### Current Release Line 0.9.1
+### Current Release Line 0.9.2
 
-**Status:** Stable release, published 2026-07-29. 0.9.1 introduces zero-copy output for
-streaming, gzip plus zlib/raw-deflate plus Brotli streaming decompression,
-and full-buffer copy reduction, all guarded by strict performance evidence
-gates.
+**Status:** Development release line. 0.9.2 is the final pre-1.0 breaking
+release, with the public configuration surface reduced from 63 directives to
+25 and the bundled FFI ABI at version 2. Development version metadata is
+0.9.2. The release tag, GitHub Release, package assets, and checksums remain
+pending until the blocking gates pass.
+
+#### 0.9.2 (current development)
+
+- **OTel removal**: The experimental OTel directives and implementation are
+  absent from the 0.9.2 production surface; ADR-0023 records conditions for a
+  possible future redesign.
+- **Release-gates-check-092**: Additive on 091; adds public-surface drift
+  check, version consistency gate (0.9.2), and reason-code registry
+  completeness gate.
+- **Streaming reason code normalization documentation**: C-only streaming
+  reason codes use UPPERCASE format; documented as a known inconsistency
+  to be resolved in 1.x when migrating to Rust enum (lowercase snake_case).
+- **README consistency verification**: English and Chinese READMEs verified
+  for version, directive, and default-value consistency.
 
 ### Release 0.7.0 Updates
 
@@ -61,7 +77,7 @@ gates.
   release-manifest.json traceability, and repository metadata.
 - Kubernetes deployment examples (Ingress Controller, Helm chart, manifests).
 - Runtime diagnostics endpoint (`/nginx-markdown/diagnostics`).
-- Dynconf dry-run and last-known-good rollback.
+- Dynconf dry-run, last-known-good failed-reload protection, and atomic file restore.
 - Rules 39–40: NGX_DONE terminal semantics, invalidated header hash==0
   filtering.
 - CI supply-chain hardening: SHA-pinned Actions, checksum verification,

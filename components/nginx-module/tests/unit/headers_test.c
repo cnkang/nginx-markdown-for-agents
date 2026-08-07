@@ -40,6 +40,7 @@ struct ngx_list_part_s {
 
 typedef struct {
     ngx_list_part_t part;
+    ngx_list_part_t *last;
     size_t size;
     ngx_uint_t nalloc;
     void *pool;
@@ -51,6 +52,9 @@ struct pool_alloc_s {
     void *ptr;
     pool_alloc_t *next;
 };
+
+static ngx_uint_t g_fail_list_push_after_expand;
+static ngx_uint_t g_list_was_expanded;
 
 typedef struct {
     pool_alloc_t *allocs;
@@ -92,7 +96,6 @@ typedef struct {
         ngx_flag_t generate_etag;
         ngx_uint_t conditional_requests;
     } policy;
-    ngx_flag_t buffer_chunked;
     void *stream_types;
 } ngx_http_markdown_conf_t;
 
@@ -143,15 +146,40 @@ ngx_pnalloc(ngx_pool_t *pool, size_t size)
 ngx_table_elt_t *
 ngx_list_push(ngx_list_t *list)
 {
+    ngx_list_part_t *last;
+    ngx_list_part_t *part;
     ngx_table_elt_t *elts;
-    if (list->part.elts == NULL) {
+
+    if (list == NULL || list->part.elts == NULL) {
         return NULL;
     }
-    if (list->part.nelts >= list->nalloc) {
-        return NULL;
+
+    last = (list->last != NULL) ? list->last : &list->part;
+    if (last->nelts >= list->nalloc) {
+        if (g_fail_list_push_after_expand && g_list_was_expanded) {
+            return NULL;
+        }
+
+        part = (ngx_list_part_t *) ngx_pnalloc(
+            (ngx_pool_t *) list->pool, sizeof(*part));
+        if (part == NULL) {
+            return NULL;
+        }
+        part->elts = ngx_pnalloc((ngx_pool_t *) list->pool,
+                                 list->nalloc * list->size);
+        if (part->elts == NULL) {
+            return NULL;
+        }
+        part->nelts = 0;
+        part->next = NULL;
+        last->next = part;
+        list->last = part;
+        last = part;
+        g_list_was_expanded = 1;
     }
-    elts = (ngx_table_elt_t *) list->part.elts;
-    return &elts[list->part.nelts++];
+
+    elts = (ngx_table_elt_t *) last->elts;
+    return &elts[last->nelts++];
 }
 
 void
@@ -208,14 +236,15 @@ ngx_http_markdown_sprintf_token(u_char *buf, ngx_uint_t token_count)
 }
 
 static void
-init_headers_list(ngx_list_t *list, ngx_uint_t capacity)
+init_headers_list(ngx_list_t *list, ngx_uint_t capacity, ngx_pool_t *pool)
 {
     list->size = sizeof(ngx_table_elt_t);
     list->nalloc = capacity;
-    list->pool = NULL;
+    list->pool = pool;
     list->part.elts = calloc(capacity, sizeof(ngx_table_elt_t));
     list->part.nelts = 0;
     list->part.next = NULL;
+    list->last = &list->part;
 }
 
 static void
@@ -339,7 +368,7 @@ new_request(void)
     memset(&r, 0, sizeof(r));
     r.pool = pool;
     r.connection = conn;
-    init_headers_list(&r.headers_out.headers, 32);
+    init_headers_list(&r.headers_out.headers, 32, pool);
     return r;
 }
 
@@ -706,6 +735,131 @@ test_update_headers_skips_invalidated_accept_ranges(void)
     TEST_PASS("Invalidated Accept-Ranges entries are skipped");
 }
 
+static void
+test_update_headers_prepare_failure_rolls_back(void)
+{
+    ngx_http_request_t       r = new_request();
+    ngx_http_markdown_conf_t conf;
+    MarkdownResult           result;
+    ngx_table_elt_t           *content_encoding;
+    ngx_table_elt_t           *etag;
+    ngx_table_elt_t            before[2];
+    ngx_uint_t                 original_nelts;
+
+    TEST_SUBSECTION("Header prepare failure restores the original response");
+
+    memset(&conf, 0, sizeof(conf));
+    conf.policy.generate_etag = 1;
+
+    memset(&result, 0, sizeof(result));
+    result.markdown_len = 10;
+    result.etag = (uint8_t *) "\"new-etag\"";
+    result.etag_len = sizeof("\"new-etag\"") - 1;
+
+    content_encoding = push_header(&r, "Content-Encoding", "gzip");
+    etag = push_header(&r, "ETag", "\"upstream\"");
+    r.headers_out.content_encoding = content_encoding;
+    r.headers_out.etag = etag;
+    r.allow_ranges = 1;
+    original_nelts = r.headers_out.headers.part.nelts;
+    before[0] = *(ngx_table_elt_t *) r.headers_out.headers.part.elts;
+    before[1] = ((ngx_table_elt_t *) r.headers_out.headers.part.elts)[1];
+
+    /* Force the P2 ETag list push to fail after P1 has applied its plan. */
+    r.headers_out.headers.nalloc = original_nelts;
+    g_fail_list_push_after_expand = 1;
+    g_list_was_expanded = 1;
+
+    TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf)
+                    == NGX_ERROR,
+                "ETag prepare failure should abort header update");
+    TEST_ASSERT(r.headers_out.headers.part.nelts == original_nelts,
+                "failed prepare must restore header-list cardinality");
+    TEST_ASSERT(memcmp(r.headers_out.headers.part.elts, before,
+                       sizeof(before)) == 0,
+                "failed prepare must restore existing header entries");
+    TEST_ASSERT(r.headers_out.content_encoding == content_encoding,
+                "failed prepare must restore Content-Encoding pointer");
+    TEST_ASSERT(r.headers_out.etag == etag,
+                "failed prepare must restore ETag pointer");
+    TEST_ASSERT(r.allow_ranges == 1,
+                "failed prepare must restore allow_ranges");
+
+    g_fail_list_push_after_expand = 0;
+    g_list_was_expanded = 0;
+    free_request(&r);
+    TEST_PASS("Header prepare failure is atomic");
+}
+
+static void
+test_update_headers_multipart_failure_restores_chain(void)
+{
+    ngx_http_request_t       r = new_request();
+    ngx_http_markdown_conf_t conf;
+    MarkdownResult           result;
+    ngx_table_elt_t           *content_encoding;
+    ngx_table_elt_t           before[2];
+    ngx_list_part_t          *original_last;
+    ngx_list_part_t          *original_next;
+    ngx_uint_t                 total;
+
+    TEST_SUBSECTION("Multipart header rollback restores list links");
+
+    memset(&conf, 0, sizeof(conf));
+    conf.policy.generate_etag = 1;
+    conf.token_estimate = 1;
+
+    memset(&result, 0, sizeof(result));
+    result.markdown_len = 10;
+    result.etag = (uint8_t *) "\"new-etag\"";
+    result.etag_len = sizeof("\"new-etag\"") - 1;
+    result.token_estimate = 1;
+
+    content_encoding = push_header(&r, "Content-Encoding", "gzip");
+    push_header(&r, "Content-Length", "10");
+    r.headers_out.content_encoding = content_encoding;
+
+    /* Model a full production list part before the snapshot is taken. */
+    r.headers_out.headers.nalloc = 2;
+    original_last = r.headers_out.headers.last;
+    original_next = original_last->next;
+    before[0] = ((ngx_table_elt_t *) original_last->elts)[0];
+    before[1] = ((ngx_table_elt_t *) original_last->elts)[1];
+
+    /* P2 expands to a new part; P4 then fails on its next push. */
+    g_fail_list_push_after_expand = 1;
+    g_list_was_expanded = 0;
+
+    TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf)
+                    == NGX_ERROR,
+                "multipart prepare failure should abort header update");
+    TEST_ASSERT(r.headers_out.headers.last == original_last,
+                "rollback must restore the original last list part");
+    TEST_ASSERT(original_last->next == original_next,
+                "rollback must restore the original last part next pointer");
+    TEST_ASSERT(original_last->nelts == 2,
+                "rollback must restore the original last part cardinality");
+
+    total = 0;
+    for (ngx_list_part_t *part = &r.headers_out.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        total += part->nelts;
+    }
+    TEST_ASSERT(total == 2,
+                "rollback must detach every newly allocated list part");
+    TEST_ASSERT(memcmp(original_last->elts, before, sizeof(before)) == 0,
+                "rollback must preserve all original multipart entries");
+    TEST_ASSERT(r.headers_out.content_encoding == content_encoding,
+                "multipart rollback must restore typed header pointers");
+
+    g_fail_list_push_after_expand = 0;
+    g_list_was_expanded = 0;
+    free_request(&r);
+    TEST_PASS("Multipart header rollback restores list links");
+}
+
 int
 main(void)
 {
@@ -723,6 +877,8 @@ main(void)
     test_update_headers_creates_vary_after_invalidated_only();
     test_update_headers_removes_duplicate_content_encoding();
     test_update_headers_skips_invalidated_accept_ranges();
+    test_update_headers_prepare_failure_rolls_back();
+    test_update_headers_multipart_failure_restores_chain();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

@@ -45,6 +45,7 @@ struct ngx_list_part_s {
 
 typedef struct {
     ngx_list_part_t part;
+    ngx_list_part_t *last;
     size_t size;
     ngx_uint_t nalloc;
     void *pool;
@@ -92,7 +93,6 @@ typedef struct {
         ngx_flag_t generate_etag;
         ngx_uint_t conditional_requests;
     } policy;
-    ngx_flag_t buffer_chunked;
     void *stream_types;
 } ngx_http_markdown_conf_t;
 

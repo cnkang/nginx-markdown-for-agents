@@ -78,28 +78,48 @@ fi
 # These are prototype-style declarations (end with ;)
 guarded_funcs=$(python3 -c "
 import re
-import sys
 
 with open('$HEADER_FILE') as f:
     lines = f.readlines()
 
-in_guard = False
-depth = 0
 funcs = set()
+stack = []
+
+# MARKDOWN_STREAMING_SHADOW_DEBUG is only defined for a streaming build, so
+# code guarded by it also has the visibility of MARKDOWN_STREAMING_ENABLED.
+implied_guards = {'MARKDOWN_STREAMING_SHADOW_DEBUG': '$GUARD_NAME'}
+
+def guard_enabled():
+    return any(name == '$GUARD_NAME' and active for name, active in stack)
+
 for line in lines:
     stripped = line.strip()
-    if stripped.startswith('#ifdef $GUARD_NAME'):
-        in_guard = True
-        depth += 1
+    directive = re.match(r'#\\s*(ifdef|ifndef|if|else|elif|endif)\\b(.*)', stripped)
+    if directive:
+        kind, expression = directive.groups()
+        if kind == 'endif':
+            if stack:
+                stack.pop()
+        elif kind in ('ifdef', 'ifndef'):
+            name = expression.strip()
+            if name in implied_guards:
+                name = implied_guards[name]
+            stack.append((name, kind == 'ifdef'))
+        elif kind == 'if':
+            positive = re.search(r'defined\\s*\\(\\s*$GUARD_NAME\\s*\\)', expression)
+            negative = re.search(r'!\\s*defined\\s*\\(\\s*$GUARD_NAME\\s*\\)', expression)
+            stack.append(('$GUARD_NAME' if positive or negative else None,
+                          bool(positive) and not negative if positive else False
+                          if negative else None))
+        elif kind in ('else', 'elif') and stack:
+            name, active = stack[-1]
+            if name == '$GUARD_NAME' and active is not None:
+                stack[-1] = (name, not active if kind == 'else' else False)
         continue
-    if in_guard and '#endif' in stripped:
-        depth -= 1
-        if depth == 0:
-            in_guard = False
-        continue
-    if in_guard:
+
+    if guard_enabled():
         # Find function declarations: return_type name(args);
-        m = re.search(r'\b(ngx_http_markdown_\w+)\s*\(', stripped)
+        m = re.search(r'\\b(ngx_http_markdown_\\w+)\\s*\\(', stripped)
         if m and ';' in line:
             funcs.add(m.group(1))
 
@@ -121,9 +141,12 @@ for func in $guarded_funcs; do
     while IFS= read -r -d '' file; do
         rel_path="${file#${REPO_ROOT}/}"
 
-        # Use Python to check if the function is referenced outside the guard
+        # Use Python to check if the function is referenced outside the guard.
+        # Keep conditional nesting intact: an inner #ifdef must not make the
+        # outer streaming guard appear closed.  Shadow debug is a streaming
+        # sub-feature and therefore implies the requested guard.
         result=$(python3 -c "
-import sys
+import re
 
 func_name = '$func'
 guard_name = '$GUARD_NAME'
@@ -131,27 +154,55 @@ guard_name = '$GUARD_NAME'
 with open('$file') as f:
     lines = f.readlines()
 
-in_guard = False
-depth = 0
+stack = []
+implied_guards = {'MARKDOWN_STREAMING_SHADOW_DEBUG': guard_name}
+
+def guard_enabled():
+    return any(name == guard_name and active for name, active in stack)
+
 for i, line in enumerate(lines, 1):
     stripped = line.strip()
-    if stripped.startswith('#ifdef ' + guard_name):
-        in_guard = True
-        depth += 1
+    directive = re.match(r'#\\s*(ifdef|ifndef|if|else|elif|endif)\\b(.*)', stripped)
+    if directive:
+        kind, expression = directive.groups()
+        if kind == 'endif':
+            if stack:
+                stack.pop()
+        elif kind in ('ifdef', 'ifndef'):
+            name = expression.strip()
+            if name in implied_guards:
+                name = implied_guards[name]
+            stack.append((name, kind == 'ifdef'))
+        elif kind == 'if':
+            positive = re.search(r'defined\\s*\\(\\s*' + re.escape(guard_name) + r'\\s*\\)', expression)
+            negative = re.search(r'!\\s*defined\\s*\\(\\s*' + re.escape(guard_name) + r'\\s*\\)', expression)
+            stack.append((guard_name if positive or negative else None,
+                          bool(positive) and not negative if positive else False
+                          if negative else None))
+        elif kind in ('else', 'elif') and stack:
+            name, active = stack[-1]
+            if name == guard_name and active is not None:
+                stack[-1] = (name, not active if kind == 'else' else False)
         continue
-    if in_guard and '#endif' in stripped:
-        depth -= 1
-        if depth == 0:
-            in_guard = False
-        continue
-    if not in_guard:
-        # Check for function reference (not a declaration in the header)
-        # Skip comment lines
+
+    if not guard_enabled():
+        # Skip comments and preprocessor text.  A function definition itself
+        # is not a visibility reference; its enclosing guard is validated by
+        # the same parser in this script.
         if stripped.startswith('*') or stripped.startswith('/*'):
             continue
-        # Check for the function name followed by (
+        # A call can contain a declaration-like return type (for example
+        # ``const ngx_str_t *r = func()``).  Only skip an actual definition;
+        # calls must remain visible to the guard check.
+        definition_pattern = (
+            r'^\\s*(?:static\\s+)?(?:inline\\s+)?(?:const\\s+)?'
+            r'[\\w\\s*]+\\b' + re.escape(func_name)
+            + r'\\s*\\([^;]*\\)\\s*\\{'
+        )
+        if re.match(definition_pattern, line):
+            continue
         if func_name + '(' in line:
-            # Skip if it's just the header declaration itself
+            # Skip a prototype in the owning header only.
             if '$HEADER_FILE' == '$file' and ';' in line:
                 continue
             print(f'{i}:{line.strip()[:80]}')

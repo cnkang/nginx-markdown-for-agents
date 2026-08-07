@@ -80,16 +80,21 @@ mod incremental;
 mod streaming;
 
 pub use abi::{
-    ERROR_DECOMPRESSION_BUDGET_EXCEEDED, ERROR_ENCODING, ERROR_INTERNAL, ERROR_INVALID_INPUT,
-    ERROR_MEMORY_LIMIT, ERROR_PARSE, ERROR_PARSE_BUDGET_EXCEEDED, ERROR_PARSE_TIMEOUT,
-    ERROR_SUCCESS, ERROR_TIMEOUT, FFI_CONFIG_NOT_SET_U8, FFI_CONFIG_NOT_SET_U32,
-    FFI_CONFIG_NOT_SET_U64, FFI_PROFILE_BALANCED, FFI_PROFILE_NONE, FFI_PROFILE_STREAMING_FIRST,
-    FFI_PROFILE_STRICT_CACHE, FFIAcceptResult, FFIBaseUrlDecision, FFIBaseUrlInput, FFIConflict,
-    FFIConflictLevel, FFIConflictList, FFIDecompResult, FFIEffectiveConfig, FFIErrorClass,
-    FFIExplicitConfig, FFIProfile, MARKDOWN_ABI_VERSION, MarkdownConverterHandle, MarkdownOptions,
-    MarkdownResult, MarkdownTrustedProxies, NEGOTIATE_REASON_CONVERT,
-    NEGOTIATE_REASON_EXPLICIT_REJECT, NEGOTIATE_REASON_LOWER_Q, NEGOTIATE_REASON_MALFORMED,
-    NEGOTIATE_REASON_NO_ACCEPT, NEGOTIATE_WILDCARD_ALLOW, NEGOTIATE_WILDCARD_STRICT,
+    DECOMP_CATEGORY_BUDGET_EXCEEDED, DECOMP_CATEGORY_FORMAT_ERROR, DECOMP_CATEGORY_INVALID_ARGS,
+    DECOMP_CATEGORY_IO_ERROR, DECOMP_CATEGORY_RATIO_EXCEEDED, DECOMP_CATEGORY_TRUNCATED_INPUT,
+    ENCODING_CHAIN_DEPTH_EXCEEDED, ENCODING_CHAIN_MALFORMED, ENCODING_CHAIN_UNKNOWN_TOKEN,
+    ENCODING_CHAIN_VALID, ERROR_DECOMPRESSION_BUDGET_EXCEEDED, ERROR_ENCODING, ERROR_INTERNAL,
+    ERROR_INVALID_INPUT, ERROR_MEMORY_LIMIT, ERROR_PARSE, ERROR_PARSE_BUDGET_EXCEEDED,
+    ERROR_PARSE_TIMEOUT, ERROR_SUCCESS, ERROR_TIMEOUT, FFI_CONFIG_NOT_SET_U8,
+    FFI_CONFIG_NOT_SET_U32, FFI_CONFIG_NOT_SET_U64, FFI_PROFILE_BALANCED, FFI_PROFILE_NONE,
+    FFI_PROFILE_STREAMING_FIRST, FFI_PROFILE_STRICT_CACHE, FFIAcceptResult, FFIBaseUrlDecision,
+    FFIBaseUrlInput, FFIChainDecodeResult, FFIConflict, FFIConflictLevel, FFIConflictList,
+    FFIDecompResult, FFIEffectiveConfig, FFIEncodingChainResult, FFIErrorClass, FFIExplicitConfig,
+    FFIProfile, MARKDOWN_ABI_VERSION, MARKDOWN_HEADER_HASH, MARKDOWN_LAYOUT_FINGERPRINT,
+    MARKDOWN_SYMBOL_SET_HASH, MarkdownConverterHandle, MarkdownOptions, MarkdownResult,
+    MarkdownTrustedProxies, NEGOTIATE_REASON_CONVERT, NEGOTIATE_REASON_EXPLICIT_REJECT,
+    NEGOTIATE_REASON_LOWER_Q, NEGOTIATE_REASON_MALFORMED, NEGOTIATE_REASON_NO_ACCEPT,
+    NEGOTIATE_WILDCARD_ALLOW, NEGOTIATE_WILDCARD_STRICT,
 };
 
 #[cfg(feature = "streaming")]
@@ -98,12 +103,15 @@ pub use abi::{
     POST_COMMIT_SAFE_FINISH,
 };
 pub use exports::{
-    markdown_abi_version, markdown_build_header_plan, markdown_classify_error_code,
-    markdown_convert, markdown_converter_free, markdown_converter_new, markdown_decide_base_url,
-    markdown_decide_conditional, markdown_decide_eligibility, markdown_decomp_result_init,
-    markdown_decompress_bounded, markdown_decompress_free, markdown_detect_conflicts,
-    markdown_free_conflicts, markdown_header_plan_free, markdown_header_plan_init,
-    markdown_negotiate_accept, markdown_options_init, markdown_result_free, markdown_result_init,
+    markdown_abi_header_hash, markdown_abi_layout_fingerprint, markdown_abi_symbol_set_hash,
+    markdown_abi_version, markdown_build_header_plan, markdown_chain_decode_free,
+    markdown_chain_decode_result_init, markdown_classify_error_code, markdown_convert,
+    markdown_converter_free, markdown_converter_new, markdown_decide_base_url,
+    markdown_decide_conditional, markdown_decide_eligibility, markdown_decode_encoding_chain,
+    markdown_decomp_result_init, markdown_decompress_bounded, markdown_decompress_free,
+    markdown_detect_conflicts, markdown_free_conflicts, markdown_header_plan_free,
+    markdown_header_plan_init, markdown_negotiate_accept, markdown_options_init,
+    markdown_parse_encoding_chain, markdown_result_free, markdown_result_init,
     markdown_trusted_proxies_free, markdown_trusted_proxies_new, markdown_trusted_proxies_push,
 };
 

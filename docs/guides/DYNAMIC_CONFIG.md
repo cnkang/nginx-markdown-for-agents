@@ -26,7 +26,7 @@ last-known-good rollback form the compatibility contract. See the
 for the production evidence and freeze boundary.
 
 For directive syntax and full parameter reference, see
-[CONFIGURATION.md](CONFIGURATION.md#dynamic-configuration-061).
+[CONFIGURATION.md](CONFIGURATION.md#dynamic-configuration-dynconf).
 
 ---
 
@@ -35,7 +35,7 @@ For directive syntax and full parameter reference, see
 ```nginx
 http {
     markdown_dynamic_config on;
-    markdown_dynamic_config_path /etc/nginx/markdown-dynconf.conf;
+    markdown_dynamic_config_path /etc/nginx/markdown-dynconf.json;
 }
 ```
 
@@ -46,27 +46,34 @@ require hot-reload without restart.
 
 ## Supported Runtime Keys
 
-| Key | Value | Maps to |
-|-----|-------|---------|
-| `schema_version` | `0.9` | **mandatory** — file rejected if missing or unknown |
-| `markdown_filter` | `on` \| `off` | `conf->enabled` |
-| `prune_noise` | `on` \| `off` | `conf->advanced.prune_noise` |
-| `log_verbosity` | `error` \| `warn` \| `info` \| `debug` | `conf->policy.log_verbosity` |
-| `streaming_budget` | `<size>` (e.g. `64k`, `4m`) | `conf->stream.budget` |
-| `memory_budget` | `<size>` (e.g. `128k`) | `conf->advanced.memory_budget` |
+The watched file is JSON. It must contain `"schema_version": 1` and may
+contain only these runtime keys:
 
-### Schema Version (0.9.0+)
+| Key | Value |
+|-----|-------|
+| `filter` | `on`, `off` |
+| `prune_noise` | `on`, `off` |
+| `log_verbosity` | `error`, `warn`, `info`, `debug` |
+| `error_policy` | `pass`, `fail_closed`, `status 429`, `status 503` |
+| `streaming_buffer` | integer bytes from 64 KiB through 1 GiB |
 
-Every dynconf file **must** include `schema_version = 0.9`. This field
-enables the module to reject configuration files written for incompatible
-versions. Behavior:
+Example:
 
-- **Missing `schema_version`** → entire file rejected (INVALID_FILE)
-- **Unknown version** (e.g. `1.0`, `0.8`) → entire file rejected
-- **Correct version** (`0.9`) → file parsed normally
+```json
+{
+  "schema_version": 1,
+  "filter": "on",
+  "prune_noise": "off",
+  "log_verbosity": "info",
+  "error_policy": "pass",
+  "streaming_buffer": 2097152
+}
+```
 
-Structural directives (`markdown_content_types`, `markdown_stream_types`,
-auth policy, conditional requests) require `nginx -s reload`.
+Missing or unknown schema versions, unknown keys, duplicate keys, invalid
+types, and out-of-range values reject the entire file. Structural directives
+(`markdown_content_types`, `markdown_stream_excluded_types`, auth policy, and
+conditional requests) require `nginx -s reload`.
 
 ---
 
@@ -82,12 +89,13 @@ The dynconf timer performs a two-phase staged commit:
 On any parse or validation error, the staging snapshot is discarded and
 the active snapshot remains unchanged. Partial updates are never applied.
 
-### `applied_mtime` Behavior
+### Diagnostics and reload state
 
-The `applied_mtime` timestamp records when the active snapshot was last
-successfully updated. It updates only on successful reload — a failed
-validation leaves `applied_mtime` unchanged, enabling retry on the next
-poll cycle.
+The diagnostics endpoint reports the dynconf `generation` and
+`last_success` fields for an active or last-known-good snapshot. A successful
+reload advances the generation and records `last_success`; a failed
+validation leaves the active snapshot and generation unchanged, enabling a
+retry on the next poll cycle.
 
 ---
 
@@ -112,8 +120,8 @@ a new active snapshot.
 
 ### Timing Guarantees
 
-- `applied_mtime` only updates on a successful reload. A failed validation
-  never advances the timestamp.
+- `generation` and `last_success` advance only on a successful reload. A
+  failed validation never advances either value.
 - Requests in flight at the time of a restoring reload continue using their
   previously-bound snapshot (request consistency is preserved).
 - The LKG snapshot is replaced only when a new reload succeeds — a failed
@@ -158,12 +166,13 @@ production environments where a bad dynconf file could affect traffic.
 
 ## Operational Recommendations
 
-- Place the dynconf file on a local filesystem (not NFS) for reliable
-  mtime detection.
+- Place the dynconf file on a local filesystem (not NFS) for reliable file
+  change detection.
 - Use dry-run mode to validate changes before applying them in
   production.
-- Monitor `dynconf_state.active_mtime` via the diagnostics endpoint to confirm
-  successful reloads.
+- Monitor `configuration.dynconf.generation` and
+  `configuration.dynconf.last_success` via the diagnostics endpoint to
+  confirm successful reloads.
 - Configure dynconf at the `http` or `server` level — only one global
   watcher per worker process is supported.
 - Unknown dynconf keys cause atomic rejection of the entire file
@@ -180,5 +189,5 @@ production environments where a bad dynconf file could affect traffic.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.0 | 2026-07-01 | Kang | Added mandatory schema_version field for version compatibility |
+| 0.9.2 | 2026-08-07 | Codex | Aligned the guide with the JSON schema v1 dynconf contract |
 | 0.7.0 | 2026-05-17 | Kang | Initial creation: LKG/rollback semantics, dry-run validation, reload behavior |

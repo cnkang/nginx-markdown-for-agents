@@ -7,14 +7,14 @@
  * Property test: exercises the decision engine from COMMITTED state
  * with every possible event and verifies:
  *   - Decision action is NEVER PASS_HTML
- *   - Decision action is NEVER REJECT_502
+ *   - Decision action is NEVER REJECT_STATUS
  *   - Decision action is always SAFE_FINISH, ABORT, or CONTINUE_STREAMING
  *   - New state is always COMMITTED, POST_COMMIT_SAFE_FINISH,
  *     or POST_COMMIT_ABORT
  *
  * Also tests the postcommit guard function.
  *
- * Validates: post-commit never produces PASS_HTML, post-commit never produces REJECT_502
+ * Validates: post-commit never produces PASS_HTML, post-commit never produces REJECT_STATUS
  */
 
 #include "../include/test_common.h"
@@ -147,11 +147,18 @@ ngx_http_markdown_metrics_record_postcommit_copied_delivery(size_t bytes)
 
 /* Track postcommit_abort metric invocations */
 static int test_abort_metric_count;
+static int test_safe_finish_metric_count;
 
 void
 ngx_http_markdown_metrics_record_postcommit_abort(void)
 {
     test_abort_metric_count++;
+}
+
+void
+ngx_http_markdown_metrics_record_postcommit_safe_finish(void)
+{
+    test_safe_finish_metric_count++;
 }
 
 /* Include the decision engine source directly */
@@ -352,6 +359,7 @@ static void test_setup(void)
     test_output_free_data = NULL;
     test_output_free_len = 0;
     test_abort_metric_count = 0;
+    test_safe_finish_metric_count = 0;
 }
 
 
@@ -406,9 +414,9 @@ static void test_committed_never_produces_html(void)
             TEST_ASSERT(d.action != NGX_HTTP_MD_ACTION_PASS_HTML,
                         "COMMITTED: action != PASS_HTML");
 
-            /* Safety invariant: NEVER REJECT_502 */
-            TEST_ASSERT(d.action != NGX_HTTP_MD_ACTION_REJECT_502,
-                        "COMMITTED: action != REJECT_502");
+            /* Safety invariant: NEVER REJECT_STATUS */
+            TEST_ASSERT(d.action != NGX_HTTP_MD_ACTION_REJECT_STATUS,
+                        "COMMITTED: action != REJECT_STATUS");
 
             /* Action must be one of valid post-commit actions */
             TEST_ASSERT(
@@ -472,8 +480,8 @@ static void test_post_commit_terminals_never_produce_html(void)
 
             TEST_ASSERT(d.action != NGX_HTTP_MD_ACTION_PASS_HTML,
                         "terminal: action != PASS_HTML");
-            TEST_ASSERT(d.action != NGX_HTTP_MD_ACTION_REJECT_502,
-                        "terminal: action != REJECT_502");
+            TEST_ASSERT(d.action != NGX_HTTP_MD_ACTION_REJECT_STATUS,
+                        "terminal: action != REJECT_STATUS");
             TEST_ASSERT(d.new_state == terminal_states[s],
                         "terminal state stays unchanged");
         }
@@ -719,6 +727,8 @@ static void test_safe_finish_happy_path(void)
                 "send_terminal bypassed the poison top filter");
     TEST_ASSERT(test_streaming_abort_called == 0,
                 "streaming abort must not be called on success");
+    TEST_ASSERT(test_safe_finish_metric_count == 1,
+                "safe_finish lifecycle metric must record first entry");
     TEST_PASS("safe_finish happy path");
 }
 

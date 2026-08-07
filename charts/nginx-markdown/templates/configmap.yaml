@@ -31,12 +31,13 @@ data:
         listen 8080;
         {{- if .Values.markdown.enabled }}
         markdown_filter on;
-        markdown_limits memory={{ .Values.markdown.maxSize }} timeout={{ .Values.markdown.timeout }};
+        markdown_limits conversion_memory={{ .Values.markdown.maxSize }} conversion_timeout={{ .Values.markdown.timeout }};
         markdown_error_policy {{ .Values.markdown.onError }};
         markdown_flavor {{ .Values.markdown.flavor }};
         {{- if .Values.markdown.tokenEstimate }}
         markdown_token_estimate on;
         {{- end }}
+        markdown_auto_decompress {{ ternary "on" "off" .Values.markdown.autoDecompress }};
         {{- if not .Values.markdown.etag }}
         markdown_cache_validation off;
         {{- else }}
@@ -46,10 +47,6 @@ data:
         {{- if .Values.markdown.streaming }}
         markdown_streaming {{ .Values.markdown.streaming.mode }};
         markdown_limits streaming_buffer={{ .Values.markdown.streaming.budget }};
-        markdown_stream_threshold {{ .Values.markdown.streaming.threshold }};
-        {{- if .Values.markdown.streaming.shadow }}
-        markdown_streaming_shadow on;
-        {{- end }}
         {{- end }}
         {{- if .Values.markdown.prune }}
         markdown_prune_noise {{ ternary "on" "off" .Values.markdown.prune.noise }};
@@ -63,12 +60,6 @@ data:
         {{- if .Values.markdown.contentTypes }}
         markdown_content_types {{ join " " .Values.markdown.contentTypes }};
         {{- end }}
-        {{- if ne .Values.markdown.llm.provider "default" }}
-        markdown_llm_provider {{ .Values.markdown.llm.provider }};
-        {{- end }}
-        {{- if .Values.markdown.llm.charsPerToken }}
-        markdown_chars_per_token {{ .Values.markdown.llm.charsPerToken }};
-        {{- end }}
         {{- end }}
         location / {
           root /usr/share/nginx/html;
@@ -76,7 +67,6 @@ data:
         {{- if and .Values.markdown.enabled .Values.metrics.enabled }}
         location = {{ .Values.metrics.uri }} {
           markdown_metrics;
-          markdown_metrics_format {{ .Values.metrics.format }};
         }
         {{- end }}
       }

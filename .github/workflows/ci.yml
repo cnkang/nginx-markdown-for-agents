@@ -6,6 +6,7 @@ on:
     branches: [main, master]
     paths:
       - "AGENTS.md"
+      - "CHANGELOG.md"
       - "components/**"
       - "tools/**"
       - "tests/**"
@@ -19,15 +20,19 @@ on:
       - ".sonar/**"
       - ".sonarcloud.properties"
       - "Makefile"
+      - ".gitattributes"
       - "README.md"
       - "README_zh-CN.md"
       - ".github/workflows/**"
       - "tools/ci/coverage_gate.py"
       - "rust-toolchain.toml"
+      - "requirements-perf.txt"
+      - "requirements-release.txt"
   push:
     branches: [main, master]
     paths:
       - "AGENTS.md"
+      - "CHANGELOG.md"
       - "components/**"
       - "tools/**"
       - "tests/**"
@@ -41,11 +46,14 @@ on:
       - ".sonar/**"
       - ".sonarcloud.properties"
       - "Makefile"
+      - ".gitattributes"
       - "README.md"
       - "README_zh-CN.md"
       - ".github/workflows/**"
       - "tools/ci/coverage_gate.py"
       - "rust-toolchain.toml"
+      - "requirements-perf.txt"
+      - "requirements-release.txt"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -74,6 +82,8 @@ permissions: {}
 #   - nginx-c-sanitizers     — ASan/UBSan sanitizer smoke
 #   - matrix-release-tests   — Release-matrix Python test suite (Req 5)
 #   - brotli-build-matrix    — Brotli streaming build matrix (on/off, Ubuntu 22.04)
+#   - release-092-contract-gates — 0.9.2 source metadata, ABI, version,
+#                                  reason-code and release contract gates
 #
 # EXPERIMENTAL (non-blocking — informational, continue-on-error or nightly):
 #   - perf-artifacts         — Performance baseline collection (continue-on-error: true)
@@ -114,6 +124,7 @@ jobs:
           filters: |
             docs:
               - 'AGENTS.md'
+              - 'CHANGELOG.md'
               - 'docs/**'
               - 'README.md'
               - 'README_zh-CN.md'
@@ -158,6 +169,7 @@ jobs:
               - 'tools/release/matrix/**'
               - 'tools/release-matrix.json'
               - 'tools/release/gates/**'
+              - 'tests/fixtures/**'
             corpus_tools:
               - 'tools/corpus/**'
             harness_tooling:
@@ -234,6 +246,9 @@ jobs:
 
       - name: Run auto-generated naming detector
         run: python3 tools/harness/detect_auto_generated_naming.py tools/ --strict
+
+      - name: Run Python complexity detector
+        run: PYTHONPATH=. python3 tools/harness/detect_python_complexity.py
 
   header-sync:
     name: FFI Header Generation Smoke
@@ -320,8 +335,7 @@ jobs:
         run: cargo clippy --manifest-path tools/corpus/test-corpus-conversion/Cargo.toml --all-targets -- -D warnings
 
       - name: Run Rust unit tests
-        # Streaming tests are included: make test-rust uses --all-features,
-        # which enables the 'streaming' feature gate (Spec 43, Req 1).
+        # Streaming tests are included by the all-features Rust test target.
         run: make test-rust
 
       - name: Run Rust doctests
@@ -331,7 +345,11 @@ jobs:
   nginx-c-tests:
     name: NGINX C Tests (Unit + Integration-C)
     needs: changes
-    if: needs.changes.outputs.nginx == 'true' || needs.changes.outputs.workflows == 'true'
+    if: >-
+      needs.changes.outputs.nginx == 'true' ||
+      needs.changes.outputs.workflows == 'true' ||
+      needs.changes.outputs.harness_tooling == 'true' ||
+      needs.changes.outputs.matrix_release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -356,6 +374,59 @@ jobs:
 
       - name: Run NGINX C integration harness
         run: make -C components/nginx-module/tests integration-c
+
+      - name: 0.9.2 streaming lifecycle unit test
+        run: make -C components/nginx-module/tests unit-streaming_impl
+
+      - name: 0.9.2 public-surface drift check
+        run: make public-surface-drift-check
+
+      - name: 0.9.2 version consistency
+        run: bash tools/harness/detect_version_consistency.sh
+
+      - name: 0.9.2 release gate contract validator
+        run: PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
+
+  release-092-contract-gates:
+    name: 0.9.2 Contract Gates
+    needs: changes
+    if: >-
+      needs.changes.outputs.docs == 'true' ||
+      needs.changes.outputs.rust == 'true' ||
+      needs.changes.outputs.nginx == 'true' ||
+      needs.changes.outputs.harness_tooling == 'true' ||
+      needs.changes.outputs.matrix_release == 'true' ||
+      needs.changes.outputs.perf == 'true' ||
+      needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install C unit-test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            libbrotli-dev \
+            pkg-config \
+            zlib1g-dev
+
+      - name: Run 0.9.2 contract gates
+        run: |
+          make public-surface-drift-check
+          bash tools/harness/detect_version_consistency.sh
+          make reason-codegen-check
+          PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
+          make -C components/nginx-module/tests unit-streaming_impl
+          PYTHONPATH=. python3 tools/release/gates/validate_official_feature_manifest.py --write
+          PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
+          PYTHONPATH=. python3 tools/release/gates/validate_official_feature_manifest.py
 
   nginx-c-clang-smoke:
     name: NGINX C Clang Smoke
@@ -726,11 +797,14 @@ jobs:
 
   matrix-release-tests:
     name: Matrix Release Tests
-    # Covers Spec 43 Req 5: matrix schema valid, supported entries have CI,
-    # no artifact exceeds scope. Also runs as part of docs-check via make docs-check.
-    # validate_workflow_matrix_consumers.py consumes only repo-owned sources.
+    # Covers the release matrix schema and supported-entry CI bindings. Also
+    # runs as part of docs-check via make docs-check.
+    # validate_workflow_matrix_consumers.py consumes only repository sources.
     needs: changes
-    if: needs.changes.outputs.matrix_release == 'true' || needs.changes.outputs.workflows == 'true'
+    if: >-
+      needs.changes.outputs.matrix_release == 'true' ||
+      needs.changes.outputs.workflows == 'true' ||
+      needs.changes.outputs.docs == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -748,6 +822,9 @@ jobs:
 
       - name: Install Python test dependencies
         run: pip install -r requirements-dev.txt
+
+      - name: Prepare official build feature manifest
+        run: PYTHONPATH=. python3 tools/release/gates/validate_official_feature_manifest.py --write
 
       - name: Run release-matrix Python tests
         run: PYTHONPATH=. python3 -m pytest -q tools/release/matrix/tests/
@@ -844,6 +921,9 @@ jobs:
       - name: Run corpus benchmark
         run: make test-benchmark
 
+      - name: Run determinism corpus (Requirement 13.4)
+        run: make test-corpus-determinism
+
       - name: Detect platform
         id: platform
         run: |
@@ -893,7 +973,11 @@ jobs:
   # Runs validate_release_gates_090.py which covers 0.9.x deliverables including
   # production examples, doctor tool, config V2, conditional requests, and
   # observability schema.
-  # Non-blocking in CI; blocking at actual release tags via make targets.
+  # Informational only; the blocking 0.9.2 contract checks (public-surface
+  # drift, version consistency, and reason code registry) run in
+  # the independent release-092-contract-gates job.  Full module/performance
+  # blocking evidence
+  # runs at tag/RC time via release-packages.yml (baseline 092).
   release-regression-gates:
     name: "Release Gates: 0.9.x Regression Validator"
     needs: [changes, rust-quality, nginx-c-tests]

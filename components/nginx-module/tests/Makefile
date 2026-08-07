@@ -45,7 +45,8 @@ build/unit/%: unit/%_test.c include/test_common.h include/test_metrics_snapshot.
 	extra_ldflags=""; \
 	case "$*" in \
 	  headers) extra_srcs="helpers/headers_standalone.c" ;; \
-	  header_compile|reason_code|error_impl|error_classification|reason_code_ffi|diagnostics_accessors|diagnostics_production|header_plan_apply|header_plan_prepare_commit) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
+	  reason_code_ffi|diagnostics_production) extra_srcs="../src/ngx_http_markdown_diagnostics_reason.c"; extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
+	  header_compile|reason_code|error_impl|error_classification|diagnostics_accessors|header_plan_apply|header_plan_prepare_commit) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
 	  diagnostics_streaming_response) extra_cflags="-DMARKDOWN_STREAMING_ENABLED" ;; \
 	  ffi_layout_check) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
 	  gzip_deflate_decompression|decompression_production) extra_cflags="-I../src -Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS) -lz" ;; \
@@ -61,13 +62,13 @@ build/unit/%: unit/%_test.c include/test_common.h include/test_metrics_snapshot.
 	  stream_error|stream_state|stream_postcommit|stream_replay|stream_commit|stream_e2e|streaming_replay_overflow_security) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
 	  streaming_impl) extra_cflags="-I../src -Iinclude/nginx_stubs -I../../rust-converter/include -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS) -lz" ;; \
 	  conversion_impl_base_url) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
-	  config_handlers_impl) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections -Wno-unused-function" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
+	  config_handlers_impl|limits_parsing_property) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections -Wno-unused-function" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  profile) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections -Wno-unused-function" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
-	  streaming_config_contract) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
+	  streaming_config_contract|directive_context_default_inherit_property|context_negative_property) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  eligibility_impl|hard_excluded_params_case|hard_excluded_types_security|status_code_excluded_security) extra_cflags="-Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  config_core_impl) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  v070_default_values) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
-	  dynconf_impl) extra_cflags="-Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
+  dynconf_impl) extra_cflags="-Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -DNGX_HTTP_MARKDOWN_DYNCONF_LEGACY_TEST -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  dynconf_snapshot) extra_cflags="-Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  effective_conf) extra_cflags="-Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  prometheus_renderer) extra_cflags="-DMARKDOWN_STREAMING_ENABLED" ;; \
@@ -125,7 +126,7 @@ COV_DIR ?= build/coverage
 unit-coverage:
 	@$(MAKE) clean
 	@$(MAKE) unit \
-		CFLAGS_COMMON="-Wall -Wextra -Werror=implicit-function-declaration -Werror=incompatible-pointer-types -g --coverage -std=$(CSTD) -Iinclude" \
+		CFLAGS_COMMON="-Wall -Wextra -Werror=implicit-function-declaration -Werror=incompatible-pointer-types -g --coverage -std=$(CSTD) -Iinclude -I../../rust-converter/include" \
 		LDFLAGS_COMMON="--coverage"
 	@mkdir -p $(COV_DIR)
 	lcov --capture --directory build/unit --output-file $(COV_DIR)/raw.lcov \

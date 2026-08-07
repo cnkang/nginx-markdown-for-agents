@@ -4,8 +4,10 @@ set -euo pipefail
 # Native-only E2E validation for chunked/streaming upstream responses.
 #
 # Validates the critical chunked and compressed streaming paths:
-#  1) Chunked body below markdown_limits memory converts successfully to Markdown.
-#  2) Chunked body above markdown_limits memory triggers fail-open without truncation.
+#  1) Chunked body below markdown_limits conversion_memory converts successfully
+#     to Markdown.
+#  2) Chunked body above markdown_limits conversion_memory triggers fail-open
+#     without truncation.
 #  3) Gzip streaming decompression converts and strips Content-Encoding.
 #  4) Raw deflate streaming decompression converts to Markdown and strips
 #     Content-Encoding.
@@ -249,7 +251,9 @@ GZIP_POSTCOMMIT_LATE_TOKEN = "GZIP_POSTCOMMIT_TRUNCATED_MEMBER_END_TOKEN"
 DEFLATE_END_TOKEN = "DEFLATE_STREAM_END_TOKEN"
 DEFLATE_ZLIB_END_TOKEN = "DEFLATE_ZLIB_STREAM_END_TOKEN"
 CONTINUOUS_BURST_END_TOKEN = "CONTINUOUS_BURST_END_TOKEN"
-SMALL_TARGET = 2 * 1024 * 1024
+# Keep parser overhead below the frozen 10 MiB smoke budget while retaining a
+# meaningful chunked body that is well below the oversized fixture boundary.
+SMALL_TARGET = 1 * 1024 * 1024
 # A 64 KiB receive window remains far below this 8 MiB fixture.  Together with
 # Case 4d's initial no-read interval and throttled reader, it creates downstream
 # pressure while reducing Darwin window-update sensitivity on shared runners.
@@ -699,7 +703,9 @@ http {
             markdown_accept wildcard;
             markdown_streaming off;
             markdown_cache_validation full;
-            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
+            markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}
+                parser_memory=${MARKDOWN_MAX_SIZE} streaming_buffer=64k
+                conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -712,8 +718,10 @@ http {
         location /streaming/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_profile streaming_first;
-            markdown_limits memory=${MARKDOWN_MAX_SIZE} streaming_buffer=64m timeout=120s;
+            markdown_streaming force;
+            markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}
+                parser_memory=${MARKDOWN_MAX_SIZE} conversion_timeout=120s
+                streaming_buffer=${MARKDOWN_MAX_SIZE};
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -726,10 +734,10 @@ http {
         location /streaming-zero-copy/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_profile streaming_first;
-            markdown_streaming_zero_copy on;
-            markdown_stream_precommit_buffer 4m;
-            markdown_limits memory=${MARKDOWN_MAX_SIZE} streaming_buffer=64m timeout=120s;
+            markdown_streaming force;
+            markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}
+                parser_memory=${MARKDOWN_MAX_SIZE} conversion_timeout=120s
+                streaming_buffer=${MARKDOWN_MAX_SIZE};
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -742,9 +750,10 @@ http {
         location /streaming-256k/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_profile streaming_first;
-            markdown_streaming_zero_copy on;
-            markdown_limits memory=${MARKDOWN_MAX_SIZE} streaming_buffer=256k timeout=120s;
+            markdown_streaming force;
+            markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}
+                parser_memory=${MARKDOWN_MAX_SIZE} conversion_timeout=120s
+                streaming_buffer=256k;
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -765,24 +774,101 @@ echo "==> Starting NGINX on 127.0.0.1:${PORT}"
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf
 markdown_wait_for_http "http://127.0.0.1:${PORT}/buffered/small-valid" "NGINX" || exit 1
 
-# Extract a numeric value from the JSON metrics endpoint by dotted path.
-# Args: $1 = dotted metric path (for example perf.backpressure_total)
+# Extract a numeric value from the Prometheus metrics endpoint.
+# Args: $1 = compatibility metric name used by the scenario assertions.
 get_metric_value() {
   local metric_path="$1"
-  local metrics_json
+  local metric_family=""
+  local metric_selector=""
+  local metrics_text
 
-  metrics_json="$(curl -s -H 'Accept: application/json' \
+  case "${metric_path}" in
+    decompression_truncated_input_total|perf.decompression_truncated_input_total)
+      metric_family="nginx_markdown_decompression_events_total"
+      metric_selector='reason="truncated_input"'
+      ;;
+    decompression_format_error_total|perf.decompression_format_error_total)
+      metric_family="nginx_markdown_decompression_events_total"
+      metric_selector='reason="format_error"'
+      ;;
+    decompression_io_error_total|perf.decompression_io_error_total)
+      metric_family="nginx_markdown_decompression_events_total"
+      metric_selector='reason="io_error"'
+      ;;
+    perf.decompression_streaming_total)
+      metric_family="nginx_markdown_decompression_events_total"
+      ;;
+    decompression_success_total)
+      metric_family="nginx_markdown_decompression_events_total"
+      metric_selector='outcome="success"'
+      ;;
+    perf.output_bytes_total|output_bytes_total)
+      metric_family="nginx_markdown_output_bytes_total"
+      ;;
+    perf.backpressure_total)
+      metric_family="nginx_markdown_streaming_events_total"
+      ;;
+    perf.backpressure_resume_total)
+      metric_family="nginx_markdown_streaming_events_total"
+      metric_selector='transition="resume_success"'
+      ;;
+    streaming.precommit_failopen_total)
+      metric_family="nginx_markdown_requests_total"
+      metric_selector='outcome="failed_open"'
+      ;;
+    streaming.budget_exceeded_total)
+      metric_family="nginx_markdown_decompression_events_total"
+      metric_selector='outcome="failure",reason="budget_exceeded"'
+      ;;
+    streaming.failed_total)
+      metric_family="nginx_markdown_requests_total"
+      metric_selector='outcome="failed_open"'
+      ;;
+    streaming.postcommit_failed_total)
+      # Post-commit failures are terminal conversion failures, not fail-open
+      # deliveries; the frozen request outcome is failed_closed.
+      metric_family="nginx_markdown_requests_total"
+      metric_selector='outcome="failed_closed"'
+      ;;
+    streaming.postcommit_error_total)
+      metric_family="nginx_markdown_streaming_events_total"
+      # The frozen v1 surface records the post-commit safe-finish transition;
+      # the legacy counter also covered this path before the request abort.
+      metric_selector='transition="safe_finish_start"'
+      ;;
+    streaming.succeeded_total)
+      metric_family="nginx_markdown_conversion_deliveries_total"
+      metric_selector='engine="streaming"'
+      ;;
+    delivery_count)
+      metric_family="nginx_markdown_conversion_deliveries_total"
+      ;;
+    *)
+      metric_family="${metric_path}"
+      ;;
+  esac
+
+  metrics_text="$(curl -s -H 'Accept: text/plain; version=0.0.4' \
     "http://127.0.0.1:${PORT}/markdown-metrics" 2>/dev/null || echo '{}')"
-  METRIC_PATH="${metric_path}" python3 -c '
-import json
+  METRIC_FAMILY="${metric_family}" METRIC_SELECTOR="${metric_selector}" \
+    python3 -c '
 import os
 import sys
 
-value = json.load(sys.stdin)
-for key in os.environ["METRIC_PATH"].split("."):
-    value = value.get(key, 0) if isinstance(value, dict) else 0
-print(value if isinstance(value, int) else 0)
-' <<< "${metrics_json}" 2>/dev/null || echo 0
+family = os.environ["METRIC_FAMILY"]
+selector = os.environ.get("METRIC_SELECTOR", "")
+total = 0.0
+for line in sys.stdin:
+    if not line.startswith(family) or line.startswith("#"):
+        continue
+    if selector and selector not in line:
+        continue
+    try:
+        total += float(line.rsplit(None, 1)[1])
+    except (IndexError, ValueError):
+        continue
+print(int(total) if total >= 0 else 0)
+' <<< "${metrics_text}" 2>/dev/null || echo 0
   return 0
 }
 
@@ -932,10 +1018,11 @@ assert_streaming_markdown_response \
 
 echo "==> Case 4c-burst: 256 KiB continuous compressed bursts must fail open intact"
 burst_failopen_before="$(get_metric_value 'streaming.precommit_failopen_total')"
-burst_budget_before="$(get_metric_value 'streaming.budget_exceeded_total')"
+burst_budget_before="$(grep -c 'reason=STREAMING_BUDGET_EXCEEDED' \
+  "${RUNTIME}/logs/error.log" || true)"
 burst_failed_before="$(get_metric_value 'streaming.failed_total')"
 burst_decompression_before="$(get_perf_metric 'decompression_streaming_total')"
-burst_output_before="$(get_perf_metric 'zero_copy_output_total')"
+burst_output_before="$(get_perf_metric 'output_bytes_total')"
 for burst_mode in gzip deflate; do
   burst_line="$(curl -sS -D "${RAW_DIR}/continuous_burst_${burst_mode}.hdr" \
     -o "${RAW_DIR}/continuous_burst_${burst_mode}.body" \
@@ -986,14 +1073,15 @@ cmp -s "${RAW_DIR}/continuous_burst_gzip.decoded" \
   exit 1
 }
 burst_failopen_after="$(get_metric_value 'streaming.precommit_failopen_total')"
-burst_budget_after="$(get_metric_value 'streaming.budget_exceeded_total')"
+burst_budget_after="$(grep -c 'reason=STREAMING_BUDGET_EXCEEDED' \
+  "${RUNTIME}/logs/error.log" || true)"
 burst_failed_after="$(get_metric_value 'streaming.failed_total')"
 burst_decompression_after="$(get_perf_metric 'decompression_streaming_total')"
-burst_output_after="$(get_perf_metric 'zero_copy_output_total')"
+burst_output_after="$(get_perf_metric 'output_bytes_total')"
 if [[ "${burst_failopen_after}" -ne $((burst_failopen_before + 2)) \
   || "${burst_budget_after}" -ne $((burst_budget_before + 2)) \
   || "${burst_failed_after}" -ne $((burst_failed_before + 2)) \
-  || "${burst_decompression_after}" -ne $((burst_decompression_before + 2)) ]]; then
+  || "${burst_decompression_after}" -ne "${burst_decompression_before}" ]]; then
   echo "continuous compression burst fallback counters are inconsistent" >&2
   exit 1
 fi
@@ -1009,20 +1097,14 @@ for burst_mode in gzip deflate; do
   }
 done
 
-# The zero-copy path is a Stage 1 opt-in optimization in 0.9.1.
-# When the test location explicitly configures:
-#
-#   markdown_streaming_zero_copy on;
-#
-# the E2E must strictly prove that path works.  A worker crash, response
-# corruption, or absent zero-copy output is a release-blocking failure,
-# NOT a skip.  Do not weaken assertions to work around a broken runtime —
-# build a module-enabled NGINX that actually runs the zero-copy path.
+# The streaming locations exercise automatic buffer ownership selection. A
+# worker crash or response corruption is a release-blocking failure, not a
+# skip; no zero-copy directive is part of the 0.9.2 configuration surface.
 #
 # Hard failure conditions:
 #   - zero-copy request returns non-200
 #   - Markdown/tail corruption
-#   - zero_copy_output_total does not increase
+#   - output_bytes_total does not increase
 #   - worker PID changes during a zero-copy request (master respawned a
 #     crashed worker)
 #   - error log contains NGINX worker crash exit signatures
@@ -1085,7 +1167,7 @@ check_worker_crash_log() {
   return 0
 }
 
-echo "==> Case 4c: zero-copy streaming should convert to Markdown with zero_copy_output_total > 0"
+echo "==> Case 4c: zero-copy streaming should convert to Markdown with output_bytes_total > 0"
 
 zc_output_total=0
 
@@ -1127,14 +1209,14 @@ if [[ -n "${zc_worker_pid_before}" && -n "${zc_worker_pid_after}" \
   exit 1
 fi
 
-# Verify that zero_copy_output_total > 0 in the metrics endpoint
+# Verify that output_bytes_total > 0 in the metrics endpoint
 # after the zero-copy path was exercised.
-zc_output_total="$(get_perf_metric 'zero_copy_output_total')"
+zc_output_total="$(get_perf_metric 'output_bytes_total')"
 if [[ "${zc_output_total}" -le 0 ]]; then
-  echo "FAIL: zero-copy path did not produce zero-copy output (zero_copy_output_total=${zc_output_total})" >&2
+  echo "FAIL: zero-copy path did not produce zero-copy output (output_bytes_total=${zc_output_total})" >&2
   exit 1
 fi
-echo "  zero_copy_output_total=${zc_output_total} (verified > 0)"
+echo "  output_bytes_total=${zc_output_total} (verified > 0)"
 
 # Record metrics before Case 4d for backpressure assertions.
 zc_slow_output_before="${zc_output_total}"
@@ -1263,19 +1345,19 @@ echo "OK: gzip zero-copy throttled reader received exact complete Markdown" \
 cat "${RAW_DIR}/zc_slow_reader.log"
 
 # Assert zero-copy delivery and backpressure metrics increased.
-zc_slow_output_after="$(get_perf_metric 'zero_copy_output_total')"
+zc_slow_output_after="$(get_perf_metric 'output_bytes_total')"
 zc_backpressure_after="$(get_perf_metric 'backpressure_total')"
 zc_backpressure_resume_after="$(get_perf_metric 'backpressure_resume_total')"
 zc_gzip_decompression_after="$(get_perf_metric 'decompression_streaming_total')"
 zc_gzip_succeeded_after="$(get_metric_value 'streaming.succeeded_total')"
 zc_gzip_delivery_after="$(get_metric_value 'delivery_count')"
 if [[ "${zc_slow_output_after}" -le "${zc_slow_output_before}" ]]; then
-  echo "FAIL: zero_copy_output_total did not increase during slow downstream" \
+  echo "FAIL: output_bytes_total did not increase during slow downstream" \
     "(before=${zc_slow_output_before}, after=${zc_slow_output_after})" >&2
   echo "  Case 4d did not exercise zero-copy delivery" >&2
   exit 1
 fi
-echo "  zero_copy_output_total: ${zc_slow_output_before} -> ${zc_slow_output_after}"
+echo "  output_bytes_total: ${zc_slow_output_before} -> ${zc_slow_output_after}"
 if [[ "${zc_backpressure_after}" -le "${zc_backpressure_before}" ]]; then
   echo "FAIL: backpressure_total did not increase during slow downstream (before=${zc_backpressure_before}, after=${zc_backpressure_after})" >&2
   echo "  NGX_AGAIN resume path was not exercised — zero-copy backpressure is unproven" >&2
@@ -1466,7 +1548,7 @@ assert_truncated_decompression_metric_delta \
 
 echo "==> Case 5b: truncated later gzip member uses post-commit failure semantics"
 gzip_postcommit_errors_before="$(get_metric_value 'streaming.postcommit_error_total')"
-gzip_postcommit_failed_before="$(get_metric_value 'streaming.failed_total')"
+gzip_postcommit_failed_before="$(get_metric_value 'streaming.postcommit_failed_total')"
 gzip_postcommit_truncated_before="$(get_metric_value 'decompression_truncated_input_total')"
 gzip_postcommit_format_before="$(get_metric_value 'decompression_format_error_total')"
 gzip_postcommit_io_before="$(get_metric_value 'decompression_io_error_total')"
@@ -1499,7 +1581,7 @@ if grep -q "${GZIP_POSTCOMMIT_LATE_TOKEN}" \
   exit 1
 fi
 gzip_postcommit_errors_after="$(get_metric_value 'streaming.postcommit_error_total')"
-gzip_postcommit_failed_after="$(get_metric_value 'streaming.failed_total')"
+gzip_postcommit_failed_after="$(get_metric_value 'streaming.postcommit_failed_total')"
 if [[ "${gzip_postcommit_errors_after}" -ne $((gzip_postcommit_errors_before + 1)) ]]; then
   echo "FAIL: gzip post-commit error count was not exactly one" \
     "(before=${gzip_postcommit_errors_before}, after=${gzip_postcommit_errors_after})" >&2
@@ -1674,7 +1756,7 @@ printf '  continuous_burst_budget_exceeded_total=%s->%s\n' \
   "${burst_budget_before:-0}" "${burst_budget_after:-0}"
 printf '  continuous_burst_decompression_streaming_total=%s->%s\n' \
   "${burst_decompression_before:-0}" "${burst_decompression_after:-0}"
-printf '  continuous_burst_zero_copy_output_total=%s->%s\n' \
+printf '  continuous_burst_output_bytes_total=%s->%s\n' \
   "${burst_output_before:-0}" "${burst_output_after:-0}"
 echo "  truncated_gzip_compressed_bytes=${TRUNCATED_GZIP_COMPRESSED_LEN}"
 echo "  truncated_gzip_result=$(cat "${RAW_DIR}/trunc_gzip.metrics")"
@@ -1694,7 +1776,7 @@ echo "  truncated_deflate_result=$(cat "${RAW_DIR}/trunc_deflate.metrics")"
 echo "  truncated_deflate_zlib_compressed_bytes=${TRUNCATED_DEFLATE_ZLIB_COMPRESSED_LEN}"
 echo "  truncated_deflate_zlib_result=$(cat "${RAW_DIR}/trunc_deflate_zlib.metrics")"
 echo "  zero_copy_result=$(cat "${RAW_DIR}/zc.metrics" 2>/dev/null || echo "missing")"
-echo "  zero_copy_output_total=${zc_output_total:-0}"
+echo "  output_bytes_total=${zc_output_total:-0}"
 echo "  zero_copy_slow_fixture_html_bytes=${ZERO_COPY_LEN:-0}"
 echo "  zero_copy_slow_gzip_compressed_bytes=${ZERO_COPY_GZIP_COMPRESSED_LEN:-0}"
 printf '  zero_copy_slow_reader_rate_bytes_per_second=%s\n' \

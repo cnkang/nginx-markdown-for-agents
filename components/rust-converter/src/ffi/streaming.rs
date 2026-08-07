@@ -242,25 +242,6 @@ pub struct StreamingOptions {
 
     /// Length in bytes of the `prune_protection_selectors` field.
     pub prune_protection_selector_len: usize,
-
-    /// LLM provider for token estimation.
-    ///
-    /// - `0` = default (4.0 chars/token)
-    /// - `1` = OpenAI GPT
-    /// - `2` = Anthropic Claude
-    /// - `3` = Google Gemini
-    /// - `4` = Meta Llama
-    ///
-    /// Overridden by `chars_per_token_fixed` when that field is non-zero.
-    pub llm_provider: u8,
-
-    /// Explicit chars-per-token ratio (fixed-point: raw = value / 10.0).
-    ///
-    /// When non-zero, overrides both the default 4.0 and the provider-specific
-    /// ratio. Non-zero `u8` values represent raw ratios 0.1-25.5 chars/token;
-    /// decoded values below 1.0 are clamped to the effective minimum 1.0.
-    /// Value `0` means "use default or provider ratio".
-    pub chars_per_token_fixed: u8,
 }
 
 /// Opaque handle wrapping a [`StreamingConverter`] for the C ABI.
@@ -756,8 +737,6 @@ mod tests {
             prune_protection_selectors: ptr::null(),
             prune_protection_selector_len: 0,
             memory_budget: 0,
-            llm_provider: 0,
-            chars_per_token_fixed: 0,
             parse_timeout_ms: 0,
             parser_memory_budget: 0,
             flush_threshold: 0,
@@ -1226,16 +1205,15 @@ mod tests {
             offset_of!(StreamingOptions, prune_protection_selector_len),
             80
         );
-        assert_eq!(offset_of!(StreamingOptions, llm_provider), 88);
-        assert_eq!(offset_of!(StreamingOptions, chars_per_token_fixed), 89);
     }
 
     #[test]
     fn test_streaming_options_size() {
         use std::mem::size_of;
 
-        /* 96 bytes: 4+4+8+4+(1*4)+ptr+usize+ptr+usize+ptr+usize+ptr+usize+1+1+padding */
-        assert_eq!(size_of::<StreamingOptions>(), 96);
+        /* 88 bytes after the current FFI freeze removed the temporary
+         * token-estimation override fields. */
+        assert_eq!(size_of::<StreamingOptions>(), 88);
     }
 
     #[test]
@@ -1258,8 +1236,6 @@ mod tests {
         assert_eq!(opts.prune_selector_len, 0);
         assert!(opts.prune_protection_selectors.is_null());
         assert_eq!(opts.prune_protection_selector_len, 0);
-        assert_eq!(opts.llm_provider, 0); /* default */
-        assert_eq!(opts.chars_per_token_fixed, 0); /* use default */
     }
 
     #[test]

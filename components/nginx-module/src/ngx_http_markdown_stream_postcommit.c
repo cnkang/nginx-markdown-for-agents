@@ -98,6 +98,12 @@ ngx_http_markdown_stream_postcommit_safe_finish(
         return NGX_ERROR;
     }
 
+#ifdef MARKDOWN_STREAMING_ENABLED
+    if (ctx->stream_sm.state == NGX_HTTP_MD_STATE_COMMITTED) {
+        ngx_http_markdown_metrics_record_postcommit_safe_finish();
+    }
+#endif
+
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "markdown postcommit safe_finish: "
                    "initiating graceful close");

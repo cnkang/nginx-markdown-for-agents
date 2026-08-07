@@ -1172,7 +1172,7 @@ def check_file(
 
     Returns list of errors (mismatch = error). Missing files and missing
     markers are treated as warnings (printed to stderr) and do not cause
-    a non-zero exit, since markers may not have been added yet (wave 2).
+    a non-zero exit, since markers may not have been added yet.
     """
     errors: list[str] = []
     try:
@@ -1199,7 +1199,7 @@ def check_file(
     if not sections:
         print(
             f"WARNING: {rel_path}: no release-matrix markers "
-            f"(will be added in wave 2)",
+            f"(will be added in a later update)",
             file=sys.stderr,
         )
         return errors

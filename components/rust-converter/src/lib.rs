@@ -44,12 +44,13 @@ pub mod config;
 pub mod converter;
 pub mod decision;
 pub mod decompress;
+pub mod dynconf;
+pub mod encoding;
 pub mod error;
 pub mod etag_generator;
 pub mod ffi;
 pub mod forwarded;
 pub mod header_plan;
-pub mod llm_adapter;
 pub mod metadata;
 pub mod metrics;
 pub mod negotiator;
@@ -64,6 +65,10 @@ pub mod incremental;
 // Streaming conversion API (feature-gated, enabled by default)
 #[cfg(feature = "streaming")]
 pub mod streaming;
+
+// Streaming lifecycle state machine (formal model)
+#[cfg(feature = "streaming")]
+pub mod streaming_lifecycle;
 
 // Re-export main types for convenience
 pub use converter::MarkdownConverter;

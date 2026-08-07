@@ -1,0 +1,95 @@
+{
+  "schema_version": "release.provenance-policy.v1",
+  "title": "0.9.2 Release Provenance Policy (frozen)",
+  "frozen_at": "2026-08-05",
+  "owner": "release engineering",
+  "status": "frozen",
+  "note": "Provenance policy defines identity, predicate, and digest-binding rules for every official artifact family. Candidate-bound provenance records are produced solely by the release workflow against the frozen candidate commit.",
+  "provenance_model": {
+    "predicate_type": "in-toto/slsa-provenance-style predicate (subject digest + build metadata)",
+    "subject_binding": "Every provenance record binds artifact sha256, candidate_sha, feature-manifest digest, ABI version, producer workflow run id, and artifact identity",
+    "evidence_commit_sha": "Separate metadata when evidence is stored outside the candidate branch; the candidate_sha is never redefined",
+    "retention": "Immutable; retrieval uses immutable run/artifact IDs per the Artifact Registry Contract"
+  },
+  "artifact_types": {
+    "source_archive": {
+      "provenance_form": "release-manifest.json entry with source URL, source SHA (git commit), and per-file sha256",
+      "predicate": "Source archive provenance predicate: repo URL + git commit SHA + archive sha256",
+      "producer": "packaging/scripts/generate-release-manifest.py (release-packages.yml integrity-checksums)",
+      "consumer": "verify-release-manifest.py, release gates, downstream evidence consumers",
+      "verification_commands": [
+        "python3 packaging/scripts/validate-release-manifest.py"
+      ]
+    },
+    "deb": {
+      "provenance_form": "candidate-release-artifact-index.json entry + package ABI manifest (package-abi-manifest.json) + SBOM entry",
+      "predicate": "DEB provenance: candidate_sha + artifact sha256 + feature-manifest digest + ABI version + build runner identity + nginx version",
+      "producer": "candidate-bound release artifact index producer",
+      "consumer": "artifact-registry-check gate, release evidence checkpoint, downstream consumers",
+      "verification_commands": [
+        "make artifact-registry-check",
+        "dpkg-deb --info <package>.deb"
+      ]
+    },
+    "rpm": {
+      "provenance_form": "candidate-release-artifact-index.json entry + package ABI manifest + SBOM entry",
+      "predicate": "RPM provenance: candidate_sha + artifact sha256 + feature-manifest digest + ABI version + build runner identity + nginx version",
+      "producer": "candidate-bound release artifact index producer",
+      "consumer": "artifact-registry-check gate, release evidence checkpoint, downstream consumers",
+      "verification_commands": [
+        "make artifact-registry-check",
+        "rpm -qip <package>.rpm"
+      ]
+    },
+    "oci": {
+      "provenance_form": "Cosign attestation (in-toto predicate) attached to the image + provenance-index.json entry",
+      "predicate": "in-toto/slsa-provenance predicate covering image manifest digest, source commit, builder identity",
+      "producer": "OCI release workflow (cosign attest)",
+      "consumer": "provenance-index.json consumers, cosign verify-attestation",
+      "verification_commands": [
+        "cosign verify-attestation <image>@sha256:<digest>"
+      ]
+    },
+    "homebrew_formula_source": {
+      "provenance_form": "Formula sha256 stanza + tag archive verification record",
+      "predicate": "Formula provenance: tag archive sha256 equals local git archive of the resolved tag commit",
+      "producer": "packaging/scripts/render_homebrew_formula.py + verify_git_archive.py",
+      "consumer": "homebrew-formula-gate.yml, homebrew-tap-publish.yml",
+      "verification_commands": [
+        "python3 packaging/scripts/verify_homebrew_formula.py",
+        "python3 packaging/scripts/verify_git_archive.py --tag <tag>"
+      ]
+    },
+    "homebrew_bottle": {
+      "provenance_form": "Bottle sha256 in bottle JSON (when applicable)",
+      "predicate": "Bottle provenance: bottle sha256 binds exact bottle bytes",
+      "producer": "Homebrew bottle build",
+      "consumer": "formula/bottle consumers",
+      "verification_commands": [
+        "shasum -a 256 <bottle>.tar.gz"
+      ]
+    }
+  },
+  "sbom": {
+    "format": "SPDX JSON (spdx-json)",
+    "producer": "anchore/sbom-action (supply-chain.yml sbom job) or syft",
+    "binding": "SBOM digest bound to the artifact digest in sbom-index.json; SBOM covers the built artifact's dependency tree",
+    "verification_commands": [
+      "make supply-chain-sbom"
+    ]
+  },
+  "security_scan": {
+    "scan_types": "SAST (CodeQL + supplemental gates) and dependency audit (cargo-deny)",
+    "report": "artifacts/release/0.9.2/security-scan-report.json produced by the release workflow; clear or formally accepted residual risk",
+    "verification_commands": [
+      "make security-static",
+      "make supply-chain"
+    ]
+  },
+  "candidate_binding_rules": [
+    "The release workflow is the sole producer of authoritative candidate-bound provenance after the candidate SHA is frozen",
+    "Failed or superseded attempts retain unique immutable run_id and attempt values and are never referenced by the release checkpoint or downstream inputs",
+    "Every record binds candidate_sha, artifact digest, feature-manifest digest, ABI version, producer, consumer, retention, storage class, run id, attempt, authoritative flag, superseded attempt, and retrieval location",
+    "Runtime evidence storage SHALL NOT create a new production candidate commit"
+  ]
+}

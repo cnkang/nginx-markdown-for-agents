@@ -2,7 +2,7 @@
 # pylint: disable=import-error
 # pylint: disable=wrong-import-position
 # pylint: disable=protected-access
-"""Unit tests for the 0.9.1 performance evidence release gate.
+"""Unit tests for the active module performance evidence release gate.
 
 Covers:
   - GO verdict when all metrics within thresholds
@@ -256,8 +256,15 @@ def test_tag_release_job_supplies_module_enabled_nginx():
         "--env NGINX_BIN=/workspace/module-runtime/nginx" in workflow
     )
     assert "libxcrypt" in workflow
-    assert "python3 tools/perf/evidence_gate.py --mode blocking" in workflow
-    assert "evidence_gate.py --blocking" not in workflow
+    evidence_invocations = [
+        "make release-perf-evidence-blocking BASELINE_VERSION=091",
+        "make release-perf-evidence-blocking BASELINE_VERSION=092",
+    ]
+    assert all(workflow.count(invocation) == 1 for invocation in evidence_invocations)
+    assert workflow.index(evidence_invocations[0]) < workflow.index(
+        evidence_invocations[1]
+    ), "Tag release evidence must run baseline 091 before baseline 092"
+    assert "RELEASE_GATE_ALLOW_SKIP_MODULE=1" not in workflow
 
 
 def test_manual_module_baseline_workflow_uses_canonical_native_runtime():
@@ -278,22 +285,22 @@ def test_manual_module_baseline_workflow_uses_canonical_native_runtime():
         "if: ${{ !(github.event_name == 'workflow_dispatch' "
         "&& inputs.bootstrap_module_baseline) }}"
     ) in workflow
-    assert "name: Canonical Module Baseline 0.9.1" in workflow
+    assert "name: Canonical Module Baseline 0.9.2" in workflow
     assert "runs-on: ubuntu-24.04" in workflow
     assert '[[ "$(uname -m)" == "x86_64" ]]' in workflow
     assert "Determine canonical benchmark NGINX version" in workflow
-    assert "tools/release-matrix.json" in workflow
+    assert "release/performance/canonical-environment.json" in workflow
     assert "apache2-utils" in workflow
     assert "components: rustfmt,clippy" in workflow, (
         "Canonical job must install repository-required Rust components with "
         "the toolchain instead of deferring rustup to cargo install"
     )
     assert "tools/perf/run_module_benchmark.sh" in workflow
-    assert "perf/baselines/module-baseline-091.json" in workflow
+    assert "perf/baselines/module-baseline-092.json" in workflow
     assert "_validate_benchmark_evidence" in workflow
     assert "make perf-evidence-check" in workflow
-    assert "make release-gates-check-091" in workflow
-    assert "module-baseline-091-${{ github.sha }}" in workflow
+    assert "make release-gates-check-092" in workflow
+    assert "module-baseline-092-${{ github.sha }}" in workflow
 
 
 def test_module_baseline_contains_completed_environment_consistent_scenarios():
@@ -2500,6 +2507,77 @@ class TestMemoryEvidenceCompleteness:
 
 class TestEnvironmentCompatibility:
     """Current and baseline environments must match for regression comparison."""
+
+    def test_selected_baseline_version_changes_only_the_resolved_path(
+        self, tmp_path, monkeypatch,
+    ):
+        """The 0.9.2 gate must read its generated baseline, not the 0.9.1 file."""
+        baseline_path = (
+            tmp_path / "perf" / "baselines" / "module-baseline-092.json"
+        )
+        baseline_path.parent.mkdir(parents=True)
+        baseline_path.write_text(json.dumps({
+            "module_benchmark": {
+                "platform": "linux-x86_64",
+                "load_generator": "ab",
+                "nginx_version": "nginx version: nginx/1.24.0",
+                "scenarios": [],
+            },
+        }), encoding="utf-8")
+        current = {
+            "module_benchmark": {
+                "platform": "linux-x86_64",
+                "load_generator": "ab",
+                "nginx_version": "nginx version: nginx/1.24.0",
+                "scenarios": [],
+            },
+        }
+
+        monkeypatch.setenv("MODULE_BASELINE_VERSION", "092")
+        monkeypatch.setattr(evidence_gate, "REPO_ROOT", tmp_path)
+        monkeypatch.setattr(
+            evidence_gate, "_validate_baseline_evidence",
+            lambda *_args: None,
+        )
+
+        metrics, has_baseline, exit_rc = evidence_gate._resolve_baseline(
+            current,
+            parse_args(["--output", str(tmp_path / "evidence.json")]),
+            blocking=False,
+        )
+
+        assert metrics == {
+            "memory_slope_pct": 0.0,
+            "fallback_rate_abs": 0.0,
+        }
+        assert has_baseline is True
+        assert exit_rc is None
+
+    def test_invalid_baseline_version_is_rejected(self, monkeypatch):
+        """Unrecognized baseline versions must not become path components."""
+        monkeypatch.setenv("MODULE_BASELINE_VERSION", "../../latest")
+
+        with pytest.raises(ValueError, match="must be one of"):
+            evidence_gate._module_baseline_version()
+
+    def test_missing_selected_baseline_reports_versioned_guidance(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        """Release-tag failures must name the selected baseline file safely."""
+        output_path = tmp_path / "evidence.json"
+        monkeypatch.setenv("MODULE_BASELINE_VERSION", "092")
+        monkeypatch.setenv("CI_COMMIT_TAG", "v0.9.2")
+        monkeypatch.setattr(evidence_gate, "REPO_ROOT", tmp_path)
+
+        _metrics, has_baseline, exit_rc = evidence_gate._resolve_baseline(
+            {},
+            parse_args(["--output", str(output_path)]),
+            blocking=True,
+        )
+
+        assert has_baseline is False
+        assert exit_rc == 1
+        assert "module-baseline-092.json" in capsys.readouterr().err
 
     def test_non_blocking_incompatible_baseline_is_not_compared(
         self, tmp_path, monkeypatch, capsys,

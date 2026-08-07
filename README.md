@@ -114,15 +114,21 @@ If something doesn't work as expected, see the [Troubleshooting](docs/guides/INS
 
 If you want a practical production-oriented configuration next, go straight to [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md).
 
-For complete, ready-to-use production configurations covering all three profiles (balanced, strict_cache, streaming_first), see the [Production Examples](examples/production/) directory.
+For complete, ready-to-use production configurations using the frozen
+explicit directive surface, see the [Production Examples](examples/production/)
+directory.
 
-## Profiles
+## Explicit production settings
 
-For production deployments, use `markdown_profile` to apply a tested set of defaults instead of configuring each directive individually:
+The 0.9.2 contract removes opaque profiles. Configure the intended behavior
+explicitly so `nginx -T` shows every operator-visible setting:
 
 ```nginx
 http {
-    markdown_profile balanced;
+    markdown_cache_validation ims_only;
+    markdown_streaming auto;
+    markdown_limits conversion_memory=64m conversion_timeout=30s
+        parser_timeout=10s max_inflight=64;
 
     server {
         listen 80;
@@ -134,17 +140,10 @@ http {
 }
 ```
 
-Three profiles are available:
-
-| Profile | Use When |
-|---------|----------|
-| `balanced` | General-purpose (recommended starting point) |
-| `strict_cache` | CDN / caching proxy with full ETag support |
-| `streaming_first` | AI agent workloads with large documents |
-
-Merge order: explicit directives > profile defaults > built-in defaults. You can override any non-forced profile field with an explicit directive in the same context.
-
-For the full profile reference, defaults table, and conflict rules, see [docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md#profiles).
+Use `markdown_cache_validation full` with `markdown_streaming off` for strict
+cache validation, or `markdown_accept wildcard` with
+`markdown_streaming force` for large agent responses. See the
+[migration guide](docs/guides/MIGRATION-0.9.2.md) for complete replacements.
 
 ## Serve Markdown to Specific Bots
 
@@ -210,7 +209,7 @@ For a complete template with more bot patterns, see [examples/nginx-configs/06-b
 | **Optional metadata** | Inject token estimates and clean YAML front matter automatically. |
 | **Metrics endpoint** | Exposes Prometheus-compatible module conversion counters for cluster observability. |
 | **Dual-engine conversion** | Full-buffer (default) for typical responses + a streaming engine for large/chunked responses. |
-| **Bounded-memory streaming** | Streaming engine converts with bounded memory (opt-in/auto) with size-based flushing (`markdown_stream_flush_min`). |
+| **Bounded-memory streaming** | Streaming conversion is selected with `markdown_streaming` and bounded by `markdown_limits streaming_buffer=`. |
 
 ## Platform Support
 
@@ -309,6 +308,7 @@ The split follows the actual problem boundary.
 - C is used where the code must integrate directly with NGINX's module APIs, filter chain, buffers, and request lifecycle.
 - Rust is used where the code must parse untrusted HTML, normalize output, and evolve safely over time.
 - The FFI boundary stays small so NGINX-facing HTTP logic and conversion logic can change with less coupling.
+- The FFI boundary is classified as **internal-only** (`INTERNAL_ONLY`). Struct layouts, function signatures, and constants may change between any two versions without notice. A 4-tuple ABI handshake prevents mismatched C/Rust binaries from starting.
 
 If you want the full design rationale rather than the short version, read [docs/architecture/SYSTEM_ARCHITECTURE.md](docs/architecture/SYSTEM_ARCHITECTURE.md), [docs/architecture/ADR/0001-use-rust-for-conversion.md](docs/architecture/ADR/0001-use-rust-for-conversion.md), and [docs/architecture/ADR/0009-rust-first-e2e-test-architecture.md](docs/architecture/ADR/0009-rust-first-e2e-test-architecture.md).
 
@@ -380,15 +380,39 @@ make supply-chain
 - [Harness Maintenance SOP](docs/guides/HARNESS_MAINTENANCE.md) — Custom lint rules and validation scripting.
 - [Frequently Asked Questions (FAQ)](docs/FAQ.md) & [Glossary](docs/glossary.md).
 
+## What's New in v0.9.2 (development candidate)
+
+The 0.9.2 branch is a development candidate; it is not a published release.
+It is the final pre-1.0 breaking release: the public configuration surface is
+reduced from 63 directives to 25 and the bundled FFI ABI advances to version 2.
+
+- **Read-only diagnostics**: `GET`/`HEAD` are supported and mutation requests,
+  including `action=rollback`, are rejected. Restore dynconf by atomically
+  replacing the watched file; LKG remains failed-reload protection. Rename
+  prevents partial-file reads, but workers converge through independent
+  watcher cycles; use diagnostics or request behavior to verify convergence,
+  or a controlled NGINX reload for a strong synchronization boundary.
+- **OTel surface removal**: the experimental OTel directives and implementation
+  are removed from 0.9.2. Deployments that need tracing should use NGINX's
+  native OTel integration or another external observability layer.
+- **Public-surface source metadata and ABI drift gate**: `make public-surface-drift-check`
+  checks directive, dynconf, metric, reason-code, and FFI source metadata
+  against the declared inventory. Runtime behavior is verified by the unit,
+  integration, and E2E test suites, not by this gate alone.
+
+See the [0.9.2 release notes](docs/releases/0.9.2-release-notes.md),
+[dynconf guide](docs/guides/DYNAMIC_CONFIG.md), and
+[rollback guide](docs/guides/ROLLBACK-0.9.2.md) for the candidate contract.
+
 ## What's New in v0.9.1
 
 v0.9.1 is the **final pre-v1.0 baseline consolidation and compatibility reset**. It combines performance readiness with the last deliberate source-build and public-contract cleanup before the v1.0 freeze. v0.9.0 was intended to be the last breaking release; the freeze was extended through v0.9.1 while v1.0 remained unpublished and adoption was still limited.
 
 - **Rust baseline reset**: source builds now require Rust 1.97+; repository, CI, and release builds use exact Rust 1.97.0 (MSRV 1.97). Prebuilt module users do not need Rust.
-- **Single streaming control**: `markdown_streaming off|auto|force` is now the sole processing-path selector. The duplicate `markdown_streaming_engine` directive is reject-only with exact off/auto/on migration hints.
+- **Single streaming control**: `markdown_streaming off|auto|force` is now the sole processing-path selector. The duplicate `markdown_streaming_engine` directive is absent; use the standard NGINX unknown-directive error to identify stale configuration.
 - **Supported flavors clarified**: `markdown_flavor` supports `commonmark` and `gfm`. The experimental `mdx` and `org-mode` values are rejected because they never had distinct production conversion semantics.
-- **Hybrid zero-copy streaming output**: `markdown_streaming_zero_copy on` (default off, opt-in) enables `ngx_buf_t` to reference Rust-owned memory directly without intermediate pool-copy, reducing memcpy for non-terminal streaming chunks. NGINX pool cleanup handlers ensure safe Rust buffer lifetime across backpressure and request teardown.
-- **Streaming decompression routing (gzip + deflate + Brotli)**: under `streaming_first` profile with `markdown_auto_decompress on` and `markdown_cache_validation` not `full`, gzip, deflate (both zlib-wrapped RFC 1950 and raw RFC 1951), and Brotli responses are decompressed incrementally through the streaming engine instead of forcing full-buffer accumulation. Gzip member boundaries and trailers are validated across chunks. Brotli streaming requires `libbrotlidec` at build time (controlled by `NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off`, enabled by default in official artifacts).
+- **Automatic zero-copy streaming output**: buffer ownership and backpressure select the safe delivery path internally; no zero-copy directive is exposed.
+- **Streaming decompression routing (gzip + deflate + Brotli)**: with explicit `markdown_streaming force`, `markdown_auto_decompress on`, and `markdown_cache_validation` not `full`, gzip, deflate (both zlib-wrapped RFC 1950 and raw RFC 1951), and Brotli responses are decompressed incrementally through the streaming engine instead of forcing full-buffer accumulation. Gzip member boundaries and trailers are validated across chunks. Brotli streaming requires `libbrotlidec` at build time (controlled by `NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off`, enabled by default in official artifacts).
 - **Full-buffer copy reduction**: internal optimization (default on, no configuration surface) eliminates redundant memcpy in the full-buffer compressed path by passing contiguous buffers directly to the decompressor and swapping output via pointer assignment.
 - **`markdown_auto_decompress` directive**: now officially registered as a configurable directive (default on). Previously an internal field not settable via `nginx.conf`.
 - **Performance evidence gate**: module-level benchmark harness (`tools/perf/run_module_benchmark.sh`) with automated release gate (`make release-gates-check-091`) enforcing latency, TTFB, memory slope, and fallback rate thresholds before release promotion.
@@ -401,7 +425,9 @@ For the full list of changes across prior versions (including breaking configura
 
 Post-v0.9.1 and towards the v1.0.0 milestone:
 
-- **Observability Expansion**: Native OpenTelemetry tracing integration inside the NGINX C module filter path.
+- **Observability interoperability**: Keep the frozen Prometheus and
+  diagnostics contracts compatible with external monitoring systems without
+  adding module-specific OTel directives.
 - **Distribution Expansion**: Official APT and YUM packaging pipelines integrated into standard Linux package indexing.
 - **Diagnostic Enhancements**: Extending CLI `nginx-markdown-doctor` checks and telemetry metrics for real-time conversion monitoring.
 

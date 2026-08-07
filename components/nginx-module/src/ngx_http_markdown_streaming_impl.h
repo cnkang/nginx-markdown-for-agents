@@ -29,21 +29,6 @@ typedef struct {
 
 
 /* Forward declarations */
-static ngx_http_markdown_otel_span_t *ngx_http_markdown_otel_span_start(
-    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf);
-static void ngx_http_markdown_otel_set_str_attr(
-    ngx_http_markdown_otel_span_t *span, const u_char *key, size_t key_len,
-    const u_char *value, size_t val_len);
-static void ngx_http_markdown_otel_set_int_attr(
-    ngx_http_markdown_otel_span_t *span, const u_char *key, size_t key_len,
-    int64_t value);
-static void ngx_http_markdown_otel_span_end(ngx_http_markdown_otel_span_t *span);
-static void ngx_http_markdown_otel_span_export(
-    ngx_http_markdown_otel_span_t *span, ngx_log_t *log,
-    ngx_http_request_t *r);
-static void ngx_http_markdown_streaming_start_otel_span(
-    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
-    const ngx_http_markdown_conf_t *conf);
 static ngx_flag_t ngx_http_markdown_streaming_delivery_ok(ngx_int_t rc);
 static void ngx_http_markdown_streaming_record_send_delivery(
     ngx_http_markdown_ctx_t *ctx,
@@ -484,15 +469,6 @@ ngx_http_markdown_streaming_cleanup(void *data)
         return;
     }
 
-    if (ctx->otel_span != NULL) {
-        ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
-            (const u_char *) "error_code", 10,
-            (int64_t) -1);
-        ngx_http_markdown_otel_span_end(ctx->otel_span);
-        ngx_http_markdown_otel_span_export(ctx->otel_span,
-            ctx->request->connection->log, ctx->request);
-        ctx->otel_span = NULL;
-    }
 
     if (ctx->streaming.handle != NULL) {
         markdown_streaming_abort(ctx->streaming.handle);
@@ -540,45 +516,37 @@ ngx_http_markdown_streaming_cleanup(void *data)
     ngx_http_markdown_streaming_pending_input_clear(ctx);
 }
 
-
-/*
- * Check whether the content type matches any stream_types
- * exclusion entry.
- *
- * Returns:
- *   1 if the content type matches an exclusion entry
- *   0 otherwise
- */
 static ngx_int_t
 ngx_http_markdown_is_excluded_stream_type(
-    ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf)
+    ngx_http_request_t *r)
 {
-    ngx_str_t   *types;
+    static u_char  sse_type[] = "text/event-stream";
+    static u_char  ndjson_type[] = "application/x-ndjson";
 
-    if (conf->routing.stream_types == NULL) {
-        return 0;
-    }
-
-    types = conf->routing.stream_types->elts;
     if (r->headers_out.content_type.data == NULL) {
         return 0;
     }
 
-    for (ngx_uint_t i = 0; i < conf->routing.stream_types->nelts; i++) {
-        if (r->headers_out.content_type.len
-                >= types[i].len
-            && ngx_strncasecmp(
-                   r->headers_out.content_type.data,
-                   types[i].data,
-                   types[i].len) == 0
-            && (r->headers_out.content_type.len == types[i].len
-                || r->headers_out.content_type.data[types[i].len] == ';'
-                || r->headers_out.content_type.data[types[i].len] == ' '
-                || r->headers_out.content_type.data[types[i].len] == '/'))
-        {
-            return 1;
-        }
+    /* Built-in hard exclusion: text/event-stream */
+    if (r->headers_out.content_type.len >= sizeof(sse_type) - 1
+        && ngx_strncasecmp(r->headers_out.content_type.data,
+                           sse_type, sizeof(sse_type) - 1) == 0
+        && (r->headers_out.content_type.len == sizeof(sse_type) - 1
+            || r->headers_out.content_type.data[sizeof(sse_type) - 1] == ';'
+            || r->headers_out.content_type.data[sizeof(sse_type) - 1] == ' '))
+    {
+        return 1;
+    }
+
+    /* Built-in hard exclusion: application/x-ndjson */
+    if (r->headers_out.content_type.len >= sizeof(ndjson_type) - 1
+        && ngx_strncasecmp(r->headers_out.content_type.data,
+                           ndjson_type, sizeof(ndjson_type) - 1) == 0
+        && (r->headers_out.content_type.len == sizeof(ndjson_type) - 1
+            || r->headers_out.content_type.data[sizeof(ndjson_type) - 1] == ';'
+            || r->headers_out.content_type.data[sizeof(ndjson_type) - 1] == ' '))
+    {
+        return 1;
     }
 
     return 0;
@@ -631,11 +599,11 @@ ngx_http_markdown_log_conditional_streaming(
  * 4. 304 Not Modified -> PATH_FULLBUFFER
  * 5. conditional_requests full_support -> PATH_FULLBUFFER
  * 6. Content-Type is text/event-stream -> PATH_FULLBUFFER
- * 7. stream_types exclusion match -> PATH_FULLBUFFER
+ * 7. stream_excluded_types exclusion match -> PATH_FULLBUFFER
  * 8. policy == force -> PATH_STREAMING
- * 9. policy == auto + CL >= markdown_stream_threshold -> PATH_STREAMING
+ * 9. policy == auto + CL >= NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT -> PATH_STREAMING
  * 10. policy == auto + chunked -> PATH_STREAMING
- * 11. policy == auto + CL < markdown_stream_threshold -> PATH_FULLBUFFER
+ * 11. policy == auto + CL < NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT -> PATH_FULLBUFFER
  *
  * Default (no markdown_streaming directive): auto mode.
  */
@@ -715,10 +683,8 @@ ngx_http_markdown_select_processing_path(
             NGX_HTTP_MARKDOWN_STREAM_REASON_EXCLUDED_CONTENT_TYPE);
     }
 
-    /* Rule 7: stream_types exclusion list (legacy conf->routing.stream_types)
-     * and v0.8.0 conf->stream.excluded_types + built-in hard exclusions */
-    if (ngx_http_markdown_is_excluded_stream_type(
-            r, conf)
+    /* Rule 7: stream_excluded_types + built-in hard exclusions */
+    if (ngx_http_markdown_is_excluded_stream_type(r)
         || ngx_http_markdown_stream_type_excluded(
                &r->headers_out.content_type, conf))
     {
@@ -742,9 +708,9 @@ ngx_http_markdown_select_processing_path(
     /* Rules 9-11: policy == auto */
     if (r->headers_out.content_length_n >= 0
         && (size_t) r->headers_out.content_length_n
-           < conf->stream.threshold)
+           < NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT)
     {
-        /* CL < markdown_stream_threshold: use full-buffer */
+        /* CL < 1 MiB fixed threshold: use full-buffer */
         ngx_http_markdown_log_decision(r, conf, eff,
             ngx_http_markdown_reason_eligible_fullbuffer_auto());
         return ngx_http_markdown_path_selection(
@@ -752,7 +718,7 @@ ngx_http_markdown_select_processing_path(
             NGX_HTTP_MARKDOWN_STREAM_REASON_BELOW_THRESHOLD);
     }
 
-    /* auto + CL >= markdown_stream_threshold or chunked (no CL) */
+    /* auto + CL >= NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT or chunked (no CL) */
     ngx_http_markdown_log_decision(r, conf, eff,
         ngx_http_markdown_reason_eligible_streaming_auto());
     return ngx_http_markdown_path_selection(
@@ -1528,21 +1494,6 @@ ngx_http_markdown_streaming_send_deferred_lastbuf(
 
         ngx_http_markdown_record_per_path_metrics(r, conf, 0);
 
-        if (ctx->otel_span != NULL) {
-            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
-                (const u_char *) "input_bytes", 11,
-                (int64_t) ctx->streaming.total_input_bytes);
-            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
-                (const u_char *) "output_bytes", 12,
-                (int64_t) ctx->streaming.output.bytes);
-            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
-                (const u_char *) "error_code", 10,
-                (int64_t) 0);
-            ngx_http_markdown_otel_span_end(ctx->otel_span);
-            ngx_http_markdown_otel_span_export(ctx->otel_span,
-                r->connection->log, r);
-            ctx->otel_span = NULL;
-        }
     } else {
         /*
          * Deferred last_buf send failed with a definitive
@@ -1634,21 +1585,6 @@ ngx_http_markdown_streaming_record_pending_terminal_success(
 
     ngx_http_markdown_record_per_path_metrics(r, conf, 0);
 
-    if (ctx->otel_span != NULL) {
-        ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
-            (const u_char *) "input_bytes", 11,
-            (int64_t) ctx->streaming.total_input_bytes);
-        ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
-            (const u_char *) "output_bytes", 12,
-            (int64_t) ctx->streaming.output.bytes);
-        ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
-            (const u_char *) "error_code", 10,
-            (int64_t) 0);
-        ngx_http_markdown_otel_span_end(ctx->otel_span);
-        ngx_http_markdown_otel_span_export(ctx->otel_span,
-            r->connection->log, r);
-        ctx->otel_span = NULL;
-    }
 
     ctx->streaming.completion.pending_terminal_metrics = 0;
 }
@@ -1899,15 +1835,6 @@ ngx_http_markdown_streaming_fallback_to_fullbuffer(
         ctx->streaming.handle = NULL;
     }
 
-    if (ctx->otel_span != NULL) {
-        ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
-            (const u_char *) "fallback", 8,
-            (const u_char *) "fullbuffer", 10);
-        ngx_http_markdown_otel_span_end(ctx->otel_span);
-        ngx_http_markdown_otel_span_export(ctx->otel_span,
-            r->connection->log, r);
-        ctx->otel_span = NULL;
-    }
 
     /* Switch to full-buffer path */
     ctx->processing_path =
@@ -2808,6 +2735,9 @@ ngx_http_markdown_streaming_map_feed_decomp_error(
 {
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total);
+        ngx_http_markdown_record_decompression_failure_budget(
+            decomp != NULL ? decomp->type
+                           : NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN);
         NGX_HTTP_MARKDOWN_METRIC_INC(
             perf.decompression_budget_exceeded_total);
         return ERROR_DECOMPRESSION_BUDGET_EXCEEDED;
@@ -2815,16 +2745,25 @@ ngx_http_markdown_streaming_map_feed_decomp_error(
 
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.format_error_total);
+        ngx_http_markdown_record_decompression_failure_format(
+            decomp != NULL ? decomp->type
+                           : NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN);
         return ERROR_DECOMPRESSION_FORMAT_ERROR;
     }
 
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.truncated_input_total);
+        ngx_http_markdown_record_decompression_failure_truncated(
+            decomp != NULL ? decomp->type
+                           : NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN);
         return ERROR_DECOMPRESSION_TRUNCATED_INPUT;
     }
 
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.io_error_total);
+        ngx_http_markdown_record_decompression_failure_io(
+            decomp != NULL ? decomp->type
+                           : NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN);
         return ERROR_DECOMPRESSION_IO_ERROR;
     }
 
@@ -2872,8 +2811,14 @@ ngx_http_markdown_streaming_map_finalize_decomp_error(
     const ngx_http_markdown_streaming_decomp_t *decomp,
     ngx_log_t *log)
 {
+    if (ctx == NULL) {
+        return ERROR_INTERNAL;
+    }
+
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total);
+        ngx_http_markdown_record_decompression_failure_budget(
+            ctx->decompression.type);
         NGX_HTTP_MARKDOWN_METRIC_INC(
             perf.decompression_budget_exceeded_total);
         return ERROR_DECOMPRESSION_BUDGET_EXCEEDED;
@@ -2881,6 +2826,8 @@ ngx_http_markdown_streaming_map_finalize_decomp_error(
 
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.format_error_total);
+        ngx_http_markdown_record_decompression_failure_format(
+            ctx->decompression.type);
         if (ctx->streaming.commit_state
             == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
         {
@@ -2891,6 +2838,8 @@ ngx_http_markdown_streaming_map_finalize_decomp_error(
 
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.truncated_input_total);
+        ngx_http_markdown_record_decompression_failure_truncated(
+            ctx->decompression.type);
         if (ctx->streaming.commit_state
             == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
         {
@@ -2901,6 +2850,8 @@ ngx_http_markdown_streaming_map_finalize_decomp_error(
 
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.io_error_total);
+        ngx_http_markdown_record_decompression_failure_io(
+            ctx->decompression.type);
         if (ctx->streaming.commit_state
             == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
         {
@@ -3213,6 +3164,7 @@ ngx_http_markdown_streaming_finalize_decomp(
     ngx_int_t  rc;
 
     if (!ctx->decompression.needed
+        || ctx->decompression.done
         || ctx->streaming.decompressor == NULL)
     {
         return NGX_OK;
@@ -3252,6 +3204,9 @@ ngx_http_markdown_streaming_finalize_decomp(
         return ngx_http_markdown_streaming_precommit_error(
             r, ctx, conf, finish_error_code);
     }
+
+    ctx->decompression.done = 1;
+    ngx_http_markdown_record_decompression_success_metrics(ctx);
 
     if (decomp_data != NULL && decomp_len > 0) {
         u_char    *out_data;
@@ -3322,21 +3277,6 @@ ngx_http_markdown_streaming_handle_finalize_ffi_error(
         "markdown: finalize error "
         "code=%ui", (ngx_uint_t) rc_ffi);
 
-    if (ctx->otel_span != NULL) {
-        ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
-            (const u_char *) "input_bytes", 11,
-            (int64_t) ctx->streaming.total_input_bytes);
-        ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
-            (const u_char *) "output_bytes", 12,
-            (int64_t) ctx->streaming.output.bytes);
-        ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
-            (const u_char *) "error_code", 10,
-            (int64_t) rc_ffi);
-        ngx_http_markdown_otel_span_end(ctx->otel_span);
-        ngx_http_markdown_otel_span_export(ctx->otel_span,
-            r->connection->log, r);
-        ctx->otel_span = NULL;
-    }
 
     markdown_result_free(result);
 
@@ -3478,20 +3418,6 @@ ngx_http_markdown_streaming_finish_terminal(
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_streaming_convert());
         ngx_http_markdown_record_per_path_metrics(r, conf, 0);
-        if (ctx->otel_span != NULL) {
-            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
-                (const u_char *) "input_bytes", 11,
-                (int64_t) ctx->streaming.total_input_bytes);
-            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
-                (const u_char *) "output_bytes", 12,
-                (int64_t) ctx->streaming.output.bytes);
-            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
-                (const u_char *) "error_code", 10, (int64_t) 0);
-            ngx_http_markdown_otel_span_end(ctx->otel_span);
-            ngx_http_markdown_otel_span_export(ctx->otel_span,
-                r->connection->log, r);
-            ctx->otel_span = NULL;
-        }
     } else if (rc == NGX_AGAIN) {
         ctx->streaming.completion.pending_terminal_metrics = 1;
     } else {
@@ -3563,45 +3489,6 @@ ngx_http_markdown_streaming_finalize_request(
 }
 
 
-static void
-ngx_http_markdown_streaming_start_otel_span(
-    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
-    const ngx_http_markdown_conf_t *conf)
-{
-    static ngx_str_t  s_gfm = ngx_string("gfm");
-    static ngx_str_t  s_cm = ngx_string("commonmark");
-
-    const ngx_str_t  *flavor;
-
-    ctx->otel_span = NULL;
-    if (conf->ops.otel_enabled == 0) {
-        return;
-    }
-
-    ctx->otel_span = ngx_http_markdown_otel_span_start(r, conf);
-    if (ctx->otel_span == NULL) {
-        return;
-    }
-
-    if (conf->flavor == NGX_HTTP_MARKDOWN_FLAVOR_GFM) {
-        flavor = &s_gfm;
-    } else {
-        flavor = &s_cm;
-    }
-
-    ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
-        (const u_char *) "flavor", 6, flavor->data, flavor->len);
-    ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
-        (const u_char *) "engine", 6, (const u_char *) "streaming", 9);
-
-    if (r->uri.len > 0) {
-        ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
-            (const u_char *) "uri_route", 9,
-            (const u_char *) "redacted", 8);
-    }
-}
-
-
 /*
  * Initialize the decompressor and both bounded pre-commit buffers after the
  * streaming handle has been created.  Any allocation failure is routed
@@ -3619,6 +3506,7 @@ ngx_http_markdown_streaming_init_buffers(
         ngx_http_markdown_decomp_failure_origin_e  create_origin;
         uint32_t                                   create_error;
 
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.attempted);
         ctx->streaming.decompressor =
             ngx_http_markdown_streaming_decomp_create_with_origin(
                 r->pool, ctx->decompression.type,
@@ -3636,7 +3524,7 @@ ngx_http_markdown_streaming_init_buffers(
         }
     }
 
-    ctx->streaming.prebuffer_limit = conf->stream.precommit_buffer;
+    ctx->streaming.prebuffer_limit = conf->limits.streaming_buffer;
     if (ctx->streaming.prebuffer_limit > 0) {
         rc = ngx_http_markdown_buffer_init(
             &ctx->streaming.prebuffer,
@@ -3711,7 +3599,7 @@ ngx_http_markdown_streaming_init_handle(
      * dynamic or programmatic configuration paths.  Fail before Rust sees
      * any input so fail-open can still forward the untouched current chain.
      */
-    if (conf->stream.precommit_buffer == 0) {
+    if (conf->limits.streaming_buffer == 0) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: streaming precommit buffer is zero; "
             "refusing to consume input without recovery storage");
@@ -3772,7 +3660,6 @@ ngx_http_markdown_streaming_init_handle(
         return rc;
     }
 
-    ngx_http_markdown_streaming_start_otel_span(r, ctx, conf);
 
     /* Sync streaming fallback state machine: handle initialized → PRE_COMMIT */
     ctx->stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;

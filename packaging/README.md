@@ -35,7 +35,7 @@ The configuration uses template variables injected by the CI matrix:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `PKG_VERSION` | Project version (from tag or workflow input) | `0.9.1` |
+| `PKG_VERSION` | Project version (from tag or workflow input) | `0.9.2` |
 | `NGINX_VERSION` | Target NGINX version from build matrix | `1.26.3` |
 | `NFPM_ARCH` | Target architecture | `amd64`, `arm64` |
 
@@ -43,7 +43,7 @@ The configuration uses template variables injected by the CI matrix:
 
 ```bash
 # Set required environment variables
-export PKG_VERSION="0.9.1"
+export PKG_VERSION="0.9.2"
 export NGINX_VERSION="1.26.3"
 export NFPM_ARCH="amd64"
 

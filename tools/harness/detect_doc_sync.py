@@ -49,7 +49,7 @@ STREAMING_TROUBLESHOOTING_PATH = Path(
 )
 PROFILE_INVENTORY_PATH = Path("docs/architecture/profile-inventory.md")
 PROMETHEUS_RENDERER_PATH = Path(
-    "components/nginx-module/src/ngx_http_markdown_prometheus_impl.h"
+    "components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h"
 )
 PROMETHEUS_GUIDE_PATH = Path("docs/guides/prometheus-metrics.md")
 PRODUCTION_SYMBOL_SURFACES = (
@@ -121,7 +121,7 @@ def check_readme_mentions_key_features(project_root: Path) -> List[str]:
         key_directives = [
             'markdown_filter',
             'markdown_limits',
-            'markdown_profile',
+            'markdown_streaming',
         ]
         warnings.extend(
             f"{readme_name}: Key directive '{directive}' not mentioned"
@@ -190,33 +190,21 @@ def _extract_directive_entry(content: str, directive: str) -> str | None:
 
 
 def _check_directive_table(content: str) -> List[str]:
-    """Validate active and reject-only streaming directive registrations."""
+    """Validate active streaming directive registration."""
     errors: List[str] = []
     active = _extract_directive_entry(content, "markdown_streaming")
-    removed = _extract_directive_entry(content, "markdown_streaming_engine")
     if active is None or "ngx_http_markdown_streaming," not in active:
         errors.append(
             f"{DIRECTIVES_PATH}: markdown_streaming must use the active "
             "ngx_http_markdown_streaming handler"
         )
-    if removed is None:
+    # markdown_streaming_engine reject-only stub has been removed in 0.9.2;
+    # NGINX's built-in "unknown directive" error is sufficient.
+    removed = _extract_directive_entry(content, "markdown_streaming_engine")
+    if removed is not None:
         errors.append(
-            f"{DIRECTIVES_PATH}: markdown_streaming_engine must remain registered "
-            "as a reject-only migration stub"
-        )
-        return errors
-    if "ngx_http_markdown_reject_streaming_engine," not in removed:
-        errors.append(
-            f"{DIRECTIVES_PATH}: markdown_streaming_engine must bind only to "
-            "ngx_http_markdown_reject_streaming_engine"
-        )
-    forbidden_slots = ("ngx_conf_set_enum_slot", "offsetof(")
-    if any(token in removed for token in forbidden_slots) or not re.search(
-        r"\n[ \t]*0,[ \t]*\n[ \t]*NULL[ \t]*$", removed
-    ):
-        errors.append(
-            f"{DIRECTIVES_PATH}: reject-only markdown_streaming_engine must not "
-            "bind an enum table or configuration slot"
+            f"{DIRECTIVES_PATH}: markdown_streaming_engine reject-only stub "
+            "must be removed (0.9.2 surface reset)"
         )
     return errors
 
@@ -339,20 +327,20 @@ def _check_chart_contract(template: str, values: str) -> List[str]:
 
 
 def _check_migration_table(content: str) -> List[str]:
-    """Require the exact legacy-to-policy migration mappings in active docs."""
+    """Require the frozen explicit replacement surface in active docs."""
     normalized = content.replace("`", "")
     errors: List[str] = []
-    for legacy, replacement in (("off", "off"), ("auto", "auto"), ("on", "force")):
-        mapping_present = any(
-            f"markdown_streaming_engine {legacy};" in line
-            and f"markdown_streaming {replacement};" in line
-            for line in normalized.splitlines()
-        )
-        if not mapping_present:
-            errors.append(
-                f"{CONFIGURATION_GUIDE_PATH}: missing exact migration mapping "
-                f"markdown_streaming_engine {legacy} -> markdown_streaming {replacement}"
-            )
+    required_fragments = (
+        "markdown_streaming off | auto | force",
+        "markdown_limits conversion_memory=",
+        "markdown_limits streaming_buffer=",
+    )
+    errors.extend(
+        f"{CONFIGURATION_GUIDE_PATH}: missing frozen explicit contract fragment "
+        f"{fragment}"
+        for fragment in required_fragments
+        if fragment not in normalized
+    )
     return errors
 
 
@@ -431,7 +419,6 @@ def _check_observability_examples(troubleshooting: str) -> List[str]:
         '"ttfb_last_seconds"': "diagnostics ttfb_last_seconds field",
         '"peak_memory_last_bytes"': "diagnostics peak_memory_last_bytes field",
         "nginx_markdown_streaming_choice_total": "retired streaming metric name",
-        "nginx_markdown_conversion_duration_seconds": "retired latency metric name",
     }
     errors: List[str] = [
         f"{STREAMING_TROUBLESHOOTING_PATH}: forbidden {label} is present"
@@ -463,11 +450,39 @@ def _check_active_directive_inventory(
 
 def _check_prometheus_catalog(renderer: str, guide: str) -> List[str]:
     """Require every production renderer family to appear in the guide."""
-    families = sorted(set(re.findall(r"nginx_markdown_[a-z0-9_]+", renderer)))
+    raw_families = set(re.findall(r"nginx_markdown_[a-z0-9_]+", renderer))
+    histogram_suffixes = ("_bucket", "_sum", "_count")
+    families = set()
+    for name in raw_families:
+        for suffix in histogram_suffixes:
+            if name.endswith(suffix):
+                name = name[: -len(suffix)]
+                break
+        families.add(name)
     return [
         f"{PROMETHEUS_GUIDE_PATH}: production metric family {name} is missing"
-        for name in families
+        for name in sorted(families)
         if f"`{name}`" not in guide
+    ]
+
+
+def _check_retired_metrics(project_root: Path) -> List[str]:
+    """Reject retired metrics outside documented migration references."""
+    errors = _scan_for_pattern(
+        project_root,
+        (Path("docs/guides"), Path("docs/features"), Path("docs/architecture")),
+        re.compile(
+            r"nginx_markdown_streaming_choice_total|"
+            r"nginx_markdown_failures_total\{reason=\\?\""
+            r"(?:memory_budget_exceeded|ffi_panic)\\?\"\}"
+        ),
+        "retired production metric name or failure label",
+    )
+    migration_pattern = re.compile(r"MIGRATION-\d")
+    return [
+        error
+        for error in errors
+        if not migration_pattern.search(Path(error.split(":")[0]).name)
     ]
 
 
@@ -522,19 +537,7 @@ def check_public_config_contract(project_root: Path) -> List[str]:
             "markdown_streaming_engine directive in an active config surface",
         )
     )
-    errors.extend(
-        _scan_for_pattern(
-            project_root,
-            (Path("docs/guides"), Path("docs/features"), Path("docs/architecture")),
-            re.compile(
-                r"nginx_markdown_streaming_choice_total|"
-                r"nginx_markdown_conversion_duration_seconds|"
-                r"nginx_markdown_failures_total\{reason=\\?\""
-                r"(?:memory_budget_exceeded|ffi_panic)\\?\"\}"
-            ),
-            "retired production metric name or failure label",
-        )
-    )
+    errors.extend(_check_retired_metrics(project_root))
     return errors
 
 

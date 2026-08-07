@@ -13,7 +13,6 @@
 #include "ngx_http_markdown_ffi_layout_check.h"
 #include "ngx_http_markdown_diagnostics.h"
 #include "ngx_http_markdown_dynconf_impl.h"
-#include "ngx_http_markdown_otel_impl.h"
 #include "ngx_http_markdown_module_state_impl.h"
 #include "ngx_http_markdown_postcommit_metrics_impl.h"
 #include "ngx_http_markdown_filter_chain_impl.h"
@@ -22,8 +21,8 @@
 #include "ngx_http_markdown_decision_log_impl.h"
 #include "ngx_http_markdown_inflight_impl.h"
 #include "ngx_http_markdown_request_impl.h"
+#include "ngx_http_markdown_metrics_v1_renderer.h"
 #include "ngx_http_markdown_metrics_impl.h"
-#include "ngx_http_markdown_prometheus_impl.h"
 #include "ngx_http_markdown_diagnostics_accessors_impl.h"
 
 #ifdef MARKDOWN_STREAMING_ENABLED

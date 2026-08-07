@@ -362,7 +362,7 @@ If `conversions_failed` is growing faster than expected relative to `conversions
 
 ### Latency Exceeding Timeout
 
-Conversion latency approaches or exceeds the configured `markdown_limits timeout=`. Check the latency bucket distribution:
+Conversion latency approaches or exceeds the configured `markdown_limits conversion_timeout=`. Check the latency bucket distribution:
 
 ```bash
 curl -s http://localhost/markdown-metrics | \
@@ -496,8 +496,8 @@ see the dedicated [Performance Rollout and Rollback Guide](performance-rollout-0
 
 | Optimization | Rollback |
 |--------------|----------|
-| Zero-copy streaming output | `markdown_streaming_zero_copy off` + reload |
-| Streaming decompression | Switch profile from `streaming_first` to `balanced` or set `markdown_auto_decompress off` + reload |
+| Streaming conversion | `markdown_streaming off` + reload |
+| Streaming decompression | `markdown_auto_decompress off` or `markdown_streaming off` + reload |
 | Full-buffer copy reduction | Code revert + binary rebuild (no config toggle — internal implementation detail) |
 
 All config-based rollbacks take effect for new requests immediately after

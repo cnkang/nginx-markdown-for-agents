@@ -702,7 +702,7 @@ main(void)
 {
     TEST_SECTION(
         "Feature: 0.9.1-performance-optimization\n"
-        "Task 14.5: Integration Tests for Rollout Control\n"
+        "Rollout control integration tests\n"
         "Validates: Requirements 10.1, 10.2, 10.3, 10.6");
 
     /* Req 10.1: Zero-copy default-off */

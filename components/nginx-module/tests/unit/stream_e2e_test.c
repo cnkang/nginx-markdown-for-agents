@@ -144,6 +144,11 @@ ngx_http_markdown_metrics_record_postcommit_abort(void)
 {
 }
 
+void
+ngx_http_markdown_metrics_record_postcommit_safe_finish(void)
+{
+}
+
 /* Include the decision engine source directly */
 #include "../../src/ngx_http_markdown_stream_state.h"
 #include "../../src/ngx_http_markdown_stream_state.c"
@@ -207,7 +212,7 @@ static void e2e_init_context_committed(ngx_http_markdown_ctx_t *ctx,
                                         ngx_uint_t on_error_policy);
 static int e2e_data_contains_html(const u_char *data, size_t len);
 static void test_8_1_precommit_fallback_html(void);
-static void test_8_2_precommit_reject_502(void);
+static void test_8_2_precommit_reject_status(void);
 static void test_8_3_replay_buffer_overflow(void);
 static void test_8_4_postcommit_safe_finish(void);
 static void test_8_5_postcommit_abort(void);
@@ -581,7 +586,7 @@ test_8_1_precommit_fallback_html(void)
  * Validates: Requirements 8.2
  */
 static void
-test_8_2_precommit_reject_502(void)
+test_8_2_precommit_reject_status(void)
 {
     ngx_http_markdown_ctx_t   ctx;
     ngx_http_markdown_conf_t  conf;
@@ -618,7 +623,7 @@ test_8_2_precommit_reject_502(void)
  * state, the decision engine enters PRE_COMMIT_REPLAY_UNAVAILABLE
  * semantics and forces a decision:
  *   - With resource limits available -> FULL_BUFFER_FALLBACK
- *   - Without resource limits -> REJECT_502
+ *   - Without resource limits -> REJECT_STATUS
  *
  * This test exercises the decision engine directly (not through
  * on_error) because REPLAY_OVERFLOW is a distinct event from the
@@ -673,13 +678,13 @@ test_8_3_replay_buffer_overflow(void)
             decision.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
             "8.3b: transitions to PASSTHROUGH");
         TEST_ASSERT(
-            decision.action == NGX_HTTP_MD_ACTION_REJECT_502,
-            "8.3b: action is REJECT_502");
+            decision.action == NGX_HTTP_MD_ACTION_REJECT_STATUS,
+            "8.3b: action is REJECT_STATUS");
         TEST_ASSERT(
             decision.reason == NGX_HTTP_MD_REASON_RESOURCE_LIMIT_EXCEEDED,
             "8.3b: reason is RESOURCE_LIMIT_EXCEEDED");
 
-        TEST_PASS("overflow + no resource limits = REJECT_502");
+        TEST_PASS("overflow + no resource limits = REJECT_STATUS");
     }
 }
 
@@ -867,10 +872,10 @@ test_8_6_no_mixed_markdown_html(void)
                 decision.action != NGX_HTTP_MD_ACTION_PASS_HTML,
                 "8.6: COMMITTED state NEVER produces PASS_HTML");
 
-            /* Post-commit irreversibility: NEVER REJECT_502 */
+            /* Post-commit irreversibility: NEVER REJECT_STATUS */
             TEST_ASSERT(
-                decision.action != NGX_HTTP_MD_ACTION_REJECT_502,
-                "8.6: COMMITTED state NEVER produces REJECT_502");
+                decision.action != NGX_HTTP_MD_ACTION_REJECT_STATUS,
+                "8.6: COMMITTED state NEVER produces REJECT_STATUS");
 
             /* Verify valid post-commit terminal transitions */
             if (decision.new_state == NGX_HTTP_MD_STATE_POST_COMMIT_SAFE_FINISH
@@ -906,7 +911,7 @@ test_8_6_no_mixed_markdown_html(void)
                 decision.action != NGX_HTTP_MD_ACTION_PASS_HTML,
                 "8.6: POST_COMMIT_SAFE_FINISH NEVER produces HTML");
             TEST_ASSERT(
-                decision.action != NGX_HTTP_MD_ACTION_REJECT_502,
+                decision.action != NGX_HTTP_MD_ACTION_REJECT_STATUS,
                 "8.6: POST_COMMIT_SAFE_FINISH NEVER produces 502");
 
             /* POST_COMMIT_ABORT */
@@ -922,7 +927,7 @@ test_8_6_no_mixed_markdown_html(void)
                 decision.action != NGX_HTTP_MD_ACTION_PASS_HTML,
                 "8.6: POST_COMMIT_ABORT NEVER produces HTML");
             TEST_ASSERT(
-                decision.action != NGX_HTTP_MD_ACTION_REJECT_502,
+                decision.action != NGX_HTTP_MD_ACTION_REJECT_STATUS,
                 "8.6: POST_COMMIT_ABORT NEVER produces 502");
 
             total_checks += 2;
@@ -975,7 +980,7 @@ main(void)
     TEST_SECTION("Stream E2E Integration Tests (streaming end-to-end integration)");
 
     test_8_1_precommit_fallback_html();
-    test_8_2_precommit_reject_502();
+    test_8_2_precommit_reject_status();
     test_8_3_replay_buffer_overflow();
     test_8_4_postcommit_safe_finish();
     test_8_5_postcommit_abort();

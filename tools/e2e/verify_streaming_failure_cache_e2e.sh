@@ -83,7 +83,7 @@ Options:
   --plan                   Print test plan and exit 0 (no NGINX_BIN required)
   --port PORT              NGINX listen port (default: ${PORT})
   --upstream-port PORT     Upstream server port (default: ${UPSTREAM_PORT})
-  --markdown-max-size SIZE markdown_limits memory value (default: ${MARKDOWN_MAX_SIZE})
+  --markdown-max-size SIZE markdown_limits conversion_memory value (default: ${MARKDOWN_MAX_SIZE})
   -h, --help               Show this help
 
 Test cases:
@@ -817,7 +817,7 @@ http {
             markdown_accept wildcard;
             markdown_cache_validation ims_only;
             markdown_streaming force;
-            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
+            markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_memory=${MARKDOWN_MAX_SIZE} streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -833,7 +833,7 @@ http {
             markdown_accept wildcard;
             markdown_cache_validation ims_only;
             markdown_streaming force;
-            markdown_limits memory=20m streaming_buffer=1k timeout=120s;
+            markdown_limits conversion_memory=20m parser_memory=20m streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -849,7 +849,7 @@ http {
             markdown_accept wildcard;
             markdown_cache_validation ims_only;
             markdown_streaming force;
-            markdown_limits memory=20m streaming_buffer=1k timeout=120s;
+            markdown_limits conversion_memory=20m parser_memory=20m streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy fail_closed;
             markdown_log_verbosity info;
 
@@ -865,7 +865,7 @@ http {
             markdown_accept wildcard;
             markdown_cache_validation ims_only;
             markdown_streaming force;
-            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
+            markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_memory=${MARKDOWN_MAX_SIZE} streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -881,7 +881,7 @@ http {
             markdown_accept wildcard;
             markdown_cache_validation full;
             markdown_streaming auto;
-            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
+            markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_memory=${MARKDOWN_MAX_SIZE} streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -897,7 +897,7 @@ http {
             markdown_accept wildcard;
             markdown_cache_validation ims_only;
             markdown_streaming force;
-            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
+            markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_memory=${MARKDOWN_MAX_SIZE} streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -913,7 +913,7 @@ http {
             markdown_accept wildcard;
             markdown_cache_validation ims_only;
             markdown_streaming force;
-            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
+            markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_memory=${MARKDOWN_MAX_SIZE} streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -929,7 +929,7 @@ http {
             markdown_accept wildcard;
             markdown_cache_validation full;
             markdown_streaming off;
-            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
+            markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_memory=${MARKDOWN_MAX_SIZE} streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -945,7 +945,7 @@ http {
             markdown_accept wildcard;
             markdown_cache_validation ims_only;
             markdown_streaming force;
-            markdown_limits memory=20m streaming_buffer=1k timeout=120s;
+            markdown_limits conversion_memory=20m parser_memory=20m streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -961,7 +961,7 @@ http {
             markdown_accept wildcard;
             markdown_cache_validation ims_only;
             markdown_streaming force;
-            markdown_limits memory=20m streaming_buffer=1k timeout=120s;
+            markdown_limits conversion_memory=20m parser_memory=20m streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy fail_closed;
             markdown_log_verbosity info;
 
@@ -979,7 +979,7 @@ http {
             markdown_accept wildcard;
             markdown_cache_validation ims_only;
             markdown_streaming force;
-            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
+            markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_memory=${MARKDOWN_MAX_SIZE} streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -997,7 +997,7 @@ http {
             markdown_accept wildcard;
             markdown_cache_validation full;
             markdown_streaming auto;
-            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
+            markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_memory=${MARKDOWN_MAX_SIZE} streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -1018,7 +1018,7 @@ http {
             markdown_accept wildcard;
             markdown_cache_validation ims_only;
             markdown_streaming force;
-            markdown_limits memory=20m streaming_buffer=1k timeout=120s;
+            markdown_limits conversion_memory=20m parser_memory=20m streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_auth_policy allow;
             markdown_auth_cookies "session*";
@@ -1035,7 +1035,7 @@ http {
             markdown_filter on;
             markdown_accept wildcard;
             markdown_cache_validation ims_only;
-            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
+            markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_memory=${MARKDOWN_MAX_SIZE} streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_auth_policy allow;
             markdown_auth_cookies "session*";
@@ -1465,7 +1465,7 @@ fi
 #   - markdown_auth_policy allow + auth_cookies "session*" + Cookie header
 #     means the request is authenticated and would normally get
 #     Cache-Control rewritten to private on the success path.
-#   - markdown_limits streaming_buffer=1k triggers pre-commit failure
+#   - markdown_limits streaming_buffer=64k triggers pre-commit failure
 #   - Fail-open MUST bypass the auth Cache-Control rewrite.
 #   - We assert: Cache-Control preserved, ETag preserved, and the
 #     decision log contains a streaming fail-open reason code.

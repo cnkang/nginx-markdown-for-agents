@@ -61,6 +61,7 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
     }
 
     /* 1. Populate decision context from request state */
+    dctx.log = (r->connection != NULL) ? r->connection->log : NULL;
     dctx.current_state = ctx->stream_sm.state;
     dctx.replay_available =
         ngx_http_markdown_stream_replay_available(ctx);
@@ -124,7 +125,7 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
           */
         return ngx_http_markdown_stream_error_pass_html(r, ctx);
 
-    case NGX_HTTP_MD_ACTION_REJECT_502:
+    case NGX_HTTP_MD_ACTION_REJECT_STATUS:
         /*
      * Pre-commit with fail_closed or status policy: finalize the request with
      * the configured error status. Use ngx_http_filter_finalize_request

@@ -88,6 +88,12 @@ Available targets include:
 - `make sonar-compile-db` - Generate `compile_commands.json` for SonarQube C/C++ analysis (local + CI)
 - `make clean` - Clean Rust and selected NGINX module test artifacts
 
+Release and performance evidence under `artifacts/` is generated in CI and
+ignored by Git. CI validates generated evidence against checked-in source and
+schema before upload; do not commit local copies of those files. The canonical
+module benchmark environment is tracked as source configuration in
+`release/performance/canonical-environment.json`.
+
 ## SonarQube C/C++ Compilation Database
 
 If SonarQube for VS Code shows:

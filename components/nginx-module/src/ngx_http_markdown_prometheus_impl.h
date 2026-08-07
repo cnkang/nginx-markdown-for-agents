@@ -2,12 +2,11 @@
 #define NGX_HTTP_MARKDOWN_PROMETHEUS_IMPL_H
 
 /*
- * Prometheus text exposition format renderer.
+ * Legacy Prometheus text renderer retained only for bounded-renderer unit
+ * fixtures. Production requests use ngx_http_markdown_metrics_v1_renderer.h.
  *
- * WARNING: This header is an implementation detail of the main
- * translation unit (ngx_http_markdown_filter_module.c).  It must
- * NOT be included from any other .c file or used as a standalone
- * compilation unit.
+ * WARNING: This header is test-only compatibility code. It must not be
+ * included by the production translation unit or used as a public renderer.
  *
  * Renders a metrics snapshot as Prometheus text exposition format
  * (content type: text/plain; version=0.0.4; charset=utf-8).
@@ -22,11 +21,16 @@ u_char *ngx_slprintf(u_char *buf, u_char *last,
     const char *fmt, ...);
 
 /*
- * Default: per-path RB-tree walk is enabled in production builds.
+ * Per-path RB-tree walk removed from production builds in 0.9.2
+ * (unbounded cardinality risk). Retained under debug guard only.
  * Unit test stubs define this to 0 before including this header.
  */
 #ifndef NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
+#ifdef MARKDOWN_METRICS_PER_PATH_DEBUG
 #define NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED  1
+#else
+#define NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED  0
+#endif
 #endif
 
 #if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
@@ -385,6 +389,8 @@ ngx_http_markdown_metrics_write_prometheus_streaming_failures(
         "\n",
         snapshot->streaming.budget_exceeded_total);
 
+    /* streaming_shadow metrics removed in 0.9.2 (production builds) */
+#ifdef MARKDOWN_STREAMING_SHADOW_DEBUG
     /* streaming_shadow_total */
     p = ngx_slprintf(p, end,
         "# HELP "
@@ -408,6 +414,7 @@ ngx_http_markdown_metrics_write_prometheus_streaming_failures(
         " %uA\n"
         "\n",
         snapshot->streaming.shadow_diff_total);
+#endif /* MARKDOWN_STREAMING_SHADOW_DEBUG */
 
     /* streaming_ttfb_seconds (gauge) */
     p = ngx_slprintf(p, end,
@@ -772,6 +779,8 @@ ngx_http_markdown_metrics_write_prometheus_tail(
             + snapshot->conversion_latency.le_1000ms
             + snapshot->conversion_latency.gt_1000ms);
 
+    /* per_path metrics removed from production in 0.9.2 */
+#if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
     /* per_path_entries */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_per_path_entries "
@@ -808,6 +817,7 @@ ngx_http_markdown_metrics_write_prometheus_tail(
         "nginx_markdown_per_path_overflow_total %uA\n"
         "\n",
         snapshot->per_path.overflow_count);
+#endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
 
     return p;
 }

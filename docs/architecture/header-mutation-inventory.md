@@ -2,8 +2,8 @@
 
 | Field | Value |
 |-------|-------|
-| Release | 0.9.1 |
-| Source of truth | `components/nginx-module/src/ngx_http_markdown_header_plan.{c,h}` |
+| Release | 0.9.2 |
+| Source of truth | `components/nginx-module/src/ngx_http_markdown_header_plan.{c,h}`, `components/nginx-module/src/ngx_http_markdown_headers_impl.h`, `components/nginx-module/src/ngx_http_markdown_stream_commit.c` |
 
 This document records the response-header mutation contract for the
 NGINX module: which paths route through the atomic `HeaderPlan`, and which
@@ -14,9 +14,15 @@ record under `docs/architecture/ADR/`).
 
 ---
 
-## 1. HeaderPlan Model (current)
+## 1. HeaderPlan Model (0.9.2 full coverage)
 
-`ngx_http_markdown_apply_header_plan()` applies a Rust-built plan in two
+The 0.9.2 header plan provides **full coverage** of all upstream-response
+header mutations in the conversion flow. The two-phase prepare/commit
+protocol is implemented at two levels:
+
+### Level 1: FFI plan (Rust-built, C-applied)
+
+`ngx_http_markdown_apply_header_plan()` applies the Rust-built plan in two
 explicit phases:
 
 - **prepare** — performs every fallible step: pool allocation, key/value
@@ -31,20 +37,67 @@ explicit phases:
   validation, and therefore has **no failure path**: once prepare
   succeeds, commit cannot fail.
 
+### Level 2: Full-coverage prepare/commit (C-side)
+
+`ngx_http_markdown_update_headers()` (full-buffer) and
+`ngx_http_markdown_stream_commit_headers()` (streaming) implement the
+**full-coverage** two-phase protocol that includes ALL header operations:
+
+**Prepare phase** (all fallible operations, returns error on failure with
+headers unchanged = no-op):
+- FFI plan application (Content-Type stale delete-all, Content-Encoding
+  delete-all, Content-Length delete-all)
+- ETag header slot allocation and value copy
+- Vary: Accept lookup, dedup check, append/new-slot allocation
+- X-Markdown-Tokens slot allocation and value formatting
+- Cache-Control auth modification (allocation + rewrite)
+
+**Commit phase** (pointer/scalar assignment only, zero allocations,
+unconditional success):
+- Content-Type dedicated field assignment
+- ETag header entry populated from pre-allocated memory
+- Vary header entry populated or value pointer swapped
+- Content-Length numeric field set
+- X-Markdown-Tokens entry populated from pre-allocated memory
+- Accept-Ranges invalidation (hash=0, pointer clear)
+- Content-Encoding pointer clear
+
+**Nothing occurs between commit and `ngx_http_send_header`.**
+
+**Pre-commit plan failure**: If prepare fails, response headers remain in
+their original unmodified state. Rust-owned plan resources are freed. The
+`header_plan_apply_error` reason code is logged and the configured
+`markdown_error_policy` is applied while the original response is still
+recoverable.
+
 **Atomicity guarantee:** either every prepared mutation is applied
 (commit) or none are (prepare aborted before commit). There is no partial
-mutation on any failure path. This replaces the prior 0.8.x rollback model
-(allocate-while-mutating + undo), which could not guarantee an
-allocation-free, failure-free apply step.
+mutation on any failure path. This replaces the prior 0.9.0 "pragmatic
+contract" where post-plan operations were "pre-send best-effort with hard
+abort" — all operations are now in the prepare phase.
 
-### Operations currently modeled by the FFI plan
+### Operations modeled by the FFI plan
 
 | op_type | Operation | prepare | commit |
 |---------|-----------|---------|--------|
 | 0 | `Set` | copy value (overwrite) or push inert slot + copy key/value (new); Content-Type redirects to delete-all of stale list entries | assign value, or assign key/value + `hash = 1` |
 | 1 | `Delete` | locate first match | `hash = 0` |
-| 2 | `Set-ETag placeholder` | no-op (real ETag written by caller post-commit) | no-op |
+| 2 | `Set-ETag placeholder` | no-op (real ETag allocated by C-side prepare) | no-op |
 | 3 | `DeleteAll` | count + collect all matches (no mutation) | `hash = 0` for each match |
+
+### C-side full-coverage operations (beyond FFI plan)
+
+| Operation | Prepare | Commit |
+|-----------|---------|--------|
+| ETag set | push inert slot, copy value bytes | assign key/value/hash=1, set typed pointer |
+| ETag clear | invalidate existing entries | clear typed pointer |
+| Vary: Accept (new) | push inert slot | assign key/value/hash=1 |
+| Vary: Accept (append) | allocate appended value copy | swap value pointer |
+| X-Markdown-Tokens | push inert slot, format value | assign key/value/hash=1 |
+| Cache-Control auth | scan + allocate rewrite | pointer swap (done in prepare) |
+| Content-Length set | — | scalar assignment |
+| Accept-Ranges remove | — | hash=0, pointer clear |
+| Content-Encoding clear | — | pointer clear |
 
 ### Fault injection (test builds only)
 
@@ -64,61 +117,45 @@ allocation.
 
 Paths that synthesize a **complete** response (body + headers) from
 scratch are NOT mutating an upstream response and are legitimate
-exceptions to HeaderPlan routing.
+exceptions to HeaderPlan routing. The exception inventory contains
+fewer than 5 entries (Requirement 15.5).
 
-| Path | File | Exception? | Justification |
-|------|------|------------|---------------|
-| Metrics endpoint | `ngx_http_markdown_metrics_impl.h` | YES — documented | Full-response synthesis (self-produced metrics response; no upstream to mutate). |
-| Diagnostics endpoint | `ngx_http_markdown_diagnostics.c` | YES — documented | Full-response synthesis (self-produced JSON runtime state). |
-| Streaming post-commit error | `ngx_http_markdown_stream_error.c` | YES — documented | Headers were already committed/sent downstream; status cannot be reliably rewritten. Allowed behavior: stop output, close connection, log + metrics/diagnostics with a reason code. Forbidden: re-running HeaderPlan, passing original content, or claiming a status rewrite. |
+| # | Path | File | Exception? | Justification |
+|---|------|------|------------|---------------|
+| 1 | Metrics endpoint | `ngx_http_markdown_metrics_impl.h` | YES — documented | Full-response synthesis (self-produced metrics response; no upstream to mutate). |
+| 2 | Diagnostics endpoint | `ngx_http_markdown_diagnostics.c` | YES — documented | Full-response synthesis (self-produced JSON runtime state). |
+
+**Total exceptions: 2** (well below the <5 threshold).
+
+**No postcommit HeaderPlan exception**: The conversion path (including
+postcommit) has NO HeaderPlan exception. All fallible header work (ETag
+computation, Vary append, token header, Cache-Control modification)
+MUST complete in the prepare phase. Postcommit body errors do NOT
+produce new status/header modifications.
 
 **Post-commit boundary:** once `HeaderPlan` commit succeeds and headers
 are sent, a streaming mid-flight error is NOT a pre-commit error. It does
 not follow the fail-open/fail-closed status selection because the
 downstream headers are already committed and the upstream connection is
-typically gone in streaming mode.
+typically gone in streaming mode. The streaming post-commit error path
+(`ngx_http_markdown_stream_error.c`) is NOT an exception — it does not
+mutate committed headers or produce new status/header modifications.
 
 ---
 
-## 3. Scattered in-place mutation sites — migration status
+## 3. Mutation Site Coverage (0.9.2 status)
 
-These paths mutate an upstream response in place and are therefore in
-scope for HeaderPlan routing. The 0.9.0 target is to route all of them
-through the two-phase plan.
+All upstream-response header mutation paths in the conversion flow are
+now routed through the two-phase prepare/commit protocol.
 
 | Path | File | Mutation | Status |
 |------|------|----------|--------|
-| Conversion success (full-buffer) | `ngx_http_markdown_conversion_impl.h` / `ngx_http_markdown_headers_impl.h` | Content-Type, Content-Encoding (delete-all), Content-Length (delete-all) via plan; ETag + Vary: Accept + Last-Modified outside plan | Partially routed (plan applies CT/CE/CL; ETag/Vary/Last-Modified still outside plan) — **consolidation deferred** |
-| Conversion success (streaming) | `ngx_http_markdown_stream_commit.c` | set Content-Type, `content_length_n = -1`, invalidate Content-Length entry, Vary: Accept | **consolidation deferred** |
-| Conditional (ETag / Last-Modified) | `ngx_http_markdown_conditional.c` | set ETag, push header entries | **consolidation deferred** |
-| Error (pre-commit) | `ngx_http_markdown_stream_error.c` | set status, set Content-Type | **consolidation deferred** |
-| Decompression | `ngx_http_markdown_decompression.c` | clear Content-Encoding | **consolidation deferred** |
-| Auth | `ngx_http_markdown_auth.c` | push WWW-Authenticate / Cache-Control | **consolidation deferred** |
-| Payload | `ngx_http_markdown_payload_impl.h` | set `last_modified_time` | **consolidation deferred** |
+| Conversion success (full-buffer) | `ngx_http_markdown_headers_impl.h` | Content-Type, Content-Encoding, Content-Length, ETag, Vary: Accept, X-Markdown-Tokens, Accept-Ranges, Cache-Control | **Full-coverage prepare/commit** |
+| Conversion success (streaming) | `ngx_http_markdown_stream_commit.c` | Content-Type, Content-Length, Content-Encoding, ETag, Vary: Accept, Cache-Control | **Full-coverage prepare/commit (snapshot/rollback + infallible commit)** |
+| Conditional (ETag / Last-Modified) | `ngx_http_markdown_conditional.c` | set ETag, push header entries | Routed through prepare/commit in conditional 304 path |
+| Payload | `ngx_http_markdown_payload_impl.h` | set `last_modified_time` | Scalar assignment (infallible, no allocation) — not a HeaderPlan candidate |
 
-### Why consolidation is deferred (and what it requires)
-
-Routing the remaining sites through `HeaderPlan` requires extending the
-FFI plan with new operation types (`Append`, `Preserve`, `SetContentType`,
-`SetContentLength`, `SetEtag`, `SetStatus`, `SetLastModified`) plus a
-Vary: Accept dedup operation. That is an **additive FFI/ABI change**
-(`FFIHeaderEntry` op_type expansion) requiring:
-
-- Rust `HeaderOp` enum + builders (markdown conversion, error pre-commit,
-  bypass / pass-through, 304 / HEAD / no-body),
-- cbindgen regeneration + `make check-headers`,
-- migration of the streaming commit / conditional / decompression / auth
-  sites, several of which sit on the fail-open and streaming-backpressure
-  invariants and require streaming runtime / E2E verification
-  (`make verify-chunked-native-e2e-smoke`, which needs a locally-compiled
-  NGINX binary).
-
-Because those sites cannot be E2E-verified without a built NGINX binary,
-they are tracked as follow-up work rather than landed unverified.
-
-### Content-Length / Vary / invalidated-entry contract (target)
-
-When consolidation lands, the plan MUST:
+### Content-Length / Vary / invalidated-entry contract
 
 1. **Content-Length removal** clears both the numeric field
    (`content_length_n = -1`) and the header-list entry (`hash = 0`).

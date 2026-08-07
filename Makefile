@@ -62,20 +62,25 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         test test-rust test-rust-doc test-nginx-unit test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
         test-nginx-integration test-e2e test-e2e-rust test-all test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
-        harness-check harness-check-full harness-security-checks test-harness regex-security-check e2e-streaming-config-check sonar-encoding-check release-supply-chain-check \
+        harness-check harness-check-full harness-security-checks test-harness regex-security-check e2e-streaming-config-check sonar-encoding-check release-supply-chain-check public-surface-drift-check schema-drift-check \
         security-static security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny \
         supply-chain supply-chain-trivy supply-chain-sbom \
         complexity-check \
-	docs-check license-check release-notes release-gates-check release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x release-gates-check-090 release-gates-check-091 release-gates-check-all release-gates-check-legacy release-gates-check-strict \
+	docs-check license-check release-notes release-gates-check release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x         release-gates-check-090 release-gates-check-091 release-gates-check-092 release-gates-check-all release-gates-check-legacy release-gates-check-strict \
+        release-matrix-check \
+        release-candidate-evidence-check artifact-registry-check release-evidence-manifest-check \
+        test-rust-fuzz-qualification test-e2e-rust-soak \
         perf-evidence-check \
         test-production-examples-nginx-t test-production-examples-e2e-smoke \
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
         verify-brotli-streaming-e2e \
+        verify-encoding-chain-e2e \
         verify-streaming-failure-cache-e2e \
         verify-streaming-failure-cache-e2e-plan \
         verify-metrics-endpoint-e2e verify-conditional-requests-e2e verify-config-merge-e2e \
         verify-auth-cache-e2e verify-status-codes-e2e \
+        verify-diagnostics-access-phase-e2e \
         test-rust-streaming \
         coverage-c coverage-rust coverage-sonar-xml coverage-all coverage-gate \
         clean help
@@ -93,6 +98,7 @@ rust-lib:
 	cd $(RUST_DIR) && cargo build --locked --target $(RUST_TARGET) --release --features $(RUST_RELEASE_FEATURES)
 	@echo "Generating C header with cbindgen..."
 	cd $(RUST_DIR) && mkdir -p include && cbindgen --quiet --config cbindgen.toml --crate nginx-markdown-converter --output include/markdown_converter.h
+	python3 tools/harness/normalize_cbindgen_header.py
 
 rust-lib-debug:
 	@echo "Building Rust library (debug) for $(RUST_TARGET)..."
@@ -147,6 +153,9 @@ test-rust-fuzz-smoke:
 	cd $(RUST_DIR) && cargo +nightly fuzz run convert_html -- -max_total_time=5
 	cd $(RUST_DIR) && cargo +nightly fuzz run streaming_chunks -- -max_total_time=5
 	cd $(RUST_DIR) && cargo +nightly fuzz run negotiation_and_headers -- -max_total_time=5
+	cd $(RUST_DIR) && cargo +nightly fuzz run fuzz_encoding_chain -- -max_total_time=5
+	cd $(RUST_DIR) && cargo +nightly fuzz run fuzz_multilayer_decode -- -max_total_time=5
+	cd $(RUST_DIR) && cargo +nightly fuzz run fuzz_trusted_proxy_cidr -- -max_total_time=5
 
 fuzz-smoke:
 	cd $(RUST_DIR) && cargo +nightly fuzz run convert_html -- -max_total_time=30
@@ -216,6 +225,12 @@ test-benchmark-summary:
 	python3 tools/perf/format_pr_summary.py \
 	--report $(CORPUS_REPORT)
 
+# Determinism corpus: every corpus fixture
+# must produce byte-identical output across repeated independent converter
+# runs.
+test-corpus-determinism:
+	bash tools/corpus/verify_determinism.sh
+
 docs-check-base:
 	python3 tools/docs/check_docs.py
 	python3 tools/docs/check_packaging_docs.py
@@ -223,6 +238,7 @@ docs-check-base:
 	python3 tools/docs/validate_packaging_matrix.py
 	python3 tools/render_release_matrix_docs.py --check
 	python3 tools/release/matrix/validate_workflow_matrix_consumers.py
+	python3 tools/release/gates/validate_release_matrix_schema.py
 
 docs-check: docs-check-base
 	python3 tools/harness/check_harness_sync.py
@@ -234,6 +250,13 @@ release-notes:
 harness-check:
 	python3 tools/harness/check_harness_sync.py
 	python3 tools/harness/detect_metrics_per_path_stub_drift.py
+	python3 tools/harness/detect_public_surface_drift.py
+
+public-surface-drift-check:
+	python3 tools/harness/detect_public_surface_drift.py
+
+schema-drift-check:
+	python3 tools/release/gates/validate_schema_drift.py
 
 harness-check-full:
 	$(MAKE) docs-check-base
@@ -263,6 +286,12 @@ e2e-streaming-config-check:
 	python3 -m pytest tools/harness/tests/test_detect_e2e_streaming_config.py -q --tb=short
 	bash tools/harness/tests/test_detect_e2e_streaming_config.sh
 	@echo "  E2E Streaming Config Check: PASSED"
+
+reason-codegen-check:
+	@echo "=== Reason Registry Code Generation Drift Check ==="
+	python3 tools/reason-codegen/generate.py
+	python3 tools/reason-codegen/generate.py --check
+	@echo "  Reason Code Generation Drift Check: PASSED"
 
 harness-security-checks:
 	bash tools/harness/detect_cwe190_casts.sh
@@ -316,6 +345,7 @@ release-supply-chain-check:
 complexity-check:
 	@echo "=== Complexity Check ==="
 	bash tools/complexity/check_complexity.sh
+	PYTHONPATH=. python3 tools/harness/detect_python_complexity.py
 
 test-harness:
 	@echo "=== Harness Detector Unit Tests ==="
@@ -336,6 +366,7 @@ test-harness:
 	bash tools/harness/tests/test_detect_hardcoded_http_status.sh
 	bash tools/harness/tests/test_detect_e2e_streaming_config.sh
 	bash tools/harness/tests/test_detect_regex_safety.sh
+	bash tools/harness/tests/test_dynconf_reload_rollback.sh
 	python3 -m pytest tools/harness/tests/ -q --tb=short -k "not check_harness_sync"
 
 license-check:
@@ -603,7 +634,7 @@ release-gates-check-070:
 #   All Python scripts called by this gate consume only repo-owned inputs:
 #   tools/, docs/, components/, AGENTS.md, .github/workflows/
 #
-# CI coverage (Spec 43):
+# CI coverage:
 #   - Streaming tests: covered by rust-quality job (make test-rust --all-features)
 #   - Chunked native E2E: covered by runtime-regressions job
 #   - Matrix validation: covered by docs-check job (make docs-check) and
@@ -794,6 +825,43 @@ perf-evidence-check:
 	@echo "=== Performance Evidence Check (non-blocking) ==="
 	@tools/perf/run_evidence_gate.sh
 
+# release-perf-evidence-blocking: shared helper that runs the module-level
+# performance evidence gate in blocking mode against a caller-specified
+# baseline.  Each release-gates-check-0NN recipe must invoke this helper with
+# an explicit BASELINE_VERSION so the baseline enters the blocking decision
+# instead of being merely exported and silently ignored.
+#
+# Parameter:
+#   BASELINE_VERSION - the module baseline to evaluate (e.g. 091, 092)
+#
+# Environment variables (forwarded to evidence_gate.py):
+#   NGINX_BIN                            - Path to module-enabled nginx binary
+#   RELEASE_GATE_ALLOW_SKIP_MODULE=1     - Allow proceeding without module
+#                                           benchmarks (non-release only)
+#
+# Classification: BLOCKING (fails on NO_GO/MISSING_EVIDENCE; fail-closed when
+# NGINX_BIN is absent unless an explicit skip is authorized)
+.PHONY: release-perf-evidence-blocking
+release-perf-evidence-blocking:
+	@if [ -z "$(BASELINE_VERSION)" ]; then \
+		echo "FAIL: release-perf-evidence-blocking requires BASELINE_VERSION" >&2; \
+		exit 1; \
+	fi
+	@echo "  Performance evidence gate (blocking mode, baseline $(BASELINE_VERSION))"
+	@if [ -n "$${NGINX_BIN:-}" ]; then \
+		MODULE_BASELINE_VERSION="$(BASELINE_VERSION)" \
+			python3 tools/perf/evidence_gate.py --mode blocking || exit 1; \
+	else \
+		if [ "$${RELEASE_GATE_ALLOW_SKIP_MODULE:-0}" = "1" ]; then \
+			MODULE_BASELINE_VERSION="$(BASELINE_VERSION)" \
+				python3 tools/perf/evidence_gate.py --mode blocking --allow-skip-module || exit 1; \
+		else \
+			echo "FAIL: Module-level benchmarks require NGINX_BIN." >&2; \
+			echo "  Set NGINX_BIN=/path/to/nginx or RELEASE_GATE_ALLOW_SKIP_MODULE=1 to skip." >&2; \
+			exit 1; \
+		fi; \
+	fi
+
 # release-gates-check-091: Blocking 0.9.1 release gate.
 # Runs all prior regression gates (0.9.0 gate chain), then adds 0.9.1-specific
 # evidence gate in blocking mode.  Fails on NO_GO verdict for RC tags.
@@ -813,18 +881,8 @@ release-gates-check-091: release-gates-check-090
 	@echo "=== 0.9.1 Release Gates (blocking) ==="
 	@echo "  [1/3] Module-level threshold engine validation"
 	python3 -c "from tools.perf.threshold_engine import evaluate_module_level; print('  threshold_engine module-level: OK')"
-	@echo "  [2/3] Performance evidence gate (blocking mode)"
-	@if [ -n "$${NGINX_BIN:-}" ]; then \
-		python3 tools/perf/evidence_gate.py --mode blocking || exit 1; \
-	else \
-		if [ "$${RELEASE_GATE_ALLOW_SKIP_MODULE:-0}" = "1" ]; then \
-			python3 tools/perf/evidence_gate.py --mode blocking --allow-skip-module || exit 1; \
-		else \
-			echo "FAIL: Module-level benchmarks require NGINX_BIN." >&2; \
-			echo "  Set NGINX_BIN=/path/to/nginx or RELEASE_GATE_ALLOW_SKIP_MODULE=1 to skip." >&2; \
-			exit 1; \
-		fi; \
-	fi
+	@echo "  [2/3] Performance evidence gate (blocking mode, baseline 091)"
+	$(MAKE) release-perf-evidence-blocking BASELINE_VERSION=091
 	@echo "  [3/3] Python perf tooling tests"
 	@if python3 -c "import pytest, hypothesis" >/dev/null 2>&1; then \
 		if python3 -m pytest tools/perf/tests/ -q --tb=short; then \
@@ -839,10 +897,111 @@ release-gates-check-091: release-gates-check-090
 	fi
 	@echo "=== 0.9.1 Release Gates: PASS ==="
 
-release-gates-check-all: release-gates-check release-gates-check-091
+# release-gates-check-092: Blocking 0.9.2 release gate.
+# Additive on 091: adds public-surface/dynconf contract drift, version
+# consistency, reason-code registry completeness, and streaming lifecycle tests.
+#
+# Environment variables (inherited from 091 chain):
+#   NGINX_BIN                            - Path to module-enabled nginx binary
+#   RELEASE_GATE_ALLOW_SKIP_MODULE=1     - Allow proceeding without module
+#                                           benchmarks
+#   RELEASE_GATE_ALLOW_SKIP_FUZZ=1       - (inherited) skip fuzz smoke
+#   RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 - (inherited) skip native E2E
+#   RELEASE_GATE_ALLOW_SKIP_COVERAGE=1   - (inherited) skip coverage
+#
+# Classification: BLOCKING
+release-gates-check-092: release-gates-check-091
+	@echo "=== 0.9.2 Release Gates (blocking) ==="
+	@echo "  [1/7] 0.9.2 performance evidence gate (blocking mode, baseline 092)"
+	$(MAKE) release-perf-evidence-blocking BASELINE_VERSION=092
+	@echo "  [2/7] Public surface and dynconf schema drift checks"
+	$(MAKE) public-surface-drift-check
+	@echo "  [3/7] Version consistency (0.9.2)"
+	bash tools/harness/detect_version_consistency.sh
+	@echo "  [4/7] Reason code registry completeness"
+	PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
+	@echo "  [5/7] Streaming lifecycle unit test"
+	$(MAKE) -C $(NGINX_TEST_DIR) unit-streaming_impl
+	@echo "  [6/7] Official build feature manifest"
+	python3 tools/release/gates/validate_official_feature_manifest.py --write
+	@echo "  [7/7] Canonical release matrix"
+	PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
+	@echo "=== 0.9.2 Release Gates: PASS ==="
+
+# release-matrix-check: Canonical release-matrix gate.
+# Validates docs/release/release-matrix.json against the immutable
+# schemas/release-matrix.schema.json, requires a fully canonical document
+# (no legacy aliases, no legacy top-level matrix, no dropped metadata
+# keys), and binds every entry to the frozen ABI version and the official
+# feature-manifest digest. Fail-closed on any drift.
+# Classification: BLOCKING
+release-matrix-check:
+	@echo "=== Canonical Release Matrix Check ==="
+	python3 tools/release/gates/validate_official_feature_manifest.py --write
+	PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
+	PYTHONPATH=. python3 -m pytest tools/release/matrix/tests/test_validate_release_matrix.py -q --tb=short
+	@echo "  Canonical Release Matrix Check: PASSED"
+
+# release-candidate-evidence-check: Pre-freeze release candidate evidence gate.
+# Validates release-candidate evidence against the v1 schema.
+# FIXTURE mode: make release-candidate-evidence-check FIXTURE=path/to/fixture.json
+release-candidate-evidence-check:
+	@echo "=== Release Candidate Evidence Check ==="
+	@if [ -n "$(FIXTURE)" ]; then \
+		python3 tools/release/gates/validate_release_candidate_evidence.py --mode fixture --expected-sha 9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d --record-input "$(FIXTURE)"; \
+	else \
+		python3 tools/release/gates/validate_release_candidate_evidence.py --mode real; \
+	fi
+
+# artifact-registry-check: Pre-freeze artifact registry gate.
+# Validates artifact registry against the v1 schema.
+# FIXTURE mode: make artifact-registry-check FIXTURE=path/to/fixture.json
+artifact-registry-check:
+	@echo "=== Artifact Registry Check ==="
+	@if [ -n "$(FIXTURE)" ]; then \
+		python3 tools/release/gates/validate_artifact_registry.py --mode fixture --expected-sha 9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d --record-input "$(FIXTURE)"; \
+	else \
+		python3 tools/release/gates/validate_artifact_registry.py --mode real; \
+	fi
+
+# release-evidence-manifest-check: Pre-freeze release evidence manifest gate.
+# Validates release evidence manifest against the v1 schema.
+# FIXTURE mode: make release-evidence-manifest-check FIXTURE=path/to/fixture.json
+release-evidence-manifest-check:
+	@echo "=== Release Evidence Manifest Check ==="
+	@if [ -n "$(FIXTURE)" ]; then \
+		python3 tools/release/gates/validate_release_evidence_manifest.py --mode fixture --expected-sha 9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d --record-input "$(FIXTURE)"; \
+	else \
+		python3 tools/release/gates/validate_release_evidence_manifest.py --mode real; \
+	fi
+
+# test-rust-fuzz-qualification: Pre-freeze fuzz qualification gate.
+# Validates fuzz qualification evidence against manifest thresholds.
+# FIXTURE mode: make test-rust-fuzz-qualification FIXTURE=path/to/fixture.json
+test-rust-fuzz-qualification:
+	@echo "=== Fuzz Qualification Check ==="
+	@if [ -n "$(FIXTURE)" ]; then \
+		python3 tools/release/gates/validate_fuzz_qualification.py --mode fixture --manifest tests/fixtures/release/fuzz-qualification-manifest.json --record-input "$(FIXTURE)"; \
+	else \
+		python3 tools/release/gates/validate_fuzz_qualification.py --mode real; \
+	fi
+
+# test-e2e-rust-soak: Pre-freeze soak qualification gate.
+# Validates soak qualification evidence against manifest thresholds.
+# FIXTURE mode: make test-e2e-rust-soak FIXTURE=path/to/fixture.json
+test-e2e-rust-soak:
+	@echo "=== Soak Qualification Check ==="
+	@if [ -n "$(FIXTURE)" ]; then \
+		python3 tools/release/gates/validate_soak_qualification.py --mode fixture --manifest tests/fixtures/release/soak-qualification-manifest.json --record-input "$(FIXTURE)"; \
+	else \
+		python3 tools/release/gates/validate_soak_qualification.py --mode real; \
+	fi
+
+release-gates-check-all: release-gates-check release-gates-check-092
 	@echo "=== Release Gates: ALL PASS ==="
 
-# Production Examples: validate all examples pass nginx -t (NEW)
+# Production Examples + Migration Guide: validate all example configs pass
+# nginx -t (NEW)
 # Requires a module-enabled NGINX binary (NGINX_BIN or PATH nginx).
 # When the binary is unavailable, the gate fails unless
 # RELEASE_GATE_ALLOW_SKIP_MODULE=1 is set, mirroring the 091
@@ -850,33 +1009,13 @@ release-gates-check-all: release-gates-check release-gates-check-091
 # (non-release validation only); tag-release CI must provide NGINX_BIN.
 test-production-examples-nginx-t: SHELL := /bin/bash
 test-production-examples-nginx-t:
-	@echo "=== Production Examples nginx -t ==="
+	@echo "=== Examples and Migration Guide nginx -t ==="
 	@nginx_bin="$${NGINX_BIN:-nginx}"; \
 	module_so="$${MODULE_SO:-}"; \
 	if command -v "$$nginx_bin" >/dev/null 2>&1; then \
-		runtime_prefix="$${RUNNER_TEMP:-$${TMPDIR:-/tmp}}/nginx-markdown-config-test-$$$$"; \
-		mkdir -p "$$runtime_prefix/logs"; \
-		trap 'rm -rf -- "$$runtime_prefix"' EXIT; \
-		set -- examples/production/*.conf; \
-		if [ "$$1" = 'examples/production/*.conf' ]; then \
-			echo "FAIL: no production example configs found in examples/production/" >&2; \
-			exit 1; \
-		fi; \
-		for conf in "$$@"; do \
-			echo "  Testing: $$conf"; \
-			test_conf="$$runtime_prefix/$$(basename "$$conf")"; \
-			sed -E 's/^([[:space:]]*)listen[[:space:]]+80([[:space:]]*;)/\1listen 18080\2/' \
-				"$$conf" > "$$test_conf"; \
-			if [[ -n "$$module_so" ]]; then \
-				"$$nginx_bin" -t -p "$$runtime_prefix/" \
-					-g "load_module $$module_so;" \
-					-c "$$test_conf" 2>&1 || exit 1; \
-			else \
-				"$$nginx_bin" -t -p "$$runtime_prefix/" \
-					-c "$$test_conf" 2>&1 || exit 1; \
-			fi; \
-		done; \
-		echo "All production examples pass nginx -t"; \
+		NGINX_BIN="$$(command -v "$$nginx_bin")" \
+		MODULE_SO="$$module_so" \
+			bash tools/e2e/verify_examples_nginx_t.sh || exit 1; \
 	else \
 		if [ "$${RELEASE_GATE_ALLOW_SKIP_MODULE:-0}" = "1" ]; then \
 			echo "SKIP: nginx binary not found (set NGINX_BIN to a module-enabled nginx; RELEASE_GATE_ALLOW_SKIP_MODULE=1)"; \
@@ -947,6 +1086,9 @@ verify-chunked-native-e2e-stress:
 verify-brotli-streaming-e2e:
 	./tools/e2e/verify_brotli_streaming_e2e.sh
 
+verify-encoding-chain-e2e:
+	./tools/e2e/verify_encoding_chain_e2e.sh
+
 verify-streaming-failure-cache-e2e:
 	./tools/e2e/verify_streaming_failure_cache_e2e.sh $(E2E_ARGS)
 
@@ -967,6 +1109,9 @@ verify-auth-cache-e2e:
 
 verify-status-codes-e2e:
 	./tools/e2e/verify_status_codes_e2e.sh
+
+verify-diagnostics-access-phase-e2e:
+	./tools/e2e/verify_diagnostics_access_phase_e2e.sh
 
 # ── Coverage targets ────────────────────────────────────────────────
 # Generate lcov reports consumed by SonarCloud.  Output lands in
@@ -1054,11 +1199,12 @@ help:
 	@echo "  test-e2e-rust            - Build and run Rust e2e-harness migrated scenarios"
 	@echo "  verify-streaming-failure-cache-e2e - Run streaming failure/cache e2e tests"
 	@echo "  verify-streaming-failure-cache-e2e-plan - Print test plan only (no NGINX_BIN required)"
-	@echo "  verify-metrics-endpoint-e2e  - Run metrics endpoint e2e tests (JSON/text/Prometheus)"
+	@echo "  verify-metrics-endpoint-e2e  - Run Prometheus text 0.0.4 metrics E2E tests"
 	@echo "  verify-conditional-requests-e2e - Run conditional-request e2e tests (ETag/304)"
 	@echo "  verify-config-merge-e2e     - Run config-merge e2e tests (http/server/location)"
 	@echo "  verify-auth-cache-e2e       - Run auth/cache interaction e2e tests"
 	@echo "  verify-status-codes-e2e     - Run upstream status-code passthrough e2e tests"
+	@echo "  verify-diagnostics-access-phase-e2e - Verify native NGINX access-phase restricts diagnostics/metrics handlers"
 	@echo "  test-all                 - Run build + rust + unit tests"
 	@echo "  sonar-compile-db         - Generate compile_commands.json for SonarQube for VS Code C/C++ analysis"
 	@echo "  test-benchmark           - Run corpus benchmark and produce Unified Report"
@@ -1084,11 +1230,19 @@ help:
 	@echo "  release-gates-check-08x  - Alias for release-gates-check-080 (0.8.x patch-line canonical entry)"
 	@echo "  release-gates-check-090  - Validate 0.9.0 release gates (additive on 0.8.0; production examples, gate validator)"
 	@echo "  release-gates-check-091  - Validate 0.9.1 release gates (blocking; module benchmark evidence gate)"
+	@echo "  release-gates-check-092  - Validate 0.9.2 release gates (blocking; 091 + 092 evidence + contract checks)"
+	@echo "  release-matrix-check      - Validate canonical release matrix against the checked-in schema and ABI/feature bindings"
+	@echo "  release-candidate-evidence-check - Validate frozen release candidate SHA manifest (FIXTURE=... for regression fixtures)"
+	@echo "  artifact-registry-check   - Validate candidate-bound release artifact index (FIXTURE=... for regression fixtures)"
+	@echo "  release-evidence-manifest-check - Validate final evidence manifest + observation state (FIXTURE=... for regression fixtures)"
+	@echo "  test-rust-fuzz-qualification   - Fuzz qualification gate (15min or 100k execs per blocking target; FIXTURE=... for regression fixtures)"
+	@echo "  test-e2e-rust-soak        - Short-soak qualification gate (30min concurrency 16; FIXTURE=... for regression fixtures)"
+	@echo "  release-perf-evidence-blocking - Shared blocking evidence helper (requires BASELINE_VERSION)"
 	@echo "  perf-evidence-check      - Run performance evidence gate (non-blocking, report-only)"
-	@echo "  release-gates-check-all  - Run current baseline and 0.9.1 release gates"
+	@echo "  release-gates-check-all  - Run current baseline and 0.9.2 release gates"
 	@echo "  release-gates-check-legacy - Validate 0.4.0 release gate documents"
 	@echo "  release-gates-check-strict - Validate all sub-specs #12-#18 for full compliance"
-	@echo "  test-production-examples-nginx-t - Validate production example configs pass nginx -t"
+	@echo "  test-production-examples-nginx-t - Validate example configs and migration-guide examples pass nginx -t"
 	@echo "  test-production-examples-e2e-smoke - Production examples E2E smoke (deferred to CI)"
 	@echo "  release-notes            - Generate release notes from release-matrix.json"
 	@echo "  coverage-c               - Generate C module e2e coverage (builds NGINX with --coverage)"
