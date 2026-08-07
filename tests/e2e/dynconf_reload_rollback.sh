@@ -488,14 +488,14 @@ diagnostics_field() {
     local match=""
 
     case "$field" in
-        config_version)
-            match="$(printf '%s' "$json" | grep -Eo '"config_version"[[:space:]]*:[[:space:]]*("[^"]*"|[0-9]+|true|false)' | head -1 || true)"
+        generation)
+            match="$(printf '%s' "$json" | grep -Eo '"generation"[[:space:]]*:[[:space:]]*("[^"]*"|[0-9]+|true|false|null)' | head -1 || true)"
             ;;
-        active_mtime)
-            match="$(printf '%s' "$json" | grep -Eo '"active_mtime"[[:space:]]*:[[:space:]]*("[^"]*"|[0-9]+|true|false)' | head -1 || true)"
+        last_success)
+            match="$(printf '%s' "$json" | grep -Eo '"last_success"[[:space:]]*:[[:space:]]*("[^"]*"|[0-9]+|true|false|null)' | head -1 || true)"
             ;;
-        markdown_filter)
-            match="$(printf '%s' "$json" | grep -Eo '"markdown_filter"[[:space:]]*:[[:space:]]*("[^"]*"|[0-9]+|true|false)' | head -1 || true)"
+        filter)
+            match="$(printf '%s' "$json" | grep -Eo '"filter"[[:space:]]*:[[:space:]]*("[^"]*"|[0-9]+|true|false|null)' | head -1 || true)"
             ;;
         *)
             return 1
@@ -625,26 +625,27 @@ else
     exit 1
 fi
 
-INITIAL_MTIME="$(diagnostics_field active_mtime "$DIAG")"
-INITIAL_VERSION="$(diagnostics_field config_version "$DIAG")"
-if [[ -n "$INITIAL_MTIME" ]]; then
-    pass "initial applied_mtime present: $INITIAL_MTIME"
+INITIAL_SUCCESS="$(diagnostics_field last_success "$DIAG")"
+INITIAL_GENERATION="$(diagnostics_field generation "$DIAG")"
+if [[ -n "$INITIAL_SUCCESS" && "$INITIAL_SUCCESS" != "null" ]]; then
+    pass "initial last_success present: $INITIAL_SUCCESS"
 else
-    fail "initial active_mtime is missing"
+    fail "initial last_success is missing"
 fi
-if [[ -n "$INITIAL_VERSION" ]]; then
-    pass "initial config_version present: $INITIAL_VERSION"
+if [[ -n "$INITIAL_GENERATION" && "$INITIAL_GENERATION" != "null" ]]; then
+    pass "initial generation present: $INITIAL_GENERATION"
 else
-    fail "initial config_version is missing"
-    INITIAL_VERSION="0"
+    fail "initial generation is missing"
+    INITIAL_GENERATION="0"
 fi
 
 # --- Step 2: Write valid dynconf and reload ---
 
-write_dynconf_atomically 'schema_version=0.9
-markdown_filter=on
-memory_budget=2m
-streaming_budget=10m'
+write_dynconf_atomically '{
+  "schema_version": 1,
+  "filter": "on",
+  "streaming_buffer": 10485760
+}'
 echo "Wrote valid dynconf to $DYNCONF_FILE" >&2
 
 # Trigger reload when a harness-owned or explicitly supplied master PID is
@@ -654,28 +655,29 @@ send_reload "valid dynconf reload" || exit $?
 
 # --- Step 3: Verify new config with bounded polling ---
 
-if wait_for_diagnostics_field config_version \
-    "changed_from:$INITIAL_VERSION" 15 \
-    && wait_for_diagnostics_field markdown_filter equals:on 15; then
-    NEW_VERSION="$(diagnostics_field config_version "$LAST_DIAG")"
-    NEW_MTIME="$(diagnostics_field active_mtime "$LAST_DIAG")"
-    pass "valid reload observed by config_version=$NEW_VERSION and markdown_filter=on"
-    if [[ -n "$NEW_MTIME" && "$NEW_MTIME" != "$INITIAL_MTIME" ]]; then
-        pass "applied_mtime changed after valid reload: $NEW_MTIME"
+if wait_for_diagnostics_field generation \
+    "changed_from:$INITIAL_GENERATION" 15 \
+    && wait_for_diagnostics_field filter equals:on 15; then
+    NEW_GENERATION="$(diagnostics_field generation "$LAST_DIAG")"
+    NEW_SUCCESS="$(diagnostics_field last_success "$LAST_DIAG")"
+    pass "valid reload observed by generation=$NEW_GENERATION and filter=on"
+    if [[ -n "$NEW_SUCCESS" && "$NEW_SUCCESS" != "$INITIAL_SUCCESS" ]]; then
+        pass "last_success changed after valid reload: $NEW_SUCCESS"
     else
-        pass "applied_mtime retained same-second value; version and behavior evidence passed"
+        pass "last_success retained same timestamp; generation and behavior evidence passed"
     fi
 else
     fail "valid dynconf reload was not observed"
-    NEW_VERSION="$INITIAL_VERSION"
-    NEW_MTIME="$(diagnostics_field active_mtime "$LAST_DIAG")"
+    NEW_GENERATION="$INITIAL_GENERATION"
+    NEW_SUCCESS="$(diagnostics_field last_success "$LAST_DIAG")"
 fi
 
 # --- Step 4: Write invalid dynconf and reload ---
 
-write_dynconf_atomically 'schema_version=0.9
-unknown_key_that_does_not_exist=should_fail
-memory_budget=invalid_not_a_size'
+write_dynconf_atomically '{
+  "schema_version": 1,
+  "unknown_key_that_does_not_exist": "should_fail"
+}'
 echo "Wrote invalid dynconf to $DYNCONF_FILE" >&2
 
 if [[ -n "${NGINX_PID:-}" || -n "${HARNESS_NGINX_PID:-}" \
@@ -685,18 +687,20 @@ fi
 
 # --- Step 5: Verify last-known-good with bounded polling ---
 
-if wait_for_diagnostics_field config_version equals:"$NEW_VERSION" 15 \
-    && wait_for_diagnostics_field markdown_filter equals:on 15; then
-    pass "invalid reload preserved config_version=$NEW_VERSION and markdown_filter=on"
+if wait_for_diagnostics_field generation equals:"$NEW_GENERATION" 15 \
+    && wait_for_diagnostics_field filter equals:on 15; then
+    pass "invalid reload preserved generation=$NEW_GENERATION and filter=on"
 else
     fail "invalid reload did not preserve the last-known-good configuration"
 fi
 
 # --- Step 6: Restore a previous valid file atomically ---
 
-write_dynconf_atomically 'schema_version=0.9
-markdown_filter=off
-memory_budget=1m'
+write_dynconf_atomically '{
+  "schema_version": 1,
+  "filter": "off",
+  "streaming_buffer": 1048576
+}'
 echo "Atomically restored valid dynconf at $DYNCONF_FILE" >&2
 
 if [[ -n "${NGINX_PID:-}" || -n "${HARNESS_NGINX_PID:-}" \
@@ -706,16 +710,16 @@ fi
 
 # --- Step 7: Verify restored-file reload with two independent signals ---
 
-if wait_for_diagnostics_field config_version \
-    "changed_from:$NEW_VERSION" 15 \
-    && wait_for_diagnostics_field markdown_filter equals:off 15; then
-    ROLLBACK_VERSION="$(diagnostics_field config_version "$LAST_DIAG")"
-    ROLLBACK_MTIME="$(diagnostics_field active_mtime "$LAST_DIAG")"
-    pass "restored reload observed by config_version=$ROLLBACK_VERSION and markdown_filter=off"
-    if [[ -n "$ROLLBACK_MTIME" && "$ROLLBACK_MTIME" != "$NEW_MTIME" ]]; then
-        pass "applied_mtime changed after restored-file reload: $ROLLBACK_MTIME"
+if wait_for_diagnostics_field generation \
+    "changed_from:$NEW_GENERATION" 15 \
+    && wait_for_diagnostics_field filter equals:off 15; then
+    ROLLBACK_GENERATION="$(diagnostics_field generation "$LAST_DIAG")"
+    ROLLBACK_SUCCESS="$(diagnostics_field last_success "$LAST_DIAG")"
+    pass "restored reload observed by generation=$ROLLBACK_GENERATION and filter=off"
+    if [[ -n "$ROLLBACK_SUCCESS" && "$ROLLBACK_SUCCESS" != "$NEW_SUCCESS" ]]; then
+        pass "last_success changed after restored-file reload: $ROLLBACK_SUCCESS"
     else
-        pass "restored-file mtime was within the same clock granularity"
+        pass "restored-file last_success retained the same timestamp"
     fi
 else
     fail "restored-file reload was not observed"
