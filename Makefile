@@ -244,6 +244,15 @@ docs-check: docs-check-base
 	python3 tools/harness/check_harness_sync.py
 	PYTHONPATH=. python3 tools/harness/detect_doc_sync.py
 
+# Advisory writing-style scan (STE-inspired, non-native-reader friendly).
+# Warning-only by default: never blocks CI. Use docs-style-check-strict to
+# turn warnings into a failure.
+docs-style-check:
+	python3 tools/docs/check_writing_style.py
+
+docs-style-check-strict:
+	python3 tools/docs/check_writing_style.py --strict
+
 release-notes:
 	python3 tools/render_release_matrix_docs.py --release-notes
 
