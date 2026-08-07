@@ -138,6 +138,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 60 | e2e-runner | E2E config directive consistency: locations with `markdown_cache_validation full` must have explicit `markdown_streaming` (no implicit auto + blocking directive unless intentionally testing runtime-block); detect_e2e_streaming_config.py advisory gate (block-aware, fail-closed, deterministic location scanner) |
 | 61 | release-integrity | Performance evidence provenance invariant: baseline_policy carries policy provenance; module_benchmark carries environment/identity; scenarios carry evidence; optional scenario_sources receive environment checks; fail closed on missing fields or mixed environments |
 | 62 | release-integrity | Release matrix key normalization invariant: all matrix consumers (loader, validation, sort, diff) must resolve aliased keys through one normalization entry point with one canonical key set, so `nginx`/`nginx_version` and `os`/`os_type`/`libc` never disagree |
+| FUZZ-001..007 | fuzz-infrastructure | Fuzz target determinism, corpus/repo tracking, ClusterFuzzLite workflows, guided fuzz smoke, batch/prune pairing, and gitignore hygiene (see fuzz-infrastructure.md) |
 
 ## Required Agent Workflow
 
@@ -205,7 +206,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Metric names match actual semantics; unit suffix matches resolution [8]
 - Format string specifiers match argument list in all renderers (count and type) [8]
 - ngx_log_debugN / ngx_log_errorN suffix digit matches actual argument count [8]
-- `bash tools/harness/detect_ngx_log_arg_count.sh` — CI gate for suffix-digit mismatch [8]
+- `bash tools/harness/detect_ngx_log_arg_count.sh` — harness gate (make harness-security-checks) for suffix-digit mismatch [8]
 
 **FFI & Cross-Language** (C, R)
 - Rust struct changes → both C headers + all init sites + cleanup helpers [15]
@@ -229,10 +230,10 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Forward declarations match definitions (same changeset) [24]
 - Forward declarations appear after all typedefs they reference; at file scope [24]
 - NOSONAR annotations include reason + rule ref; bare `/* NOSONAR */` forbidden; only for NGINX API contract [24]
-- `bash tools/harness/detect_nosonar_discipline.sh` — CI gate for bare NOSONAR [24]
+- `bash tools/harness/detect_nosonar_discipline.sh` — harness gate (make harness-security-checks) for bare NOSONAR [24]
 - No unguarded ops on NULL/uninitialized/invalid values [Baseline]
-- Orphan comment closers: every */ must have a matching /*; `python3 tools/harness/detect_orphan_comment_close.py` — CI gate [56]
-- #ifdef-guarded function visibility: functions declared inside #ifdef GUARD must not be referenced outside; `bash tools/harness/detect_ifdef_guard_visibility.sh` — CI gate [57]
+- Orphan comment closers: every */ must have a matching /*; `python3 tools/harness/detect_orphan_comment_close.py` — harness gate (make harness-security-checks) [56]
+- #ifdef-guarded function visibility: functions declared inside #ifdef GUARD must not be referenced outside; `bash tools/harness/detect_ifdef_guard_visibility.sh` — harness gate (make harness-security-checks) [57]
 
 **NGINX Idioms** (C)
 - Full ngx_list_part_t chain iteration (part→next) [28]
@@ -276,7 +277,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   before extraction or execution [13]
 - Release source builds require a full reviewed commit ID and verify the fetched
   commit exactly before executing repository code [13]
-- Workflow input injection: ${{ inputs.* }} must be routed through env: before use in shell run blocks; `bash tools/harness/detect_workflow_input_injection.sh` — CI gate [58]
+- Workflow input injection: ${{ inputs.* }} must be routed through env: before use in shell run blocks; `bash tools/harness/detect_workflow_input_injection.sh` — harness gate (make harness-security-checks) [58]
 - Workflow secrets are step-scoped to their minimal consumer. Repository build,
   test, setup, and coverage steps must not inherit unrelated credentials [48]
 - Validator/gate regex patterns match actual struct field paths [13]
@@ -454,6 +455,10 @@ Follow evidence-first verification (no completion claim without fresh command ou
 - Release gates 0.8.x: `make release-gates-check-08x` (canonical 0.8.x patch-line entry; `release-gates-check-080` is the compatible original name)
 - Release gates 0.9.0: `make release-gates-check-090` (additive on 0.8.0; production examples, gate validator; `RELEASE_GATE_ALLOW_SKIP_MODULE=1` skips `test-production-examples-nginx-t` when `NGINX_BIN` is unavailable, mirroring the 091 module-benchmark skip contract)
 - Release gates 0.9.1: `make release-gates-check-091` (additive on 0.9.0; blocking performance evidence gate for RC tags)
+- Release gates 0.9.2: `make release-gates-check-092` (additive on 0.9.1; current 0.9.2 blocking gate: public-surface drift, schema drift, reason-codegen, version consistency, release matrix, evidence manifest; `RELEASE_GATE_ALLOW_SKIP_MODULE=1` skip contract inherited from 090/091)
+- Public-surface changes: `make public-surface-drift-check` (FFI/exported-symbol inventory drift vs checked-in public-surface-inventory.json)
+- Schema changes: `make schema-drift-check` (generates metrics-registry/diagnostics-field-contract/dynconf-precedence artifacts from renderer + schemas, then validates drift; wired into release-gates-check-092 and CI release-092-contract-gates)
+- Reason-code changes: `make reason-codegen-check` (reason registry vs generated code, error classification coverage)
 - Release matrix changes: `make release-matrix-check` (canonical docs/release/release-matrix.json vs the checked-in schema; ABI/feature digest binding; fail-closed on aliases)
 - Candidate freeze / release evidence changes: `make release-candidate-evidence-check`, `make artifact-registry-check`, `make release-evidence-manifest-check` (generic pre-freeze gates; FIXTURE=... runs checked-in positive/negative fixtures and is gate regression coverage only, never candidate evidence)
 - Fuzz/soak qualification gates: `make test-rust-fuzz-qualification` (15 min or 100k executions per blocking target, whichever is later), `make test-e2e-rust-soak` (30 min at concurrency 16 with RSS/memory/latency recording); FIXTURE mode as above
@@ -576,6 +581,7 @@ remediation:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-07 | Kang | Pre-freeze review closeout: indexed public-surface/schema/reason-codegen gates and release-gates-check-092 in verification list; relabeled 5 local-only detectors from "CI gate" to "harness gate (make harness-security-checks)"; added fuzz-infrastructure (FUZZ-001..007) index row; aligned Document Updates log with harness README |
 | 0.9.2 | 2026-08-06 | Kang | Added five generic pre-freeze release gates: release-candidate-evidence-check, artifact-registry-check, release-evidence-manifest-check, test-rust-fuzz-qualification, test-e2e-rust-soak (validators under tools/release/gates/, fixtures under tests/fixtures/release/, FIXTURE=... regression mode, Property 27 official-artifact feature consistency test) |
 | 0.9.1 | 2026-07-29 | Kang | v0.9.1 release audit round 2: release-gate validation, detector regression fixtures, and release-integrity harness rules; AGENTS.md + harness README index synced |
 | 0.9.1 | 2026-07-29 | Kang | v0.9.1 release audit: finalized CHANGELOG date (Unreleased→2026-07-29), release notes status (Release candidate→General Availability), PROJECT_STATUS 0.9.1 section added with 0.9.0 demoted to previous breaking release, VERSION_PLANNING release state updated, packaging example version updated (0.8.3→0.9.1); harness rules README.md rule mapping corrected (Rules 52-60 deduplicated, 56-59 consolidated under build-safety, 52→streaming-backpressure, 53→ffi-crosslang, 54→ci-gating, 60→e2e-runner); AGENTS.md Rule 58/59 domain reassigned to build-safety (matching build-safety.md content); build-safety.md YAML frontmatter added (rules: [56,57,58,59]) and title corrected to (56–59) |

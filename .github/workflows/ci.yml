@@ -420,6 +420,7 @@ jobs:
       - name: Run 0.9.2 contract gates
         run: |
           make public-surface-drift-check
+          make schema-drift-check
           bash tools/harness/detect_version_consistency.sh
           make reason-codegen-check
           PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py

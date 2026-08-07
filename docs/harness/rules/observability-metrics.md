@@ -42,7 +42,10 @@ Required:
   metric entries include type, labels, order, and bounded-cardinality policy;
   reason entries include discriminant, variant string, metric family, C
   accessor, and registry count. Duplicate, malformed, or symlink-escaped
-  inventory/source inputs must fail closed.
+  inventory/source inputs must fail closed.  The gate is
+  `make public-surface-drift-check` (`tools/harness/detect_public_surface_drift.py`,
+  blocking step of `release-gates-check-092` and the CI
+  `release-092-contract-gates` job).
 
 ---
 

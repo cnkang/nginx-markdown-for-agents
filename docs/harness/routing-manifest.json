@@ -147,6 +147,35 @@
       ],
       "notes": "0.9.2 blocking gate: 091 prerequisite then 092 blocking performance evidence (baseline 092), source metadata/ABI drift, reason-code registry, version consistency, and OTel lifecycle checks"
     },
+    "public-surface-drift": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make public-surface-drift-check"
+      ],
+      "notes": "FFI/exported-symbol inventory drift vs checked-in public-surface-inventory.json; blocking step of release-gates-check-092 and ci.yml release-092-contract-gates"
+    },
+    "schema-drift": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make schema-drift-check"
+      ],
+      "notes": "Validators/gates against the checked-in schema registry (validate_schema_drift.py); part of make all and release-gates-check-092"
+    },
+    "reason-codegen": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make reason-codegen-check"
+      ],
+      "notes": "Reason registry vs generated code and error classification coverage; blocking step of release-gates-check-092 and ci.yml release-092-contract-gates"
+    },
+    "observation": {
+      "phase": "report-oriented",
+      "commands": [
+        ".github/workflows/nightly-observation.yml",
+        ".github/workflows/weekly-observation.yml"
+      ],
+      "notes": "Nightly/weekly observation workflows for release evidence and matrix drift; report-oriented, pinned action SHAs, minimal secrets"
+    },
     "release-governance": {
       "phase": "focused-semantic",
       "commands": [

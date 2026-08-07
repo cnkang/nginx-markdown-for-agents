@@ -54,7 +54,7 @@ Required:
     hint, never the authorized identity.
   - **Verified toolchain installers**: When a release workflow installs
     Rust toolchain via `rustup`, it must use a verified installer script
-    (for example `tools/install-verified-rustup.sh`) that validates the
+    (for example `packaging/scripts/install-verified-rustup.sh`) that validates the
     downloaded `rustup-init` checksum before execution.  The installer
     must be invoked with an explicit `bash` invocation (not `sh`) to
     ensure bash-only syntax is supported.  Release-gate validators must
