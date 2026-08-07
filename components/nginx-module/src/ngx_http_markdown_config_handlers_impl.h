@@ -836,6 +836,15 @@ ngx_http_markdown_trusted_proxies(ngx_conf_t *cf, ngx_command_t *cmd,
         return NGX_CONF_OK;
     }
 
+    if (cf->args->nelts - 1 > NGX_HTTP_MARKDOWN_TRUSTED_PROXIES_MAX) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "\"%V\" directive accepts at most %d entries, got %ui",
+            &cmd->name,
+            (ngx_uint_t) NGX_HTTP_MARKDOWN_TRUSTED_PROXIES_MAX,
+            cf->args->nelts - 1);
+        return NGX_CONF_ERROR;
+    }
+
     mmcf->trusted_proxies_manifest = ngx_array_create(
         cf->pool, cf->args->nelts - 1, sizeof(ngx_str_t));
     if (mmcf->trusted_proxies_manifest == NULL) {
@@ -859,20 +868,9 @@ ngx_http_markdown_trusted_proxies(ngx_conf_t *cf, ngx_command_t *cmd,
     cln->handler = ngx_http_markdown_trusted_proxies_cleanup;
     cln->data = set;
 
-    if (cf->args->nelts - 1 > NGX_HTTP_MARKDOWN_TRUSTED_PROXIES_MAX) {
-        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-            "\"%V\" directive accepts at most %d entries, got %ui",
-            &cmd->name,
-            (ngx_uint_t) NGX_HTTP_MARKDOWN_TRUSTED_PROXIES_MAX,
-            cf->args->nelts - 1);
-        markdown_trusted_proxies_free(set);
-        return NGX_CONF_ERROR;
-    }
-
     for (ngx_uint_t i = 1; i < cf->args->nelts; i++) {
         manifest_entry = ngx_array_push(mmcf->trusted_proxies_manifest);
         if (manifest_entry == NULL) {
-            markdown_trusted_proxies_free(set);
             return NGX_CONF_ERROR;
         }
         *manifest_entry = value[i];
