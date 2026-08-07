@@ -45,6 +45,7 @@ struct ngx_list_part_s {
 
 typedef struct {
     ngx_list_part_t part;
+    ngx_list_part_t *last;
     size_t size;
     ngx_uint_t nalloc;
     void *pool;

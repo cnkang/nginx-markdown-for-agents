@@ -62,7 +62,7 @@ pub enum ErrorClass {
     InvalidDynconf = 6,
     /// Running with a degraded (last-known-good) snapshot.
     DegradedSnapshot = 7,
-    /// HeaderPlan apply failed after headers were committed.
+    /// HeaderPlan apply failed before headers were committed.
     HeaderPlanApplyError = 8,
     /// Streaming conversion failed mid-flight (body partially sent).
     StreamingMidFlightError = 9,
@@ -96,14 +96,11 @@ impl ErrorClass {
     /// use nginx_markdown_converter::error::classification::ErrorClass;
     ///
     /// assert!(!ErrorClass::ConversionError.is_post_commit());
-    /// assert!(ErrorClass::HeaderPlanApplyError.is_post_commit());
+    /// assert!(!ErrorClass::HeaderPlanApplyError.is_post_commit());
     /// assert!(ErrorClass::StreamingMidFlightError.is_post_commit());
     /// ```
     pub fn is_post_commit(self) -> bool {
-        matches!(
-            self,
-            ErrorClass::HeaderPlanApplyError | ErrorClass::StreamingMidFlightError
-        )
+        matches!(self, ErrorClass::StreamingMidFlightError)
     }
 
     /// Return the lowercase snake_case string representation.
@@ -252,7 +249,7 @@ impl ErrorBehavior {
 ///
 /// # Rules
 ///
-/// 1. **Post-commit errors** (`HeaderPlanApplyError`, `StreamingMidFlightError`)
+/// 1. **Post-commit errors** (`StreamingMidFlightError`)
 ///    **always** return `TerminateConnection`, regardless of the configured
 ///    policy. Headers have been sent; the status line cannot be rewritten.
 ///
@@ -462,6 +459,7 @@ mod tests {
             ErrorClass::Overload,
             ErrorClass::InvalidDynconf,
             ErrorClass::DegradedSnapshot,
+            ErrorClass::HeaderPlanApplyError,
         ];
         for class in &pre_commit {
             assert!(!class.is_post_commit(), "{:?} should be pre-commit", class);
@@ -470,8 +468,8 @@ mod tests {
 
     #[test]
     fn test_post_commit_classes() {
-        assert!(ErrorClass::HeaderPlanApplyError.is_post_commit());
         assert!(ErrorClass::StreamingMidFlightError.is_post_commit());
+        assert!(!ErrorClass::HeaderPlanApplyError.is_post_commit());
     }
 
     /* ====================================================================
@@ -489,6 +487,7 @@ mod tests {
             ErrorClass::Overload,
             ErrorClass::InvalidDynconf,
             ErrorClass::DegradedSnapshot,
+            ErrorClass::HeaderPlanApplyError,
         ];
         for class in &pre_commit_classes {
             let behavior = decide_error_behavior(*class, ErrorPolicy::Pass);
@@ -512,6 +511,7 @@ mod tests {
             ErrorClass::Overload,
             ErrorClass::InvalidDynconf,
             ErrorClass::DegradedSnapshot,
+            ErrorClass::HeaderPlanApplyError,
         ];
         for code in [429u16, 502, 503] {
             for class in &pre_commit_classes {
@@ -539,6 +539,7 @@ mod tests {
             ErrorClass::Overload,
             ErrorClass::InvalidDynconf,
             ErrorClass::DegradedSnapshot,
+            ErrorClass::HeaderPlanApplyError,
         ];
         for class in &pre_commit_classes {
             let behavior = decide_error_behavior(*class, ErrorPolicy::FailClosed);
@@ -557,10 +558,7 @@ mod tests {
 
     #[test]
     fn test_postcommit_forces_terminate_regardless_of_policy() {
-        let post_commit_classes = [
-            ErrorClass::HeaderPlanApplyError,
-            ErrorClass::StreamingMidFlightError,
-        ];
+        let post_commit_classes = [ErrorClass::StreamingMidFlightError];
         let policies = [
             ErrorPolicy::Pass,
             ErrorPolicy::Status(429),

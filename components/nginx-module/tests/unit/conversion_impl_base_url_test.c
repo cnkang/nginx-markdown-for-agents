@@ -189,6 +189,10 @@ static ngx_chain_t *g_next_body_filter_last_input = NULL;
 static ngx_uint_t g_next_body_filter_call_count = 0;
 static ngx_uint_t g_markdown_result_free_calls = 0;
 static ngx_uint_t g_log_decision_calls = 0;
+static const ngx_str_t *g_last_decision_reason = NULL;
+static const ngx_str_t *g_last_decision_category = NULL;
+static ngx_uint_t g_last_failure_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+static ngx_uint_t g_last_failure_status = 0;
 static ngx_uint_t g_reason_streaming_shadow_calls = 0;
 static ngx_uint_t g_streaming_new_with_code_calls = 0;
 static ngx_uint_t g_streaming_feed_calls = 0;
@@ -369,6 +373,60 @@ ngx_http_markdown_log_decision(ngx_http_request_t *r,
     UNUSED(eff);
     UNUSED(reason_code);
     g_log_decision_calls++;
+}
+
+const ngx_str_t *
+ngx_http_markdown_reason_header_plan_apply_err(void)
+{
+    static ngx_str_t reason = {
+        sizeof("header_plan_apply_error") - 1,
+        (u_char *) "header_plan_apply_error"
+    };
+
+    return &reason;
+}
+
+const ngx_str_t *
+ngx_http_markdown_reason_from_error_category(
+    ngx_http_markdown_error_category_t category, ngx_log_t *log)
+{
+    static ngx_str_t conversion = {
+        sizeof("conversion_error") - 1,
+        (u_char *) "conversion_error"
+    };
+    static ngx_str_t resource = {
+        sizeof("memory_budget_exceeded") - 1,
+        (u_char *) "memory_budget_exceeded"
+    };
+    static ngx_str_t system = {
+        sizeof("ffi_panic") - 1,
+        (u_char *) "ffi_panic"
+    };
+
+    UNUSED(log);
+    if (category == NGX_HTTP_MARKDOWN_ERROR_CONVERSION) {
+        return &conversion;
+    }
+    if (category == NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT) {
+        return &resource;
+    }
+    return &system;
+}
+
+static void
+ngx_http_markdown_log_decision_with_category(
+    ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_str_t *reason_code,
+    const ngx_str_t *error_category)
+{
+    UNUSED(r);
+    UNUSED(conf);
+    UNUSED(eff);
+    g_log_decision_calls++;
+    g_last_decision_reason = reason_code;
+    g_last_decision_category = error_category;
 }
 
 void
@@ -797,9 +855,10 @@ ngx_http_markdown_reject_or_fail_open_buffered_response(
 {
     UNUSED(r);
     UNUSED(ctx);
-    UNUSED(conf);
     UNUSED(debug_message);
     g_failopen_call_count++;
+    g_last_failure_policy = conf->on_error;
+    g_last_failure_status = conf->error_status;
     return g_failopen_rc;
 }
 
@@ -1059,6 +1118,10 @@ reset_stub_state(void)
     g_next_body_filter_call_count = 0;
     g_markdown_result_free_calls = 0;
     g_log_decision_calls = 0;
+    g_last_decision_reason = NULL;
+    g_last_decision_category = NULL;
+    g_last_failure_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    g_last_failure_status = 0;
     g_reason_streaming_shadow_calls = 0;
     g_streaming_new_with_code_calls = 0;
     g_streaming_feed_calls = 0;
@@ -2121,9 +2184,60 @@ test_send_conversion_output_paths(void)
     result.markdown = out;
     result.markdown_len = sizeof(out) - 1;
     g_update_headers_rc = NGX_ERROR;
+    g_failopen_rc = NGX_DONE;
     rc = ngx_http_markdown_send_conversion_output(
         &r, &ctx, &conf, &result, 1);
-    TEST_ASSERT(rc == NGX_ERROR, "header update failure should return NGX_ERROR");
+    TEST_ASSERT(rc == NGX_DONE,
+                "header update failure should apply pass policy");
+    TEST_ASSERT(g_failopen_call_count == 1,
+                "header update failure should route through error policy");
+    TEST_ASSERT(ctx.error.has_category == 1
+                && ctx.error.last_category == NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
+                "header update failure should record system category");
+    TEST_ASSERT(g_last_decision_reason != NULL
+                && STR_EQ((char *) g_last_decision_reason->data,
+                          "header_plan_apply_error"),
+                "header update failure should log canonical reason");
+
+    reset_stub_state();
+    init_request(&r);
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&result, 0, sizeof(result));
+    result.markdown = out;
+    result.markdown_len = sizeof(out) - 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    conf.error_status = 503;
+    g_update_headers_rc = NGX_ERROR;
+    g_failopen_rc = NGX_ERROR;
+    rc = ngx_http_markdown_send_conversion_output(
+        &r, &ctx, &conf, &result, 1);
+    TEST_ASSERT(rc == NGX_ERROR,
+                "header update failure should route status policy");
+    TEST_ASSERT(g_failopen_call_count == 1
+                && g_last_failure_policy == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT
+                && g_last_failure_status == 503,
+                "header update failure should preserve status 503 policy");
+
+    reset_stub_state();
+    init_request(&r);
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&result, 0, sizeof(result));
+    result.markdown = out;
+    result.markdown_len = sizeof(out) - 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    conf.error_status = 502;
+    g_update_headers_rc = NGX_ERROR;
+    g_failopen_rc = NGX_ERROR;
+    rc = ngx_http_markdown_send_conversion_output(
+        &r, &ctx, &conf, &result, 1);
+    TEST_ASSERT(rc == NGX_ERROR,
+                "header update failure should route fail-closed policy");
+    TEST_ASSERT(g_failopen_call_count == 1
+                && g_last_failure_policy == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT
+                && g_last_failure_status == 502,
+                "header update failure should preserve fail-closed 502 policy");
 
     reset_stub_state();
     init_request(&r);

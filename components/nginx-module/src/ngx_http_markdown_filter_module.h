@@ -1698,6 +1698,7 @@ const ngx_str_t *ngx_http_markdown_reason_failed_open(void);
 
 /* Return the ELIGIBLE_FAILED_CLOSED reason code */
 const ngx_str_t *ngx_http_markdown_reason_failed_closed(void);
+const ngx_str_t *ngx_http_markdown_reason_header_plan_apply_err(void);
 
 /* Return the SKIP_ACCEPT reason code (not in eligibility enum) */
 const ngx_str_t *ngx_http_markdown_reason_skip_accept(void);

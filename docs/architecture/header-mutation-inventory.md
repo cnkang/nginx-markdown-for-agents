@@ -64,9 +64,11 @@ unconditional success):
 
 **Nothing occurs between commit and `ngx_http_send_header`.**
 
-**Post-plan failure**: If prepare fails, response headers remain in their
-original unmodified state. Rust-owned plan resources are freed. The
-`header_plan_apply_error` reason code is logged.
+**Pre-commit plan failure**: If prepare fails, response headers remain in
+their original unmodified state. Rust-owned plan resources are freed. The
+`header_plan_apply_error` reason code is logged and the configured
+`markdown_error_policy` is applied while the original response is still
+recoverable.
 
 **Atomicity guarantee:** either every prepared mutation is applied
 (commit) or none are (prepare aborted before commit). There is no partial
