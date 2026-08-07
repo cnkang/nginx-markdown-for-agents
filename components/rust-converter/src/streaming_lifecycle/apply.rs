@@ -364,8 +364,8 @@ fn apply_finalize_converter(
                 error_origin: outcome.error_origin.unwrap_or(ErrorOrigin::Internal),
                 failure_site: Some(FailureSite::ConverterFinalize),
             };
-            let (pre_effect, _failure_updates) =
-                compute_finalize_failure_updates(&frame.failure_ledger, &record, frame);
+            let pre_effect =
+                compute_finalize_failure_updates(&frame.failure_ledger, &record);
 
             if ctx.downstream_usable {
                 /* downstream usable → BEGIN_ABORT chain */
@@ -450,8 +450,7 @@ fn apply_finalize_converter(
 fn compute_finalize_failure_updates(
     ledger: &FailureLedger,
     record: &FailureRecord,
-    _frame: &TransitionFrame,
-) -> (PreEffect, FailureUpdates) {
+) -> PreEffect {
     let pre_effect = if ledger.primary.is_none() {
         PreEffect {
             primary_update: Some(record.clone()),
@@ -465,8 +464,7 @@ fn compute_finalize_failure_updates(
             delivery_update: None,
         }
     };
-    /* The full FailureUpdates is constructed by the caller */
-    (pre_effect.clone(), FailureUpdates::NONE)
+    pre_effect
 }
 
 /// SEND_CLOSING_OUTPUT: send closing Markdown bytes downstream.
