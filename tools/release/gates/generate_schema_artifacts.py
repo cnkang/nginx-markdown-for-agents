@@ -34,7 +34,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 if str(REPO_ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "tools"))
-from lib.path_validation import validate_read_path  # noqa: E402
+from lib.path_validation import (  # noqa: E402
+    validate_read_path,
+    validate_write_path_within_root,
+)
 
 DEFAULT_VERSION = "0.9.2"
 
@@ -106,6 +109,18 @@ FIVE_TIER_PRECEDENCE_HIERARCHY = [
     },
 ]
 
+PRECEDENCE_SOURCE_MARKERS = {
+    "request_variable": "request variable evaluation",
+    "static": "explicit static configuration",
+    "dynconf": "dynconf runtime override",
+    "http_baseline": "inherited http baseline",
+    "default": "built-in default",
+}
+PRECEDENCE_TIER_PATTERN = re.compile(
+    r"^\s*\*\s+([1-5])\.\s+(.+?)\s*$", re.MULTILINE
+)
+VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+
 
 def _read_text(path: Path) -> str:
     """Read a repository text file with canonical path validation."""
@@ -116,6 +131,46 @@ def _read_text(path: Path) -> str:
 def _read_json(path: Path) -> dict:
     """Read and parse a repository JSON file."""
     return json.loads(_read_text(path))
+
+
+def _extract_precedence_hierarchy(content: str) -> list[dict]:
+    """Extract and validate the frozen precedence hierarchy from the header."""
+    matches = PRECEDENCE_TIER_PATTERN.findall(content)
+    expected_tiers = [entry["tier"] for entry in FIVE_TIER_PRECEDENCE_HIERARCHY]
+    actual_tiers = [int(tier) for tier, _ in matches]
+    if actual_tiers != expected_tiers:
+        raise ValueError(
+            "dynconf precedence header has unexpected tier numbering: "
+            f"{actual_tiers!r}"
+        )
+
+    hierarchy = []
+    for expected, (tier_text, description) in zip(
+        FIVE_TIER_PRECEDENCE_HIERARCHY, matches
+    ):
+        lower_description = description.lower()
+        sources = [
+            source
+            for source, marker in PRECEDENCE_SOURCE_MARKERS.items()
+            if marker in lower_description
+        ]
+        if len(sources) != 1 or sources[0] != expected["source"]:
+            raise ValueError(
+                f"dynconf precedence header tier {tier_text} does not match "
+                f"expected source {expected['source']!r}"
+            )
+        if description != expected["description"]:
+            raise ValueError(
+                f"dynconf precedence header tier {tier_text} description "
+                "drifted from the frozen contract"
+            )
+
+        parsed = dict(expected)
+        parsed["source"] = sources[0]
+        parsed["description"] = description
+        hierarchy.append(parsed)
+
+    return hierarchy
 
 
 def _extract_family_type(content: str, family: str) -> str:
@@ -260,13 +315,15 @@ def generate_dynconf_precedence_report() -> dict:
     if not schema_keys:
         raise ValueError("dynconf.schema.json has no properties")
 
-    _read_text(PRECEDENCE_HEADER_PATH)  # existence/sanity check
+    precedence_hierarchy = _extract_precedence_hierarchy(
+        _read_text(PRECEDENCE_HEADER_PATH)
+    )
 
     return {
         "schema_version": 1,
         "generator": Path(__file__).name,
         "source": str(DYNCONF_SCHEMA_PATH.relative_to(REPO_ROOT)),
-        "five_tier_precedence_hierarchy": FIVE_TIER_PRECEDENCE_HIERARCHY,
+        "five_tier_precedence_hierarchy": precedence_hierarchy,
         "field_specific_provenance_rules": {
             "fields": {
                 key: {
@@ -296,8 +353,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    artifact_dir = (
-        REPO_ROOT / "artifacts" / "release" / args.version
+    if VERSION_PATTERN.fullmatch(args.version) is None:
+        parser.error("--version must use MAJOR.MINOR.PATCH")
+
+    artifact_root = REPO_ROOT / "artifacts" / "release"
+    artifact_dir = validate_write_path_within_root(
+        artifact_root / args.version,
+        artifact_root,
+        purpose="schema artifact release version",
     )
     artifact_dir.mkdir(parents=True, exist_ok=True)
 

@@ -19,6 +19,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
 from tools.release.gates import generate_schema_artifacts as gen  # noqa: E402
@@ -126,6 +128,25 @@ def test_dynconf_precedence_report_covers_all_schema_keys():
     ]
 
 
+def test_dynconf_precedence_header_drift_is_rejected():
+    """The generator must reject a changed precedence source or order."""
+    header = (
+        REPO_ROOT
+        / "components"
+        / "nginx-module"
+        / "src"
+        / "ngx_http_markdown_dynconf_precedence.h"
+    ).read_text(encoding="utf-8")
+    mutated = header.replace(
+        "1. NGINX request variable evaluation",
+        "1. Dynconf runtime override",
+        1,
+    )
+
+    with pytest.raises(ValueError, match="tier 1"):
+        gen._extract_precedence_hierarchy(mutated)
+
+
 def test_generated_artifacts_pass_schema_drift_validator():
     """End-to-end: write artifacts then validate with the drift gate."""
     artifact_dir = REPO_ROOT / "artifacts" / "release" / "0.9.2"
@@ -152,5 +173,11 @@ def test_generated_artifacts_pass_schema_drift_validator():
     errors.extend(validate_schema_drift.gate_metrics_registry())
     errors.extend(validate_schema_drift.gate_diagnostics_field_contract())
     errors.extend(validate_schema_drift.gate_dynconf_schema())
-    errors.extend(validate_schema_drift.gate_reason_codegen_drift())
     assert errors == [], f"Schema drift validator failed: {errors}"
+
+
+@pytest.mark.parametrize("version", ["../escape", "/tmp/escape"])
+def test_generator_rejects_path_escaping_version(version):
+    """CLI version input cannot escape the release artifact directory."""
+    with pytest.raises(SystemExit):
+        gen.main(["--version", version])

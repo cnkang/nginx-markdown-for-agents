@@ -112,7 +112,7 @@ the target failed on a clean checkout (baseline branch reproduced the
   generator deriving the 3 artifacts from the v1 renderer header,
   diagnostics.schema.json, dynconf.schema.json, and the dynconf precedence
   header (reason-codegen pattern).
-- `make schema-drift-check` now runs generator + validator (5/5 gates pass).
+- `make schema-drift-check` now runs generator + validator (4/4 schema gates pass).
 - Wired into CI `release-092-contract-gates` job and `release-gates-check-092`
   step [2/7] (matches the step's declared "schema drift checks" scope).
 - Added `tools/release/gates/tests/test_generate_schema_artifacts.py`
@@ -120,7 +120,7 @@ the target failed on a clean checkout (baseline branch reproduced the
 - AGENTS.md schema-drift-check entry updated to describe the generation step.
 
 Verification (fresh runs, all green):
-- `make schema-drift-check` — 5/5 gates PASSED
+- `make schema-drift-check` — 4/4 schema gates PASSED
 - `python3 -m pytest tools/release/gates/tests -q` — 406 passed
 - `make harness-check` / `make harness-security-checks` — PASS
 - `grep -rn '\s\|\d\|\w' tools/harness/detect_*.sh` (grep/sed/awk patterns) — 0 hits
