@@ -15,7 +15,7 @@ verification commands, and operational notes.
 
 The `private-internal` example intentionally keeps its Basic-authenticated
 backend on `127.0.0.1`. A co-located TLS terminator is mandatory and must be
-the only client-facing endpoint; clients must never send credentials directly
+the only client-facing endpoint. Clients must never send credentials directly
 to the cleartext backend listener.
 
 ## Choosing a Streaming Policy
@@ -28,7 +28,7 @@ to the cleartext backend listener.
   deterministic cache validation.
 
 - **`force`** — optimized for AI agent workloads that fetch large documents.
-  It requests streaming whenever the response is otherwise eligible; full
+  It requests streaming whenever the response is otherwise eligible. Full
   cache validation can still require the bounded full-buffer path.
 
 ## Usage

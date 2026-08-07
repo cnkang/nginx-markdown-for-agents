@@ -17,16 +17,16 @@ Content-Encoding header
 Gzip and deflate use zlib. Deflate accepts zlib-wrapped and raw RFC 1951
 streams, but rejects trailing bytes. Gzip validates trailers and supports
 concatenated members while retaining one response-wide budget. Brotli uses the
-native streaming decoder when `NGX_HTTP_BROTLI` is compiled in; otherwise it
-uses the bounded full-buffer path.
+native streaming decoder when the build compiles `NGX_HTTP_BROTLI` in.
+Otherwise it uses the bounded full-buffer path.
 
 `markdown_auto_decompress off;` preserves a compressed response without
-conversion. With the default `on`, the selected streaming/full-buffer path is
-controlled by `markdown_streaming` and `markdown_cache_validation`.
+conversion. With the default `on`, `markdown_streaming` and
+`markdown_cache_validation` control the selected streaming/full-buffer path.
 
 ## Safety controls
 
-Decompressed output is bounded by the `decompressed_size` key:
+The `decompressed_size` key bounds the decompressed output:
 
 ```nginx
 markdown_limits conversion_memory=64m decompressed_size=20m
@@ -41,12 +41,12 @@ storage.
 
 ## Failure behavior
 
-Decompression failures are classified as budget, format, truncated-input, or
-I/O errors. `markdown_error_policy pass` (the default) returns the original
-response after the fail-open delivery has succeeded. `fail_closed` returns the
-configured error status. A failure after streaming commit follows the
-post-commit safe-finish/abort semantics; it does not attempt to replay an
-already delivered response.
+The module classifies decompression failures as budget, format,
+truncated-input, or I/O errors. `markdown_error_policy pass` (the default)
+returns the original response after the fail-open delivery has succeeded.
+`fail_closed` returns the configured error status. A failure after streaming
+commit follows the post-commit safe-finish/abort semantics. It does not
+attempt to replay an already delivered response.
 
 ## Observability
 
@@ -61,10 +61,10 @@ nginx_markdown_decompression_events_total{
 }
 ```
 
-Successful streaming decompressions are recorded when finalization succeeds,
-so a decoder that spans body chunks is counted exactly once. The renderer
-also exposes the frozen request, conversion, streaming, dynconf, and build
-families described in [`prometheus-metrics.md`](../guides/prometheus-metrics.md).
+The module records successful streaming decompressions when finalization
+succeeds, so a decoder that spans body chunks counts exactly once. The
+renderer also exposes the frozen request, conversion, streaming, dynconf, and
+build families described in [`prometheus-metrics.md`](../guides/prometheus-metrics.md).
 
 ## Verification
 
@@ -80,4 +80,5 @@ and [`CONFIGURATION.md`](../guides/CONFIGURATION.md) for operator syntax.
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 0.9.2 | 2026-08-08 | Non-native-reader writing pass: active voice, removed prose semicolons. |
 | 0.9.2 | 2026-08-04 | Align decompression controls and metrics with the frozen release contract. |
