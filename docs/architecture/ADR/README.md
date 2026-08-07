@@ -80,6 +80,7 @@ What other options were considered and why were they not chosen?
 | [0024](0024-brotli-streaming-decompression.md) | Brotli Streaming Decompression | Accepted | 2026-07-17 |
 | [0025](0025-public-surface-inventory-drift-gate.md) | Public Surface Inventory and Drift Gate | Accepted | 2026-07-30 |
 | [0026](0026-dynconf-file-restore-contract.md) | Dynamic Configuration File Restore Without a Runtime Rollback API | Accepted | 2026-07-30 |
+| [0027](0027-otel-removal-reintroduction-conditions.md) | OpenTelemetry Removal and Reintroduction Conditions | Accepted | 2026-08-07 |
 
 ## Creating a New ADR
 
@@ -113,6 +114,7 @@ What other options were considered and why were they not chosen?
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-07 | Kang | Added ADR-0027 (OTel removal/reintroduction conditions), moved into the ADR/ directory with canonical NNNN-description naming |
 | 0.9.2 | 2026-07-30 | Codex | Added ADR-0025 public-surface drift gate and ADR-0026 dynconf file-restore contract |
 | 0.9.1 | 2026-07-17 | Kiro | Added ADR-0024 (Brotli Streaming Decompression) to index |
 | 0.9.1 | 2026-07-14 | Codex | Added ADR-0023 for the final pre-v1 streaming and flavor contract reset |

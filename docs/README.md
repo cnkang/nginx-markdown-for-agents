@@ -92,6 +92,29 @@ Project-level status and maintenance-oriented references.
 
 Index: [project/README.md](project/README.md)
 
+### `releases/`
+
+Per-version release notes and release checklists (one file per release line).
+
+- 0.9.2 release notes and pre-freeze checklist
+- canonical release matrix: [release-matrix.json](releases/release-matrix.json)
+
+### `development/`
+
+Implementation plans for in-flight release lines (for example the 0.9.2
+implementation plan); consumed during development and archived when the
+release ships.
+
+### `evidence/`
+
+Machine-readable evidence artifacts referenced by feature docs (for example
+corpus-diff tables); treated as read-only reference data.
+
+### `operations/`
+
+Deployment-oriented reference material that is not part of the canonical
+user guide (for example production-configs.md, validated by release gates).
+
 ## Reader Paths
 
 - Operators and deployers: start with `guides/`

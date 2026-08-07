@@ -124,3 +124,32 @@ Verification (fresh runs, all green):
 - `python3 -m pytest tools/release/gates/tests -q` — 406 passed
 - `make harness-check` / `make harness-security-checks` — PASS
 - `grep -rn '\s\|\d\|\w' tools/harness/detect_*.sh` (grep/sed/awk patterns) — 0 hits
+
+---
+
+## Follow-up: directory and naming consistency (2026-08-07, PR review round 2)
+
+Additional structural inconsistencies found and fixed:
+
+1. **ADR-0027 location/naming**: The OTel conditions record (renamed from
+   ADR-0023 in the first round) lived in the lone `docs/architecture/decisions/`
+   directory with an `ADR-` filename prefix, while the canonical location is
+   `docs/architecture/ADR/` with `NNNN-description.md` naming (26 existing
+   records). Moved to `docs/architecture/ADR/0027-otel-removal-reintroduction-conditions.md`;
+   `decisions/` directory removed; ADR/README.md index + Document Updates log
+   updated. All references are plain-text "ADR-0027" mentions (no path links),
+   so no reference churn.
+2. **docs/release/ vs docs/releases/**: `docs/release/release-matrix.json`
+   was a lone leftover — commit f8292eb8 ("merge docs/release/ into
+   docs/releases/") predated the matrix file (created later by 463a622e), so
+   it never got consolidated. Moved to
+   `docs/releases/release-matrix.json`; updated `validate_release_matrix.py`
+   (docstring + MATRIX_PATH + output), its tests, Makefile comment, and the
+   routing-manifest release-matrix family note. `docs/release/` removed.
+3. **docs/README.md index gaps**: `releases/`, `development/`, `evidence/`,
+   `operations/` directories were absent from the Documentation Sections
+   index (all have real consumers: gate-validated paths, feature-doc evidence,
+   release notes). Added index entries; no directory moves needed.
+
+Verified: `make release-matrix-check` PASS, matrix/ docs/ gates pytest 251
+passed, `make docs-check` PASS.
