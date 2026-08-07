@@ -1190,7 +1190,8 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
         return NGX_ERROR;
     }
     
-    /* Allocate transferable output using the ctx->buffer allocator family. */
+    /* Allocate transferable output using the same ngx_alloc/ngx_free
+     * allocator family as ctx->buffer (Rule 43). */
     output_data = ngx_http_markdown_decomp_alloc_output(r, output_size,
         ngx_http_markdown_decomp_zlib_cleanup, &stream);
     if (output_data == NULL) {
@@ -1376,7 +1377,8 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
         BrotliDecoderDestroyInstance(decoder);
         return NGX_ERROR;
     }
-    /* Allocate transferable output using the ctx->buffer allocator family. */
+    /* Allocate transferable output using the same ngx_alloc/ngx_free
+     * allocator family as ctx->buffer (Rule 43). */
     output_data = ngx_http_markdown_decomp_alloc_output(r, output_size,
         ngx_http_markdown_decomp_brotli_cleanup, decoder);
     if (output_data == NULL) {

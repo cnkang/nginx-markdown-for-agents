@@ -127,10 +127,11 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
 
     case NGX_HTTP_MD_ACTION_REJECT_STATUS:
         /*
-     * Pre-commit with fail_closed or status policy: finalize the request with
-     * the configured error status. Use ngx_http_filter_finalize_request
-         * so NGINX generates the correct error response (the body filter
-         * does not reliably handle positive return codes).
+         * Pre-commit with fail_closed or status policy: finalize the request
+         * with the configured error status. Use
+         * ngx_http_filter_finalize_request so NGINX generates the correct
+         * error response (the body filter does not reliably handle
+         * positive return codes).
          */
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                       "markdown stream on_error: "

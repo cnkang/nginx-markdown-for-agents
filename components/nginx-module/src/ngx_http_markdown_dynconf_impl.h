@@ -66,7 +66,8 @@
 #define NGX_HTTP_MARKDOWN_DYNCONF_BACKSTOP_TICKS  30
 
 /*
- * SHA-256 hex digest length (64 hex chars + NUL terminator).
+ * SHA-256 hex digest length: 72 = 'sha256:' prefix (7) + 64 hex
+ * chars + NUL terminator.
  */
 #define NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_LEN  72
 

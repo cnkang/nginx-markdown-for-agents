@@ -379,8 +379,7 @@ ngx_http_markdown_stream_postcommit_abort(
  * HTML content signatures are present in the output chain.
  *
  * Current implementation validates state preconditions and performs
- * a basic scan for HTML doctype/tag signatures.  Detailed HTML
- * detection will be enhanced when the body filter is wired.
+ * a basic scan for HTML doctype/tag signatures.
  *
  * Returns:
  *   NGX_OK    - Guard passes, output is safe to send
@@ -496,9 +495,11 @@ ngx_http_markdown_stream_postcommit_log(
  * bookkeeping shared by both the empty-terminal and closing-bytes paths.
  *
  * The caller is responsible for allocating `b` from r->pool and setting
- * its content/flags (only `b->last_buf` is read here to decide whether
- * `main_terminal_sent` may be latched, per Rule 47: the latch is set only
- * after a successful downstream return, never on NGX_AGAIN).
+ * its content/flags.  Only `b->last_buf` and `b->last_in_chain` are read
+ * here: `last_buf` decides whether `main_terminal_sent` may be latched
+ * and `last_in_chain` whether `subrequest_terminal_sent` may be latched
+ * (per Rule 47, latches are set only after a successful downstream
+ * return, never on NGX_AGAIN).
  *
  * Parameters:
  *   r   - current HTTP request
@@ -699,8 +700,8 @@ ngx_http_markdown_stream_postcommit_send_terminal(
     ngx_buf_t   *b;
     ngx_int_t    acquired;
 
-    /* send_terminal is the only path allowed when ctx is NULL: guard
-     * before acquiring so the acquire helper never sees a NULL ctx. */
+    /* send_terminal is the only caller that may receive a NULL ctx:
+     * guard here so the acquire helper never sees a NULL ctx. */
     if (ctx == NULL) {
         return NGX_ERROR;
     }
