@@ -520,8 +520,8 @@ ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r)
  * entries and dedicated response fields before the first helper so any
  * prepare failure can restore the exact pre-conversion representation.
  * Newly pushed list slots are made unreachable by restoring the saved list
- * metadata.  The snapshot is bounded to keep request-path allocation
- * explicit and predictable.
+ * metadata, including the original last part's next pointer.  The snapshot
+ * is bounded to keep request-path allocation explicit and predictable.
  */
 #define NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_MAX_ENTRIES  1024
 
@@ -535,10 +535,9 @@ typedef struct {
     unsigned int            allow_ranges;
     ngx_http_markdown_header_snapshot_entry_t  *entries;
     ngx_uint_t              entry_count;
-#ifndef NGX_HTTP_MARKDOWN_HEADERS_STANDALONE_TYPES_H
     ngx_list_part_t        *original_last;
     ngx_uint_t              original_last_nelts;
-#endif
+    ngx_list_part_t        *original_last_next;
 } ngx_http_markdown_header_snapshot_t;
 
 
@@ -554,12 +553,11 @@ ngx_http_markdown_header_snapshot_prepare(
     memset(snapshot, 0, sizeof(*snapshot));
     snapshot->headers_out = r->headers_out;
     snapshot->allow_ranges = r->allow_ranges ? 1U : 0U;
-#ifndef NGX_HTTP_MARKDOWN_HEADERS_STANDALONE_TYPES_H
     snapshot->original_last = r->headers_out.headers.last;
     if (snapshot->original_last != NULL) {
         snapshot->original_last_nelts = snapshot->original_last->nelts;
+        snapshot->original_last_next = snapshot->original_last->next;
     }
-#endif
 
     count = 0;
     for (part = &r->headers_out.headers.part;
@@ -615,11 +613,10 @@ ngx_http_markdown_header_snapshot_restore(
         return;
     }
 
-#ifndef NGX_HTTP_MARKDOWN_HEADERS_STANDALONE_TYPES_H
     if (snapshot->original_last != NULL) {
         snapshot->original_last->nelts = snapshot->original_last_nelts;
+        snapshot->original_last->next = snapshot->original_last_next;
     }
-#endif
 
     r->headers_out = snapshot->headers_out;
     r->allow_ranges = snapshot->allow_ranges;

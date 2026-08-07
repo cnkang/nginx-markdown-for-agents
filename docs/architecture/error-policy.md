@@ -30,7 +30,7 @@ Allowed status codes: `429`, `503` (`502` is the `fail_closed` default; use `fai
 | `overload` | pre-commit | Yes | Inflight limit exceeded |
 | `invalid_dynconf` | pre-commit | Yes | Dynamic config invalid |
 | `degraded_snapshot` | pre-commit | Yes | Using last-known-good snapshot |
-| `header_plan_apply_error` | post-commit | **No** | HeaderPlan commit failed |
+| `header_plan_apply_error` | pre-commit | Yes | HeaderPlan prepare/apply failed before headers were sent |
 | `streaming_mid_flight_error` | post-commit | **No** | Streaming failed mid-body |
 
 ## Pre-commit vs Post-commit
@@ -72,7 +72,8 @@ decide_error_behavior(class, policy) → behavior
 1. If the failure is post-commit:
    - `Pass` -> `SafeFinish`, falling back to `Abort`
    - `FailClosed` or `Status(n)` -> `Abort`
-2. Otherwise, apply the configured pre-commit policy:
+2. Otherwise, including `header_plan_apply_error`, apply the configured
+   pre-commit policy:
    - `Pass` → `PassThrough`
    - `Status(n)` → `ReturnStatus(n)`
    - `FailClosed` → `ReturnStatus(502)`

@@ -197,7 +197,7 @@ These 8 codes are new — they have no 0.8.x equivalent:
 | 20 | `overload` | Error | Inflight guard triggered |
 | 21 | `invalid_dynconf` | Error | Invalid dynamic configuration |
 | 22 | `degraded_snapshot` | Error | Degraded dynconf snapshot |
-| 23 | `header_plan_apply_error` | Error | Header plan commit failure |
+| 23 | `header_plan_apply_error` | Error | Pre-commit header plan apply failure |
 | 24 | `streaming_mid_flight_error` | Error | Streaming mid-flight error |
 | 25 | `bypass_no_transform` | Skip | No-Transform directive bypass |
 
