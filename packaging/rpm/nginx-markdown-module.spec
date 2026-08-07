@@ -1,3 +1,5 @@
+# Legacy copy; CI uses packaging/rpm/SPECS/nginx-module-markdown.spec with
+# parameterized %{version}. This file is retained for historical reference only.
 Name:           nginx-module-markdown-for-agents
 Version:        0.8.0
 Release:        1%{?dist}

@@ -370,7 +370,7 @@ make supply-chain
 ### Production Rollout & Operations
 - [Streaming Rollout Cookbook](docs/guides/streaming-rollout-cookbook.md) — Step-by-step cookbook for safely introducing bounded streaming.
 - [Operations Guide](docs/guides/OPERATIONS.md) — Monitoring, log tuning, and runtime troubleshooting.
-- [Migration Guides](docs/guides/MIGRATION-0.9.md) — Upgrading from older versions ([0.8.x → 0.9.x Migration](docs/guides/MIGRATION-0.9.md) / [0.7.x → 0.8.x Migration](docs/guides/MIGRATION-0.8.md)).
+- [Migration Guides](docs/guides/MIGRATION-0.9.2.md) — 0.9.2 breaking-change migration ([0.9.1+ → 0.9.2 Migration](docs/guides/MIGRATION-0.9.2.md) / [0.9.x → 0.9.1 Migration](docs/guides/MIGRATION-0.9.1.md) / [0.8.x → 0.9.x Migration](docs/guides/MIGRATION-0.9.md) / [0.7.x → 0.8.x Migration](docs/guides/MIGRATION-0.8.md)).
 - [Dynamic Reloading](docs/guides/DYNAMIC_CONFIG.md) — Fine-tuning dynamic variables and live configuration updates.
 
 ### Technical Architecture & Harness
@@ -439,6 +439,7 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-07 | Kang | Added What's New v0.9.2 section, explicit production settings section, 0.9.2/0.9.1 migration guide links, and document history sync |
 | 0.9.1 | 2026-07-29 | Kang | Release audit: finalized CHANGELOG date, release notes status, PROJECT_STATUS 0.9.1 section, VERSION_PLANNING release state, harness rule mapping (Rules 52-60), build-safety domain alignment. |
 | 0.9.1 | 2026-07-19 | Codex | Finalized the v0.9.1 release summary for Brotli streaming decompression, build controls, and release evidence. |
 | 0.9.1 | 2026-07-17 | Kang | Optimized README organization, removed historical What's New logs, consolidated capabilities table, and structured docs index for v0.9.1 release. |

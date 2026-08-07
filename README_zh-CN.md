@@ -367,7 +367,7 @@ make supply-chain
 ### 生产部署与运维
 - [流式上线指引](docs/guides/streaming-rollout-cookbook.md) — 渐进式引入、安全开启有界流式转换的运维指南。
 - [运维排障指南](docs/guides/OPERATIONS.md) — 状态监控、日志调整和运行时故障诊断。
-- [迁移升级指引](docs/guides/MIGRATION-0.9.md) — 升级指南 ([0.8.x → 0.9.x 迁移升级](docs/guides/MIGRATION-0.9.md) / [0.7.x → 0.8.x 迁移升级](docs/guides/MIGRATION-0.8.md))。
+- [迁移升级指引](docs/guides/MIGRATION-0.9.2.md) — 升级指南 ([0.9.1+ → 0.9.2 迁移](docs/guides/MIGRATION-0.9.2.md) / [0.9.x → 0.9.1 迁移](docs/guides/MIGRATION-0.9.1.md) / [0.8.x → 0.9.x 迁移升级](docs/guides/MIGRATION-0.9.md) / [0.7.x → 0.8.x 迁移升级](docs/guides/MIGRATION-0.8.md))。
 - [动态热重载](docs/guides/DYNAMIC_CONFIG.md) — 热更新动态变量及 live config 配置。
 
 ### 系统架构与自动化 Harness
@@ -430,6 +430,7 @@ BSD 2-Clause "Simplified" License。详见 [LICENSE](LICENSE)。
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-07 | Kang | 新增 v0.9.2 新特性段、生产显式配置段、0.9.2/0.9.1 迁移指南链接，并同步文档更新记录 |
 | 0.9.1 | 2026-07-29 | Kang | 发布基线同步：完成 CHANGELOG 日期收口、发布说明状态更新、PROJECT_STATUS 当前版本线更新、版本规划、Harness 规则表 (Rules 52-60) 与 build-safety 域对齐。 |
 | 0.9.1 | 2026-07-19 | Codex | 完成 v0.9.1 正式发布摘要，补充 Brotli 流式解压、构建控制和发布证据说明。 |
 | 0.9.1 | 2026-07-17 | Kang | 优化 README 文档组织，移除旧版本的 What's New 日志，合并核心功能特性表，并梳理文档导航结构以适配 v0.9.1。 |

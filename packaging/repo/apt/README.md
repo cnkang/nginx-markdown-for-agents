@@ -1,12 +1,12 @@
 # nginx-markdown-for-agents APT Repository
 
-This is the APT package repository for `nginx-module-markdown`, an NGINX dynamic
+This is the APT package repository for `nginx-module-markdown-for-agents`, an NGINX dynamic
 filter module that serves Markdown to AI agents while keeping HTML for normal
 clients.
 
 > **Note**: This is a self-hosted, unofficial repository template. It is not
 > part of the Debian, Ubuntu, or any other official distribution archive.
-> For the public v0.7.0 release channel, use the GitHub Release DEB artifacts
+> For the latest GitHub Release artifacts, use the GitHub Release DEB artifacts
 > with `SHA256SUMS`; `pkg.example.com` and the commands below are operator
 > examples for repositories you publish yourself.
 
@@ -88,7 +88,7 @@ curl -H "Accept: text/markdown" http://localhost/
 
 | Component | Description |
 |-----------|-------------|
-| `main` | Primary packages (nginx-module-markdown) |
+| `main` | Primary packages (nginx-module-markdown-for-agents) |
 
 ---
 
@@ -148,8 +148,8 @@ curl -fsSL https://pkg.example.com/nginx-markdown/gpg.key | \
 gpg --verify /var/lib/apt/lists/*nginx-markdown*Release.gpg
 
 # Check package integrity after download
-apt-get download nginx-module-markdown
-dpkg-sig --verify nginx-module-markdown_*.deb
+apt-get download nginx-module-markdown-for-agents
+dpkg-sig --verify nginx-module-markdown-for-agents_*.deb
 ```
 
 ---

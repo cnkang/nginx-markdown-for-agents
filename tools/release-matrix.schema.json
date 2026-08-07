@@ -12,6 +12,17 @@
       "description": "Schema version for forward compatibility.",
       "pattern": "^\\d+\\.\\d+$"
     },
+    "updated_at": {
+      "type": "string",
+      "description": "Timestamp of the last automated update (maintained by update_matrix.py)."
+    },
+    "matrix": {
+      "type": "array",
+      "description": "Legacy install-matrix view (keys: nginx/os_type/arch/support_tier), maintained in sync with entries by update_matrix.py and consumed by validate_matrix_install_consistency.py and check_packaging_consistency.py. Canonical entries remain the authoritative release matrix.",
+      "items": {
+        "type": "object"
+      }
+    },
     "entries": {
       "type": "array",
       "description": "All supported platform/artifact combinations.",
