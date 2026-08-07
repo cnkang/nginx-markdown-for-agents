@@ -99,6 +99,8 @@ pub struct IncrementalConverterHandle {
 ///
 /// - `options` must point to a valid, properly aligned `MarkdownOptions` that
 ///   remains readable for the duration of this call.
+/// - `out_handle` must be a valid, writable pointer to
+///   `*mut IncrementalConverterHandle`.
 /// - The returned pointer is heap-allocated; the caller owns it and must not
 ///   dereference it except via the `markdown_incremental_*` family of functions.
 ///
@@ -135,17 +137,6 @@ pub struct IncrementalConverterHandle {
 /// // Either finalize to produce output or free when done without producing output.
 /// unsafe { markdown_incremental_free(handle) };
 /// ```
-///
-/// This constructor gives C callers actionable
-/// failure classification. On success, `*out_handle` receives a non-NULL handle.
-/// On error, `*out_handle` is set to NULL and the function returns an error code.
-///
-/// # Safety
-///
-/// - `out_handle` must be a valid, writable pointer to
-///   `*mut IncrementalConverterHandle`.
-/// - `options` must point to a valid, properly aligned `MarkdownOptions` that
-///   remains readable for the duration of this call.
 ///
 /// # Returns
 ///

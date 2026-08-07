@@ -583,8 +583,8 @@ typedef struct IncrementalConverterHandle IncrementalConverterHandle;
 /**
  * Opaque handle to a reusable Rust converter instance shared across FFI calls.
  *
- * This struct holds stateful components (ETag generator, token estimator) that
- * are reused across multiple conversions to avoid re-initialization overhead.
+ * This struct holds the stateful ETag generator that is reused across
+ * multiple conversions to avoid re-initialization overhead.
  * The handle is created via `markdown_converter_new()` and freed via
  * `markdown_converter_free()` on the C side.
  *
@@ -1426,7 +1426,7 @@ typedef struct FFIExplicitConfig {
    */
   uint32_t limits_max_inflight;
   /**
-   * `markdown_error_policy`: 0=pass, 1=fail_closed; 255=not set.
+   * `markdown_error_policy`: 0=pass, 1=status, 2=fail_closed; 255=not set.
    */
   uint8_t error_policy;
   /**
@@ -1471,7 +1471,7 @@ typedef struct FFIEffectiveConfig {
    */
   uint32_t limits_max_inflight;
   /**
-   * Effective error policy: 0=pass, 1=fail_closed.
+   * Effective error policy: 0=pass, 1=status, 2=fail_closed.
    */
   uint8_t error_policy;
   /**
@@ -2151,6 +2151,8 @@ uint8_t markdown_classify_error_code(uint32_t error_code);
  *
  * - `options` must point to a valid, properly aligned `MarkdownOptions` that
  *   remains readable for the duration of this call.
+ * - `out_handle` must be a valid, writable pointer to
+ *   `*mut IncrementalConverterHandle`.
  * - The returned pointer is heap-allocated; the caller owns it and must not
  *   dereference it except via the `markdown_incremental_*` family of functions.
  *
@@ -2187,17 +2189,6 @@ uint8_t markdown_classify_error_code(uint32_t error_code);
  * // Either finalize to produce output or free when done without producing output.
  * unsafe { markdown_incremental_free(handle) };
  * ```
- *
- * This constructor gives C callers actionable
- * failure classification. On success, `*out_handle` receives a non-NULL handle.
- * On error, `*out_handle` is set to NULL and the function returns an error code.
- *
- * # Safety
- *
- * - `out_handle` must be a valid, writable pointer to
- *   `*mut IncrementalConverterHandle`.
- * - `options` must point to a valid, properly aligned `MarkdownOptions` that
- *   remains readable for the duration of this call.
  *
  * # Returns
  *

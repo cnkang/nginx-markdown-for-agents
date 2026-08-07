@@ -300,8 +300,8 @@ pub struct MarkdownResult {
 
 /// Opaque handle to a reusable Rust converter instance shared across FFI calls.
 ///
-/// This struct holds stateful components (ETag generator, token estimator) that
-/// are reused across multiple conversions to avoid re-initialization overhead.
+/// This struct holds the stateful ETag generator that is reused across
+/// multiple conversions to avoid re-initialization overhead.
 /// The handle is created via `markdown_converter_new()` and freed via
 /// `markdown_converter_free()` on the C side.
 ///
@@ -789,7 +789,7 @@ pub struct FFIExplicitConfig {
     pub limits_streaming_buffer_bytes: u64,
     /// `markdown_limits max_inflight=`; `u32::MAX`=not set.
     pub limits_max_inflight: u32,
-    /// `markdown_error_policy`: 0=pass, 1=fail_closed; 255=not set.
+    /// `markdown_error_policy`: 0=pass, 1=status, 2=fail_closed; 255=not set.
     pub error_policy: u8,
     /// `markdown_diagnostics`: 0=off, 1=on; 255=not set.
     pub diagnostics: u8,
@@ -815,7 +815,7 @@ pub struct FFIEffectiveConfig {
     pub limits_streaming_buffer_bytes: u64,
     /// Effective max inflight conversions.
     pub limits_max_inflight: u32,
-    /// Effective error policy: 0=pass, 1=fail_closed.
+    /// Effective error policy: 0=pass, 1=status, 2=fail_closed.
     pub error_policy: u8,
     /// Effective diagnostics: 0=off, 1=on.
     pub diagnostics: u8,
@@ -868,7 +868,7 @@ pub enum FFIErrorClass {
     InvalidDynconf = 6,
     /// Running with degraded (last-known-good) snapshot.
     DegradedSnapshot = 7,
-    /// HeaderPlan apply failed after headers committed.
+    /// HeaderPlan apply failed before headers were committed.
     HeaderPlanApplyError = 8,
     /// Streaming conversion failed mid-flight.
     StreamingMidFlightError = 9,
@@ -1187,7 +1187,7 @@ mod layout_tests {
     /// [A04.7] FFI mapping closure test: Rust ERROR_* constant count == C define count.
     ///
     /// Ensures no Rust error variant is missing a C-side define.
-    /// The expected count (10 for non-streaming, 13 with streaming) must be
+    /// The expected count (13 for non-streaming, 16 with streaming) must be
     /// updated whenever a new error code is added to either side.
     #[test]
     fn test_error_code_count_matches_c_defines() {
