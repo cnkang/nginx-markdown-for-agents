@@ -50,6 +50,14 @@ RENDERER_PATH = (
 )
 DIAGNOSTICS_SCHEMA_PATH = REPO_ROOT / "schemas" / "diagnostics.schema.json"
 DYNCONF_SCHEMA_PATH = REPO_ROOT / "schemas" / "dynconf.schema.json"
+DYNCONF_RUST_SCHEMA_PATH = (
+    REPO_ROOT
+    / "components"
+    / "rust-converter"
+    / "src"
+    / "dynconf"
+    / "schema.rs"
+)
 PRECEDENCE_HEADER_PATH = (
     REPO_ROOT
     / "components"
@@ -119,6 +127,10 @@ PRECEDENCE_SOURCE_MARKERS = {
 PRECEDENCE_TIER_PATTERN = re.compile(
     r"^\s*\*\s+([1-5])\.\s+(.+?)\s*$", re.MULTILINE
 )
+KNOWN_KEYS_PATTERN = re.compile(
+    r"(?ms)^\s*(?:pub\s+)?const\s+KNOWN_KEYS\s*:\s*&\[&str\]\s*="
+    r"\s*&\[\s*(.*?)\s*\];"
+)
 VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 
@@ -131,6 +143,20 @@ def _read_text(path: Path) -> str:
 def _read_json(path: Path) -> dict:
     """Read and parse a repository JSON file."""
     return json.loads(_read_text(path))
+
+
+def _extract_rust_dynconf_keys(content: str) -> set[str]:
+    """Extract the Rust parser's complete dynconf key allowlist."""
+    match = KNOWN_KEYS_PATTERN.search(content)
+    if match is None:
+        raise ValueError("Rust dynconf schema has no KNOWN_KEYS allowlist")
+
+    keys = re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', match.group(1))
+    if not keys:
+        raise ValueError("Rust dynconf KNOWN_KEYS allowlist is empty")
+    if len(keys) != len(set(keys)):
+        raise ValueError("Rust dynconf KNOWN_KEYS allowlist has duplicate keys")
+    return set(keys)
 
 
 def _extract_precedence_hierarchy(content: str) -> list[dict]:
@@ -309,11 +335,21 @@ def generate_diagnostics_field_contract() -> dict:
 def generate_dynconf_precedence_report() -> dict:
     """Generate dynconf-precedence-report.json from schema + precedence header."""
     schema = _read_json(DYNCONF_SCHEMA_PATH)
+    schema_properties = set(schema.get("properties", {}))
     schema_keys = {
-        key for key in schema.get("properties", {}) if key != "schema_version"
+        key for key in schema_properties if key != "schema_version"
     }
     if not schema_keys:
         raise ValueError("dynconf.schema.json has no properties")
+
+    rust_keys = _extract_rust_dynconf_keys(_read_text(DYNCONF_RUST_SCHEMA_PATH))
+    if schema_properties != rust_keys:
+        schema_only = sorted(schema_properties - rust_keys)
+        rust_only = sorted(rust_keys - schema_properties)
+        raise ValueError(
+            "dynconf schema keys drifted from Rust KNOWN_KEYS allowlist: "
+            f"schema_only={schema_only!r}, rust_only={rust_only!r}"
+        )
 
     precedence_hierarchy = _extract_precedence_hierarchy(
         _read_text(PRECEDENCE_HEADER_PATH)

@@ -147,6 +147,25 @@ def test_dynconf_precedence_header_drift_is_rejected():
         gen._extract_precedence_hierarchy(mutated)
 
 
+def test_dynconf_rust_allowlist_drift_is_rejected(monkeypatch):
+    """The generator must reject keys absent from the Rust parser allowlist."""
+    rust_path = gen.DYNCONF_RUST_SCHEMA_PATH
+    rust_source = rust_path.read_text(encoding="utf-8")
+    mutated = rust_source.replace(
+        '"streaming_buffer"', '"undocumented_field"', 1
+    )
+    original_read_text = gen._read_text
+
+    def read_text(path):
+        if path == rust_path:
+            return mutated
+        return original_read_text(path)
+
+    monkeypatch.setattr(gen, "_read_text", read_text)
+    with pytest.raises(ValueError, match="Rust KNOWN_KEYS"):
+        gen.generate_dynconf_precedence_report()
+
+
 def test_generated_artifacts_pass_schema_drift_validator():
     """End-to-end: write artifacts then validate with the drift gate."""
     artifact_dir = REPO_ROOT / "artifacts" / "release" / "0.9.2"

@@ -8,6 +8,7 @@ on:
       - "AGENTS.md"
       - "CHANGELOG.md"
       - "components/**"
+      - "schemas/**"
       - "tools/**"
       - "tests/**"
       - "docs/**"
@@ -34,6 +35,7 @@ on:
       - "AGENTS.md"
       - "CHANGELOG.md"
       - "components/**"
+      - "schemas/**"
       - "tools/**"
       - "tests/**"
       - "docs/**"
@@ -110,6 +112,7 @@ jobs:
       matrix_release: ${{ steps.filter.outputs.matrix_release }}
       corpus_tools: ${{ steps.filter.outputs.corpus_tools }}
       harness_tooling: ${{ steps.filter.outputs.harness_tooling }}
+      contract_gates: ${{ steps.filter.outputs.contract_gates }}
       workflows: ${{ steps.filter.outputs.workflows }}
     steps:
       - name: Checkout repository
@@ -185,6 +188,8 @@ jobs:
               - 'docs/harness/**'
               - 'tools/complexity/baseline.json'
               - '.github/workflows/**'
+            contract_gates:
+              - 'schemas/**'
             workflows:
               - '.github/workflows/**'
 
@@ -397,6 +402,7 @@ jobs:
       needs.changes.outputs.harness_tooling == 'true' ||
       needs.changes.outputs.matrix_release == 'true' ||
       needs.changes.outputs.perf == 'true' ||
+      needs.changes.outputs.contract_gates == 'true' ||
       needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
