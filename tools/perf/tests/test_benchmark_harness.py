@@ -37,11 +37,14 @@ import pytest
 from tools.perf.report_schema import validate_module_benchmark
 from tools.perf.upstream_mock import MockUpstreamHandler
 from tools.perf.benchmark_validation import (
+    ScenarioResultInput,
     attach_response_probe,
+    build_scenario_result,
     compare_streaming_probe_bodies,
     parse_ab_result,
     parse_curl_header_artifact,
     parse_hey_result,
+    merge_diagnostics_metrics,
     parse_prometheus_metrics,
     validate_response_probe,
 )
@@ -77,18 +80,76 @@ def test_parse_prometheus_v1_metrics_for_benchmark_adapter():
 nginx_markdown_conversion_attempts_total{engine="streaming"} 3
 nginx_markdown_conversion_attempts_total{engine="full_buffer"} 2
 nginx_markdown_conversion_deliveries_total{engine="streaming"} 3
-nginx_markdown_streaming_events_total{transition="fallback",reason="bypass_no_transform"} 1
+nginx_markdown_streaming_events_total{transition="fallback",reason="precommit_html_error"} 1
 nginx_markdown_decompression_events_total{encoding="brotli",outcome="success",reason="ok"} 4
 nginx_markdown_decompression_events_total{encoding="brotli",outcome="failure",reason="budget_exceeded"} 1
 """
     )
 
-    assert metrics["streaming_path_hits"] == 3.0
-    assert metrics["fullbuffer_path_hits"] == 2.0
-    assert metrics["streaming"]["fallback_total"] == 1.0
-    assert metrics["perf"]["decompression_events_total"] == 5.0
-    assert metrics["perf"]["decompression_budget_exceeded_total"] == 1.0
-    assert metrics["perf"]["zero_copy_output_total"] == 3.0
+    assert metrics["streaming_path_hits"] == 3
+    assert metrics["fullbuffer_path_hits"] == 2
+    assert metrics["streaming"]["fallback_total"] == 1
+    assert metrics["perf"]["decompression_events_total"] == 5
+    assert metrics["perf"]["decompression_budget_exceeded_total"] == 1
+    assert "zero_copy_output_total" not in metrics["perf"]
+
+
+def test_merge_diagnostics_metrics_preserves_exact_counter_sources():
+    metrics = parse_prometheus_metrics(
+        'nginx_markdown_conversion_attempts_total{engine="streaming"} 3\n'
+    )
+    merged = merge_diagnostics_metrics(
+        metrics,
+        {
+            "runtime": {
+                "module_metrics": {
+                    "streaming_requests_total": 3,
+                    "precommit_failopen_total": 0,
+                    "zero_copy_output_total": 3,
+                    "copied_output_total": 1,
+                }
+            }
+        },
+    )
+    assert merged["streaming"]["requests_total"] == 3
+    assert merged["streaming"]["precommit_failopen_total"] == 0
+    assert merged["perf"]["zero_copy_output_total"] == 3
+    assert merged["perf"]["copied_output_total"] == 1
+
+
+def test_parse_prometheus_metrics_does_not_infer_output_ownership():
+    metrics = parse_prometheus_metrics(
+        'nginx_markdown_conversion_deliveries_total{engine="streaming"} 4\n'
+        'nginx_markdown_conversion_deliveries_total{engine="full_buffer"} 2\n'
+    )
+    assert "zero_copy_output_total" not in metrics["perf"]
+    assert "copied_output_total" not in metrics["perf"]
+
+
+def test_missing_diagnostics_counters_fail_closed_in_scenario_metrics():
+    result = build_scenario_result(
+        ScenarioResultInput(
+            raw_content=VALID_AB_OUTPUT,
+            name="streaming-first",
+            profile="streaming_first",
+            compression="none",
+            transfer_encoding="chunked",
+            concurrency=1,
+            worker_rss_kb=1,
+            load_generator="ab",
+            ttfb={"ttfb_p50_ms": 1.0, "ttfb_p95_ms": 2.0},
+            nginx_metrics=parse_prometheus_metrics(
+                'nginx_markdown_conversion_attempts_total{engine="streaming"} 3\n'
+            ),
+            input_bytes=1,
+            baseline_rss_kb=1,
+            peak_rss_kb=1,
+            iterations=10,
+            load_exit_code=0,
+        )
+    )
+    assert result["metrics"]["fallback_rate"] is None
+    assert "precommit_failopen_total" not in result["metrics"]
 
 
 def test_ab_requires_all_requests_and_zero_failures():
@@ -345,7 +406,7 @@ def test_module_benchmark_records_actual_fixture_bytes():
     """Every scenario must report the actual fixture size for memory slope."""
     source = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
     assert 'fixture_bytes="$(wc -c < "$CORPUS_DIR/$SC_FIXTURE")"' in source
-    assert "input_bytes=int(sys.argv[11])" in source
+    assert "input_bytes=int(sys.argv[12])" in source
 
 
 def test_module_benchmark_requires_load_and_response_correctness():
@@ -357,7 +418,8 @@ def test_module_benchmark_requires_load_and_response_correctness():
     ).read_text(encoding="utf-8")
     assert "parse_ab_result" in validation_source
     assert "parse_hey_result" in validation_source
-    assert "ScenarioResultInput, build_scenario_result" in source
+    assert "ScenarioResultInput" in source
+    assert "build_scenario_result" in source
     assert '"$ITERATIONS" "$load_gen_exit"' in source
     assert "validate_response_probe" in source
     assert "response_correctness_failed" in source
@@ -1441,6 +1503,6 @@ class TestNginxConfigGeneration:
         validation = (
             REPO_ROOT / "tools" / "perf" / "benchmark_validation.py"
         ).read_text(encoding="utf-8")
-        assert 'streaming.get("precommit_failopen_total", 0)' in validation
+        assert 'streaming.get("precommit_failopen_total")' in validation
         assert "failopen_total / requests_total" in validation
         assert '"streaming_fallback_total": streaming.get' in validation

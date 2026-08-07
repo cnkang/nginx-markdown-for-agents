@@ -6,6 +6,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -145,7 +146,7 @@ def _parse_prometheus_labels(label_text: str) -> dict[str, str] | None:
 
 def _parse_prometheus_sample(
     raw_line: str,
-) -> tuple[str, dict[str, str], float] | None:
+) -> tuple[str, dict[str, str], int | float] | None:
     """Parse one Prometheus sample, ignoring comments and malformed lines."""
     line = raw_line.strip()
     if not line or line.startswith("#"):
@@ -160,14 +161,16 @@ def _parse_prometheus_sample(
         value = float(match.group("value"))
     except ValueError:
         return None
+    if math.isfinite(value) and value.is_integer():
+        return match.group("name"), labels, int(value)
     return match.group("name"), labels, value
 
 
 def _parse_prometheus_families(
     content: str,
-) -> dict[str, list[tuple[dict[str, str], float]]]:
+) -> dict[str, list[tuple[dict[str, str], int | float]]]:
     """Collect valid Prometheus samples by family name."""
-    families: dict[str, list[tuple[dict[str, str], float]]] = {}
+    families: dict[str, list[tuple[dict[str, str], int | float]]] = {}
     for raw_line in content.splitlines():
         sample = _parse_prometheus_sample(raw_line)
         if sample is None:
@@ -178,10 +181,10 @@ def _parse_prometheus_families(
 
 
 def _prometheus_total(
-    families: dict[str, list[tuple[dict[str, str], float]]],
+    families: dict[str, list[tuple[dict[str, str], int | float]]],
     name: str,
     **wanted: str,
-) -> float:
+) -> int | float:
     """Sum one family, optionally restricted to exact label values."""
     return sum(
         value
@@ -204,12 +207,6 @@ def parse_prometheus_metrics(content: str) -> dict[str, Any]:
     full_buffer_attempts = _prometheus_total(
         families, "nginx_markdown_conversion_attempts_total", engine="full_buffer"
     )
-    streaming_deliveries = _prometheus_total(
-        families, "nginx_markdown_conversion_deliveries_total", engine="streaming"
-    )
-    full_buffer_deliveries = _prometheus_total(
-        families, "nginx_markdown_conversion_deliveries_total", engine="full_buffer"
-    )
     return {
         "streaming_path_hits": streaming_attempts,
         "fullbuffer_path_hits": full_buffer_attempts,
@@ -229,10 +226,39 @@ def parse_prometheus_metrics(content: str) -> dict[str, Any]:
                 outcome="failure",
                 reason="budget_exceeded",
             ),
-            "zero_copy_output_total": streaming_deliveries,
-            "copied_output_total": full_buffer_deliveries,
         },
     }
+
+
+def merge_diagnostics_metrics(
+    metrics: dict[str, Any], diagnostics: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Merge exact internal counters from the diagnostics contract.
+
+    The frozen Prometheus v1 endpoint intentionally exposes engine delivery
+    counters, not output ownership or streaming pre-commit fail-open
+    counters. Those counters are collected from the structured diagnostics
+    endpoint instead of being inferred from unrelated labels.
+    """
+    runtime = diagnostics.get("runtime")
+    if not isinstance(runtime, Mapping):
+        return metrics
+    module_metrics = runtime.get("module_metrics")
+    if not isinstance(module_metrics, Mapping):
+        return metrics
+
+    streaming = metrics.setdefault("streaming", {})
+    perf = metrics.setdefault("perf", {})
+    field_map = {
+        "streaming_requests_total": (streaming, "requests_total"),
+        "precommit_failopen_total": (streaming, "precommit_failopen_total"),
+        "zero_copy_output_total": (perf, "zero_copy_output_total"),
+        "copied_output_total": (perf, "copied_output_total"),
+    }
+    for source_key, (target, target_key) in field_map.items():
+        if source_key in module_metrics:
+            target[target_key] = module_metrics[source_key]
+    return metrics
 
 
 def parse_ab_result(content: str, iterations: int) -> dict:
@@ -523,10 +549,10 @@ def _path_metrics(
     nginx_metrics: Mapping[str, Any],
 ) -> tuple[
     tuple[dict[str, Any], dict[str, Any], float, float, float | None, float | None],
-    float,
-    float,
-    float,
-    float,
+    int | float | None,
+    int | float | None,
+    float | None,
+    int | float,
 ]:
     """Derive path ratios and streaming counters from the metrics adapter."""
     perf = nginx_metrics.get("perf", {}) or {}
@@ -536,9 +562,18 @@ def _path_metrics(
     total_hits = streaming_hits + fullbuffer_hits
     streaming_ratio = streaming_hits / total_hits if total_hits > 0 else None
     fullbuffer_ratio = fullbuffer_hits / total_hits if total_hits > 0 else None
-    requests_total = streaming.get("requests_total", 0)
-    failopen_total = streaming.get("precommit_failopen_total", 0)
-    fallback_rate = failopen_total / requests_total if requests_total > 0 else 0.0
+    requests_total = streaming.get("requests_total")
+    failopen_total = streaming.get("precommit_failopen_total")
+    if (
+        isinstance(requests_total, int)
+        and not isinstance(requests_total, bool)
+        and isinstance(failopen_total, int)
+        and not isinstance(failopen_total, bool)
+        and requests_total > 0
+    ):
+        fallback_rate = failopen_total / requests_total
+    else:
+        fallback_rate = None
     return (
         perf,
         streaming,
@@ -576,7 +611,7 @@ def _scenario_metrics(
     decomp_streaming, decomp_fullbuffer = _decompression_path_metrics(
         data.compression, perf, streaming_hits
     )
-    return {
+    result = {
         "rps": rps,
         "latency_p50_ms": p50,
         "latency_p95_ms": p95,
@@ -595,16 +630,22 @@ def _scenario_metrics(
         "fallback_rate": fallback_rate,
         "streaming_fallback_total": streaming.get("fallback_total", 0),
         "streaming_requests_total": requests_total,
-        "precommit_failopen_total": failopen_total,
         "throughput_mbps": 0.0,
         "decompression_streaming_total": decomp_streaming,
         "decompression_fullbuffer_total": decomp_fullbuffer,
-        "zero_copy_output_total": perf.get("zero_copy_output_total", 0),
-        "copied_output_total": perf.get("copied_output_total", 0),
         "pending_output_high_watermark_bytes": perf.get(
             "pending_output_high_watermark_bytes", 0
         ),
     }
+    optional_fields = (
+        ("precommit_failopen_total", streaming),
+        ("zero_copy_output_total", perf),
+        ("copied_output_total", perf),
+    )
+    for field, source in optional_fields:
+        if field in source:
+            result[field] = source[field]
+    return result
 
 
 def build_scenario_result(data: ScenarioResultInput) -> dict:
