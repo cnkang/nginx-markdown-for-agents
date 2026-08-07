@@ -29,7 +29,7 @@ The project consists of two main components:
 - **Rust converter**: HTML-to-Markdown conversion library (`libnginx_markdown_converter.a`)
 - **NGINX filter module (C)**: NGINX integration layer that invokes the Rust converter via FFI
 
-This guide covers every supported installation method — from a single-command install script to a full source build — along with platform compatibility, verification procedures, troubleshooting, and environment-specific notes.
+This guide covers every supported installation method. Methods range from a single-command install script to a full source build. It also covers platform compatibility, verification procedures, troubleshooting, and environment-specific notes.
 
 ---
 
@@ -245,7 +245,7 @@ Strategy](PACKAGE_DISTRIBUTION.md).
 
 **Tier: Secondary**
 
-For a fully self-contained Docker image that compiles the module from source against the exact official `nginx` image you run, use the provided multi-stage Dockerfile:
+For a fully self-contained Docker image that compiles the module from source against the exact official `nginx` image you run, use the provided multi-stage Dockerfile. It builds against the same `nginx` version you run:
 
 - [`examples/docker/Dockerfile.official-nginx-source-build`](../../examples/docker/Dockerfile.official-nginx-source-build)
 
@@ -262,7 +262,7 @@ This follows the official-image multi-stage pattern:
 ### Platform-Specific Build Notes
 
 - **Alpine-based** official images use `nginx-mod-dev`, which provides a matching NGINX source tree in the container.
-- **Debian-based** official images do not currently provide a matching `nginx-dev` package, so the Dockerfile downloads the exact matching NGINX source tarball for the build stage only.
+- **Debian-based** official images do not currently provide a matching `nginx-dev` package. The Dockerfile downloads the exact matching NGINX source tarball for the build stage only.
 - In all cases, the runtime stage keeps the official `nginx` image and adds
   only the module, example content, and the non-root runtime configuration.
 
@@ -358,7 +358,7 @@ If you use a custom NGINX build, or a platform not supported by the pre-built bi
 - PCRE development headers (`pcre-devel` or `libpcre3-dev`)
 - zlib development headers (`zlib-devel` or `zlib1g-dev`)
 - Brotli decoder development headers (`brotli-devel` or `libbrotli-dev`) —
-  required only for `NGX_MARKDOWN_BROTLI_STREAMING=on`; `auto` falls back to
+  required only for `NGX_MARKDOWN_BROTLI_STREAMING=on`. `auto` falls back to
   the Rust bounded full-buffer decoder when they are unavailable
 - OpenSSL development headers (`openssl-devel` or `libssl-dev`) — optional
 
@@ -685,7 +685,7 @@ curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/
 
 ## 7. Compatibility Matrix
 
-> **Canonical source:** [`tools/release-matrix.json`](../../tools/release-matrix.json) is the canonical, machine-readable source of truth for platform support. The table below is a human-readable snapshot; always consult the JSON file for automation and CI.
+> **Canonical source:** [`tools/release-matrix.json`](../../tools/release-matrix.json) is the canonical, machine-readable source of truth for platform support. The table below is a human-readable snapshot. Always consult the JSON file for automation and CI.
 
 ### Support Tiers
 
@@ -932,7 +932,7 @@ curl --fail-with-body \
 
 Look for `nginx_markdown_requests_total`,
 `nginx_markdown_conversion_attempts_total`, and
-`nginx_markdown_conversion_deliveries_total`; the complete catalog is in
+`nginx_markdown_conversion_deliveries_total`. The complete catalog is in
 [`prometheus-metrics.md`](prometheus-metrics.md).
 
 ### Understanding Fail-Open Behavior
