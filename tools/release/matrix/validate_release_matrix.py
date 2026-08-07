@@ -2,7 +2,7 @@
 """Canonical release-matrix validation gate.
 
 Validates that the sole repository-owned release matrix
-(`docs/release/release-matrix.json`, schema version 1) is:
+(`docs/releases/release-matrix.json`, schema version 1) is:
 
 1. Schema-conformant against the immutable
    `schemas/release-matrix.schema.json` (draft 2020-12).
@@ -34,7 +34,7 @@ import subprocess
 import sys
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
-MATRIX_PATH = REPO_ROOT / "docs" / "release" / "release-matrix.json"
+MATRIX_PATH = REPO_ROOT / "docs" / "releases" / "release-matrix.json"
 SCHEMA_PATH = REPO_ROOT / "schemas" / "release-matrix.schema.json"
 NORMALIZE_PATH = (
     REPO_ROOT / "tools" / "release" / "matrix" / "normalize_matrix.py"
@@ -202,7 +202,7 @@ def main() -> int:
     print(f"feature-manifest digest binding: {feature_manifest_digest()}")
     print(f"abi_version binding: {frozen_abi_version()}")
     print(
-        "PASS: docs/release/release-matrix.json is canonical, "
+        "PASS: docs/releases/release-matrix.json is canonical, "
         "schema-conformant, and ABI/feature-bound"
     )
     return 0

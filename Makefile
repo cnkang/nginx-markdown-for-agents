@@ -932,7 +932,7 @@ release-gates-check-092: release-gates-check-091
 	@echo "=== 0.9.2 Release Gates: PASS ==="
 
 # release-matrix-check: Canonical release-matrix gate.
-# Validates docs/release/release-matrix.json against the immutable
+# Validates docs/releases/release-matrix.json against the immutable
 # schemas/release-matrix.schema.json, requires a fully canonical document
 # (no legacy aliases, no legacy top-level matrix, no dropped metadata
 # keys), and binds every entry to the frozen ABI version and the official
@@ -1214,7 +1214,7 @@ help:
 	@echo "  test-benchmark-compare   - Compare corpus reports (baseline vs current)"
 	@echo "  test-benchmark-summary   - Generate PR benchmark summary from latest report"
 	@echo "  harness-check            - Validate harness truth surfaces and optional local adapters"
-	@echo "  harness-check-full       - Run full harness validation plus docs/release checks"
+	@echo "  harness-check-full       - Run full harness validation plus docs/releases checks"
 	@echo "  harness-security-checks  - Run local static harness/security detectors"
 	@echo "  release-supply-chain-check - Validate immutable release inputs, secret scope, and auth transport"
 	@echo "  complexity-check         - Run complexity analysis (lizard + complexipy + shellcheck)"

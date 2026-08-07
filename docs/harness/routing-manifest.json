@@ -198,7 +198,7 @@
       "commands": [
         "make release-matrix-check"
       ],
-      "notes": "Validates docs/release/release-matrix.json against the immutable release-matrix schema, requires a fully canonical document (no legacy aliases or legacy top-level matrix), and binds every entry to the frozen ABI version and the official feature-manifest digest"
+      "notes": "Validates docs/releases/release-matrix.json against the immutable release-matrix schema, requires a fully canonical document (no legacy aliases or legacy top-level matrix), and binds every entry to the frozen ABI version and the official feature-manifest digest"
     },
     "version-consistency": {
       "phase": "focused-semantic",
