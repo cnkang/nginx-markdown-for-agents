@@ -549,6 +549,10 @@ ngx_http_markdown_manifest_append_policy_fields(
     size_t         auto_len;
     size_t         cache_len;
 
+    /*
+     * Normalize policy enums and flags before rendering the manifest so
+     * equivalent effective configurations produce stable string values.
+     */
     if (conf->accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD) {
         accept_value = (const u_char *) "wildcard";
         accept_len = sizeof("wildcard") - 1;
@@ -588,6 +592,10 @@ ngx_http_markdown_manifest_append_policy_fields(
         cache_len = sizeof("off") - 1;
     }
 
+    /*
+     * Keep the field order canonical because the serialized manifest is
+     * hashed and compared by the diagnostics contract.
+     */
     if (ngx_http_markdown_manifest_field_string(
             builder, "accept", accept_value, accept_len,
             explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_ACCEPT, 0)
