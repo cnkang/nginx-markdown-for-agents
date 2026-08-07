@@ -2,7 +2,7 @@
 
 This is the frozen configuration reference. The command table has 25
 active `markdown_*` directives. Resource limits use one `markdown_limits`
-directive with bounded key/value entries; dynamic configuration has its own
+directive with bounded key/value entries. Dynamic configuration has its own
 five-key JSON overlay.
 
 ## Minimal configuration
@@ -35,7 +35,7 @@ machine-readable surface is
 ## Active directive table
 
 All active directives accept the contexts recorded in the public inventory.
-The table below is the operator-facing summary; inheritance follows normal
+The table below is the operator-facing summary. Inheritance follows normal
 NGINX `http` → `server` → `location` configuration merging.
 
 | Directive | Purpose | Typical values |
@@ -97,8 +97,8 @@ markdown_limits conversion_timeout=10s parser_timeout=5s
     decompressed_size=20m decompression_ratio=100 max_inflight=64;
 ```
 
-The bounds are cumulative where the decoder has multiple gzip members. A
-truncated final member is rejected; a decompression failure follows
+The bounds are cumulative where the decoder has multiple gzip members. The
+decoder rejects a truncated final member. A decompression failure follows
 `markdown_error_policy` before commit and cannot replay the original body
 after streaming headers have been sent.
 
@@ -113,17 +113,17 @@ The requested policy is `markdown_streaming off | auto | force`.
 The heuristic threshold is internal and is intentionally not a directive.
 Streaming is still blocked by full cache validation, excluded content types,
 unsupported encodings, and build-time feature boundaries. For compressed
-responses, `markdown_auto_decompress on` is required for conversion. Brotli
-uses the streaming decoder only when the feature is compiled; otherwise it
-uses bounded full-buffer decompression.
+responses, conversion requires `markdown_auto_decompress on`. Brotli
+uses the streaming decoder only when built with the feature enabled.
+Otherwise it uses bounded full-buffer decompression.
 
 ### Cache interaction
 
 `markdown_cache_validation full` requires complete converted output before
 headers and therefore selects full-buffer. `ims_only` or `off` permits
-streaming when the other gates pass. Streaming headers are committed before
-the first converted body buffer, so post-commit errors use safe-finish or
-abort handling rather than replaying the upstream body.
+streaming when the other gates pass. The module commits streaming headers
+before the first converted body buffer, so post-commit errors use safe-finish
+or abort handling rather than replaying the upstream body.
 
 ## Authentication and request selection
 
@@ -133,25 +133,25 @@ unexpectedly. `markdown_auth_policy` and `markdown_auth_cookies` prevent
 conversion of authenticated content according to the configured policy.
 
 `markdown_content_types` controls general conversion eligibility.
-`markdown_stream_excluded_types` is an additional streaming-only exclusion;
-an excluded type may still use full-buffer conversion when otherwise eligible.
+`markdown_stream_excluded_types` is an additional streaming-only exclusion.
+An excluded type may still use full-buffer conversion when otherwise eligible.
 Built-in streaming exclusions include event-stream and newline-delimited JSON
 media types.
 
 `markdown_trusted_proxies` is an explicit CIDR allowlist for forwarded URL
-headers. Forwarded headers from an untrusted peer are ignored.
+headers. The module ignores forwarded headers from an untrusted peer.
 
 ## Markdown output and pruning
 
 `markdown_flavor` accepts only `commonmark` and `gfm`. `markdown_token_estimate`
 adds bounded token-estimate output. `markdown_front_matter` controls supported
 front-matter handling. `markdown_prune_noise`, `markdown_prune_selectors`, and
-`markdown_prune_protection_selectors` control bounded DOM-noise pruning; a
+`markdown_prune_protection_selectors` control bounded DOM-noise pruning. A
 protected selector wins over a matching removal selector.
 
 ## Metrics and diagnostics
 
-Metrics are exposed by placing `markdown_metrics` in a location, commonly
+You expose metrics by placing `markdown_metrics` in a location, commonly
 protected by loopback or an explicit access policy:
 
 ```nginx
@@ -167,7 +167,7 @@ Scrape with `Accept: text/plain; version=0.0.4`. The endpoint emits exactly
 the twelve frozen Prometheus families documented in
 [`prometheus-metrics.md`](prometheus-metrics.md). `markdown_diagnostics` is a
 read-only JSON endpoint for effective configuration, provenance, decisions,
-and bounded runtime state; it accepts only `GET` and `HEAD`.
+and bounded runtime state. It accepts only `GET` and `HEAD`.
 
 ## Dynamic configuration (dynconf)
 
@@ -218,7 +218,7 @@ reload`.
 nginx -t && nginx -s reload
 ```
 
-For an emergency streaming rollback, set `markdown_streaming off`; for a
+For an emergency streaming rollback, set `markdown_streaming off`. For a
 compressed-input rollback, set `markdown_auto_decompress off`. Preserve the
 diagnostics JSON, Prometheus response, logs, and exact configuration before
 restoring the previous settings.

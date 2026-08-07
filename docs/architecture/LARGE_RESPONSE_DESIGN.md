@@ -1,15 +1,15 @@
 # Large Response Optimization Design
 
-This document describes the architecture for handling large HTTP responses in `nginx-markdown-for-agents`. It covers the streaming processing path, the policy-based routing logic, the relationship to the full-buffer path, and the non-degradation guarantees that protect small-response performance.
+This document describes the architecture for handling large HTTP responses in `nginx-markdown-for-agents`. It covers the streaming processing path, the policy-based routing logic, and the relationship to the full-buffer path. It also covers the non-degradation guarantees that protect small-response performance.
 
 ## Context
 
 Since v0.8.0, the module supports **two conversion engines**:
 
 - **Full-buffer engine** (default for small responses): buffers the complete eligible response body before conversion through FFI. This remains the simplest and most tested path.
-- **Streaming engine** (enabled via `markdown_streaming`): processes HTML incrementally through a bounded-memory pipeline (charset detection → tokenization → sanitization → state machine → emission) with per-request memory limits and backpressure.
+- **Streaming engine** (enabled via `markdown_streaming`): processes HTML incrementally through a bounded-memory pipeline. The pipeline runs charset detection, tokenization, sanitization, a state machine, and emission, with per-request memory limits and backpressure.
 
-The legacy incremental path (feature-gated behind the `incremental` Rust feature and routed by the retired `markdown_large_body_threshold` directive) was a stepping stone toward true streaming. It is **no longer the recommended path** for new deployments; see [RFC-0008](RFC-0008-streaming-conversion-support-contract.md) and [ADR-0023](ADR/0023-single-streaming-policy.md) for the streaming design.
+The legacy incremental path was a stepping stone toward true streaming. It sits behind the `incremental` Rust feature flag and routes through the retired `markdown_large_body_threshold` directive. It is **no longer the recommended path** for new deployments. See [RFC-0008](RFC-0008-streaming-conversion-support-contract.md) and [ADR-0023](ADR/0023-single-streaming-policy.md) for the streaming design.
 
 For background on the existing request lifecycle and buffering model, see:
 
@@ -20,10 +20,10 @@ For background on the existing request lifecycle and buffering model, see:
 
 ## Design Principles
 
-- **Default off**: the incremental path is disabled by default at both the NGINX configuration level and the Rust compilation level
+- **Default off**: the incremental path defaults to disabled at both the NGINX configuration level and the Rust compilation level
 - **Non-degradation**: introducing the new path must not regress small-response performance or break existing functionality
 - **Semantic equivalence**: for any valid input, the incremental path must produce output identical to the full-buffer path
-- **Observable**: path selection is tracked through metrics so operators can monitor routing behavior in production
+- **Observable**: metrics track path selection, so operators can monitor routing behavior in production
 
 ## Processing Path Architecture
 
@@ -54,21 +54,21 @@ Response arrives at body filter
 
 ### Full-Buffer Path (Existing)
 
-No changes. The module buffers the complete response body, optionally decompresses it, resolves conditional requests, then calls `markdown_convert()` through FFI. This is the only active path when the feature is disabled.
+No changes. The module buffers the complete response body, optionally decompresses it, resolves conditional requests, then calls `markdown_convert()` through FFI. This is the only active path when you disable the feature.
 
 ### Incremental Path (New, Feature-Gated)
 
-When the threshold router selects the incremental path, the NGINX module still buffers the complete response body (and decompresses it if needed), then hands the full buffer to the Rust `IncrementalConverter` via FFI in a single call sequence:
+When the threshold router selects the incremental path, the NGINX module still buffers the complete response body. It decompresses the body if needed. The module hands the full buffer to the Rust `IncrementalConverter` via FFI. The call sequence is:
 
 1. `markdown_incremental_new_with_code()` — create a converter instance with the current `ConversionOptions` and retain the status code
 2. `markdown_incremental_feed()` — called once with the complete buffered body (`ctx->buffer.data`)
 3. `markdown_incremental_finalize()` — produce the final `MarkdownResult`
 4. `markdown_incremental_free()` — release the converter only when `feed`
-   fails or `finalize` rejects invalid arguments; after valid non-NULL
-   arguments are accepted, `finalize` consumes the handle regardless of its
+   fails or `finalize` rejects invalid arguments. After the call accepts valid
+   non-NULL arguments, `finalize` consumes the handle regardless of its
    return code
 
-True per-upstream-chunk feeding from NGINX (calling `feed` as each body chunk arrives from upstream) is not implemented yet and remains a future change. The current implementation buffers first, then delegates to the incremental Rust API.
+True per-upstream-chunk feeding from NGINX (calling `feed` as each body chunk arrives from upstream) is not implemented yet. It remains a future change. The current implementation buffers first, then delegates to the incremental Rust API.
 
 In practical terms, the current incremental path should be understood as:
 
@@ -76,21 +76,23 @@ In practical terms, the current incremental path should be understood as:
 - an API/ABI scaffold for future chunk-oriented processing
 - semantic groundwork for proving equivalence between full-buffer and future streaming variants
 
-It should not yet be understood as a true streaming or peak-memory-reduction path. The request body still exists as a full NGINX-side buffer, and the Rust incremental API currently accumulates fed bytes internally before parsing.
+It should not yet be understood as a true streaming or peak-memory-reduction path. The request body still exists as a full NGINX-side buffer. The Rust incremental API currently accumulates fed bytes internally before parsing.
 
 > [!NOTE]
-> **64 MiB Hard Limit**: To prevent uncontrolled memory growth before true streaming is implemented, the `IncrementalConverter` in Rust enforces a strict 64 MiB buffer limit. If the sum of fed chunks exceeds this size, `feed_chunk` returns a `MemoryLimit` error, triggering the C module's `markdown_error_policy`.
+> **64 MiB Hard Limit**: To prevent uncontrolled memory growth, the `IncrementalConverter` in Rust enforces a strict 64 MiB buffer limit. This applies until the project implements true streaming. If the sum of fed chunks exceeds this size, `feed_chunk` returns a `MemoryLimit` error. The C module then applies `markdown_error_policy`.
 
 > [!WARNING]
 > **Architecture Warning: Do not increase the 64 MiB limit**
 > 
-> A 64 MiB HTML document currently translates to roughly 2.5GB-3GB of peak RAM consumption during Rust DOM tree construction (an empirical ~40x memory bloat factor). 
+> A 64 MiB HTML document currently translates to roughly 2.5GB-3GB of peak RAM consumption during Rust DOM tree construction. That is an empirical ~40x memory bloat factor. 
 > 
-> Because NGINX uses a multi-worker concurrency model, arbitrarily increasing this limit (e.g., to 1 GB) exposes the server to extreme OOM (Out Of Memory) risks. Just 4 concurrent 1 GB requests would demand over 160 GB of RAM, triggering the OS OOM Killer, crashing NGINX workers, and taking down all other in-flight requests. It also creates a massive DoS attack vector.
+> Because NGINX uses a multi-worker concurrency model, increasing this limit
+> (e.g., to 1 GB) exposes the server to extreme OOM (Out Of Memory) risks.
+> Just 4 concurrent 1 GB requests would demand over 160 GB of RAM. This triggers the OS OOM Killer, crashes NGINX workers, and takes down all other in-flight requests. It also creates a massive DoS attack vector.
 > 
-> **To safely support GB-scale responses in the future**, the architecture must be fundamentally shifted from DOM-tree building to a **Streaming SAX Parser**. True stream processing (maintaining $O(1)$ memory by discarding parsed chunks instantly) is the only safe way to surpass the 64 MiB limit without unbounded memory amplification.
+> **To safely support GB-scale responses in the future**, the architecture must be fundamentally shifted from DOM-tree building to a **Streaming SAX Parser**. True stream processing maintains $O(1)$ memory by discarding parsed chunks instantly. It is the only safe way to surpass the 64 MiB limit without unbounded memory amplification.
 
-The incremental API is compiled only when the `incremental` Rust feature flag is enabled. When the feature is not compiled but a threshold is configured, the module logs a warning per request and falls back to the full-buffer path.
+The build compiles the incremental API only when you enable the `incremental` Rust feature flag. When the feature is not compiled but you configure a threshold, the module logs a warning per request. It falls back to the full-buffer path.
 
 ## Threshold Router
 
@@ -99,7 +101,7 @@ The incremental API is compiled only when the `incremental` Rust feature flag is
 > to fail with a migration hint. There is no Config V2 replacement. The
 > internal `routing.large_body_threshold` struct field persists for the
 > feature-gated incremental path, but the threshold is no longer
-> user-configurable. The following sections are retained as historical design
+> user-configurable. The following sections remain as historical design
 > reference for pre-0.9.0 deployments.
 
 The Threshold Router is the decision point in the NGINX C module that selects which processing path a request follows.
@@ -125,7 +127,7 @@ The router evaluates in this order:
 1. If `large_body_threshold == 0` (off): all requests use the full-buffer path. Behavior is identical to a build without this feature.
 2. If the request is HEAD, 304, or fail-open replay: always use the full-buffer path (see Special Path Semantics below).
 3. If `Content-Length` is present and `Content-Length >= large_body_threshold`: use the incremental path.
-4. If `Content-Length` is absent: buffer the response; once buffered size exceeds the threshold, switch to the incremental path.
+4. If `Content-Length` is absent: buffer the response. Once buffered size exceeds the threshold, switch to the incremental path.
 
 ### Data Model Extensions
 
@@ -150,7 +152,7 @@ struct {
 } path_hits;
 ```
 
-Path hit counters are exposed through the existing `markdown_metrics` endpoint.
+The module exposes path hit counters through the existing `markdown_metrics` endpoint.
 
 ## Incremental Converter API (Rust)
 
@@ -162,7 +164,7 @@ default = []
 incremental = []
 ```
 
-The `incremental` feature is off by default. When disabled, no incremental-only symbols are exported and the legacy `markdown_convert()` ABI remains unchanged.
+The `incremental` feature is off by default. When disabled, the module exports no incremental-only symbols and the legacy `markdown_convert()` ABI remains unchanged.
 
 ### Rust Interface
 
@@ -193,7 +195,7 @@ Error --> [*]
 
 ### FFI Functions
 
-Exported only when `incremental` feature is enabled:
+The build exports these functions only when you enable the `incremental` feature:
 
 | FFI Function | Purpose |
 |-------------|---------|
@@ -220,19 +222,19 @@ When `markdown_large_body_threshold` is set to `off`, all requests follow the fu
 
 ### Small Response P50 Latency
 
-The introduction of the threshold router and incremental path must not degrade small-response P50 latency by more than 5% compared to the baseline recorded in [PERFORMANCE_BASELINES.md](../testing/PERFORMANCE_BASELINES.md).
+The introduction of the threshold router and incremental path must not degrade small-response P50 latency by more than 5%. [PERFORMANCE_BASELINES.md](../testing/PERFORMANCE_BASELINES.md) records the comparison baseline.
 
-This is validated by:
+Validation steps:
 
 1. Running `tools/perf/run_perf_baseline.sh --tier small` after changes
 2. Comparing the measured `p50_ms` against the platform baseline in `perf/baselines/<platform>.json`
 3. Failing the check if degradation exceeds 5%
 
-This 5% threshold is specific to the large-response optimization validation and is independent of the general CI performance gate thresholds (which use different warning/blocking levels).
+This 5% threshold is specific to the large-response optimization validation. It is independent of the general CI performance gate thresholds (which use different warning/blocking levels).
 
 ### Functional Consistency
 
-For all inputs that produce correct results through the full-buffer path, the incremental path (single `feed_chunk` of the complete input + `finalize`) must produce byte-identical output. This is verified through property-based testing (proptest) that generates random HTML inputs and compares both paths.
+For all inputs that produce correct results through the full-buffer path, the incremental path must produce byte-identical output. The input is a single `feed_chunk` of the complete input plus `finalize`. Property-based testing (proptest) verifies this. The tests generate random HTML inputs and compare both paths.
 
 ## Error Handling
 
