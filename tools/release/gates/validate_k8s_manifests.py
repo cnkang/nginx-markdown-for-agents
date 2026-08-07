@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Kubernetes manifest and Helm chart validator for v0.7.0 release gates.
+Kubernetes manifest and Helm chart validator for v0.7.0 release gates. 由 0.7.0 引入，被 0.8.0+ 门禁复用
 
 Validates that K8s deployment artifacts exist and are well-formed:
 

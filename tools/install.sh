@@ -6,7 +6,7 @@ set -euo pipefail
 #   curl -fsSLo /tmp/nginx-markdown-install.sh https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh
 #   sudo bash /tmp/nginx-markdown-install.sh
 # OR (if using specific release version):
-#   VERSION=v0.1.0 sudo -E bash /tmp/nginx-markdown-install.sh
+#   VERSION=v0.9.2 sudo -E bash /tmp/nginx-markdown-install.sh
 # OR (in Docker, skip root check):
 # SKIP_ROOT_CHECK=1 bash /path/to/install.sh
 # OR (auto-disable stale load_module snippets on ABI mismatch):
