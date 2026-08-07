@@ -132,7 +132,7 @@ location /docs/ {
 - `full`: Support Markdown-variant `If-None-Match` (ETag) and preserve upstream `If-Modified-Since` semantics
 - `off`: No conditional request support for Markdown variants
 
-**Performance Note**: `full_support` requires conversion to generate a Markdown-variant ETag for comparison, which has performance implications for conditional requests.
+**Performance Note**: `full` requires conversion to generate a Markdown-variant ETag for comparison, which has performance implications for conditional requests.
 
 ## Conditional Request Handling
 

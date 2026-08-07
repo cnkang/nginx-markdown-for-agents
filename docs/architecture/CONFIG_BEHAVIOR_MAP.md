@@ -98,7 +98,7 @@ flowchart LR
 | Behavior | Selects the Markdown flavor emitted by the Rust converter |
 | Lifecycle impact | Rust conversion options preparation before FFI call |
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/rust-converter/src/converter.rs` |
-| Practical note | `commonmark` and `gfm` are the supported values. The former `mdx` and `org-mode` selectors are rejected in v0.9.1 because they never provided distinct conversion semantics. |
+| Practical note | `commonmark` and `gfm` are the supported values. The former `mdx` and `org-mode` selectors are rejected in 0.9.2 because they never provided distinct conversion semantics. |
 
 ### `markdown_token_estimate`
 
@@ -196,7 +196,7 @@ flowchart LR
 | Behavior | Selects the processing path: `off` requires full-buffer, `auto` routes by size/response shape, and `force` prefers streaming for every eligible response |
 | Lifecycle impact | Header-phase routing and body-filter path selection after hard eligibility and cache-validation gates |
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_request_impl.h`, `components/nginx-module/src/ngx_http_markdown_streaming_impl.h` |
-| Practical note | This is the sole public streaming selector in v0.9.1. The removed `markdown_streaming_engine` directive is reject-only and reports the exact migration. |
+| Practical note | This is the sole public streaming selector in 0.9.2. The removed `markdown_streaming_engine` directive is absent from the command table; using it reports an `unknown directive` error at `nginx -t` time. |
 
 ## Practical Use Cases
 

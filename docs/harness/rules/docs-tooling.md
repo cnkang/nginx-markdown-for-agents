@@ -27,9 +27,11 @@ Required:
   Prometheus, use the full series name with labels (for example
   `nginx_markdown_streaming_total{result="postcommit_error"}`).  Do not invent
   flat metric names that do not exist in any output format.
-- When docs reference derived rates (for example `shadow_diff_rate`), include
-  the computation formula using real metric names so operators can reproduce
-  the calculation (for example `shadow_diff_total / shadow_total`).  Verify
+- When docs reference derived rates (for example `decompression_failure_rate`),
+  include the computation formula using real metric names so operators can
+  reproduce the calculation (for example
+  `sum(rate(nginx_markdown_decompression_events_total{outcome="failed"}[5m])) / sum(rate(nginx_markdown_decompression_events_total[5m]))`).
+  Verify
   that the denominator is scoped to the same population as the numerator —
   using a global request count as denominator for a streaming-only failure
   count will dilute the rate during partial rollout and mask real problems.
@@ -38,12 +40,13 @@ Required:
   default plain-text format uses human-readable labels that differ from JSON
   keys and Prometheus series names; omitting `Accept` causes false negatives
   when grepping for snake_case keys.
-- `tools/harness/detect_doc_sync.py` owns the blocking v0.9.1 public-config
+- `tools/harness/detect_doc_sync.py` owns the blocking 0.9.2 public-config
   drift contract. It reads the current worktree directly, including untracked
   files under the owned production/example/E2E/Sonar surfaces. It verifies the
-  active `markdown_streaming` registration, reject-only
-  `markdown_streaming_engine` stub, Helm `markdown.streaming.mode` mapping,
-  removal of production `stream.engine`/`STREAM_ENGINE` symbols, the
+  active `markdown_streaming` registration, the removal of the former
+  reject-only `markdown_streaming_engine` stub (removed names now fail with
+  NGINX's standard `unknown directive` error), Helm `markdown.streaming.mode`
+  mapping, removal of production `stream.engine`/`STREAM_ENGINE` symbols, the
   commonmark/gfm-only flavor contract with explicit mdx/org-mode rejection,
   and the exact off-to-off, auto-to-auto, on-to-force migration table.
 - This detector is blocking in the existing CI docs job through

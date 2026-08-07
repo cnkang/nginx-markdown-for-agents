@@ -4,6 +4,8 @@
 **Audience**: Operators upgrading from 0.5.x/0.6.x/0.7.x to 0.8.0
 
 > **v0.9.1+ operators:** `markdown_streaming_engine` has been removed and replaced by `markdown_streaming`. If you are reading this guide for the streaming behavior changes, please replace `markdown_streaming_engine off;` with `markdown_streaming off;` in your configuration files.
+>
+> **v0.9.2 operators:** `markdown_stream_threshold` has also been removed. The auto-route threshold is now fixed internally at 1 MiB and is not operator-configurable; the table below describing `markdown_stream_threshold` is historical and no longer applies.
 
 ## Overview
 

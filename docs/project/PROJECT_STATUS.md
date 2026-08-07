@@ -38,8 +38,19 @@ pending until the blocking gates pass.
 #### 0.9.2 (current development)
 
 - **OTel removal**: The experimental OTel directives and implementation are
-  absent from the 0.9.2 production surface; ADR-0023 records conditions for a
+  absent from the 0.9.2 production surface; ADR-0027 records conditions for a
   possible future redesign.
+- **Metrics freeze**: The production metrics endpoint is replaced by the
+  twelve-family v1 contract (`requests_total`, `conversion_attempts_total`,
+  `conversion_deliveries_total`, `conversion_duration_seconds`,
+  `input_bytes_total`, `output_bytes_total`, `inflight_requests`,
+  `streaming_events_total`, `streaming_peak_memory_bytes`,
+  `decompression_events_total`, `dynconf_reloads_total`, `build_info`),
+  replacing the legacy multi-format, per-path, shadow, and debug families.
+- **Directive removal (38 total) and ABI 2**: 19 reject-only migration stubs
+  plus 14 active directives and 5 standalone limit directives are removed;
+  the public surface drops from 63 directives to 25, and the bundled Rust/C
+  FFI ABI moves to version 2.
 - **Release-gates-check-092**: Additive on 091; adds public-surface drift
   check, version consistency gate (0.9.2), and reason-code registry
   completeness gate.
@@ -49,7 +60,7 @@ pending until the blocking gates pass.
 - **README consistency verification**: English and Chinese READMEs verified
   for version, directive, and default-value consistency.
 
-### Release 0.7.0 Updates
+### Release 0.7.0 Updates (historical)
 
 - P0 runtime correctness:
   - Full-buffer pending chain on NGX_AGAIN with resume (Rule 1).
@@ -84,7 +95,7 @@ pending until the blocking gates pass.
   ClusterFuzzLite integration.
 - Streaming memory budget enforcement during code block accumulation.
 
-### Release 0.6.3 Updates
+### Release 0.6.3 Updates (historical)
 
 - Rust-first E2E migration closure:
   - `tools/e2e-harness/` is now a first-class migrated-scenario runner for:
@@ -122,7 +133,7 @@ pending until the blocking gates pass.
 - The harness now records short-lived execution memory in a user-local state
   carrier instead of tracked repository docs.
 
-### Release 0.6.2 Updates
+### Release 0.6.2 Updates (historical)
 
 - Dynamic configuration hot-reload:
   - `markdown_dynamic_config` directive for runtime configuration reload without
@@ -138,7 +149,7 @@ pending until the blocking gates pass.
 - dynconf_path_configured lifecycle:
   - Flag lives in `main_conf_t` (per-reload isolation), not file-scope static.
 
-### Release 0.6.1 Updates
+### Release 0.6.1 Updates (historical)
 
 - Hardening release:
   - Rules 27–31: Markdown output escaping and injection prevention, full
@@ -146,7 +157,7 @@ pending until the blocking gates pass.
     of `ngx_str_t` before C API calls, merge residual code integrity checks.
   - Output-safety risk pack added under `docs/harness/risk-packs/`.
 
-### Release 0.6.0 Updates
+### Release 0.6.0 Updates (historical)
 
 - Production readiness release:
   - Streaming engine as default (`markdown_streaming_engine auto`).
@@ -163,7 +174,7 @@ pending until the blocking gates pass.
   - Dynamic configuration hot-reload (`markdown_dynamic_config`).
   - ADR-0006 (OTel), ADR-0007 (Streaming Default), ADR-0008 (Noise Pruning Default).
 
-### Release 0.5.0 Updates
+### Release 0.5.0 Updates (historical)
 
 - Streaming architecture and runtime:
   - True streaming path integrated into the dual-engine model (opt-in), with
@@ -179,7 +190,7 @@ pending until the blocking gates pass.
   - `make harness-check` and `make harness-check-full` are wired as executable
     validation entrypoints.
 
-### Release 0.4.0 Updates
+### Release 0.4.0 Updates (historical)
 
 - 0.4.0 release-gate validation and tests refined based on automated code-review feedback:
   - Metric naming validation now supports histogram `_seconds_bucket/_sum/_count` series while keeping stricter rejection of ambiguous suffixes.
@@ -382,7 +393,7 @@ When deploying:
 
 1. **Start incrementally**: Enable on one location or path first
 2. **Monitor behavior**: Use the metrics endpoint to track conversions
-3. **Set appropriate limits**: Configure `markdown_limits` (e.g., `memory=<size> timeout=<time>`)
+3. **Set appropriate limits**: Configure `markdown_limits` (e.g., `conversion_memory=<size> conversion_timeout=<time>`)
 4. **Choose failure mode**: Select `markdown_error_policy` based on requirements
 5. **Test caching**: Verify cache behavior with your CDN or caching layer
 6. **Review security**: Ensure authentication policies match your security model
@@ -393,17 +404,20 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 
 ### Current Release Line (0.9.x)
 
-The 0.9.x release line is the current maintained line. The current release
-is 0.9.1 — a baseline-consolidation and compatibility-reset release that adds
+The 0.9.x release line is the current maintained line. The current
+release is 0.9.2 (development line); 0.9.1 is the previous release — a
+baseline-consolidation and compatibility-reset release that adds
 hybrid zero-copy streaming output, gzip/deflate/Brotli streaming decompression,
 performance evidence gates, and a doctor advice tool, on top of the 0.9.0
 breaking-release foundation.
 
-#### 0.9.1 (current)
+#### 0.9.1 (previous release)
 
 - **Hybrid zero-copy streaming output**: `markdown_streaming_zero_copy`
   directive (default off) with pool-cleanup handler and fallback to pool-copy
-  when the zero-copy buffer factory fails.
+  when the zero-copy buffer factory fails. **Removed in 0.9.2**: zero-copy
+  delivery is now an internal optimization selected automatically from buffer
+  ownership and backpressure state, with no operator-facing directive.
 - **Streaming decompression routing**: gzip, zlib-wrapped deflate (RFC 1950
   header sniffing), and Brotli bounded streaming decompression with member
   lifecycle management and cumulative budget enforcement.
