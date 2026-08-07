@@ -190,6 +190,8 @@ test_collect_metrics_with_data(void)
     g_metrics_data.results.delivery_count = 100;
     g_metrics_data.requests_entered = 200;
     g_metrics_data.results.failopen_count = 3;
+    g_metrics_data.perf.zero_copy_output_total = 7;
+    g_metrics_data.perf.copied_output_total = 2;
     ngx_http_markdown_metrics = &g_metrics_data;
 
     ngx_http_markdown_diagnostics_collect_metrics(&out);
@@ -198,6 +200,10 @@ test_collect_metrics_with_data(void)
     TEST_ASSERT(out.delivery_total == 100, "delivery should be 100");
     TEST_ASSERT(out.requests_total == 200, "requests should be 200");
     TEST_ASSERT(out.failopen_total == 3, "failopen should be 3");
+    TEST_ASSERT(out.zero_copy_output_total == 7,
+                "zero_copy_output should be 7");
+    TEST_ASSERT(out.copied_output_total == 2,
+                "copied_output should be 2");
 
     TEST_PASS("Metrics collected correctly");
 }
@@ -216,6 +222,7 @@ test_collect_metrics_streaming(void)
     g_metrics_data.requests_entered = 100;
     g_metrics_data.results.failopen_count = 1;
     g_metrics_data.streaming.requests_total = 30;
+    g_metrics_data.streaming.precommit_failopen_total = 4;
     g_metrics_data.streaming.succeeded_total = 25;
     g_metrics_data.streaming.failed_total = 5;
     g_metrics_data.streaming.fallback_total = 2;
@@ -230,6 +237,8 @@ test_collect_metrics_streaming(void)
     TEST_ASSERT(out.conversions_total == 10, "conversions should be 10");
     TEST_ASSERT(out.streaming_requests_total == 30,
                 "streaming_requests should be 30");
+    TEST_ASSERT(out.precommit_failopen_total == 4,
+                "precommit_failopen should be 4");
     TEST_ASSERT(out.streaming_succeeded_total == 25,
                 "streaming_succeeded should be 25");
     TEST_ASSERT(out.streaming_failed_total == 5,

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "diagnostics.schema.json",
   "title": "nginx-markdown-for-agents Diagnostics Endpoint Schema v1",
-  "description": "JSON Schema for the diagnostics endpoint response body. Defines exactly 7 top-level fields with strict typing, nullability, and bounds.",
+  "description": "JSON Schema for the diagnostics endpoint response body. Defines exactly 7 top-level fields with strict typing, nullability, and bounds, plus bounded module evidence counters.",
   "type": "object",
   "required": [
     "schema_version",
@@ -132,6 +132,35 @@
           "type": "integer",
           "minimum": 0,
           "description": "Number of requests with pending output buffers."
+        },
+        "module_metrics": {
+          "type": "object",
+          "description": "Exact module counters used by local performance evidence adapters.",
+          "required": [
+            "streaming_requests_total",
+            "precommit_failopen_total",
+            "zero_copy_output_total",
+            "copied_output_total"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "streaming_requests_total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "precommit_failopen_total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "zero_copy_output_total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "copied_output_total": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
         }
       }
     },

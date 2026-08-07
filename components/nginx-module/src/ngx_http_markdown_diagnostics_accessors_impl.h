@@ -53,10 +53,16 @@ ngx_http_markdown_diagnostics_collect_metrics(
         ngx_http_markdown_metrics->perf.backpressure_total;
     out->inflight = (ngx_atomic_uint_t) ngx_http_markdown_inflight_current();
     out->pending_output = 0;
+    out->zero_copy_output_total =
+        ngx_http_markdown_metrics->perf.zero_copy_output_total;
+    out->copied_output_total =
+        ngx_http_markdown_metrics->perf.copied_output_total;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     out->streaming_requests_total =
         ngx_http_markdown_metrics->streaming.requests_total;
+    out->precommit_failopen_total =
+        ngx_http_markdown_metrics->streaming.precommit_failopen_total;
     out->streaming_succeeded_total =
         ngx_http_markdown_metrics->streaming.succeeded_total;
     out->streaming_failed_total =

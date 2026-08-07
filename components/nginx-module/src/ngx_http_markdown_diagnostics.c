@@ -871,7 +871,11 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
         "\"effective_sources\":{\"filter\":\"%s\","
         "\"prune_noise\":\"%s\",\"log_verbosity\":\"%s\","
         "\"error_policy\":\"%s\",\"streaming_buffer\":\"%s\"}},"
-        "\"runtime\":{\"inflight\":%uA,\"pending_output\":%uA},"
+        "\"runtime\":{\"inflight\":%uA,\"pending_output\":%uA,"
+        "\"module_metrics\":{\"streaming_requests_total\":%uA,"
+        "\"precommit_failopen_total\":%uA,"
+        "\"zero_copy_output_total\":%uA,"
+        "\"copied_output_total\":%uA}},"
         "\"recent_decisions\":[",
         ngx_http_markdown_diag_bool(effective.filter),
         ngx_http_markdown_diag_bool(effective.prune_noise),
@@ -884,7 +888,9 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
         ngx_http_markdown_diag_source_name(effective.log_verbosity_source),
         ngx_http_markdown_diag_source_name(effective.error_policy_source),
         ngx_http_markdown_diag_source_name(effective.streaming_buffer_source),
-        metrics.inflight, metrics.pending_output);
+        metrics.inflight, metrics.pending_output,
+        metrics.streaming_requests_total, metrics.precommit_failopen_total,
+        metrics.zero_copy_output_total, metrics.copied_output_total);
     if (ngx_http_markdown_diagnostics_fmt_decisions(&p, last, state)
         != NGX_OK)
     {

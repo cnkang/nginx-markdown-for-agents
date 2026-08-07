@@ -31,7 +31,8 @@ endpoint. The response has exactly these seven top-level fields:
 - `build`: source SHA, NGINX/Rust versions, and feature list
 - `configuration`: static digest, Dynconf state, effective values, and
   per-field sources
-- `runtime`: worker-local `inflight` and `pending_output`
+- `runtime`: worker-local `inflight` and `pending_output`, plus the bounded
+  `module_metrics` counters used by local performance evidence collection
 - `recent_decisions`: bounded worker-local decision entries
 
 The schema rejects unknown fields and malformed types. The handler is
@@ -42,6 +43,12 @@ the handler's built-in internal access boundary.
 
 Legacy `config_snapshot`, profile, streaming, duplicated metrics, and
 rollback-mutation fields are not part of v1.
+
+The optional `runtime.module_metrics` object is a structured evidence bridge,
+not a second public metrics surface. When present, it carries exact integer
+counters for streaming requests, pre-commit fail-open decisions, zero-copy
+output, and copied output. The benchmark adapter fails closed when the object
+is absent rather than inferring these values from unrelated Prometheus labels.
 
 ## Prometheus Metrics v1
 

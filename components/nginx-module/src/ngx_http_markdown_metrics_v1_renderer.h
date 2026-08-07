@@ -384,7 +384,7 @@ ngx_http_markdown_metrics_v1_render_families_8_to_9(
         "nginx_markdown_streaming_events_total"
         "{transition=\"commit\",reason=\"converted\"} %uA\n"
         "nginx_markdown_streaming_events_total"
-        "{transition=\"fallback\",reason=\"bypass_no_transform\"} %uA\n"
+        "{transition=\"fallback\",reason=\"precommit_html_error\"} %uA\n"
         "nginx_markdown_streaming_events_total"
         "{transition=\"safe_finish_start\",reason=\"converted\"} %uA\n"
         "nginx_markdown_streaming_events_total"
