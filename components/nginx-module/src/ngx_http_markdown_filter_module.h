@@ -160,10 +160,12 @@ ngx_int_t ngx_http_markdown_next_body_filter(ngx_http_request_t *r,
     (2 * 1024 * 1024)
 
 /*
- * Streaming engine reason codes (streaming observability).
+ * Streaming engine path-selection states (internal implementation state).
  *
- * Stable identifiers explaining why a particular engine path was chosen.
- * Additive only — removal requires major version bump.
+ * These values explain why a particular engine path was chosen inside the C
+ * streaming router.  They are not entries in the canonical Rust reason
+ * registry and are not a Prometheus or JSON label contract.  Operator-visible
+ * outcome reasons must use the canonical reason accessors instead.
  */
 typedef enum {
     /* Engine choice: true streaming */
@@ -198,11 +200,10 @@ typedef enum {
 } ngx_http_markdown_stream_reason_e;
 
 /*
- * Map streaming reason code to its stable string identifier.
+ * Map an internal streaming path state to its debug-log string.
  *
- * Returns a static NUL-terminated string suitable for logs,
- * JSON output, and Prometheus labels.  Unknown values return
- * "unknown".
+ * The returned strings are for internal diagnostics only.  Unknown values
+ * return "unknown".
  */
 static ngx_inline const char *
 ngx_http_markdown_stream_reason_str(

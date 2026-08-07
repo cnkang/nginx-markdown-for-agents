@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.9.2] - Unreleased candidate (2026-07-30)
+## [0.9.2] - Unreleased candidate (2026-08-07)
 
 Maintenance and hardening release. Fixes diagnostics and reason-code mapping
 gaps, documents request-scoped OTel ownership, removes the unsafe worker-local
@@ -59,6 +59,10 @@ before/after examples.
   Rust and C.
 - `stream_state` `PRE_COMMIT` fallthrough now logs an invariant violation
   instead of silently advancing state.
+- Prometheus `nginx_markdown_streaming_events_total{transition="fallback"}`
+  now reports `reason="precommit_html_error"` (matching the logged reason at
+  the fallback decision) instead of the incorrect `reason="bypass_no_transform"`.
+  Dashboards keyed on the previous label value must be updated.
 
 ### Added
 
