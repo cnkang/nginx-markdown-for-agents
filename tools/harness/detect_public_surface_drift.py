@@ -247,8 +247,8 @@ def _validate_otel_schema(inventory):
     errors = []
     for key in ("directives", "reject_only"):
         errors.extend(_validate_otel_group(key, otel.get(key)))
-    if otel.get("status") not in ("experimental", "stable"):
-        errors.append("otel.status must be experimental or stable")
+    if otel.get("status") not in ("experimental", "stable", "removed"):
+        errors.append("otel.status must be experimental, stable, or removed")
     return errors
 
 

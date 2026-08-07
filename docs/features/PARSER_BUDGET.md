@@ -82,7 +82,7 @@ Before any parsing occurs, the C module checks the response body size
 against the configured maximum. Documents exceeding this limit are never
 passed to the Rust converter.
 
-- **Default**: 10 MB
+- **Default**: 64 MiB
 - **Effect**: Prevents the parser from receiving unbounded input
 - **Enforcement point**: C body filter, before FFI call
 
@@ -91,9 +91,9 @@ cannot be interrupted, limiting input size bounds the worst-case parse time.
 
 ### 2.2 Parser Memory Budget
 
-**Directive**: `markdown_parser_budget` (v0.7.0)
+**Directive**: `markdown_limits parser_memory=<size>`
 
-- **Default**: 64 MB
+- **Default**: 32 MiB
 - **Enforcement**:
   - **Streaming path**: The `MemoryBudget` struct tracks allocations across
     pipeline stages (state stack, output buffer, charset sniff, lookahead).
@@ -119,14 +119,14 @@ sub-budgets:
 | `charset_sniff` | 1024 B | Charset detection scan buffer |
 | `lookahead` | 64 KiB | Front-matter / head metadata buffering |
 
-When `markdown_parser_budget` is set, the streaming budget is scaled
-proportionally via `MemoryBudget::for_total(budget)`.
+When `parser_memory` is set, the streaming budget is scaled proportionally
+via `MemoryBudget::for_total(budget)`.
 
 ### 2.3 Parse Timeout (Cooperative Checkpoints)
 
-**Directive**: `markdown_parse_timeout` (v0.7.0)
+**Directive**: `markdown_limits parser_timeout=<time>`
 
-- **Default**: 30 seconds
+- **Default**: 10 seconds
 - **Enforcement**: Cooperative timeout via `ConversionContext`
 - **Error code**: `ERROR_PARSE_TIMEOUT` (10)
 - **Reason code**: `PARSE_TIMEOUT`
@@ -166,9 +166,9 @@ the actual timeout overshoot depends on input size:
 | < 1 MB | < 100 ms | Negligible |
 | 1-5 MB | 100-500 ms | Low |
 | 5-10 MB | 500 ms - 1 s | Moderate |
-| > 10 MB | Blocked by `markdown_limits conversion_memory=` | N/A |
+| > 64 MiB | Blocked by `markdown_limits conversion_memory=` | N/A |
 
-The `markdown_limits conversion_memory=<size>` directive (default 10 MB) ensures that the
+The `markdown_limits conversion_memory=<size>` directive (default 64 MiB) ensures that the
 uninterruptible parse phase is bounded to approximately 1 second on
 modern hardware.
 
@@ -215,13 +215,13 @@ Request arrives
     ├─ markdown_limits conversion_memory= check (C layer)
     │   └─ FAIL → pass-through, reason: SIZE_EXCEEDED
     │
-    ├─ markdown_parse_timeout pre-check
+    ├─ markdown_limits parser_timeout= pre-check
     │   └─ FAIL → pass-through, reason: PARSE_TIMEOUT
     │
     ├─ html5ever parse_document (uninterruptible)
-    │   └─ Bounded by markdown_limits conversion_memory= ≤ 10 MB
+    │   └─ Bounded by markdown_limits conversion_memory= ≤ 64 MiB
     │
-    ├─ markdown_parse_timeout post-parse check
+    ├─ markdown_limits parser_timeout= post-parse check
     │   └─ FAIL → pass-through, reason: PARSE_TIMEOUT
     │
     ├─ DOM traversal with cooperative checkpoints
@@ -239,8 +239,8 @@ Request arrives
 When multiple limits are hit simultaneously, the first detected wins:
 
 1. Input size (`markdown_limits conversion_memory=<size>`) — checked first, before FFI call
-2. Parse timeout (`markdown_parse_timeout`) — checked at each checkpoint
-3. Memory budget (`markdown_parser_budget`) — checked on each allocation
+2. Parse timeout (`markdown_limits parser_timeout=<time>`) — checked at each checkpoint
+3. Memory budget (`markdown_limits parser_memory=<size>`) — checked on each allocation
 
 ### Fail-Open Behavior
 
@@ -248,7 +248,9 @@ When any limit is hit:
 
 - The original HTML content is passed through to the client unchanged
 - The appropriate reason code is set (`PARSE_TIMEOUT` or `PARSE_BUDGET_EXCEEDED`)
-- The corresponding Prometheus counter is incremented
+- The decision and error classification are recorded through the active
+  request and diagnostics observability surfaces; there are no standalone v1
+  Prometheus families for parser timeout or parser budget.
 - A warning-level log entry is emitted with the reason code
 
 ---
@@ -258,8 +260,8 @@ When any limit is hit:
 | Limit | Status | Path | Enforcement Point |
 |-------|--------|------|-------------------|
 | Input size (`markdown_limits conversion_memory=`) | ✅ Implemented | Both | C body filter pre-check |
-| Parse timeout (`markdown_parse_timeout`) | ✅ Implemented | Both | Cooperative checkpoints in Rust |
-| Parser memory budget (`markdown_parser_budget`) | ✅ Implemented | Streaming | `MemoryBudget` stage checks |
+| Parse timeout (`markdown_limits parser_timeout=`) | ✅ Implemented | Both | Cooperative checkpoints in Rust |
+| Parser memory budget (`markdown_limits parser_memory=`) | ✅ Implemented | Streaming | `MemoryBudget` stage checks |
 | Parser memory budget (full-buffer) | ✅ Implemented | Full-buffer | Input size proxy pre-check |
 | Depth limit (explicit directive) | ⏳ Planned | — | Future: configurable max nesting |
 | Node-count limit (explicit directive) | ⏳ Planned | — | Future: configurable max nodes |
@@ -269,29 +271,17 @@ When any limit is hit:
 
 | Code | Constant | Trigger |
 |------|----------|---------|
-| 10 | `ERROR_PARSE_TIMEOUT` | Elapsed time exceeds `markdown_parse_timeout` |
-| 11 | `ERROR_PARSE_BUDGET_EXCEEDED` | Memory allocation exceeds `markdown_parser_budget` |
-
-### Implemented Metrics
-
-| Metric | Type | Trigger |
-|--------|------|---------|
-| `nginx_markdown_parse_timeouts_total` | Counter | Parse timeout exceeded |
-| `nginx_markdown_parse_budget_exceeded_total` | Counter | Parser budget exceeded |
+| 10 | `ERROR_PARSE_TIMEOUT` | Elapsed time exceeds `parser_timeout` |
+| 11 | `ERROR_PARSE_BUDGET_EXCEEDED` | Memory allocation exceeds `parser_memory` |
 
 ---
 
 ## 5. Configuration Reference
 
 ```nginx
-# Maximum input size before parsing (pre-parse gate)
-markdown_limits conversion_memory=10m;
-
-# Cooperative timeout for the entire conversion pipeline
-markdown_parse_timeout 30s;
-
-# Memory budget for parser allocations
-markdown_parser_budget 64m;
+# Unified resource limits for the conversion pipeline
+markdown_limits conversion_timeout=30s parser_timeout=10s
+    conversion_memory=64m parser_memory=32m streaming_buffer=2m;
 ```
 
 For full directive syntax and examples, see `docs/guides/CONFIGURATION.md`.

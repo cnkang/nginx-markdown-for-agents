@@ -128,6 +128,7 @@ def test_live_inventory_matches_all_extracted_surfaces() -> None:
     assert inventory["reject_only_directives"] == []
     assert inventory["otel"]["directives"] == []
     assert inventory["otel"]["reject_only"] == []
+    assert inventory["otel"]["status"] == "removed"
     assert len(live_directives) == 25
     assert all(
         entry["classification"] == "active"
@@ -283,6 +284,14 @@ def test_final_inventory_rejects_migration_stubs() -> None:
 
     assert "final 0.9.2 inventory must contain zero reject-only directives" in errors
     assert "final 0.9.2 inventory must contain zero reject-only OTel directives" in errors
+
+
+def test_removed_otel_status_is_valid_for_empty_surface() -> None:
+    """An empty OTel surface can be explicitly marked as removed."""
+    inventory = copy.deepcopy(detector.load_inventory())
+    inventory["otel"]["status"] = "removed"
+
+    assert detector._validate_otel_schema(inventory) == []
 
 
 def test_final_inventory_requires_frozen_public_counts() -> None:
