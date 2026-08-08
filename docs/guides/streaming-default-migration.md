@@ -16,7 +16,7 @@ v0.6.x compatibility bridge entirely:
 |---|---|---|---|---|
 | `markdown_streaming_engine` | `off` (full-buffer) | `auto` (per-request selection) | `auto` (per-request selection) | Large/chunked responses use streaming by default |
 | `markdown_prune_noise` | N/A (compile-time opt-in) | `on` (runtime, default-enabled) | `on` (runtime, default-enabled) | Noise regions (nav, footer, ads) removed by default |
-| `markdown_streaming_auto_threshold` | N/A (new in 0.6.0) | Accepted (32k default) | **Removed** — `nginx -t` fails | Must use `markdown_stream_threshold` |
+| `markdown_streaming_auto_threshold` | N/A (new in 0.6.0) | Accepted (32k default) | **Removed** — `nginx -t` fails | Auto mode used the then-current threshold; see the 0.9.2 note below |
 | `markdown_streaming_engine` `$variable` | Accepted | Accepted | **Removed** — `nginx -t` fails | Must use fixed `off`/`auto`/`on` |
 
 **Key guarantee**: Explicit `off`/`on` configurations produce identical behavior
@@ -72,7 +72,7 @@ markdown_streaming_engine off;
 ### How Auto Mode Selects Engine
 
 ```
-if Content-Length >= markdown_stream_threshold:
+if Content-Length >= the configured threshold (historical 0.8.x behavior):
     → streaming engine
 elif Transfer-Encoding: chunked:
     → streaming engine
@@ -80,7 +80,7 @@ else:
     → full-buffer engine
 ```
 
-### Configuring the Threshold
+### Configuring the Threshold (historical through 0.9.1)
 
 ```nginx
 # Lower threshold: stream more responses (default 1m)
@@ -90,8 +90,10 @@ markdown_stream_threshold 512k;
 markdown_stream_threshold 5m;
 ```
 
-**Note**: `markdown_streaming_auto_threshold` was removed in 0.8.0.
-Use `markdown_stream_threshold` instead.
+**Historical note:** `markdown_streaming_auto_threshold` was removed in 0.8.0;
+`markdown_stream_threshold` was the 0.8.x/0.9.1 replacement. Both threshold
+directives are removed in 0.9.2. Current auto mode uses a fixed internal 1 MiB
+threshold and cannot be configured.
 
 ### Monitoring Auto Mode Selection
 
@@ -149,15 +151,16 @@ If pruning removes all content:
 ### `markdown_streaming_auto_threshold` — REMOVED in 0.8.0
 
 This directive is no longer registered. `nginx -t` will fail with
-"unknown directive" if it appears in your configuration. Replace with
-`markdown_stream_threshold`:
+"unknown directive" if it appears in your configuration. In 0.9.2, use
+`markdown_streaming off|auto|force`; auto mode uses the fixed internal 1 MiB
+threshold.
 
 ```nginx
 # Before (0.6.x/0.7.x) — NO LONGER ACCEPTED
 markdown_streaming_auto_threshold 64k;
 
-# After (0.8.0) — required
-markdown_stream_threshold 64k;
+# After (0.9.2) — required only when selecting an explicit policy
+markdown_streaming auto;
 ```
 
 ### `markdown_streaming_engine` `$variable` — REMOVED in 0.8.0

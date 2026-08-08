@@ -24,6 +24,7 @@ from lib.reason_code import REASON_C_ACCESSOR_ALIASES  # noqa: E402
 
 INVENTORY_PATH = os.path.join(ROOT, "docs", "harness", "public-surface-inventory.json")
 DIRECTIVES_PATH = os.path.join(ROOT, "components", "nginx-module", "src", "ngx_http_markdown_config_directives_impl.h")
+DIRECTIVE_NAMES_PATH = os.path.join(ROOT, "components", "nginx-module", "src", "ngx_http_markdown_directive_names.h")
 REASON_CODE_PATH = os.path.join(ROOT, "components", "rust-converter", "src", "decision", "reason_code.rs")
 REASON_C_PATH = os.path.join(ROOT, "components", "nginx-module", "src", "ngx_http_markdown_reason.c")
 DYNCONF_PATH = os.path.join(ROOT, "components", "nginx-module", "src", "ngx_http_markdown_dynconf_impl.h")
@@ -399,6 +400,23 @@ def _directive_registry_block(text):
     return text[block_start:closing]
 
 
+def _expand_directive_macros(text):
+    """Expand the shared directive-name inventory before parsing C rows."""
+    names = read_text(DIRECTIVE_NAMES_PATH)
+    definitions = dict(re.findall(
+        r"^#define\s+(NGX_HTTP_MARKDOWN_DIRECTIVE_[A-Z0-9_]+)\s+\\\s*\"([^\"]+)\"",
+        names,
+        flags=re.MULTILINE,
+    ))
+    combined = "{}\n{}".format(text, names)
+    return re.sub(
+        r"ngx_string\((NGX_HTTP_MARKDOWN_DIRECTIVE_[A-Z0-9_]+)\)",
+        lambda match: 'ngx_string("{}")'.format(
+            definitions.get(match.group(1), match.group(1))),
+        combined,
+    )
+
+
 def _balanced_command_entries(block):
     """Split command rows while rejecting unbalanced braces."""
     entries = []
@@ -684,7 +702,9 @@ def _command_contracts(text):
 
 def extract_directive_contract_from_c():
     """Extract directive metadata from the live C command registry."""
-    return _command_contracts(read_text(DIRECTIVES_PATH))
+    return _command_contracts(
+        _expand_directive_macros(read_text(DIRECTIVES_PATH))
+    )
 
 
 def extract_directives_from_c():

@@ -28,23 +28,23 @@ markdown_filter;            # Error: missing value
 
 ---
 
-### 2. markdown_limits memory=<size> (size)
+### 2. markdown_limits conversion_memory=<size> (size)
 
 > **0.9.0**: `markdown_max_size` is retired; use `markdown_limits conversion_memory=`.
 
 **Valid configurations:**
 ```nginx
-markdown_limits memory=10m;      # 10 megabytes
-markdown_limits memory=5120k;    # 5120 kilobytes
-markdown_limits memory=1048576;  # 1048576 bytes
+markdown_limits conversion_memory=10m;      # 10 megabytes
+markdown_limits conversion_memory=5120k;    # 5120 kilobytes
+markdown_limits conversion_memory=1048576;  # 1048576 bytes
 ```
 
 **Invalid configurations:**
 ```nginx
-markdown_limits memory=-1;       # Error: negative size
-markdown_limits memory=0;        # Error: size must be positive
-markdown_limits memory=abc;      # Error: invalid size format
-markdown_limits memory;          # Error: missing value
+markdown_limits conversion_memory=-1;       # Error: negative size
+markdown_limits conversion_memory=0;        # Error: size must be positive
+markdown_limits conversion_memory=abc;      # Error: invalid size format
+markdown_limits conversion_memory;          # Error: missing value
 ```
 
 **Expected behavior:**
@@ -54,23 +54,23 @@ markdown_limits memory;          # Error: missing value
 
 ---
 
-### 3. markdown_limits timeout=<time> (time)
+### 3. markdown_limits conversion_timeout=<time> (time)
 
 > **0.9.0**: `markdown_timeout` is retired; use `markdown_limits conversion_timeout=`.
 
 **Valid configurations:**
 ```nginx
-markdown_limits timeout=5s;        # 5 seconds
-markdown_limits timeout=5000ms;    # 5000 milliseconds
-markdown_limits timeout=5000;      # 5000 milliseconds (default unit)
+markdown_limits conversion_timeout=5s;        # 5 seconds
+markdown_limits conversion_timeout=5000ms;    # 5000 milliseconds
+markdown_limits conversion_timeout=5000;      # 5000 milliseconds (default unit)
 ```
 
 **Invalid configurations:**
 ```nginx
-markdown_limits timeout=-1;        # Error: negative timeout
-markdown_limits timeout=0;         # Error: timeout must be positive
-markdown_limits timeout=abc;       # Error: invalid time format
-markdown_limits timeout;           # Error: missing value
+markdown_limits conversion_timeout=-1;  # Error: negative timeout
+markdown_limits conversion_timeout=0;   # Error: timeout must be positive
+markdown_limits conversion_timeout=abc; # Error: invalid time format
+markdown_limits conversion_timeout;     # Error: missing value
 ```
 
 **Expected behavior:**
@@ -331,45 +331,45 @@ markdown_stream_types text;     # Error: invalid format, must be "type/subtype"
 ```nginx
 http {
     markdown_filter on;
-    markdown_limits memory=5m;
+    markdown_limits conversion_memory=5m;
     
     server {
-        # Inherits: markdown_filter on, markdown_limits memory=5m
+        # Inherits: markdown_filter on, markdown_limits conversion_memory=5m
         
         location /api {
             markdown_filter off;  # Overrides parent
-            # Inherits: markdown_limits memory=5m
+            # Inherits: markdown_limits conversion_memory=5m
         }
     }
 }
 ```
 
 **Expected:**
-- `/api`: filter off, limits memory=5m
-- Other locations: filter on, limits memory=5m
+- `/api`: filter off, limits conversion_memory=5m
+- Other locations: filter on, limits conversion_memory=5m
 
 ### Test 2: Multi-level inheritance
 ```nginx
 http {
     markdown_filter on;
-    markdown_limits timeout=10s;
+    markdown_limits conversion_timeout=10s;
     markdown_error_policy pass;
     
     server {
-        markdown_limits timeout=5s;  # Overrides http level
+        markdown_limits conversion_timeout=5s;  # Overrides http level
         # Inherits: markdown_filter on, markdown_error_policy pass
         
         location /docs {
             markdown_error_policy fail_closed;  # Overrides server level
-            # Inherits: markdown_filter on, markdown_limits timeout=5s
+            # Inherits: markdown_filter on, markdown_limits conversion_timeout=5s
         }
     }
 }
 ```
 
 **Expected:**
-- `/docs`: filter on, timeout 5s, error_policy fail_closed
-- Other locations: filter on, timeout 5s, error_policy pass
+- `/docs`: filter on, conversion_timeout 5s, error_policy fail_closed
+- Other locations: filter on, conversion_timeout 5s, error_policy pass
 
 ### Test 3: Array directive inheritance
 ```nginx
