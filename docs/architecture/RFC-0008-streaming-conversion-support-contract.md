@@ -10,7 +10,7 @@
 
 ## Implementation Note
 
-RFC-0008 was implemented in 0.8.0, which shipped the true streaming contract,
+The 0.8.0 release implemented RFC-0008, shipping the true streaming contract,
 fallback semantics, and support matrix source of truth as specified in this
 document. The 0.8.1 patch release added further hardening: streaming header
 commit atomicity (Rule 39 rollback semantics), FFI streaming finish invalid
@@ -40,7 +40,7 @@ maintain the necessary state and correctly merge content across boundaries.
 Once the converter has sufficient context and confirms the response remains
 safely convertible, it MAY send Markdown output downstream. Output is NOT
 required to correspond one-to-one with input chunks, but the module MUST NOT
-wait until the entire HTML response is received before producing any output.
+wait until the entire HTML response arrives before producing any output.
 
 ### 1.3 Explainable Memory Bound
 
@@ -70,10 +70,10 @@ The following patterns alone do **not** constitute true streaming:
 - Receiving input in batches but buffering the complete body internally before
   producing output on finalize.
 - Passing chunked responses through without conversion.
-- Skipping conversion when a size threshold is exceeded.
+- Skipping conversion for responses exceeding a size threshold. The module skips conversion for oversized responses.
 
-True streaming MUST produce valid Markdown output **before** the complete
-upstream body has been buffered.
+True streaming MUST produce valid Markdown output **before** the module
+buffers the complete upstream body. The module emits output while the body still streams in.
 
 ### 1.7 Exclusions
 
@@ -87,15 +87,15 @@ True streaming does NOT cover:
   has an incremental implementation — e.g., strict Markdown-variant ETag
   comparison, full-text-scan front matter, and normalization modes requiring
   the complete document.
-- **Compressed responses** MUST be decompressed through the controlled
-  decompression budget before entering the streaming HTML converter. gzip, br,
-  and deflate payloads MUST NOT be fed directly to the streaming parser.
+- **Compressed responses** MUST pass through the controlled
+  decompression budget before entering the streaming HTML converter. The module
+  MUST NOT feed gzip, br, and deflate payloads directly to the streaming parser.
 
 ### 1.8 Terminology Boundary
 
 In 0.8.0 product documentation, "streaming supported" MUST refer exclusively
 to the true streaming path defined above. The existence of an "incremental API"
-MUST NOT be equated with "true streaming GA".
+MUST NOT equate with "true streaming GA".
 
 ---
 
@@ -134,7 +134,7 @@ following is true:
 - Upstream uses chunked transfer encoding.
 - `Content-Length` >= `markdown_stream_threshold`.
 
-Absence of `Content-Length` only makes the response a streaming candidate; it
+Absence of `Content-Length` only makes the response a streaming candidate. It
 does not force streaming. The engine MUST still verify content type, feature
 compatibility, parser readiness, and configured rollout policy before selecting
 true streaming.
@@ -176,11 +176,12 @@ the minimum size threshold.
 # markdown_stream_flush_interval 100ms;
 ```
 
-`markdown_stream_flush_interval` is reserved for a future release. Its
-semantics are defined here for completeness: when set, the module MAY also
+`markdown_stream_flush_interval` stays reserved for a future release. This
+section defines its semantics for completeness: when set, the module MAY also
 flush if the maximum wait time elapses regardless of output size. This
-directive MUST NOT be documented as implemented or accepted in configuration
-until actually supported. The 0.8.0 release gate does not validate it.
+directive MUST NOT appear in documentation as implemented or accepted in
+configuration until actually supported. The 0.8.0 release gate does not
+validate it.
 
 ### 2.5 Relationship to Existing Chunked Configuration
 
@@ -190,7 +191,7 @@ markdown_buffer_chunked on;
 
 **Default retained**: `on`
 
-In 0.8.0, this directive means: whether chunked responses are allowed to enter
+In 0.8.0, this directive means: whether chunked responses may enter
 the Markdown conversion pipeline.
 
 | `markdown_buffer_chunked` | `markdown_streaming` | Behavior |
@@ -250,21 +251,21 @@ Triggers for pre-commit fallback:
 
 - HTML parser determines input is unsuitable for streaming.
 - Response matches a hard-excluded content type.
-- A feature requiring full-document correctness is enabled.
+- A feature requiring full-document correctness turns on.
 - Decompression budget, parser budget, or stream state initialization fails.
 
 Pre-commit fallback is only available when the raw replay buffer can still cover
-all upstream bytes read so far AND downstream response headers have not been
-committed.
+all upstream bytes read so far. It also requires that the module has not yet
+committed downstream response headers.
 
 If downstream response headers or Markdown body bytes have already been sent,
 the response has transitioned to committed state (see §3.4).
 
 If the raw replay buffer can no longer cover all upstream bytes read so far
-but headers have not yet been committed, HTML passthrough fallback is no longer
-available. The module MUST either continue with a safe conversion path, switch
-to full-buffer conversion within configured resource limits, or reject the
-response before headers are committed according to `markdown_on_error`.
+but the module has not yet committed headers, HTML passthrough fallback is no
+longer available. The module MUST either continue with a safe conversion path,
+switch to full-buffer conversion within configured resource limits, or reject
+the response before the module commits headers according to `markdown_on_error`.
 
 #### `markdown_on_error pass`
 
@@ -296,8 +297,9 @@ full-buffer resource limits (e.g., `markdown_max_size`, memory budget):
 - `markdown_streaming auto` and the module assesses streaming risk
   outweighs benefit.
 
-If full-buffer resource limits would be exceeded, fallback proceeds to
+If the response would exceed full-buffer resource limits, fallback proceeds to
 passthrough or reject according to the applicable `markdown_on_error` policy.
+Exceeding the limits triggers the fallback path. The module then applies the configured policy.
 
 Full-buffer fallback is **not** an error. It is a normal `auto`-mode decision.
 
@@ -333,8 +335,8 @@ When an error occurs post-commit:
   protocol-safe manner.
 - If the response can still produce structurally valid Markdown, emit a minimal
   safe closure.
-- If Markdown structure cannot be guaranteed, abort output and close the
-  response chain.
+- If the module cannot guarantee Markdown structure, abort output and close the
+  response chain. The module aborts rather than emitting invalid output. This keeps the response protocol-safe.
 - The module MUST NOT append raw HTML fragments.
 - The module MUST NOT mix partial Markdown with raw HTML.
 - The module MUST NOT send content conflicting with the already-committed
@@ -367,21 +369,22 @@ Before entering true streaming, the header filter MUST complete these decisions:
 2. Is the response content type convertible?
 3. Is streaming allowed for this response?
 4. Does a full-buffer fallback apply instead?
-5. Must `Content-Length` be cleared or set to unknown?
+5. Must the module clear `Content-Length` or set it to unknown?
 6. Set `Content-Type: text/markdown; charset=utf-8`.
 7. Set `Vary: Accept`.
 8. Disable or defer headers that depend on the complete body.
 
-If true streaming is selected:
+If the module selects true streaming:
 
-- `Content-Length` MUST be removed from the outgoing response headers, and the
-  internal response length MUST be marked unknown (e.g., setting
+- The module MUST remove `Content-Length` from the outgoing response headers.
+  It MUST also mark the internal response length unknown (e.g., setting
   `r->headers_out.content_length_n = -1` and clearing the
   `content_length` header where applicable).
 - Chunked downstream follows standard NGINX output behavior.
-- Output-derived ETag MUST NOT be generated before streaming commit.
-- If a correct Markdown-variant ETag cannot be produced, the upstream ETag MUST
-  be removed or downgraded to weak semantics / disabled for this response.
+- The module MUST NOT generate output-derived ETag before streaming commit.
+- If the module cannot produce a correct Markdown-variant ETag, it MUST remove
+  the upstream ETag or downgrade it to weak semantics / disabled for this
+  response. The module drops or weakens the ETag to stay correct.
 
 ---
 
@@ -393,8 +396,8 @@ source of truth.
 **Recommended file**: `tools/release-matrix.json`
 
 If a `packaging/matrix.yaml` already exists in the repository, 0.8.0 MAY retain
-it as a packaging input, but the authoritative external support declaration MUST
-be generated from or validated against `tools/release-matrix.json`.
+it as a packaging input. However, the authoritative external support
+declaration MUST come from `tools/release-matrix.json` or validate against it.
 
 Documentation, README, release notes, and workflow matrices MUST NOT contain
 hand-maintained, mutually conflicting version support tables.
@@ -435,8 +438,8 @@ The following files MUST NOT contain hand-maintained support matrices:
 - `docs/guides/PACKAGE_DISTRIBUTION.md`
 - Release notes template
 
-These files MUST be generated from `tools/release-matrix.json` or validated
-against it via CI.
+These files MUST come from `tools/release-matrix.json` or validate against
+it via CI.
 
 **Recommended commands**:
 

@@ -102,7 +102,7 @@ the request passes through without ever reaching the streaming path selector.
 
 ### Hard exclusions -- application/x-ndjson, application/stream+json (Requirement 4) -- PASS
 
-- **Location**: These types are excluded by the content_type allowlist check
+- **Location**: The content_type allowlist check excludes these types
   (step 4) since only `text/html` (or user-configured types) passes.
 - **Defense-in-depth**: `ngx_http_markdown_stream_type_excluded()` provides an
   explicit hard-exclusion function covering all three types. The streaming
@@ -125,7 +125,7 @@ the request passes through without ever reaching the streaming path selector.
   Content-Length against `markdown_limits memory=<size>`.
 - **Ordering**: Executes at step 4, inside eligibility check.
 - **Note**: When Content-Length is absent (chunked), the check passes and size
-  enforcement is deferred to the body filter (budget tracking during streaming
+  the module defers enforcement to the body filter (budget tracking during streaming
   feed calls -- covered by the streaming input contract.
 - **Verdict**: CONFIRMED -- static limit checked before streaming; dynamic
   budget enforced during streaming (separate concern).
@@ -178,7 +178,7 @@ practice: avoid header/body phase inconsistency for dynamic variables).
 
 ## Conclusion
 
-**Property 1 (No Bypass) is satisfied.** The code structure guarantees that:
+**Property 1 (No Bypass) holds.** The code structure guarantees that:
 
 1. All security checks execute in `ngx_http_markdown_header_filter` BEFORE
    the streaming candidate evaluation point.
@@ -187,7 +187,7 @@ practice: avoid header/body phase inconsistency for dynamic variables).
    eligibility gate, auth policy check, and Accept negotiation.
 4. Hard-excluded types are doubly guarded: by the content-type allowlist AND
    by explicit streaming exclusion checks.
-5. Compression is handled before path selection -- unsupported formats never
+5. The module handles compression before path selection -- unsupported formats never
    reach streaming.
 
 No gaps found. No remediation needed for this property.

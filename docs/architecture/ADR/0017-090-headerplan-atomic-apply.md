@@ -10,11 +10,11 @@ Accepted (0.9.0 contract freeze — initial contract phase)
 operations and rollback support. However, several response-header mutations still
 happen **outside** HeaderPlan (in-place on `r->headers_out`), and the existing
 apply path interleaves allocation with mutation. Because NGINX pool allocation
-**cannot be rolled back**, an allocation failure mid-apply can leave headers
+**cannot roll back**, an allocation failure mid-apply can leave headers
 partially mutated — a correctness and fail-open hazard (AGENTS.md Rule 39).
 
 The current scattered-mutation map and the documented full-response-synthesis
-exceptions are recorded in the local 0.9.0 working inventory; this ADR freezes
+the working inventory records exceptions locally for 0.9.0. This ADR freezes
 the resulting contract.
 
 ## Decision
@@ -57,8 +57,8 @@ succeeds.**
 
 ### Documented exception table (NOT in-place mutation → bypass allowed)
 
-These synthesize a **complete** response (no upstream response to mutate) and are
-permitted exceptions, each justified and listed:
+These synthesize a **complete** response (no upstream response to mutate) and count
+as permitted exceptions, each justified and listed:
 
 | Path | Justification |
 |------|---------------|
@@ -72,7 +72,7 @@ Any **new** exception requires ADR justification and an entry here. New in-place
 ### Post-commit error boundary
 
 Once commit succeeds and headers are sent, a streaming post-commit error
-**cannot** be treated as pre-commit: it does not follow `markdown_error_policy`
+**cannot** count as pre-commit: it does not follow `markdown_error_policy`
 pass/fail_closed/status selection. Allowed: stop output, close the downstream
 connection, log reason code `streaming_mid_flight_error` (ADR-0018), emit
 metrics. Forbidden: pass original content, return 200 with truncated body, or
@@ -89,7 +89,7 @@ directly affect wire-level correctness:
 
 The following **post-plan operations** execute after the plan commits
 successfully. They are **pre-send best-effort with hard abort**: a failure in
-any of them returns `NGX_ERROR` before `ngx_http_send_header()` is called, so
+any of them returns `NGX_ERROR` before the module calls `ngx_http_send_header()`, so
 no partially-mutated headers reach the wire. However, they are not covered by
 the plan's rollback guarantee — a failure here leaves the already-committed
 core mutations in place (which is safe: Content-Type/Content-Encoding/old
@@ -112,7 +112,7 @@ to NGINX-specific list-push semantics. The current design keeps Rust
 plan-building pure (core wire-critical mutations only) and handles
 NGINX-lifecycle-specific header operations in C post-plan. This is a pragmatic
 0.9.0 contract; if future requirements demand full atomicity for these
-operations, they should be migrated into the Rust plan with corresponding FFI
+operations, they should migrate into the Rust plan with corresponding FFI
 expansion.
 
 ## Consequences
@@ -127,7 +127,7 @@ expansion.
 ### Negative
 
 - Prepare must over-allocate worst-case header entries up front.
-- Existing scattered mutations must be migrated into HeaderPlan.
+- Existing scattered mutations must migrate into HeaderPlan.
 - Fault-injection test surface grows.
 
 ## Alternatives Considered

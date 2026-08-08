@@ -11,7 +11,7 @@ established in [ADR-0001](0001-use-rust-for-conversion.md). As the project
 matured through v0.5.0 and v0.6.x, the boundary remained largely static: Rust
 owned HTML→Markdown conversion while C owned everything else.
 
-In v0.7.0, several new capabilities are required—Accept negotiation, conditional
+In v0.7.0, several new capabilities become required—Accept negotiation, conditional
 request handling, URL/Host validation, a decision engine, header plan
 construction, and reason-code/metrics normalization. These are all pure logic
 with no dependency on NGINX APIs, making them natural candidates for Rust
@@ -22,14 +22,14 @@ buffer hardening, output ordering) highlighted that the FFI boundary needs
 stronger contracts: explicit struct initialization helpers, CI-enforced header
 drift checks, and layout tests.
 
-The question: should new pure logic continue to be implemented in C (closer to
+The question: should new pure logic continue to implement in C (closer to
 NGINX), or should the project adopt a deliberate "Rust-first" strategy for all
 new logic that does not require NGINX API access?
 
 ## Decision
 
-In v0.7.0, the project adopts a **Rust-first** strategy: all new pure logic is
-implemented in Rust and exposed to the C module via FFI. The C side retains only
+In v0.7.0, the project adopts a **Rust-first** strategy: all new pure logic
+lives in Rust and exposes to the C module via FFI. The C side retains only
 NGINX-coupled responsibilities.
 
 ### C Side Retains
@@ -84,7 +84,7 @@ NGINX-coupled responsibilities.
 6. C must not parse Rust error text
 7. Worker request path must not contain hidden blocking operations
 8. All cross-boundary structs use `repr(C)`
-9. New FFI fields are appended to struct tail (non-breaking ABI change)
+9. New FFI fields append to struct tail (non-breaking ABI change)
 
 ## Consequences
 

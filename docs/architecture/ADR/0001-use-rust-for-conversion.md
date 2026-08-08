@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-The project requires a robust HTML-to-Markdown conversion engine that can be integrated with NGINX. The conversion logic needs to:
+The project requires a robust HTML-to-Markdown conversion engine that can integrate with NGINX. The conversion logic needs to:
 
 - Parse potentially malformed HTML safely
 - Generate consistent Markdown output
@@ -88,7 +88,7 @@ The NGINX module:
 **Pros:**
 - Language agnostic
 - Easy to scale independently
-- Can be updated without NGINX restart
+- Updates without NGINX restart
 
 **Cons:**
 - Network latency overhead (10-100ms+)

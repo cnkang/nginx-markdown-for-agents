@@ -6,11 +6,11 @@
 
 ## Context
 
-v0.5.x ships noise pruning as an opt-in Cargo feature (`prune_noise_regions`). When enabled, it removes structural HTML regions (nav, footer, aside, ad slots, cookie banners) that have no value for AI agent consumption. This typically reduces output volume by 15–60% depending on page noise ratio.
+v0.5.x ships noise pruning as an opt-in Cargo feature (`prune_noise_regions`). When enabled, it removes structural HTML regions that have no value for AI agent consumption. These include nav, footer, aside, ad slots, and cookie banners. This typically reduces output volume by 15–60% depending on page noise ratio. The pruning targets non-content regions only.
 
 Current limitations:
 1. Pruning is opt-in at compile time — operators must rebuild with `--features prune_noise_regions`
-2. No runtime configuration — selectors are hardcoded defaults
+2. No runtime configuration — selectors stay hardcoded defaults
 3. No protection mechanism — operators cannot exclude specific subtrees from pruning
 4. No empty-output fallback — if pruning removes everything, the result is an empty Markdown string
 
@@ -38,7 +38,7 @@ nav, footer, aside
 ```
 
 > **v0.6.0 scope**: Pruning matches by HTML tag name only. CSS
-> selector syntax (`.class`, `#id`, `[role="..."]`) is deferred to a
+> selector syntax (`.class`, `#id`, `[role="..."]`) defers to a
 > future release. Operators should use tag-name selectors.
 
 ### Protection Selectors
@@ -113,7 +113,7 @@ pub struct PruneConfig {
 
 ## Relationship to Other ADRs
 
-- [ADR-0007](0007-streaming-default.md): pruning applies in both streaming and full-buffer paths. In streaming, pruned subtrees are skipped at tokenizer level; in full-buffer, pruned nodes are excluded during DOM traversal.
+- [ADR-0007](0007-streaming-default.md): pruning applies in both streaming and full-buffer paths. In streaming, pruned subtrees skip at tokenizer level. In full-buffer, pruned nodes drop out during DOM traversal.
 - [ADR-0004](0004-streaming-bounded-memory-conversion.md): pruning reduces output volume, which helps streaming stay within memory budget.
 
 ## References

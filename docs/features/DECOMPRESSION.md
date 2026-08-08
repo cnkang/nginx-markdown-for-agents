@@ -1,11 +1,11 @@
 # Decompression Budget and Error Handling
 
 This page describes the bounded decompression contract in 0.9.2. The runtime
-flow is covered in [`AUTOMATIC_DECOMPRESSION.md`](AUTOMATIC_DECOMPRESSION.md).
+the runtime flow appears in [`AUTOMATIC_DECOMPRESSION.md`](AUTOMATIC_DECOMPRESSION.md).
 
 ## Configuration
 
-Decompression limits are keys of `markdown_limits`; there is no standalone
+Decompression limits are keys of `markdown_limits`. There is no standalone
 decompression-size directive in the live command registry.
 
 ```nginx
@@ -19,12 +19,12 @@ location / {
 - `decompressed_size` caps the cumulative decompressed output.
 - `decompression_ratio` caps expansion relative to compressed input.
 - `conversion_memory` remains the overall conversion working-memory cap.
-- `markdown_error_policy pass` preserves the original response; `fail_closed`
+- `markdown_error_policy pass` preserves the original response. `fail_closed`
   returns the configured error status.
 
-The limits are checked in both full-buffer and streaming paths. Gzip member
+The module checks the limits in both full-buffer and streaming paths. Gzip member
 resets do not reset the response-wide accounting, and truncated final streams
-are rejected.
+get rejected.
 
 ## Error classification
 
@@ -43,8 +43,8 @@ These failures also participate in the generated reason-code registry through
 
 ## Prometheus contract
 
-The endpoint emits Prometheus text format only. Every decompression event is
-represented by the single frozen family:
+The endpoint emits Prometheus text format only. A single frozen family
+represents every decompression event:
 
 ```text
 nginx_markdown_decompression_events_total{
@@ -54,8 +54,8 @@ nginx_markdown_decompression_events_total{
 }
 ```
 
-The `success` outcome is counted once after a decoder has completely
-finalized. Failures are counted at the error classification point, before
+The module counts the `success` outcome once after a decoder has completely
+finalized. It counts failures at the error classification point, before
 fail-open or fail-closed response handling. This makes event totals
 independent of whether the original body is ultimately delivered.
 
@@ -63,9 +63,9 @@ independent of whether the original body is ultimately delivered.
 
 1. The decoder classifies the error and records the reason.
 2. The module logs the decision and applies `markdown_error_policy`.
-3. For `pass`, the original response is delivered through the normal
-   downstream path; `NGX_AGAIN` is not counted as delivery.
-4. For `fail_closed`, the request is finalized with the configured status.
+3. For `pass`, the module delivers the original response through the normal
+   downstream path. `NGX_AGAIN` is not counted as delivery.
+4. For `fail_closed`, the module finalizes the request with the configured status.
 
 After streaming commit, the module uses post-commit safe-finish or abort
 semantics and does not attempt impossible replay of already-sent bytes.

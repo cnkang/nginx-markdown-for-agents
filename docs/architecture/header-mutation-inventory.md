@@ -7,8 +7,8 @@
 
 This document records the response-header mutation contract for the
 NGINX module: which paths route through the atomic `HeaderPlan`, and which
-are documented exceptions. Any new `r->headers_out` direct write that is
-not routed through `HeaderPlan` must be added to the Exception Table with
+count as documented exceptions. Any new `r->headers_out` direct write that is
+not routed through `HeaderPlan` must enter the Exception Table with
 justification (and, for non-trivial cases, an architecture decision
 record under `docs/architecture/ADR/`).
 
@@ -18,7 +18,7 @@ record under `docs/architecture/ADR/`).
 
 The 0.9.2 header plan provides **full coverage** of all upstream-response
 header mutations in the conversion flow. The two-phase prepare/commit
-protocol is implemented at two levels:
+the protocol implements at two levels:
 
 ### Level 1: FFI plan (Rust-built, C-applied)
 
@@ -65,12 +65,12 @@ unconditional success):
 **Nothing occurs between commit and `ngx_http_send_header`.**
 
 **Pre-commit plan failure**: If prepare fails, response headers remain in
-their original unmodified state. Rust-owned plan resources are freed. The
-`header_plan_apply_error` reason code is logged and the configured
-`markdown_error_policy` is applied while the original response is still
+their original unmodified state. The module frees Rust-owned plan resources. The
+the module logs the `header_plan_apply_error` reason code and applies the
+configured `markdown_error_policy` while the original response is still
 recoverable.
 
-**Atomicity guarantee:** either every prepared mutation is applied
+**Atomicity guarantee:** either the module applies every prepared mutation
 (commit) or none are (prepare aborted before commit). There is no partial
 mutation on any failure path. This replaces the prior 0.9.0 "pragmatic
 contract" where post-plan operations were "pre-send best-effort with hard
@@ -159,8 +159,8 @@ now routed through the two-phase prepare/commit protocol.
 
 1. **Content-Length removal** clears both the numeric field
    (`content_length_n = -1`) and the header-list entry (`hash = 0`).
-2. **Vary: Accept** is deduplicated: prepare scans existing `Vary`
-   entries (comma-split, trimmed, case-insensitive); if `Accept` is
+2. **Vary: Accept** deduplicates: prepare scans existing `Vary`
+   entries (comma-split, trimmed, case-insensitive). If `Accept` is
    already present the commit is a no-op, otherwise it appends `Accept`.
 3. All lookup/iteration filters invalidated (`hash == 0`) entries —
    already enforced by `ngx_http_markdown_plan_for_each_header_named`.

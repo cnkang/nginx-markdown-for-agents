@@ -2,16 +2,16 @@
 
 **Status**: 0.9.2 production contract
 
-The 0.9.2 streaming lifecycle is represented by the frozen Prometheus and
+The frozen Prometheus and diagnostics contracts represent the 0.9.2 streaming lifecycle
 Diagnostics contracts. The former 0.8/0.9 streaming-specific metric families
 and diagnostics sections are not emitted.
 
 ## Metrics
 
-The endpoint is enabled with `markdown_metrics` and emits Prometheus text
-format 0.0.4. The complete family catalog is maintained in
+The `markdown_metrics` directive enables the endpoint, which emits Prometheus text
+format 0.0.4. The complete family catalog lives in
 [Prometheus Metrics](../guides/prometheus-metrics.md). Streaming-specific
-observability is carried by:
+observability comes through:
 
 | Family | Labels | Meaning |
 |---|---|---|
@@ -25,7 +25,7 @@ observability is carried by:
 The renderer emits a fixed transition allowlist: `commit`, `fallback`,
 `safe_finish_start`, `abort_start`, `resume_success`, and `resume_failure`.
 The `reason` label is a fixed compile-time binding to the canonical reason
-key; it is not looked up dynamically from the registry at render time.  The
+key. It is not looked up dynamically from the registry at render time.  The
 internal C path-selection enum is not used for this family.
 
 The six series currently map to the following snapshot counters:
@@ -55,13 +55,13 @@ The counters follow these conservation rules:
 
 The diagnostics handler returns the strict Schema v1 response documented in
 [Observability Contract v1](../architecture/observability-schema-v1.md). It has
-no streaming-only top-level section. Runtime visibility is provided by the
+no streaming-only top-level section. The frozen families provide runtime visibility via
 worker-local `runtime` counters, bounded `recent_decisions` entries, and the
 optional `runtime.module_metrics` evidence counters. Those counters are read
-directly by the benchmark harness; they are not inferred from engine labels.
+directly by the benchmark harness. They are not inferred from engine labels.
 
-Only GET and HEAD are accepted. HEAD computes the complete response length but
-sends no body; other methods return 405. Native NGINX allow/deny/auth
+The endpoint accepts only GET and HEAD. HEAD computes the complete response length but
+sends no body. Other methods return 405. Native NGINX allow/deny/auth
 directives can narrow access further but cannot broaden the handler's built-in
 internal boundary.
 
@@ -69,8 +69,8 @@ internal boundary.
 
 Streaming decisions use the canonical
 `components/rust-converter/reason_registry.toml` registry. Operator-visible
-keys are lowercase snake_case; unknown numeric values map to
-`internal_unknown` and are logged as an error.
+keys are lowercase snake_case. Unknown numeric values map to
+`internal_unknown` and get logged as an error.
 
 When fallback or resume-failure events increase:
 

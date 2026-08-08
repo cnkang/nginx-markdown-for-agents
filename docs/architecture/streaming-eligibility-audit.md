@@ -1,23 +1,23 @@
 # Streaming Eligibility Audit (0.9.2)
 
 This is the current implementation audit for the frozen release contract.
-It records observable gates and their owning surfaces; internal heuristic
+It records observable gates and their owning surfaces. Internal heuristic
 thresholds are deliberately not configuration keys.
 
 ## Eligibility order
 
-The request must pass all of these gates before streaming conversion is
-selected:
+The request must pass all of these gates before the module selects streaming
+conversion:
 
 1. The request method, status, range behavior, and response content type are
    eligible for Markdown conversion.
 2. `markdown_filter` and `markdown_accept` allow conversion.
 3. `markdown_streaming` is not `off`.
-4. `markdown_cache_validation` does not require complete output before the
-   headers are committed.
+4. `markdown_cache_validation` does not require complete output before
+   the module commits headers.
 5. The response is not listed by `markdown_stream_excluded_types`.
-6. If compressed, `markdown_auto_decompress` is `on` and the encoding is
-   supported by the selected build path.
+6. If compressed, `markdown_auto_decompress` is `on` and the selected build
+   path supports the encoding.
 7. The bounded streaming buffers and `markdown_limits max_inflight` permit
    the request.
 
@@ -45,24 +45,24 @@ encoding, memory, or backpressure safety rules.
 
 Gzip and both supported deflate framings use the incremental decoder when the
 streaming gates pass. Brotli uses the incremental decoder only when the
-feature is compiled; otherwise it uses the bounded full-buffer Rust FFI path.
+the build compiles the feature. Otherwise it uses the bounded full-buffer Rust FFI path.
 Unsupported encodings pass through or follow the configured error policy.
 
 Every decoder has a terminal success or failure event. Gzip member resets do
-not reset the response-wide decompression budget, and truncated final input is
-rejected rather than treated as a successful partial response.
+not reset the response-wide decompression budget. The module rejects
+truncated final input rather than treating it as a successful partial response.
 
 ## Commit and backpressure boundary
 
-Before headers are committed, a replay or resource failure can fall back to
+Before the module commits headers, a replay or resource failure can fall back to
 the bounded full-buffer path when the error policy permits it. After commit,
-the original body cannot be replayed: the module starts safe-finish or aborts
+the original body cannot replay: the module starts safe-finish or aborts
 the response according to the terminal error path.
 
 `NGX_AGAIN` suspends delivery and preserves ownership of pending buffers. It
 does not increment delivery counters, clear terminal latches, or finalize the
-request. Delivery is recorded only after downstream accepts the terminal
-converted buffer.
+request. The module records delivery only after downstream accepts the terminal
+converted buffer. It treats `NGX_AGAIN` as a suspension, not delivery.
 
 ## Evidence surfaces
 
@@ -75,6 +75,6 @@ converted buffer.
 - Bounded resource state: `nginx_markdown_inflight_requests` and the
   `markdown_limits` configuration.
 
-The public metric registry and diagnostics schema are checked by the
+The drift gate checks the public metric registry and diagnostics schema
 release gates. This document must remain explanatory and must not introduce a
 second configuration or metric vocabulary.

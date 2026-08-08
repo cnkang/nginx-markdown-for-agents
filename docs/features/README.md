@@ -2,9 +2,9 @@
 
 This directory contains feature-level references for the NGINX module and Rust converter.
 
-These documents are for readers who already understand the high-level product behavior and want to study specific implementation areas, constraints, or safety properties.
+These documents are for readers who already understand the high-level product behavior. They want to study specific implementation areas, constraints, or safety properties.
 
-Read this section when the top-level guides answer what to configure, but you still need to understand why the implementation behaves the way it does.
+Read this section when the top-level guides answer what to configure. You still need to understand why the implementation behaves the way it does. The feature docs cover the how and why.
 
 If you need rollout steps, operator checklists, or directive syntax, go back to:
 

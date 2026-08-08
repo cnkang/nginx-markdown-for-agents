@@ -35,7 +35,7 @@ register runs **first** when a response flows through the chain.
 | Standard (compiled-in) | `proxy` → `proxy_cache` → `gunzip` → `gzip` → `brotli` (ngx_brotli) |
 | Dynamic (load_module) | `markdown_filter` (this module) |
 
-Dynamic modules are initialised after standard modules, so
+The runtime initialises dynamic modules after standard modules, so
 `markdown_filter` registers its header and body filters **after** all
 standard filters.  This means:
 
@@ -152,7 +152,7 @@ after gunzip has stripped it.
 | Brotli compresses | Markdown → Brotli bytes |
 | Client receives | `Content-Type: text/markdown; charset=utf-8`, `Content-Encoding: br` |
 
-**Key invariant:** If the Brotli filter module (`ngx_brotli`) is loaded,
+**Key invariant:** If the Brotli filter module (`ngx_brotli`) loads,
 it compresses the **converted Markdown** output.  Markdown's built-in
 decompression handles upstream Brotli regardless of whether the Brotli
 filter is present, because the Brotli filter is a **compressor** (response
