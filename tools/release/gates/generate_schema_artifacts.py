@@ -29,7 +29,8 @@ import re
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+SOURCE_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = SOURCE_ROOT
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 if str(REPO_ROOT / "tools") not in sys.path:
@@ -42,16 +43,16 @@ from lib.path_validation import (  # noqa: E402
 DEFAULT_VERSION = "0.9.2"
 
 RENDERER_PATH = (
-    REPO_ROOT
+    SOURCE_ROOT
     / "components"
     / "nginx-module"
     / "src"
     / "ngx_http_markdown_metrics_v1_renderer.h"
 )
-DIAGNOSTICS_SCHEMA_PATH = REPO_ROOT / "schemas" / "diagnostics.schema.json"
-DYNCONF_SCHEMA_PATH = REPO_ROOT / "schemas" / "dynconf.schema.json"
+DIAGNOSTICS_SCHEMA_PATH = SOURCE_ROOT / "schemas" / "diagnostics.schema.json"
+DYNCONF_SCHEMA_PATH = SOURCE_ROOT / "schemas" / "dynconf.schema.json"
 DYNCONF_RUST_SCHEMA_PATH = (
-    REPO_ROOT
+    SOURCE_ROOT
     / "components"
     / "rust-converter"
     / "src"
@@ -59,7 +60,7 @@ DYNCONF_RUST_SCHEMA_PATH = (
     / "schema.rs"
 )
 PRECEDENCE_HEADER_PATH = (
-    REPO_ROOT
+    SOURCE_ROOT
     / "components"
     / "nginx-module"
     / "src"
@@ -294,7 +295,7 @@ def generate_metrics_registry() -> dict:
         "schema_version": 1,
         "format": "prometheus_text_004",
         "generator": Path(__file__).name,
-        "source": str(RENDERER_PATH.relative_to(REPO_ROOT)),
+        "source": str(RENDERER_PATH.relative_to(SOURCE_ROOT)),
         "families": families,
     }
 
@@ -326,7 +327,7 @@ def generate_diagnostics_field_contract() -> dict:
     return {
         "schema_version": 1,
         "generator": Path(__file__).name,
-        "source": str(DIAGNOSTICS_SCHEMA_PATH.relative_to(REPO_ROOT)),
+        "source": str(DIAGNOSTICS_SCHEMA_PATH.relative_to(SOURCE_ROOT)),
         "effective_fields": effective_fields,
         "constraints": {"field_count": len(effective_fields)},
     }
@@ -358,7 +359,7 @@ def generate_dynconf_precedence_report() -> dict:
     return {
         "schema_version": 1,
         "generator": Path(__file__).name,
-        "source": str(DYNCONF_SCHEMA_PATH.relative_to(REPO_ROOT)),
+        "source": str(DYNCONF_SCHEMA_PATH.relative_to(SOURCE_ROOT)),
         "five_tier_precedence_hierarchy": precedence_hierarchy,
         "field_specific_provenance_rules": {
             "fields": {

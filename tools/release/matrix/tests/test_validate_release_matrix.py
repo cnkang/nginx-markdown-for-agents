@@ -187,7 +187,8 @@ def test_mismatched_abi_fails(
         fake_matrix_root,
         {
             "schema_version": 1,
-            "entries": [{**canonical_entry(), "abi_version": 1}],
+            "entries": [{**canonical_entry(), "abi_version": 1,
+                          "feature_manifest_digest": expected_digest()}],
         },
     )
     with pytest.raises(SystemExit, match="binding drift"):

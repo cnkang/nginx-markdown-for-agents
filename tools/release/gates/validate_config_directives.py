@@ -213,7 +213,11 @@ def check_directive_in_docs(
     if not docs:
         result.fail(check_id, "CONFIGURATION.md not found")
         return
-    if doc_heading in docs:
+    heading_pattern = (
+        rf"(?<![A-Za-z0-9_]){re.escape(doc_heading)}"
+        rf"(?![A-Za-z0-9_])"
+    )
+    if re.search(heading_pattern, docs):
         result.pass_(check_id, "documented in CONFIGURATION.md")
     else:
         result.fail(check_id, "NOT documented in CONFIGURATION.md")
@@ -311,6 +315,9 @@ def check_constant_not_in_source(
 ) -> None:
     """Verify a removed constant is not #defined in filter_module.h."""
     check_id = f"removed-constant:{constant_name}"
+    if not source:
+        result.fail(check_id, "filter_module.h not found")
+        return
     pattern = rf"#define\s+{re.escape(constant_name)}\b"
     if re.search(pattern, source):
         result.fail(
@@ -331,6 +338,9 @@ def check_conf_field_not_in_source(
     check_id = f"removed-field:{field_pattern}"
     found_in = []
     for name, content in sources.items():
+        if not content:
+            result.fail(check_id, f"source file missing: {name}")
+            return
         if re.search(field_pattern, content):
             found_in.append(name)
     if found_in:

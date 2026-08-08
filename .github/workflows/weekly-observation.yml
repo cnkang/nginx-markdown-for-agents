@@ -40,9 +40,11 @@ jobs:
         run: cargo +nightly install cargo-fuzz
 
       - name: Run weekly fuzz target
+        env:
+          FUZZ_TARGET: ${{ matrix.target }}
         run: |
           cd components/rust-converter
-          cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=3600
+          cargo +nightly fuzz run "${FUZZ_TARGET}" -- -max_total_time=3600
 
       - name: Upload fuzz artifacts
         if: always()

@@ -221,6 +221,7 @@ jobs:
             pcre2-devel \
             zlib-devel \
             brotli-devel \
+            pkg-config \
             openssl-devel \
             tar \
             gzip \
