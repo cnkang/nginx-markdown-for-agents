@@ -138,6 +138,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 60 | e2e-runner | E2E config directive consistency: locations with `markdown_cache_validation full` must have explicit `markdown_streaming` (no implicit auto + blocking directive unless intentionally testing runtime-block); detect_e2e_streaming_config.py advisory gate (block-aware, fail-closed, deterministic location scanner) |
 | 61 | release-integrity | Performance evidence provenance invariant: baseline_policy carries policy provenance; module_benchmark carries environment/identity; scenarios carry evidence; optional scenario_sources receive environment checks; fail closed on missing fields or mixed environments |
 | 62 | release-integrity | Release matrix key normalization invariant: all matrix consumers (loader, validation, sort, diff) must resolve aliased keys through one normalization entry point with one canonical key set, so `nginx`/`nginx_version` and `os`/`os_type`/`libc` never disagree |
+| 63 | docs-tooling | Non-native-reader writing style (STE-inspired): changed files zero new warnings (`make docs-style-check-regression`); repository warning budget must not grow (`make docs-style-check-baseline`); preserve meaning when rewriting passive voice (keep subject/object direction and explicit agent, never drop must/never/only qualifiers) |
 | FUZZ-001..007 | fuzz-infrastructure | Fuzz target determinism, corpus/repo tracking, ClusterFuzzLite workflows, guided fuzz smoke, batch/prune pairing, and gitignore hygiene (see fuzz-infrastructure.md) |
 
 ## Required Agent Workflow
@@ -580,6 +581,7 @@ remediation:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Rule 63 (docs-tooling): STE-inspired non-native-reader writing style gate — `check_writing_style.py` gains `--changed` (changed files must introduce zero new warnings) and `--baseline` (total warning budget must not grow); fixed LATIN_RE so e.g./i.e./etc. are actually detected (baseline now 295 incl. 103 Latin-abbreviation backlog); both gates wired into `make docs-check` via docs-style-check-regression/baseline targets; Rule 63 index row + tests added |
 | 0.9.2 | 2026-08-07 | Kang | Pre-freeze review closeout: indexed public-surface/schema/reason-codegen gates and release-gates-check-092 in verification list; relabeled 5 local-only detectors from "CI gate" to "harness gate (make harness-security-checks)"; added fuzz-infrastructure (FUZZ-001..007) index row; aligned Document Updates log with harness README |
 | 0.9.2 | 2026-08-06 | Kang | Added five generic pre-freeze release gates: release-candidate-evidence-check, artifact-registry-check, release-evidence-manifest-check, test-rust-fuzz-qualification, test-e2e-rust-soak (validators under tools/release/gates/, fixtures under tests/fixtures/release/, FIXTURE=... regression mode, Property 27 official-artifact feature consistency test) |
 | 0.9.1 | 2026-07-29 | Kang | v0.9.1 release audit round 2: release-gate validation, detector regression fixtures, and release-integrity harness rules; AGENTS.md + harness README index synced |

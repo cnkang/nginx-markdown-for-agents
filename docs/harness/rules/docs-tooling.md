@@ -1,6 +1,6 @@
 ---
 domain: docs-tooling
-rules: [9, 49]
+rules: [9, 49, 63]
 paths:
   - "docs/**"
   - "tools/**"
@@ -63,3 +63,42 @@ Required:
 - New dependencies must enter with correct license type, copyright notice,
   and license text. Removed dependencies must delete.
 - Verify with: `diff <(grep '^version =' Cargo.lock) <(grep '[0-9]\+\.[0-9]\+' THIRD-PARTY-NOTICES)`
+
+### 63. Non-native-reader writing style (STE-inspired) for maintained docs
+Historical issues: writing-pass semantic drift found in the docs/kb-pilot
+review (`cae5450d`): passive-to-active rewrites that inverted meaning
+(budget exceeds, tail data must reject), dropped subjects, and removed
+requirements. The style gate exists to keep maintained docs readable by
+translators, NMT engines, and LLMs (see `docs/development/WRITING_GUIDE.md`).
+
+Required:
+- Maintained Markdown (root docs + `docs/`, excluding `docs/archive/` and
+  gitignored paths) must follow the STE-inspired prose rules in
+  `docs/development/WRITING_GUIDE.md`: sentences ≤ 25 words (descriptive) /
+  ≤ 20 words (instructions), active voice, no Latin abbreviations
+  (`e.g.`/`i.e.`/`etc.`), no contractions, no multi-word noun chains
+  (≥ 4 capitalized words), no semicolon chains in prose.
+- Files changed in the current changeset must introduce **zero** new
+  warnings: `make docs-style-check-regression` (or
+  `python3 tools/docs/check_writing_style.py --changed`) must pass.
+  A new warning in a changed file fails the gate.
+- The repository-wide warning budget must not grow:
+  `make docs-style-check-baseline` (or
+  `python3 tools/docs/check_writing_style.py --baseline`) fails when the
+  total exceeds the retained budget in `DEFAULT_BASELINE`
+  (`tools/docs/check_writing_style.py`). Lower the constant only when a
+  changeset reduces warnings. Never raise it to absorb new violations.
+- Preserve meaning when rewriting passive voice to active: keep the
+  original subject/object direction (`X is exceeded` → `the conversion
+  exceeds X`, never `X exceeds`), keep the agent explicit (`the module
+  blocks streaming`, never `streaming blocks`), and never drop a
+  requirement or qualifier (must/never/only) during simplification.
+- Verification commands live in the Makefile and run inside `make docs-check`
+  (the `docs-tooling` verification family): `make docs-style-check`
+  (advisory), `make docs-style-check-regression` (changed files, blocking),
+  `make docs-style-check-baseline` (budget, blocking).
+- The scan excludes code blocks, fenced blocks, tables, headings, inline
+  code, links, and HTML comments. Rule documents, release-gate
+  templates, and MUST-specification clauses may retain rule-format long
+  sentences and semicolon-separated list items where the structure is
+  intrinsic to the document type.
