@@ -51,19 +51,18 @@ def _split_row(line: str) -> list[str] | None:
     return cells
 
 
-def _parse_table(text: str, heading_pattern: str) -> tuple[list[str], list[dict[str, str]]]:
-    lines = text.splitlines()
+def _find_table_header(
+    lines: list[str], heading_pattern: str
+) -> tuple[list[str], int]:
     heading = re.compile(heading_pattern)
     start = next((i for i, line in enumerate(lines) if heading.match(line)), None)
     if start is None:
         raise ValueError(f"missing table heading matching {heading_pattern!r}")
 
-    header_index = None
-    for index in range(start + 1, len(lines)):
-        row = _split_row(lines[index])
-        if row is not None:
-            header_index = index
-            break
+    header_index = next(
+        (i for i in range(start + 1, len(lines)) if _split_row(lines[i]) is not None),
+        None,
+    )
     if header_index is None:
         raise ValueError(f"missing table after {heading_pattern!r}")
     headers = [cell.strip().lower() for cell in _split_row(lines[header_index]) or []]
@@ -74,7 +73,12 @@ def _parse_table(text: str, heading_pattern: str) -> tuple[list[str], list[dict[
     separator = _split_row(lines[separator_index]) if separator_index < len(lines) else None
     if separator is None or not all(re.fullmatch(r":?-{3,}:?", cell) for cell in separator):
         raise ValueError(f"missing separator after table {heading_pattern!r}")
+    return headers, separator_index
 
+
+def _parse_table_rows(
+    lines: list[str], separator_index: int, headers: list[str], heading_pattern: str
+) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
     for line in lines[separator_index + 1 :]:
         if line.lstrip().startswith("#"):
@@ -92,7 +96,13 @@ def _parse_table(text: str, heading_pattern: str) -> tuple[list[str], list[dict[
                 f"expected {len(headers)}: {line}"
             )
         rows.append(dict(zip(headers, cells)))
-    return headers, rows
+    return rows
+
+
+def _parse_table(text: str, heading_pattern: str) -> tuple[list[str], list[dict[str, str]]]:
+    lines = text.splitlines()
+    headers, separator_index = _find_table_header(lines, heading_pattern)
+    return headers, _parse_table_rows(lines, separator_index, headers, heading_pattern)
 
 
 def _clean(value: object) -> str:
@@ -135,19 +145,22 @@ def _current_limit_keys() -> list[str]:
     return values
 
 
-def validate_contract(
-    inventory: dict, contract_text: str, readme_text: str
-) -> list[str]:
-    errors: list[str] = []
-    try:
-        _, directive_rows = _parse_table(contract_text, r"^## Active Directives \(")
-        _, dynconf_rows = _parse_table(contract_text, r"^## Dynconf Keys \(")
-        _, metric_rows = _parse_table(contract_text, r"^## Metric Families \(")
-        _, reason_rows = _parse_table(contract_text, r"^## Reason Codes \(")
-        _, limit_rows = _parse_table(contract_text, r"^## markdown_limits Keys$")
-    except ValueError as exc:
-        return [str(exc)]
+def _parse_contract_tables(
+    contract_text: str,
+) -> tuple[list[dict[str, str]], ...]:
+    patterns = (
+        r"^## Active Directives \(",
+        r"^## Dynconf Keys \(",
+        r"^## Metric Families \(",
+        r"^## Reason Codes \(",
+        r"^## markdown_limits Keys$",
+    )
+    return tuple(_parse_table(contract_text, pattern)[1] for pattern in patterns)
 
+
+def _validate_directives(
+    errors: list[str], inventory: dict, directive_rows: list[dict[str, str]]
+) -> None:
     expected_directives = {
         item["name"]: {
             "syntax": _clean(item["syntax"]),
@@ -177,6 +190,13 @@ def validate_contract(
             f"{inventory['directive_count']}"
         )
 
+
+def _validate_dynconf(
+    errors: list[str],
+    inventory: dict,
+    dynconf_rows: list[dict[str, str]],
+    contract_text: str,
+) -> None:
     expected_dynconf = {
         item["name"]: {
             "type": _clean(item["type"]),
@@ -227,6 +247,9 @@ def validate_contract(
         re.I | re.S,
     ):
         errors.append("dynconf: contract must describe five runtime-mutable keys plus schema metadata")
+
+
+def _validate_readme(errors: list[str], readme_text: str) -> None:
     if README_FROZEN_SECTION_RE.search(readme_text) or README_FROZEN_ROW_RE.search(
         readme_text
     ):
@@ -237,6 +260,10 @@ def validate_contract(
         if required_reference not in readme_text:
             errors.append(f"README must reference {required_reference}")
 
+
+def _validate_metrics(
+    errors: list[str], inventory: dict, metric_rows: list[dict[str, str]]
+) -> None:
     expected_metrics = {
         item["name"]: {
             "type": _clean(item["type"]),
@@ -253,8 +280,21 @@ def validate_contract(
         }
         for row in metric_rows
     }
-    _compare_maps(errors, "metrics", expected_metrics, actual_metrics, ("type", "labels", "cardinality"))
+    _compare_maps(
+        errors,
+        "metrics",
+        expected_metrics,
+        actual_metrics,
+        ("type", "labels", "cardinality"),
+    )
 
+
+def _validate_reasons_and_limits(
+    errors: list[str],
+    inventory: dict,
+    reason_rows: list[dict[str, str]],
+    limit_rows: list[dict[str, str]],
+) -> None:
     expected_reasons = {
         str(item["discriminant"]): {
             "string": _clean(item["string"]),
@@ -269,11 +309,46 @@ def validate_contract(
         }
         for row in reason_rows
     }
-    _compare_maps(errors, "reason codes", expected_reasons, actual_reasons, ("string", "metric key"))
+    _compare_maps(
+        errors,
+        "reason codes",
+        expected_reasons,
+        actual_reasons,
+        ("string", "metric key"),
+    )
 
     expected_limits = {key: {} for key in _current_limit_keys()}
     actual_limits = {row["key"].strip("`"): {} for row in limit_rows}
     _compare_maps(errors, "markdown_limits", expected_limits, actual_limits, ())
+
+
+def _validate_ffi(errors: list[str], inventory: dict, contract_text: str) -> None:
+    _validate_ffi(errors, inventory, contract_text)
+
+
+def validate_contract(
+    inventory: dict, contract_text: str, readme_text: str
+) -> list[str]:
+    errors: list[str] = []
+    try:
+        (
+            directive_rows,
+            dynconf_rows,
+            metric_rows,
+            reason_rows,
+            limit_rows,
+        ) = _parse_contract_tables(contract_text)
+    except ValueError as exc:
+        return [str(exc)]
+
+    _validate_directives(errors, inventory, directive_rows)
+
+    _validate_dynconf(errors, inventory, dynconf_rows, contract_text)
+    _validate_readme(errors, readme_text)
+
+    _validate_metrics(errors, inventory, metric_rows)
+
+    _validate_reasons_and_limits(errors, inventory, reason_rows, limit_rows)
 
     ffi_count = len(inventory["ffi_exports"])
     if not re.search(

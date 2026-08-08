@@ -559,29 +559,52 @@ def build_corpus(runtime_dir: pathlib.Path, manifest: dict) -> dict:
     return corpus
 
 
+def _read_master_pid(pid_file: pathlib.Path) -> int | None:
+    """Read a valid NGINX master PID, or return None while it starts."""
+    if not pid_file.is_file():
+        return None
+    try:
+        return int(pid_file.read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _find_worker_child(ps_output: str, master_pid: int) -> int:
+    """Find the first process whose parent is the NGINX master."""
+    for line in ps_output.splitlines():
+        fields = line.split(None, 2)
+        if len(fields) == 3 and fields[1] == str(master_pid):
+            return int(fields[0])
+    return -1
+
+
+def _query_worker_pid(master_pid: int) -> int:
+    """Query the process table for a worker of the supplied master PID."""
+    try:
+        ps = subprocess.run(
+            ["ps", "-axo", "pid=,ppid=,comm="],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return -1
+    if ps.returncode != 0:
+        return -1
+    return _find_worker_child(ps.stdout, master_pid)
+
+
 def find_worker_pid(runtime_dir: pathlib.Path) -> int:
+    """Wait briefly for the NGINX master and return one worker PID."""
     pid_file = runtime_dir / "nginx.pid"
     deadline = time.time() + 15
     while time.time() < deadline:
-        if pid_file.is_file():
-            try:
-                master_pid = int(pid_file.read_text().strip())
-                ps = subprocess.run(
-                    ["ps", "-axo", "pid=,ppid=,comm="],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=10,
-                )
-                if ps.returncode == 0:
-                    for line in ps.stdout.splitlines():
-                        fields = line.split(None, 2)
-                        if len(fields) == 3 and fields[1] == str(master_pid):
-                            return int(fields[0])
-            except ValueError:
-                pass
-            except (OSError, subprocess.SubprocessError):
-                pass
+        master_pid = _read_master_pid(pid_file)
+        if master_pid is not None:
+            worker_pid = _query_worker_pid(master_pid)
+            if worker_pid > 0:
+                return worker_pid
         time.sleep(0.5)
     return -1
 
