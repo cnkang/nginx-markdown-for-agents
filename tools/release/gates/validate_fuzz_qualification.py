@@ -31,6 +31,7 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -276,9 +277,12 @@ def validate_corpus_seeds(data: dict, expected_sha: str,
 
 def _cargo_fuzz_available() -> bool:
     """Return whether the cargo +nightly toolchain can be invoked."""
+    cargo = shutil.which("cargo")
+    if cargo is None:
+        return False
     try:
         result = subprocess.run(
-            ["cargo", "+nightly", "--version"],
+            [cargo, "+nightly", "--version"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             timeout=30, check=False)
     except (OSError, subprocess.SubprocessError):
@@ -288,9 +292,13 @@ def _cargo_fuzz_available() -> bool:
 
 def _invoke_fuzz(target: str, flags: list[str], timeout: int) -> dict:
     """Run one cargo fuzz invocation, returning status and captured output."""
+    cargo = shutil.which("cargo")
+    if cargo is None:
+        return {"returncode": -1, "stdout": "",
+                "stderr": "spawn failed: cargo not found"}
     validated_target = validate_filename_strict(target, purpose=FUZZ_TARGET_LABEL)
     command = [
-        "cargo", "+nightly", "fuzz", "run", validated_target, "--", *flags
+        cargo, "+nightly", "fuzz", "run", validated_target, "--", *flags
     ]
     started = time.monotonic()
     try:
@@ -337,7 +345,8 @@ def _classify_finding(finding: str) -> tuple[int, int]:
     """Return (crashes, sanitizer_findings) counts for a failure finding."""
     if not finding:
         return 0, 0
-    if "AddressSanitizer" in finding:
+    if any(marker in finding for marker in (
+            "AddressSanitizer", "UndefinedBehaviorSanitizer", "runtime error:")):
         return 0, 1
     return 1, 0
 

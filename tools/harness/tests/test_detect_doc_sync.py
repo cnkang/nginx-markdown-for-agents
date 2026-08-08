@@ -56,6 +56,11 @@ ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     )
     _write(
         root,
+        detector.DIRECTIVE_NAMES_PATH,
+        '#define NGX_HTTP_MARKDOWN_DIRECTIVE_STREAMING "markdown_streaming"\n',
+    )
+    _write(
+        root,
         detector.CHART_TEMPLATE_PATH,
         "markdown_streaming {{ .Values.markdown.streaming.mode }};\n",
     )

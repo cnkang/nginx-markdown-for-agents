@@ -243,6 +243,19 @@ def _extract_family_labels(content: str, family: str) -> list[dict]:
 
     # Enforce the closed allowlist for the streaming transition label.
     if family == "nginx_markdown_streaming_events_total":
+        transition = next(
+            (label for label in labels if label["name"] == "transition"),
+            None,
+        )
+        if transition is None:
+            raise ValueError(
+                "streaming events renderer has no transition label")
+        observed = set(transition["values"])
+        expected = set(STREAMING_TRANSITION_VALUES)
+        if observed != expected:
+            raise ValueError(
+                "streaming transition values drift: "
+                f"observed={sorted(observed)!r}, expected={sorted(expected)!r}")
         for label in labels:
             if label["name"] == "transition":
                 label["values"] = list(STREAMING_TRANSITION_VALUES)

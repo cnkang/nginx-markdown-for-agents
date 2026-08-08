@@ -16,6 +16,7 @@ Exit codes:
 
 import json
 import re
+import tomllib
 import sys
 from pathlib import Path
 
@@ -52,12 +53,16 @@ def check_version_consistency(repo: Path) -> dict:
     if not cargo_toml.exists():
         mismatches.append("Cargo.toml: file not found")
     else:
-        content = cargo_toml.read_text()
-        m = re.search(r'^version\s*=\s*"([^"]+)"', content, re.MULTILINE)
-        if m and m.group(1) != EXPECTED_VERSION:
-            mismatches.append(f"Cargo.toml: {m.group(1)}")
-        elif not m:
-            mismatches.append("Cargo.toml: version not found")
+        try:
+            cargo_data = tomllib.loads(cargo_toml.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+            mismatches.append(f"Cargo.toml: invalid TOML ({exc})")
+        else:
+            package = cargo_data.get("package")
+            version = package.get("version") if isinstance(package, dict) else None
+            if version != EXPECTED_VERSION:
+                mismatches.append(
+                    f"Cargo.toml: {version if version is not None else 'version not found'}")
 
     changelog = sources[CHANGELOG_FILENAME]
     if not changelog.exists():
