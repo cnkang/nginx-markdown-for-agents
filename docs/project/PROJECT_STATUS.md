@@ -723,7 +723,7 @@ See `examples/docker/` for Docker build examples.
 ## Summary
 
 **NGINX Markdown for Agents** is on the 0.9.x release line (latest patch:
-0.9.1). The project provides
+0.9.2). The project provides
 HTML-to-Markdown conversion through NGINX content negotiation with a
 streaming-default conversion model, with bounded-memory streaming as the
 default path and full-buffer conversion as the fallback. Version 0.8.0
@@ -740,7 +740,7 @@ includes streaming observability (metrics and tracing), streaming security
 enforcement (policy validation and alerts), streaming configuration directives, Prometheus-compatible
 metrics, decision reason codes, rollout and rollback guides, parity and
 evidence workflows for streaming rollout safety, dynamic configuration
-hot-reload, OpenTelemetry tracing, per-path metrics, OS package distribution,
+hot-reload, OS package distribution,
 release automation, performance baseline gating, runtime validation reuse,
 fuzzing workflows, and shared metrics aggregation for observability.
 
@@ -768,6 +768,7 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Fixed summary release line to 0.9.2; removed OTel and per-path metrics from current capabilities |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.8.3 | 2026-06-26 | Kang | 0.8.3 closeout: streaming state machine fixes, ExitMany batch unwind, decompression buffer memory safety, snapshot capacity, FFI Box::into_raw fix, full release gate validation |
 | 0.8.2 | 2026-06-23 | Kang | 0.8.2 release: streaming decompression hardening, implied-closure correctness, FFI panic safety, decompression budget enforcement, security scan scoping, release-line documentation closeout |
