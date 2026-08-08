@@ -220,38 +220,82 @@ ngx_http_markdown_parse_encoding_chain_ffi(const ngx_http_request_t *r,
 {
     FFIEncodingChainResult   result;
     u_char                   classification;
+    ngx_uint_t               layer_capacity;
 
     (void) r;
     ngx_memzero(&result, sizeof(result));
+
+    if (ctx == NULL || combined == NULL
+        || (combined->len > 0 && combined->data == NULL))
+    {
+        if (ctx != NULL) {
+            ctx->decompression.chain_parsed = 1;
+            ctx->decompression.layer_count = 0;
+            ctx->decompression.needed = 0;
+            ctx->decompression.done = 0;
+            ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_NONE;
+            ngx_memzero(ctx->decompression.layers,
+                        sizeof(ctx->decompression.layers));
+        }
+        return DECOMP_CATEGORY_INVALID_ARGS;
+    }
 
     classification = markdown_parse_encoding_chain(
         (const uint8_t *) combined->data, combined->len, &result);
 
     ctx->decompression.chain_parsed = 1;
-    ctx->decompression.layer_count = result.layer_count;
-    ngx_memcpy(ctx->decompression.layers, result.layers,
-               sizeof(ctx->decompression.layers));
 
-    if (classification == ENCODING_CHAIN_VALID) {
-        if (result.layer_count == 0) {
-            return ENCODING_CHAIN_VALID;
-        }
-        /* Map the first layer to the legacy type enum for routing
-         * compatibility (single-layer streaming path). */
-        switch (result.layers[0]) {
-        case 0:
-            ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_GZIP;
-            break;
-        case 1:
-            ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE;
-            break;
-        case 2:
-            ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI;
-            break;
-        default:
-            ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN;
-            break;
-        }
+    if (classification != ENCODING_CHAIN_VALID) {
+        ctx->decompression.layer_count = 0;
+        ctx->decompression.needed = 0;
+        ctx->decompression.done = 0;
+        ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_NONE;
+        ngx_memzero(ctx->decompression.layers,
+                    sizeof(ctx->decompression.layers));
+        return classification;
+    }
+
+    layer_capacity = sizeof(ctx->decompression.layers)
+                     / sizeof(ctx->decompression.layers[0]);
+    if (result.layer_count > layer_capacity) {
+        ctx->decompression.layer_count = 0;
+        ctx->decompression.needed = 0;
+        ctx->decompression.done = 0;
+        ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_NONE;
+        ngx_memzero(ctx->decompression.layers,
+                    sizeof(ctx->decompression.layers));
+        return DECOMP_CATEGORY_INVALID_ARGS;
+    }
+
+    ctx->decompression.layer_count = result.layer_count;
+    ngx_memzero(ctx->decompression.layers,
+                sizeof(ctx->decompression.layers));
+    if (result.layer_count > 0) {
+        ngx_memcpy(ctx->decompression.layers, result.layers,
+                   result.layer_count
+                   * sizeof(ctx->decompression.layers[0]));
+    }
+
+    if (result.layer_count == 0) {
+        ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_NONE;
+        return ENCODING_CHAIN_VALID;
+    }
+
+    /* Map the first layer to the legacy type enum for routing
+     * compatibility (single-layer streaming path). */
+    switch (result.layers[0]) {
+    case 0:
+        ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_GZIP;
+        break;
+    case 1:
+        ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE;
+        break;
+    case 2:
+        ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI;
+        break;
+    default:
+        ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN;
+        break;
     }
 
     return classification;

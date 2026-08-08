@@ -744,16 +744,17 @@ fn validate_port(port: &str) -> Option<()> {
 /// entire forwarded set; `X-Forwarded-*` is never retried.
 fn decide_from_forwarded(input: &BaseUrlInput, trusted: &[Cidr]) -> BaseUrlDecision {
     let raw = input.forwarded.unwrap_or_default();
-    let Some(elements) = parse_forwarded_elements(raw) else {
+    let Some(mut elements) = parse_forwarded_elements(raw) else {
         return discard_forwarded_set(input, BaseUrlReason::ForwardedMalformed);
     };
 
     /* Validate every element's values; any failure discards the set. */
-    for element in &elements {
-        if let Some(for_addr) = &element.for_addr
-            && validate_forwarded_addr(for_addr).is_none()
-        {
-            return discard_forwarded_set(input, BaseUrlReason::ForwardedInvalidValue);
+    for element in &mut elements {
+        if let Some(for_addr) = &element.for_addr {
+            let Some(normalized) = validate_forwarded_addr(for_addr) else {
+                return discard_forwarded_set(input, BaseUrlReason::ForwardedInvalidValue);
+            };
+            element.for_addr = Some(normalized);
         }
         if let Some(proto) = &element.proto
             && validate_proto(proto).is_none()

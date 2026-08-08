@@ -914,9 +914,9 @@ test_default_values_property(void)
     TEST_ASSERT(child->routing.content_types == NULL,
         "markdown_content_types default should be NULL");
 
-    /* markdown_streaming: default off (via stream merge) */
-    TEST_ASSERT(child->stream.policy == NGX_HTTP_MARKDOWN_STREAMING_OFF,
-        "markdown_streaming default should be off");
+    /* markdown_streaming: default auto (via stream merge) */
+    TEST_ASSERT(child->stream.policy == NGX_HTTP_MARKDOWN_STREAMING_AUTO,
+        "markdown_streaming default should be auto");
 
     /* markdown_stream_excluded_types: default NULL */
     TEST_ASSERT(child->stream.excluded_types == NULL,

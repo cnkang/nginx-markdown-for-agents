@@ -103,6 +103,15 @@ impl DynconfWatcher {
         }
     }
 
+    fn assert_lkg_consistent(&self) {
+        if let (Some(raw), Some(result)) = (&self.lkg_raw_bytes, &self.lkg_result) {
+            assert_eq!(result.source_digest, compute_source_digest(raw));
+            assert_eq!(self.source_digest.as_ref(), Some(&result.source_digest));
+            assert_eq!(self.active_digest.as_ref(), Some(&result.active_digest));
+            assert_eq!(self.lkg_digest.as_ref(), Some(&result.active_digest));
+        }
+    }
+
     /// Process a file event through the state machine.
     /// Returns the new state after the transition.
     fn process_event(&mut self, event: &FileEvent) -> DynconfState {
@@ -125,6 +134,7 @@ impl DynconfWatcher {
                 self.last_error = None;
                 self.lkg_raw_bytes = Some(raw_bytes.clone());
                 self.lkg_result = Some(result);
+                self.assert_lkg_consistent();
                 DynconfState::Active
             }
 
@@ -151,6 +161,7 @@ impl DynconfWatcher {
                 self.last_error = None;
                 self.lkg_raw_bytes = Some(raw_bytes.clone());
                 self.lkg_result = Some(result);
+                self.assert_lkg_consistent();
                 DynconfState::Active
             }
 
@@ -180,6 +191,7 @@ impl DynconfWatcher {
                 self.last_error = None;
                 self.lkg_raw_bytes = Some(raw_bytes.clone());
                 self.lkg_result = Some(result);
+                self.assert_lkg_consistent();
                 DynconfState::Active
             }
 
@@ -212,6 +224,7 @@ impl DynconfWatcher {
                 self.last_error = None;
                 self.lkg_raw_bytes = Some(raw_bytes.clone());
                 self.lkg_result = Some(result);
+                self.assert_lkg_consistent();
                 DynconfState::Active
             }
 

@@ -9,15 +9,11 @@
 
 #include "test_common.h"
 
-#define OUTPUT_PROMETHEUS 2
+typedef uintptr_t ngx_uint_t;
 
-/* Mirrors ngx_http_markdown_metrics_select_format(). */
-static int
-select_format(const char *accept)
-{
-    (void) accept;
-    return OUTPUT_PROMETHEUS;
-}
+#include "../../src/ngx_http_markdown_metrics_format.h"
+
+#define OUTPUT_PROMETHEUS NGX_HTTP_MARKDOWN_METRICS_OUTPUT_PROMETHEUS
 
 static void
 test_all_accept_values_select_prometheus(void)
@@ -37,7 +33,9 @@ test_all_accept_values_select_prometheus(void)
     TEST_SUBSECTION("all Accept values select Prometheus v1");
 
     for (i = 0; i < sizeof(accept_values) / sizeof(accept_values[0]); i++) {
-        TEST_ASSERT(select_format(accept_values[i]) == OUTPUT_PROMETHEUS,
+        (void) accept_values[i];
+        TEST_ASSERT(ngx_http_markdown_metrics_select_format(NULL)
+                    == OUTPUT_PROMETHEUS,
                     "metrics endpoint must remain Prometheus-only");
     }
 

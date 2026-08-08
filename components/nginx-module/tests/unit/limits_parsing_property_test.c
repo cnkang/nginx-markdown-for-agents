@@ -744,61 +744,56 @@ test_property1b_duplicate_keys_rejected(void)
 {
     ngx_http_markdown_conf_t mcf;
     char *rc;
-    static u_char arg1[] = "conversion_timeout=5s";
-    static u_char arg2[] = "conversion_timeout=10s";
-    static u_char arg3[] = "parser_timeout=2s";
-    static u_char arg4[] = "parser_timeout=3s";
-    static u_char arg5[] = "conversion_memory=128m";
-    static u_char arg6[] = "conversion_memory=256m";
-    static u_char arg7[] = "decompression_ratio=50";
-    static u_char arg8[] = "decompression_ratio=100";
+    static u_char conversion_timeout_a[] = "conversion_timeout=5s";
+    static u_char conversion_timeout_b[] = "conversion_timeout=10s";
+    static u_char parser_timeout_a[] = "parser_timeout=2s";
+    static u_char parser_timeout_b[] = "parser_timeout=3s";
+    static u_char conversion_memory_a[] = "conversion_memory=128m";
+    static u_char conversion_memory_b[] = "conversion_memory=256m";
+    static u_char parser_memory_a[] = "parser_memory=128m";
+    static u_char parser_memory_b[] = "parser_memory=256m";
+    static u_char streaming_buffer_a[] = "streaming_buffer=128k";
+    static u_char streaming_buffer_b[] = "streaming_buffer=256k";
+    static u_char decompressed_size_a[] = "decompressed_size=1m";
+    static u_char decompressed_size_b[] = "decompressed_size=2m";
+    static u_char decompression_ratio_a[] = "decompression_ratio=50";
+    static u_char decompression_ratio_b[] = "decompression_ratio=100";
+    static u_char max_inflight_a[] = "max_inflight=10";
+    static u_char max_inflight_b[] = "max_inflight=20";
+
+#define ASSERT_DUPLICATE(first, second, label) \
+    do { \
+        init_limits_unset(&mcf); \
+        setup_conf_context(3); \
+        g_args[1].data = (u_char *) (first); \
+        g_args[1].len = sizeof(first) - 1; \
+        g_args[2].data = (u_char *) (second); \
+        g_args[2].len = sizeof(second) - 1; \
+        rc = ngx_http_markdown_limits(&g_cf, &g_cmd, &mcf); \
+        TEST_ASSERT(rc != NGX_CONF_OK, label); \
+    } while (0)
 
     TEST_SUBSECTION(
         "Property 1b: Duplicate keys are rejected");
 
-    /* Test duplicate conversion_timeout */
-    init_limits_unset(&mcf);
-    setup_conf_context(3);
-    g_args[1].data = arg1;
-    g_args[1].len = sizeof(arg1) - 1;
-    g_args[2].data = arg2;
-    g_args[2].len = sizeof(arg2) - 1;
-    rc = ngx_http_markdown_limits(&g_cf, &g_cmd, &mcf);
-    TEST_ASSERT(rc != NGX_CONF_OK,
+    ASSERT_DUPLICATE(conversion_timeout_a, conversion_timeout_b,
         "duplicate conversion_timeout must be rejected");
-
-    /* Test duplicate parser_timeout */
-    init_limits_unset(&mcf);
-    setup_conf_context(3);
-    g_args[1].data = arg3;
-    g_args[1].len = sizeof(arg3) - 1;
-    g_args[2].data = arg4;
-    g_args[2].len = sizeof(arg4) - 1;
-    rc = ngx_http_markdown_limits(&g_cf, &g_cmd, &mcf);
-    TEST_ASSERT(rc != NGX_CONF_OK,
+    ASSERT_DUPLICATE(parser_timeout_a, parser_timeout_b,
         "duplicate parser_timeout must be rejected");
-
-    /* Test duplicate conversion_memory */
-    init_limits_unset(&mcf);
-    setup_conf_context(3);
-    g_args[1].data = arg5;
-    g_args[1].len = sizeof(arg5) - 1;
-    g_args[2].data = arg6;
-    g_args[2].len = sizeof(arg6) - 1;
-    rc = ngx_http_markdown_limits(&g_cf, &g_cmd, &mcf);
-    TEST_ASSERT(rc != NGX_CONF_OK,
+    ASSERT_DUPLICATE(conversion_memory_a, conversion_memory_b,
         "duplicate conversion_memory must be rejected");
-
-    /* Test duplicate decompression_ratio */
-    init_limits_unset(&mcf);
-    setup_conf_context(3);
-    g_args[1].data = arg7;
-    g_args[1].len = sizeof(arg7) - 1;
-    g_args[2].data = arg8;
-    g_args[2].len = sizeof(arg8) - 1;
-    rc = ngx_http_markdown_limits(&g_cf, &g_cmd, &mcf);
-    TEST_ASSERT(rc != NGX_CONF_OK,
+    ASSERT_DUPLICATE(parser_memory_a, parser_memory_b,
+        "duplicate parser_memory must be rejected");
+    ASSERT_DUPLICATE(streaming_buffer_a, streaming_buffer_b,
+        "duplicate streaming_buffer must be rejected");
+    ASSERT_DUPLICATE(decompressed_size_a, decompressed_size_b,
+        "duplicate decompressed_size must be rejected");
+    ASSERT_DUPLICATE(decompression_ratio_a, decompression_ratio_b,
         "duplicate decompression_ratio must be rejected");
+    ASSERT_DUPLICATE(max_inflight_a, max_inflight_b,
+        "duplicate max_inflight must be rejected");
+
+#undef ASSERT_DUPLICATE
 
     TEST_PASS("Property 1b: all duplicate key cases rejected");
 }

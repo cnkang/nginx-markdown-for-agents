@@ -1,6 +1,8 @@
 #ifndef NGX_HTTP_MARKDOWN_CONFIG_DIRECTIVES_IMPL_H
 #define NGX_HTTP_MARKDOWN_CONFIG_DIRECTIVES_IMPL_H
 
+#include "ngx_http_markdown_directive_names.h"
+
 /*
  * Directive registry table.
  *
@@ -59,7 +61,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   }
      */
     {
-        ngx_string("markdown_filter"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_FILTER),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_http_markdown_filter,
         NGX_HTTP_LOC_CONF_OFFSET,
@@ -86,7 +88,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   markdown_limits conversion_timeout=30s conversion_memory=64m;
      */
     {
-        ngx_string("markdown_limits"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_LIMITS),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE,
         ngx_http_markdown_limits,
         NGX_HTTP_LOC_CONF_OFFSET,
@@ -111,7 +113,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   markdown_error_policy status 503;
      */
     {
-        ngx_string("markdown_error_policy"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_ERROR_POLICY),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE12,
         ngx_http_markdown_error_policy,
         NGX_HTTP_LOC_CONF_OFFSET,
@@ -134,7 +136,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   markdown_flavor gfm;
      */
     {
-        ngx_string("markdown_flavor"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_FLAVOR),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_http_markdown_flavor,
         NGX_HTTP_LOC_CONF_OFFSET,
@@ -154,7 +156,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   markdown_token_estimate on;
      */
     {
-        ngx_string("markdown_token_estimate"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_TOKEN_ESTIMATE),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
         ngx_conf_set_flag_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
@@ -173,7 +175,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   markdown_front_matter on;
      */
     {
-        ngx_string("markdown_front_matter"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_FRONT_MATTER),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
         ngx_conf_set_flag_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
@@ -197,7 +199,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   markdown_accept wildcard;
      */
     {
-        ngx_string("markdown_accept"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_ACCEPT),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_conf_set_enum_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
@@ -220,7 +222,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   markdown_auth_policy deny;
      */
     {
-        ngx_string("markdown_auth_policy"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_AUTH_POLICY),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_http_markdown_auth_policy,
         NGX_HTTP_LOC_CONF_OFFSET,
@@ -241,7 +243,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   markdown_auth_cookies session* auth_token PHPSESSID;
      */
     {
-        ngx_string("markdown_auth_cookies"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_AUTH_COOKIES),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE,
         ngx_http_markdown_auth_cookies,
         NGX_HTTP_LOC_CONF_OFFSET,
@@ -264,7 +266,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   markdown_cache_validation full;
      */
     {
-        ngx_string("markdown_cache_validation"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_CACHE_VALIDATION),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_http_markdown_cache_validation,
         NGX_HTTP_LOC_CONF_OFFSET,
@@ -290,7 +292,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   markdown_streaming auto;
      */
     {
-        ngx_string("markdown_streaming"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_STREAMING),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_http_markdown_streaming,
         NGX_HTTP_LOC_CONF_OFFSET,
@@ -312,7 +314,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   markdown_log_verbosity warn;
      */
     {
-        ngx_string("markdown_log_verbosity"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_LOG_VERBOSITY),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_http_markdown_log_verbosity,
         NGX_HTTP_LOC_CONF_OFFSET,
@@ -339,7 +341,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   markdown_content_types text/html application/xhtml+xml;
      */
     {
-        ngx_string("markdown_content_types"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_CONTENT_TYPES),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE,
         ngx_http_markdown_content_types,
         NGX_HTTP_LOC_CONF_OFFSET,
@@ -365,7 +367,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * Public default: off
      */
     {
-        ngx_string("markdown_trusted_proxies"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_TRUSTED_PROXIES),
         NGX_HTTP_MAIN_CONF|NGX_CONF_1MORE,
         ngx_http_markdown_trusted_proxies,
         NGX_HTTP_MAIN_CONF_OFFSET,
@@ -387,7 +389,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   markdown_metrics_shm_size 128k;
      */
     {
-        ngx_string("markdown_metrics_shm_size"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_METRICS_SHM_SIZE),
         NGX_HTTP_MAIN_CONF|NGX_CONF_TAKE1,
         ngx_conf_set_size_slot,
         NGX_HTTP_MAIN_CONF_OFFSET,
@@ -418,7 +420,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * Public default: off
      */
     {
-        ngx_string("markdown_metrics"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_METRICS),
         NGX_HTTP_LOC_CONF|NGX_CONF_NOARGS,
         ngx_http_markdown_metrics_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
@@ -451,7 +453,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   markdown_prune_noise off;
      */
     {
-        ngx_string("markdown_prune_noise"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_PRUNE_NOISE),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
             |NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
         ngx_conf_set_flag_slot,
@@ -475,7 +477,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   markdown_prune_selectors "nav footer aside sidebar";
      */
     {
-        ngx_string("markdown_prune_selectors"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_PRUNE_SELECTORS),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
             |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_conf_set_str_slot,
@@ -499,7 +501,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   markdown_prune_protection_selectors "nav";
      */
     {
-        ngx_string("markdown_prune_protection_selectors"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_PRUNE_PROTECTION_SELECTORS),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
             |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_conf_set_str_slot,
@@ -532,7 +534,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   markdown_auto_decompress off;
      */
     {
-        ngx_string("markdown_auto_decompress"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_AUTO_DECOMPRESS),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
         ngx_conf_set_flag_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
@@ -555,7 +557,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   markdown_dynamic_config_path /etc/nginx/markdown_dynamic.conf;
      */
     {
-        ngx_string("markdown_dynamic_config"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_DYNAMIC_CONFIG),
         NGX_HTTP_MAIN_CONF|NGX_CONF_FLAG,
         ngx_http_markdown_dynconf_flag,
         NGX_HTTP_MAIN_CONF_OFFSET,
@@ -576,7 +578,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   markdown_dynamic_config_path /etc/nginx/markdown_dynamic.conf;
      */
     {
-        ngx_string("markdown_dynamic_config_path"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_DYNAMIC_CONFIG_PATH),
         NGX_HTTP_MAIN_CONF|NGX_CONF_TAKE1,
         ngx_http_markdown_set_dynconf_path,
         NGX_HTTP_MAIN_CONF_OFFSET,
@@ -599,7 +601,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   markdown_dynconf_dry_run on;
      */
     {
-        ngx_string("markdown_dynconf_dry_run"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_DYNCONF_DRY_RUN),
         NGX_HTTP_MAIN_CONF|NGX_CONF_FLAG,
         ngx_http_markdown_dynconf_flag,
         NGX_HTTP_MAIN_CONF_OFFSET,
@@ -632,7 +634,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   }
      */
     {
-        ngx_string("markdown_diagnostics"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_DIAGNOSTICS),
         NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
         ngx_http_markdown_diagnostics_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
@@ -658,7 +660,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   markdown_stream_excluded_types text/csv application/xml;
      */
     {
-        ngx_string("markdown_stream_excluded_types"),
+        ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_STREAM_EXCLUDED_TYPES),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
             |NGX_HTTP_LOC_CONF|NGX_CONF_1MORE,
         ngx_http_markdown_stream_excluded_types_handler,

@@ -23,6 +23,8 @@
 
 #include "../include/test_common.h"
 
+#include "../../src/ngx_http_markdown_directive_names.h"
+
 /* ----------------------------------------------------------------
  * The active command-table target (25 entries, frozen).
  * Extracted from the production directive registry. This
@@ -31,31 +33,31 @@
  * ---------------------------------------------------------------- */
 
 static const char *active_directives[] = {
-    "markdown_filter",
-    "markdown_limits",
-    "markdown_error_policy",
-    "markdown_flavor",
-    "markdown_token_estimate",
-    "markdown_front_matter",
-    "markdown_accept",
-    "markdown_auth_policy",
-    "markdown_auth_cookies",
-    "markdown_cache_validation",
-    "markdown_streaming",
-    "markdown_log_verbosity",
-    "markdown_content_types",
-    "markdown_trusted_proxies",
-    "markdown_metrics_shm_size",
-    "markdown_metrics",
-    "markdown_prune_noise",
-    "markdown_prune_selectors",
-    "markdown_prune_protection_selectors",
-    "markdown_auto_decompress",
-    "markdown_dynamic_config",
-    "markdown_dynamic_config_path",
-    "markdown_dynconf_dry_run",
-    "markdown_diagnostics",
-    "markdown_stream_excluded_types"
+    NGX_HTTP_MARKDOWN_DIRECTIVE_FILTER,
+    NGX_HTTP_MARKDOWN_DIRECTIVE_LIMITS,
+    NGX_HTTP_MARKDOWN_DIRECTIVE_ERROR_POLICY,
+    NGX_HTTP_MARKDOWN_DIRECTIVE_FLAVOR,
+    NGX_HTTP_MARKDOWN_DIRECTIVE_TOKEN_ESTIMATE,
+    NGX_HTTP_MARKDOWN_DIRECTIVE_FRONT_MATTER,
+    NGX_HTTP_MARKDOWN_DIRECTIVE_ACCEPT,
+    NGX_HTTP_MARKDOWN_DIRECTIVE_AUTH_POLICY,
+    NGX_HTTP_MARKDOWN_DIRECTIVE_AUTH_COOKIES,
+    NGX_HTTP_MARKDOWN_DIRECTIVE_CACHE_VALIDATION,
+    NGX_HTTP_MARKDOWN_DIRECTIVE_STREAMING,
+    NGX_HTTP_MARKDOWN_DIRECTIVE_LOG_VERBOSITY,
+    NGX_HTTP_MARKDOWN_DIRECTIVE_CONTENT_TYPES,
+    NGX_HTTP_MARKDOWN_DIRECTIVE_TRUSTED_PROXIES,
+    NGX_HTTP_MARKDOWN_DIRECTIVE_METRICS_SHM_SIZE,
+    NGX_HTTP_MARKDOWN_DIRECTIVE_METRICS,
+    NGX_HTTP_MARKDOWN_DIRECTIVE_PRUNE_NOISE,
+    NGX_HTTP_MARKDOWN_DIRECTIVE_PRUNE_SELECTORS,
+    NGX_HTTP_MARKDOWN_DIRECTIVE_PRUNE_PROTECTION_SELECTORS,
+    NGX_HTTP_MARKDOWN_DIRECTIVE_AUTO_DECOMPRESS,
+    NGX_HTTP_MARKDOWN_DIRECTIVE_DYNAMIC_CONFIG,
+    NGX_HTTP_MARKDOWN_DIRECTIVE_DYNAMIC_CONFIG_PATH,
+    NGX_HTTP_MARKDOWN_DIRECTIVE_DYNCONF_DRY_RUN,
+    NGX_HTTP_MARKDOWN_DIRECTIVE_DIAGNOSTICS,
+    NGX_HTTP_MARKDOWN_DIRECTIVE_STREAM_EXCLUDED_TYPES
 };
 
 #define ACTIVE_DIRECTIVE_COUNT \

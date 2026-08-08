@@ -3521,7 +3521,9 @@ ngx_http_markdown_streaming_init_buffers(
         }
     }
 
-    ctx->streaming.prebuffer_limit = conf->limits.streaming_buffer;
+    ctx->streaming.prebuffer_limit = ctx->effective_conf != NULL
+        ? ctx->effective_conf->streaming_buffer
+        : conf->limits.streaming_buffer;
     if (ctx->streaming.prebuffer_limit > 0) {
         rc = ngx_http_markdown_buffer_init(
             &ctx->streaming.prebuffer,
@@ -3596,7 +3598,7 @@ ngx_http_markdown_streaming_init_handle(
      * dynamic or programmatic configuration paths.  Fail before Rust sees
      * any input so fail-open can still forward the untouched current chain.
      */
-    if (conf->limits.streaming_buffer == 0) {
+    if (ctx->streaming.prebuffer_limit == 0) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: streaming precommit buffer is zero; "
             "refusing to consume input without recovery storage");
