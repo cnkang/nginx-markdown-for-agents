@@ -20,7 +20,7 @@ Historical issue chain (performance evidence provenance):
 gate must be *attributable to an exact, auditable source*. Evidence whose
 provenance is ambiguous, mixed-environment, or unbound is not release
 evidence — the gate must reject it (fail closed). This invariant collapsed
-from a seven-commit incremental design sequence and must be stated as one
+from a seven-commit incremental design sequence and must read as one
 contract so future gate work starts from the complete set of fields.
 
 **Required evidence provenance fields.** The `baseline_policy` object in each
@@ -61,10 +61,10 @@ own objects; provenance is not copied into every scenario record:
    when `streaming_requests_total == 0`). The evidence gate cross-checks this
    via `_fallback_rate_consistency_violations`; a mismatch is a gate failure.
    `streaming_fallback_total` remains a separate path-routing counter and must
-   not be substituted for the pre-commit fail-open ratio.
-3. **Immutable baseline retention.** Once a baseline evidence pack is
-   generated and used by a release gate, it becomes an immutable audit record.
-   Subsequent regeneration does not overwrite it; the old pack is preserved
+   the module must not substitute it for the pre-commit fail-open ratio.
+3. **Immutable baseline retention.** Once a release gate generates and uses a
+   baseline evidence pack, it becomes an immutable audit record.
+   Subsequent regeneration does not overwrite it; the old pack stays preserved
    with its own digest.
 4. **Fail closed on missing provenance.** The blocking gate
    (`make release-gates-check-091`) must reject any baseline policy that is
@@ -91,8 +91,8 @@ own objects; provenance is not copied into every scenario record:
   confirm it carries the six policy provenance fields above; inspect
   `module_benchmark` and scenario records for their separate schemas.
 
-**Why this rule.** Without a single contract, evidence provenance fields were
-added one at a time as blockers were discovered (seven commits). The result
+**Why this rule.** Without a single contract, evidence provenance fields
+appeared one at a time as blockers surfaced (seven commits). The result
 was working but undocumented as a unit — the next person to extend the gate
 had no way to know which fields were required vs. optional. This rule captures
 the invariant the seven commits collectively established.
@@ -112,7 +112,7 @@ Historical issue chain (release-matrix key normalization): `59fbc06e`
 independent ad-hoc key lookups that silently disagree. The matrix loader
 (`tools/release/matrix/update_matrix.py`) evolved through a five-commit
 normalization sequence because key aliases (`nginx` / `nginx_version`,
-`os_type` / `os` / `libc`) were handled independently in each function.
+`os_type` / `os` / `libc`) stayed independent in each function.
 
 **Required:**
 
@@ -120,7 +120,7 @@ normalization sequence because key aliases (`nginx` / `nginx_version`,
    dict (`load_matrix`, `_validate_matrix_entry`, `_validate_manual_entries`,
    `_entry_sort_key`, `compute_matrix`, `diff_matrix`) must resolve aliased
    keys through the same normalization entry point, so an entry written with
-   legacy keys (`nginx`, `os`) is interpreted identically to one written with
+   legacy keys (`nginx`, `os`) reads identically to one written with
    canonical keys (`nginx_version`, `os_type`).
 
 2. **Stable composite sort key.** `_entry_sort_key` and `_entry_key` in

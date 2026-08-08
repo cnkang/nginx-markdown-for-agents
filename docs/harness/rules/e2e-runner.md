@@ -11,23 +11,23 @@ paths:
 ### 37. Rust-first E2E test runner (e2e-harness)
 
 Required:
-- New product-level HTTP E2E scenarios must be implemented in
+- Implement new product-level HTTP E2E scenarios in
   `tools/e2e-harness/` as Rust scenario modules under
   `src/scenarios/`.  Each scenario must follow the established pattern:
-  Reuse_Mode executes actual HTTP tests against a provided NGINX binary;
+  Reuse_Mode executes actual HTTP tests against a provided NGINX binary.
   Bootstrap_Mode must resolve a runnable runtime directly or through a
   documented bootstrap path while preserving harness-owned scenario
   execution and assertions.
 - Adding new Python pytest files under
-  `components/nginx-module/tests/e2e/` is forbidden.  That directory is
-  classified as Remove in the 0.6.3 test surface audit; no new files may be
-  added.
+  `components/nginx-module/tests/e2e/` is forbidden.  The 0.6.3 test surface
+  audit classified that directory as Remove. No new files may
+  get added.
 - Adding new independent shell E2E scenario scripts under `tools/e2e/`
   that contain embedded assertion logic is forbidden for product-level HTTP
   behavior.  New scenarios must use the Rust harness.
 - Allowed exceptions:
   - Thin shell wrappers in `tools/e2e/` that delegate to
-    `e2e-harness scenario <name>` are permitted.
+    `e2e-harness scenario <name>` stay permitted.
   - Shell scripts for 0.6.3-deferred scenarios (streaming, security, etc.)
     remain on their current paths until migrated in a future release.
   - `tools/e2e/run_e2e_suite.sh` retains its role as the canonical
@@ -77,30 +77,30 @@ Required:
   `auto` + `markdown_cache_validation full` combinations, and the
   `auto + full` contradiction.  It is block-aware (comment-masked brace
   parsing, direct-depth directive extraction, fail-closed scan errors).
-  Location block headers are parsed by a deterministic character scanner
+  A deterministic character scanner parses location block headers
   (`_scan_location_headers`, `_parse_location_header`, `_read_location_path`)
   instead of a regex, supporting quoted regex locations (with spaces),
   regex quantifiers `{m,n}`, and escaped quotes.  Strict UTF-8 file reading
   rejects encoding errors (produces ScanError).  Overall config structure
-  is validated (`_validate_config_structure`) to detect malformed configs
+  `_validate_config_structure` validates the structure to detect malformed configs
   before location analysis.  Unterminated quoted strings produce a single
   root ScanError and stop further structural analysis of that section so
-  cascading false errors are avoided.  Heredoc openers are found by a
+  cascading false errors stay avoided.  Heredoc openers are found by a
   deterministic per-line scanner (`_find_heredoc_opener`) that skips
   comments and quoted strings, so `# cat <<EOF` and `echo "<<EOF"` do not
-  open false heredocs; `<<` closes at column 0, `<<-` closes after leading
+  open false heredocs. `<<` closes at column 0, `<<-` closes after leading
   tabs only (spaces rejected).  Rust nginx config extraction uses a unified
-  scan: raw-string spans are returned to the ordinary-string scanner so `"`
-  inside raw-string bodies is not re-scanned; char and byte-char literals
-  (`'"'`, `b'"'`) are skipped so a single quote is not mistaken for a
+  scan: raw-string spans return to the ordinary-string scanner so `"`
+  inside raw-string bodies is not re-scanned. Char and byte-char literals
+  (`'"'`, `b'"'`) get skipped so a single quote is not mistaken for a
   string delimiter.
 
 Detector contract:
-- Comments containing `{` or `}` are masked before brace parsing so they
+- The detector masks comments containing `{` or `}` before brace parsing so they
   cannot inflate location depth or satisfy a parent location's directive.
 - A parent location's directive check only considers its direct-depth
-  directives; nested ``location`` sub-blocks do not satisfy the parent and
-  are checked independently.
+  directives. Nested ``location`` sub-blocks do not satisfy the parent and
+  get checked independently.
 - Read failures (OSError), malformed heredocs, and unmatched braces surface
   as scan errors.  In `--strict` mode they cause a non-zero exit.  The
   detector never silently swallows read/parse errors with "no findings".

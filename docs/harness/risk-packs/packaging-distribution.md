@@ -66,9 +66,9 @@ or packaging documentation.
   paths as nFPM packages and must run `check_install_layout.sh` against their
   generated packages before upload.  They must validate package version inputs
   before using them in generated paths or metadata.
-- Package dependencies must be satisfiable by the target package manager; exact
+- Package dependencies must be satisfiable by the target package manager. Exact
   constraints must use distro-resolvable EVRs, not naked upstream source
-  versions when release suffixes or epochs are expected.
+  versions when release suffixes or epochs appear.
 - RPM smoke tests must derive nginx.org repository family from the target
   distribution instead of assuming CentOS-compatible paths for every RPM image.
 - Release package build environments must use a glibc baseline compatible with
@@ -88,12 +88,13 @@ or packaging documentation.
   module directives. Any module directive family, including metrics directives,
   must require module enablement plus an explicit in-container module path.
   Module-enabled renders must not auto-create node `hostPath` mounts from that
-  path; custom mounts belong behind explicit opt-in values.
+  path. Custom mounts belong behind explicit opt-in values.
 - Homebrew formula repository and repo-owned formula template must stay in sync
   with release artifacts, tag timing, checksums, and post-release verification.
-- Formula hashes cover the exact bytes at the declared URL; the downloaded
-  archive content is compared with a local archive of the resolved tag commit,
-  while Formula source and version independently bind to that same commit.
+- Formula hashes cover the exact bytes at the declared URL. The harness
+  compares the downloaded archive content with a local archive of the
+  resolved tag commit, while Formula source and version independently bind
+  to that same commit.
 - `docs/guides/INSTALLATION.md` must document all installation methods
 - Public package installation docs must distinguish active GitHub Release
   artifacts from planned APT/YUM repositories. Do not show bare repository

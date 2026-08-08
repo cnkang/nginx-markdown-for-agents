@@ -27,7 +27,7 @@ Required:
 Verification:
 - `grep -rn 'pending_output\|resume_pending' components/nginx-module/src/`
 - For each resume path, verify whether downstream retained the original chain.
-  A copy-filter-owned chain must be resumed with
+  A copy-filter-owned chain must resume with
   `ngx_http_next_body_filter(r, NULL)`, not with the original chain pointer.
 
 ---
@@ -49,7 +49,7 @@ on replay buffer init/append failure, duplicate finalize on terminal buffer).
 
 Required:
 - Any buffer used to store original upstream bytes for fail-open replay
-  (for example `failopen_replay_buf`) must be initialized before streaming
+  (for example `failopen_replay_buf`) must initialize before streaming
   enters Pre-Commit.  Initialization failure must abort the streaming
   handle and route through `precommit_error` — never silently continue
   streaming without a fail-open recovery path.
@@ -67,7 +67,7 @@ Required:
   empty `last_buf` (since `handle` is NULL after precommit_error abort).
 - Never use `*last_buf = 0` side-effects to suppress finalize; prefer
   explicit output flags that document the control-flow contract.
-- `results.failopen_count` must be incremented only after fail-open
+- `results.failopen_count` must increment only after fail-open
   passthrough succeeds (downstream filter returns `NGX_OK` or `NGX_DONE`,
   i.e. `delivery_ok`), not at the precommit_error decision point.
   `streaming.precommit_failopen_total` tracks decisions;
@@ -81,9 +81,9 @@ Required:
   buffer-append failure (`handle_buffer_append_failure`), and the header
   filter fail-open paths (unsupported compression, ctx-alloc failure,
   inflight overload, inflight cleanup-alloc failure).  The decision to
-  fail-open is recorded separately via `log_decision()` /
-  `log_failure_decision()` at the decision point; the delivery counter
-  must not be touched until the downstream filter returns.
+  fail-open gets recorded separately via `log_decision()` /
+  `log_failure_decision()` at the decision point. The delivery counter
+  the code must not touch it until the downstream filter returns.
 
 Verification:
 - `grep -rn 'failopen_replay_buf\|failopen_replay_initialized' components/nginx-module/src/`
@@ -188,7 +188,7 @@ Required:
 
 Verification:
 - `grep -rn 'pop_and_update_derived_state\|ordered_list_counters' components/rust-converter/src/streaming/`
-- For each pop path, verify that derived state is reconciled for every popped context.
+- For each pop path, verify that derived state reconciles for every popped context.
 
 ## Required Agent Workflow
 
@@ -206,16 +206,16 @@ Verification:
 
 **Do NOT write code first and fix later. Validate BEFORE every file write/edit.**
 
-For each code change you are about to produce, mentally (or explicitly in a thinking step) walk through the applicable rules from the checklist above and confirm the output will not violate them. The checklist is organized by file type:
+For each code change you are about to produce, mentally (or explicitly in a thinking step) walk through the applicable rules from the checklist above and confirm the output will not violate them. The checklist organizes items by file type:
 
 #### C module code (`components/nginx-module/src/`)
 1. No dead stores — every assignment is read before the next write to the same variable. (Rule 16)
 2. No cognitive-complexity blowup — if adding branches/loops to an existing function, estimate whether the addition stays within the threshold; extract a helper proactively if it would exceed. (Rule 17)
 3. No blocking calls, no raw malloc/free, no global mutable state. (Baseline)
 4. Return codes (`NGX_OK`, `NGX_AGAIN`, `NGX_DECLINED`, `NGX_ERROR`, `NGX_DONE`) used with correct semantics. (Baseline, Rule 2)
-5. Backpressure: if the change touches body-filter output, confirm pending-chain and `last_buf` ordering are preserved. (Rule 1)
+5. Backpressure: if the change touches body-filter output, confirm pending-chain and `last_buf` ordering stay preserved. (Rule 1)
    At every `NGX_AGAIN` boundary, identify who owns the unsent chain. Module-owned
-   chains are resubmitted; downstream-owned chains are drained with a `NULL`
+   the module resubmits chains; it drains downstream-owned chains with a `NULL`
    input and must never receive the original chain twice.
 6. Memory budgets enforced on every allocation path; auxiliary buffers freed on all exits. (Rule 3)
 7. UTF-8 chunk-boundary safety if touching streaming text paths. (Rule 4)
@@ -235,7 +235,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 21. Naming and documentation: every new or modified function has a block comment (purpose, parameters, return values). Variables and types use descriptive names. Complex logic has inline comments explaining *why*. (Rule 26)
 22. Markdown output escaping: every new emission site for links, images, or URLs must call the shared escaping helper. No raw string interpolation in Markdown link labels `[...]` or destinations `(...)` / `<...>`. URL values must reject percent-encoded control characters before scheme validation. Forwarded header values must be validated (first-hop extraction, control char rejection, IPv6 bracket validation, fallback to server name). (Rule 27)
 23. Full `ngx_list_part_t` chain iteration: any function iterating `ngx_list_t` must traverse the full `part → part->next` chain, not only the first part. When aggregating flags from multiple headers of the same name, check the aggregated result before branching on per-header flags. (Rule 28)
-24. Flag clearing ordering: flags gating operations must be cleared **after** the gated operation succeeds, not before. Pattern: `if (flag) { rc = op(); if (rc == NGX_OK) flag = 0; }`. Doc comments must state the clearing contract. (Rule 29)
+24. Flag clearing ordering: flags gating operations must clear **after** the gated operation succeeds, not before. Pattern: `if (flag) { rc = op(); if (rc == NGX_OK) flag = 0; }`. Doc comments must state the clearing contract. (Rule 29)
 25. NUL-termination of `ngx_str_t`: before passing `ngx_str_t.data` to C APIs requiring NUL-terminated input (`ngx_strcasecmp`, `stat()`, `ngx_file_info()`, `opendir()`, `strstr()`), copy to a stack/pool buffer and append `'\0'`. Prefer length-bounded NGINX APIs (`ngx_strncasecmp`, `ngx_strlchr`) when possible. For directive matching, require exact length equality first. (Rule 30)
 26. Residual code integrity: after merge or >500-line change in a single file, verify compilation, `git diff --check`, function count, and no duplicate adjacent blocks. For >30-line changes, verify the file is not truncated (closing brace present). (Rule 31)
 27. Snapshot race elimination: in `header_filter`, `ngx_http_markdown_dynconf_watcher.active_snapshot` must be read exactly once at function entry into a function-lifetime `snap_copy`; `early_eff` is built from that once. Both variables must have function-lifetime scope. ctx binding must copy from these function-level variables (via `ngx_http_markdown_bind_request_snapshot()`), never re-read the global `active_snapshot` or re-invoke `build_effective_conf()`. `handle_ctx_alloc_failure()` must receive `eff` (not NULL). (Rule 34)
@@ -247,7 +247,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 #### C test code (`components/nginx-module/tests/unit/`)
 1. No dead stores — simulation-style tests set the final value directly; initial state documented in comments only. (Rule 16)
 2. Loop variables declared inside `for` when not used after the loop. (Rule 16)
-3. Every assigned variable is consumed by a `TEST_ASSERT` before function end. (Rule 16)
+3. Every assigned variable gets consumed by a `TEST_ASSERT` before function end. (Rule 16)
 4. Variables initialized at declaration when the compiler cannot prove definite assignment. (Rule 16)
 5. Parameterized loops must consume the parameter value in the exercised path; avoid no-op parameterization. (Rule 14)
 6. Where available, call shared test helpers that mirror production routing semantics instead of duplicating inline branch logic. (Rule 14)
@@ -282,7 +282,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 #### Shell scripts (`tools/`, e2e harnesses)
 1. Every `case` has a `*)` default clause. (Rule 18)
 2. Diagnostic/error messages go to stderr (`>&2`). (Rule 18)
-3. No nested `if` without `else` that could be merged into a compound condition. (Rule 18)
+3. No nested `if` without `else` that could merge into a compound condition. (Rule 18)
 4. String literals used 4+ times extracted into `readonly` constants. (Rule 18)
 5. macOS bash 3.2 compatible — no GNU-only flags, no `grep -P`. (Rule 11)
 6. No unsanitized path interpolation or inline code injection. (Rule 12)
@@ -330,7 +330,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 7. Code examples in documentation must use meaningful names and include comments explaining non-obvious logic, matching the same standards as production code. (Rule 26)
 8. Markdown escaping and link-destination examples in docs must use escaped forms; never show raw interpolation of untrusted text in link labels or destinations. (Rule 27)
 
-**If any item would be violated, redesign the change before writing it.** Do not emit code that you know will need a follow-up fix — that wastes time, wastes tokens and review cycles.
+**If any item would violate, redesign the change before writing it.** Do not emit code that you know will need a follow-up fix — that wastes time, wastes tokens and review cycles. Redesign keeps the output clean.
 
 ### During coding
 - Preserve NGINX event-driven semantics; no hidden blocking calls.
@@ -374,11 +374,11 @@ If full suite is too heavy for current scope, run the narrowest relevant target 
   is incomplete.
 
 ## Definition of Done for Agent Changes
-- Pre-output checklist was applied to every file written or modified (no write-first-fix-later).
+- Apply the pre-output checklist to every file written or modified (no write-first-fix-later).
 - Behavior is correct for nominal and edge-case paths.
 - Added/updated regression tests cover the fixed failure mode.
 - Related docs/validators/CI triggers stay consistent.
-- Verification commands were run in the current session and results were checked.
+- Run verification commands in the current session and check the results.
 
 ## Rule Maintenance (Meta-Rule)
 
@@ -388,8 +388,8 @@ review cycle, the agent must evaluate whether `AGENTS.md` needs updating:
 1. **Pattern extraction**: For each fix, ask: "Is this a one-off typo, or does
    it represent a class of mistakes that could recur in different code?"  If
    the latter, extract a generalizable rule.
-2. **Generalize, don't enumerate**: Rules should describe the *principle* that
-   was violated, not just the specific instance.  Bad: "check
+2. **Generalize, do not enumerate**: Rules should describe the *principle* that
+   the rule was violated, not just the specific instance.  Bad: "check
    `ERROR_BUDGET_EXCEEDED` alongside `ERROR_MEMORY_LIMIT`."  Good: "when
    classifying values into semantic categories across language boundaries,
    cover all source-defined values that map to the category, not just the
@@ -413,9 +413,9 @@ review cycle, the agent must evaluate whether `AGENTS.md` needs updating:
    that perform the same write and apply the same guard.  A rule that says
    "do X in path A" implicitly requires "do X in every path that does the
    same thing."
-6. **Checklist sync**: If a new rule is added or an existing rule is
-   strengthened, update the corresponding pre-output checklist item(s) so
-   the rule is enforced at write time, not discovered at review time.
+6. **Checklist sync**: If you add a new rule or strengthen an existing rule,
+   update the corresponding pre-output checklist item(s) so
+   the rule enforces at write time, not at review time.
 7. **Scope**: Only add rules that are actionable and verifiable before code
    is written.  Avoid vague aspirational statements.  Every rule should
    answer: "What specific check does the agent perform, and what does

@@ -35,12 +35,12 @@ Scorecard.
 - Third-party Actions remain pinned to immutable SHAs with version comments.
 - Workflow secrets remain step-scoped to their minimal consumer.
 - Artifact-producing builders use reviewed manifest digests, and external
-  source/tool downloads are verified before extraction or execution.
+  the harness verifies source/tool downloads before extraction or execution.
 - Basic Auth production examples use TLS directly or a loopback-only backend
   behind a mandatory co-located TLS terminator.
 - Generated scan outputs, SBOMs, and tool caches stay out of git.
 - Runnable Dockerfiles use a non-root final user. NGINX images use port 8080
-  plus writable `/tmp` PID/temp paths; fuzz images preserve writable source,
+  plus writable `/tmp` PID/temp paths. Fuzz images preserve writable source,
   build, and output mounts for the ClusterFuzzLite action.
 
 ## Focused Verification
