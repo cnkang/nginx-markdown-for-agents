@@ -50,11 +50,11 @@ represents every decompression event:
 nginx_markdown_decompression_events_total{
   encoding="gzip|deflate|brotli",
   outcome="success|failure",
-  reason="success|budget|format|truncated|io"
+  reason="ok|budget_exceeded|format_error|truncated_input|io_error"
 }
 ```
 
-The module counts the `success` outcome once after a decoder has completely
+The module counts the `ok` reason once with the `success` outcome after a decoder has completely
 finalized. It counts failures at the error classification point, before
 fail-open or fail-closed response handling. This makes event totals
 independent of whether the original body is ultimately delivered.

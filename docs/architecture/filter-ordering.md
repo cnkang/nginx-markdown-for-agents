@@ -35,12 +35,12 @@ register runs **first** when a response flows through the chain.
 | Standard (compiled-in) | `proxy` → `proxy_cache` → `gunzip` → `gzip` → `brotli` (ngx_brotli) |
 | Dynamic (load_module) | `markdown_filter` (this module) |
 
-The runtime initialises dynamic modules after standard modules, so
-`markdown_filter` registers its header and body filters **after** all
-standard filters.  This means:
-
-> **The markdown filter runs FIRST (closest to upstream) in the response
-> filter chain, before gzip/gunzip/Brotli/proxy_cache body filters.**
+The runtime initialises the loaded module according to the effective NGINX
+module configuration.  The supported default path uses the markdown filter's
+own bounded decompressor before conversion.  It does not depend on the
+optional `gunzip` filter.  When operators configure an external decompressor,
+they must verify its effective position for that NGINX build and set
+`markdown_auto_decompress off`.
 
 ### 1.2 Data Flow Diagram
 
@@ -66,14 +66,6 @@ Upstream response (HTML, possibly Content-Encoding: gzip/br)
   │ (Markdown body downstream)
   ▼
 ┌─────────────────────────────────┐
-│ gunzip body filter (if enabled) │  ← decompresses upstream gzip
-│  · operates on upstream bytes    │
-│  · sees Markdown if markdown     │
-│    already converted             │
-└─────────────────────────────────┘
-  │
-  ▼
-┌─────────────────────────────────┐
 │ gzip body filter                │  ← compresses response for client
 │  · compresses Markdown output    │
 │  · adds Content-Encoding: gzip   │
@@ -96,6 +88,31 @@ Upstream response (HTML, possibly Content-Encoding: gzip/br)
   ▼
 Client response (Markdown, possibly gzip/br compressed)
 ```
+
+When operators enable an external decompressor and the effective chain places
+it before Markdown, the body path is instead:
+
+```text
+Upstream response (gzip HTML)
+  │
+  ▼
+┌─────────────────────────────────┐
+│ gunzip body filter              │  ← external pre-decompressor
+│  · removes upstream compression  │
+└─────────────────────────────────┘
+  │ (plain HTML)
+  ▼
+┌─────────────────────────────────┐
+│ markdown body filter            │  ← converts the decompressed body
+└─────────────────────────────────┘
+  │
+  ▼
+Client response (Markdown)
+```
+
+This external path is separate from the normal chain above. Operators must
+verify the effective order for their NGINX build and set
+`markdown_auto_decompress off` to prevent double decompression.
 
 ---
 
@@ -121,16 +138,17 @@ sees Markdown bytes.
 |----------|-------|
 | Client sends | `Accept: text/markdown` |
 | Upstream sends | `Content-Encoding: gzip` (HTML bytes compressed) |
-| gunzip decompresses | gzip → HTML (if `gunzip on`) |
+| markdown auto-decompresses | gzip → HTML (default built-in path) |
 | markdown converts | HTML → Markdown |
 | Client receives | `Content-Type: text/markdown; charset=utf-8`, no `Content-Encoding` |
 
 **Two decompression paths:**
 
-1. **gunzip filter** (`gunzip on` in nginx.conf): The gunzip filter
-   decompresses upstream gzip **before** markdown sees the body.  Markdown
-   receives plain HTML and converts it.  Use `markdown_auto_decompress off`
-   to avoid double-decompression.
+1. **gunzip filter** (`gunzip on` in nginx.conf): Use this only when the
+   effective filter chain places gunzip before markdown.  In that arrangement
+   gunzip decompresses upstream gzip before markdown sees the body.  Markdown
+   receives plain HTML and converts it.  Set
+   `markdown_auto_decompress off` to avoid double-decompression.
 
 2. **markdown built-in auto-decompress** (`markdown_auto_decompress on`,
    default): Markdown's own body filter decompresses gzip/deflate/Brotli
@@ -188,8 +206,8 @@ Subsequent cache hits serve Markdown directly without re-conversion.
 | gunzip | markdown_auto_decompress | Upstream gzip | Upstream br | Behaviour |
 |--------|--------------------------|---------------|-------------|-----------|
 | off    | on (default)             | markdown decompresses | markdown decompresses | Recommended: single decompressor |
-| on     | off                      | gunzip decompresses | markdown decompresses | gunzip for gzip, markdown for br |
-| on     | on (default)             | **double-decompress risk** | markdown decompresses | Avoid: set auto_decompress off |
+| on     | off                      | gunzip decompresses only if it runs before markdown | markdown decompresses | External gzip path, markdown for br |
+| on     | on (default)             | **double-decompress risk if gunzip runs before markdown** | markdown decompresses | Avoid: set auto_decompress off for that chain |
 | off    | off                      | passthrough (gzip to client) | passthrough (br to client) | No decompression; client handles |
 
 ---

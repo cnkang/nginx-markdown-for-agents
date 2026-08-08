@@ -9,8 +9,8 @@ the repository and places it here:
 
 ```bash
 # Generate source tarball (typically done by CI)
-git archive --format=tar.gz --prefix=nginx-module-markdown-0.9.2/ \
-    -o packaging/rpm/SOURCES/nginx-module-markdown-0.9.2.tar.gz HEAD
+git archive --format=tar.gz --prefix=nginx-module-markdown-for-agents-0.9.2/ \
+    -o packaging/rpm/SOURCES/nginx-module-markdown-for-agents-0.9.2.tar.gz HEAD
 ```
 
 The `Source0` field in the SPEC file references this tarball by name.

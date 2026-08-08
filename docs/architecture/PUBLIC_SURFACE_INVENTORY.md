@@ -105,7 +105,7 @@ rollback response schema.
 | `worker` | `{pid, scope}` with `scope="worker-local"` | `STABLE_FOR_1_0` |
 | `build` | `{source_sha, nginx_version, rust_version, features}` | `STABLE_FOR_1_0` |
 | `configuration` | `{static_digest, dynconf, effective, effective_sources}`; strict additional-properties-free schema | `STABLE_FOR_1_0` |
-| `runtime` | `{inflight, pending_output}` worker-local non-negative counters | `STABLE_FOR_1_0` |
+| `runtime` | `{inflight, pending_output, module_metrics}` worker-local non-negative counters | `STABLE_FOR_1_0` |
 | `recent_decisions` | bounded array of `{timestamp, outcome, stage, reason, error_origin, duration_ms}` | `STABLE_FOR_1_0` |
 
 The full JSON Schema is `schemas/diagnostics.schema.json`. The effective
