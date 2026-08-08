@@ -17,7 +17,7 @@ Required:
 - Keep reason-code behavior and tests aligned when eligibility logic changes.
 - For protocol edge statuses (for example 206), map to the intended reason consistently even in malformed upstream scenarios.
 - When adding a new reason code string definition and accessor function, the
-  the developer must add corresponding `ngx_http_markdown_log_decision()` callsite(s) in
+  developer must add corresponding `ngx_http_markdown_log_decision()` callsite(s) in
   the same changeset.  A reason code that appears but never gets emitted at
   runtime is a contract violation — operators and docs will reference a code
   that never appears in logs.
@@ -92,9 +92,10 @@ Required:
   (b) add a comment explicitly documenting the approximation and its
   limitations, or (c) defer the metric to a future release when the proper
   data source is available.
-- **Counter metrics that track delivery outcomes (for example `results.failopen_count`)
-  the module must increment only after the delivery operation succeeds (downstream filter
-  returns `NGX_OK`), not at the decision point that initiates the delivery.**
+- **The module must increment counter metrics that track delivery outcomes (for
+  example `results.failopen_count`) only after the delivery operation succeeds
+  (downstream filter returns `NGX_OK`), not at the decision point that initiates
+  the delivery.**
   Separate "decision" counters (for example `streaming.precommit_failopen_total`)
   from "delivery" counters (for example `results.failopen_count`) to prevent
   inflating the delivery count when the downstream send later fails (header

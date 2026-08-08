@@ -396,8 +396,8 @@ review cycle, the agent must evaluate whether `AGENTS.md` needs updating:
 1. **Pattern extraction**: For each fix, ask: "Is this a one-off typo, or does
    it represent a class of mistakes that could recur in different code?"  If
    the latter, extract a generalizable rule.
-2. **Generalize, do not enumerate**: Rules should describe the *principle* that
-   the rule got violated, not just the specific instance.  Bad: "check
+2. **Generalize, do not enumerate**: Rules should describe the *principle* behind
+   the violation, not just the specific instance.  Bad: "check
    `ERROR_BUDGET_EXCEEDED` alongside `ERROR_MEMORY_LIMIT`."  Good: "when
    classifying values into semantic categories across language boundaries,
    cover all source-defined values that map to the category, not just the
@@ -422,8 +422,8 @@ review cycle, the agent must evaluate whether `AGENTS.md` needs updating:
    "do X in path A" implicitly requires "do X in every path that does the
    same thing."
 6. **Checklist sync**: If you add a new rule or strengthen an existing rule,
-   update the corresponding pre-output checklist item(s) so
-   the rule enforces at write time, not at review time.
+   update the corresponding pre-output checklist item(s) so the checklist
+   enforces the rule at write time, not at review time.
 7. **Scope**: Only add rules that are actionable and verifiable before code
    is written.  Avoid vague aspirational statements.  Every rule should
    answer: "What specific check does the agent perform, and what does

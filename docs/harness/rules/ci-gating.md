@@ -36,8 +36,9 @@ Required:
     C/C++ and Rust SAST workflow. Supplemental Semgrep rules should cover
     workflow/script/release/config risks, not duplicate CodeQL language scans.
 - **Supply chain hardening (binary downloads)**:
-  - Downloaded binaries and source tarballs in CI workflows and Dockerfiles
-    the harness must verify them against a known-good checksum (SHA256 minimum).
+  - CI workflows and Dockerfiles must verify downloaded binaries and source
+    tarballs against a known-good checksum (SHA256 minimum). The harness must
+    check that each download path contains this verification.
   - Maintain checksums in a version-controlled file (for example
     `packaging/checksums.sha256`) and reference it in download scripts.
   - Forbid the `curl URL | sudo tar` pattern.  Use download→verify→extract

@@ -60,8 +60,8 @@ own objects, provenance is not copied into every scenario record:
    must equal `precommit_failopen_total / streaming_requests_total` (or 0.0
    when `streaming_requests_total == 0`). The evidence gate cross-checks this
    via `_fallback_rate_consistency_violations`, a mismatch is a gate failure.
-   `streaming_fallback_total` remains a separate path-routing counter and must
-   the module must not substitute it for the pre-commit fail-open ratio.
+   `streaming_fallback_total` remains a separate path-routing counter. The
+   module must not substitute it for the pre-commit fail-open ratio.
 3. **Immutable baseline retention.** Once a release gate generates and uses a
    baseline evidence pack, it becomes an immutable audit record.
    Subsequent regeneration does not overwrite it, the old pack stays preserved
@@ -119,9 +119,9 @@ normalization sequence because key aliases (`nginx` / `nginx_version`,
 1. **Single alias-resolution path.** Every function that reads a matrix entry
    dict (`load_matrix`, `_validate_matrix_entry`, `_validate_manual_entries`,
    `_entry_sort_key`, `compute_matrix`, `diff_matrix`) must resolve aliased
-   keys through the same normalization entry point, so an entry written with
-   legacy keys (`nginx`, `os`) reads identically to one written with
-   canonical keys (`nginx_version`, `os_type`).
+   keys through the same normalization entry point, so the normalization layer
+   interprets an entry written with legacy keys (`nginx`, `os`) the same way as
+   one written with canonical keys (`nginx_version`, `os_type`).
 
 2. **Stable composite sort key.** `_entry_sort_key` and `_entry_key` in
    `diff_matrix` must sort on the *normalized* tuple

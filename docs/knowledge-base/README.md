@@ -53,8 +53,10 @@ machine-readable value or count.
 ## Contract Files (load on demand)
 
 - `config-contract.md` — **The frozen 0.9.2 contract in one place**: full
-  directive, dynconf, metric, reason-code, limit, and FFI tables with their
-  semantics. Load this for any directive/default/metric question.
+  directive, dynconf, metric, reason-code, and limit tables, plus an FFI
+  surface summary. Load this for any directive/default/metric question. For
+  complete FFI export names and signatures, use the inventory or generated
+  header referenced below.
 
 ## Index: Where to Find What
 

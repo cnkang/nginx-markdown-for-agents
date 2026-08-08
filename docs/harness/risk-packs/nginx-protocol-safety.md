@@ -34,8 +34,8 @@ cache-control, conditional request, status, or header semantics change.
 - conditional request modes preserve the intended full-buffer vs streaming path
 - status-specific eligibility, especially `206` and `304`, maps to the intended
   reason code under normal and malformed upstream responses
-- the harness verifies HEAD requests and empty-body artifacts with `curl --head` or an
-  equivalent protocol-correct check
+- Protocol checks cover HEAD requests and empty-body artifacts with `curl
+  --head` or an equivalent protocol-correct check
 - protocol docs use exact config names, reason codes, and retrievable metrics
 - `ngx_str_t` values are NUL-terminated before passing to C APIs that require
   it. Prefer length-bounded NGINX APIs where possible (Rule 30)

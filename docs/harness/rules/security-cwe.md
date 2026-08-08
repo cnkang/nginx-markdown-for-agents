@@ -67,8 +67,8 @@ Required:
   `REPO_ROOT / "known-file"`) are exempt.
 - Every write-path construction (`Path(path)`) where `path` comes from CLI
   arguments must call `.resolve()` before containment checks,
-  `.mkdir(parents=True)`, or `open()` to prevent symlink traversal. Containment
-  the code must check it on that canonical target with `Path.relative_to()` or an
+  `.mkdir(parents=True)`, or `open()` to prevent symlink traversal. The code
+  must check containment on that canonical target with `Path.relative_to()` or an
   equivalent path-aware operation, lexical prefix checks such as
   `abspath().startswith()` are insufficient.
 - `Path(path).parent.mkdir(parents=True)` must use a resolved path:
