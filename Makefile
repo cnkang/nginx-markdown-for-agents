@@ -243,15 +243,29 @@ docs-check-base:
 docs-check: docs-check-base
 	python3 tools/harness/check_harness_sync.py
 	PYTHONPATH=. python3 tools/harness/detect_doc_sync.py
+	$(MAKE) docs-style-check-regression
+	$(MAKE) docs-style-check-baseline
 
-# Advisory writing-style scan (STE-inspired, non-native-reader friendly).
-# Warning-only by default: never blocks CI. Use docs-style-check-strict to
-# turn warnings into a failure.
+# STE-inspired writing-style gates (non-native-reader friendly, see
+# docs/development/WRITING_GUIDE.md and harness Rule 63).
+# docs-style-check: advisory scan, never blocks.
+# docs-style-check-regression: files changed since HEAD (working tree +
+# staged) must have zero warnings; blocks new prose that violates the style.
+# docs-style-check-baseline: total warnings must not exceed the retained
+# budget (295, see DEFAULT_BASELINE in check_writing_style.py); lowers as
+# docs improve. Pass --base=<ref> via STYLE_BASE to diff against another
+# ref (e.g. CI merge-base).
 docs-style-check:
 	python3 tools/docs/check_writing_style.py
 
 docs-style-check-strict:
 	python3 tools/docs/check_writing_style.py --strict
+
+docs-style-check-regression:
+	python3 tools/docs/check_writing_style.py --changed $(if $(STYLE_BASE),--base=$(STYLE_BASE),)
+
+docs-style-check-baseline:
+	python3 tools/docs/check_writing_style.py --baseline
 
 release-notes:
 	python3 tools/render_release_matrix_docs.py --release-notes

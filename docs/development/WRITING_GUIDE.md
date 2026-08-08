@@ -100,14 +100,24 @@ README:
 Run the advisory style checker (warning-only, never edits files):
 
 ```bash
-python3 tools/docs/check_writing_style.py [--strict] [--limit N]
+python3 tools/docs/check_writing_style.py [--strict|--changed|--baseline [N]] [--limit N]
 ```
 
 - Default: reports warnings, exits 0 — safe for CI and local use.
 - `--strict`: exits 1 when warnings exist (opt-in gate).
+- `--changed`: exits 1 when a changed file (working tree + staged since
+  `--base`, default HEAD) introduces a warning that did not exist before.
+  This is the per-changeset gate (harness Rule 63): new or edited prose
+  must not add violations, while pre-existing warnings in a file stay
+  allowed until the file gets cleaned up.
+- `--baseline [N]`: exits 1 when the repository-wide warning total exceeds
+  the retained budget N (default 295, see `DEFAULT_BASELINE` in the
+  checker). Guards against regressions. Lower N as docs improve.
 - `--limit N`: cap warnings per file.
 - The checker excludes code blocks, tables, headings, and inline code. It
   scans prose only.
+- Both gates run inside `make docs-check` via
+  `make docs-style-check-regression` and `make docs-style-check-baseline`.
 
 ## 9. Reference
 
