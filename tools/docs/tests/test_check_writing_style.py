@@ -120,6 +120,24 @@ def test_rule_checklist_item_long_length_exempt():
     assert not any("long sentence" in w for w in warnings)
 
 
+def test_numbered_instruction_uses_instruction_limit():
+    text = "1. Run " + " ".join(["word"] * 20) + ".\n"
+    warnings = cws.audit(text, Path("docs/guides/x.md"), None)
+    assert any("long instruction" in warning for warning in warnings)
+
+
+def test_bulleted_instruction_uses_instruction_limit():
+    text = "- Run " + " ".join(["word"] * 20) + ".\n"
+    warnings = cws.audit(text, Path("docs/guides/x.md"), None)
+    assert any("long instruction" in warning for warning in warnings)
+
+
+def test_numbered_rule_checklist_item_long_length_exempt():
+    text = "1. **Fat-pointer safety**: When transferring ownership of a Rust slice or Vec to C via Box::into_raw, the pointer must stay valid until the matching free helper runs in every failure path, and the caller must not retain the pointer after free.\n"
+    warnings = cws.audit(text, Path("docs/guides/x.md"), None)
+    assert not any("long sentence" in warning for warning in warnings)
+
+
 def test_rule_doc_plain_list_item_exempt():
     # Governance "- " list items in AGENTS.md / harness rule docs are atomic.
     text = "- Full-buffer and streaming gzip/deflate/Brotli preserve codec/member lifecycle, streaming state survives arbitrary chunks and backpressure resumes, and gzip member resets keep response-wide budgets.\n"
@@ -211,6 +229,19 @@ def test_changed_mode_computes_base_warnings_once(monkeypatch):
 def test_makefile_passes_explicit_style_base():
     makefile = (cws.ROOT / "Makefile").read_text(encoding="utf-8")
     assert 'check_writing_style.py --changed --base "$(STYLE_BASE)"' in makefile
+
+
+def test_makefile_defaults_style_base_for_local_docs_check():
+    makefile = (cws.ROOT / "Makefile").read_text(encoding="utf-8")
+    assert "STYLE_BASE ?= HEAD" in makefile
+
+
+def test_docs_check_fetches_style_base_history():
+    workflow = (cws.ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    docs_job = workflow.split("  docs-check:", 1)[1].split(
+        "  harness-tooling:", 1
+    )[0]
+    assert "fetch-depth: 0" in docs_job
 
 
 def test_reference_line_noun_chain_exempt():

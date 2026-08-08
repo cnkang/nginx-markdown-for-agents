@@ -56,12 +56,12 @@ Required:
 ### 49. THIRD-PARTY-NOTICES drift with dependency changes
 Required:
 - When any dependency arrives, leaves, or changes version (in
-  Cargo.toml, Cargo.lock, or C/NGINX build files), the corresponding entry
-  in `THIRD-PARTY-NOTICES` must update in the same changeset.
+  Cargo.toml, Cargo.lock, or C/NGINX build files), update the corresponding
+  entry in `THIRD-PARTY-NOTICES` in the same changeset.
 - Version numbers in THIRD-PARTY-NOTICES must match the resolved versions in
   `Cargo.lock` (not the semver range in Cargo.toml).
-- New dependencies must enter with correct license type, copyright notice,
-  and license text. Removed dependencies must delete.
+- Add new dependencies with the correct license type, copyright notice, and
+  license text. Delete entries for removed dependencies.
 - Verify with: `diff <(grep '^version =' Cargo.lock) <(grep '[0-9]\+\.[0-9]\+' THIRD-PARTY-NOTICES)`
 
 ### 63. Non-native-reader writing style (STE-inspired) for maintained docs

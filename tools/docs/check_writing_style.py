@@ -168,13 +168,15 @@ def _prose_only(raw: str) -> str:
     return t
 
 
-# Rule-checklist item line: "- **Title**: ...", "N. **Title**: ...", or
-# "N. Title: ..." — a single atomic checkpoint. Its length is structural,
-# not prose bloat, so length checks do not apply.
-RULE_ITEM_RE = re.compile(r"^(?:-\s+\*\*|\d+[.)]\s+\*\*|\d+[.)]\s)")
+# Rule-checklist item line: "- **Title**: ..." or "N. **Title**: ...".
+# Only this explicit structure is exempt from prose length checks.
+RULE_ITEM_RE = re.compile(
+    r"^(?:[-*]\s+|\d+[.)]\s+)\*\*[^*\n]+\*\*:\s+"
+)
+LIST_MARKER_RE = re.compile(r"^(?:[-*]|\d+[.)])\s+")
 
-# Rule/governance documents whose "- " list items are atomic checkpoints
-# even without a bold title (AGENTS.md required-list, harness rule docs).
+# Rule/governance documents whose list items are atomic checkpoints even
+# without a bold title (AGENTS.md required-list, harness rule docs).
 RULE_DOC_PREFIXES = ("AGENTS.md", "docs/harness/rules/")
 
 # Reference line carrying a formal title: "- ADR-0019: 0.9.0 Production
@@ -217,19 +219,23 @@ NOUN_CHAIN_ALLOWLIST = {
 }
 
 
-def _sentences(prose: str) -> list[tuple[str, bool, bool]]:
+def _sentences(
+    prose: str, governance: bool = False
+) -> list[tuple[str, bool, bool]]:
     """Split prose into (sentence, rule_item_line, ref_line) units.
 
     Each line is processed first; the line's flags decide which checks
-    apply. Rule-item lines and reference lines keep their structural
-    formatting (see RULE_ITEM_RE / REF_LINE_RE).
+    apply. Rule-item lines, governance list items, and reference lines keep
+    their structural formatting (see RULE_ITEM_RE / REF_LINE_RE).
     """
     out: list[tuple[str, bool, bool]] = []
     for line in prose.split("\n"):
         line = line.strip()
         if not line:
             continue
-        rule_item = bool(RULE_ITEM_RE.match(line))
+        rule_item = bool(RULE_ITEM_RE.match(line)) or (
+            governance and bool(LIST_MARKER_RE.match(line))
+        )
         ref_line = bool(REF_LINE_RE.match(line))
         for s in SENT_SPLIT_RE.split(line):
             s = s.strip()
@@ -245,17 +251,16 @@ def audit(text: str, path: Path, limit: int | None) -> list[str]:
     rel = str(path.relative_to(ROOT)) if path.is_absolute() else str(path)
     rule_doc = rel.startswith(RULE_DOC_PREFIXES)
 
-    for s, rule_item, ref_line in _sentences(prose):
-        n = len(s.split())
+    for s, rule_item, ref_line in _sentences(prose, rule_doc):
         if rule_item:
             continue  # rule-checklist item: length is structural
-        if rule_doc and s.startswith("- "):
-            continue  # governance list item in a rule doc: atomic checkpoint
+        rule_text = LIST_MARKER_RE.sub("", s, count=1)
+        n = len(rule_text.split())
         if n > SENT_DESCRIPTIVE_MAX:
             warnings.append(
                 f"long sentence ({n}w > {SENT_DESCRIPTIVE_MAX}): {s[:100]}"
             )
-        elif n > SENT_INSTRUCTION_MAX and INSTRUCTION_RE.match(s):
+        elif n > SENT_INSTRUCTION_MAX and INSTRUCTION_RE.match(rule_text):
             warnings.append(
                 f"long instruction ({n}w > {SENT_INSTRUCTION_MAX}): {s[:100]}"
             )

@@ -52,6 +52,7 @@ MODULE_SO ?= build/ngx_http_markdown_filter_module.so
 PREFIX ?= /usr
 LIBDIR ?= $(PREFIX)/lib
 DESTDIR ?=
+STYLE_BASE ?= HEAD
 MODULE_INSTALL_DIR := $(LIBDIR)/nginx/modules
 NGINX_MODULES_AVAILABLE_DIR := $(PREFIX)/share/nginx/modules-available
 DOC_INSTALL_DIR := $(PREFIX)/share/doc/nginx-markdown-for-agents
@@ -252,8 +253,8 @@ docs-check: docs-check-base
 # docs/development/WRITING_GUIDE.md and harness Rule 63).
 # docs-style-check: advisory scan, never blocks.
 # docs-style-check-regression: files changed since STYLE_BASE (working tree +
-# staged) must have zero warnings; STYLE_BASE is required and must resolve to
-# a commit so a missing base cannot produce a false green result.
+# staged) must have zero warnings. Local invocations default to HEAD; CI must
+# provide the actual fetched comparison base.
 # docs-style-check-baseline: total warnings must not exceed the retained
 # budget (0, see DEFAULT_BASELINE in check_writing_style.py); the maintained
 # docs now pass the audit clean, so any warning fails this gate.

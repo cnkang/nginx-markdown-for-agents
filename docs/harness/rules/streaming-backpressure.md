@@ -184,7 +184,10 @@ Verification:
 Historical issues: `c06397b1`.
 
 Required:
-- When an end tag drains multiple contexts from the stack (misnested HTML), ALL derived state (`list_depth`, `blockquote_depth`, `in_preformatted`, `ordered_list_counters`) must reconcile for EVERY popped context, not just the matching one.
+- When an end tag drains multiple contexts from the stack (misnested HTML),
+  the drain logic must reconcile every derived state field (`list_depth`,
+  `blockquote_depth`, `in_preformatted`, `ordered_list_counters`) for every
+  popped context, not just the matching one.
 - Historical issue `c06397b1` fixed a bug where `</ul>` or `</blockquote>` draining an inner `<ol>` left stale `ordered_list_counters`. The fix removed the `pop_ordered_counters` flag so `OrderedList` ALWAYS pops its counter regardless of which end tag triggered the drain.
 
 Verification:
