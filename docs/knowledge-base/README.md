@@ -11,7 +11,7 @@ models, and pointers.
 - You need the frozen 0.9.2 contract facts fast (directive list, defaults,
   dynconf keys, metrics) without re-reading CONFIGURATION.md end to end.
 - You are reviewing or writing docs and must check a claim against the
-  contract (e.g. "is `markdown_profile` still active?" → no, removed).
+  contract (for example "is `markdown_profile` still active?" → no, removed).
 - You need to know which document to consult for a given question.
 - You are onboarding a new contributor to the 0.9.2 contract.
 

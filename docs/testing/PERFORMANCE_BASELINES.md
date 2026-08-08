@@ -271,12 +271,12 @@ This exact peak value comes from the OS.
 
 ### macOS — `sampled_peak`
 
-On macOS, the script polls `ps -o rss` at a configurable interval (e.g., `--interval 100` for 100 ms) and records the maximum observed value. Because this is a polling-based approach, the reported peak may be lower than the true peak. A short-lived memory spike can occur between samples and go unobserved.
+On macOS, the script polls `ps -o rss` at a configurable interval (for example `--interval 100` for 100 ms) and records the maximum observed value. Because this is a polling-based approach, the reported peak may be lower than the true peak. A short-lived memory spike can occur between samples and go unobserved.
 
 ### Cross-Platform Comparison Caveat
 
 Memory values collected on Linux (`os_reported_peak`) and macOS (`sampled_peak`) use fundamentally different collection methods.
-**Do not compare absolute memory values across platforms.** Instead, compare relative changes (e.g., incremental vs. full-buffer path) within the same platform and collection method. Absolute values differ across platforms.
+**Do not compare absolute memory values across platforms.** Instead, compare relative changes (for example incremental versus full-buffer path) within the same platform and collection method. Absolute values differ across platforms.
 
 ### Usage
 

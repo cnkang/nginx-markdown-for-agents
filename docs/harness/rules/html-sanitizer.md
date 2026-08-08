@@ -14,9 +14,9 @@ Historical issues: `8440ac3`, `dbcdad8`, `77a46d6`.
 
 Required:
 - Treat HTML void elements as self-closing by semantics, not only tokenizer flags.
-- Skip-mode exit for dangerous elements must be name-aware; mismatched closing tags must not prematurely exit skip mode.
+- Skip-mode exit for dangerous elements must be name-aware, mismatched closing tags must not prematurely exit skip mode.
 - Keep nesting-depth accounting saturation-safe and invariant-preserving under malformed HTML.
-- When using tokenizer-level streams, do not assume tree-builder implicit tags (for example implicit `</head>`); state transitions must be explicit.
+- When using tokenizer-level streams, do not assume tree-builder implicit tags (for example implicit `</head>`), state transitions must be explicit.
 
 ---
 
@@ -37,7 +37,7 @@ Required:
 - Streaming code-block emitters must also carry the code fence **language
   identifier** across text-event boundaries.  The language string (for
   example `rust`, `language-rust`) may be split across adjacent tokenizer
-  events; the state machine must buffer partial language bytes and
+  events, the state machine must buffer partial language bytes and
   assemble the complete identifier before matching it against the
   `language-` class prefix.  When matching a language class for HTML
   output, strip the `language-` prefix and use the bare language name.

@@ -13,7 +13,7 @@ paths:
 Historical issues: `d2d836f`, `5288c1b`, `19c896c`, `bc35a1f`.
 
 Required:
-- Encode skip-reason mapping explicitly; do not rely on indirect checks that can misclassify edge cases.
+- Encode skip-reason mapping explicitly, do not rely on indirect checks that can misclassify edge cases.
 - Keep reason-code behavior and tests aligned when eligibility logic changes.
 - For protocol edge statuses (for example 206), map to the intended reason consistently even in malformed upstream scenarios.
 - When adding a new reason code string definition and accessor function, the
@@ -38,8 +38,8 @@ Required:
   that would hide rollout risk at `warn` verbosity.
 - Keep the public-surface inventory contract synchronized with source, not just
   by symbol name. Directive entries include classification, handler, context,
-  argument contract, defaults, syntax, migration target, and OTel status;
-  metric entries include type, labels, order, and bounded-cardinality policy;
+  argument contract, defaults, syntax, migration target, and OTel status,
+  metric entries include type, labels, order, and bounded-cardinality policy,
   reason entries include discriminant, variant string, metric family, C
   accessor, and registry count. Duplicate, malformed, or symlink-escaped
   inventory/source inputs must fail closed.  The gate is
@@ -53,7 +53,7 @@ Required:
 Historical issues: `478db96`, `b905fee`, `461908f`, `9f3885e`.
 
 Required:
-- Detect and fail on response rendering truncation; never silently emit partial metrics payloads.
+- Detect and fail on response rendering truncation, never silently emit partial metrics payloads.
 - Set response metadata (status/content-length/content-type) only after final body length is known.
 - Keep metrics struct/schema evolution synchronized across C code, tests, docs, and snapshots.
 - When SHM-backed metrics struct layout changes, enforce a hot-reload compatibility strategy:
@@ -104,8 +104,8 @@ Required:
 
 ### 8b. Configuration–code alignment for tooling
 Historical issues: evidence targets nested under `targets` key but code read
-top-level keys; `no_regression_small_medium` in JSON but `no_regression` in
-code; `html_bytes` in Rust output but `input_bytes` in Python readers.
+top-level keys, `no_regression_small_medium` in JSON but `no_regression` in
+code, `html_bytes` in Rust output but `input_bytes` in Python readers.
 
 Required:
 - When a configuration file (JSON, TOML, YAML) defines a nested schema (for
@@ -136,7 +136,7 @@ Required:
 
 ### 8c. Benchmark averaging consistency
 Historical issues: warmup and fallback iterations included in latency/throughput
-averages but not in durations; markdown/token averages divided by `total_iters`
+averages but not in durations, markdown/token averages divided by `total_iters`
 while p50/p95 computed only from measured iterations.
 
 Required:
@@ -224,7 +224,7 @@ Required:
   needed, use separate counters with unambiguous names.
 - **Delivery counters must be distinct from decision counters.** A decision
   counter (for example `precommit_failopen_total`) records the control-flow
-  choice; a delivery counter (for example `results.failopen_count`) records
+  choice, a delivery counter (for example `results.failopen_count`) records
   successful downstream transmission.  Incrementing the delivery counter at
   the decision point inflates the count when the downstream send fails.  See
   Rule 8 for the concrete `failopen_count` contract and Rule 38 for the
@@ -283,7 +283,7 @@ Required:
 - **Format string argument matching**: when adding new metric fields to text
   or JSON renderers that use `ngx_snprintf` or `ngx_slprintf`, manually verify
   that the number and types of format specifiers (`%V`, `%uA`, `%uz`, `%O`,
-  `%i`, `%T`, etc.) exactly match the argument list.  `ngx_snprintf` does not
+  `%i`, `%T`, and so on) exactly match the argument list.  `ngx_snprintf` does not
   perform compile-time type checking — a mismatch silently produces corrupted
   output or reads garbage from the stack.  After adding fields, count
   specifiers and arguments side-by-side.  Prefer extracting per-metric

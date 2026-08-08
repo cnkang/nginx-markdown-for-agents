@@ -88,3 +88,51 @@ def test_is_maintained_scope():
     assert cws._is_maintained("AGENTS.md") is True
     assert cws._is_maintained("docs/features/security.md") is True
     assert cws._is_maintained("docs/archive/old-note.md") is False
+
+
+def test_rule_checklist_item_long_length_exempt():
+    # Rule-checklist item ("- **Title**: ...") length is structural.
+    text = "- **Fat-pointer safety**: When transferring ownership of a Rust slice or Vec to C via Box::into_raw, the pointer must stay valid until the matching free helper runs in every failure path, and the caller must not retain the pointer after free.\n"
+    warnings = cws.audit(text, Path("docs/harness/rules/x.md"), None)
+    assert not any("long sentence" in w for w in warnings)
+
+
+def test_rule_doc_plain_list_item_exempt():
+    # Governance "- " list items in AGENTS.md / harness rule docs are atomic.
+    text = "- Full-buffer and streaming gzip/deflate/Brotli preserve codec/member lifecycle, streaming state survives arbitrary chunks and backpressure resumes, and gzip member resets keep response-wide budgets.\n"
+    warnings = cws.audit(text, Path("AGENTS.md"), None)
+    assert not any("long sentence" in w for w in warnings)
+
+
+def test_normal_doc_long_list_item_still_flagged():
+    # The same long list item in a non-rule doc is still a violation.
+    text = "- Full-buffer and streaming gzip/deflate/Brotli preserve codec/member lifecycle, streaming state survives arbitrary chunks and backpressure resumes, and gzip member resets keep response-wide budgets while the module tracks peak memory across the whole conversion path.\n"
+    warnings = cws.audit(text, Path("docs/guides/x.md"), None)
+    assert any("long sentence" in w for w in warnings)
+
+
+def test_quoted_source_citation_exempt():
+    # Quoted source-comment references stay verbatim and are not audited.
+    text = '- **Issue**: doc says "0=pass, 1=fail_closed; 255=not set" and "Zero-copy was removed; always pool-copy".\n'
+    warnings = cws.audit(text, Path("docs/project/x.md"), None)
+    assert warnings == []
+
+
+def test_reference_line_noun_chain_exempt():
+    # Reference lines carry formal document titles.
+    text = "- ADR-0019: 0.9.0 Production Readiness Release Gate Framework\n"
+    warnings = cws.audit(text, Path("docs/architecture/x.md"), None)
+    assert warnings == []
+
+
+def test_allowlisted_formal_title_exempt():
+    text = "- Xcode Command Line Tools (macOS) and the Rust toolchain are required.\n"
+    warnings = cws.audit(text, Path("docs/guides/x.md"), None)
+    assert not any("noun chain" in w for w in warnings)
+
+
+def test_cross_line_allowlisted_noun_chain_exempt():
+    # Cross-line merge of an allowlisted title with neighboring prose.
+    prose = "Send an explicit Prometheus header. See\nPrometheus Metrics Guide for the catalog."
+    warnings = cws.audit(prose, Path("docs/guides/x.md"), None)
+    assert not any("noun chain" in w for w in warnings)

@@ -145,7 +145,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 ```
 
 Multi-platform builds require Docker Buildx with a builder that supports
-the target platforms (e.g., `docker buildx create --use`).
+the target platforms (for example `docker buildx create --use`).
 
 ### Customization Points
 
@@ -405,7 +405,7 @@ runs five scenarios sequentially, and cleans up on exit.
 | `curl` | Used by the embedded smoke test between scenarios |
 | Manifest directory | K8s manifests at `examples/kubernetes/manifest/` |
 
-#### What Scenarios Are Covered
+#### Covered Scenarios
 
 | # | Scenario | Description |
 |---|----------|-------------|

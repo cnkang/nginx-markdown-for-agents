@@ -10,7 +10,7 @@ paths:
 ## Dynconf Snapshot Isolation
 
 ### 34. Request-path code must read dynconf-mutable fields through effective_conf, not live conf
-Historical issues: P0 request-level consistency gap (snapshot bound but not consumed);
+Historical issues: P0 request-level consistency gap (snapshot bound but not consumed),
 P0 snapshot race (active_snapshot read twice in header_filter).
 
 Required:
@@ -92,7 +92,7 @@ Required:
   reload returns `RELOAD_APPLIED` or `RELOAD_NO_CHANGE`.
   `applied_mtime` is also updated to `last_mtime` on
   `RELOAD_DRY_RUN_OK` / `RELOAD_DRY_RUN_FAIL` to suppress repeated
-  re-validation of the same file content; it must not advance on
+  re-validation of the same file content, it must not advance on
   `RELOAD_INVALID_FILE` / `RELOAD_IO_ERROR` so the timer retries the
   reload on the next poll cycle.
 - When `last_mtime != applied_mtime`, the timer handler must retry
@@ -112,7 +112,7 @@ Verification:
 - `tools/harness/detect_live_conf_reads.sh` — checks dynconf_enabled
   gate on build_effective_conf, applied_mtime guard, and retry logic.
 - `make test-nginx-unit` — effective_conf_test includes
-  test_dynconf_snapshot_not_consumed_when_dynconf_disabled;
+  test_dynconf_snapshot_not_consumed_when_dynconf_disabled,
   dynconf_impl_test includes
   test_start_applies_existing_file_on_startup and
   test_start_invalid_file_leaves_applied_mtime_zero.

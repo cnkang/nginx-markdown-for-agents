@@ -332,7 +332,7 @@ For response formats, metric fields, and monitoring usage, see [Configuration Gu
 
 ## Features
 
-### What Markdown flavor is supported?
+### Which Markdown flavor does the module support?
 
 The module supports two flavors:
 - **CommonMark** (default): Standard Markdown specification

@@ -36,7 +36,7 @@ Validates authenticated-request handling with `markdown_auth_policy allow` and `
 
 Validates dynamic enablement via `markdown_filter $variable`, including:
 
-- truthy/falsy runtime values (`on`, `off`, `yes`, `no`, etc.)
+- truthy/falsy runtime values (`on`, `off`, `yes`, `no`, and so on)
 - surrounding whitespace normalization (for example `" on "`)
 - safe fallback for invalid runtime values (treated as disabled)
 

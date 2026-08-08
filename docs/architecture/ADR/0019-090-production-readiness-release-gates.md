@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (0.9.0 contract freeze; gate implementation follows in the release-hardening phase)
+Accepted (0.9.0 contract freeze, gate implementation follows in the release-hardening phase)
 
 ## Context
 
@@ -16,7 +16,7 @@ release-gates wave (final wave).
 
 ### Frozen names (1.0-stable)
 
-- Make target: `make release-gates-check-090` (**new**; does not exist yet).
+- Make target: `make release-gates-check-090` (**new**, does not exist yet).
 - Validators: `tools/release/gates/validate_release_gates_090.py`,
   `validate_config_directives.py` (merged validator covering v0.7.0–v0.8.0 directives).
 - Production-examples smoke: `make test-production-examples-nginx-t` and
@@ -28,7 +28,7 @@ release-gates wave (final wave).
 (`Makefile:568`), extended with 0.9.0-specific steps (Config V2 reject-only
 golden errors, HeaderPlan fault-injection, reason-registry/diagnostics renderer
 contract, production-examples smoke, version-consistency). It MUST NOT recursively
-invoke `release-gates-check-080` from inside its own recipe; prior-version
+invoke `release-gates-check-080` from inside its own recipe, prior-version
 the validators it reuses invoke directly and stay **caller-parameterized** for the
 active version (`RELEASE_GATE_EXPECTED_CARGO_VERSION=0.9.0`), per AGENTS.md Rule
 13.
@@ -45,9 +45,9 @@ active version (`RELEASE_GATE_EXPECTED_CARGO_VERSION=0.9.0`), per AGENTS.md Rule
 Production-examples smoke is **0.9.0 blocking**. When the module-enabled
 NGINX binary is genuinely unavailable (for example local macOS without a
 module-enabled `nginx`), `RELEASE_GATE_ALLOW_SKIP_MODULE=1` records a SKIP
-and lets non-release validation proceed; tag-release CI checkouts must
+and lets non-release validation proceed, tag-release CI checkouts must
 provide `NGINX_BIN` and must not rely on this escape hatch. Soft gates emit a
-summary/artifact and must not silently skip; if a soft toolchain is genuinely
+summary/artifact and must not silently skip, if a soft toolchain is genuinely
 absent the gate records the skip reason rather than weakening the check. Gate
 validators must run in a clean checkout and must not depend on untracked local
 working directories.
@@ -70,7 +70,7 @@ working directories.
 
 ## Alternatives Considered
 
-- **Reuse `-080` directly**: rejected — 0.9.0 is breaking; `-080` asserts 0.8.x
+- **Reuse `-080` directly**: rejected — 0.9.0 is breaking, `-080` asserts 0.8.x
   invariants and would not validate Config V2 / reason registry / schema v1.
 - **Recursive `make release-gates-check-080` call inside `-090`**: rejected per
   Rule 13 (duplicate/expensive re-runs, version-assertion conflicts).

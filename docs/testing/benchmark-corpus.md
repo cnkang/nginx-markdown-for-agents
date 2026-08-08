@@ -222,7 +222,7 @@ intentionally changes.
 
 ### Quality Thresholds
 
-Defined in `perf/quality-thresholds.json` (`pp` = percentage points, i.e. absolute difference in percentage):
+Defined in `perf/quality-thresholds.json` (`pp` = percentage points, that is, absolute difference in percentage):
 
 | Metric | Warning | Blocking | Direction |
 |--------|---------|----------|-----------|

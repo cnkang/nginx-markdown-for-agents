@@ -73,12 +73,12 @@ The converter classifies elements into three categories using `SanitizeAction`:
 - `<input>` (void form control) - The module extracts descriptive text from attributes in priority order: `aria-label` > `placeholder` > `value`. It suppresses hidden inputs (`type="hidden"`) entirely. The module drops them from the output.
 
 **Embedded Content Elements — Tags Stripped, URL Extracted, Fallback Preserved** (`SanitizeAction::StripElement`):
-- `<iframe>`, `<object>`, `<embed>` - The module removes tags. It extracts the `src` (iframe/embed) or `data` (object) URL as a Markdown link, using the `title` attribute as the link label when available. Fallback child text between the tags stays in the output. It suppresses dangerous URL schemes (`javascript:`, `data:`, etc.) — only safe URLs appear in the output. The module blocks unsafe schemes entirely.
+- `<iframe>`, `<object>`, `<embed>` - The module removes tags. It extracts the `src` (iframe/embed) or `data` (object) URL as a Markdown link, using the `title` attribute as the link label when available. Fallback child text between the tags stays in the output. It suppresses dangerous URL schemes (`javascript:`, `data:`, and so on) — only safe URLs appear in the output. The module blocks unsafe schemes entirely.
 
 **Media Elements — URL Extracted, Fallback Preserved** (handled in traversal):
 - `<video>`, `<audio>` - The module extracts the `src` URL as a Markdown link (with `title` as label). Video `poster` thumbnails become Markdown images. Fallback child text stays via normal child traversal.
-- `<source>` - The module extracts the `src` URL as a Markdown link with `type` as label (e.g., `[video/mp4](url)`).
-- `<track>` - The module extracts the `src` URL as a Markdown link with `label` as link text (e.g., `[English](subs.vtt)`).
+- `<source>` - The module extracts the `src` URL as a Markdown link with `type` as label (for example `[video/mp4](url)`).
+- `<track>` - The module extracts the `src` URL as a Markdown link with `label` as link text (for example `[English](subs.vtt)`).
 - `<area>` - The module extracts the `href` as a Markdown link with `alt` or `title` as link text.
 
 **Implementation**:

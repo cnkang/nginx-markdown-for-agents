@@ -52,7 +52,7 @@ The following breaking changes require configuration and/or tooling updates:
    and fall through without conversion.
 
 6. **Metrics consolidation** — unified metric families with a `reason` label
-   replace per-reason metric keys (e.g.,
+   replace per-reason metric keys (for example
    `markdown_skipped_accept_total` → `nginx_markdown_skips_total{reason="skipped_accept"}`).
 
 ---
@@ -453,7 +453,7 @@ profile "balanced" default (pass) in location /docs/
 ```
 
 **Note:** This is a warning, not an error. Explicit directives always override
-profile defaults. The warning helps you audit intentional overrides vs.
+profile defaults. The warning helps you audit intentional overrides versus
 accidental conflicts.
 
 ### Dashboards show no data after upgrade
@@ -582,6 +582,6 @@ layers for removed directives.** This is a deliberate design choice:
 - The breaking boundary is unambiguous: if `nginx -t` passes, your
   configuration is fully 0.9.0 compliant.
 
-If you need to maintain both 0.8.x and 0.9.0 configurations (e.g., during a
+If you need to maintain both 0.8.x and 0.9.0 configurations (for example during a
 staged rollout across a fleet), use separate configuration files and deploy
 the matching module binary with each configuration version.

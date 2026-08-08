@@ -29,7 +29,7 @@ This operational guide provides procedures for monitoring, troubleshooting, tuni
 
 - NGINX Markdown filter module installed and configured
 - Access to NGINX logs and metrics
-- Monitoring system configured (Prometheus, Grafana, etc.)
+- Monitoring system configured (Prometheus, Grafana, and so on)
 - Basic understanding of NGINX and HTTP
 
 ### Maintenance and Validation Notes
@@ -1006,7 +1006,7 @@ grep "markdown decision:" /var/log/nginx/error.log | grep -E "reason=failed_open
 
 ### Reason Code and Metrics Label Alignment
 
-Reason codes use lowercase snake_case strings in decision log entries (e.g.,
+Reason codes use lowercase snake_case strings in decision log entries (for example
 `not_eligible`, `converted`, `failed_open`) and the same strings as Prometheus
 `reason` label values. This means you can go from a metric spike to the
 corresponding log entries without any translation. (Streaming engine codes such

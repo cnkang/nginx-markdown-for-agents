@@ -27,7 +27,7 @@ Required:
   an explicit non-negative check must precede it.  The pattern
   `if (parsed < 0) return NGX_ERROR;` must appear before any `(size_t) parsed`
   assignment.
-- Every narrowing conversion (e.g. `size_t → uInt`, `ngx_uint_t → uint8_t`,
+- Every narrowing conversion (for example `size_t → uInt`, `ngx_uint_t → uint8_t`,
   `ngx_uint_t → uint32_t`) an explicit upper-bound check must precede
   against the destination type's maximum value, with an error/clamp path.
 - Size-value parsing via `ngx_parse_size()` must go through
@@ -40,12 +40,12 @@ Required:
 - Addition of two `size_t` values that will feed memory allocation or
   buffer sizing must include an overflow guard:
   `if (a > (size_t)-1 - b) { /* saturate or error */ }`.
-- Casting the result of pointer subtraction to `(size_t)` (e.g.
+- Casting the result of pointer subtraction to `(size_t)` (for example
   `(size_t)(last - pos)`) is forbidden unless:
   a. The subtraction appears in a comparison context (`>=`, `<=`, `==`) that
-     self-guards; or
-  b. A bounds check on the pointers (e.g. `if (last <= p)`) precedes the
-     cast; or
+     self-guards, or
+  b. A bounds check on the pointers (for example `if (last <= p)`) precedes the
+     cast, or
   c. The code uses the safe wrapper `ngx_http_markdown_buf_len_safe(buf)` instead.
   The `detect_cwe190_casts.sh` Pattern (d) flags all other cases.
 
@@ -63,13 +63,13 @@ Required:
 - Every `open(path, ...)` call in `tools/` Python scripts where `path` comes
   from CLI arguments, function parameters, or environment variables must
   pass through `validate_read_path()` (from `tools/lib/path_validation.py`)
-  before the `open()` call.  Hard-coded paths within the repo (e.g.
+  before the `open()` call.  Hard-coded paths within the repo (for example
   `REPO_ROOT / "known-file"`) are exempt.
 - Every write-path construction (`Path(path)`) where `path` comes from CLI
   arguments must call `.resolve()` before containment checks,
   `.mkdir(parents=True)`, or `open()` to prevent symlink traversal. Containment
   the code must check it on that canonical target with `Path.relative_to()` or an
-  equivalent path-aware operation; lexical prefix checks such as
+  equivalent path-aware operation, lexical prefix checks such as
   `abspath().startswith()` are insufficient.
 - `Path(path).parent.mkdir(parents=True)` must use a resolved path:
   `resolved = Path(path).resolve()` then `resolved.parent.mkdir(...)`.

@@ -46,7 +46,7 @@ can safely:
 
 ### Post-commit Errors
 
-Errors that occur after headers have been sent (e.g., `Content-Type: text/markdown`
+Errors that occur after headers have been sent (for example `Content-Type: text/markdown`
 is already on the wire). The module **cannot** rewrite the status line.
 
 The configured policy selects one of two protocol-safe actions:

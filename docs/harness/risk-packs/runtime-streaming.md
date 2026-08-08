@@ -29,7 +29,7 @@ chains, fail-open flow, or deferred output ordering.
 - derived-state reconciliation on multi-context drain (Rule 52): when an end
   tag pops contexts from the middle of the stack, ALL derived state
   (`list_depth`, `blockquote_depth`, `in_preformatted`,
-  `ordered_list_counters`) must be updated for every popped context
+  `ordered_list_counters`) must update for every popped context
 - replay/runtime fixtures vs new failure paths
 - known-difference registry schema drift (`drift_type`/`severity`) vs parity
   suppressor semantics

@@ -48,9 +48,9 @@ succeeds.**
 
 ### Streaming vs full-buffer header matrix
 
-- **Streaming**: deletes/omits `Content-Length`; generates **no** ordinary ETag
-  (headers commit before the transformed body is known); `If-None-Match` not
-  supported; `If-Modified-Since` uses preserved `Last-Modified`.
+- **Streaming**: deletes/omits `Content-Length`, generates **no** ordinary ETag
+  (headers commit before the transformed body is known), `If-None-Match` not
+  supported, `If-Modified-Since` uses preserved `Last-Modified`.
 - **Full-buffer**: when `markdown_cache_validation full` and a transformed
   representation is computable, generates a transformed ETag.
 - HEAD / 304 / no-body / error-status paths follow a documented matrix.
@@ -111,7 +111,7 @@ adding ETag set/clear, Vary add, and token header to the Rust
 to NGINX-specific list-push semantics. The current design keeps Rust
 plan-building pure (core wire-critical mutations only) and handles
 NGINX-lifecycle-specific header operations in C post-plan. This is a pragmatic
-0.9.0 contract; if future requirements demand full atomicity for these
+0.9.0 contract, if future requirements demand full atomicity for these
 operations, they should migrate into the Rust plan with corresponding FFI
 expansion.
 
@@ -119,7 +119,7 @@ expansion.
 
 ### Positive
 
-- No partial header mutation; commit is allocation-free and cannot half-apply.
+- No partial header mutation, commit is allocation-free and cannot half-apply.
 - All `Content-Type`/`Content-Length`/`ETag`/`Vary` edge cases handled in one
   atomic place.
 - Honest streaming post-commit semantics (no false 502/rewrite promises).
@@ -133,7 +133,7 @@ expansion.
 ## Alternatives Considered
 
 - **Allocate-during-commit with rollback**: rejected — NGINX pool allocations are
-  not reversible; rollback of allocation is impossible.
+  not reversible, rollback of allocation is impossible.
 - **Leave scattered mutations as-is**: rejected — they are the partial-mutation
   hazard this ADR closes.
 

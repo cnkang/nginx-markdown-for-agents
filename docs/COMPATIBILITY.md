@@ -42,7 +42,7 @@ filename.
 NGINX validates every dynamic module at load time using a **Binary
 Compatibility Signature**. This signature derives from:
 
-1. The NGINX version number (e.g., `1.26.3`).
+1. The NGINX version number (for example `1.26.3`).
 2. The set of `./configure` options used to build NGINX.
 3. Internal ABI markers that reflect struct layouts and API contracts.
 
@@ -60,7 +60,7 @@ combinations of the **same** NGINX version.
 
 However, `--with-compat` does **not**:
 
-- Guarantee cross-version compatibility (e.g., a module built for 1.26.3
+- Guarantee cross-version compatibility (for example a module built for 1.26.3
   will not load on 1.24.0).
 - Eliminate all signature differences (some options still affect the
   signature even with `--with-compat`).
@@ -132,7 +132,7 @@ nginx -V 2>&1 | head -5
   distribution suffix. The `--prefix` is typically `/etc/nginx`.
 - **Distribution-provided**: Version line may include a suffix like
   `(Ubuntu)` or the configure options include distribution-specific paths
-  (e.g., `--conf-path=/etc/nginx/nginx.conf` with non-standard module
+  (for example `--conf-path=/etc/nginx/nginx.conf` with non-standard module
   paths).
 - **OpenResty**: Version line shows `openresty/...` or includes
   `--with-luajit`.
@@ -166,7 +166,7 @@ nginx: [emerg] module "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
    ```
 
    Compare the reported version against the package filename. They must
-   match exactly (e.g., package built for `nginx-1.26.3` requires NGINX
+   match exactly (for example package built for `nginx-1.26.3` requires NGINX
    `1.26.3`).
 
 2. **Check your architecture**:

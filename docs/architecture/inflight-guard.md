@@ -88,7 +88,7 @@ When `current >= max_inflight`:
 2. The request is **not** counted in the inflight counter
 3. The configured error policy determines behavior:
    - **pass** (default): Original response passed through unmodified
-   - **status N**: Configured HTTP status code returned (e.g., 503)
+   - **status N**: Configured HTTP status code returned (for example 503)
    - **fail_closed**: 502 Bad Gateway returned
 
 ## Metrics

@@ -54,7 +54,7 @@ sink cannot signal "stop processing" to the tokenizer.
 
 #### Signal-based interruption
 
-Using OS signals (SIGALRM, etc.) to interrupt the parser is **not feasible**:
+Using OS signals (SIGALRM, and so on) to interrupt the parser is **not feasible**:
 
 - Rust panic from a signal handler has undefined behavior. The Rust reference forbids it.
 - Signal delivery across the FFI boundary (C → Rust) is unsafe

@@ -16,7 +16,7 @@ The current implementation uses OTLP HTTP/JSON encoding. OTLP HTTP/protobuf is a
 
 ## Rationale
 
-1. NGINX module C code operates under strict dependency constraints. Large third-party libraries (e.g., opentelemetry-c) add build complexity, version coupling, and ABI stability risk.
+1. NGINX module C code operates under strict dependency constraints. Large third-party libraries (for example opentelemetry-c) add build complexity, version coupling, and ABI stability risk.
 2. The OTLP HTTP/JSON protocol is simple enough for manual span encoding. A span requires: trace_id, span_id, parent_id, name, kind, start/end timestamps, and attributes — all fixed-format JSON fields. JSON encoding avoids the complexity of protobuf wire format while remaining compatible with OTLP HTTP collectors.
 3. Introducing an OTel SDK on the Rust side would add FFI boundary calls for span creation/export. This increases cross-language overhead and complexity.
 4. The project's installation experience is zero-runtime-dependency. Adding an OTel SDK would break this.

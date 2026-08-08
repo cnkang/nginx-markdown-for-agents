@@ -13,7 +13,7 @@ Historical issues: `23165d9`, `2c7d6a9`, `0eae34b`, `1b0df51`.
 
 Required:
 - Enforce all configured budgets (including total working-set budget), not only per-buffer budgets.
-- Any auxiliary heap expansion buffer must be explicitly freed on all exits; copy final data back to pool-owned memory if needed.
+- Any auxiliary heap expansion buffer must be explicitly freed on all exits, copy final data back to pool-owned memory if needed.
 - Any collector strings/buffers (for example link text, sniff buffers) must respect configured limits.
 - Track peak memory from real resident state, not only counters.
 - Do not hardcode stage limits in downstream components when a configured
@@ -21,7 +21,7 @@ Required:
   output buffer bytes). Thread budget values through constructors and enforce
   them at the runtime write/check site.
 - Budget guard helper APIs and production enforcement must not drift: if
-  helper methods exist for stage checks, production code should call them; if
+  helper methods exist for stage checks, production code should call them, if
   a helper is not part of production enforcement, remove it in the same change
   set. Avoid parallel inline checks and helper checks that can diverge.
 - Never apply hidden floor/ceiling behavior that weakens a configured budget
@@ -43,7 +43,7 @@ Required:
   `buffer_init` time to ensure the backing store frees when the
   request pool dies, even if no explicit `ngx_free` call happens.
 - When code outside `buffer.c` needs to replace `ctx->buffer.data`
-  (e.g. decompression output exceeds capacity), it MUST use `ngx_alloc`
+  (for example decompression output exceeds capacity), it MUST use `ngx_alloc`
   for the new allocation and `ngx_free` for the old — never `ngx_palloc`
   or `ngx_pfree`.
 - **Generalized pool-vs-heap rule**: Any buffer that is independently

@@ -70,7 +70,7 @@ Streaming conversion remains a possible later direction, but it is not part of t
    - Mitigated by size limit and bypass
    - Most web pages are < 1MB
 
-4. **Not Suitable for Streaming Content**: Cannot convert SSE, WebSockets, etc.
+4. **Not Suitable for Streaming Content**: Cannot convert SSE, WebSockets, and so on
    - Mitigated by eligibility checks
    - Can explicitly exclude streaming endpoints
 
@@ -152,7 +152,7 @@ If streaming becomes necessary in the future:
 - Maintain parser state across chunks
 - Output Markdown incrementally
 - Handle errors gracefully (may need to abort mid-stream)
-- Document limitations (no Content-Length, no ETag, etc.)
+- Document limitations (no Content-Length, no ETag, and so on)
 
 ## Metrics to Monitor
 

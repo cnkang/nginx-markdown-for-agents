@@ -36,13 +36,13 @@ All version numbers across the project must synchronize to reflect the current r
 - Main `Cargo.toml` (source of truth)
 - Helm Chart `version` and `appVersion` fields
 - Internal Cargo.toml dependencies (fuzz targets, corpus tools)
-- Documentation examples (INSTALLATION.md, etc.)
+- Documentation examples (INSTALLATION.md, and so on)
 
 The Rust build contract is a second, independently synchronized baseline:
 
 - `rust-toolchain.toml` owns the exact repository/release compiler.
 - Every first-party Cargo manifest declares the matching major/minor MSRV.
-- Blocking CI and release workflows use the exact compiler; nightly fuzzing is
+- Blocking CI and release workflows use the exact compiler, nightly fuzzing is
   the only intentionally nightly lane.
 - Release Dockerfiles consume `rust-toolchain.toml` instead of embedding an
   independent compiler version.
@@ -71,11 +71,11 @@ The harness detector `tools/harness/detect_version_consistency.sh` performs the 
 4. **Homebrew Formula**: Reports version (informational only - intentionally kept at previous release, updated by publish workflow)
 5. **Rust Baseline**: Calls the blocking
    `tools/harness/check_rust_baseline.py` validator, which checks:
-   - exact `MAJOR.MINOR.PATCH` toolchain identity;
-   - all four first-party manifest MSRVs;
-   - classified blocking, release, and nightly workflows;
-   - release Dockerfile consumption of the canonical toolchain;
-   - Debian source-build compiler floor; and
+   - exact `MAJOR.MINOR.PATCH` toolchain identity,
+   - all four first-party manifest MSRVs,
+   - classified blocking, release, and nightly workflows,
+   - release Dockerfile consumption of the canonical toolchain,
+   - Debian source-build compiler floor, and
    - current contributor, install, compatibility, and operations docs.
 
 An unclassified workflow that installs Rust is a failure so a new workflow
@@ -93,7 +93,7 @@ release notes.
 The following are intentionally NOT checked:
 - **Homebrew Formula** (`packaging/homebrew/nginx-markdown-module.rb`): The `url` and `sha256` fields are intentionally kept at the previous release version. The `homebrew-tap-publish.yml` workflow automatically rewrites these fields during release.
 - **Historical CHANGELOG entries**: Version numbers in changelog history reference past versions.
-- **Documentation historical references**: Mentions of past versions in migration guides, compatibility notes, etc.
+- **Documentation historical references**: Mentions of past versions in migration guides, compatibility notes, and so on
 
 ## Remediation
 When the detector finds a version inconsistency:
@@ -122,7 +122,7 @@ This detector integrates into:
 - `make harness-security-checks`: Runs as part of the harness security check suite
 - `make release-gates-check-092`: Blocking step of the current 0.9.2 release gate
 - CI `release-092-contract-gates` job: Runs version consistency on PRs
-- `make harness-check` does not run this detector; use `make harness-check-full`
+- `make harness-check` does not run this detector, use `make harness-check-full`
   for the full suite including security checks
 
 ## Example Output

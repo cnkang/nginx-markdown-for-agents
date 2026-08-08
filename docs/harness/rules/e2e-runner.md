@@ -28,7 +28,7 @@ Required:
 - Allowed exceptions:
   - Thin shell wrappers in `tools/e2e/` that delegate to
     `e2e-harness scenario <name>` stay permitted.
-  - Shell scripts for 0.6.3-deferred scenarios (streaming, security, etc.)
+  - Shell scripts for 0.6.3-deferred scenarios (streaming, security, and so on)
     remain on their current paths until migrated in a future release.
   - `tools/e2e/run_e2e_suite.sh` retains its role as the canonical
     `make test-e2e` orchestrator, delegating migrated scenarios to the
@@ -66,13 +66,13 @@ Required:
 - When a test intends to exercise the **streaming** path, use
   `markdown_streaming force` (or `auto` with no blocking directives).
   Ensure the assertions actually verify streaming-specific behavior
-  (e.g., chunked transfer encoding, absence of Content-Length, streaming
+  (for example chunked transfer encoding, absence of Content-Length, streaming
   metrics).
 - The one exception: tests that **intentionally validate the runtime-block
   mechanism** (that is, verifying that `auto` + `full` correctly falls back
   to full-buffer) may use the contradictory combination, but must document
   this intent in a comment and assert streaming-block-specific indicators
-  (e.g., ETag presence, Content-Length, full-buffer metric delta).
+  (for example ETag presence, Content-Length, full-buffer metric delta).
 - `detect_e2e_streaming_config.py` provides advisory detection of implicit
   `auto` + `markdown_cache_validation full` combinations, and the
   `auto + full` contradiction.  It is block-aware (comment-masked brace

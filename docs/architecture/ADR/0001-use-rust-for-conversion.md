@@ -33,7 +33,7 @@ The Rust component:
 
 The NGINX module:
 - Handle HTTP request/response processing
-- Manage NGINX-specific concerns (configuration, logging, etc.)
+- Manage NGINX-specific concerns (configuration, logging, and so on)
 - Call into Rust via FFI for conversion
 
 ## Consequences
