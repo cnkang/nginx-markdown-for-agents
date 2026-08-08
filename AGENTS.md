@@ -127,7 +127,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 49 | docs-tooling | THIRD-PARTY-NOTICES must stay in sync with resolved dependency versions; add/remove/update entries in same changeset as Cargo.lock changes |
 | 50 | nginx-idioms | Content-Type OWS separator accepts HTAB; trailing OWS excluded before parameter comparison |
 | 51 | streaming-backpressure | Auth Cache-Control commit failure routes through precommit_error; multi-header aggregation checks any_public before has_private |
-| 52 | streaming-backpressure | Derived-state reconciliation on multi-context drain; ALL derived state reconciled for EVERY popped context |
+| 52 | streaming-backpressure | Drain logic reconciles every derived state field for every popped context |
 | 53 | ffi-crosslang | FFI fat-pointer safety; use as_mut_ptr + mem::forget for slice ownership transfer; empty results return NULL |
 | 54 | ci-gating | Release artifact path traversal protection; resolve and verify containment before accessing manifest filenames |
 | 55 | version-consistency | Keep source, chart, internal dependency, and documentation version references synchronized for the active release |

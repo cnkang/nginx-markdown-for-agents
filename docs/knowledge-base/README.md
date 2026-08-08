@@ -30,14 +30,11 @@ it, never copy it into this directory.
 
 ### 2. Public surface is the frozen contract
 
-0.9.2 freezes the public surface: **25 active directives, 0 reject-only
-directives (all stubs removed), 5 runtime-mutable dynconf keys plus required
-`schema_version` metadata, 12 metric families, 27
-reason codes, 47 FFI exports, ABI v2**. Anything outside this surface is
-either removed (38 directives total) or not part of the contract. The
-authoritative source is
+0.9.2 freezes the public surface. The complete tables, counts, and values
+live in `config-contract.md`. The machine-readable authoritative source is
 `docs/harness/public-surface-inventory.json`, validated by the drift gate
-(`make public-surface-drift-check`).
+(`make public-surface-drift-check`). Anything outside this surface is either
+removed or not part of the contract.
 
 ### 3. Removed ≠ deprecated
 
@@ -46,28 +43,18 @@ Directives removed in 0.9.2 fail `nginx -t` with NGINX's standard
 configs reference a removed directive, they are stale. See
 `docs/guides/0.9.2-breaking-changes.md` for the full removal list.
 
-## Key Numbers (0.9.2 frozen contract)
+## Contract Loading
 
-| Item | Value | Source |
-|---|---|---|
-| Active directives | 25 | `config-contract.md` |
-| Removed directives (total) | 38 | `docs/guides/0.9.2-breaking-changes.md` |
-| Dynconf keys | 5 runtime-mutable + `schema_version` metadata (`filter`, `prune_noise`, `log_verbosity`, `error_policy`, `streaming_buffer`) | `config-contract.md` |
-| Metric families | 12 | `config-contract.md` |
-| Reason codes | 27 (0–26) | `config-contract.md` |
-| FFI exports | 47, ABI v2, all `INTERNAL_ONLY` | `config-contract.md` |
-| MSRV / toolchain | Rust 1.97.0 (MSRV 1.97) | `rust-toolchain.toml` |
-| OTel | Removed (ADR-0027) | `docs/architecture/ADR/0027-otel-removal-reintroduction-conditions.md` |
-| Profiles | Removed (`markdown_profile` gone) | `docs/guides/0.9.2-breaking-changes.md` |
+This README intentionally does not duplicate frozen numeric facts. Load
+`config-contract.md` for the current directive, dynconf, metric, reason-code,
+limit, and FFI tables. Use `public-surface-inventory.json` when you need a
+machine-readable value or count.
 
 ## Contract Files (load on demand)
 
 - `config-contract.md` — **The frozen 0.9.2 contract in one place**: full
-  25-directive table (syntax, default, context), five runtime-mutable dynconf
-  keys plus required `schema_version` metadata with
-  allowed values, the 12 metric families, reason-code list, FFI summary, and
-  `markdown_limits` key semantics. Load this for any directive/default/
-  metric question.
+  directive, dynconf, metric, reason-code, limit, and FFI tables with their
+  semantics. Load this for any directive/default/metric question.
 
 ## Index: Where to Find What
 

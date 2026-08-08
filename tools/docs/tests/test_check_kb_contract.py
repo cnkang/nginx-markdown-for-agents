@@ -60,3 +60,10 @@ def test_limit_key_drift_is_reported():
     )
     errors = checker.validate_contract(inventory, contract, readme)
     assert any("markdown_limits: missing rows" in error for error in errors)
+
+
+def test_readme_frozen_numbers_are_rejected():
+    inventory, contract, readme = _inputs()
+    readme += "\n## Key Numbers\n\n| Active directives | 25 | source |\n"
+    errors = checker.validate_contract(inventory, contract, readme)
+    assert any("README must not duplicate" in error for error in errors)

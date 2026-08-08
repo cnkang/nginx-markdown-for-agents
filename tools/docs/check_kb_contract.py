@@ -19,6 +19,12 @@ INVENTORY_PATH = ROOT / "docs/harness/public-surface-inventory.json"
 CONTRACT_PATH = ROOT / "docs/knowledge-base/config-contract.md"
 README_PATH = ROOT / "docs/knowledge-base/README.md"
 LIMIT_REGISTRY_PATH = ROOT / "tools/release/gates/validate_config_directives.py"
+README_FROZEN_SECTION_RE = re.compile(r"^## Key Numbers\b", re.M)
+README_FROZEN_ROW_RE = re.compile(
+    r"^\|\s*(?:Active directives|Removed directives|Dynconf keys|"
+    r"Metric families|Reason codes|FFI exports|MSRV / toolchain|OTel|Profiles)\s*\|",
+    re.M,
+)
 
 
 def _split_row(line: str) -> list[str] | None:
@@ -221,12 +227,15 @@ def validate_contract(
         re.I | re.S,
     ):
         errors.append("dynconf: contract must describe five runtime-mutable keys plus schema metadata")
-    if not re.search(
-        r"5 runtime-mutable dynconf\s+keys plus required\s+`schema_version` metadata",
-        readme_text,
-        re.I | re.S,
+    if README_FROZEN_SECTION_RE.search(readme_text) or README_FROZEN_ROW_RE.search(
+        readme_text
     ):
-        errors.append("dynconf: README must describe five runtime-mutable keys plus schema metadata")
+        errors.append(
+            "README must not duplicate the frozen numeric contract; link to config-contract.md"
+        )
+    for required_reference in ("config-contract.md", "public-surface-inventory.json"):
+        if required_reference not in readme_text:
+            errors.append(f"README must reference {required_reference}")
 
     expected_metrics = {
         item["name"]: {
