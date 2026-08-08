@@ -1272,6 +1272,7 @@ tail -f /var/log/nginx/error.log | grep "markdown decision:"
 | `nginx_markdown_input_bytes_total` | Counter | Input bytes read for conversion |
 | `nginx_markdown_output_bytes_total` | Counter | Converted bytes delivered downstream |
 | `nginx_markdown_inflight_requests` | Gauge | Current in-flight conversions |
+| `nginx_markdown_streaming_peak_memory_bytes` | Gauge | Peak streaming working-memory high-water mark |
 | `nginx_markdown_streaming_events_total` | Counter | Bounded streaming transitions |
 | `nginx_markdown_decompression_events_total` | Counter | Bounded decompression events |
 | `nginx_markdown_dynconf_reloads_total` | Counter | Dynamic-configuration reload outcomes |
@@ -1286,6 +1287,7 @@ plain-text metric fields are part of the 0.9.2 contract.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Added missing nginx_markdown_streaming_peak_memory_bytes metric row |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

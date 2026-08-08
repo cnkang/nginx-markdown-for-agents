@@ -32,7 +32,7 @@ bash tools/doctor/nginx-markdown-doctor.sh [OPTIONS]
 | 1 | At least one check failed |
 | 2 | Usage error |
 
-## Checks (0.9.0 + 0.9.1)
+## Checks (0.9.0 through 0.9.2)
 
 ### Core Checks (0.9.0)
 
@@ -57,7 +57,7 @@ bash tools/doctor/nginx-markdown-doctor.sh [OPTIONS]
 ### Human-readable (default)
 
 ```text
-nginx-markdown-doctor v0.9.1
+nginx-markdown-doctor v0.9.2
 ─────────────────────────────────
   ✓ [pass] nginx_version: nginx version 1.28.0 detected
   ✓ [pass] module_exists: module found at /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
@@ -78,7 +78,7 @@ Summary: 8 passed, 0 failed, 0 warnings, 0 skipped (8 total)
 ```json
 {
   "schema_version": 1,
-  "tool_version": "0.9.1",
+  "tool_version": "0.9.2",
   "timestamp": "2026-07-01T12:00:00Z",
   "checks": [
     {
@@ -160,7 +160,7 @@ Summary: 8 passed, 0 failed, 0 warnings, 0 skipped (8 total)
     },
     "tool_version": {
       "type": "string",
-      "description": "Doctor tool version (e.g. 0.9.1)"
+      "description": "Doctor tool version (e.g. 0.9.2)"
     },
     "timestamp": {
       "type": "string",

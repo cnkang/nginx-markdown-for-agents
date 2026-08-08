@@ -1,5 +1,11 @@
 # Migration Guide: 0.9.0 → 0.9.1
 
+> **Historical guide.** This guide covers the 0.9.0 → 0.9.1 migration
+> only. The 0.9.2 release removed the OTel directives that the migration
+> table below recommends (`markdown_otel`, `markdown_otel_endpoint`). If
+> you upgrade directly to 0.9.2, read
+> [MIGRATION-0.9.2.md](MIGRATION-0.9.2.md) first.
+
 ## Overview
 
 **0.9.0 → 0.9.1 is a breaking release.** The 0.9.0 release intended to be the
@@ -287,4 +293,5 @@ Rust converter and C module must be a matched pair from the same version.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Marked guide historical; OTel directives removed in 0.9.2 |
 | 0.9.1 | 2026-07-29 | Kang | Initial migration guide for 0.9.0 → 0.9.1 |

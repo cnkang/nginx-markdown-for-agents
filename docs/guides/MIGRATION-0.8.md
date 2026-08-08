@@ -2,6 +2,13 @@
 
 **Audience**: Operators upgrading from 0.7.x to 0.8.0
 
+> **Historical guide.** This guide covers the 0.7.x → 0.8.0 migration.
+> Later releases removed the directives it teaches
+> (`markdown_streaming_engine`, `markdown_stream_threshold`). If you
+> upgrade from 0.8.x or older to 0.9.2, read
+> [MIGRATION-0.9.2.md](MIGRATION-0.9.2.md) and
+> [0.9.2-breaking-changes.md](0.9.2-breaking-changes.md) instead.
+
 ## Overview
 
 v0.8.0 introduces the **true streaming contract**: the module can now convert
@@ -397,6 +404,7 @@ output parity before enabling streaming for live traffic.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Marked guide historical |
 | 0.8.3 | 2026-06-26 | Kang | No changes; version alignment with 0.8.3 release |
 | 0.8.0 | 2026-06-16 | Kang | Initial migration guide |
 | 0.8.0 | 2026-06-16 | Codex | Added missing streaming reason codes: `not_html`, `compressed`, `not_candidate`, `accept_mismatch` |
