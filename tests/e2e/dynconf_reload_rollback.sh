@@ -489,13 +489,13 @@ diagnostics_field() {
 
     case "$field" in
         generation)
-            match="$(printf '%s' "$json" | grep -Eo '"generation"[[:space:]]*:[[:space:]]*("[^"]*"|[0-9]+|true|false|null)' | head -1 || true)"
+            match=$(printf '%s' "$json" | grep -E -o '"generation"[[:space:]]*:[[:space:]]*("[^"]*"|[0-9]+|true|false|null)' | head -1 || true)
             ;;
         last_success)
-            match="$(printf '%s' "$json" | grep -Eo '"last_success"[[:space:]]*:[[:space:]]*("[^"]*"|[0-9]+|true|false|null)' | head -1 || true)"
+            match=$(printf '%s' "$json" | grep -E -o '"last_success"[[:space:]]*:[[:space:]]*("[^"]*"|[0-9]+|true|false|null)' | head -1 || true)
             ;;
         filter)
-            match="$(printf '%s' "$json" | grep -Eo '"filter"[[:space:]]*:[[:space:]]*("[^"]*"|[0-9]+|true|false|null)' | head -1 || true)"
+            match=$(printf '%s' "$json" | grep -E -o '"filter"[[:space:]]*:[[:space:]]*("[^"]*"|[0-9]+|true|false|null)' | head -1 || true)
             ;;
         *)
             return 1

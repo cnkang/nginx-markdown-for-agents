@@ -71,6 +71,20 @@ def test_metrics_registry_streaming_transition_allowlist():
     assert "event" not in labels
 
 
+def test_streaming_transition_allowlist_rejects_missing_renderer_value():
+    """Observed renderer values must match the closed transition contract."""
+    content = (
+        '# HELP nginx_markdown_streaming_events_total events\n'
+        '# TYPE nginx_markdown_streaming_events_total counter\n'
+        'nginx_markdown_streaming_events_total{transition=\\"start\\"} 1\n'
+    )
+
+    with pytest.raises(ValueError, match="transition values drift"):
+        gen._extract_family_labels(
+            content, "nginx_markdown_streaming_events_total"
+        )
+
+
 def test_metrics_registry_build_info_gauge():
     """build_info is a gauge with value 1."""
     registry = gen.generate_metrics_registry()

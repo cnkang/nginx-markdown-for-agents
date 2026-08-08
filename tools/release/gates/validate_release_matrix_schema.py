@@ -51,14 +51,17 @@ def run_normalization(doc: dict) -> tuple[bool, str]:
     """Run the normalization entry point as a subprocess over a JSON doc."""
     import subprocess
 
-    proc = subprocess.run(
-        [sys.executable, str(NORMALIZE_PATH), "-"],
-        input=json.dumps(doc),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=30,
-    )
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(NORMALIZE_PATH), "-"],
+            input=json.dumps(doc),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"normalizer execution failed: {exc}"
     if proc.returncode == 0:
         try:
             json.loads(proc.stdout)

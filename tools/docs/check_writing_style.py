@@ -76,9 +76,7 @@ CONTRACTION_RE = re.compile(
 PASSIVE_RE = re.compile(
     r"\b(?:is|are|was|were|be|been|being)\s+\w+ed\b", re.IGNORECASE
 )
-NOUN_CHAIN_RE = re.compile(
-    r"\b(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+){3,})\b"
-)
+CAPITALIZED_WORD_RE = re.compile(r"\b[A-Z][a-z]+\b")
 SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"`(])")
 SOURCE_CITATION_LINE_RE = re.compile(
     r"^(?:>\s*)?(?:[-*]\s*)?(?:\*\*)?"
@@ -321,8 +319,7 @@ def audit(text: str, path: Path, limit: int | None) -> list[str]:
         warnings.append(f"contraction '{m.group(0)}': avoid in prose")
     for m in PASSIVE_RE.finditer(prose):
         warnings.append(f"passive-ish '{m.group(0)}': prefer active voice")
-    for m in NOUN_CHAIN_RE.finditer(prose):
-        chain = m.group(0)
+    for chain, chain_start in _noun_chains(prose):
         # Cross-line merges may glue an allowlisted proper noun to
         # neighboring prose (e.g. "See\nPrometheus Metrics Guide\n\nCapture").
         # If the chain contains an allowlisted formal title, it is a proper
@@ -330,8 +327,11 @@ def audit(text: str, path: Path, limit: int | None) -> list[str]:
         if any(al in chain for al in NOUN_CHAIN_ALLOWLIST):
             continue
         # skip noun chains on reference lines (document titles)
-        line_start = prose.rfind("\n", 0, m.start()) + 1
-        line = prose[line_start : prose.find("\n", m.end())]
+        line_start = prose.rfind("\n", 0, chain_start) + 1
+        line_end = prose.find("\n", chain_start)
+        if line_end == -1:
+            line_end = len(prose)
+        line = prose[line_start:line_end]
         if REF_LINE_RE.match(line.strip()):
             continue
         warnings.append(
@@ -342,6 +342,37 @@ def audit(text: str, path: Path, limit: int | None) -> list[str]:
         warnings.append(f"{semi} semicolon(s) in prose: split into sentences")
 
     return warnings[:limit] if limit else warnings
+
+
+def _noun_chains(text: str) -> Iterator[tuple[str, int]]:
+    """Yield runs of four or more capitalized words on one line."""
+    for line_start, line in _lines_with_offsets(text):
+        words = list(CAPITALIZED_WORD_RE.finditer(line))
+        run: list[re.Match[str]] = []
+        for word in words:
+            if run and not all(
+                char in " \t" for char in line[run[-1].end():word.start()]
+            ):
+                if len(run) > NOUN_CHAIN_MAX:
+                    yield (
+                        " ".join(item.group(0) for item in run),
+                        line_start + run[0].start(),
+                    )
+                run = []
+            run.append(word)
+        if len(run) > NOUN_CHAIN_MAX:
+            yield (
+                " ".join(item.group(0) for item in run),
+                line_start + run[0].start(),
+            )
+
+
+def _lines_with_offsets(text: str) -> Iterator[tuple[int, str]]:
+    """Yield each line and its offset without relying on regex repetition."""
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        yield offset, line
+        offset += len(line)
 
 
 def _changed_md_files(base: str) -> list[Path]:

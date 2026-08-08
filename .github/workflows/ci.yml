@@ -192,6 +192,7 @@ jobs:
               - '.github/workflows/**'
             contract_gates:
               - 'schemas/**'
+              - 'tools/reason-codegen/**'
             workflows:
               - '.github/workflows/**'
 

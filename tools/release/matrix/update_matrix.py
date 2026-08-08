@@ -1008,13 +1008,17 @@ def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
         )
         for legacy_entry in merged
     ]
+    generated_keys = {
+        (entry["nginx_version"], entry["libc"], entry["arch"])
+        for entry in dynamic_entries
+    }
     other_entries = [
         entry
         for entry in entries
-        if not (
-            isinstance(entry, dict)
-            and entry.get("artifact_type") == "dynamic-module"
-        )
+        if not isinstance(entry, dict)
+        or entry.get("artifact_type") != "dynamic-module"
+        or (entry.get("nginx_version"), entry.get("libc"), entry.get("arch"))
+        not in generated_keys
     ]
     dynamic_entries.sort(
         key=lambda entry: (
