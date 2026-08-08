@@ -20,7 +20,7 @@ Copy the table below into your sub-spec and populate it for each capability with
 
 1. Use factual, non-speculative language. State what ships now and what does not ship now.
 2. Do not imply commitments for future releases. The 0.5.x column describes deferred work, not planned work.
-3. Every field must fill in. A blank 0.5.x Scope or Prerequisites field defeats the purpose of the template.
+3. The author must fill in every field. A blank 0.5.x Scope or Prerequisites field defeats the purpose of the template.
 
 ## Instructions for Sub-Spec Owners
 

@@ -27,8 +27,8 @@ Establish a single machine-readable release matrix per RFC 0008 section 4:
 2. CI workflows, documentation generators, packaging scripts, and release-gate
    validators MUST consume `tools/release-matrix.json` as their authoritative
    source for platform and version support declarations.
-3. Human-readable documentation MAY generate from the matrix but MUST NOT
-   be manually maintained in parallel.
+3. The matrix MAY generate human-readable documentation, but the documentation
+   MUST NOT be manually maintained in parallel.
 
 The matrix covers at minimum:
 - Target NGINX version range (floor and ceiling)

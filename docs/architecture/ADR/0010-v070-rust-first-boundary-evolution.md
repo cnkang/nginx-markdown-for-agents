@@ -22,9 +22,9 @@ buffer hardening, output ordering) highlighted that the FFI boundary needs
 stronger contracts: explicit struct initialization helpers, CI-enforced header
 drift checks, and layout tests.
 
-The question: should new pure logic continue to implement in C (closer to
-NGINX), or should the project adopt a deliberate "Rust-first" strategy for all
-new logic that does not require NGINX API access?
+The project must decide whether to continue implementing new pure logic in C
+(closer to NGINX) or adopt a deliberate "Rust-first" strategy for logic that
+does not require NGINX API access.
 
 ## Decision
 

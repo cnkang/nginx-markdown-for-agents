@@ -27,9 +27,9 @@ chains, fail-open flow, or deferred output ordering.
 - media URL extraction parity (`img`/`video`/`audio`/`source`/`track`/`area`)
   vs full-buffer behavior
 - derived-state reconciliation on multi-context drain (Rule 52): when an end
-  tag pops contexts from the middle of the stack, ALL derived state
-  (`list_depth`, `blockquote_depth`, `in_preformatted`,
-  `ordered_list_counters`) must update for every popped context
+  tag pops contexts from the middle of the stack, the drain logic must update
+  every derived state field (`list_depth`, `blockquote_depth`,
+  `in_preformatted`, `ordered_list_counters`) for every popped context
 - replay/runtime fixtures vs new failure paths
 - known-difference registry schema drift (`drift_type`/`severity`) vs parity
   suppressor semantics

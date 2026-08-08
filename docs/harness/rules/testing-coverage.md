@@ -84,10 +84,10 @@ Required:
 - Declare loop variables (`i`, `feed_count`, and so on) inside the `for` statement when they are not used after the loop. The test code already uses C99 features, so prefer `for (size_t i = 0; ...)` over declaring `i` at function scope.
 - When a test assigns a variable to verify a cast or representation, ensure the variable is actually read by a `TEST_ASSERT` before the function ends.
 - Initialize variables at declaration when the compiler cannot prove they are always assigned before use (for example variables set only inside conditional branches).
-- Output variables passed by pointer to helpers (for example
-  `foo(..., &last_buf, ..., &fallback_cl)`) must initialize before the call
-  even when the callee assigns them on success, early-return
-  paths in test/prod helpers can otherwise read indeterminate storage.
+- The caller must initialize output variables before passing their pointers to
+  helpers (for example `foo(..., &last_buf, ..., &fallback_cl)`), even when the
+  callee assigns them on success. Early-return paths in test or production
+  helpers can otherwise read indeterminate storage.
 
 ---
 

@@ -207,7 +207,8 @@ Configure-time environment variable `NGX_MARKDOWN_BROTLI_STREAMING` (values:
   `BROTLI_DECODER_PARAM_LARGE_WINDOW`, so the decoder rejects the RFC 9841
   large-window extension (WBITS > 24). Performance evidence must include
   high-standard-window and high-compression-ratio RSS measurements.
-- CI matrix grows: must test both Brotli-enabled and Brotli-disabled builds,
+- CI matrix grows: the project must test both Brotli-enabled and
+  Brotli-disabled builds,
   including at least one Ubuntu 22.04 (Brotli 1.0.9) environment
 
 ## Alternatives Considered

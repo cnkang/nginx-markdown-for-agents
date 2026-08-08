@@ -58,18 +58,19 @@ if configured). `markdown_trusted_proxies` is **http context only**, CIDR-based
 (IPv4 + IPv6, parsed at config time), and `Forwarded` takes precedence over
 `X-Forwarded-*` with right-most value selection on multi-hop chains (the
 right-most element is the one appended by the trusted proxy. The left-most
-is client-controlled and must not gain trust). `proto` stays
+element is client-controlled, so the module must not trust it). `proto` stays
 restricted to `http`/`https`. Untrusted sources produce a reason code and never
 leak raw header values into logs/metrics.
 
 ### C complexity reduction acceptance (per migrated file)
 
-Each migration must produce: before/after C function inventory. It must also produce: P0 migration
-status (migrated / thin-wrapper / documented exception), Rust unit coverage, and a C
-integration **parity test** (Rust decision == legacy C decision for identical
-input) retained until the C logic disappears. `tools/harness/detect_c_pure_logic.sh`
-must pass. The migration keeps no duplicate C/Rust business logic and no direct
-`headers_out` mutation outside HeaderPlan exceptions (ADR-0017).
+Each migration must produce a before/after C function inventory, P0 migration
+status (migrated / thin-wrapper / documented exception), Rust unit coverage,
+and a C integration **parity test** (Rust decision == legacy C decision for
+identical input) retained until the C logic disappears.
+`tools/harness/detect_c_pure_logic.sh` must pass. The migration must keep no
+duplicate C/Rust business logic and no direct `headers_out` mutation outside
+HeaderPlan exceptions (ADR-0017).
 
 ## Consequences
 

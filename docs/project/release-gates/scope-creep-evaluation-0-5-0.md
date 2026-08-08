@@ -8,7 +8,7 @@ This document defines the process for evaluating and rejecting out-of-scope prop
 
 **Does the work directly serve the streaming mainline?**
 
-All scope evaluations use this as the core criterion. Work that cannot demonstrate a strong coupling to the streaming mainline must demote to P1 or defer.
+All scope evaluations use this as the core criterion. The team must demote or defer work that cannot demonstrate a strong coupling to the streaming mainline.
 
 ## Evaluation Flow
 

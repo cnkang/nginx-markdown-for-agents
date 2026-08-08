@@ -28,16 +28,15 @@ compares metadata as well as names for directives, OTel controls,
 dynamic-configuration keys, metrics, reason codes, and FFI exports.
 
 This is a **source metadata and ABI drift gate**, not a runtime behavior
-contract. Directive defaults, syntax, status, and migration targets are
-read from the source command table, handler signatures, and inline
-metadata. Dynconf type/allowed/default/inheritance are read from parser
-tables and field declarations. The inventory declares metric bounded cardinality and checks it against
-label value sources. The gate does not
-execute directive create/merge functions, dynconf apply paths, or runtime
-metric rendering. The existing unit, integration, and E2E test suites verify
-runtime behavior. A source comment or detector constant
-change alone can satisfy this gate. It cannot by itself prove runtime
-behavior stays unchanged.
+contract. The extractor reads directive defaults, syntax, status, and
+migration targets from the source command table, handler signatures, and
+inline metadata. It reads dynconf type/allowed/default/inheritance from parser
+tables and field declarations. It compares metric bounded cardinality with
+the label value sources declared in the inventory. The gate does not execute
+directive create/merge functions, dynconf apply paths, or runtime metric
+rendering. The existing unit, integration, and E2E test suites verify runtime
+behavior. A source comment or detector constant change alone can satisfy this
+gate. It cannot by itself prove runtime behavior stays unchanged.
 
 The inventory, implementation, tests, and the relevant operator documentation
 must update in the same change set. The project exposes the check through
