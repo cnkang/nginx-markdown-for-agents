@@ -61,7 +61,7 @@ The budget covers only bounded state:
 - tag/context stack
 - output pending buffer
 
-If the budget exceeds, behavior follows configured fallback policy (see below).
+If the conversion exceeds the budget, behavior follows configured fallback policy (see below).
 
 ### 4) Controlled Fallback and Commit Semantics
 

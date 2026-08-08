@@ -41,9 +41,9 @@ Required:
   `NGX_MARKDOWN_BROTLI_STREAMING=auto|on`; `off` or an `auto` probe failure
   selects bounded full-buffer decompression instead of defining
   `NGX_HTTP_BROTLI`.  Brotli streaming reuses the same codec/member
-  lifecycle invariants as gzip/deflate: tail data must reject, truncated
-  the module must detect and reject final streams, guard no-progress,
-  and decompression accounting stays response-wide.
+  lifecycle invariants as gzip/deflate: the module must reject tail data,
+  detect and reject truncated final streams, guard no-progress,
+  and keep decompression accounting response-wide.
 - Codec-specific lifecycle state must survive arbitrary NGINX input chunk
   boundaries and downstream backpressure resumes.  Downstream `NGX_AGAIN`
   must not imply that compressed source input got consumed or may advance.

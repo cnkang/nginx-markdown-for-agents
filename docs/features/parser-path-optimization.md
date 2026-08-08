@@ -366,7 +366,7 @@ The output produced by `FusedNormalizer` is identical to the output of
 
 The fused normalizer activates when the traversal output (intermediate
 Markdown) exceeds `LARGE_BODY_THRESHOLD` (256 KB, a hardcoded constant in
-`converter.rs`). This threshold checks against the traversal output length
+`converter.rs`). This threshold gets checked against the traversal output length
 after `traverse_node_with_context` completes — not against the input HTML size.
 
 The 256 KB value is chosen to match the order of magnitude of the

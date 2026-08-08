@@ -29,7 +29,7 @@ new logic that does not require NGINX API access?
 ## Decision
 
 In v0.7.0, the project adopts a **Rust-first** strategy: all new pure logic
-lives in Rust and exposes to the C module via FFI. The C side retains only
+lives in Rust and the C module consumes it via FFI. The C side retains only
 NGINX-coupled responsibilities.
 
 ### C Side Retains

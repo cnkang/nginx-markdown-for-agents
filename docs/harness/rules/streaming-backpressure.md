@@ -330,7 +330,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 7. Code examples in documentation must use meaningful names and include comments explaining non-obvious logic, matching the same standards as production code. (Rule 26)
 8. Markdown escaping and link-destination examples in docs must use escaped forms; never show raw interpolation of untrusted text in link labels or destinations. (Rule 27)
 
-**If any item would violate, redesign the change before writing it.** Do not emit code that you know will need a follow-up fix — that wastes time, wastes tokens and review cycles. Redesign keeps the output clean.
+**If any item would be violated, redesign the change before writing it.** Do not emit code that you know will need a follow-up fix — that wastes time, wastes tokens and review cycles. Redesign keeps the output clean.
 
 ### During coding
 - Preserve NGINX event-driven semantics; no hidden blocking calls.

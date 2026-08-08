@@ -38,7 +38,7 @@ The gate fails if the following exceed the 0.9.0 baseline:
   `decompression_streaming_total > 0` per codec.  The `gzip-large` scenario
   separately verifies the full-buffer gzip decompression path
   (`decompression_fullbuffer_total > 0`).
-- **Diagnostics**: `tools/perf/doctor_advice.py` provides operator diagnostics when thresholds breached.
+- **Diagnostics**: `tools/perf/doctor_advice.py` provides operator diagnostics when thresholds get breached.
 
 ## Consequences
 
