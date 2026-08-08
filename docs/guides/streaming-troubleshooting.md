@@ -1,8 +1,8 @@
 # Streaming Troubleshooting Guide
 
 This guide is for the frozen 0.9.2 streaming surface. Diagnose the selected
-engine from the diagnostics endpoint and use Prometheus metrics for counters;
-the module no longer exposes operator-facing threshold, profile, or zero-copy
+engine from the diagnostics endpoint and use Prometheus metrics for counters.
+The module no longer exposes operator-facing threshold, profile, or zero-copy
 switches.
 
 Related docs:
@@ -50,7 +50,7 @@ The following conditions still select full-buffer or passthrough:
 - `markdown_cache_validation full` requires complete output before headers.
 - `markdown_auto_decompress off` leaves compressed responses unchanged.
 - An unsupported `Content-Encoding` is not converted.
-- A response content type listed by `markdown_stream_excluded_types` is
+- A response content type listed by `markdown_stream_excluded_types` gets
   excluded.
 - A build without the Brotli streaming feature uses the bounded full-buffer
   Brotli path.
@@ -86,14 +86,13 @@ curl -s -H 'Accept: text/plain; version=0.0.4' \
 ```
 
 For Brotli, confirm that the build contains the Brotli streaming feature. A
-feature-disabled build is expected to use bounded full-buffer decompression,
-not to fail the request solely because streaming is unavailable.
+a feature-disabled build uses bounded full-buffer decompression. It does not fail the request solely because streaming is unavailable.
 
 ## Pre-commit fallback
 
-Streaming can fall back before headers are committed when the bounded replay
-or parser pre-commit work cannot complete. This is safe fail-open behavior:
-the original response remains available and the request-level metric records
+Streaming can fall back before the module commits headers when the bounded replay
+or parser pre-commit work cannot complete. This is safe fail-open behavior.
+The original response remains available and the request-level metric records
 the terminal outcome.
 
 Inspect these transitions:
@@ -112,7 +111,7 @@ input or policy bypass.
 
 ## Post-commit failure or shortened output
 
-After converted headers are committed, the module cannot replay the original
+After the module commits converted headers, it cannot replay the original
 body. Check safe-finish and abort transitions:
 
 ```bash
@@ -124,12 +123,12 @@ curl -s -H 'Accept: text/plain; version=0.0.4' \
 Any sustained `abort_start` or `resume_failure` increase is a rollback
 trigger. Set `markdown_streaming off` and reload while collecting the request
 URI, content encoding, and reason labels from logs. Do not infer success from
-`NGX_AGAIN`; delivery is counted only after downstream accepts the terminal
+`NGX_AGAIN`. Delivery counts only after downstream accepts the terminal
 converted buffer.
 
 ## Decompression limits
 
-The active limits are configured as key/value entries:
+You configure the active limits as key/value entries:
 
 ```nginx
 markdown_limits decompressed_size=20m decompression_ratio=100
@@ -140,7 +139,7 @@ markdown_limits decompressed_size=20m decompression_ratio=100
 
 `decompressed_size` and `decompression_ratio` are cumulative across a gzip
 response's members. A truncated final member, invalid framing, I/O error, or
-budget violation is recorded in
+the module records a budget violation in
 `nginx_markdown_decompression_events_total` and follows the configured
 `markdown_error_policy` before commit.
 
@@ -151,5 +150,5 @@ budget violation is recorded in
    `markdown_auto_decompress off`).
 3. Run `nginx -t && nginx -s reload`.
 4. Verify `conversion_attempts_total{engine="streaming"}` stops increasing.
-5. Re-enable with `auto` only after the reason labels and compressed-input
-   evidence have been reviewed.
+5. Re-enable with `auto` only after reviewing the reason labels and
+   compressed-input evidence.

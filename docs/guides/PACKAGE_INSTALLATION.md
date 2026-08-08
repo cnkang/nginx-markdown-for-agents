@@ -8,7 +8,7 @@ official NGINX repository packages.
 
 GitHub Releases are the current distribution channel for DEB and RPM package
 artifacts, but asset availability is tag-specific.
-Public APT/YUM repositories are planned but not available yet.
+The project plans public APT/YUM repositories but has not launched them yet.
 They are not part of the current GA channel.
 
 Bare package-manager installation commands only work after an operator
@@ -19,7 +19,7 @@ Release.
 > **Availability check:** A release candidate and its compatibility-matrix
 > entry do not make a DEB or RPM package downloadable. Before using the
 > commands below, confirm that the selected GitHub Release contains the exact
-> package and `SHA256SUMS`; otherwise use the
+> package and `SHA256SUMS`. Otherwise use the
 > [Manual Source Build](./INSTALLATION.md#6-secondary-manual-source-build).
 
 ## Select the Matching Artifact
@@ -101,14 +101,14 @@ nginx -V 2>&1 | grep markdown
 nginx -t
 ```
 
-The module binary is installed using the canonical NGINX dynamic-module name:
+Install the module binary using the canonical NGINX dynamic-module name:
 
 ```text
 ngx_http_markdown_filter_module.so
 ```
 
-Package names and artifact filenames use `nginx-module-markdown-for-agents`;
-the module filename remains `ngx_http_markdown_filter_module.so`.
+Package names and artifact filenames use `nginx-module-markdown-for-agents`.
+The module filename remains `ngx_http_markdown_filter_module.so`.
 
 ## Enable Module
 

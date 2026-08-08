@@ -68,7 +68,7 @@ Content-Type: text/html
 ...
 ```
 
-The install script auto-enables `markdown_filter on` and wires the `load_module` directive, so no manual configuration editing is required. The NGINX default welcome page (`/usr/share/nginx/html/index.html`) serves as the demo content source — no upstream or proxy configuration needed.
+The install script auto-enables `markdown_filter on` and wires the `load_module` directive. You do not need to edit the configuration manually. The NGINX default welcome page (`/usr/share/nginx/html/index.html`) serves as the demo content source — no upstream or proxy configuration needed.
 
 > **Note:** If you need a standalone demo configuration file, see [`examples/nginx-configs/00-minimal-demo.conf`](../../examples/nginx-configs/00-minimal-demo.conf).
 
@@ -76,7 +76,7 @@ The install script auto-enables `markdown_filter on` and wires the `load_module`
 
 ## 3. Install Path Tiers
 
-Each installation method is classified into a tier that sets expectations for friction and support level.
+Each installation method falls into a tier that sets expectations for friction and support level.
 
 | Tier | Meaning | CI-Verified | Example |
 |------|---------|-------------|---------|
@@ -150,7 +150,7 @@ sudo nginx -t && sudo nginx -s reload
 
 **Tier: Convenience**
 
-This project can be installed from a dedicated Homebrew tap on macOS:
+You can install this project from a dedicated Homebrew tap on macOS:
 
 ```bash
 brew tap cnkang/nginx-markdown
@@ -159,9 +159,9 @@ brew install cnkang/nginx-markdown/nginx-markdown-module
 
 Notes:
 - If you publish and maintain your own tap, replace `cnkang/nginx-markdown` with your tap name.
-- The formula is tied to GitHub release tag artifacts (`refs/tags/<tag>.tar.gz`).
-- SHA-256 must be generated from the downloadable GitHub tag artifact, not local `git archive`.
-- Tap publish and macOS post-release verification automation are documented in [`docs/guides/HOMEBREW_TAP_RELEASE.md`](./HOMEBREW_TAP_RELEASE.md).
+- The formula ties to GitHub release tag artifacts (`refs/tags/<tag>.tar.gz`).
+- Generate SHA-256 from the downloadable GitHub tag artifact, not local `git archive`.
+- Tap publish and macOS post-release verification automation have documentation in [`docs/guides/HOMEBREW_TAP_RELEASE.md`](./HOMEBREW_TAP_RELEASE.md).
 
 If you need deterministic control over compiler flags or local patching, use [Manual Source Build](#6-secondary-manual-source-build).
 
@@ -175,9 +175,8 @@ Starting with v0.7.0, release workflows can build DEB and RPM artifacts for
 supported Linux distributions. Public GitHub Release asset availability is
 tag-specific: confirm that the target release contains the exact package and
 `SHA256SUMS` before running these commands. A release candidate or a
-compatibility-matrix entry is not a downloadable package. If no matching asset
-is published, use [Manual Source Build](#6-secondary-manual-source-build).
-APT/YUM repository publishing is planned, but public APT/YUM repository
+compatibility-matrix entry is not a downloadable package. If the release does not publish a matching asset, use [Manual Source Build](#6-secondary-manual-source-build).
+The project plans APT/YUM repository publishing. Public APT/YUM repository
 publishing is not part of the current GA channel. Do not use `apt-get install
 nginx-module-markdown` or `yum install nginx-module-markdown` unless you
 operate your own package repository.
@@ -245,7 +244,7 @@ Strategy](PACKAGE_DISTRIBUTION.md).
 
 **Tier: Secondary**
 
-For a fully self-contained Docker image that compiles the module from source against the exact official `nginx` image you run, use the provided multi-stage Dockerfile. It builds against the same `nginx` version you run:
+For a fully self-contained Docker image that compiles the module from source, use the provided multi-stage Dockerfile. It builds against the exact official `nginx` image you run.
 
 - [`examples/docker/Dockerfile.official-nginx-source-build`](../../examples/docker/Dockerfile.official-nginx-source-build)
 
@@ -330,7 +329,7 @@ curl -sD - -o /dev/null -H "Accept: text/html" http://127.0.0.1:8080/
 
 **Tier: Secondary**
 
-If you use a custom NGINX build, or a platform not supported by the pre-built binaries, compile the module from source. This section covers the Rust library build, NGINX module compilation, and platform prerequisites.
+Compile the module from source when you use a custom NGINX build or a platform without pre-built binaries. This section covers the Rust library build, NGINX module compilation, and platform prerequisites. See the [Manual Source Build](#6-secondary-manual-source-build) section for the full procedure. The manual path fits custom builds and unsupported platforms.
 
 ### Scope and Verification Notes
 
@@ -549,7 +548,7 @@ export MODULE_PATH=/path/to/nginx-markdown-for-agents/components/nginx-module
 
 #### Configure as a Dynamic Module (Recommended)
 
-Dynamic modules can be loaded/unloaded without recompiling NGINX.
+Dynamic modules load/unload without recompiling NGINX.
 
 The default shown below matches the Rust library's Cargo default features. If
 you built Rust with a different final feature set, export the matching
@@ -570,7 +569,7 @@ export NGX_MARKDOWN_RUST_FEATURES=default
 
 #### Configure as a Static Module
 
-Static modules are compiled directly into the NGINX binary.
+Static modules compile directly into the NGINX binary.
 
 ```bash
 export NGX_MARKDOWN_RUST_FEATURES=default
@@ -690,13 +689,13 @@ curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/
 ### Support Tiers
 
 - **Full** — Pre-built binary available, install script supported, CI-verified.
-- **Source Only** — No pre-built binary; build from source using the [Manual Source Build](#6-secondary-manual-source-build) instructions.
+- **Source Only** — No pre-built binary. Build from source using the [Manual Source Build](#6-secondary-manual-source-build) instructions.
 
 ### Minimum Supported Version
 
 The minimum supported NGINX version is **1.24.0**. Older versions are out of scope due to differences in the dynamic module ABI.
 
-If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [Manual Source Build](#6-secondary-manual-source-build) instructions to compile the module for your version.
+If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [Manual Source Build](#6-secondary-manual-source-build) instructions. They compile the module for your version.
 
 ### Platform Compatibility Matrix
 
@@ -816,7 +815,7 @@ ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz
 
 ### Exact Version Match Requirement
 
-NGINX dynamic modules require an **exact version match**. A module built for NGINX 1.26.2 will **not** load on NGINX 1.26.3. The NGINX module ABI is tied to the exact patch version, so approximate version matching is not supported.
+NGINX dynamic modules require an **exact version match**. A module built for NGINX 1.26.2 will **not** load on NGINX 1.26.3. The NGINX module ABI ties to the exact patch version. Approximate version matching is not supported.
 
 ### Determining the Correct Artifact
 
@@ -891,7 +890,7 @@ Vary: Accept
 
 #### 3. HTML Passthrough Curl
 
-Confirms that requests without `Accept: text/markdown` are served unchanged:
+Confirms that requests without `Accept: text/markdown` pass through unchanged:
 
 ```bash
 curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/
@@ -920,7 +919,7 @@ Look for initialization messages such as:
 
 #### 5. Metrics Endpoint (When Enabled)
 
-If a metrics endpoint location is configured, confirm the frozen Prometheus
+If you configure a metrics endpoint location, confirm that the frozen Prometheus
 families are present:
 
 ```bash
@@ -939,7 +938,7 @@ Look for `nginx_markdown_requests_total`,
 
 The default configuration uses `markdown_error_policy pass` (fail-open). This means:
 
-- If the module attempts a conversion and the conversion **fails** (e.g., timeout, converter error), the original HTML response is returned with `Content-Type: text/html`.
+- If the module attempts a conversion and the conversion **fails** (e.g., timeout, converter error), it returns the original HTML response with `Content-Type: text/html`.
 - This is **distinct** from requests that were never eligible for conversion (e.g., wrong `Content-Type`, non-200 status, missing `Accept: text/markdown` header). Those are "skipped" requests, not "fail-open."
 - To detect fail-open events, inspect the NGINX error log for conversion failure messages.
 
@@ -969,7 +968,7 @@ dlopen() "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so" failed
 ```
 
 **Root Cause:**
-The `load_module` directive is missing from `nginx.conf`, or the path to the `.so` file is incorrect. This can happen when the install script's auto-wiring was incomplete or the module file was moved after installation.
+The `load_module` directive is missing from `nginx.conf`, or the path to the `.so` file is incorrect. This can happen when the install script's auto-wiring was incomplete or the module file moved after installation.
 
 **Resolution Steps:**
 
@@ -1036,8 +1035,7 @@ module is not binary compatible
 **Root Cause:**
 NGINX dynamic modules require an exact version match. A module built for NGINX 1.26.2 will not load on NGINX 1.26.3. The pre-built binary does not exist for your exact NGINX version.
 
-Another common variant is a **stale previously-installed module** still being
-loaded by `load_module`. In that case `nginx -t` may fail with:
+Another common variant is a **stale previously-installed module** that `load_module` still loads. In that case `nginx -t` may fail with:
 
 ```text
 module ".../ngx_http_markdown_filter_module.so" version 1024000 instead of 1028003
@@ -1056,7 +1054,7 @@ still enabled in config.
    ```bash
    curl -sL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/release-matrix.json | python3 -m json.tool
    ```
-3. If your version is not in the matrix but is >= 1.24.0, build from source using the [Manual Source Build](#6-secondary-manual-source-build) instructions.
+3. If your version is not in the matrix but is >= 1.24.0, build from source. Use the [Manual Source Build](#6-secondary-manual-source-build) instructions.
 4. If your version is below 1.24.0, upgrade NGINX to a supported version.
 5. If you see `version ... instead of ...`, disable stale module loader snippets before retry:
    ```bash
@@ -1118,7 +1116,7 @@ dlopen() ... failed (Error relocating ... symbol not found)
 or the install script reports a libc detection mismatch.
 
 **Root Cause:**
-A glibc-linked binary was installed on a musl-based system (e.g., Alpine Linux) or vice versa. The two C standard library implementations are not ABI-compatible.
+The user installed a glibc-linked binary on a musl-based system (e.g., Alpine Linux), or the reverse. The two C standard library implementations are not ABI-compatible.
 
 **Resolution Steps:**
 
@@ -1198,7 +1196,7 @@ The system cannot reach GitHub to download the pre-built binary or checksum file
    nslookup github.com
    ```
 4. If the system is air-gapped, manually download the binary and checksum on a connected machine.
-   Manual download is intended only for air-gapped or troubleshooting scenarios — prefer the [install script](#4-primary-install-script) for normal installations.
+   Use manual download only for air-gapped or troubleshooting scenarios. Prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
    # Set these values from a GitHub Release that lists both assets.
    RELEASE_TAG="<published-release-tag>"
@@ -1231,7 +1229,7 @@ Release asset does not provide a SHA256 digest; refusing to install without an a
 ```
 
 **Root Cause:**
-The SHA-256 hash of the downloaded binary does not match the expected checksum from the release. This can be caused by a corrupted download, an incomplete transfer, a network intermediary modifying the file, or a tampered artifact.
+The SHA-256 hash of the downloaded binary does not match the expected checksum from the release. Possible causes: a corrupted download, an incomplete transfer, a network intermediary modifying the file, or a tampered artifact.
 
 **Resolution Steps:**
 
@@ -1240,7 +1238,7 @@ The SHA-256 hash of the downloaded binary does not match the expected checksum f
    curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
    ```
 2. If the failure persists, manually verify the checksum.
-   Manual download is intended only for troubleshooting — prefer the [install script](#4-primary-install-script) for normal installations.
+   Use manual download only for troubleshooting. Prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
    # Set these values from a GitHub Release that lists both assets.
    RELEASE_TAG="<published-release-tag>"
@@ -1255,8 +1253,8 @@ The SHA-256 hash of the downloaded binary does not match the expected checksum f
    sha256sum -c "ngx_http_markdown_filter_module-${NGINX_VERSION}-${OS_TYPE}-${ARCH}.tar.gz.sha256"
    ```
 3. If the checksum still fails, try downloading from a different network or machine to rule out a network intermediary.
-4. If the issue persists, report it on the project's GitHub issue tracker — the release artifact may need to be re-published.
-5. If you must install in a controlled emergency scenario without a published digest, set `ALLOW_INSECURE_NO_CHECKSUM=1` explicitly and document the exception in your change record.
+4. If the issue persists, report it on the project's GitHub issue tracker. The release artifact may need to be re-published.
+5. If you must install in a controlled emergency scenario without a published digest, set `ALLOW_INSECURE_NO_CHECKSUM=1` explicitly. Document the exception in your change record.
 
 ---
 
@@ -1266,7 +1264,7 @@ The SHA-256 hash of the downloaded binary does not match the expected checksum f
 Requests that should return Markdown are returning HTML instead. The response has `Content-Type: text/html` even though the client sends `Accept: text/markdown`.
 
 **Root Cause:**
-The module only converts a response when all eligibility requirements are met. If any requirement is not satisfied, the original response is passed through unchanged.
+The module only converts a response when all eligibility requirements are met. If any requirement is not satisfied, it passes the original response through unchanged.
 
 The eligibility requirements are:
 
@@ -1281,7 +1279,7 @@ The eligibility requirements are:
 
 **Resolution Steps:**
 
-1. Confirm the module is enabled:
+1. Confirm that the module loads and `markdown_filter on` activates:
    ```bash
    grep -r 'markdown_filter' /etc/nginx/
    ```
@@ -1309,7 +1307,7 @@ The eligibility requirements are:
 #### SOP 8: Upstream Response Not Eligible
 
 **Symptom:**
-The module is loaded and `markdown_filter on` is set, but specific pages are not being converted. Other pages may convert correctly.
+The module loads and `markdown_filter on` is set, but specific pages are not converting. Other pages may convert correctly.
 
 **Root Cause:**
 The upstream response for those pages does not meet the eligibility criteria. Common reasons:
@@ -1336,10 +1334,10 @@ The upstream response for those pages does not meet the eligibility criteria. Co
 #### SOP 9: Compression / Decompression Issues
 
 **Symptom:**
-The module fails to convert responses that are compressed by the upstream. The error log may show conversion failures, or the response is passed through as HTML despite meeting all other eligibility requirements.
+The module fails to convert responses that the upstream compressed. The error log may show conversion failures. Alternatively, the response passes through as HTML despite meeting all other eligibility requirements.
 
 **Root Cause:**
-The upstream server sends a compressed response (gzip, brotli, or deflate), and the module cannot decompress it before conversion. This can happen when the module's built-in decompression is not handling the encoding, or when NGINX's own compression interacts with the module's pipeline.
+The upstream server sends a compressed response (gzip, brotli, or deflate). The module cannot decompress it before conversion. This can happen when the module's built-in decompression is not handling the encoding. It can also happen when NGINX's own compression interacts with the module's pipeline.
 
 **Resolution Steps:**
 

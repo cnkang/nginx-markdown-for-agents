@@ -15,15 +15,15 @@ integrity verification via SHA256SUMS, and GPG signature verification.
 | Self-hosted YUM | .rpm | Planned; no public repository URL yet | GPG |
 
 APT/YUM repository publishing is intentionally tracked as a future distribution
-step. Until a real repository and signing key are published, installation docs
+step. Until the project publishes a real repository and signing key, installation docs
 must point users to GitHub Release package artifacts rather than bare
 `apt-get install` or `yum install` commands.
 
-The release matrix describes the package build and validation targets; it does
+The release matrix describes the package build and validation targets. It does
 not prove that a particular tag has public package assets. Before using a
 package command, verify that the target GitHub Release lists both the exact
 package and its `SHA256SUMS` file. Release candidates do not make package
-assets available. If no matching asset is published, use the
+assets available. If the release publishes no matching asset, use the
 [Manual Source Build](./INSTALLATION.md#6-secondary-manual-source-build).
 
 <!-- BEGIN:release-matrix:distribution-matrix -->
@@ -177,8 +177,8 @@ Every release includes a `release-manifest.json` providing structured metadata
 about the release: git tag, commit SHA, package filenames with SHA-256 hashes,
 source archive hash (for tag releases), and GitHub Actions workflow metadata.
 
-The manifest is generated during the `integrity-checksums` CI job and is
-included in `SHA256SUMS`. The `SHA256SUMS` file is then signed as
+The `integrity-checksums` CI job generates the manifest and includes it
+in `SHA256SUMS`. The release then signs the `SHA256SUMS` file as
 `SHA256SUMS.asc` for tag releases, providing a chain of custody:
 
 ```
@@ -198,9 +198,9 @@ curl -fsSL -H "Accept: application/json" -o release-manifest.json \
 
 ## GPG Signature Verification
 
-When GPG signing is enabled for a release, a detached ASCII-armored signature
-file (`SHA256SUMS.asc`) is published alongside `SHA256SUMS`. This allows
-verification that the checksums were produced by the project maintainers.
+When the project enables GPG signing for a release, it publishes a detached
+ASCII-armored signature file (`SHA256SUMS.asc`) alongside `SHA256SUMS`. This
+lets users verify that the project maintainers produced the checksums.
 
 ### Importing the Project Public Key
 
@@ -255,15 +255,15 @@ sha256sum --check --ignore-missing SHA256SUMS
 ```
 
 If all steps succeed, the package and manifest are authentic and intact.
-The manifest (`release-manifest.json`) is included in `SHA256SUMS` and therefore
-covered by the GPG signature on `SHA256SUMS`.
+The manifest (`release-manifest.json`) appears in `SHA256SUMS`. The GPG
+signature on `SHA256SUMS` therefore covers it.
 
 ## Security Policy
 
-- Release checksums are GPG-signed with the project release key (`SHA256SUMS.asc` signs `SHA256SUMS`). Package authenticity is verified by first verifying the signed checksum file, then checking the downloaded package against `SHA256SUMS`.
+- Release checksums are GPG-signed with the project release key (`SHA256SUMS.asc` signs `SHA256SUMS`). Users verify package authenticity by first verifying the signed checksum file, then checking the downloaded package against `SHA256SUMS`.
 - The default `postinst` script does NOT add `load_module` to `nginx.conf`.
 - Operators must explicitly enable the module, ensuring intentional activation.
-- Module is loaded as a dynamic module (`--add-dynamic-module`), not compiled in.
+- The module loads as a dynamic module (`--add-dynamic-module`), not compiled in.
 
 ## Non-Goals
 

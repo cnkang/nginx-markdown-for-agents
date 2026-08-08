@@ -4,7 +4,7 @@
 > documented in this playbook is a **reject-only stub** in 0.9.0+. Setting it
 > in `nginx.conf` causes `nginx -t` to fail with a migration hint. There is no
 > Config V2 replacement; the incremental-path threshold is no longer
-> user-configurable. This playbook is retained as a historical reference for
+> user-configurable. This playbook stays as a historical reference for
 > pre-0.9.0 deployments. For current rollout guidance, use the
 > [Rollout Cookbook](ROLLOUT_COOKBOOK.md) and
 > [Configuration Guide](CONFIGURATION.md#markdown_limits).
@@ -24,7 +24,7 @@
 
 ## Overview
 
-This playbook describes how to gradually enable the large-response incremental processing path controlled by the `markdown_large_body_threshold` directive. The rollout follows a phased approach — single location, single server, then global — with verification checkpoints at each stage and a one-command rollback that requires no code changes.
+This playbook describes how to gradually enable the large-response incremental processing path controlled by the `markdown_large_body_threshold` directive. The rollout follows a phased approach: single location, single server, then global. It includes verification checkpoints at each stage and a one-command rollback that requires no code changes.
 
 ### Target Audience
 
@@ -45,7 +45,7 @@ This playbook describes how to gradually enable the large-response incremental p
 
 Before starting the rollout, verify:
 
-1. **Rust `incremental` feature is compiled in.** The NGINX module binary must be built with the Rust converter's `incremental` feature enabled. If the feature is not compiled but a threshold is configured, the module logs a warning and falls back to the full-buffer path — the incremental path will not activate.
+1. **Rust `incremental` feature compiled in.** The NGINX module binary must be built with the Rust converter's `incremental` feature enabled. If the feature is not compiled but a threshold exists in config, the module logs a warning. It falls back to the full-buffer path. The incremental path will not activate. The fallback keeps the module safe. A configured threshold without the feature stays dormant. The warning names the missing feature. You configure the threshold without the feature at your own risk.
 
    ```bash
    # Build the Rust converter with incremental support
@@ -67,21 +67,21 @@ Before starting the rollout, verify:
    # Should show a symbol — if empty, the feature was not linked in.
    ```
 
-2. **Metrics endpoint is accessible.** The `markdown_metrics` location must be configured and reachable from localhost or a local collector on the NGINX host.
+2. **Metrics endpoint accessible.** Configure the `markdown_metrics` location. Make it reachable from localhost or a local collector on the NGINX host.
 
    ```bash
    curl http://localhost/markdown-metrics
    # Verify output includes "fullbuffer_path_hits" and "incremental_path_hits"
    ```
 
-3. **Baseline metrics are recorded.** Capture current conversion error rate, P95 latency, and memory usage before enabling the threshold. These serve as the comparison baseline for each rollout phase.
+3. **Baseline metrics recorded.** Capture current conversion error rate, P95 latency, and memory usage before enabling the threshold. These serve as the comparison baseline for each rollout phase.
 
    ```bash
    # Record baseline snapshot (JSON)
    curl -s -H "Accept: application/json" http://localhost/markdown-metrics > /tmp/baseline-metrics.json
    ```
 
-4. **NGINX configuration is tested and backed up.**
+4. **NGINX configuration tested and backed up.**
 
    ```bash
    nginx -t
@@ -229,7 +229,7 @@ Monitor these four metrics throughout every rollout phase:
 
 #### 1. Path Hit Ratio
 
-Tracks how traffic is distributed between the full-buffer and incremental paths.
+Tracks how traffic distributes between the full-buffer and incremental paths.
 
 ```bash
 # Snapshot (JSON)
@@ -341,7 +341,7 @@ Rollback requires **no code changes** — only a configuration update and reload
 
 **Step 1: Disable the threshold.**
 
-Set `markdown_large_body_threshold off` at the same scope where it was enabled.
+Set `markdown_large_body_threshold off` at the same scope where you enabled it.
 
 For a global rollout (Phase 3), edit the `http` block:
 
@@ -376,7 +376,7 @@ location /docs/internal {
 nginx -t && nginx -s reload
 ```
 
-This immediately routes all requests back to the full-buffer path. In-flight requests on the incremental path complete normally; new requests use the full-buffer path.
+This immediately routes all requests back to the full-buffer path. In-flight requests on the incremental path complete normally. New requests use the full-buffer path.
 
 ### Emergency Rollback (Single Command)
 
@@ -391,7 +391,7 @@ nginx -t && nginx -s reload
 
 ## Rollback Trigger Conditions
 
-Initiate an **immediate rollback** if any of the following conditions are observed:
+Initiate an **immediate rollback** if you observe any of the following conditions:
 
 | Condition | Threshold | Action |
 |-----------|-----------|--------|
@@ -496,7 +496,7 @@ ps aux | grep "nginx: worker" | awk '{printf "PID %s: uptime check — RSS %.1f 
 Record the following for post-incident review:
 
 - Timestamp of rollback
-- Phase at which rollback was triggered
+- Phase that triggered the rollback
 - Trigger condition observed (error rate, latency, etc.)
 - Metrics snapshot before and after rollback
 - Any error log entries related to the issue

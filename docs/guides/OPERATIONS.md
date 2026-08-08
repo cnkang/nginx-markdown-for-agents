@@ -37,9 +37,9 @@ This operational guide provides procedures for monitoring, troubleshooting, tuni
 - This guide includes example commands, sample metrics, and suggested thresholds. Validate them in staging before production use.
 - Metric field names in this guide should match the current metrics endpoint implementation in `components/nginx-module/src/ngx_http_markdown_filter_module.c`.
 - The built-in metrics endpoint returns the frozen Prometheus exposition.
-  Send an explicit Prometheus `Accept` header; see
+  Send an explicit Prometheus `Accept` header. See
   [Prometheus Metrics Guide](prometheus-metrics.md).
-- Metrics are aggregated in shared memory across workers; a single endpoint response reflects the whole NGINX instance, not just the worker that served `/markdown-metrics`.
+- Metrics aggregate in shared memory across workers. A single endpoint response reflects the whole NGINX instance, not just the worker that served `/markdown-metrics`.
 - For “why this request took a specific branch,” use [../architecture/REQUEST_LIFECYCLE.md](../architecture/REQUEST_LIFECYCLE.md) and [../architecture/CONFIG_BEHAVIOR_MAP.md](../architecture/CONFIG_BEHAVIOR_MAP.md) alongside this runbook.
 
 ### Terminology and Command Conventions
@@ -47,7 +47,7 @@ This operational guide provides procedures for monitoring, troubleshooting, tuni
 - **Module** means the NGINX Markdown filter module (the NGINX C component).
 - **Rust converter** means the Rust HTML-to-Markdown library and FFI layer.
   - **Metrics endpoint** means the HTTP endpoint enabled by `markdown_metrics` (Prometheus text 0.0.4 only).
-- Metrics commands in this guide often use `http://localhost/markdown-metrics`; replace it with your actual metrics endpoint path when different.
+- Metrics commands in this guide often use `http://localhost/markdown-metrics`. Replace it with your actual metrics endpoint path when different.
 
 ---
 
@@ -247,7 +247,7 @@ fi
 
 ## Troubleshooting
 
-The repository CI now includes a non-blocking Darwin/macOS smoke workflow that exercises the shared native-build helper, real-nginx IMS validation, and chunked native smoke. If a runtime issue reproduces only on macOS, start by comparing its workflow logs with the primary Linux `runtime-regressions` job.
+The repository CI now includes a non-blocking Darwin/macOS smoke workflow. It exercises the shared native-build helper, real-nginx IMS validation, and chunked native smoke. If a runtime issue reproduces only on macOS, start by comparing its workflow logs with the primary Linux `runtime-regressions` job.
 
 ### Common Issues and Solutions
 
@@ -446,13 +446,13 @@ curl -H "Accept: text/markdown" http://localhost/test
 
 #### Upgrading to 0.9.x
 
-- `fullbuffer_path_hits` and `incremental_path_hits` have been moved to the end of `ngx_http_markdown_metrics_t`. If you use shared-memory metrics, a graceful reload is sufficient; no data migration is needed.
-- The `incremental` feature is off by default. Enable it with `--features incremental` when building the Rust converter to use the incremental processing path. Streaming selection is controlled by `markdown_streaming off|auto|force`; `auto` uses an internal bounded heuristic rather than an operator-facing threshold directive.
-- `X-Forwarded-Host` and `X-Forwarded-Proto` headers are no longer trusted by default for base URL construction. If NGINX sits behind a trusted reverse proxy that sets these headers, add its proxy range in the `http` context, for example `markdown_trusted_proxies 10.0.0.0/8;`. Forwarded headers remain ignored for direct peers outside the configured CIDRs.
+- `fullbuffer_path_hits` and `incremental_path_hits` moved to the end of `ngx_http_markdown_metrics_t`. If you use shared-memory metrics, a graceful reload is sufficient. You need no data migration.
+- The `incremental` feature is off by default. Enable it with `--features incremental` when building the Rust converter. This activates the incremental processing path. `markdown_streaming off|auto|force` controls streaming selection. `auto` uses an internal bounded heuristic rather than an operator-facing threshold directive. This replaces the retired threshold directive.
+- `X-Forwarded-Host` and `X-Forwarded-Proto` headers are no longer trusted by default for base URL construction. If NGINX sits behind a trusted reverse proxy that sets these headers, add its proxy range in the `http` context. For example, use `markdown_trusted_proxies 10.0.0.0/8;`. Forwarded headers remain ignored for direct peers outside the configured CIDRs. Trusted proxies keep base URLs correct. Configure them explicitly. This restores the previous behavior.
 
 #### Upgrading to 0.2.x
 
-No public directive renames are introduced. If you relied on older documentation, review the updated guides for clarified installation paths, compression rollout guidance, metrics fields, and architecture references.
+The project introduces no public directive renames. If you relied on older documentation, review the updated guides. They clarify installation paths, compression rollout guidance, metrics fields, and architecture references. The guides now describe the current directive names.
 
 Variable-driven `markdown_filter` support is new in 0.2.0. Existing static `on`/`off` configurations continue to work without changes.
 
@@ -876,24 +876,24 @@ curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/test
 ```
 
 6. **If issues persist:**
-- Verify the compression format is supported (gzip, deflate, br)
-- Check if compressed data might be corrupted
+- Verify that the module supports the compression format (gzip, deflate, br). The module supports these three formats. Check the upstream Content-Encoding header.
+- Check whether compressed data might have corruption. Corrupted streams fail decompression. A partial transfer often causes this. Verify the upstream transfer completed. Compare the received size with Content-Length.
 - Review error logs for specific decompression error codes
 - Consider reporting the issue with sample data
 
-**Note:** Automatic decompression eliminates the need for CDN bypass or special routing in most cases.
+**Note:** Automatic decompression eliminates the need for CDN bypass or special routing in most cases. The module handles decompression internally.
 
 ---
 
 ## Reason Code Reference for Operators
 
-Every request that enters the module's decision chain receives a reason code that explains the outcome. These reason codes appear in decision log entries and Prometheus metrics labels using the same strings, so you can correlate a log entry directly with a metric counter without translation.
+Every request that enters the module's decision chain receives a reason code that explains the outcome. These reason codes appear in decision log entries and Prometheus metrics labels using the same strings. You can correlate a log entry directly with a metric counter without translation.
 
 For the full decision chain model (check order, flowchart, and outcome determination logic), see [Decision Chain Model](../features/DECISION_CHAIN.md).
 
 ### Reason Code Table
 
-The table below maps each reason code to its internal enum, error category, request state, description, and the action you should take when you see it.
+The table below maps each reason code to its internal enum, error category, request state, and description. It also lists the action you should take when you see it.
 
 | Reason Code | Request State | Description | Suggested Operator Action |
 |---|---|---|---|
@@ -910,7 +910,7 @@ The table below maps each reason code to its internal enum, error category, requ
 
 #### Engine Selection Codes
 
-When the streaming engine is enabled, the engine selector emits a reason code indicating which path was chosen:
+When you enable the streaming engine, the engine selector emits a reason code indicating which path was chosen:
 
 | Reason Code | Family | Severity | Description | Suggested Operator Action |
 |---|---|---|---|---|
@@ -918,7 +918,7 @@ When the streaming engine is enabled, the engine selector emits a reason code in
 
 #### Streaming Reason Codes
 
-When the streaming engine is active (`markdown_streaming auto` or `force`), the following reason codes are emitted at streaming decision points:
+When the streaming engine is active (`markdown_streaming auto` or `force`), the engine emits the following reason codes at streaming decision points:
 
 | Reason Code | Family | Severity | Description | Suggested Operator Action |
 |---|---|---|---|---|
@@ -967,7 +967,7 @@ SKIPPED     = sum(requests_total{outcome="skipped"})
 FAILED      = sum(requests_total{outcome=~"failed_.*"})
 ```
 
-> **Note:** The outcome, stage, and reason labels are the authoritative request-level classification. They are bounded and do not include a path or URI dimension.
+> **Note:** The outcome, stage, and reason labels are the authoritative request-level classification. They stay bounded and do not include a path or URI dimension.
 
 **From decision log entries** (useful for request-level correlation):
 
@@ -979,7 +979,7 @@ SKIPPED     = count of "reason=not_eligible" (and other skipped_* codes) in deci
                + skipped_accept_reject + skipped_conditional + bypass_no_transform)
 ```
 
-> **Note:** Request outcomes are exposed as Prometheus
+> **Note:** The module exposes request outcomes as Prometheus
 > `nginx_markdown_requests_total{outcome=...,stage=...,reason=...}` series. Use decision
 > log grep patterns when you need request URIs, status details, or correlation
 > with a specific upstream response.
@@ -1050,9 +1050,9 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 
 ## Decision Logging
 
-The module emits structured decision log entries to the NGINX error log for every request that enters the [decision chain](../features/DECISION_CHAIN.md). Each entry records the reason code and request context, giving operators a per-request view of why the module converted, skipped, or failed a request.
+The module emits structured decision log entries to the NGINX error log for every request that enters the [decision chain](../features/DECISION_CHAIN.md). Each entry records the reason code and request context. It gives operators a per-request view of why the module converted, skipped, or failed a request.
 
-Decision logging is controlled by the `markdown_log_verbosity` directive. No separate directive is needed — the existing verbosity knob gates which outcomes produce log entries and how much detail they contain.
+The `markdown_log_verbosity` directive controls decision logging. You need no separate directive. The existing verbosity knob gates which outcomes produce log entries and how much detail they contain. The directive name reflects this control. Set it to `debug` for full detail. The knob controls both presence and verbosity of entries.
 
 ### Log Entry Format
 
@@ -1075,7 +1075,7 @@ Fields:
 
 #### Extended Format (debug verbosity)
 
-When `markdown_log_verbosity` is set to `debug`, three additional fields are appended:
+When `markdown_log_verbosity` is set to `debug`, three additional fields append:
 
 ```text
 markdown decision: reason=<REASON_CODE> method=<METHOD> uri=<URI> content_type=<TYPE> filter_value=<VALUE> accept=<ACCEPT> status=<STATUS>
@@ -1091,7 +1091,7 @@ Additional fields:
 
 ### Concrete Log Line Examples
 
-These examples show what operators will see in `/var/log/nginx/error.log`. The NGINX timestamp, log level, PID, and connection fields are included for realism.
+These examples show what operators will see in `/var/log/nginx/error.log`. The examples include the NGINX timestamp, log level, PID, and connection fields for realism.
 
 #### Successful conversion (info verbosity)
 
@@ -1128,7 +1128,7 @@ The `markdown_log_verbosity` directive controls which decision outcomes produce 
 | `info` (default) | All outcomes | Base | Recommended for rollout — full visibility into every decision |
 | `debug` | All outcomes | Extended (adds `filter_value`, `accept`, `status`) | Troubleshooting — maximum detail for diagnosing specific requests |
 
-At `error` and `warn` levels, non-failure outcomes (`not_eligible`, `skipped_*`, `disabled`, and `converted`) are silently suppressed. Both levels only emit failure outcomes such as `failed_open` and `failed_closed`. At `info` and `debug` levels, the full bounded outcome set is available. Decision logs retain specific reason codes such as `memory_budget_exceeded`, `timeout`, or `ffi_panic`; the Prometheus `nginx_markdown_requests_total` family carries those values in its `reason` label.
+At `error` and `warn` levels, non-failure outcomes (`not_eligible`, `skipped_*`, `disabled`, and `converted`) are silently suppressed. Both levels only emit failure outcomes such as `failed_open` and `failed_closed`. At `info` and `debug` levels, the full bounded outcome set is available. Decision logs retain specific reason codes such as `memory_budget_exceeded`, `timeout`, or `ffi_panic`. The Prometheus `nginx_markdown_requests_total` family carries those values in its `reason` label.
 
 #### Configuration examples
 
@@ -1157,7 +1157,7 @@ The module maps decision outcomes to NGINX log levels so that NGINX's own `error
 
 This means:
 - If your NGINX `error_log` level is set to `warn`, you will only see failure decision entries (including streaming failures) regardless of `markdown_log_verbosity`.
-- If your NGINX `error_log` level is set to `info` or `debug`, the `markdown_log_verbosity` directive controls which entries appear; streaming non-failure entries are emitted at `info` level.
+- If your NGINX `error_log` level is set to `info` or `debug`, the `markdown_log_verbosity` directive controls which entries appear. The module emits streaming non-failure entries at `info` level.
 - For full decision logging visibility (including all streaming outcomes), ensure `error_log` is at `info` level or lower.
 
 ### Parsing Decision Log Entries
