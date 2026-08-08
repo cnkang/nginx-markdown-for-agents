@@ -10,7 +10,7 @@ Accepted
 
 ## Context
 
-The compatibility surface is distributed across the NGINX command table,
+The compatibility surface spreads across the NGINX command table,
 Rust reason and FFI definitions, dynamic-configuration parsing, metrics
 rendering, generated headers, and operator documentation. Checking names or
 prose alone does not detect changes to accepted values, handler behavior,
@@ -30,17 +30,17 @@ dynamic-configuration keys, metrics, reason codes, and FFI exports.
 This is a **source metadata and ABI drift gate**, not a runtime behavior
 contract. Directive defaults, syntax, status, and migration targets are
 read from the source command table, handler signatures, and inline
-metadata; dynconf type/allowed/default/inheritance are read from parser
-tables and field declarations; metric bounded cardinality is declared in
-the inventory and checked against label value sources. The gate does not
+metadata. Dynconf type/allowed/default/inheritance are read from parser
+tables and field declarations. The inventory declares metric bounded cardinality and checks it against
+label value sources. The gate does not
 execute directive create/merge functions, dynconf apply paths, or runtime
-metric rendering. Runtime behavior is verified by the existing unit,
-integration, and E2E test suites. A source comment or detector constant
-change alone can satisfy this gate; it cannot by itself prove runtime
-behavior is unchanged.
+metric rendering. The existing unit, integration, and E2E test suites verify
+runtime behavior. A source comment or detector constant
+change alone can satisfy this gate. It cannot by itself prove runtime
+behavior stays unchanged.
 
 The inventory, implementation, tests, and the relevant operator documentation
-must be updated in the same change set. The check is exposed through
+must update in the same change set. The project exposes the check through
 `make public-surface-drift-check` and is a blocking input to
 `make release-gates-check-092`. It is a compatibility-contract check, not a
 second runtime schema or a promise that every listed internal symbol is a
@@ -71,8 +71,8 @@ clean implementation comparison.
 
 - **Names-only inventory:** rejected because it misses flags, labels, defaults,
   handler classification, signatures, and ABI drift.
-- **Documentation-only contract:** rejected because prose cannot reliably be
-  compared with source in a clean release checkout.
+- **Documentation-only contract:** rejected because prose cannot reliably
+  compare with source in a clean release checkout.
 - **Compiler/reflection-based extraction:** deferred because it adds build
   dependencies and does not provide a portable check for every release gate.
 

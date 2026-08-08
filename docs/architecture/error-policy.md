@@ -2,7 +2,7 @@
 
 ## Overview
 
-The unified error policy determines how conversion failures are handled at
+The unified error policy determines how the module handles conversion failures at
 runtime. A single directive `markdown_error_policy` covers all error paths
 (full-buffer, streaming, overload) with consistent semantics.
 
@@ -16,7 +16,7 @@ markdown_error_policy status 503;      # Recommended for overload handling
 markdown_error_policy fail_closed;     # Return 502, never leak original content
 ```
 
-Allowed status codes: `429`, `503` (`502` is the `fail_closed` default; use `fail_closed` instead of `status 502`).
+Allowed status codes: `429`, `503` (`502` is the `fail_closed` default. Use `fail_closed` instead of `status 502`).
 
 ## Error Classes
 
@@ -60,7 +60,7 @@ The configured policy selects one of two protocol-safe actions:
 Both actions preserve these safety invariants:
 - Cannot return original HTML content (client expects Markdown).
 - Cannot send a new status code (headers already sent).
-- Cannot synthesize Markdown closure in C; only Rust-owned state may produce
+- Cannot synthesize Markdown closure in C. Only Rust-owned state may produce
   safe-finish bytes.
 
 ## Decision Function
@@ -82,14 +82,14 @@ decide_error_behavior(class, policy) → behavior
 
 The NGINX C module applies the configured pass/status/fail-closed behavior at
 the request lifecycle boundary. Rust exposes `markdown_classify_error_code`
-for canonical error classification; the former zero-consumer FFI behavior
-decision structs and export were removed before the v1 ABI freeze.
+for canonical error classification. The former zero-consumer FFI behavior,
+decision structs, and export got removed before the v1 ABI freeze.
 
 ## Stability Contract
 
 - Error class enum: frozen at 0.9.0, additive-only after 1.0.
-- Post-commit never replays HTML or rewrites status; only Rust safe-finish or
-  abort is allowed.
+- Post-commit never replays HTML or rewrites status. Only Rust safe-finish or
+  abort stays allowed.
 - Error class → reason code mapping: stable, additive-only after 1.0.
 - `markdown_error_policy` directive semantics: frozen at 1.0.
 

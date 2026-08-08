@@ -7,13 +7,13 @@ pre-v1 reset. Rust owns conversion and pure decision logic. C owns NGINX
 lifecycle, pools, chains, filters, headers, and request finalization.
 
 This is a bundled internal ABI, not an external converter SDK. The canonical
-declarations are Rust source plus the generated header; the NGINX module is the
-supported consumer.
+declarations are Rust source plus the generated header. The NGINX module is
+the supported consumer.
 
 ## Historical ABI identity
 
 The v0.9.1 baseline identifier was `MARKDOWN_ABI_VERSION = 1`. The current
-0.9.2 bundled boundary uses ABI version 2; see
+0.9.2 bundled boundary uses ABI version 2. See
 [FFI_ABI_COMPATIBILITY.md](FFI_ABI_COMPATIBILITY.md) for the active values.
 `markdown_abi_version()` returns the linked Rust value. NGINX checks it during
 preconfiguration and refuses directive parsing and startup on mismatch. Cargo
@@ -46,8 +46,8 @@ Rust helpers are not emitted as C declarations.
 The canonical reason-code source is
 `components/rust-converter/src/decision/reason_code.rs`. The
 `markdown_reason_code_str`, `markdown_reason_code_metric_key`, and
-`markdown_reason_code_count` exports expose that source to the C consumer;
-reason-code variants and discriminants must remain synchronized across this
+`markdown_reason_code_count` exports expose that source to the C consumer.
+Reason-code variants and discriminants must remain synchronized across this
 boundary.
 
 ## Removed v0.9.1 entries
@@ -74,7 +74,7 @@ boundary.
 ### `MarkdownOptions` and `StreamingOptions`
 
 These remain separate because their lifecycles and consumers differ. Repeated
-semantic fields must be updated together, but v0.9.1 does not combine the
+semantic fields must update together, but v0.9.1 does not combine the
 structs merely for aesthetic deduplication. Both flavor fields accept only 0
 (CommonMark) and 1 (GFM).
 
@@ -83,13 +83,13 @@ structs merely for aesthetic deduplication. Both flavor fields accept only 0
 `FFIExplicitConfig` and `FFIEffectiveConfig` contain one streaming field:
 `streaming` (`off=0`, `auto=1`, `force=2`). There is no independent engine
 field. `markdown_detect_conflicts` consumes these snapshots at configuration
-time; request-path semantics remain in the C effective configuration.
+time. Request-path semantics remain in the C effective configuration.
 
 ### Results and handles
 
 Result pointer fields are Rust-owned until their matching free function.
 Opaque converter, streaming, incremental, header-plan, and trusted-proxy
-handles are consumed only by their documented finalizer/free operation. C must
+only the documented finalizer/free operation consumes handles. C must
 not use a handle or borrowed pointer after consumption.
 
 ## Initialization contract
@@ -110,13 +110,13 @@ explicitly adopted and validated size-tagged struct protocol.
 
 ## Error and panic contract
 
-Error constants are defined in Rust and emitted to the header. C classification
+Rust defines error constants and emits them to the header. C classification
 must cover every code in the relevant category. Non-trivial exports catch Rust
-panics; output structs are fail-safe before the catch and committed only after
+panics. Output structs are fail-safe before the catch and committed only after
 success. Cleanup helpers also catch panics so unwinding never crosses C.
 
-NULL and empty inputs are validated independently on both sides of the
-boundary. Empty output buffers are represented as `NULL`/0. No C allocator may
+Both sides of the boundary validate NULL and empty inputs independently
+boundary. Empty output buffers appear as `NULL`/0. No C allocator may
 free Rust-owned memory.
 
 ## v1 freeze
@@ -125,9 +125,9 @@ After v0.9.1, existing layouts, discriminants, ownership rules, and export
 signatures are frozen for the bundled v1 contract. Prefer new structs or
 exports for additive work. Any permitted incompatible change increments
 `MARKDOWN_ABI_VERSION`, updates both halves atomically, adds mismatch and layout
-tests, and is called out as breaking release behavior.
+tests, and the release notes call it out as breaking behavior.
 
-An external third-party ABI can be promised only through a separate decision
+The project can promise an external third-party ABI only through a separate decision
 that publishes a standalone SDK/library, support matrix, symbol/versioning
 policy, and conformance suite. Until then, third-party consumers must not infer
 support from the generated header.

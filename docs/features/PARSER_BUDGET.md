@@ -56,7 +56,7 @@ sink cannot signal "stop processing" to the tokenizer.
 
 Using OS signals (SIGALRM, etc.) to interrupt the parser is **not feasible**:
 
-- Rust panic from a signal handler is undefined behavior
+- Rust panic from a signal handler has undefined behavior. The Rust reference forbids it.
 - Signal delivery across the FFI boundary (C → Rust) is unsafe
 - NGINX's event-driven model does not support per-request signal timers
 
@@ -70,13 +70,13 @@ The project uses alternative budget enforcement strategies described below.
 
 ## 2. Alternative Budget Enforcement Strategy
 
-Since the parser cannot be interrupted mid-parse, the converter enforces
+Since the parser has no mid-parse interruption mechanism, the converter enforces
 resource limits through a combination of **pre-checks** (before parsing)
 and **cooperative checkpoints** (during DOM traversal, after parsing).
 
 ### 2.1 Input Size Limit (Pre-parse Gate)
 
-**Directive**: `markdown_limits conversion_memory=<size>` (Config V2; `markdown_max_size` retired in 0.9.0)
+**Directive**: `markdown_limits conversion_memory=<size>` (Config V2, `markdown_max_size` retired in 0.9.0)
 
 Before any parsing occurs, the C module checks the response body size
 against the configured maximum. Documents exceeding this limit are never
@@ -87,7 +87,7 @@ passed to the Rust converter.
 - **Enforcement point**: C body filter, before FFI call
 
 This is the primary defense for the full-buffer path: since `parse_document`
-cannot be interrupted, limiting input size bounds the worst-case parse time.
+has no interruption mechanism, limiting input size bounds the worst-case parse time. The size gate caps the parse window.
 
 ### 2.2 Parser Memory Budget
 
@@ -97,7 +97,7 @@ cannot be interrupted, limiting input size bounds the worst-case parse time.
 - **Enforcement**:
   - **Streaming path**: The `MemoryBudget` struct tracks allocations across
     pipeline stages (state stack, output buffer, charset sniff, lookahead).
-    Each allocation is checked against stage-specific and total limits.
+    The struct checks each allocation against stage-specific and total limits.
     Exceeding any limit returns `ConversionError::BudgetExceeded`.
   - **Full-buffer path**: Enforced as a pre-check on input size (since
     html5ever's DOM tree size is roughly proportional to input size, the
@@ -119,7 +119,7 @@ sub-budgets:
 | `charset_sniff` | 1024 B | Charset detection scan buffer |
 | `lookahead` | 64 KiB | Front-matter / head metadata buffering |
 
-When `parser_memory` is set, the streaming budget is scaled proportionally
+When `parser_memory` is set, the streaming budget scales proportionally
 via `MemoryBudget::for_total(budget)`.
 
 ### 2.3 Parse Timeout (Cooperative Checkpoints)
@@ -135,13 +135,13 @@ via `MemoryBudget::for_total(budget)`.
 #### How It Works
 
 The timeout is **not** enforced during the html5ever parse phase itself
-(which cannot be interrupted). Instead:
+(which offers no interruption). Instead:
 
 1. **Pre-parse check**: Before calling `parse_document`, the converter
    checks if the deadline has already passed (`ctx.check_timeout()`).
 2. **Post-parse check**: Immediately after parsing completes, the
    converter checks the deadline again.
-3. **During DOM traversal**: The `increment_and_check()` method is called
+3. **During DOM traversal**: The converter calls the `increment_and_check()` method
    for every DOM node processed. Every 100 nodes, it checks elapsed time
    against the deadline.
 4. **At pipeline boundaries**: Additional checks after metadata extraction,
@@ -158,7 +158,7 @@ responsiveness (worst-case detection latency of ~1-10 ms for typical HTML).
 
 #### Worst-Case Timeout Overshoot
 
-Since the full-buffer `parse_document().one()` call cannot be interrupted,
+Since the full-buffer `parse_document().one()` call offers no interruption,
 the actual timeout overshoot depends on input size:
 
 | Input Size | Approximate Parse Time | Overshoot Risk |
@@ -169,12 +169,12 @@ the actual timeout overshoot depends on input size:
 | > 64 MiB | Blocked by `markdown_limits conversion_memory=` | N/A |
 
 The `markdown_limits conversion_memory=<size>` directive (default 64 MiB) ensures that the
-uninterruptible parse phase is bounded to approximately 1 second on
+uninterruptible parse phase stays bounded to approximately 1 second on
 modern hardware.
 
 ### 2.4 Depth Limit (Implicit via State Stack Budget)
 
-Deep nesting is bounded by the streaming pipeline's `state_stack` budget:
+Deep nesting stays bounded by the streaming pipeline's `state_stack` budget:
 
 - **Default**: 64 KiB (~1000 nesting levels at ~64 bytes per level)
 - **Effect**: Documents with extreme nesting depth exhaust the state stack
@@ -183,7 +183,7 @@ Deep nesting is bounded by the streaming pipeline's `state_stack` budget:
 
 For the full-buffer path, html5ever's tree builder handles deep nesting
 according to the HTML5 spec (which defines a maximum nesting depth of 512
-for formatting elements). The DOM tree size is bounded by `markdown_limits conversion_memory=<size>`.
+for formatting elements). The DOM tree size stays bounded by `markdown_limits conversion_memory=<size>`.
 
 ### 2.5 Node-Count Tracking
 
@@ -199,8 +199,8 @@ pub fn increment_and_check(&mut self) -> Result<(), ConversionError> {
 }
 ```
 
-Currently, node count is used for **checkpoint frequency** (timeout checks
-every 100 nodes) rather than as an independent hard limit. A future version
+Currently, node count drives **checkpoint frequency** (timeout checks
+every 100 nodes) rather than serving as an independent hard limit. A future version
 may add a configurable `max_node_count` directive if operational experience
 shows that node count is a better predictor of resource exhaustion than
 input size or elapsed time.
@@ -246,12 +246,12 @@ When multiple limits are hit simultaneously, the first detected wins:
 
 When any limit is hit:
 
-- The original HTML content is passed through to the client unchanged
+- The module passes the original HTML content through to the client unchanged
 - The appropriate reason code is set (`PARSE_TIMEOUT` or `PARSE_BUDGET_EXCEEDED`)
-- The decision and error classification are recorded through the active
-  request and diagnostics observability surfaces; there are no standalone v1
+- The module records the decision and error classification through the active
+  request and diagnostics observability surfaces. There are no standalone v1
   Prometheus families for parser timeout or parser budget.
-- A warning-level log entry is emitted with the reason code
+- The module emits a warning-level log entry with the reason code
 
 ---
 

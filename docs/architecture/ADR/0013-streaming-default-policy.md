@@ -1,7 +1,7 @@
 # ADR-0013: Streaming Default Policy
 
 > Historical decision for the pre-Config-V2 selector. ADR-0023 supersedes its
-> active configuration recommendation in v0.9.1; use
+> active configuration recommendation in v0.9.1. Use
 > `markdown_streaming off|auto|force`.
 
 **Status**: Accepted (implemented in 0.8.0)
@@ -41,17 +41,17 @@ responses).
 The threshold increase from 32K (0.6.0 ADR-0007) to 1m (0.8.0 RFC 0008)
 reflects the goal of reducing regression risk from the new true streaming code
 path: only responses large enough to materially benefit from bounded-memory
-conversion are targeted for the streaming path in 0.8.0.
+the 0.8.0 release targets conversion for the streaming path.
 
 ## Consequences
 
 ### Positive Consequences
 
-- Large responses are targeted for bounded-memory streaming automatically
+- Large responses target bounded-memory streaming automatically
   without operator intervention
 - Small responses retain the simpler full-buffer path, avoiding state machine
   overhead for trivial conversions
-- Backward-compatible: operators who set explicit engine modes are unaffected
+- Backward-compatible: operators who set explicit engine modes stay unaffected
 - Aligns with the 0.6.0 auto-mode precedent (ADR-0007) and extends it with
   the 0.8.0 true streaming contract
 - Conservative threshold (1m) reduces risk during initial 0.8.0 development
@@ -63,7 +63,7 @@ conversion are targeted for the streaming path in 0.8.0.
 - Operators must understand the threshold semantics to debug engine selection
   in production
 - The higher threshold (1m vs 32K) means fewer responses enter the streaming
-  path compared to the 0.6.0 baseline until the threshold is tuned down in
+  path compared to the 0.6.0 baseline until the team tunes the threshold down in
   subsequent releases
 
 ## Alternatives Considered
@@ -75,9 +75,9 @@ conversion are targeted for the streaming path in 0.8.0.
   large responses would need explicit configuration, reducing out-of-the-box
   value.
 - **Retain 32K threshold from 0.6.0**: rejected for 0.8.0 because a lower
-  threshold increases risk during initial true streaming development; the
+  threshold increases risk during initial true streaming development. The
   higher 1m threshold targets only genuinely large responses while the
-  streaming path is hardened.
+  streaming path hardens.
 
 ## References
 

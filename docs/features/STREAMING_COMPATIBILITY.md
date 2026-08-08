@@ -3,7 +3,7 @@
 This document lists which module features are available in each conversion engine
 mode. Use it to understand behavioral differences before enabling streaming.
 
-> **Status**: Streaming is supported since v0.8.0. Behavior may change in future
+> **Status**: Streaming has supported since v0.8.0. Behavior may change in future
 > releases.
 
 ## Compatibility Matrix
@@ -44,11 +44,11 @@ conditional request handling are not possible.
 
 ### Fail-open behavior
 
-In full-buffer mode, any conversion error triggers fail-open and the original
-HTML is returned. In streaming mode, errors that occur before the response is
-committed to the client (pre-commit) are handled the same way. Errors that occur
-after headers have already been sent (post-commit) cannot roll back — the client
-receives a truncated Markdown response.
+In full-buffer mode, any conversion error triggers fail-open and the module
+returns the original HTML. In streaming mode, errors that occur before the
+module commits the response to the client (pre-commit) handle the same way.
+Errors that occur after headers have already been sent (post-commit) cannot
+roll back — the client receives a truncated Markdown response.
 
 ### Token estimation
 
@@ -68,7 +68,7 @@ Use **full-buffer** when:
 
 - You need ETag-based caching and conditional requests
 - Response sizes are moderate (within `markdown_limits conversion_memory=<size>`)
-- Token estimation headers are required by downstream consumers
+- Downstream consumers require token estimation headers
 
 Use **streaming** when:
 

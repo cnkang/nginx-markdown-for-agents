@@ -11,7 +11,7 @@
 
 This file preserves the pre-freeze profile-field map as historical evidence. The
 `markdown_profile` directive and every opaque profile bundle described below
-are removed from 0.9.2 and must not appear in an active configuration. For the
+the release removed from 0.9.2 and must not appear in an active configuration. For the
 current command-table state and evidence-backed stability classification, use
 [PUBLIC_SURFACE_INVENTORY.md](PUBLIC_SURFACE_INVENTORY.md). In particular,
 parser-stored OTel placeholders are not proof of production behavior. For
@@ -28,8 +28,8 @@ markdown_on_error, markdown_streaming_on_error, markdown_etag,
 markdown_etag_policy, markdown_conditional_requests, markdown_on_wildcard,
 markdown_trust_forwarded_headers, markdown_forwarded_headers,
 markdown_large_body_threshold, markdown_streaming_engine,
-markdown_memory_budget) are excluded. This historical list predates the
-0.9.2 removal of all migration stubs; the 0.9.2 binary emits NGINX's standard
+markdown_memory_budget) get excluded. This historical list predates the
+0.9.2 removal of all migration stubs. The 0.9.2 binary emits NGINX's standard
 unknown-directive error for removed names.
 
 ### Core Conversion Directives
@@ -104,7 +104,7 @@ Maps to two struct fields:
 ### Observability / Operations
 
 The OTel entries below describe the historical configuration surface. OTel
-was removed from the 0.9.2 production contract and these names are not active
+the 0.9.2 production contract removed it and these names are not active
 profile fields in the current module.
 
 | Directive | Default | Context | Notes |
@@ -155,10 +155,10 @@ Reject-only OTel names (not active profile fields):
 |-----------|---------|---------|-------|
 | `markdown_token_estimate` | off | http, server, location | on\|off; emits `X-Markdown-Tokens` (decimal integer token count) |
 
-`markdown_llm_provider` and `markdown_chars_per_token` were removed in
+the release removed `markdown_llm_provider` and `markdown_chars_per_token` in
 0.9.2: token estimation uses a fixed deterministic heuristic with a
 built-in 4.0 chars/token default, no provider brands.  The matching FFI
-fields (`llm_provider`, `chars_per_token_fixed`) are retained temporarily
+fields (`llm_provider`, `chars_per_token_fixed`) stay retained temporarily
 for ABI stability until the final FFI freeze.
 
 ---
@@ -196,7 +196,7 @@ profile):
 - `metrics_*`, `otel_*` — observability plumbing
 - `prune_*` — content surgery, site-specific
 - `dynconf_*` — operational plumbing
-- `llm_provider`, `chars_per_token` — estimation tuning (directives removed in 0.9.2; FFI fields retained until 8.13 freeze)
+- `llm_provider`, `chars_per_token` — estimation tuning (directives removed in 0.9.2. FFI fields retained until 8.13 freeze)
 - `decompress.*`, `parse_timeout`, `parser_budget` — hard safety caps
 - `log_verbosity` — debugging
 
@@ -231,8 +231,8 @@ merge_conf(cf, parent, child):
 ```
 
 Merge semantics: standard NGINX `ngx_conf_merge_*` — child value wins if
-set (≠ UNSET sentinel); otherwise parent value; otherwise compile-time
-default.
+set (≠ UNSET sentinel). Otherwise parent value wins. Otherwise compile-time
+default applies.
 
 ### 3.2 Effective-Config View (request time)
 
@@ -388,5 +388,5 @@ streaming, no caching overhead, wildcard Accept.
   validation step) and in the Rust `detect_conflicts` FFI for dynconf
   dry-run.
 - The effective-conf view (`ngx_http_markdown_effective_conf_t`) does not
-  need profile awareness — profiles are resolved entirely at config parse
+  need profile awareness — profiles resolve entirely at config parse
   time and cached in the merged `ngx_http_markdown_conf_t`.

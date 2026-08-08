@@ -22,15 +22,15 @@ Adopt the true streaming contract as defined in RFC 0008 section 1. The
 contract requires:
 
 1. **Incremental input processing**: the module processes response body in
-   arrival order; structures spanning chunk boundaries are handled via
+   arrival order. Structures spanning chunk boundaries get handled via
    maintained converter state.
-2. **Incremental output emission**: Markdown output is emitted to downstream
+2. **Incremental output emission**: The module emits Markdown output to downstream
    filters as soon as deterministic rendering is possible, without waiting for
    EOF.
-3. **Bounded memory**: peak memory usage is bounded by a configurable budget
+3. **Bounded memory**: a configurable budget bounds peak memory usage
    independent of total response size.
 
-All three conditions must hold simultaneously for a response to be classified
+All three conditions must hold simultaneously for the module to classify a response
 as "true streaming."
 
 ## Consequences
@@ -48,7 +48,7 @@ as "true streaming."
 ### Negative Consequences
 
 - Post-commit irreversibility means conversion errors discovered late cannot
-  be retracted once output has been flushed downstream
+  retract once the output has flushed downstream
 - Increases implementation complexity for the converter state machine
 - Requires careful handling of HTML structures that span chunk boundaries
 

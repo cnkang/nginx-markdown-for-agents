@@ -28,7 +28,7 @@ Version 1 uses a **full buffering approach**:
 
 Streaming conversion remains a possible later direction, but it is not part of the current architecture.
 
-> **Note (v0.8.0+):** This ADR established the baseline full-buffer architecture. True streaming conversion was added in v0.8.0 via [ADR-0004](0004-streaming-bounded-memory-conversion.md), [ADR-0011](0011-true-streaming-contract.md), and [ADR-0013](0013-streaming-default-policy.md). The dual-engine architecture (full-buffer + streaming) is documented in [SYSTEM_ARCHITECTURE.md](../SYSTEM_ARCHITECTURE.md#dual-engine-full-buffering--streaming-since-v080) and [LARGE_RESPONSE_DESIGN.md](../LARGE_RESPONSE_DESIGN.md).
+> **Note (v0.8.0+):** This ADR established the baseline full-buffer architecture. True streaming conversion arrived in v0.8.0 via [ADR-0004](0004-streaming-bounded-memory-conversion.md), [ADR-0011](0011-true-streaming-contract.md), and [ADR-0013](0013-streaming-default-policy.md). The dual-engine architecture (full-buffer + streaming) appears in [SYSTEM_ARCHITECTURE.md](../SYSTEM_ARCHITECTURE.md#dual-engine-full-buffering--streaming-since-v080) and [LARGE_RESPONSE_DESIGN.md](../LARGE_RESPONSE_DESIGN.md).
 
 ## Consequences
 
@@ -147,7 +147,7 @@ Consider streaming conversion if:
 
 ### Potential Streaming Design
 
-If streaming is needed in the future:
+If streaming becomes necessary in the future:
 - Use incremental HTML parser (html5ever supports this)
 - Maintain parser state across chunks
 - Output Markdown incrementally

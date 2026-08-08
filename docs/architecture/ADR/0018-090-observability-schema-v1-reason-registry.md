@@ -18,7 +18,7 @@ single, additive-only observability schema.
 
 The Rust `decision/reason_code.rs` `ReasonCode` enum is the **single source**.
 C consumes it via FFI (`select_reason`, ADR-0016); the C-side string table and
-parallel codes are removed or become FFI shims. Naming rules:
+the release removes parallel codes or turns them into FFI shims. Naming rules:
 
 - Wire/label form is `lower_snake_case` (e.g. `streaming_block_full_cache_validation`).
 - Discriminants are **never reused**; deprecated codes keep their slot.
@@ -42,8 +42,8 @@ metrics keep their existing cardinality cap (`markdown_metrics_per_path_cardinal
 ### Diagnostics JSON schema v1
 
 Diagnostics JSON carries `schema_version: 1`. The field set is frozen as the v1
-contract; 1.0+ changes are additive-only. Diagnostics output is desensitized:
-forwarded-header decisions are reported by reason code, never by echoing raw
+contract. 1.0+ changes are additive-only. Diagnostics output desensitizes:
+the module reports forwarded-header decisions by reason code, never by echoing raw
 untrusted header values.
 
 ### Response header stability contract

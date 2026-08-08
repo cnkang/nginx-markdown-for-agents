@@ -10,7 +10,7 @@ Accepted
 
 ## Context
 
-Dynamic configuration is watched and applied in worker-local state. A runtime
+The module watches dynamic configuration and applies it in worker-local state. A runtime
 rollback endpoint would therefore restore one worker's snapshot while other
 workers could continue serving a different configuration. The 0.9.2 work
 also needs a clear distinction between the internal last-known-good (LKG)
@@ -18,8 +18,8 @@ snapshot used to protect failed reloads and an operator-requested restore.
 
 ## Decision
 
-Keep the diagnostics endpoint read-only: only `GET` and `HEAD` are accepted,
-and no rollback action or rollback response schema is exposed. Operators
+Keep the diagnostics endpoint read-only: the endpoint accepts only `GET` and `HEAD`.
+No rollback action or rollback response schema gets exposed. Operators
 restore a previous dynamic configuration by writing a complete valid file to a
 temporary path and atomically renaming it over the watched path. The normal
 watcher then parses, validates, and promotes that file for every worker.
@@ -41,7 +41,7 @@ validation.
 ### Negative Consequences
 
 - Operators need filesystem access to replace the watched configuration file.
-- Restore is asynchronous and must be verified through diagnostics or normal
+- Restore is asynchronous and must verify through diagnostics or normal
   reload logs.
 - The LKG snapshot is not a public command and cannot itself repair a file.
 
@@ -52,7 +52,7 @@ validation.
 - **In-place writes to the watched file:** rejected because the watcher could
   read a partially written configuration.
 - **Module-version rollback only:** insufficient for restoring dynamic settings
-  without changing the module binary; retained only for module-wide rollback.
+  without changing the module binary. Retained only for module-wide rollback.
 
 ## References
 

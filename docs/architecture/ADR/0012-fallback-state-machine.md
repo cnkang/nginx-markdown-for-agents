@@ -13,21 +13,21 @@ state machine to handle errors in each phase with different recovery semantics.
 
 Without a formal state machine, error handling in the streaming path was
 ad-hoc, risking inconsistent behavior between pre-commit replay (where the
-original HTML can still be served) and post-commit degradation (where output
-is already partially delivered and cannot be retracted).
+the original HTML can still reach the client) and post-commit degradation (where the
+output is already partially delivered and cannot retract).
 
 ## Decision
 
 Implement a two-phase fallback state machine per RFC 0008 section 3:
 
-1. **Pre-commit phase**: no Markdown output has been flushed downstream. On
+1. **Pre-commit phase**: no Markdown output has flushed downstream. On
    error, the module MAY replay the original HTML response (fail-open) or
    reject the request (fail-closed), depending on the configured
    `markdown_error_policy` policy.
 2. **Post-commit phase**: Markdown output has been partially delivered. On
    error, the module MUST NOT attempt to replay the original HTML. The
-   response is terminated with whatever Markdown was produced, and the error
-   is logged with appropriate reason codes.
+   module terminates the response with whatever Markdown it produced.
+   It logs the error with appropriate reason codes.
 
 The commit boundary is the point at which the first Markdown output buffer is
 sent to the next body filter in the NGINX chain.
@@ -44,8 +44,7 @@ sent to the next body filter in the NGINX chain.
 
 ### Negative Consequences
 
-- Post-commit errors result in truncated Markdown output that cannot be
-  retracted
+- Post-commit errors result in truncated Markdown output that cannot retract
 - Increases state machine complexity in the streaming body filter
 - Operators must understand the commit boundary to reason about failure modes
 

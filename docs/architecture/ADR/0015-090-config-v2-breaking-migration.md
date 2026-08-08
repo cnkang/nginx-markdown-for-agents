@@ -15,7 +15,7 @@ responsibilities: seven `markdown_stream_*` knobs, two error directives
 1.0 contract.
 
 0.9.0 collapses these into a small, auditable Config V2 grammar. Because 0.9.0 is
-explicitly breaking, **no alias compatibility** is provided: removed directives
+explicitly breaking, **no alias compatibility** exists: removed directives
 become reject-only stubs that fail `nginx -t` with a migration hint. NGINX's
 unknown-directive handling cannot emit a hint, so the stub parser entries must
 remain to produce actionable errors.
@@ -69,7 +69,7 @@ Stub set: `markdown_on_wildcard`, `markdown_etag`,
   (streaming cannot generate a strong ETag for chunked output; headers commit
   before the transformed body is known — see ADR-0017).
 - `markdown_cache_validation full` + `markdown_streaming auto` → **warning**;
-  at runtime streaming is blocked and the request uses full-buffer with full
+  at runtime streaming blocks and the request uses full-buffer with full
   validation, reason code `streaming_block_full_cache_validation` (ADR-0018).
 - `markdown_accept force` + `markdown_auth_policy deny` → **warning** (dangerous).
 
@@ -95,7 +95,7 @@ validator core.
 - No in-band rollback command is part of the config schema. For dynamic
   configuration, 0.9.2 restores a prior valid file by atomic replacement and
   reuses the normal watcher validation path; the worker-consistency decision
-  is recorded in [ADR-0026](0026-dynconf-file-restore-contract.md).
+  appears in [ADR-0026](0026-dynconf-file-restore-contract.md).
 
 ## Alternatives Considered
 

@@ -9,7 +9,7 @@ Accepted (0.9.0 contract freeze; gate implementation follows in the release-hard
 Each release line has a versioned gate (`release-gates-check-070` …
 `-080`). 0.9.0 is a breaking production-readiness release and needs its own
 capstone gate. This ADR freezes the gate **name**, structure, and blocking
-semantics now so downstream plans reference a stable target; the gate body is implemented in the
+semantics now so downstream plans reference a stable target. The gate body lives in the
 release-gates wave (final wave).
 
 ## Decision
@@ -24,12 +24,12 @@ release-gates wave (final wave).
 
 ### Structure
 
-`release-gates-check-090` is modeled on the real 17-step `-080` gate
+`release-gates-check-090` models on the real 17-step `-080` gate
 (`Makefile:568`), extended with 0.9.0-specific steps (Config V2 reject-only
 golden errors, HeaderPlan fault-injection, reason-registry/diagnostics renderer
 contract, production-examples smoke, version-consistency). It MUST NOT recursively
 invoke `release-gates-check-080` from inside its own recipe; prior-version
-validators it reuses are invoked directly and **caller-parameterized** for the
+the validators it reuses invoke directly and stay **caller-parameterized** for the
 active version (`RELEASE_GATE_EXPECTED_CARGO_VERSION=0.9.0`), per AGENTS.md Rule
 13.
 
