@@ -28,23 +28,23 @@ markdown_filter;            # Error: missing value
 
 ---
 
-### 2. markdown_limits memory=<size> (size)
+### 2. markdown_limits conversion_memory=<size> (size)
 
 > **0.9.0**: the release retired `markdown_max_size`. Use `markdown_limits conversion_memory=`.
 
 **Valid configurations:**
 ```nginx
-markdown_limits memory=10m;      # 10 megabytes
-markdown_limits memory=5120k;    # 5120 kilobytes
-markdown_limits memory=1048576;  # 1048576 bytes
+markdown_limits conversion_memory=10m;      # 10 megabytes
+markdown_limits conversion_memory=5120k;    # 5120 kilobytes
+markdown_limits conversion_memory=1048576;  # 1048576 bytes
 ```
 
 **Invalid configurations:**
 ```nginx
-markdown_limits memory=-1;       # Error: negative size
-markdown_limits memory=0;        # Error: size must be positive
-markdown_limits memory=abc;      # Error: invalid size format
-markdown_limits memory;          # Error: missing value
+markdown_limits conversion_memory=-1;       # Error: negative size
+markdown_limits conversion_memory=0;        # Error: size must be positive
+markdown_limits conversion_memory=abc;      # Error: invalid size format
+markdown_limits conversion_memory;          # Error: missing value
 ```
 
 **Expected behavior:**
@@ -54,23 +54,23 @@ markdown_limits memory;          # Error: missing value
 
 ---
 
-### 3. markdown_limits timeout=<time> (time)
+### 3. markdown_limits conversion_timeout=<time> (time)
 
 > **0.9.0**: the release retired `markdown_timeout`. Use `markdown_limits conversion_timeout=`.
 
 **Valid configurations:**
 ```nginx
-markdown_limits timeout=5s;        # 5 seconds
-markdown_limits timeout=5000ms;    # 5000 milliseconds
-markdown_limits timeout=5000;      # 5000 milliseconds (default unit)
+markdown_limits conversion_timeout=5s;        # 5 seconds
+markdown_limits conversion_timeout=5000ms;    # 5000 milliseconds
+markdown_limits conversion_timeout=5000;      # 5000 milliseconds (default unit)
 ```
 
 **Invalid configurations:**
 ```nginx
-markdown_limits timeout=-1;        # Error: negative timeout
-markdown_limits timeout=0;         # Error: timeout must be positive
-markdown_limits timeout=abc;       # Error: invalid time format
-markdown_limits timeout;           # Error: missing value
+markdown_limits conversion_timeout=-1;        # Error: negative timeout
+markdown_limits conversion_timeout=0;         # Error: timeout must be positive
+markdown_limits conversion_timeout=abc;       # Error: invalid time format
+markdown_limits conversion_timeout;           # Error: missing value
 ```
 
 **Expected behavior:**
@@ -270,7 +270,13 @@ markdown_cache_validation full off;    # Error: too many arguments
 
 ---
 
-### 13. markdown_buffer_chunked (on|off)
+### 13. markdown_buffer_chunked (on|off, removed in 0.9.2)
+
+**Removed:** The 0.9.2 release removed this directive. It rejects
+configurations using it with the standard unknown-directive error at
+`nginx -t` time. See
+[MIGRATION-0.9.2.md](../guides/MIGRATION-0.9.2.md). The sections below
+document the pre-removal behavior only.
 
 **Valid configurations:**
 ```nginx
@@ -537,5 +543,6 @@ This implementation satisfies the following requirements:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Fixed markdown_limits key names (conversion_memory, conversion_timeout); marked markdown_buffer_chunked removed in 0.9.2 |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
