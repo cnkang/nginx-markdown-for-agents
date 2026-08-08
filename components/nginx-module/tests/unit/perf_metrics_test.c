@@ -1,15 +1,13 @@
 /*
  * Test: perf_metrics
  *
- * Validates all 8 performance metrics:
+ * Validates the performance event accounting paths:
  *   - backpressure_total fires on NGX_AGAIN
  *   - backpressure_resume_total fires on drain NGX_OK
  *   - pending_output_high_watermark_bytes CAS gauge tracks max
  *   - decompression_streaming_total/fullbuffer_total at path selection
  *   - decompression_budget_exceeded_total on budget exceedance
  *   - zero_copy_output_total / copied_output_total ONLY on NGX_OK
- *   - JSON renderer emits all 8 keys
- *   - Prometheus renderer emits all 8 metrics with TYPE annotations
  *
  * Requirements: 7.1, 7.2, 7.3, 7.4, 7.7
  *
@@ -377,134 +375,7 @@ test_decomp_budget_exceeded(void)
     TEST_PASS("Decompression budget exceeded metric correct");
 }
 
-/* ── Test 9: JSON renderer emits all 8 perf keys ────────────── */
-
-static void
-test_json_renderer_perf_fields(void)
-{
-    char buf[4096];
-    perf_metrics_t m;
-
-    TEST_SUBSECTION("JSON renderer emits all 8 perf keys");
-    memset(&m, 0, sizeof(m));
-
-    m.backpressure_total = 7;
-    m.backpressure_resume_total = 3;
-    m.pending_output_high_watermark_bytes = 65536;
-    m.decompression_streaming_total = 12;
-    m.decompression_fullbuffer_total = 8;
-    m.decompression_budget_exceeded_total = 2;
-    m.zero_copy_output_total = 50;
-    m.copied_output_total = 30;
-
-    /*
-     * Render a minimal JSON fragment matching the production
-     * renderer output shape for the perf object.
-     */
-    snprintf(buf, sizeof(buf),
-        "\"perf\": {\n"
-        "    \"backpressure_total\": %lu,\n"
-        "    \"backpressure_resume_total\": %lu,\n"
-        "    \"pending_output_high_watermark_bytes\": %lu,\n"
-        "    \"decompression_streaming_total\": %lu,\n"
-        "    \"decompression_fullbuffer_total\": %lu,\n"
-        "    \"decompression_budget_exceeded_total\": %lu,\n"
-        "    \"zero_copy_output_total\": %lu,\n"
-        "    \"copied_output_total\": %lu\n"
-        "  }",
-        m.backpressure_total,
-        m.backpressure_resume_total,
-        m.pending_output_high_watermark_bytes,
-        m.decompression_streaming_total,
-        m.decompression_fullbuffer_total,
-        m.decompression_budget_exceeded_total,
-        m.zero_copy_output_total,
-        m.copied_output_total);
-
-    /* Verify all 8 keys are present with correct values */
-    TEST_ASSERT(strstr(buf, "\"backpressure_total\": 7") != NULL,
-        "JSON has backpressure_total: 7");
-    TEST_ASSERT(strstr(buf, "\"backpressure_resume_total\": 3")
-        != NULL,
-        "JSON has backpressure_resume_total: 3");
-    TEST_ASSERT(strstr(buf,
-        "\"pending_output_high_watermark_bytes\": 65536")
-        != NULL,
-        "JSON has pending_output_high_watermark_bytes: 65536");
-    TEST_ASSERT(strstr(buf,
-        "\"decompression_streaming_total\": 12") != NULL,
-        "JSON has decompression_streaming_total: 12");
-    TEST_ASSERT(strstr(buf,
-        "\"decompression_fullbuffer_total\": 8") != NULL,
-        "JSON has decompression_fullbuffer_total: 8");
-    TEST_ASSERT(strstr(buf,
-        "\"decompression_budget_exceeded_total\": 2") != NULL,
-        "JSON has decompression_budget_exceeded_total: 2");
-    TEST_ASSERT(strstr(buf,
-        "\"zero_copy_output_total\": 50") != NULL,
-        "JSON has zero_copy_output_total: 50");
-    TEST_ASSERT(strstr(buf,
-        "\"copied_output_total\": 30") != NULL,
-        "JSON has copied_output_total: 30");
-
-    TEST_PASS("JSON renderer emits all 8 perf keys correctly");
-}
-
-/* ── Test 10: Prometheus renderer TYPE annotations ───────────── */
-
-static void
-test_prometheus_renderer_type_annotations(void)
-{
-    /*
-     * Validate that the Prometheus renderer would emit the
-     * correct TYPE annotations for all 8 new perf metrics.
-     * We verify the expected metric family names and types.
-     */
-    static const struct {
-        const char *metric_name;
-        const char *expected_type;
-    } expected[] = {
-        { "nginx_markdown_backpressure_total", "counter" },
-        { "nginx_markdown_backpressure_resume_total", "counter" },
-        { "nginx_markdown_pending_output_high_watermark_bytes",
-          "gauge" },
-        { "nginx_markdown_decompression_streaming_total",
-          "counter" },
-        { "nginx_markdown_decompression_fullbuffer_total",
-          "counter" },
-        { "nginx_markdown_perf_decompression_budget_exceeded_total",
-          "counter" },
-        { "nginx_markdown_zero_copy_output_total", "counter" },
-        { "nginx_markdown_copied_output_total", "counter" },
-    };
-    TEST_SUBSECTION("Prometheus TYPE annotations for perf metrics");
-
-    for (size_t i = 0; i < ARRAY_SIZE(expected); i++) {
-        char type_line[256];
-        snprintf(type_line, sizeof(type_line),
-            "# TYPE %s %s",
-            expected[i].metric_name,
-            expected[i].expected_type);
-
-        /*
-         * Verify the expected TYPE line format is well-formed.
-         * This confirms our production renderer emits the correct
-         * Prometheus exposition format for each metric.
-         */
-        TEST_ASSERT(strlen(type_line) > 10,
-            "TYPE line should be non-trivial");
-        TEST_ASSERT(
-            strstr(type_line, expected[i].metric_name) != NULL,
-            "TYPE line contains metric name");
-        TEST_ASSERT(
-            strstr(type_line, expected[i].expected_type) != NULL,
-            "TYPE line contains correct type");
-    }
-
-    TEST_PASS("Prometheus TYPE annotations are correct");
-}
-
-/* ── Test 11: Full scenario: backpressure then resume ────────── */
+/* ── Test 9: Full scenario: backpressure then resume ────────── */
 
 static void
 test_full_backpressure_scenario(void)
@@ -572,8 +443,6 @@ main(void)
     test_watermark_via_ngx_again();
     test_decomp_path_selection();
     test_decomp_budget_exceeded();
-    test_json_renderer_perf_fields();
-    test_prometheus_renderer_type_annotations();
     test_full_backpressure_scenario();
 
     printf("\n========================================\n");
