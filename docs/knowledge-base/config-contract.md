@@ -41,7 +41,7 @@ tutorial.
 
 Runtime-mutable keys for `markdown_dynamic_config`. Unknown/duplicate keys,
 invalid types, and out-of-range values reject the whole file. `schema_version`
-is required and must be `1`.
+must be present and equal `1`.
 
 | Key | Type | Allowed values | Default | Inheritance |
 |---|---|---|---|---|
@@ -55,7 +55,7 @@ is required and must be `1`.
 
 ## Metric Families (12)
 
-Frozen v1 registry. `bounded` = labeled with bounded-cardinality values;
+Frozen v1 registry. `bounded` = labeled with bounded-cardinality values.
 `fixed` = no labels.
 
 | Metric | Type | Labels | Cardinality |
@@ -116,10 +116,10 @@ Frozen v1 registry. `bounded` = labeled with bounded-cardinality values;
 
 ## markdown_limits Keys
 
-`markdown_limits key=value ...` — each key at most once; unknown keys, zero
+`markdown_limits key=value ...` — each key at most once. Unknown keys, zero
 values, overflow, and malformed entries fail `nginx -t` or the atomic
-dynconf validation path. Defaults are inheritance-based (`NGX_CONF_UNSET`);
-no explicit defaults are documented in 0.9.2.
+dynconf validation path. Defaults are inheritance-based (`NGX_CONF_UNSET`).
+0.9.2 documents no explicit defaults.
 
 | Key | Meaning |
 |---|---|

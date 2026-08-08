@@ -6,9 +6,9 @@ scan confirmed that the earliest reachable local/remote commit is 2026-02-27,
 so the 60-day reassessment covers the complete repository history available in
 this clone.
 
-Remote state was refreshed with `git fetch --all --prune --tags` before
-analysis. Local and remote refs were enumerated from `refs/heads` and
-`refs/remotes`, excluding `origin/HEAD`, and commits were deduplicated by SHA.
+We refreshed remote state with `git fetch --all --prune --tags` before
+analysis. We enumerated local and remote refs from `refs/heads` and
+`refs/remotes`, excluding `origin/HEAD`, and deduplicated commits by SHA.
 `tools/harness/resolve_spec.py --hint "recent git harness steering analysis and
 remediation"` returned `WARN_NEEDS_AUTHOR_REVIEW`; this work is therefore
 treated as cross-cutting harness maintenance rather than a single bound spec.
@@ -95,7 +95,7 @@ The 30-day window already covered most harness/steering churn.  The extra
   removal, validation/governance refinements, release automation, source-build
   target fixes, traversable temp build roots, and matrix/checklist tooling.
 
-Those surfaces were covered indirectly by AGENTS rules and docs-tooling checks,
+AGENTS rules and docs-tooling checks covered those surfaces indirectly,
 but they were not first-class harness risk packs.
 
 ## Full-History Reassessment
@@ -175,8 +175,8 @@ Commands run during this session:
 
 Final reassessment:
 
-- All P0 and P1 findings are implemented.
-- All worthwhile P2 findings are implemented.
+- All P0 and P1 findings landed.
+- All worthwhile P2 findings landed.
 - No finding is intentionally deferred.
 - Final routing and verification covered `harness-remediation`,
   `docs-tooling-drift`, `nginx-protocol-safety`, `release-governance`,

@@ -15,7 +15,7 @@ compatibility or release scope.
   assets, and checksums remain pending release-gate evidence.
 - The intended v1.0 contract freeze begins following the v0.9.2 release.
 
-At the time v0.9.0 shipped, it was intended to be the last breaking release
+At the time v0.9.0 shipped, the plan intended it to be the last breaking release
 before v1.0. That freeze was deliberately extended through v0.9.1 because v1.0
 had not shipped, adoption remained limited, and the final toolchain,
 dependency, configuration, and ABI audit found cleanup worth completing before
@@ -43,9 +43,10 @@ changes to public configuration, ABI, or runtime behavior.
 
 ### Release Evidence
 
-v0.9.2 remains a development candidate until the exact branch head passes the
-release-gates-check-092 evidence chain and the release artifacts are reviewed.
-Passing local gates alone does not declare a published stable release.
+v0.9.2 remains a development candidate until the exact branch head passes
+the release-gates-check-092 evidence chain and the release artifacts get
+reviewed. Passing local gates alone does not declare a published stable
+release.
 
 ## v0.9.1 Release Objective
 
@@ -85,7 +86,7 @@ is clearly marked as historical or migration guidance.
 ### Public Surface Review
 
 Before the v1.0 freeze, every provisional or implementation-oriented public
-surface must be classified as stable, experimental, internal, or removed. The
+the project must classify the surface as stable, experimental, internal, or removed. The
 review includes:
 
 - Markdown flavors such as MDX and Org mode;
@@ -96,14 +97,14 @@ review includes:
 - reason-code labels; and
 - exported FFI entry points and ABI layout.
 
-A surface is ready for the v1.0 contract only when it is implemented in the
+A surface is ready for the v1.0 contract only when the code implements it in the
 production path, documented accurately, directly tested, deterministic across
 configuration inheritance, useful to operators, and named suitably for
 long-term support.
 
 ## v1.0 Contract Freeze
 
-After v0.9.2 is published, v1.0 preparation is a stabilization phase rather
+After the project publishes v0.9.2, v1.0 preparation is a stabilization phase rather
 than another baseline reset.
 
 ### Freeze Rules
@@ -118,7 +119,7 @@ than another baseline reset.
 - Toolchain or dependency changes must preserve the published compatibility
   floor unless a later release explicitly announces and documents a change.
 - Security and correctness fixes take priority over strict behavioral
-  compatibility when no safe compatible fix exists; the impact must be stated
+  compatibility when no safe compatible fix exists. The change must state the impact
   plainly.
 
 ### Allowed v1.0 Preparation Work
@@ -129,7 +130,7 @@ than another baseline reset.
 - performance improvements that preserve observable output and contracts; and
 - additive capabilities that do not weaken existing guarantees.
 
-New experimental surfaces must be clearly labeled and must not be represented
+New experimental surfaces must be clearly labeled and must not appear
 as part of the frozen stable contract.
 
 ## Post-v1.0 Compatibility Policy
@@ -154,7 +155,7 @@ together and pass the version-consistency gate.
 
 ## Release Evidence
 
-The v0.9.1 release was declared stable after all of the following were true:
+The project declared the v0.9.1 release stable after all of the following held:
 
 1. repository harness, docs, complexity, license, static-security, and
    supply-chain checks pass;

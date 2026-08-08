@@ -4,7 +4,7 @@
 
 This checklist aggregates all release gate verification steps for the `0.5.5`
 stabilization and correctness release. Each gate has a verification command,
-expected output format, and pass/fail criterion. Gates are organized by phase:
+expected output format, and pass/fail criterion. Gates organize by phase:
 cheap blockers first, focused semantic checks second, umbrella checks third.
 
 This checklist covers verification families touched by the stabilization
@@ -97,12 +97,11 @@ waived before the release proceeds.
 
 `make release-gates-check` and `make release-gates-check-strict` validate
 0.5.0 release gate surfaces (the 0.5.0 workstreams), not 0.5.5-specific surfaces.
-The 0.5.5-specific validator (`validate_release_gates_055.py`) has been
-removed; the 0.5.0 targets serve as a non-regression baseline for 0.5.5.
+The release removed the 0.5.5-specific validator (`validate_release_gates_055.py`). The 0.5.0 targets serve as a non-regression baseline for 0.5.5.
 
 ## Waiver Process
 
-If any go/no-go criterion cannot be met, a waiver may be recorded. Each waiver
+If any go/no-go criterion cannot be met, the team may record a waiver. Each waiver
 entry MUST contain all four required fields:
 
 | Field | Format | Description |

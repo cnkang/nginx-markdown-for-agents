@@ -95,7 +95,7 @@ distinguishes runtime verification targets from static verification targets.
 
 ## Consistency with Routing Manifest
 
-All verification families referenced in this matrix are defined in
+This matrix references verification families that live in
 `docs/harness/routing-manifest.json`:
 
 - `harness-sync` → cheap blocker → `make harness-check`
