@@ -2,14 +2,14 @@
 
 ## Overview
 
-Every request that reaches the Markdown filter module passes through an ordered sequence of checks called the decision chain. The first failing check determines the outcome and assigns a reason code. If all checks pass, conversion is attempted and the outcome depends on whether conversion succeeds or fails.
+Every request that reaches the Markdown filter module passes through an ordered sequence of checks called the decision chain. The first failing check determines the outcome and assigns a reason code. If all checks pass, the module attempts conversion and the outcome depends on whether conversion succeeds or fails.
 
-Reason codes are the canonical, machine-readable outcome identifiers. They are emitted in two places and use the **same lowercase snake_case strings** everywhere:
+Reason codes are the canonical, machine-readable outcome identifiers. The module emits them in two places and uses the **same lowercase snake_case strings** everywhere:
 
 - Decision log entries: `markdown: reason=<code> ...` (see `components/nginx-module/src/ngx_http_markdown_decision_log_impl.h`)
 - Prometheus metrics labels (`reason="<code>"`, see `components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h`)
 
-The single source of truth for the reason code list is `components/rust-converter/src/decision/reason_code.rs`, mirrored in [Observability Schema v1](../architecture/observability-schema-v1.md). This document describes the check order, what each check evaluates, and how outcomes are determined. Rollout procedures are in the [Rollout Cookbook](../guides/ROLLOUT_COOKBOOK.md); rollback procedures are in the [Rollback Guide](../guides/ROLLBACK_GUIDE.md).
+The single source of truth for the reason code list is `components/rust-converter/src/decision/reason_code.rs`, mirrored in [Observability Schema v1](../architecture/observability-schema-v1.md). This document describes the check order, what each check evaluates, and how the module determines outcomes. Rollout procedures are in the [Rollout Cookbook](../guides/ROLLOUT_COOKBOOK.md). Rollback procedures are in the [Rollback Guide](../guides/ROLLBACK_GUIDE.md).
 
 ## Decision Chain Flowchart
 
@@ -50,7 +50,7 @@ flowchart TD
 
 ## Check Order
 
-The decision chain evaluates checks in a fixed order. The first check that fails stops evaluation and assigns the corresponding reason code. This "short-circuit" behavior means a request that fails multiple checks always gets the reason code of the earliest failing check in the sequence.
+The decision chain evaluates checks in a fixed order. The first check that fails stops evaluation and assigns the corresponding reason code. This "short-circuit" behavior means a request that fails multiple checks gets the reason code of the earliest failing check.
 
 | Order | Check | What It Evaluates | Reason Code on Failure |
 |-------|-------|--------------------|------------------------|
@@ -67,9 +67,10 @@ The decision chain evaluates checks in a fixed order. The first check that fails
 ### Accept negotiation outcomes
 
 When the request is eligible on checks 1–7 but the `Accept` header does not
-resolve in favor of Markdown, one of three distinct skip reason codes is emitted
-(this is the one eligibility branch that preserves sub-case granularity, because
-the failure cause is operationally meaningful for content negotiation):
+resolve in favor of Markdown, the module emits one of three distinct skip
+reason codes (this is the one eligibility branch that preserves sub-case
+granularity, because the failure cause is operationally meaningful for content
+negotiation):
 
 | Condition | Reason Code |
 |-----------|-------------|
@@ -77,16 +78,16 @@ the failure cause is operationally meaningful for content negotiation):
 | No `Accept` header present and `markdown_accept` is `strict` | `skipped_no_accept` |
 | `Accept` present but does not request Markdown (and not the reject case above) | `skipped_accept` |
 
-When `markdown_accept` is `wildcard`, `text/*` and `*/*` also qualify for conversion;
-when `force`, conversion is attempted regardless of the `Accept` header.
+When `markdown_accept` is `wildcard`, `text/*` and `*/*` also qualify for conversion.
+When `markdown_accept` is `force`, the module attempts conversion regardless of the `Accept` header.
 
 ## First-Failing-Check Rule
 
-The module evaluates checks 1 through 9 in the order listed above. As soon as one check fails, the module assigns the corresponding reason code and stops. No subsequent checks are evaluated.
+The module evaluates checks 1 through 9 in the order listed above. As soon as one check fails, the module assigns the corresponding reason code and stops. No subsequent checks run.
 
-For example, if a `POST` request arrives for a path where `markdown_filter` is `on`, the module assigns `not_eligible` (check 2) without evaluating status, content-type, size, auth, or Accept checks.
+For example, if a `POST` request arrives for a path where `markdown_filter` is `on`, the module assigns `not_eligible` (check 2). It skips the status, content-type, size, auth, and Accept checks.
 
-This behavior is important for operators diagnosing why a request was skipped. The reason code always points to the first condition that prevented conversion, not to all conditions that would have prevented it.
+This behavior matters for operators diagnosing why the module skipped a request. The reason code always points to the first condition that prevented conversion. It does not list all conditions that would have prevented it.
 
 ## Outcome Determination
 
@@ -94,23 +95,23 @@ When all eligibility checks pass (checks 1–9), the module attempts conversion.
 
 ### Success: converted
 
-Conversion succeeded. The client receives the Markdown representation of the HTML response. The reason code is `converted` and the request state is CONVERTED.
+Conversion succeeded. The client receives the Markdown representation of the HTML response. The reason code is `converted` and the request state becomes CONVERTED.
 
 ### Failure with `markdown_error_policy pass`: failed_open
 
-Conversion was attempted but failed (HTML parse error, timeout, resource limit, decompression error, or internal/system error). Because `markdown_error_policy` is set to `pass` (the default), the module serves the original HTML response unchanged. The client is unaffected. The reason code is `failed_open` and the request state is FAILED.
+The module attempted conversion but it failed (HTML parse error, timeout, resource limit, decompression error, or internal/system error). Because `markdown_error_policy` is set to `pass` (the default), the module serves the original HTML response unchanged. The client sees no impact. The reason code is `failed_open` and the request state becomes FAILED.
 
 This is the recommended configuration for production rollouts. Conversion failures never break client responses.
 
 ### Failure with `markdown_error_policy fail_closed`: failed_closed
 
-Conversion was attempted but failed. Because `markdown_error_policy` is set to `fail_closed`, the module returns a `502 Bad Gateway` error. The reason code is `failed_closed` and the request state is FAILED.
+The module attempted conversion but it failed. Because `markdown_error_policy` is set to `fail_closed`, the module returns a `502 Bad Gateway` error. The reason code is `failed_closed` and the request state becomes FAILED.
 
 Use `fail_closed` only when you need strict guarantees that clients never receive HTML when they requested Markdown. This is not recommended during initial rollout.
 
 ## Failure Sub-Classification
 
-When conversion fails (either `failed_open` or `failed_closed`), the module also records a failure sub-classification that provides more detail about what went wrong. These appear as a separate `category=` field in decision log entries and as distinct `reason` label values on the `nginx_markdown_requests_total` metric. They do not change the primary outcome (`failed_open` or `failed_closed`), which is determined solely by the `markdown_error_policy` setting.
+When conversion fails (either `failed_open` or `failed_closed`), the module records a failure sub-classification. It provides more detail about what went wrong. These appear as a separate `category=` field in decision log entries and as distinct `reason` label values on the `nginx_markdown_requests_total` metric. They do not change the primary outcome (`failed_open` or `failed_closed`), which depends solely on the `markdown_error_policy` setting.
 
 | Failure Reason Code | Meaning |
 |---------------------|---------|
@@ -127,7 +128,7 @@ When conversion fails (either `failed_open` or `failed_closed`), the module also
 
 ## Request States
 
-Every request that enters the decision chain ends up in one of four mutually exclusive states. The request state is derived from the reason code — no additional runtime field is stored.
+Every request that enters the decision chain ends up in one of four mutually exclusive states. The module derives the request state from the reason code. It stores no additional runtime field.
 
 | Request State | Reason Codes | Meaning |
 |---------------|-------------|---------|
@@ -145,7 +146,7 @@ Operators can determine request state counts from metrics and logs:
 
 ## Reason Code Reference
 
-The complete set of 27 reason codes is defined in `components/rust-converter/src/decision/reason_code.rs` and mirrored in [Observability Schema v1](../architecture/observability-schema-v1.md). All `as_str()` values are lowercase snake_case. The table below maps the high-level decision outcomes described in this document to their reason codes; the full registry (including decompression, dynconf, and streaming sub-codes) lives in the schema document.
+The complete set of 27 reason codes lives in `components/rust-converter/src/decision/reason_code.rs`. It mirrors into [Observability Schema v1](../architecture/observability-schema-v1.md). All `as_str()` values are lowercase snake_case. The table below maps the high-level decision outcomes described in this document to their reason codes. The full registry (including decompression, dynconf, and streaming sub-codes) lives in the schema document.
 
 | Decision Outcome | Reason Code | Request State | Description |
 |---|---|---|---|
@@ -162,7 +163,7 @@ The complete set of 27 reason codes is defined in `components/rust-converter/src
 
 > **Removed reason codes.** Earlier releases documented per-check uppercase codes
 > such as `SKIP_METHOD`, `SKIP_STATUS`, `SKIP_CONFIG`, and `ELIGIBLE_CONVERTED`.
-> These were consolidated in the 0.9.0 observability schema: eligibility checks
+> The 0.9.0 observability schema consolidated these: eligibility checks
 > 2–7 now emit `not_eligible`, scope-off emits `disabled`, and the conversion
 > outcomes are `converted` / `failed_open` / `failed_closed`. If you are
 > correlating old dashboards or alerts, update them to the lowercase codes above.
@@ -185,17 +186,17 @@ The complete set of 27 reason codes is defined in `components/rust-converter/src
 | `streaming_mid_flight_error` | Streaming conversion mid-flight error |
 | Delivery vs Decision counter separation | `failopen_count` (delivery) increments only after downstream `NGX_OK`; decision counter increments on decision regardless of downstream status |
 
-All reason codes use lowercase snake_case format. The same strings appear in both decision log entries and Prometheus metrics labels, so operators can correlate log entries with metric counters without translation.
+All reason codes use lowercase snake_case format. The same strings appear in both decision log entries and Prometheus metrics labels. Operators can correlate log entries with metric counters without translation.
 
 ## Implementation Details
 
 The check order matches the eligibility evaluation in `components/nginx-module/src/ngx_http_markdown_eligibility.c`, with the header-filter and Accept-negotiation additions:
 
-- Scope enablement (check 1) is evaluated before `ngx_http_markdown_check_eligibility()` is called.
-- Auth policy (check 7) is evaluated as part of eligibility.
-- Accept negotiation (check 8) is evaluated after the core eligibility checks pass.
+- The module evaluates scope enablement (check 1) before it calls `ngx_http_markdown_check_eligibility()`.
+- The module evaluates auth policy (check 7) as part of eligibility.
+- The module evaluates Accept negotiation (check 8) after the core eligibility checks pass.
 
-The reason code strings are produced by the Rust `ReasonCode::as_str()` registry and surfaced to C via the `markdown_reason_code_str()` FFI accessor. C-side code never hard-codes reason code literals; it converts the `ReasonCode` discriminant into the canonical lowercase string. See [Observability Schema v1](../architecture/observability-schema-v1.md) for the full registry and FFI accessor list.
+The Rust `ReasonCode::as_str()` registry produces the reason code strings. The `markdown_reason_code_str()` FFI accessor surfaces them to C. C-side code never hard-codes reason code literals. It converts the `ReasonCode` discriminant into the canonical lowercase string. See [Observability Schema v1](../architecture/observability-schema-v1.md) for the full registry and FFI accessor list.
 
 ## Related Documentation
 

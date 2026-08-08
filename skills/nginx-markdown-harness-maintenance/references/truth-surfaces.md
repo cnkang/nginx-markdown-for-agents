@@ -1,6 +1,6 @@
 # Truth Surfaces
 
-The repository contract is owned by tracked files, not by local adapters.
+Tracked files own the repository contract, not local adapters.
 
 ## Owner Layers
 

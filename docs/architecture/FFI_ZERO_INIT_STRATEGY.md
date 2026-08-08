@@ -1,9 +1,9 @@
 # FFI Zero/Default Initialization Strategy
 
 > **Note**: This document originated in v0.7.0. The zero-initialization
-> policy remains in effect for v0.9.1; however, the FFI struct inventory
+> policy remains in effect for v0.9.2, however, the FFI struct inventory
 > has evolved. See [FFI_MIGRATION_CONTRACT.md](FFI_MIGRATION_CONTRACT.md)
-> for the current v0.9.1 FFI boundary.
+> for the current v0.9.2 FFI boundary.
 
 ## Policy
 
@@ -49,12 +49,13 @@ by default. Stack-allocated FFI structs must use `ngx_memzero` explicitly.
 
 After FFI call returns, the C code must check `error_code` before
 dereferencing any pointer field in `MarkdownResult`. On error (non-zero
-`error_code`), only `error_message` and `error_len` are valid; all other
+`error_code`), only `error_message` and `error_len` are valid, all other
 pointer fields may be NULL.
 
 ## Document Updates
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Updated version references to v0.9.2 |
 | 0.7.0 | 2026-05-17 | Kang | Initial zero/default initialization strategy document |
 | 0.7.0-impl | 2026-05-18 | codex | Add FFIHeaderPlan zero-init and free lifecycle rule |

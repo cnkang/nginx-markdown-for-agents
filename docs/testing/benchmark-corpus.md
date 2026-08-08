@@ -26,7 +26,7 @@ tests/corpus/
 
 ### Page Types
 
-Each fixture is classified into one of five page types via its `.meta.json` sidecar:
+Each fixture classifies into one of five page types via its `.meta.json` sidecar:
 
 | Page Type | Description |
 |-----------|-------------|
@@ -152,7 +152,7 @@ token-reduction-percent = (1 - output_bytes / input_bytes) * 100 * token_approx_
 make test-benchmark
 ```
 
-This builds the `test-corpus-conversion` binary, runs the converter on every corpus fixture, and writes the Unified Report to `perf/reports/corpus-report.json` with before/after examples in `perf/reports/examples/`.
+This builds the `test-corpus-conversion` binary, runs the converter on every corpus fixture, and writes the Unified Report to `perf/reports/corpus-report.json`. Before/after examples land in `perf/reports/examples/`.
 
 ### Compare Reports
 
@@ -203,26 +203,26 @@ Both contribute independently to the CI pass/fail decision.
 
 ### CI Trigger Coverage
 
-The `Corpus Benchmark Gate` in `.github/workflows/ci.yml` is wired to run when any of the following changed-path outputs are true: `perf`, `rust`, `e2e`, `corpus_tools`, or `workflows`.
+The `Corpus Benchmark Gate` in `.github/workflows/ci.yml` wires to run when any of the following changed-path outputs are true: `perf`, `rust`, `e2e`, `corpus_tools`, or `workflows`.
 
 - `corpus_tools` maps to `tools/corpus/**`, ensuring changes to benchmark helper scripts (for example `tools/corpus/validate_corpus.sh` and `tools/corpus/test-corpus-conversion/**`) cannot bypass corpus benchmark validation in PR CI.
 
 ### Linux CI Baseline
 
-The committed corpus baseline (`perf/baselines/corpus-baseline.json`) is generated
+The pipeline generates the committed corpus baseline (`perf/baselines/corpus-baseline.json`)
 on `linux-x86_64`, matching the GitHub Actions runner used by the Corpus
 Benchmark Gate. This keeps p50/p95/p99 comparisons active in PR CI while also
 checking platform-independent quality metrics such as fallback rate, token
 reduction, and conversion outcomes.
 
 Local runs on a different platform still skip latency comparisons to avoid
-cross-platform noise; their quality metrics remain comparable. Regenerate the
+cross-platform noise. Their quality metrics remain comparable. Regenerate the
 committed baseline on `linux-x86_64` whenever the corpus or converter baseline
 intentionally changes.
 
 ### Quality Thresholds
 
-Defined in `perf/quality-thresholds.json` (`pp` = percentage points, i.e. absolute difference in percentage):
+Defined in `perf/quality-thresholds.json` (`pp` = percentage points, that is, absolute difference in percentage):
 
 | Metric | Warning | Blocking | Direction |
 |--------|---------|----------|-----------|
@@ -249,7 +249,7 @@ CI uploads these artifacts:
 
 - **Fallback rate** indicates what percentage of fixtures failed conversion. Lower is better.
 - **Token reduction** shows estimated byte savings. Higher is better. Values above 50% are typical for content-rich pages.
-- **Latency percentiles** measure conversion speed. P50 is the typical case; P95/P99 catch tail latency.
+- **Latency percentiles** measure conversion speed. P50 is the typical case. P95/P99 catch tail latency.
 - **Per-fixture details** in the report show exactly which fixtures converted, skipped, or failed.
 
 

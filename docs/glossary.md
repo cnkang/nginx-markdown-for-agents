@@ -24,7 +24,7 @@ operator documentation, and harness reports.
 - C functions, fields, and local variables use NGINX-style snake_case.
 - Rust public APIs use Rust naming conventions and Rustdoc comments.
 - Reason codes must match emitted log and metric labels exactly. Decision-chain
-  reason codes use lowercase snake_case; streaming engine reason codes use
+  reason codes use lowercase snake_case, streaming engine reason codes use
   uppercase snake_case.
 - Prometheus examples use the full series name and labels, for example
   `nginx_markdown_requests_total{outcome="failed_open"}`.

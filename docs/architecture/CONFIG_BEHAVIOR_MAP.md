@@ -12,7 +12,7 @@ For the full request flow, read [REQUEST_LIFECYCLE.md](REQUEST_LIFECYCLE.md). Fo
 
 ## How to Read This Map
 
-Each directive is described in four dimensions:
+The map describes each directive in four dimensions:
 
 - behavior: what it changes from the user's point of view
 - lifecycle impact: which phase or branch it affects

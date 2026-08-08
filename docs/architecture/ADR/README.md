@@ -4,7 +4,7 @@ This directory contains Architecture Decision Records (ADRs) documenting signifi
 
 ## What is an ADR?
 
-An Architecture Decision Record (ADR) is a document that captures an important architectural decision made along with its context and consequences.
+An Architecture Decision Record (ADR) is a document that captures an important architectural decision. It records the decision along with its context and consequences.
 
 ## ADR Format
 
@@ -59,7 +59,7 @@ What other options were considered and why were they not chosen?
 | [0003](0003-inline-origin-near-conversion.md) | Inline Origin-Near Conversion | Accepted | 2026-03-18 |
 | [0004](0004-streaming-bounded-memory-conversion.md) | Streaming Conversion with Bounded Memory and Controlled Fallback | Accepted | 2026-03-23 |
 | [0005](0005-repo-owned-harness.md) | Repo-Owned Harness for Agent Workflow and Spec Routing | Accepted | 2026-04-13 |
-| [0006](0006-otel-integration.md) | OpenTelemetry Integration Architecture | Accepted | 2026-04-28 |
+| [0006](0006-otel-integration.md) | OpenTelemetry Integration Architecture | Superseded by ADR-0027 | 2026-04-28 |
 | [0007](0007-streaming-default.md) | Streaming Engine as Default (auto mode) | Superseded by ADR-0023 | 2026-04-28 |
 | [0008](0008-noise-pruning-default.md) | Noise Pruning Enabled by Default | Accepted | 2026-04-28 |
 | [0009](0009-rust-first-e2e-test-architecture.md) | Rust-First E2E Test Architecture with Hybrid Runtime Coverage | Accepted | 2026-05-13 |
@@ -114,6 +114,7 @@ What other options were considered and why were they not chosen?
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Marked ADR-0006 as Superseded by ADR-0027 (OTel removal) |
 | 0.9.2 | 2026-08-07 | Kang | Added ADR-0027 (OTel removal/reintroduction conditions), moved into the ADR/ directory with canonical NNNN-description naming |
 | 0.9.2 | 2026-07-30 | Codex | Added ADR-0025 public-surface drift gate and ADR-0026 dynconf file-restore contract |
 | 0.9.1 | 2026-07-17 | Kiro | Added ADR-0024 (Brotli Streaming Decompression) to index |

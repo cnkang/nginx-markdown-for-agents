@@ -22,7 +22,7 @@ unstable ABI. 0.9.0 therefore freezes a **small-API** decision boundary.
 
 ### Small decision APIs (no giant aggregate FFI)
 
-The decision core is exposed as small, independently testable Rust functions
+The module exposes the decision core as small, independently testable Rust functions
 operating on normalized inputs (byte slices, primitive fields, normalized config
 snapshots), never on `ngx_http_request_t`:
 
@@ -37,7 +37,7 @@ snapshots), never on `ngx_http_request_t`:
 | `classify_error` | `error.rs` | pure classification |
 
 Any aggregation layer MUST be a thin wrapper over these small APIs, not a new
-request-swallowing FFI entry point. New `FFIDecisionResult`-style structs are
+request-swallowing FFI entry point. New `FFIDecisionResult`-style structs stay
 permitted but must be `repr(C)`, additive-only, and initialized via helper
 constructors (Rule 15).
 
@@ -57,26 +57,27 @@ Source IP is taken from `r->connection->sockaddr` (after the realip module,
 if configured). `markdown_trusted_proxies` is **http context only**, CIDR-based
 (IPv4 + IPv6, parsed at config time), and `Forwarded` takes precedence over
 `X-Forwarded-*` with right-most value selection on multi-hop chains (the
-right-most element is the one appended by the trusted proxy; the left-most
-is client-controlled and must not be trusted). `proto` is
+right-most element is the one appended by the trusted proxy. The left-most
+element is client-controlled, so the module must not trust it). `proto` stays
 restricted to `http`/`https`. Untrusted sources produce a reason code and never
 leak raw header values into logs/metrics.
 
 ### C complexity reduction acceptance (per migrated file)
 
-Each migration must produce: before/after C function inventory; P0 migration
-status (migrated / thin-wrapper / documented exception); Rust unit coverage; a C
-integration **parity test** (Rust decision == legacy C decision for identical
-input) retained until the C logic is deleted; `tools/harness/detect_c_pure_logic.sh`
-passing; no duplicate C/Rust business logic; no direct `headers_out` mutation
-outside HeaderPlan exceptions (ADR-0017).
+Each migration must produce a before/after C function inventory, P0 migration
+status (migrated / thin-wrapper / documented exception), Rust unit coverage,
+and a C integration **parity test** (Rust decision == legacy C decision for
+identical input) retained until the C logic disappears.
+`tools/harness/detect_c_pure_logic.sh` must pass. The migration must keep no
+duplicate C/Rust business logic and no direct `headers_out` mutation outside
+HeaderPlan exceptions (ADR-0017).
 
 ## Consequences
 
 ### Positive Consequences
 
-- Decision logic is unit-testable without NGINX; property tests apply.
-- Stable, additive small-API ABI; no request-state coupling.
+- Decision logic is unit-testable without NGINX. Property tests apply.
+- Stable, additive small-API ABI. No request-state coupling.
 - Single source of truth for accept/eligibility/conditional/reason/error.
 
 ### Negative Consequences
@@ -90,7 +91,7 @@ outside HeaderPlan exceptions (ADR-0017).
 - **Giant `decide_request(r)` FFI**: rejected — couples Rust to NGINX internals,
   untestable, unstable ABI.
 - **Keep pure logic in C**: rejected — repeats the 0.5–0.6 pattern of subtle C
-  pure-logic bugs; contradicts ADR-0010.
+  pure-logic bugs. It also contradicts ADR-0010.
 
 ## References
 

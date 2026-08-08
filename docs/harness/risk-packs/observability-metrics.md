@@ -20,7 +20,7 @@ Prometheus output, or release-gate monitoring semantics change.
 - metric name semantics vs actual measurement point
 - reason-code additions vs log emission and severity classification
 - release-gate docs vs validator key paths
-- per-path labels are escaped consistently across JSON and Prometheus outputs,
+- per-path labels escape consistently across JSON and Prometheus outputs,
   and cardinality overflow routes to a documented pseudo-path rather than
   silently dropping paths
 - metrics that traverse NGINX header lists or request structures inspect all

@@ -28,8 +28,8 @@ Gate 6: Fuzz & Packaging Infrastructure (depends on Gate 1; validates specs 29-3
 ```
 
 **Release-blocking scope**: Gates 1 through 6 are blocking for 0.7.0 GA as
-defined in this document. Gate 3 is satisfied by the tag package workflow's
-build, install-layout, checksum, and smoke-test chain. Gate 4 is satisfied by
+defined in this document. The tag package workflow satisfies Gate 3 via its
+build, install-layout, checksum, and smoke-test chain. Gate 4 passes via
 chart lint/render validation, with live cluster smoke recorded when promoted
 for a tag.
 
@@ -93,7 +93,7 @@ for a tag.
 | 4.2 | K8s smoke tests | Smoke script execution | Conversion, Accept negotiation, /metrics all pass |
 | 4.3 | F5 feasibility assessment | Documentation review | Assessment document complete with conclusions |
 
-**Fail action**: Block release. Resolve chart lint/render validation gaps before proceeding; record live cluster smoke when promoted for a tag.
+**Fail action**: Block release. Resolve chart lint/render validation gaps before proceeding. Record live cluster smoke when promoted for a tag.
 
 ---
 
@@ -110,7 +110,7 @@ for a tag.
 | 5.5 | All new metrics have validator | Validator coverage check | No unvalidated metric |
 | 5.6 | All new configs have validator | Validator coverage check | No unvalidated config directive |
 
-**Fail action**: Block release. Docs/harness/validator gaps must be resolved.
+**Fail action**: Block release. The team must resolve docs/harness/validator gaps.
 
 ---
 

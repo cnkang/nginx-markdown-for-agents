@@ -17,7 +17,7 @@ The top-level `Makefile` currently targets macOS on:
 - Apple Silicon (`arm64` -> `aarch64-apple-darwin`)
 - Intel (`x86_64` -> `x86_64-apple-darwin`)
 
-The build target is selected automatically from `uname -m`.
+The build script selects the target automatically from `uname -m`.
 
 ## Prerequisites
 
@@ -42,7 +42,7 @@ rustup target add x86_64-apple-darwin
 
 **2. cbindgen**
 
-`cbindgen` is required to generate the C header used by the NGINX module.
+The build requires `cbindgen` to generate the C header used by the NGINX module.
 
 ```bash
 cargo install cbindgen --version 0.29.2 --locked
@@ -88,10 +88,10 @@ Available targets include:
 - `make sonar-compile-db` - Generate `compile_commands.json` for SonarQube C/C++ analysis (local + CI)
 - `make clean` - Clean Rust and selected NGINX module test artifacts
 
-Release and performance evidence under `artifacts/` is generated in CI and
+CI generates release and performance evidence under `artifacts/` and
 ignored by Git. CI validates generated evidence against checked-in source and
-schema before upload; do not commit local copies of those files. The canonical
-module benchmark environment is tracked as source configuration in
+schema before upload. Do not commit local copies of those files. The canonical
+the module benchmark environment stays tracked as source configuration in
 `release/performance/canonical-environment.json`.
 
 ## SonarQube C/C++ Compilation Database
@@ -114,12 +114,12 @@ This command:
 - builds the module with a compiler wrapper
 - writes `compile_commands.json` to the repository root
 
-After generation, reload VS Code (or run the SonarQube embedded action to switch compilation database) and ensure the active database is:
+After generation, reload VS Code (or run the SonarQube embedded action) to switch compilation databases. Ensure the active database is:
 
 - `<workspace>/compile_commands.json`
 
 Do not commit `compile_commands.json`.
-It is a generated build artifact and is ignored by git.
+It is a generated build artifact and git ignores it.
 
 ### CI-based SonarCloud analysis
 
@@ -137,7 +137,7 @@ Required repository secret:
 
 - `SONAR_TOKEN`
 
-If `SONAR_TOKEN` is not set (for example fork PRs), the Sonar job is skipped.
+If `SONAR_TOKEN` is not set (for example fork PRs), the Sonar job skips.
 
 Optional script flags:
 

@@ -54,12 +54,12 @@ in `ngx_http_markdown_route_streaming_compression()`:
 
 The same four-condition gate applies uniformly: `markdown_auto_decompress` ON,
 streaming selected, `markdown_cache_validation` not `full`, codec supported.
-No new public directive or runtime policy branch is introduced.
+The change introduces no new public directive or runtime policy branch.
 
 ### No New Public Directives
 
 No new NGINX runtime directive, configuration parameter, or configuration
-default is introduced. The existing `markdown_decompress_max_size` budget
+default gets introduced. The existing `markdown_decompress_max_size` budget
 applies identically to Brotli. The existing `markdown_error_policy` governs
 fail-open/reject behavior.
 
@@ -138,13 +138,14 @@ without folding to generic `NGX_ERROR`.
 **`finished` flag semantics:** Guards compressed-input acceptance and prevents
 further `BrotliDecoderDecompressStream` invocation after stream completion.
 Does NOT suppress Rust converter finalization or HTTP terminal output
-production. HTTP terminal at-most-once is enforced by `main_terminal_sent` /
-`subrequest_terminal_sent` latches independently.
+production. `main_terminal_sent` and `subrequest_terminal_sent` latches
+enforce HTTP terminal at-most-once independently.
 
 **Semantic non-retryable invariant:** After a post-decode workspace expansion
-failure, the decoder has consumed input that cannot be replayed. Existing
-terminal/error state fields enforce the non-retryable invariant; a dedicated
-field is added only if code inspection proves existing states insufficient.
+failure, the decoder has consumed input that cannot replay. Existing
+terminal/error state fields enforce the non-retryable invariant. The team
+adds a dedicated field only if code inspection proves existing states
+insufficient.
 No subsequent call may re-feed the same compressed data.
 
 ### ABI Freeze
@@ -155,20 +156,20 @@ No subsequent call may re-feed the same compressed data.
 - **Brotli-disabled builds** (`NGX_HTTP_BROTLI` undefined): identical public
   ABI, zero Brotli linker references, no unconditional dependency added
 - **Official Brotli-enabled builds** (release artifacts): intentionally depend
-  on `libbrotlidec` at build time and runtime (DEB: `libbrotli1`; RPM:
-  `libbrotli`; Homebrew: `depends_on "brotli"`)
+  on `libbrotlidec` at build time and runtime (DEB: `libbrotli1`. RPM:
+  `libbrotli`. Homebrew: `depends_on "brotli"`)
 - All Brotli streaming code guarded by `#ifdef NGX_HTTP_BROTLI` — enforced by
   `detect_ifdef_guard_visibility.sh` CI gate
 
 ### Build-Control Mechanism
 
 Configure-time environment variable `NGX_MARKDOWN_BROTLI_STREAMING` (values:
-`auto` | `on` | `off`; default `auto`):
+`auto` | `on` | `off`, default `auto`):
 
-- `on`: probe for `<brotli/decode.h>` + `libbrotlidec`; define
-  `NGX_HTTP_BROTLI`; link decoder. Configure failure if dependency missing.
+- `on`: probe for `<brotli/decode.h>` + `libbrotlidec`, define
+  `NGX_HTTP_BROTLI`, link decoder. Configure failure if dependency missing.
 - `off`: no probing, no linking, Brotli remains on full-buffer Rust FFI path.
-- `auto`: probe silently; success enables streaming, failure falls back.
+- `auto`: probe silently, success enables streaming, failure falls back.
 
 ### Go/No-Go Freeze Criteria
 
@@ -201,12 +202,13 @@ Configure-time environment variable `NGX_MARKDOWN_BROTLI_STREAMING` (values:
 - Adds a build-time and runtime dependency on `libbrotlidec` for
   Brotli-enabled builds (official release artifacts)
 - Brotli decoder internal allocations (ring buffers, context maps) are not
-  bounded by `markdown_decompress_max_size` — only decoded output volume is
+  bounded by `markdown_decompress_max_size` — only decoded output volume gets
   budgeted. Standard RFC 7932 streams use WBITS 10–24. The module does not set
   `BROTLI_DECODER_PARAM_LARGE_WINDOW`, so the decoder rejects the RFC 9841
   large-window extension (WBITS > 24). Performance evidence must include
   high-standard-window and high-compression-ratio RSS measurements.
-- CI matrix grows: must test both Brotli-enabled and Brotli-disabled builds,
+- CI matrix grows: the project must test both Brotli-enabled and
+  Brotli-disabled builds,
   including at least one Ubuntu 22.04 (Brotli 1.0.9) environment
 
 ## Alternatives Considered
@@ -218,11 +220,11 @@ Configure-time environment variable `NGX_MARKDOWN_BROTLI_STREAMING` (values:
   existing `markdown_auto_decompress` + routing gates provide sufficient
   control without directive proliferation.
 - **Custom allocator for Brotli decoder internal memory**: Deferred. The
-  default system allocator is sufficient for the 0.9.1 scope; a pool-backed
+  default system allocator is sufficient for the 0.9.1 scope. A pool-backed
   allocator would require careful thread-safety analysis for future
   multi-threaded decoders.
 - **Concatenated Brotli stream support**: Not applicable. RFC 7932 defines a
-  single-stream format; no concatenated member handling is needed.
+  single-stream format. It needs no concatenated member handling.
 
 ## References
 

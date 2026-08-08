@@ -5,7 +5,7 @@
 The inflight guard is a per-worker concurrency limiter that prevents any
 single NGINX worker from accumulating unbounded in-flight markdown
 conversions.  When the number of active conversions reaches the configured
-limit, new eligible requests are handled according to the unified error
+limit, the module handles new eligible requests according to the unified error
 policy (pass-through, return a status code, or fail closed).
 
 ## Design Decisions
@@ -19,14 +19,14 @@ Each NGINX worker process maintains its own counter.  This avoids:
 - Cache-line bouncing between cores
 
 Since NGINX workers are single-threaded event loops, a per-worker counter
-with `ngx_atomic_t` fields is sufficient.  The atomic type is used only to
+with `ngx_atomic_t` fields is sufficient.  The atomic type serves only to
 allow safe reads from the metrics snapshot path (which runs in the same
 worker but may read during a different event-loop phase).
 
 ### Cleanup Handler Pattern
 
-The decrement is guaranteed on **every** exit path through a pool cleanup
-handler registered on `r->pool`.  When the request pool is destroyed—whether
+The module guarantees the decrement on **every** exit path through a pool cleanup
+handler registered on `r->pool`.  When the request pool gets destroyed—whether
 due to normal completion, client abort, timeout, or any error—the cleanup
 handler fires and decrements the counter.
 
@@ -50,7 +50,7 @@ terminate a request.
 | NGX_AGAIN (backpressure) | — | — | Request still in progress |
 | NGX_DONE (subrequest) | — | — | Request still in progress |
 
-**Key invariant**: The counter is incremented exactly once per eligible
+**Key invariant**: The module increments the counter exactly once per eligible
 request, and decremented exactly once when that request completes (by any
 means).
 
@@ -60,7 +60,7 @@ The cleanup handler includes an **idempotency flag** (`decremented`).  Even
 if the handler is somehow invoked multiple times, only the first call
 performs the decrement.  This prevents counter underflow.
 
-The counter itself is guarded against going negative: the decrement path
+The module guards the counter itself against going negative: the decrement path
 checks `current > 0` before subtracting.
 
 ## Configuration
@@ -84,11 +84,11 @@ The default value of 64 is chosen to protect typical deployments where:
 
 When `current >= max_inflight`:
 
-1. The `overload_total` counter is incremented
+1. The module increments the `overload_total` counter
 2. The request is **not** counted in the inflight counter
 3. The configured error policy determines behavior:
    - **pass** (default): Original response passed through unmodified
-   - **status N**: Configured HTTP status code returned (e.g., 503)
+   - **status N**: Configured HTTP status code returned (for example 503)
    - **fail_closed**: 502 Bad Gateway returned
 
 ## Metrics
@@ -100,8 +100,8 @@ The frozen Prometheus surface exposes the current gauge and request outcome:
 | `nginx_markdown_inflight_requests` | gauge | Currently in-flight conversions |
 | `nginx_markdown_requests_total{outcome=...,stage=...,reason=...}` | counter | Terminal request outcomes, including inflight-limit decisions |
 
-Counters and gauges are aggregated in the module's shared metrics zone and
-are exposed at the configured `markdown_metrics` location.
+The module aggregates counters and gauges in its shared metrics zone and
+exposes them at the configured `markdown_metrics` location.
 
 ## Implementation Files
 

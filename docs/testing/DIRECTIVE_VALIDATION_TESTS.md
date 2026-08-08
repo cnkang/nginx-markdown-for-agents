@@ -24,13 +24,13 @@ markdown_filter;            # Error: missing value
 - Default: off
 - Context: http, server, location
 - Inheritance: child overrides parent
-- Variables/complex values are evaluated per request; resolved values support 1/0, on/off, true/false, yes/no
+- The module evaluates variables/complex values per request. Resolved values support 1/0, on/off, true/false, yes/no
 
 ---
 
 ### 2. markdown_limits conversion_memory=<size> (size)
 
-> **0.9.0**: `markdown_max_size` is retired; use `markdown_limits conversion_memory=`.
+> **0.9.0**: the release retired `markdown_max_size`. Use `markdown_limits conversion_memory=`.
 
 **Valid configurations:**
 ```nginx
@@ -56,7 +56,7 @@ markdown_limits conversion_memory;          # Error: missing value
 
 ### 3. markdown_limits conversion_timeout=<time> (time)
 
-> **0.9.0**: `markdown_timeout` is retired; use `markdown_limits conversion_timeout=`.
+> **0.9.0**: the release retired `markdown_timeout`. Use `markdown_limits conversion_timeout=`.
 
 **Valid configurations:**
 ```nginx
@@ -67,10 +67,10 @@ markdown_limits conversion_timeout=5000;      # 5000 milliseconds (default unit)
 
 **Invalid configurations:**
 ```nginx
-markdown_limits conversion_timeout=-1;  # Error: negative timeout
-markdown_limits conversion_timeout=0;   # Error: timeout must be positive
-markdown_limits conversion_timeout=abc; # Error: invalid time format
-markdown_limits conversion_timeout;     # Error: missing value
+markdown_limits conversion_timeout=-1;        # Error: negative timeout
+markdown_limits conversion_timeout=0;         # Error: timeout must be positive
+markdown_limits conversion_timeout=abc;       # Error: invalid time format
+markdown_limits conversion_timeout;           # Error: missing value
 ```
 
 **Expected behavior:**
@@ -244,7 +244,7 @@ markdown_auth_cookies "";   # Error: empty cookie pattern
 
 ### 11. markdown_cache_validation (off|ims_only|full)
 
-> **0.9.0**: `markdown_etag` and `markdown_conditional_requests` are retired; use `markdown_cache_validation`.
+> **0.9.0**: the release retired `markdown_etag` and `markdown_conditional_requests`. Use `markdown_cache_validation`.
 
 **Valid configurations:**
 ```nginx
@@ -270,7 +270,13 @@ markdown_cache_validation full off;    # Error: too many arguments
 
 ---
 
-### 13. markdown_buffer_chunked (on|off)
+### 13. markdown_buffer_chunked (on|off, removed in 0.9.2)
+
+**Removed:** The 0.9.2 release removed this directive. It rejects
+configurations using it with the standard unknown-directive error at
+`nginx -t` time. See
+[MIGRATION-0.9.2.md](../guides/MIGRATION-0.9.2.md). The sections below
+document the pre-removal behavior only.
 
 **Valid configurations:**
 ```nginx
@@ -295,10 +301,10 @@ markdown_buffer_chunked;        # Error: missing value
 
 ### 14. markdown_stream_types (removed in 0.9.2)
 
-**Removed:** This directive was removed in 0.9.2. Configurations using it are
-rejected with the standard unknown-directive error at `nginx -t` time. See
+**Removed:** The 0.9.2 release removed this directive. It rejects configurations
+using it with the standard unknown-directive error at `nginx -t` time. See
 [MIGRATION-0.9.2.md](../guides/MIGRATION-0.9.2.md) for the replacement
-surface. Historical validation examples are retained below only as an
+surface. Historical validation examples stay below only as an
 archived record of the pre-0.9.2 surface.
 
 **Historical (pre-0.9.2) examples:**
@@ -398,11 +404,11 @@ All directive handlers provide clear error messages:
 
 1. **Duplicate directive:**
    - Message: "is duplicate"
-   - Occurs when directive is specified multiple times in same context
+   - Occurs when the directive appears multiple times in the same context
 
 2. **Invalid value:**
    - Message: "invalid value \"%s\" in \"%s\" directive, it must be ..."
-   - Occurs when value doesn't match expected format
+   - Occurs when value does not match expected format
 
 3. **Empty value:**
    - Message: "empty [pattern/type] in \"%s\" directive"
@@ -410,13 +416,13 @@ All directive handlers provide clear error messages:
 
 4. **Invalid format:**
    - Message: "invalid [type] \"%s\" in \"%s\" directive, must be in format ..."
-   - Occurs when value format is incorrect (e.g., content type without slash)
+   - Occurs when value format is incorrect (for example content type without slash)
 
 ---
 
 ## Configuration Validation at Startup
 
-All configuration parameters are validated at NGINX startup:
+NGINX validates all configuration parameters at startup:
 
 1. **Flag directives** (on|off): Validated by ngx_conf_set_flag_slot
 2. **Size directives**: Validated by ngx_conf_set_size_slot (must be positive)
@@ -461,10 +467,10 @@ acceptance with real NGINX startup checks (`nginx -t`) in an integration setup.
 - [ ] Test duplicate directive detection
 - [ ] Test array directives with multiple values
 - [ ] Test array directives with empty values
-- [ ] Verify defaults are applied when directive is not specified
+- [ ] Verify defaults apply when the directive is not specified
 - [ ] Test all directives in combination
 - [ ] Verify NGINX refuses to start with invalid configuration
-- [ ] Verify configuration is logged at startup (info level)
+- [ ] Verify the configuration logs at startup (info level)
 
 ---
 
@@ -537,5 +543,6 @@ This implementation satisfies the following requirements:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Fixed markdown_limits key names (conversion_memory, conversion_timeout); marked markdown_buffer_chunked removed in 0.9.2 |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

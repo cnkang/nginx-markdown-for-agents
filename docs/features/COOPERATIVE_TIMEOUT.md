@@ -19,7 +19,7 @@ flowchart TD
     style FailClosed fill:#c00,color:#fff
 ```
 
-The NGINX Markdown for Agents converter implements a **cooperative timeout mechanism** to protect against resource exhaustion from slow or malicious HTML conversions. This mechanism provides timeout enforcement without thread spawning, making it compatible with NGINX's event-driven worker model.
+The NGINX Markdown for Agents converter implements a **cooperative timeout mechanism**. It protects against resource exhaustion from slow or malicious HTML conversions. This mechanism provides timeout enforcement without thread spawning, making it compatible with NGINX's event-driven worker model.
 
 This document focuses on the converter-side implementation. For user-facing directive syntax and deployment tuning, use `docs/guides/CONFIGURATION.md`.
 
@@ -70,11 +70,11 @@ pub struct ConversionContext {
 
 ### Timeout Checkpoints
 
-Timeout is checked at these key points:
+The converter checks the timeout at these key points:
 
 1. **After HTML parsing** - Before DOM traversal begins
 2. **Every 100 DOM nodes during traversal** - Balance between performance and responsiveness
-3. **After metadata extraction** - If YAML front matter is enabled
+3. **After metadata extraction** - If YAML front matter turns on
 4. **Before output normalization** - After Markdown generation
 5. **After output normalization** - Final check before returning
 
@@ -84,7 +84,7 @@ The checkpoint frequency (every 100 nodes) provides a balance:
 
 - **Performance**: Not checking on every single node (would be expensive)
 - **Responsiveness**: Detecting timeout within reasonable time
-- **Typical case**: For a 10,000 node document, timeout is checked ~100 times
+- **Typical case**: For a 10,000 node document, the converter checks the timeout ~100 times
 
 ## Usage
 
@@ -138,11 +138,11 @@ markdown_options_t options = {
 markdown_convert(handle, html, html_len, &options, &result);
 ```
 
-If `timeout_ms = 0`, no timeout is enforced.
+If `timeout_ms = 0`, the converter enforces no timeout.
 
 ## Public Configuration Surface
 
-At the NGINX layer, this mechanism is exercised through `markdown_limits conversion_timeout=<time>`. The converter receives that value through the FFI boundary as `timeout_ms`.
+At the NGINX layer, this mechanism exercises through `markdown_limits conversion_timeout=<time>`. The converter receives that value through the FFI boundary as `timeout_ms`.
 
 Keep directive syntax, examples, and rollout choices in:
 
@@ -180,7 +180,7 @@ The worst-case latency for timeout detection is the time between checkpoints:
 
 ### Timeout Error
 
-When timeout is exceeded, the conversion returns `Err(ConversionError::Timeout)`:
+When the timeout elapses, the conversion returns `Err(ConversionError::Timeout)`:
 
 ```rust
 match converter.convert_with_context(&dom, &mut ctx) {
@@ -200,7 +200,7 @@ match converter.convert_with_context(&dom, &mut ctx) {
 
 ### FFI Error Code
 
-In the FFI layer, timeout errors are mapped to `ERROR_TIMEOUT` (code 3):
+In the FFI layer, the module maps timeout errors to `ERROR_TIMEOUT` (code 3):
 
 ```c
 if (result.error_code == ERROR_TIMEOUT) {
@@ -214,13 +214,13 @@ if (result.error_code == ERROR_TIMEOUT) {
 
 ### Unit Tests
 
-The timeout mechanism is tested with:
+Tests cover the timeout mechanism with:
 
 - **No timeout**: Verify conversion succeeds with `Duration::ZERO`
 - **Generous timeout**: Verify conversion succeeds with long timeout
-- **Short timeout**: Verify timeout is detected with very short timeout
-- **Node count tracking**: Verify node count is incremented
-- **Elapsed time tracking**: Verify elapsed time is tracked
+- **Short timeout**: Verify the timeout triggers with a very short value
+- **Node count tracking**: Verify the node count increments
+- **Elapsed time tracking**: Verify the converter tracks elapsed time
 - **Backward compatibility**: Verify old `convert()` method still works
 
 ### Integration Tests

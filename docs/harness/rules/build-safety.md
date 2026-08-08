@@ -34,15 +34,15 @@ compilation.
 ## Rule 57: #ifdef-Guarded Function Visibility
 
 **Principle**: Functions declared inside `#ifdef FEATURE_GUARD` blocks must
-not be referenced outside that guard. When a function is needed in both
-feature-enabled and feature-disabled builds, it must be declared outside the
+not reference it outside that guard. When both builds need a function
+(feature-enabled and feature-disabled), declare it outside the
 `#ifdef` guard. This catches the common mistake of adding a function
 declaration inside an `#ifdef` but forgetting to move it outside when the
-function is referenced from non-feature-gated code.
+code references the function from non-feature-gated paths.
 
 **Historical issue**: `a29d1a7b` — `ngx_http_markdown_reason_streaming_skip_compressed`
-was declared inside `#ifdef MARKDOWN_STREAMING_ENABLED` but was referenced
-from non-streaming code paths. The function had to be moved outside the
+the function sat inside `#ifdef MARKDOWN_STREAMING_ENABLED` but code referenced it
+from non-streaming code paths. The team had to move the function outside the
 `#ifdef` guard so it remains available in feature-disabled builds.
 
 **Detection**: `bash tools/harness/detect_ifdef_guard_visibility.sh`
@@ -58,11 +58,11 @@ from non-streaming code paths. The function had to be moved outside the
 
 **Principle**: Direct interpolation of GitHub Actions inputs (`${{ inputs.* }}`)
 into shell `run:` blocks allows command injection via crafted input values.
-Inputs must be routed through environment variables (`env:`) and referenced
+Inputs must route through environment variables (`env:`) and reference
 only as env vars in shell scripts. This prevents command substitution attacks
 where a malicious input value contains shell metacharacters.
 
-**Historical issue**: `d0d5730c` — `inputs.version` was interpolated directly
+**Historical issue**: `d0d5730c` — the workflow interpolated `inputs.version` directly
 into shell `run:` blocks before regex validation, allowing command substitution
 in the signing environment. Also found in `release-rpm.yml` during harness
 analysis.
@@ -93,6 +93,6 @@ code (429/503). The fix returned `conf->error_status` in all reject paths.
 - Scans C source files containing reject/error handling code
 - Flags `return NGX_HTTP_BAD_GATEWAY` in reject/error context
 - Skips lines containing `conf->error_status` (correct pattern)
-- Advisory mode by default; `--strict` for blocking
+- Advisory mode by default, `--strict` for blocking
 
 **Verification**: `bash tools/harness/detect_hardcoded_http_status.sh`

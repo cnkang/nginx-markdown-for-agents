@@ -45,7 +45,7 @@ We will try to:
 
 ## Scope
 
-This policy is intended for vulnerabilities in the code and release artifacts shipped by this repository, including:
+This policy covers vulnerabilities in the code and release artifacts shipped by this repository, including:
 
 - the NGINX C module in `components/nginx-module/`
 - the Rust converter and FFI boundary in `components/rust-converter/`
@@ -72,10 +72,10 @@ Examples that are usually out of scope unless they demonstrate a concrete vulner
 
 Please give maintainers reasonable time to investigate and ship a fix before public disclosure.
 
-When a report is confirmed:
+When the team confirms a report:
 
-- critical issues should be fixed in a patch release when feasible
-- lower-severity fixes may be batched into the next planned release
+- the team fixes critical issues in a patch release when feasible
+- lower-severity fixes may wait for the next planned release
 - release notes and `CHANGELOG.md` should document the fix, and may include CVE references when appropriate
 
 ## Operational Expectations
@@ -101,7 +101,7 @@ Local smoke example:
 make test-rust-fuzz-smoke
 ```
 
-Nightly GitHub Actions coverage is defined in `.github/workflows/nightly-fuzz.yml`.
+Nightly GitHub Actions coverage lives in `.github/workflows/nightly-fuzz.yml`.
 
 ## Related Documentation
 
@@ -113,6 +113,7 @@ Nightly GitHub Actions coverage is defined in `.github/workflows/nightly-fuzz.ym
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | STE-inspired writing-style cleanup (passive voice) |
 | 0.9.1 | 2026-07-19 | Kang | Update supported version line to 0.9.x |
 | 0.8.3 | 2026-06-26 | Kang | No changes; version alignment with 0.8.3 release |
 | 0.8.0 | 2026-06-16 | Kang | Update supported version line to 0.8.x |

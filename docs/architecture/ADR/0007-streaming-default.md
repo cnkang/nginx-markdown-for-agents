@@ -1,7 +1,7 @@
 # ADR-0007: Streaming Engine as Default (auto mode)
 
 > Historical decision for the v0.6.0 directive surface. ADR-0023 supersedes
-> its active configuration recommendation in v0.9.1; use
+> its active configuration recommendation in v0.9.1. Use
 > `markdown_streaming off|auto|force`.
 
 **Status**: Superseded by ADR-0023
@@ -55,7 +55,7 @@ context: http, server, location
 ## Rationale
 
 1. Streaming engine is production-proven across 0.5.x releases with no known data-loss regressions.
-2. `auto` mode provides a safe graduated rollout: small responses use the simpler full-buffer path, large/chunked responses benefit from streaming's bounded memory and lower TTFB.
+2. `auto` mode provides a safe graduated rollout. Small responses use the simpler full-buffer path. Large/chunked responses benefit from streaming's bounded memory and lower TTFB.
 3. Operators who need identical 0.5.x behavior can set `markdown_streaming_engine off` explicitly — no behavior change for explicit configurations.
 4. The auto threshold (32 KiB default) is conservative: full-buffer is cheap for small responses, streaming is beneficial for large ones.
 
@@ -76,7 +76,7 @@ context: http, server, location
 ### v0.8.0 Compatibility Bridge Removal
 
 The v0.6.0 compatibility bridge that mapped `markdown_streaming_auto_threshold`
-to `markdown_stream_threshold` during configuration merge has been removed in
+to `markdown_stream_threshold` during configuration merge disappeared in
 v0.8.0. The `ngx_http_markdown_streaming_cfg_t` struct, `conf->streaming`
 field, and the `ngx_http_markdown_bridge_legacy_stream_values` /
 `ngx_http_markdown_merge_streaming_values` functions no longer exist. Runtime

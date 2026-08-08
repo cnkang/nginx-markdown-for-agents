@@ -32,7 +32,7 @@ bash tools/doctor/nginx-markdown-doctor.sh [OPTIONS]
 | 1 | At least one check failed |
 | 2 | Usage error |
 
-## Checks (0.9.0 + 0.9.1)
+## Checks (0.9.0 through 0.9.2)
 
 ### Core Checks (0.9.0)
 
@@ -57,7 +57,7 @@ bash tools/doctor/nginx-markdown-doctor.sh [OPTIONS]
 ### Human-readable (default)
 
 ```text
-nginx-markdown-doctor v0.9.1
+nginx-markdown-doctor v0.9.2
 ─────────────────────────────────
   ✓ [pass] nginx_version: nginx version 1.28.0 detected
   ✓ [pass] module_exists: module found at /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
@@ -78,7 +78,7 @@ Summary: 8 passed, 0 failed, 0 warnings, 0 skipped (8 total)
 ```json
 {
   "schema_version": 1,
-  "tool_version": "0.9.1",
+  "tool_version": "0.9.2",
   "timestamp": "2026-07-01T12:00:00Z",
   "checks": [
     {
@@ -160,7 +160,7 @@ Summary: 8 passed, 0 failed, 0 warnings, 0 skipped (8 total)
     },
     "tool_version": {
       "type": "string",
-      "description": "Doctor tool version (e.g. 0.9.1)"
+      "description": "Doctor tool version (e.g. 0.9.2)"
     },
     "timestamp": {
       "type": "string",
@@ -260,7 +260,7 @@ The doctor tool runs as a smoke test in CI via
 
 1. The tool runs without crashing
 2. JSON output is valid
-3. At least 3 checks are reported
+3. The tool reports at least 3 checks
 4. JSON schema structure is correct
 
 ## Remediation Hints (0.9.1)
@@ -287,7 +287,7 @@ appropriate release artifact. The recommendation appears in:
 
 ## Environment Compatibility (0.9.1)
 
-The tool is designed to work correctly on:
+The tool works correctly on:
 
 - **macOS** (bash 3.2+): No GNU-only flags, compatible with system bash
 - **Linux** (Ubuntu/Debian, CentOS/RHEL): Detects package type and glibc

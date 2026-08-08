@@ -13,15 +13,16 @@ Historical issues: `23165d9`, `2c7d6a9`, `0eae34b`, `1b0df51`.
 
 Required:
 - Enforce all configured budgets (including total working-set budget), not only per-buffer budgets.
-- Any auxiliary heap expansion buffer must be explicitly freed on all exits; copy final data back to pool-owned memory if needed.
-- Any collector strings/buffers (for example link text, sniff buffers) must be bounded by configured limits.
+- Free any auxiliary heap expansion buffer on every exit. Then copy final data
+  back to pool-owned memory when needed.
+- Any collector strings/buffers (for example link text, sniff buffers) must respect configured limits.
 - Track peak memory from real resident state, not only counters.
 - Do not hardcode stage limits in downstream components when a configured
   budget field already exists (for example charset sniff bytes, stack bytes,
   output buffer bytes). Thread budget values through constructors and enforce
   them at the runtime write/check site.
 - Budget guard helper APIs and production enforcement must not drift: if
-  helper methods exist for stage checks, production code should call them; if
+  helper methods exist for stage checks, production code should call them, if
   a helper is not part of production enforcement, remove it in the same change
   set. Avoid parallel inline checks and helper checks that can diverge.
 - Never apply hidden floor/ceiling behavior that weakens a configured budget
@@ -37,13 +38,13 @@ Required:
 - The design rationale (documented in `buffer.c:36-39` and
   `buffer.c:220-224`): pool allocations cannot be individually freed,
   so repeated buffer expansions on large responses would grow the pool
-  indefinitely.  `ngx_alloc/ngx_free` allows superseded buffers to be
-  released immediately.
-- A pool cleanup handler (`ngx_pool_cleanup_add`) is registered at
-  `buffer_init` time to ensure the backing store is freed when the
-  request pool is destroyed, even if no explicit `ngx_free` is called.
+  indefinitely.  `ngx_alloc/ngx_free` lets superseded buffers free
+  immediately.
+- The module registers a pool cleanup handler (`ngx_pool_cleanup_add`) at
+  `buffer_init` time to ensure the backing store frees when the
+  request pool dies, even if no explicit `ngx_free` call happens.
 - When code outside `buffer.c` needs to replace `ctx->buffer.data`
-  (e.g. decompression output exceeds capacity), it MUST use `ngx_alloc`
+  (for example decompression output exceeds capacity), it MUST use `ngx_alloc`
   for the new allocation and `ngx_free` for the old — never `ngx_palloc`
   or `ngx_pfree`.
 - **Generalized pool-vs-heap rule**: Any buffer that is independently
@@ -52,10 +53,10 @@ Required:
   example zlib `finish()` output buffers, `apply_limits` temporary
   buffers, buffer-expansion scratch space) — MUST use `ngx_alloc` /
   `ngx_free`.  Pool-allocating such a buffer and later calling
-  `ngx_free` on it is undefined behavior: `ngx_free` calls the system
+  `ngx_free` on it counts as undefined behavior: `ngx_free` calls the system
   `free()`, which expects a heap pointer from `malloc`/`ngx_alloc`, not
   a pool-internal pointer from `ngx_palloc`/`ngx_pcalloc`.  Conversely,
-  a buffer allocated with `ngx_alloc` must never be freed with
+  a buffer allocated with `ngx_alloc` must never free via
   `ngx_pfree` — use `ngx_free` exclusively.
 - **Decompression finish workspace**: The zlib `finish()` path may
   need to grow its output buffer when compressed data expands beyond

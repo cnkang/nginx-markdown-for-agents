@@ -55,12 +55,12 @@ For detailed installation and configuration instructions, see:
 
 ## Compatibility Warning
 
-> **IMPORTANT**: This prebuilt package is compiled against a specific
+> **IMPORTANT**: This prebuilt package compiles against a specific
 > nginx.org stable release. It is **ONLY** compatible with the exact
 > nginx.org version indicated in the package filename.
 
 NGINX dynamic modules are **NOT** universal shared libraries. Each module
-is compiled against a specific NGINX source version and validated via a
+compiles against a specific NGINX source version and validates via a
 binary compatibility signature at load time. If the signature does not
 match, NGINX will refuse to load the module.
 
@@ -78,7 +78,7 @@ the module from source against your local NGINX source tree. See
 
 ## License
 
-This project is licensed under the **BSD 2-Clause License**.
+The **BSD 2-Clause License** governs this project.
 See the `LICENSE` file installed at
 `/usr/share/licenses/nginx-markdown-for-agents/LICENSE` for the full text.
 

@@ -32,20 +32,20 @@ deviation_pct = (current - baseline) / baseline * 100
 
 For `lower_is_better` metrics, a positive deviation means regression.
 For `higher_is_better` metrics, a negative deviation means regression
-(thresholds are expressed as negative numbers).
+(thresholds appear as negative numbers).
 
 ## Configuration File
 
-Thresholds are stored in `perf/thresholds.json`, organized by platform,
+`perf/thresholds.json` stores thresholds, organized by platform,
 sample tier, and metric. Each entry includes a `rationale` field explaining
 the threshold choice.
 
 The `platforms` object contains explicit per-platform sections keyed by the
-`uname`-style platform identifier (e.g., `linux-x86_64`, `darwin-arm64`).
+`uname`-style platform identifier (for example `linux-x86_64`, `darwin-arm64`).
 The `"default"` section serves as a fallback for platforms without an
 explicit entry. The threshold engine resolves thresholds in this order:
 
-1. Exact platform match (e.g., `linux-x86_64`)
+1. Exact platform match (for example `linux-x86_64`)
 2. `"default"` platform entry
 3. Built-in hardcoded defaults
 
@@ -60,11 +60,11 @@ Currently configured platforms:
 
 1. Edit `perf/thresholds.json` with the new values.
 2. Submit a PR so the change is auditable.
-3. Include justification in the PR description (e.g., CI noise analysis,
+3. Include justification in the PR description (for example CI noise analysis,
    workload characteristic change).
 
 To add thresholds for a new platform, add a new key under `platforms`
-matching the platform's `uname`-style identifier (`<os>-<arch>`, e.g.,
+matching the platform's `uname`-style identifier (`<os>-<arch>`, for example
 `darwin-arm64` for Apple Silicon macOS).
 
 ## CI Noise Mitigation

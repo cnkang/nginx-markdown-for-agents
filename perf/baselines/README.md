@@ -4,7 +4,7 @@ This directory contains platform-specific performance baselines for the `nginx-m
 
 ## Overview
 
-Performance baselines are used to:
+Performance baselines provide these functions:
 - Track performance regression across releases
 - Compare full-buffer vs streaming engine performance
 - Generate evidence packs for release decisions
@@ -13,7 +13,7 @@ Module-level percentage comparisons require the current report and baseline to
 use the same platform, load generator, NGINX version, and critical-scenario
 input sizes. The evidence gate reports `MISSING_EVIDENCE` rather than a
 regression verdict when these fields differ. Report-only mode retains exit zero
-for visibility; blocking release mode fails until comparable evidence exists.
+for visibility. Blocking release mode fails until comparable evidence exists.
 
 ## Evidence Truth and Conservative Normalization
 
@@ -26,31 +26,30 @@ Module baselines contain two different classes of data:
   `zero_copy_output_total`, `copied_output_total`, `baseline_rss_bytes`,
   `peak_rss_bytes`, `input_bytes`, scenario status and metadata, platform,
   load generator, and NGINX version.
-- Performance thresholds may be conservatively normalized: RPS may only be
-  rounded downward or lowered, while latency and TTFB may only be rounded
-  upward or raised. RPS must never be increased and latency/TTFB must never be
-  decreased to make evidence look better.
+- Performance thresholds may round RPS downward or lower it. They may round
+  latency and TTFB upward or raise them. RPS must never increase and
+  latency/TTFB must never decrease to make evidence look better.
 
-Do not fabricate or improve measured evidence. Only documented conservative
-normalization of latency/throughput is allowed; path, fallback, output, memory,
-and environment evidence must remain verbatim.
+Do not fabricate or improve measured evidence. Conservative normalization
+may adjust latency and throughput only. Path, fallback, output, memory, and
+environment evidence must remain verbatim.
 
 Retain the raw workflow artifact and record its run, source Git commit,
 adjustment rule, person or reason, and adjustment date in `baseline_policy`.
-The current `module-baseline-091.json` is a verbatim eight-scenario run from
-commit `cab92df229b0b68cb02d88817a208e009f3ce106`, measured at
-`2026-07-28T22:41:12Z` by canonical workflow run `30405031983/attempts/1`.
+The current `module-baseline-092.json` records a verbatim eight-scenario run
+from commit `97672b57d4479febbf6d9a3d947a339236b698f3`, measured at
+`2026-07-31T04:36:09Z` by canonical workflow run `30604344481/attempts/1`.
 Its retained raw artifact has SHA-256
-`a511b90f82d05f827ea011faccec3ff5b3aead892943180f98e617c6c09aad12`.
+`ebcd73ec55c4e85a6cdbc85371832342d97b2edcdf06c56cf5bb7a91f0ab5c92`.
 The validator requires this source commit, run attempt, timestamp, retained
 raw artifact, and digest to remain mutually consistent.
 
-Provenance is layered by object: `baseline_policy` carries policy provenance;
+Provenance layers by object: `baseline_policy` carries policy provenance,
 top-level `module_benchmark` carries `platform`, `load_generator`,
-`nginx_version`, `git_commit`, and `timestamp`; each scenario carries its
-metadata, `load_integrity`, `metrics`, and `response_correctness`. The optional
-`baseline_policy.scenario_sources` object is checked for environment
-consistency only when present.
+`nginx_version`, `git_commit`, and `timestamp`, and each scenario carries its
+metadata, `load_integrity`, `metrics`, and `response_correctness`. The
+validator checks the optional `baseline_policy.scenario_sources` object for
+environment consistency only when present.
 
 The module benchmark derives its retained probe directory from the report
 output path. For the canonical raw report this is
@@ -58,12 +57,12 @@ output path. For the canonical raw report this is
 `.headers`, `.body`, and `.json` files for each of the eight scenarios.
 `tools/perf/validate_module_probe_artifacts.py` verifies that complete
 triplet, its response verdict and digest, and the finalized baseline's
-complete `response_correctness` object before the canonical artifact is
-uploaded. The validator parses the final HTTP response block in each `.headers`
+complete `response_correctness` object before the system uploads the
+canonical artifact. The validator parses the final HTTP response block in each `.headers`
 file and binds its status, normalized headers, Markdown content type, and empty
-content encoding to the probe JSON. The canonical artifact is retained for 30
-days; failure-only debug artifacts remain on the shorter diagnostic retention
-period.
+content encoding to the probe JSON. The system retains the canonical artifact
+for 30 days. Failure-only debug artifacts remain on the shorter diagnostic
+retention period.
 
 ## Raw Artifact Binding and Digest Verification
 
@@ -75,51 +74,52 @@ SHA-256 digest. The `baseline_policy` block records:
   raw file's bytes.
 
 The finalizer (`tools/perf/finalize_module_baseline.py`) computes the digest
-from the actual raw file at finalization time; the validator
+from the actual raw file at finalization time. The validator
 (`tools/perf/evidence_gate.py`) recomputes the digest and rejects any
-mismatch. Writing a digest without verifying the file is not accepted.
+mismatch. Do not write a digest without verifying the file.
 
 ### verbatim_run vs conservative_normalized
 
 - **`verbatim_run`**: the finalized baseline is the raw report plus a
-  `baseline_policy` block. No raw evidence may be modified. The validator
-  compares the entire finalized report with `baseline_policy` removed against
-  the raw report.
-- **`conservative_normalized`**: RPS may only be rounded downward or
-  lowered; latency/TTFB/TTLB may only be rounded upward or raised. Truth
-  evidence (path, fallback, output, memory, environment, scenario status,
-  metadata, metric keys, and `decompression_coverage`) must remain identical
-  to the raw report. The policy adjustment ledger must exactly describe every
-  changed adjustable metric and its delta. The finalizer records the
-  adjustment rule, reason, and date; the validator machine-verifies the full
-  relationship against the raw artifact.
+  `baseline_policy` block. The finalizer must not modify raw evidence. The
+  validator compares the entire finalized report with `baseline_policy`
+  removed against the raw report.
+- **`conservative_normalized`**: RPS may only round downward or lower.
+  Latency, TTFB, and TTLB may only round upward or raise. Truth evidence
+  (path, fallback, output, memory, environment, scenario status, metadata,
+  metric keys, and `decompression_coverage`) must remain identical to the raw
+  report. The policy adjustment ledger must exactly describe every changed
+  adjustable metric and its delta. The finalizer records the adjustment rule,
+  reason, and date. The validator machine-verifies the full relationship
+  against the raw artifact.
 
-The `baseline_policy.type` is restricted to `verbatim_run` or
+The `baseline_policy.type` permits only `verbatim_run` or
 `conservative_normalized`. Any other value (or a missing type) fail-closes
-the release gate. The full 40-character lowercase source Git SHA is
-required for both policy types; short SHAs, `unknown`, or placeholders are
-rejected. The historical exception at commit `847f9013` is retained only as
-an audit record in repository history; it is no longer used by the current
-canonical baseline and must not be extended to new baselines.
+the release gate. Both policy types require the full 40-character lowercase
+source Git SHA. The validator rejects short SHAs, `unknown`, or placeholders.
+The historical exception at commit `847f9013` survives only as an audit
+record in repository history. It no longer applies to the current canonical
+baseline, and new baselines must not extend it.
 
 ### Historical audit record
 
 The original pre-regeneration baseline at commit `847f9013` remains relevant
 only to historical validator tests and audit comparisons. It is not the active
-release baseline. The active 0.9.1 baseline uses `verbatim_run` provenance and
+release baseline. The active 0.9.2 baseline uses `verbatim_run` provenance and
 does not use `historical_audit_exception`.
 
 ## Environment Consistency
 
 A single baseline file must never mix scenarios measured under different
-environments. Every scenario in `module-baseline-091.json` shares the
-top-level canonical environment (`linux-x86_64`, `ab`, NGINX 1.24.0). When a
-scenario is merged from a different run, `baseline_policy.scenario_sources`
-must declare structured `platform`, `load_generator`, and `nginx_version`
-fields for it, and the evidence gate rejects the baseline unless each of them
-matches the top-level environment. A scenario measured in a diverging
-environment must instead live in its own environment-truthful baseline file
-and must never be compared against reports from the canonical environment.
+environments. Every scenario in `module-baseline-092.json` shares the
+top-level canonical environment (`linux-x86_64`, `ab`, NGINX 1.24.0). When
+the finalizer merges a scenario from a different run,
+`baseline_policy.scenario_sources` must declare structured `platform`,
+`load_generator`, and `nginx_version` fields for it, and the evidence gate
+rejects the baseline unless each of them matches the top-level environment.
+A scenario measured in a diverging environment must instead live in its own
+environment-truthful baseline file and must never enter comparisons against
+reports from the canonical environment.
 
 The active canonical run includes `brotli-streaming-first` under NGINX 1.24.0
 with the other seven scenarios. The older
@@ -150,23 +150,23 @@ Each platform has a dedicated baseline file:
   baseline (canonical NGINX 1.24.0 environment)
 - `module-baseline-091-raw.json` - retained raw report for the canonical
   0.9.1 baseline (provenance artifact referenced by
-  `module-baseline-091.json`; generated by the nightly workflow)
+  `module-baseline-091.json`, generated by the nightly workflow)
 - `module-baseline-091-raw-probes/` - retained response probe artifacts
-  derived from `module-baseline-091-raw.json`; the canonical workflow
-  validates all eight scenario triplets before upload
+  derived from `module-baseline-091-raw.json`. The canonical workflow
+  validates all eight scenario triplets before upload.
 - `module-baseline-brotli-091.json` - Brotli streaming evidence measured on
-  NGINX 1.30.4; archival only, never compared across environments
+  NGINX 1.30.4 (archival only, excluded from cross-environment comparisons)
 - `module-baseline-brotli-091-raw.json` - retained raw report for the Brotli
   run (provenance artifact referenced by `module-baseline-brotli-091.json`)
 - `module-baseline-092.json` - Linux x86_64 module-level 0.9.2 evidence
-  baseline (canonical NGINX environment); the blocking evidence source for
+  baseline (canonical NGINX environment), the blocking evidence source for
   the 0.9.2 release gates (`make release-gates-check-092`)
 - `module-baseline-092-raw.json` - retained raw report for the canonical
   0.9.2 baseline (provenance artifact referenced by
-  `module-baseline-092.json`; generated by the nightly workflow)
+  `module-baseline-092.json`, generated by the nightly workflow)
 - `module-baseline-092-raw-probes/` - retained response probe artifacts
-  derived from `module-baseline-092-raw.json`; the canonical workflow
-  validates all eight scenario triplets before upload
+  derived from `module-baseline-092-raw.json`. The canonical workflow
+  validates all eight scenario triplets before upload.
 
 ## Running Benchmarks
 
@@ -266,15 +266,15 @@ These tiers are specifically designed to validate streaming performance:
 
 ### Streaming-Specific Metrics
 
-When `--engine streaming` or `--engine both` is used:
+When you use `--engine streaming` or `--engine both`:
 
 - `ttfb_ms` - Time to first Markdown byte
 - `ttlb_ms` - Time to last Markdown byte
 - `cpu_time_ms` - CPU time consumed
 - `flush_count` - Number of flush points
 - `fallback_rate` - Pre-commit fail-open ratio
-  (`precommit_failopen_total / streaming_requests_total`); this is distinct
-  from `streaming_fallback_total`, the path-routing fallback counter.
+  (`precommit_failopen_total / streaming_requests_total`). This value is
+  distinct from `streaming_fallback_total`, the path-routing fallback counter.
 
 ## Evidence Pack
 
@@ -323,7 +323,7 @@ perf/reports/
 The baseline system integrates with CI pipelines:
 1. Nightly benchmarks run automatically
 2. Threshold engine compares against baselines
-3. Results are archived in `perf/reports/`
+3. The pipeline archives results in `perf/reports/`
 4. Evidence packs generated for release candidates
 
 ## See Also
@@ -338,6 +338,7 @@ The baseline system integrates with CI pipelines:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Pointed active baseline references at module-baseline-092 |
 | 0.9.1 | 2026-07-28 | Codex | Documented strict raw-artifact provenance, exact historical-exception binding, and conservative normalization rules. |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
