@@ -2,7 +2,7 @@
 
 ## Overview
 
-Each sub-spec must include at least one boundary description for any capability with a natural extension beyond 0.5.0. Boundary descriptions use factual, non-speculative language — stating what is delivered and what is deferred, without implying commitments to future versions.
+Each sub-spec must include at least one boundary description for any capability with a natural extension beyond 0.5.0. Boundary descriptions use factual, non-speculative language. They state what ships now and what defers, without implying commitments to future versions.
 
 ## Template
 
@@ -20,10 +20,10 @@ Each sub-spec must include at least one boundary description for any capability 
 
 ## Required Fields
 
-1. **Capability**: The capability being described
+1. **Capability**: The capability under description
 2. **0.5.0 Scope**: Specific deliverables for this version
 3. **0.6.x+ Scope**: Content deferred to future versions
-4. **Boundary Placement Rationale**: Explanation of why the boundary is placed at this point
+4. **Boundary Placement Rationale**: Explanation of why the boundary sits at this point
 5. **Prerequisites for Deferred Work**: Conditions that must exist before deferred work can begin
 
 ## Example
@@ -44,7 +44,7 @@ Each sub-spec must include at least one boundary description for any capability 
 
 - Use factual, non-speculative language
 - Do not imply commitments to future versions
-- State what is delivered and what is deferred
+- State what ships now and what defers
 - Avoid commitment words like "planned", "will" when describing 0.6.x+ content
 - Use neutral terms like "deferred", "out of scope"
 

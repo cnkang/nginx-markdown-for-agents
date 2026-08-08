@@ -9,6 +9,10 @@
 //!
 //! **All strings use UTF-8 bytes + length representation (NOT NUL-terminated C strings)**
 //!
+//! Exception: header plan entries in `FFIHeaderEntry` use NUL-terminated
+//! key/value buffers (with `key_len`/`value_len` excluding the NUL), per the
+//! `FFIHeaderEntry` contract. All other FFI strings are length-prefixed.
+//!
 //! This is a non-standard but intentional design choice that provides several benefits:
 //! 1. **Binary Safety**: Supports embedded NUL bytes in content
 //! 2. **Performance**: Avoids strlen() overhead in C code

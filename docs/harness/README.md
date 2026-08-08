@@ -59,7 +59,7 @@ flowchart LR
 
 - `AGENTS.md` remains the Codex-first contract.
 - `docs/harness/` owns reusable harness truth, not domain semantics already documented elsewhere.
-- Optional local spec inputs are read-only and must not be used as a cache or
+- Optional local spec inputs are read-only and must not serve as a cache or
   annotation store for repository truth.
 - Optional local adapter layers can summarize and link, but they do not define
   independent rules.

@@ -19,7 +19,7 @@ module parameters without restarting NGINX. A periodic timer (1s interval)
 polls a configuration file for changes and applies them using a two-phase,
 staged-commit model.
 
-Dynconf is classified `STABLE_FOR_1_0`. The supported key set, atomic staged
+The project classifies dynconf as `STABLE_FOR_1_0`. The supported key set, atomic staged
 promotion, one-snapshot-per-request rule, dry-run behavior, and
 last-known-good rollback form the compatibility contract. See the
 [Public Surface Inventory](../architecture/PUBLIC_SURFACE_INVENTORY.md#dynamic-configuration-contract)
@@ -81,19 +81,19 @@ conditional requests) require `nginx -s reload`.
 
 The dynconf timer performs a two-phase staged commit:
 
-1. **Parse phase:** The entire file is parsed into a staging snapshot.
-2. **Validate phase:** Every key and value is validated.
+1. **Parse phase:** The module parses the entire file into a staging snapshot.
+2. **Validate phase:** The module validates every key and value.
 3. **Promote phase:** If all lines pass, the staging snapshot atomically
    replaces the active snapshot.
 
-On any parse or validation error, the staging snapshot is discarded and
-the active snapshot remains unchanged. Partial updates are never applied.
+On any parse or validation error, the module discards the staging snapshot.
+The active snapshot remains unchanged. Partial updates are never applied.
 
 ### Diagnostics and reload state
 
 The diagnostics endpoint reports the dynconf `generation` and
 `last_success` fields for an active or last-known-good snapshot. A successful
-reload advances the generation and records `last_success`; a failed
+reload advances the generation and records `last_success`. A failed
 validation leaves the active snapshot and generation unchanged, enabling a
 retry on the next poll cycle.
 
@@ -102,17 +102,17 @@ retry on the next poll cycle.
 ## Last-Known-Good and Rollback
 
 The module maintains a last-known-good (LKG) configuration snapshot for state
-tracking and diagnostics when a new configuration is promoted.
+tracking and diagnostics when the module promotes a new configuration.
 
 ### LKG Preservation
 
-When a reload succeeds, the previous active snapshot is preserved as the
-last-known-good configuration. This happens automatically on every
+When a reload succeeds, the module preserves the previous active snapshot as
+the last-known-good configuration. This happens automatically on every
 successful reload cycle.
 
 ### Operator Rollback
 
-The diagnostics endpoint is read-only and accepts only `GET` and `HEAD`; it
+The diagnostics endpoint is read-only and accepts only `GET` and `HEAD`. It
 does not expose a rollback operation. To roll back, atomically restore a
 previous valid dynconf file (with a changed modification time). The normal
 poll cycle parses and validates the restored contents before promoting them as
@@ -123,8 +123,8 @@ a new active snapshot.
 - `generation` and `last_success` advance only on a successful reload. A
   failed validation never advances either value.
 - Requests in flight at the time of a restoring reload continue using their
-  previously-bound snapshot (request consistency is preserved).
-- The LKG snapshot is replaced only when a new reload succeeds — a failed
+  previously-bound snapshot (request consistency stays preserved).
+- The LKG snapshot gets replaced only when a new reload succeeds — a failed
   reload does not discard the existing LKG.
 
 ### Example Scenario
@@ -149,7 +149,7 @@ configuration file but does not promote the staging snapshot to active.
 markdown_dynconf_dry_run on;
 ```
 
-Validation results are logged at `info` level, including line numbers and
+The module logs validation results at `info` level, including line numbers and
 field-level error details for any failures.
 
 ### Dry-Run Workflow
@@ -174,7 +174,7 @@ production environments where a bad dynconf file could affect traffic.
   `configuration.dynconf.last_success` via the diagnostics endpoint to
   confirm successful reloads.
 - Configure dynconf at the `http` or `server` level — only one global
-  watcher per worker process is supported.
+  watcher per worker process gets supported.
 - Unknown dynconf keys cause atomic rejection of the entire file
   (not silent skip).
 

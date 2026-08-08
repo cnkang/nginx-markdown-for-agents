@@ -12,7 +12,7 @@ client -> NGINX runtime -> upstream/backend -> NGINX markdown filter -> client
 
 Use this page to answer three questions:
 
-- which E2E scenarios are considered canonical
+- which E2E scenarios count as canonical
 - which script owns each scenario
 - how `make test-e2e` and CI reuse native NGINX runtimes
 
@@ -28,8 +28,8 @@ That suite currently runs focused checks across all E2E scenarios.
 
 ### Migrated scenarios (Rust e2e-harness)
 
-The following scenarios have been migrated to the Rust e2e-harness and are
-executed via `e2e-harness scenario <name>`:
+The following scenarios have migrated to the Rust e2e-harness and run
+via `e2e-harness scenario <name>`:
 
 | Scenario | Rust module | Former shell source |
 |----------|-------------|---------------------|
@@ -67,7 +67,7 @@ but the maintained implementation now lives entirely under `tools/e2e/`, not und
 
 ## What E2E Covers
 
-The canonical E2E suite is intentionally focused on runtime paths that benefit from a native NGINX binary and real network behavior:
+The canonical E2E suite focuses intentionally on runtime paths that benefit from a native NGINX binary. It also covers real network behavior:
 
 - proxy-chain Markdown conversion through HTTPS upstreams
 - backend header preservation plus module-side `ETag` regeneration
@@ -85,7 +85,7 @@ The canonical E2E suite is intentionally focused on runtime paths that benefit f
 
 ### Coverage E2E Scenarios
 
-The coverage script (`tools/sonar/collect_nginx_coverage.sh`) runs expanded E2E scenarios against an instrumented NGINX instance to collect gcov/lcov data. These scenarios are organized by subsystem:
+The coverage script (`tools/sonar/collect_nginx_coverage.sh`) runs expanded E2E scenarios against an instrumented NGINX instance to collect gcov/lcov data. The scenarios organize by subsystem:
 
 | Category | Scenarios |
 |----------|-----------|
@@ -112,7 +112,7 @@ Use the E2E suite for:
 
 ## Proxy/TLS Backend Check
 
-The proxy/TLS scenario is owned by:
+The proxy/TLS scenario belongs to:
 
 ```bash
 tools/e2e/verify_proxy_tls_backend_e2e.sh
@@ -196,7 +196,7 @@ tools/e2e/verify_large_markdown_response_e2e.sh --keep-artifacts
 
 For direct execution of the canonical E2E scripts:
 
-1. `curl`, `python3`, and common shell utilities are installed
+1. The host has `curl`, `python3`, and common shell utilities installed
 2. `openssl` is available for the TLS backend fixture
 3. if reusing `NGINX_BIN`, it points to a module-enabled binary
 4. if not reusing `NGINX_BIN`, native build tooling is available (`cargo`, `make`, `tar`, compiler toolchain)

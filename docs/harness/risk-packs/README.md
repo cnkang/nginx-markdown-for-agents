@@ -21,14 +21,16 @@ runtime semantics from canonical docs. They answer four practical questions:
 | [tooling-path-security.md](tooling-path-security.md) | tooling path validation, safe file I/O, subprocess argument safety | `AGENTS.md`, `tools/lib/path_validation.py` |
 | [security-static-supply-chain.md](security-static-supply-chain.md) | actionlint, shellcheck, gitleaks, Semgrep, cargo-deny, Trivy/SBOM/Scorecard | `AGENTS.md`, `docs/harness/rules/security-static-analysis.md` |
 | [harness-remediation.md](harness-remediation.md) | recent Git analysis, harness rules, steering adapters, remediation closeout | `AGENTS.md`, `docs/harness/core.md` |
-| [otel-integration.md](otel-integration.md) | OTel tracing, OTel metrics, OTLP export, span attributes | `AGENTS.md`, `docs/features/otel-tracing.md` |
 | [packaging-distribution.md](packaging-distribution.md) | APT/YUM repos, Homebrew tap, Helm chart, K8s Ingress | `AGENTS.md`, `docs/guides/INSTALLATION.md` |
 | [dynamic-config-hot-reload.md](dynamic-config-hot-reload.md) | dynamic config parsing, reload retry, runtime apply | `AGENTS.md`, `docs/guides/CONFIGURATION.md` |
+| [e2e-migration.md](e2e-migration.md) | Rust harness E2E migration, wrapper parity, reuse mode | `AGENTS.md`, `docs/testing/E2E_TESTS.md` |
+| [output-safety.md](output-safety.md) | Markdown output escaping, link emission, content-injection prevention | `AGENTS.md`, `docs/harness/rules/html-sanitizer.md` |
 
 ## Document Updates
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Removed otel-integration from index; added e2e-migration and output-safety rows |
 | 0.8.3 | 2026-06-26 | Kang | Added release-manifest and version-consistency verification families |
 | 0.8.2 | 2026-06-13 | Codex | Added security-static-supply-chain pack for supplemental static security and supply-chain visibility gates |
 | 0.6.2 | 2026-05-11 | Kang | Added tooling-path-security pack to generalize repeated tooling path-safety fixes |

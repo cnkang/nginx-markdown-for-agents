@@ -52,6 +52,7 @@ MODULE_SO ?= build/ngx_http_markdown_filter_module.so
 PREFIX ?= /usr
 LIBDIR ?= $(PREFIX)/lib
 DESTDIR ?=
+STYLE_BASE ?= HEAD
 MODULE_INSTALL_DIR := $(LIBDIR)/nginx/modules
 NGINX_MODULES_AVAILABLE_DIR := $(PREFIX)/share/nginx/modules-available
 DOC_INSTALL_DIR := $(PREFIX)/share/doc/nginx-markdown-for-agents
@@ -62,7 +63,8 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         test test-rust test-rust-doc test-nginx-unit test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
         test-nginx-integration test-e2e test-e2e-rust test-all test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
-        harness-check harness-check-full harness-security-checks test-harness regex-security-check e2e-streaming-config-check sonar-encoding-check release-supply-chain-check public-surface-drift-check schema-drift-check \
+        test-corpus-determinism reason-codegen-check \
+        harness-check harness-check-full harness-security-checks test-harness regex-security-check e2e-streaming-config-check sonar-encoding-check release-supply-chain-check public-surface-drift-check schema-drift-check kb-contract-check \
         security-static security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny \
         supply-chain supply-chain-trivy supply-chain-sbom \
         complexity-check \
@@ -243,6 +245,34 @@ docs-check-base:
 docs-check: docs-check-base
 	python3 tools/harness/check_harness_sync.py
 	PYTHONPATH=. python3 tools/harness/detect_doc_sync.py
+	$(MAKE) kb-contract-check
+	$(MAKE) docs-style-check-regression
+	$(MAKE) docs-style-check-baseline
+
+# STE-inspired writing-style gates (non-native-reader friendly, see
+# docs/development/WRITING_GUIDE.md and harness Rule 63).
+# docs-style-check: advisory scan, never blocks.
+# docs-style-check-regression: files changed since STYLE_BASE (working tree +
+# staged) must have zero warnings. Local invocations default to HEAD; CI must
+# provide the actual fetched comparison base.
+# docs-style-check-baseline: total warnings must not exceed the retained
+# budget (0, see DEFAULT_BASELINE in check_writing_style.py); the maintained
+# docs now pass the audit clean, so any warning fails this gate.
+docs-style-check:
+	python3 tools/docs/check_writing_style.py
+
+docs-style-check-strict:
+	python3 tools/docs/check_writing_style.py --strict
+
+docs-style-check-regression:
+	@test -n "$(STYLE_BASE)" || { echo "FAIL: STYLE_BASE is required for docs-style-check-regression" >&2; exit 1; }
+	python3 tools/docs/check_writing_style.py --changed --base "$(STYLE_BASE)"
+
+docs-style-check-baseline:
+	python3 tools/docs/check_writing_style.py --baseline
+
+kb-contract-check:
+	python3 tools/docs/check_kb_contract.py
 
 release-notes:
 	python3 tools/render_release_matrix_docs.py --release-notes
@@ -256,6 +286,7 @@ public-surface-drift-check:
 	python3 tools/harness/detect_public_surface_drift.py
 
 schema-drift-check:
+	python3 tools/release/gates/generate_schema_artifacts.py
 	python3 tools/release/gates/validate_schema_drift.py
 
 harness-check-full:
@@ -316,6 +347,7 @@ harness-security-checks:
 	PYTHONPATH=. python3 tools/harness/detect_forward_decl_order.py components/nginx-module/src --strict
 	PYTHONPATH=. python3 tools/harness/detect_duplicate_code.py components/nginx-module/src --strict
 	PYTHONPATH=. python3 tools/harness/detect_orphan_comment_close.py
+	PYTHONPATH=. python3 tools/harness/detect_ffi_dead_exports.py --check
 	bash tools/harness/detect_ifdef_guard_visibility.sh
 	bash tools/harness/detect_workflow_input_injection.sh
 	bash tools/harness/detect_hardcoded_http_status.sh
@@ -532,12 +564,12 @@ release-gates-check-070:
 				esac; \
 				echo "  [install-layout] No packages found; building local $$nfpm_arch DEB/RPM with nFPM..."; \
 				mkdir -p dist; \
-				PKG_VERSION=$${PKG_VERSION:-0.7.0} NGINX_VERSION=$${NGINX_VERSION:-1.26.3} NFPM_ARCH=$$nfpm_arch \
+				PKG_VERSION=$${PKG_VERSION:-0.9.2} NGINX_VERSION=$${NGINX_VERSION:-1.26.3} NFPM_ARCH=$$nfpm_arch \
 					nfpm package --config packaging/nfpm/nfpm.yaml --packager deb \
-					--target dist/nginx-module-markdown-for-agents_$${PKG_VERSION:-0.7.0}_nginx-$${NGINX_VERSION:-1.26.3}_$${nfpm_arch}.deb; \
-				PKG_VERSION=$${PKG_VERSION:-0.7.0} NGINX_VERSION=$${NGINX_VERSION:-1.26.3} NFPM_ARCH=$$nfpm_arch \
+					--target dist/nginx-module-markdown-for-agents_$${PKG_VERSION:-0.9.2}_nginx-$${NGINX_VERSION:-1.26.3}_$${nfpm_arch}.deb; \
+				PKG_VERSION=$${PKG_VERSION:-0.9.2} NGINX_VERSION=$${NGINX_VERSION:-1.26.3} NFPM_ARCH=$$nfpm_arch \
 					nfpm package --config packaging/nfpm/nfpm.yaml --packager rpm \
-					--target dist/nginx-module-markdown-for-agents-$${PKG_VERSION:-0.7.0}-nginx$${NGINX_VERSION:-1.26.3}-1.$${rpm_arch}.rpm; \
+					--target dist/nginx-module-markdown-for-agents-$${PKG_VERSION:-0.9.2}-nginx$${NGINX_VERSION:-1.26.3}-1.$${rpm_arch}.rpm; \
 			else \
 				echo "FAIL: no package files in dist/ and nfpm is unavailable." >&2; \
 				echo "  To fix, either:" >&2; \
@@ -916,6 +948,7 @@ release-gates-check-092: release-gates-check-091
 	$(MAKE) release-perf-evidence-blocking BASELINE_VERSION=092
 	@echo "  [2/7] Public surface and dynconf schema drift checks"
 	$(MAKE) public-surface-drift-check
+	$(MAKE) schema-drift-check
 	@echo "  [3/7] Version consistency (0.9.2)"
 	bash tools/harness/detect_version_consistency.sh
 	@echo "  [4/7] Reason code registry completeness"
@@ -929,7 +962,7 @@ release-gates-check-092: release-gates-check-091
 	@echo "=== 0.9.2 Release Gates: PASS ==="
 
 # release-matrix-check: Canonical release-matrix gate.
-# Validates docs/release/release-matrix.json against the immutable
+# Validates docs/releases/release-matrix.json against the immutable
 # schemas/release-matrix.schema.json, requires a fully canonical document
 # (no legacy aliases, no legacy top-level matrix, no dropped metadata
 # keys), and binds every entry to the frozen ABI version and the official
@@ -1211,7 +1244,7 @@ help:
 	@echo "  test-benchmark-compare   - Compare corpus reports (baseline vs current)"
 	@echo "  test-benchmark-summary   - Generate PR benchmark summary from latest report"
 	@echo "  harness-check            - Validate harness truth surfaces and optional local adapters"
-	@echo "  harness-check-full       - Run full harness validation plus docs/release checks"
+	@echo "  harness-check-full       - Run full harness validation plus docs/releases checks"
 	@echo "  harness-security-checks  - Run local static harness/security detectors"
 	@echo "  release-supply-chain-check - Validate immutable release inputs, secret scope, and auth transport"
 	@echo "  complexity-check         - Run complexity analysis (lizard + complexipy + shellcheck)"

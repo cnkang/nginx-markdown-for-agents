@@ -209,7 +209,10 @@ def _check_index_artifact(artifact: dict, index_pos: int, seen_ids: set,
         seen_ids.add(artifact_id)
 
     artifact_sha = artifact.get("artifact_sha256")
-    if artifact_sha is not None and not DIGEST_PATTERN.fullmatch(artifact_sha):
+    if artifact_sha is not None and (
+        not isinstance(artifact_sha, str)
+        or not DIGEST_PATTERN.fullmatch(artifact_sha)
+    ):
         reasons.append(
             f"below-threshold: artifacts[{index_pos}] artifact_sha256 "
             f"{artifact_sha!r} is not valid sha256 format")

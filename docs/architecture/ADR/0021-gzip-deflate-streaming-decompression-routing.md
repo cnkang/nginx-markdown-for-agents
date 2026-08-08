@@ -7,7 +7,7 @@ Accepted — Brotli full-buffer section superseded by [ADR-0024](0024-brotli-str
 ## Context
 
 0.9.1 routes compressed responses through streaming decompression when the
-streaming engine is selected, `auto_decompress` is on, and cache validation is
+the module selects the streaming engine, `auto_decompress` turns on, and cache validation is
 not `full`. Deflate already supports both RFC 1950 zlib-wrapped and RFC 1951
 raw framing through deferred header sniffing. Gzip uses zlib's gzip wrapper
 mode (`MAX_WBITS + 16`), including header and trailer validation.
@@ -22,8 +22,8 @@ the response.
 ## Decision
 
 Make **gzip** and **deflate** streaming-eligible under the same routing gates in
-0.9.1. The original decision kept Brotli on bounded full-buffer decompression;
-that restriction is historical and was superseded by ADR-0024, which adds
+0.9.1. The original decision kept Brotli on bounded full-buffer decompression.
+That restriction is historical and ADR-0024 superseded it. ADR-0024 adds
 Brotli under the same runtime gates in the final 0.9.1 implementation.
 
 The deflate inflater sniffs the first two bytes to distinguish zlib-wrapped
@@ -36,8 +36,8 @@ member boundary succeeds and an incomplete final member fails.
 
 `total_decompressed` and `max_decompressed_size` remain response-wide across
 gzip member resets. Source input ownership remains independent of downstream
-`NGX_AGAIN`; unconsumed input stays retained for resume, and terminal delivery
-is recorded only after downstream success.
+`NGX_AGAIN`. Unconsumed input stays retained for resume, and the module
+records terminal delivery only after downstream success.
 
 The default Rust full-buffer decoder consumes all concatenated members through
 `MultiGzDecoder`. The C no-Rust fallback performs member-aware `inflateReset`
@@ -49,14 +49,14 @@ when earlier output exactly fills that budget.
 ### Error Handling
 - **Pre-commit errors**: Trigger fail-open via the replay buffer.
 - **Post-commit errors**: Use the existing post-commit safe-finish/abort
-  semantics; original compressed-body replay is not possible after commit.
+  semantics. Original compressed-body replay is not possible after commit.
 
 ### Routing and Gating
 - The routing decision is made in the header filter.
 - Existing decompression and streaming counters classify routing, budget,
   pre-commit, and post-commit outcomes.
 - `streaming_first` prefers streaming when the selected codec and validation
-  requirements are supported. The original Brotli exclusion was superseded by
+  requirements stay supported. ADR-0024 superseded the original Brotli exclusion
   ADR-0024.
 
 ## Consequences
@@ -68,7 +68,7 @@ when earlier output exactly fills that budget.
 - Gives streaming, Rust full-buffer, and C fallback paths the same
   concatenated-member and cumulative-budget contract.
 - The initial decision kept Brotli's decoder-state and memory validation out of
-  scope. This historical consequence was superseded when ADR-0024 promoted
+  scope. This historical consequence ended when ADR-0024 promoted
   Brotli within the same 0.9.1 release.
 
 ### Negative Consequences

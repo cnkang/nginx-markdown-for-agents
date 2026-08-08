@@ -367,7 +367,7 @@ make supply-chain
 ### 生产部署与运维
 - [流式上线指引](docs/guides/streaming-rollout-cookbook.md) — 渐进式引入、安全开启有界流式转换的运维指南。
 - [运维排障指南](docs/guides/OPERATIONS.md) — 状态监控、日志调整和运行时故障诊断。
-- [迁移升级指引](docs/guides/MIGRATION-0.9.md) — 升级指南 ([0.8.x → 0.9.x 迁移升级](docs/guides/MIGRATION-0.9.md) / [0.7.x → 0.8.x 迁移升级](docs/guides/MIGRATION-0.8.md))。
+- [迁移升级指引](docs/guides/MIGRATION-0.9.2.md) — 升级指南 ([0.9.1+ → 0.9.2 迁移](docs/guides/MIGRATION-0.9.2.md) / [0.9.x → 0.9.1 迁移](docs/guides/MIGRATION-0.9.1.md) / [0.8.x → 0.9.x 迁移升级](docs/guides/MIGRATION-0.9.md) / [0.7.x → 0.8.x 迁移升级](docs/guides/MIGRATION-0.8.md))。
 - [动态热重载](docs/guides/DYNAMIC_CONFIG.md) — 热更新动态变量及 live config 配置。
 
 ### 系统架构与自动化 Harness
@@ -405,7 +405,8 @@ v0.9.1 是 **v1.0 前最后一次基线收敛与兼容性重置**。它在性能
 - **单一流式控制**：`markdown_streaming off|auto|force` 现在是唯一处理路径选择器。重复的 `markdown_streaming_engine` 已移除；旧配置由 NGINX 标准 unknown-directive 错误识别。
 - **明确支持的 flavor**：`markdown_flavor` 仅支持 `commonmark` 和 `gfm`。实验性的 `mdx` 与 `org-mode` 从未有独立生产语义，现会被明确拒绝。
 - **自动零拷贝流式输出**：由缓冲区所有权和背压状态在内部选择安全的交付路径，不暴露零拷贝指令。
-- **流式解压路由（gzip + deflate + Brotli）**：显式设置 `markdown_streaming force`、`markdown_auto_decompress on` 且 `markdown_cache_validation` 不为 `full` 时，gzip、deflate（包括 zlib 封装 RFC 1950 和原始 RFC 1951 deflate）及 Brotli 响应通过流式引擎增量解压，无需强制全缓冲积攒。gzip member 边界和 trailer 会跨分块校验。Brotli 流式解压需要构建时的 `libbrotlidec`（通过 `NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off` 控制，官方构件默认启用）。
+- **流式解压路由（gzip + deflate + Brotli）**：设置 `markdown_streaming force`、`markdown_auto_decompress on`，且 `markdown_cache_validation` 不为 `full`。
+  此时流式引擎会增量解压 gzip、deflate（含 zlib 封装 RFC 1950 和原始 RFC 1951）及 Brotli 响应。它不会强制全缓冲积攒。gzip member 边界和 trailer 会跨分块校验。Brotli 流式解压需要构建时的 `libbrotlidec`。`NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off` 控制该依赖。官方构件默认启用。
 - **全缓冲拷贝减少**：内部优化（默认开启，无配置项），通过将连续缓冲区直接传递给解压器并通过指针赋值交换输出，消除全缓冲压缩路径中冗余的 memcpy。
 - **`markdown_auto_decompress` 指令**：现已正式注册为可配置指令（默认开启）。此前仅为内部字段，无法通过 `nginx.conf` 设置。
 - **性能证据门禁**：模块级基准测试工具（`tools/perf/run_module_benchmark.sh`）与自动化发布门禁（`make release-gates-check-091`）在发布前强制验证延迟、TTFB、内存斜率和回退率阈值。
@@ -416,7 +417,7 @@ v0.9.1 是 **v1.0 前最后一次基线收敛与兼容性重置**。它在性能
 
 ## 未来规划
 
-v0.9.1 发布后迈向 v1.0.0 正式版的演进方向：
+v0.9.2 发布后迈向 v1.0.0 正式版的演进方向：
 
 - **可观测性互操作**：保持冻结的 Prometheus 与 Diagnostics 合同兼容外部监控系统，不再增加模块专用 OTel 指令。
 - **分发渠道拓宽**：将 APT 与 YUM 打包发布整合至标准的 Linux 发行版包索引中。
@@ -430,6 +431,8 @@ BSD 2-Clause "Simplified" License。详见 [LICENSE](LICENSE)。
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Hermes | 非母语读者友好改写：拆分长句、移除正文分号、主动语态，遵循 WRITING_GUIDE 的 STE 风格 |
+| 0.9.2 | 2026-08-07 | Kang | 新增 v0.9.2 新特性段、生产显式配置段、0.9.2/0.9.1 迁移指南链接，并同步文档更新记录 |
 | 0.9.1 | 2026-07-29 | Kang | 发布基线同步：完成 CHANGELOG 日期收口、发布说明状态更新、PROJECT_STATUS 当前版本线更新、版本规划、Harness 规则表 (Rules 52-60) 与 build-safety 域对齐。 |
 | 0.9.1 | 2026-07-19 | Codex | 完成 v0.9.1 正式发布摘要，补充 Brotli 流式解压、构建控制和发布证据说明。 |
 | 0.9.1 | 2026-07-17 | Kang | 优化 README 文档组织，移除旧版本的 What's New 日志，合并核心功能特性表，并梳理文档导航结构以适配 v0.9.1。 |

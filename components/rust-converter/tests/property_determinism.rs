@@ -3,8 +3,7 @@
 //! **Validates: Requirements 13.4**
 //!
 //! For pairs of conversions with identical effective inputs, verify
-//! byte-identical Markdown output.  Varying unrelated request headers
-//! between runs confirms they do not affect output.
+//! byte-identical Markdown output.
 
 use nginx_markdown_converter::converter::MarkdownConverter;
 use nginx_markdown_converter::parser::parse_html;
@@ -37,18 +36,6 @@ fn arb_html() -> impl Strategy<Value = String> {
     ]
 }
 
-/// Unrelated request headers that must not affect the output.
-const UNRELATED_HEADERS: &[&str] = &[
-    "Accept: text/html,application/xhtml+xml",
-    "Accept: application/markdown",
-    "Accept-Language: en-US,en;q=0.9",
-    "Accept-Language: zh-CN,zh;q=0.9",
-    "User-Agent: curl/8.0",
-    "User-Agent: Mozilla/5.0 (X11; Linux x86_64) Firefox/120.0",
-    "X-Custom-Header: arbitrary",
-    "Cache-Control: max-age=60",
-];
-
 fn convert(html: &str) -> String {
     let dom = parse_html(html.as_bytes()).expect("fixture HTML must parse");
     let conv = converter();
@@ -65,21 +52,6 @@ proptest! {
         let third = convert(&html);
         assert_eq!(first, second);
         assert_eq!(second, third);
-    }
-
-    /// Varying unrelated request headers does not affect the output:
-    /// the conversion path never reads them.
-    #[test]
-    fn p25_unrelated_request_headers_do_not_affect_output(html in arb_html()) {
-        let baseline = convert(&html);
-        for header in UNRELATED_HEADERS {
-            let _ = header;
-            /* The conversion API has no request-header input; this asserts
-             * the contract structurally: output depends only on the
-             * effective input tuple, which contains no request headers. */
-        }
-        let again = convert(&html);
-        assert_eq!(baseline, again);
     }
 
     /// Different effective inputs are allowed to produce different output

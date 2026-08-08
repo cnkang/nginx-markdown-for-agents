@@ -1,6 +1,6 @@
 # HTML to Markdown Test Corpus
 
-This directory contains a comprehensive test corpus for validating HTML-to-Markdown conversion across diverse real-world scenarios. The corpus is organized by category to facilitate targeted testing.
+This directory contains a comprehensive test corpus for validating HTML-to-Markdown conversion across diverse real-world scenarios. The corpus groups content by category to facilitate targeted testing.
 
 ## Directory Structure
 
@@ -158,17 +158,18 @@ When adding new test cases:
 
 ## Maintenance
 
-This corpus should be updated when:
+Update this corpus when:
 
-- New HTML patterns are encountered in production
-- Conversion bugs are discovered and fixed
-- New features are added (e.g., new element handlers)
-- Edge cases are identified through testing
+- you encounter new HTML patterns in production
+- you discover and fix conversion bugs
+- you add new features (for example, new element handlers)
+- you identify edge cases through testing
 
 
 ## Document Updates
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
+| 0.9.2 | 2026-08-08 | Kang | Fixed Document Updates row order (time descending) |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

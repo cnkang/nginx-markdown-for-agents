@@ -232,9 +232,10 @@ ngx_http_markdown_stream_replay_available(const ngx_http_markdown_ctx_t *ctx)
  * Build an output chain from the replay buffer for HTML passthrough.
  *
  * Allocates an ngx_chain_t and ngx_buf_t from the request pool,
- * then points the buffer at the replay data.  The buffer is marked
- * as memory-resident (not file-backed) and last_buf=1 so downstream
- * filters know this is the complete replayed response body.
+ * copies the replay data into the request pool and points the
+ * buffer at that copy.  The buffer is marked as memory-resident
+ * (not file-backed) and last_buf=1 so downstream filters know
+ * this is the complete replayed response body.
  *
  * Returns:
  *   Non-NULL chain link on success

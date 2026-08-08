@@ -38,7 +38,7 @@ http {
 
 ### Minimal Enablement (PHP-FPM)
 
-If your site is served by `php-fpm` (common setup), use `fastcgi_pass` instead of `proxy_pass`:
+If your site uses `php-fpm` (common setup), use `fastcgi_pass` instead of `proxy_pass`:
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
@@ -133,12 +133,12 @@ Notes for the global-on pattern:
 - Start with `markdown_error_policy pass;` (fail-open) to reduce rollout risk
 - Exclude API/static/media/download routes explicitly for clarity
 - Existing `.md` files usually do not need conversion (module only converts eligible `text/html` responses)
-- Keep using `Accept: text/markdown` for verification; browsers with normal `Accept` headers still get HTML
+- Keep using `Accept: text/markdown` for verification. Browsers with normal `Accept` headers still get HTML
 - In PHP setups, verify the final request lands in the location block you expect
 
 ### Production-Oriented Example (gzip + php-fpm + static cache + API exceptions)
 
-This example reflects a common production PHP-FPM deployment: global enablement, explicit exclusions, static asset caching, and gzip enabled (including Markdown responses).
+This example reflects a common production PHP-FPM deployment. It shows global enablement, explicit exclusions, static asset caching, and gzip enabled (including Markdown responses).
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
@@ -215,13 +215,13 @@ http {
 }
 ```
 
-If you are using a reverse proxy upstream instead of PHP-FPM, `proxy_set_header Accept-Encoding "";` is still a useful first-step simplification, but it is optional. The module can automatically decompress upstream `gzip`, `br`, and `deflate` responses when you keep compression enabled end to end.
+If you are using a reverse proxy upstream instead of PHP-FPM, `proxy_set_header Accept-Encoding "";` is still a useful first-step simplification. It is optional. The module can automatically decompress upstream `gzip`, `br`, and `deflate` responses when you keep compression enabled end to end.
 
 ### Bot-Targeted Conversion (User-Agent Based)
 
-AI crawlers and agent bots typically do not send `Accept: text/markdown`. They use standard browser-like Accept headers when fetching pages. If you want specific bots to receive Markdown automatically, you can rewrite the Accept header at the NGINX layer based on User-Agent matching.
+AI crawlers and agent bots typically do not send `Accept: text/markdown`. They use standard browser-like Accept headers when fetching pages. If you want specific bots to receive Markdown automatically, you can rewrite the Accept header at the NGINX layer. You match by User-Agent.
 
-This is a practical pattern because it requires no application or module code changes — the module's existing content negotiation handles the conversion once it sees `text/markdown` in the Accept header. Operators can manage the bot list entirely through NGINX configuration.
+This is a practical pattern because it requires no application or module code changes. The module's existing content negotiation handles the conversion once it sees `text/markdown` in the Accept header. Operators can manage the bot list entirely through NGINX configuration.
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
@@ -318,7 +318,7 @@ http {
 
 #### Strict cache validation — CDN / caching proxy
 
-Full ETag-based conditional request support. Streaming is disabled (forced off)
+Full ETag-based conditional request support. Streaming stays disabled (forced off)
 so the module can generate a transformed ETag for the complete Markdown output.
 
 ```nginx
@@ -341,7 +341,7 @@ http {
 
         location /docs/ {
             markdown_filter on;
-            # Override memory limit for large doc pages
+            # Apply a tighter memory limit for this docs location
             markdown_limits conversion_memory=16m;
             proxy_pass http://backend;
         }
@@ -522,16 +522,16 @@ location / {
 ### PHP (`php-fpm`) deployments
 
 - PHP pages are commonly served from `location ~ \.php$` via `fastcgi_pass`
-- If you only enable `markdown_filter on;` in `location /`, PHP requests may end up in another location block and not be converted
+- If you only enable `markdown_filter on;` in `location /`, PHP requests may end up in another location block and stay unconverted
 - Prefer enabling in the PHP location (or `server` scope)
 
 ### PHP application-level compression can interfere
 
-If PHP compresses output itself (`zlib.output_compression=On`), disable that for routes you want to convert, and let NGINX handle response compression instead.
+If PHP compresses output itself (`zlib.output_compression=On`), disable that for routes you want to convert. Let NGINX handle response compression instead.
 
 ### Existing `.md` files bypass conversion automatically
 
-The module only converts eligible `text/html` responses. Native Markdown or plain text responses are bypassed. You can still explicitly exclude `.md` paths:
+The module only converts eligible `text/html` responses. Native Markdown or plain text responses bypass conversionssed. You can still explicitly exclude `.md` paths:
 
 ```nginx
 location ~* \.md$ {

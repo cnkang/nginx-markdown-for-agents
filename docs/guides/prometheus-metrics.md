@@ -3,12 +3,12 @@
 This guide describes the 0.9.2 production metrics contract. The endpoint emits
 only Prometheus text exposition format 0.0.4 and exactly the twelve families
 listed below. The checked-in metrics registry is the machine-readable source
-for names, types, labels, and help text; the public inventory documents the
+for names, types, labels, and help text. The public inventory documents the
 operator-facing surface.
 
 ## Enable the endpoint
 
-Configure the endpoint in a location block. The handler is disabled unless
+Configure the endpoint in a location block. The handler stays disabled unless
 `markdown_metrics` is present and accepts only `GET` and `HEAD`.
 
 ```nginx
@@ -20,7 +20,7 @@ location = /markdown-metrics {
 }
 ```
 
-The handler enforces loopback access itself; the `allow`/`deny` rules can
+The handler enforces loopback access itself. The `allow`/`deny` rules can
 narrow access further but cannot broaden it. Scrapers should request:
 
 ```sh
@@ -34,7 +34,7 @@ part of the 0.9.2 directive or wire contract.
 
 ## Frozen family catalog
 
-All names use the `nginx_markdown_` prefix. Label names and values are bounded;
+All names use the `nginx_markdown_` prefix. Label names and values stay bounded.
 path, URI, host, profile, and per-path dimensions are not emitted.
 
 | Family | Type | Labels | Meaning |
@@ -55,7 +55,7 @@ path, URI, host, profile, and per-path dimensions are not emitted.
 The engine values are `full_buffer` and `streaming`. The streaming transition
 allowlist is `commit`, `fallback`, `safe_finish_start`, `abort_start`,
 `resume_success`, and `resume_failure`. Decompression encodings are `gzip`,
-`deflate`, and `brotli`; its outcomes are `success` and `failure`. Dynconf
+`deflate`, and `brotli`. Its outcomes are `success` and `failure`. Dynconf
 outcomes are `success` and `failure`.
 
 The conversion histogram boundaries are `0.001`, `0.005`, `0.01`, `0.025`,
@@ -82,7 +82,7 @@ inflight_requests == 0
 ```
 
 HTML passthrough, failed-open HTML, failed-closed responses, and abort-terminal
-responses do not increment `conversion_deliveries_total`. They are represented
+responses do not increment `conversion_deliveries_total`. They appear
 by their terminal request outcome instead.
 
 ## Scrape configuration
@@ -118,7 +118,7 @@ appears.
 
 The canonical reason source is
 [`components/rust-converter/reason_registry.toml`](../../components/rust-converter/reason_registry.toml).
-Generated C and Rust artifacts must be refreshed with:
+The developer must refresh generated C and Rust artifacts with:
 
 ```sh
 python3 tools/reason-codegen/generate.py
@@ -127,13 +127,13 @@ python3 tools/reason-codegen/generate.py --check
 
 Operator-visible reason keys are lowercase `snake_case`, including
 `encoding_header_invalid` for malformed `Content-Encoding` grammar. Unknown
-numeric reason codes map to `internal_unknown` and are logged as errors.
+numeric reason codes map to `internal_unknown` and get logged as errors.
 
 ## Migration from earlier metric surfaces
 
 The 0.9.2 freeze removes legacy conversion, passthrough, per-path, streaming
 debug, JSON, and multi-format families. Update dashboards and alerts to the
-twelve families above; do not carry old family names into a
+twelve families above. Do not carry old family names into a
 new 0.9.2 deployment. The detailed public compatibility inventory is
 [`docs/architecture/PUBLIC_SURFACE_INVENTORY.md`](../architecture/PUBLIC_SURFACE_INVENTORY.md).
 

@@ -64,15 +64,15 @@ the large tier.
 
 ### Corpus diff: per-fixture output equivalence
 
-All 33 fixtures in the benchmark corpus (`tests/corpus/`) were converted with
+All 33 fixtures in the benchmark corpus (`tests/corpus/`) converted with
 both the baseline (`2af6fef`) and current code using the same converter
-configuration. The comparison was performed by checking out the baseline source,
-building, converting all fixtures, computing blake3 hashes of each Markdown
-output, then repeating with the current source and comparing the hash sets.
+configuration. The comparison checked out the baseline source,
+built it, converted all fixtures, computed blake3 hashes of each Markdown
+output, then repeated with the current source and compared the hash sets.
 
 Method: `git checkout <commit> -- components/rust-converter/src/` → `cargo
 build` → convert each fixture via `MarkdownConverter::new().convert()` →
-`blake3::hash(output)` → compare. The full artifact is stored at
+`blake3::hash(output)` → compare. The full artifact lives at
 `docs/evidence/10-parser-path-optimization-corpus-diff.tsv`.
 
 | Category | Fixtures | Diffs | Status |
@@ -126,7 +126,7 @@ path.
 
 All 0.4.0 optimizations operate within the existing buffer-based conversion
 pipeline. They do not introduce streaming, chunk-driven parsing, or parser
-replacement. The html5ever parsing phase (step 1) is untouched.
+replacement. The html5ever parsing phase (step 1) stays untouched.
 
 ### Current pipeline
 
@@ -166,7 +166,7 @@ components/rust-converter/src/
 ### What it does
 
 During DOM traversal, the converter checks each element's tag name against a
-pruning list before visiting its children. Elements on the list are skipped
+pruning list before visiting its children. Elements on the list skip
 immediately, avoiding the cost of recursing into their subtrees.
 
 For `<script>`, `<style>`, and `<noscript>`, the `SecurityValidator` already
@@ -175,7 +175,7 @@ optimization makes this explicit at the traversal layer and avoids visiting
 child text nodes that would produce no output regardless.
 
 For `<nav>`, `<footer>`, and `<aside>`, pruning skips the entire subtree
-(element and all descendants). This is disabled by default in 0.4.0.
+(element and all descendants). This stays disabled by default in 0.4.0.
 
 ### Elements targeted
 
@@ -188,25 +188,25 @@ For `<nav>`, `<footer>`, and `<aside>`, pruning skips the entire subtree
 | `<footer>` | `SkipSubtree` | Skip element and all descendants | Disabled (feature flag) |
 | `<aside>` | `SkipSubtree` | Skip element and all descendants | Disabled (feature flag) |
 
-All other elements return `Traverse` and are handled normally.
+All other elements return `Traverse` and get normal handling.
 
 ### Pruning rules
 
-- Pruning decisions are based on tag name only. No attribute inspection, no
+- Pruning decisions depend on tag name only. No attribute inspection, no
   content heuristics, no `role` attribute matching.
-- The `RcDom` tree is never mutated. Pruning operates at the traversal layer
+- The `RcDom` tree never mutates. Pruning operates at the traversal layer
   by returning early from `handle_element_internal`.
-- For `SkipChildren`: the element node itself is processed (though
-  `SecurityValidator` removes it), but its children are never visited.
-- For `SkipSubtree`: the element and its entire subtree are skipped.
+- For `SkipChildren`: the element node itself processes (though
+  `SecurityValidator` removes it), but its children never get visited.
+- For `SkipSubtree`: the element and its entire subtree skip.
 - For elements not in the pruning list, the decision is deterministic:
   `Traverse`. There is no ambiguity state.
 
 ### Feature flag: `prune_noise_regions`
 
-Semantic noise region pruning (`<nav>`, `<footer>`, `<aside>`) is gated behind
+Semantic noise region pruning (`<nav>`, `<footer>`, `<aside>`) sits behind
 the `prune_noise_regions` Cargo feature flag. In 0.4.0 release builds, this
-feature is disabled by default. It can be enabled at compile time for
+feature stays disabled by default. You can enable it at compile time for
 benchmarking and corpus diff collection:
 
 ```bash
@@ -218,11 +218,11 @@ with acceptable false-kill risk, reviewed during a future release cycle.
 
 ### Known limitations
 
-- `<div role="navigation">` and similar attribute-based semantic regions are
-  not detected. Only the six tag names listed above are recognized.
-- When `prune_noise_regions` is enabled, pages that place primary content
+- `<div role="navigation">` and similar attribute-based semantic regions
+  go undetected. Only the six tag names listed above qualify.
+- When you enable `prune_noise_regions`, pages that place primary content
   inside `<nav>`, `<footer>`, or `<aside>` elements will lose that content
-  (false kill). This is a known trade-off and the reason the feature is
+  (false kill). This is a known trade-off. It is also why the feature stays
   disabled by default.
 - Pruning runs before `SecurityValidator::check_element` for prunable
   elements. This is safe because `script`/`style`/`noscript` are already in
@@ -246,7 +246,7 @@ path.
 
 The fast path is a qualification gate, not a separate converter. Qualifying
 documents use the same `traverse_node` code path, but the converter can
-eliminate unreachable branches during traversal (e.g., table handling, form
+eliminate unreachable branches during traversal (for example table handling, form
 control handling, embedded content handling are unreachable for fast-path
 documents). `SecurityValidator` remains fully active.
 
@@ -289,17 +289,17 @@ The maximum nesting depth is 15 (`FAST_PATH_MAX_DEPTH`). This covers typical
 article structures. Deeply nested documents likely have complex structures that
 benefit from the full conversion path.
 
-Depth is counted from the document root node (depth 0). A text node inside
+Depth counts from the document root node (depth 0). A text node inside
 `<html><body><div><p>text</p></div></body></html>` sits at depth 5.
 
 ### Known limitations
 
 - The pre-scan walks the entire DOM tree, adding O(n) overhead. For documents
-  that do not qualify, this is wasted work. In practice, the scan is
+  that do not qualify, this wastes work. In practice, the scan is
   lightweight (tag-name comparison only) and terminates early on the first
   disqualifying node.
 - The allowed element set is intentionally conservative. Some elements that
-  could be handled by the fast path (e.g., `<dl>`, `<dt>`, `<dd>`) are
+  the fast path could handle (for example `<dl>`, `<dt>`, `<dd>`) stay
   excluded to keep the qualification logic simple.
 - The fast path does not skip `SecurityValidator` checks. It reduces branch
   overhead in the traversal, not security validation.
@@ -323,16 +323,16 @@ This eliminates one O(n) allocation and copy for the normalization result.
 The optimization targets the normalization phase (after traversal), not the
 traversal itself. The default initial traversal buffer uses a 1 KB
 pre-allocation, but when the caller provides an input size hint exceeding
-`LARGE_BODY_THRESHOLD`, the buffer is pre-allocated proportionally to the
+`LARGE_BODY_THRESHOLD`, the buffer pre-allocates proportionally to the
 input HTML size via `estimate_output_capacity`. The FFI and incremental entry
 points set this hint automatically. For small documents or callers that do not
-set the hint, the default 1 KB pre-allocation is used. The `RcDom` does not
-expose the original byte count without an additional tree walk, which is why
-the hint must be provided externally.
+set the hint, the default 1 KB pre-allocation applies. The `RcDom` does not
+expose the original byte count without an additional tree walk. That is why
+the caller must provide the hint externally.
 
 ### Buffer estimation for the fused normalizer
 
-When the fused normalizer is activated, its output buffer is pre-allocated
+When the fused normalizer activates, its output buffer pre-allocates
 using `estimate_output_capacity`, which estimates the normalized output at 40%
 of the traversal output size (`OUTPUT_SIZE_ESTIMATE_FACTOR = 0.4`), clamped to
 \[4 KB, 4 MB\]:
@@ -343,7 +343,7 @@ of the traversal output size (`OUTPUT_SIZE_ESTIMATE_FACTOR = 0.4`), clamped to
 | ~10 KB – ~10 MB | `output_size × 0.4` |
 | > ~10 MB | 4 MB (maximum) |
 
-Note: the estimate is based on the traversal output size (intermediate
+Note: the estimate depends on the traversal output size (intermediate
 Markdown), not the input HTML size. This is a pragmatic choice — the input
 byte count is not available from the `RcDom` without a separate walk.
 
@@ -351,30 +351,29 @@ byte count is not available from the `RcDom` without a separate walk.
 
 The `FusedNormalizer` struct replaces the two-pass normalize-then-copy pattern
 for large documents. It applies normalization rules incrementally as each line
-is appended:
+appends:
 
-- Tracks fenced code block state (`` ``` `` delimiters).
+- Tracks fenced code block state (triple-backtick delimiters).
 - Collapses consecutive blank lines to a single blank line.
 - Trims trailing whitespace from each line.
 - Normalizes inline whitespace (collapses multiple spaces) outside code blocks,
   while preserving leading indentation and content inside backtick spans.
 
 The output produced by `FusedNormalizer` is identical to the output of
-`MarkdownConverter::normalize_output` for the same input. This equivalence is
-verified by property-based tests.
+`MarkdownConverter::normalize_output` for the same input. Property-based tests verify this equivalence.
 
 ### Threshold
 
 The fused normalizer activates when the traversal output (intermediate
 Markdown) exceeds `LARGE_BODY_THRESHOLD` (256 KB, a hardcoded constant in
-`converter.rs`). This threshold is checked against the traversal output length
+`converter.rs`). This threshold gets checked against the traversal output length
 after `traverse_node_with_context` completes — not against the input HTML size.
 
 The 256 KB value is chosen to match the order of magnitude of the
-`markdown_large_body_threshold` NGINX directive default (retired in 0.9.0;
-historically controlled input HTML size), though the two values
-measure different things (the directive controlled input HTML size; the constant
-controls intermediate output size). Documents below the threshold use the
+`markdown_large_body_threshold` NGINX directive default (retired in 0.9.0,
+historically controlled input HTML size). The two values
+measure different things: the directive controlled input HTML size, while the constant
+controls intermediate output size. Documents below the threshold use the
 standard `normalize_output` two-pass approach.
 
 ### Known limitations
@@ -382,16 +381,16 @@ standard `normalize_output` two-pass approach.
 - The fused normalizer processes the traversal output line-by-line after
   traversal completes. It does not interleave with traversal itself — the
   intermediate `output` string is still fully built before normalization
-  begins. CRLF normalization is handled inline by `push_line` (stripping
-  trailing `\r`), so no separate `replace("\r\n", "\n")` allocation is
-  needed. The saving is one full O(n) allocation and copy compared to the
+  begins. CRLF normalization happens inline in `push_line` (stripping
+  trailing `\r`), so the code needs no separate `replace("\r\n", "\n")`
+  allocation. The saving is one full O(n) allocation and copy compared to the
   two-pass `normalize_output` path.
-- For large documents, the initial traversal buffer is pre-allocated
+- For large documents, the initial traversal buffer pre-allocates
   proportionally to the input HTML size (via `estimate_output_capacity`) when
   the caller provides an input size hint exceeding `LARGE_BODY_THRESHOLD`.
   The FFI and incremental entry points set this hint automatically. For small
   documents or callers that do not set the hint, the default 1 KB
-  pre-allocation is used. When the fused normalizer activates (after
+  pre-allocation applies. When the fused normalizer activates (after
   traversal), it receives the actual traversal output length as its capacity,
   avoiding the underestimate that would result from applying the 0.4 factor
   to already-converted Markdown text.
@@ -401,7 +400,7 @@ standard `normalize_output` two-pass approach.
   ratios may over- or under-allocate, but the clamp bounds (4 KB–4 MB)
   prevent pathological cases.
 - The threshold is a hardcoded constant, not configurable via NGINX directives.
-  It is not the same as `markdown_large_body_threshold` (retired in 0.9.0;
+  It differs from `markdown_large_body_threshold` (retired in 0.9.0,
   historically controlled input HTML size limits), though both use 256 KB
   as a default.
 - `ConversionContext` timeout checks remain active throughout the large-response
@@ -422,15 +421,15 @@ path is taken:
 - Dangerous element removal (`script`, `style`, `noscript`, and others in
   `DANGEROUS_ELEMENTS`)
 - Event handler attribute stripping (`on*` prefix)
-- Dangerous URL detection (`javascript:`, `data:`, etc.)
+- Dangerous URL detection (`javascript:`, `data:`, and so on)
 - DOM depth validation
 
 Pruning `<script>`, `<style>`, and `<noscript>` earlier is security-positive —
 it avoids visiting their children, which the security validator would remove
 anyway. Pruning `<nav>`, `<footer>`, `<aside>` is a content decision, not a
-security decision; these elements are not in `DANGEROUS_ELEMENTS`.
+security decision. These elements are not in `DANGEROUS_ELEMENTS`.
 
-No new `unsafe` code is introduced by any optimization in this spec.
+No optimization in this spec introduces new `unsafe` code.
 
 ## Stop Line
 
@@ -460,9 +459,8 @@ The following items are explicitly out of scope for 0.4.0:
 - **Content-aware heuristic pruning** — Readability-style algorithms that
   analyze content to decide what to prune.
 - **Configurable pruning rules** — Operator-facing directives to control which
-  elements are pruned.
-- **Optimization of the html5ever parsing phase** — Step 1 of the pipeline is
-  untouched.
+  elements the module prunes.
+- **Optimization of the html5ever parsing phase** — Step 1 of the pipeline stays untouched.
 - **Promotion of semantic pruning to default-on** — `<nav>`, `<footer>`,
   `<aside>` pruning remains behind a feature flag until evidence and rollout
   posture support promotion.

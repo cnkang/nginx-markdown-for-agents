@@ -6,7 +6,7 @@ This guide covers rolling back the 0.9.2 development candidate to a prior
 release. 0.9.2 is a breaking release (see
 [0.9.2-breaking-changes.md](0.9.2-breaking-changes.md)), but it has no
 on-disk data migration. Rolling back the module binary restores the 0.9.1
-directive surface only after the configuration is also restored; the 0.9.2
+directive surface only after the configuration is also restored. The 0.9.2
 25-directive configuration and ABI 2 are not compatible with a 0.9.1 binary.
 Publication and artifact availability are separate release gates.
 
@@ -103,7 +103,7 @@ Key reversions:
 | `markdown_streaming auto` | `markdown_streaming_engine auto` |
 | `markdown_streaming force` | `markdown_streaming_engine on` |
 | `markdown_flavor commonmark` | `markdown_flavor commonmark` (unchanged) |
-| `markdown_otel on` | `markdown_otel_tracing on` (partial — some 0.9.1 OTel directives have no 0.9.0 equivalent) |
+| `markdown_otel on` | `markdown_otel_tracing on` (partial — some 0.9.1 OTel directives have no 0.9.0 equivalent; note that 0.9.2 removed OTel entirely, so no 0.9.2 configuration contains either form) |
 
 ### Step 3: Install 0.9.0 binary and validate
 
@@ -124,7 +124,7 @@ The diagnostics endpoint is read-only and accepts only `GET` and `HEAD`.
 There is no runtime rollback API or rollback response schema. To restore a
 previous dynamic configuration, replace the watched file atomically. Atomic
 rename guarantees that every read observes either the complete old file or the
-complete new file; it does not guarantee that all workers apply the new
+complete new file. It does not guarantee that all workers apply the new
 snapshot at the same instant. Each worker has its own watcher cycle, so
 workers can briefly report different `config_version` values and serve
 different active snapshots while convergence is in progress:
@@ -149,12 +149,12 @@ The watcher observes the changed modification time, parses and validates the
 complete file, then promotes it through the normal staged reload. If parsing
 or validation fails, the active snapshot and its `applied_mtime` remain at the
 last successfully applied state. Verify convergence with the read-only
-diagnostics endpoint or with request behavior from the relevant workers. If a
-strong synchronization boundary is required, perform a controlled NGINX
-reload; do not assume that every worker has restored the new snapshot
+diagnostics endpoint or with request behavior from the relevant workers. If
+you need a strong synchronization boundary, perform a controlled NGINX
+reload. Do not assume that every worker has restored the new snapshot
 immediately.
 
-Do not send `POST /nginx-markdown/diagnostics?action=rollback`; it is rejected
+Do not send `POST /nginx-markdown/diagnostics?action=rollback`. The module rejects it
 with `405 Method Not Allowed`. This deliberate absence avoids restoring a
 worker-local snapshot while other NGINX workers continue serving a different
 configuration.
@@ -168,8 +168,8 @@ and bundled ABI changes are not reversible by swapping only the binary:
 
 - Diagnostics mapping fix is backward-compatible
 - C reason code constants include the 0.9.2 registry additions
-- OTel is removed from the 0.9.2 production surface
-- Dynconf diagnostics remains read-only; file restore is atomic and auditable
+- The 0.9.2 production surface removed OTel
+- Dynconf diagnostics remains read-only. File restore is atomic and auditable
 - Public surface inventory is a build-time gate
 
 Restore the matching 0.9.1 configuration and binary together when rolling
@@ -199,4 +199,5 @@ from their current values under the downgraded module.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Clarified that OTel directives exist in no 0.9.2 configuration (OTel removed) |
 | 0.9.2 | 2026-07-30 | Kang | Initial rollback guide for 0.9.2 |

@@ -1416,9 +1416,10 @@ impl StreamingConverter {
 
     /// Selects the final metadata URL, preferring a discovered canonical over the base URL.
     ///
-    /// If `canonical_found` is `true`, returns `current_url.clone()` (the canonical URL previously
-    /// recorded during head processing). If `canonical_found` is `false`, returns `base_url.clone()`,
-    /// which may be `None` to clear any previously observed `og:url`.
+    /// If `canonical_found` is `true`, returns the re-sanitized canonical URL,
+    /// or `None` if it fails validation. If `canonical_found` is `false`,
+    /// returns `base_url.clone()`, which may be `None` to clear any previously
+    /// observed `og:url`.
     ///
     /// # Examples
     ///
@@ -1523,7 +1524,7 @@ impl StreamingConverter {
     ///   - The state machine has not entered any dangerous/skip regions
     ///   - The nesting depth has remained within fast-path limits
     ///   - No fallback has been triggered
-    ///   - At least one block-level element has been processed
+    ///   - At least one chunk has been fed
     ///
     /// Returns `true` if the document qualifies for fast-path, `false`
     /// otherwise.  For documents where the full structure is not yet
@@ -1887,7 +1888,6 @@ mod tests {
         .unwrap();
         let _result = conv.finalize().unwrap();
 
-        // Metadata is consumed during finalize, check before
         // Actually we need to check before finalize consumes self
         let mut conv2 = make_converter_with_metadata();
         conv2.feed_chunk(b"<html><head><title>My Page Title</title></head><body><p>Content</p></body></html>").unwrap();

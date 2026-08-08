@@ -35,7 +35,6 @@
       "attachment_name": "Embedded RPM PGP header signature",
       "digest_binding": "RPM header signature covers package content digest; package sha256 also listed in SHA256SUMS",
       "verification_commands": [
-        "rpm -K --nosignature <package>.rpm",
         "rpm -Kv <package>.rpm",
         "gpg --verify SHA256SUMS.asc SHA256SUMS"
       ],
@@ -77,7 +76,7 @@
   },
   "key_management": {
     "reference": "docs/guides/GPG_KEY_MANAGEMENT.md",
-    "secret_storage": "GitHub Actions environment 'release-signing' secrets (GPG_PRIVATE_KEY, GPG_PASSPHRASE, GPG_KEY_ID); step-scoped to the signing job only",
+    "secret_storage": "GitHub Actions environment 'release-signing' secrets (GPG_PRIVATE_KEY, GPG_PASSPHRASE, GPG_KEY_ID); job-scoped to a dedicated signing job, injected only into the signing step and never exposed to build or test steps",
     "rotation": "Key rotation follows docs/guides/GPG_KEY_MANAGEMENT.md; rotated keys remain valid for verification of prior releases"
   },
   "policy_reference_notes": [

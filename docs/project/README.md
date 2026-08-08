@@ -38,12 +38,12 @@ This directory contains project-level status and maintenance-oriented documentat
 - `../archive/release-0.4.0/` — legacy 0.4.0 release records (gitignored local
   copy): `GO_NO_GO_0.4.0.md`, `RELEASE_CHECKLIST_0.4.0.md`.
 
-Harness-related repository posture is summarized in `PROJECT_STATUS.md` and
-detailed in `HARNESS_HISTORY.md`, `docs/harness/`,
+`PROJECT_STATUS.md` and the dedicated pages summarize the harness-related
+repository posture. The details live in `HARNESS_HISTORY.md`, `docs/harness/`,
 `docs/architecture/HARNESS_ARCHITECTURE.md`, and
 `docs/guides/HARNESS_MAINTENANCE.md`.
 
-Use this section for repository-wide status, maintenance posture, and other project-level notes that should stay aligned with the current tracked codebase.
+Use this section for repository-wide status and maintenance posture. Keep other project-level notes aligned with the current tracked codebase.
 
 ## Document Updates
 

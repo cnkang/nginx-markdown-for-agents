@@ -12,7 +12,7 @@ long-term maintenance pressure:
 
 - assertion logic was spread across many shell files
 - scenario parity between similar checks was harder to enforce
-- typed assertions and reusable fixtures were limited compared with Rust
+- typed assertions and reusable fixtures stayed limited compared with Rust
 
 At the same time, not every E2E concern should move at once. Some scenarios are
 still better served by focused native scripts that own runtime bootstrapping or
@@ -31,7 +31,7 @@ while keeping a hybrid suite during migration.
 
 ### 1. Rust becomes the canonical implementation for migrated E2E scenarios
 
-The following scenarios are implemented in `tools/e2e-harness/src/scenarios/`:
+The following scenarios live in `tools/e2e-harness/src/scenarios/`:
 
 - `accept-negotiation`
 - `metrics-endpoint`
@@ -57,7 +57,7 @@ have equal-or-better Rust coverage and lifecycle guarantees.
 ### 4. Preserve C test ownership for C-boundary concerns
 
 This ADR does not change C test ownership for NGINX/C internals, FFI boundary,
-or compiler/toolchain-sensitive checks. Those boundaries are defined by
+or compiler/toolchain-sensitive checks. Those boundaries get defined by
 `docs/testing/C_TEST_BOUNDARY.md`.
 
 ## Consequences
@@ -92,7 +92,7 @@ runtime-heavy scenarios that still rely on mature shell orchestration in 0.6.3.
 ### 3. Move product-level E2E into C integration tests instead of Rust harness
 
 Rejected because these concerns are HTTP/runtime behavior checks, not NGINX-C
-internal behavior; C boundary tests remain separate by design.
+internal behavior. C boundary tests remain separate by design.
 
 ## References
 

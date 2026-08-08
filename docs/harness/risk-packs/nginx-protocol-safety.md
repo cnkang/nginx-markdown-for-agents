@@ -22,10 +22,10 @@ cache-control, conditional request, status, or header semantics change.
 
 ## Sync Points
 
-- headers are finalized before body data and are not emitted twice
+- the module finalizes headers before body data and does not emit them twice
 - auth-denied, auth-allowed, and authenticated cache-control branches are all
   covered by tests
-- repeated header fields are evaluated across every `ngx_list_part_t`, not only
+- the module evaluates repeated header fields across every `ngx_list_part_t`, not only
   the first list part or first matching value
 - cache-control decisions aggregate all relevant values before applying
   precedence, especially `public` with `private`/`no-store` combinations
@@ -34,11 +34,11 @@ cache-control, conditional request, status, or header semantics change.
 - conditional request modes preserve the intended full-buffer vs streaming path
 - status-specific eligibility, especially `206` and `304`, maps to the intended
   reason code under normal and malformed upstream responses
-- HEAD requests and empty-body artifacts are verified with `curl --head` or an
-  equivalent protocol-correct check
+- Protocol checks cover HEAD requests and empty-body artifacts with `curl
+  --head` or an equivalent protocol-correct check
 - protocol docs use exact config names, reason codes, and retrievable metrics
 - `ngx_str_t` values are NUL-terminated before passing to C APIs that require
-  it; prefer length-bounded NGINX APIs where possible (Rule 30)
+  it. Prefer length-bounded NGINX APIs where possible (Rule 30)
 - directive keyword matching requires exact length equality before
   `ngx_strncasecmp` to prevent out-of-bounds reads on truncated inputs (Rule 30)
 

@@ -100,21 +100,10 @@ fn assert_snapshots_equal(a: &DynconfResult, b: &DynconfResult) {
 
 /// Assert that two DynconfResult instances differ in at least one field.
 fn assert_snapshots_differ(a: &DynconfResult, b: &DynconfResult) {
-    let same = a.source_digest == b.source_digest
-        && a.active_digest == b.active_digest
-        && a.filter == b.filter
-        && a.prune_noise == b.prune_noise
-        && a.log_verbosity == b.log_verbosity
-        && a.error_policy == b.error_policy
-        && a.streaming_buffer == b.streaming_buffer;
-    // If inputs are genuinely different documents, they should produce
-    // different parse results (at minimum different digests).
-    // If they happen to be byte-identical, both assertions trivially hold.
-    if !same {
-        // Good — the reload produced a different snapshot, as expected.
-    }
-    // If same, it means the random generator produced identical content,
-    // which is acceptable but not interesting for the property.
+    assert_ne!(
+        a.source_digest, b.source_digest,
+        "different dynconf documents must produce different source digests"
+    );
 }
 
 // ─── Property Tests ───────────────────────────────────────────────────────────

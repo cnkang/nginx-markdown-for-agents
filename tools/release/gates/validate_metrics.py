@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Metric validator for v0.7.0 release gates.
+Metric validator for v0.7.0 release gates. 由 0.7.0 引入，被 0.8.0+ 门禁复用
 
 Validates that all new v0.7.0 Prometheus metrics are properly defined
 and documented across the required surfaces:

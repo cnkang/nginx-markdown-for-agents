@@ -19,10 +19,13 @@ duplicate adjacent blocks exist.  This detector automates that check.
 
 Usage:
     python3 tools/harness/detect_duplicate_code.py [directory]
+    python3 tools/harness/detect_duplicate_code.py --strict [directory]
     python3 tools/harness/detect_duplicate_code.py components/nginx-module/src
 
 Exit codes:
-    0 — always (advisory); findings are printed as WARNING/INFO
+    0 — advisory; findings are printed as WARNING/INFO
+    1 — strict mode blocking findings (direct-fix warnings or
+        adjacent merge residuals)
 """
 
 from __future__ import annotations

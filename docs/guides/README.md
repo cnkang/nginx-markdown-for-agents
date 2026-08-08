@@ -2,7 +2,7 @@
 
 This directory contains the canonical operational guides for building, installing, configuring, deploying, and running the project.
 
-Use these documents when you need decisions and procedures you can act on directly in an environment, not just implementation background.
+Use these documents when you need decisions and procedures you can act on directly in an environment. They are not just implementation background.
 
 ## Recommended Reading Order
 

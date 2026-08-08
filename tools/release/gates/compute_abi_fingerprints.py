@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Compute the four ABI handshake identity hashes.
+"""Compute the three ABI handshake identity hashes (the fourth identity,
+MARKDOWN_ABI_VERSION, is a plain constant).
 
 Formulas (documented in components/rust-converter/src/ffi/abi.rs):
 
@@ -102,7 +103,7 @@ def layout_fingerprint() -> int:
         name, size = match.group(1), match.group(2)
         lines.append(f"{name}:{size}")
     if not lines:
-        print("ERROR: no struct sizes parsed from layout-check header", file=sys.stderr)
+        raise ValueError("no struct sizes parsed from layout-check header")
     payload = "\n".join(sorted(set(lines))).encode("utf-8")
     return truncate8(hashlib.sha256(payload).digest())
 

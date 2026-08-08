@@ -1,6 +1,6 @@
 ---
 name: nginx-markdown-harness-maintenance
-description: Route and validate harness maintenance work for nginx-markdown-for-agents. Use when changing AGENTS.md, docs/harness, tools/harness, Makefile, or CI harness wiring, and when you need spec resolution, risk-pack routing, and phased verification commands.
+description: Route and validate harness maintenance work for nginx-markdown-for-agents. Use when changing AGENTS.md, docs/harness, tools/harness, Makefile, or CI harness wiring. Also use it when you need spec resolution, risk-pack routing, or phased verification commands.
 ---
 
 # NGINX Markdown Harness Maintenance
@@ -66,8 +66,8 @@ verification families: 3
 
 - `resolve_spec.py` returns `PASS` or explicitly documented `WARN_*`
 - matched verification families have been run and outcomes recorded
-- repeated drift has either converged or been escalated with concrete evidence
-- repo truth surfaces are updated when harness behavior changed
+- repeated drift has either converged or escalated with concrete evidence
+- the repo updates truth surfaces when harness behavior changes
 
 ## References
 
@@ -80,5 +80,6 @@ verification families: 3
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | STE-inspired writing-style cleanup (long instruction, passive voice) |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |

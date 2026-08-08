@@ -1365,6 +1365,20 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
     return g_stream_commit_headers_rc;
 }
 
+void
+ngx_http_markdown_pending_output_set(ngx_chain_t **slot, ngx_chain_t *value)
+{
+    if (slot != NULL) {
+        *slot = value;
+    }
+}
+
+ngx_atomic_uint_t
+ngx_http_markdown_pending_output_current(void)
+{
+    return 0;
+}
+
 /*
  * Include the streaming implementation header after all stubs are defined.
  * This pulls in the inline/static helper functions that are the actual

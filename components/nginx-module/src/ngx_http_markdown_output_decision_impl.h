@@ -8,7 +8,9 @@
  * zero-copy buffer factory (Rust memory referenced directly)
  * or the existing pool-copy path (data copied into pool).
  *
- * Zero-copy was removed in 0.9.2 (directive deleted); always pool-copy.
+ * The zero-copy path is retained but never selected since
+ * 0.9.2: the decision always returns POOL_COPY (the governing
+ * directive was deleted).  No code is removed (pre-freeze).
  */
 typedef enum {
     NGX_HTTP_MARKDOWN_OUTPUT_POOL_COPY  = 0,
@@ -19,7 +21,9 @@ typedef enum {
 /*
  * Hybrid output decision function.
  *
- * Zero-copy removed in 0.9.2: always returns POOL_COPY.
+ * Retained path only: since 0.9.2 the decision always returns
+ * POOL_COPY, so the zero-copy branch is never selected.  The
+ * zero-copy code path stays intact (pre-freeze) but is dead.
  *
  * conf               - location configuration (unused)
  * chunk_is_terminal  - whether this is the last chunk (unused)

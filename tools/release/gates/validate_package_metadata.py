@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Package metadata validator for v0.7.0 release gates.
+Package metadata validator for v0.7.0 release gates. 由 0.7.0 引入，被 0.8.0+ 门禁复用
 
 Validates that the package metadata files used by the v0.7.0 workflow exist
 and contain required fields/paths:

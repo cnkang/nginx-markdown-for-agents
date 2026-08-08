@@ -34,6 +34,8 @@ ngx_http_markdown_diagnostics_collect_metrics(
     }
 
     ngx_memzero(out, sizeof(ngx_http_markdown_diag_metrics_t));
+    out->pending_output =
+        ngx_http_markdown_pending_output_current();
 
     if (ngx_http_markdown_metrics == NULL) {
         return;
@@ -52,7 +54,6 @@ ngx_http_markdown_diagnostics_collect_metrics(
     out->backpressure_total =
         ngx_http_markdown_metrics->perf.backpressure_total;
     out->inflight = (ngx_atomic_uint_t) ngx_http_markdown_inflight_current();
-    out->pending_output = 0;
     out->zero_copy_output_total =
         ngx_http_markdown_metrics->perf.zero_copy_output_total;
     out->copied_output_total =

@@ -805,18 +805,19 @@ pub unsafe extern "C" fn markdown_decide_base_url(
         let inp = unsafe { &*input };
 
         let source_ip = unsafe { optional_str(inp.source_ip, inp.source_ip_len) }.unwrap_or("");
-        let forwarded = unsafe { optional_str_present(inp.forwarded, inp.forwarded_len) };
+        let forwarded = unsafe { optional_str_present(inp.forwarded, inp.forwarded_len) }.ok()?;
         let x_forwarded_for =
-            unsafe { optional_str_present(inp.x_forwarded_for, inp.x_forwarded_for_len) };
+            unsafe { optional_str_present(inp.x_forwarded_for, inp.x_forwarded_for_len) }.ok()?;
         let x_forwarded_proto =
-            unsafe { optional_str_present(inp.x_forwarded_proto, inp.x_forwarded_proto_len) };
+            unsafe { optional_str_present(inp.x_forwarded_proto, inp.x_forwarded_proto_len) }
+                .ok()?;
         let x_forwarded_host =
-            unsafe { optional_str_present(inp.x_forwarded_host, inp.x_forwarded_host_len) };
+            unsafe { optional_str_present(inp.x_forwarded_host, inp.x_forwarded_host_len) }.ok()?;
         let x_forwarded_port =
-            unsafe { optional_str_present(inp.x_forwarded_port, inp.x_forwarded_port_len) };
-        let host = unsafe { optional_str_present(inp.host, inp.host_len) };
+            unsafe { optional_str_present(inp.x_forwarded_port, inp.x_forwarded_port_len) }.ok()?;
+        let host = unsafe { optional_str_present(inp.host, inp.host_len) }.ok()?;
         let direct_scheme =
-            unsafe { optional_str_present(inp.direct_scheme, inp.direct_scheme_len) };
+            unsafe { optional_str_present(inp.direct_scheme, inp.direct_scheme_len) }.ok()?;
 
         let cidrs: &[crate::forwarded::Cidr] = if inp.trusted.is_null() {
             &[]
@@ -922,14 +923,16 @@ unsafe fn optional_str<'a>(ptr: *const u8, len: usize) -> Option<&'a str> {
 /// This variant distinguishes a NULL pointer (absent field) from a non-NULL
 /// zero-length pointer (present but empty field), as required by the trusted
 /// proxy header precedence contract.
-unsafe fn optional_str_present<'a>(ptr: *const u8, len: usize) -> Option<&'a str> {
+unsafe fn optional_str_present<'a>(ptr: *const u8, len: usize) -> Result<Option<&'a str>, ()> {
     if ptr.is_null() {
-        return None;
+        return Ok(None);
     }
     if len == 0 {
-        return Some("");
+        return Ok(Some(""));
     }
-    std::str::from_utf8(unsafe { std::slice::from_raw_parts(ptr, len) }).ok()
+    std::str::from_utf8(unsafe { std::slice::from_raw_parts(ptr, len) })
+        .map(Some)
+        .map_err(|_| ())
 }
 
 /// Initialize a `MarkdownOptions` struct with sensible defaults.

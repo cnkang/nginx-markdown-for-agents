@@ -40,9 +40,11 @@ jobs:
         run: cargo +nightly install cargo-fuzz
 
       - name: Run weekly fuzz target
+        env:
+          FUZZ_TARGET: ${{ matrix.target }}
         run: |
           cd components/rust-converter
-          cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=3600
+          cargo +nightly fuzz run "${FUZZ_TARGET}" -- -max_total_time=3600
 
       - name: Upload fuzz artifacts
         if: always()
@@ -85,10 +87,25 @@ jobs:
 
       - name: Run soak qualification gate
         run: |
-          if command -v nginx >/dev/null 2>&1 || [ -n "${NGINX_BIN:-}" ]; then
-            make test-e2e-rust-soak
+          nginx_bin="${NGINX_BIN:-}"
+          module_so="${MODULE_SO:-}"
+          probe_dir=""
+          if [[ -n "$nginx_bin" && -x "$nginx_bin" \
+                && -n "$module_so" && -f "$module_so" \
+                && "$module_so" == /* \
+                && "$module_so" != *[!A-Za-z0-9_./-]* ]]; then
+            probe_dir="$(mktemp -d)"
+            printf 'load_module %s;\nevents {}\nhttp {}\n' \
+              "$module_so" > "$probe_dir/nginx.conf"
+            if "$nginx_bin" -t -q -p "$probe_dir" -c nginx.conf; then
+              make test-e2e-rust-soak
+            else
+              echo "SKIP (justified): NGINX_BIN cannot load MODULE_SO" >&2
+              echo "policy_reference: Requirement 18 qualification thresholds (short soak)" >&2
+            fi
+            rm -rf "$probe_dir"
           else
-            echo "SKIP (justified): no module-enabled nginx binary available (NGINX_BIN unset)" >&2
+            echo "SKIP (justified): no executable NGINX_BIN plus loadable MODULE_SO available" >&2
             echo "policy_reference: Requirement 18 qualification thresholds (short soak)" >&2
           fi
         shell: bash

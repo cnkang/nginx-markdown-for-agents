@@ -1,6 +1,10 @@
 #!/bin/bash
 #
-# Reason-Code Lifecycle Audit Script
+# [LEGACY] Reason-Code Lifecycle Audit Script
+#
+# Historical lifecycle auditor superseded by the reason-codegen pipeline
+# (tools/reason-codegen/ + `make reason-codegen-check`).  Retained for
+# reference only; not wired into any Makefile target or workflow.
 #
 # Verifies that every defined reason code has a complete lifecycle:
 #   (a) static string definition in ngx_http_markdown_reason.c

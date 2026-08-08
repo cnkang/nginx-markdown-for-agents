@@ -562,6 +562,8 @@ ngx_http_markdown_streaming_decomp_free_heap(u_char **heap_buf_ptr)
  *
  * Returns:
  *   NGX_OK    - success
+ *   NGX_HTTP_MARKDOWN_DECOMP_OVERFLOW_ERROR (-105)
+ *             - size_t overflow when doubling the buffer
  *   NGX_ERROR - allocation failure (old buffer freed)
  */
 static ngx_int_t
@@ -1607,8 +1609,17 @@ ngx_http_markdown_streaming_decomp_feed_case_brotli(
  *
  * Returns:
  *   NGX_OK       - success (out_data/out_len populated)
- *   NGX_ERROR    - decompression error or size limit exceeded
  *   NGX_DECLINED - unsupported format
+ *   Typed error codes (negative):
+ *     NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED (-100) - decompressed
+ *       size limit exceeded
+ *     NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR (-101) - corrupt or
+ *       invalid compressed stream
+ *     NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT (-102) - truncated
+ *       final stream/member
+ *     NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR (-103) - internal stream
+ *       engine error
+ *   NGX_ERROR    - unrecoverable allocation/system error
  */
 static ngx_int_t ngx_http_markdown_streaming_decomp_apply_limits(
     ngx_http_markdown_streaming_decomp_t *decomp,

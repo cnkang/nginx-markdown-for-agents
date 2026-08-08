@@ -23,6 +23,7 @@ static struct MarkdownConverterHandle *ngx_http_markdown_converter = NULL;
 /* Global pointer to shared metrics state, resolved during worker init. */
 static ngx_http_markdown_metrics_t *ngx_http_markdown_metrics = NULL;
 static ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
+static ngx_atomic_uint_t ngx_http_markdown_pending_output_requests;
 /*
  * Keep the metrics SHM zone name layout-versioned.
  *
@@ -44,6 +45,52 @@ static u_char ngx_http_markdown_empty_string[] = "";
  * last_known_good holds the previous active snapshot for diagnostics and
  * failed-reload protection. */
 static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher = { 0 };
+
+static void
+ngx_http_markdown_pending_output_increment(void)
+{
+    ngx_atomic_fetch_add(&ngx_http_markdown_pending_output_requests, 1);
+}
+
+static void
+ngx_http_markdown_pending_output_decrement(void)
+{
+    ngx_atomic_uint_t  current;
+
+    for ( ;; ) {
+        current = ngx_http_markdown_pending_output_requests;
+        if (current == 0) {
+            return;
+        }
+        if (ngx_atomic_cmp_set(&ngx_http_markdown_pending_output_requests,
+                               current, current - 1))
+        {
+            return;
+        }
+    }
+}
+
+void
+ngx_http_markdown_pending_output_set(ngx_chain_t **slot,
+    ngx_chain_t *value)
+{
+    if (slot == NULL) {
+        return;
+    }
+
+    if (*slot == NULL && value != NULL) {
+        ngx_http_markdown_pending_output_increment();
+    } else if (*slot != NULL && value == NULL) {
+        ngx_http_markdown_pending_output_decrement();
+    }
+    *slot = value;
+}
+
+ngx_atomic_uint_t
+ngx_http_markdown_pending_output_current(void)
+{
+    return ngx_http_markdown_pending_output_requests;
+}
 
 #define NGX_HTTP_MARKDOWN_METRIC_ADD(field, value)                                  \
     do {                                                                            \

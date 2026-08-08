@@ -11,8 +11,7 @@ This gate validates:
   2. Diagnostics schema against the field contract artifact
   3. Dynconf schema against the Rust parser implementation (cross-checking
      known keys, types, ranges)
-  4. Reason codegen drift (calls generate.py --check)
-  5. All consumed release artifacts exist and have valid structure
+  4. All consumed schema artifacts exist and have valid structure
 
 Requirements: 15.8, 15.12
 
@@ -38,8 +37,6 @@ RELEASE_ARTIFACT_DIR = REPO_ROOT / "artifacts" / "release" / "0.9.2"
 METRICS_REGISTRY = RELEASE_ARTIFACT_DIR / "metrics-registry.json"
 DIAGNOSTICS_FIELD_CONTRACT = RELEASE_ARTIFACT_DIR / "diagnostics-field-contract.json"
 DYNCONF_PRECEDENCE_REPORT = RELEASE_ARTIFACT_DIR / "dynconf-precedence-report.json"
-REASON_REGISTRY_REPORT = RELEASE_ARTIFACT_DIR / "reason-registry-report.json"
-GENERATED_REASON_ARTIFACTS = RELEASE_ARTIFACT_DIR / "generated-reason-artifacts.json"
 
 # Schema paths
 DYNCONF_SCHEMA = REPO_ROOT / "schemas" / "dynconf.schema.json"
@@ -49,14 +46,11 @@ DIAGNOSTICS_SCHEMA = REPO_ROOT / "schemas" / "diagnostics.schema.json"
 METRICS_VALIDATOR = (
     REPO_ROOT / "tools" / "release" / "gates" / "validate_metrics_registry.py"
 )
-REASON_CODEGEN = REPO_ROOT / "tools" / "reason-codegen" / "generate.py"
 
-# Expected release artifacts (must all exist and be valid JSON)
+# Expected schema artifacts (must all exist and be valid JSON)
 RELEASE_ARTIFACTS = [
     DYNCONF_PRECEDENCE_REPORT,
     METRICS_REGISTRY,
-    REASON_REGISTRY_REPORT,
-    GENERATED_REASON_ARTIFACTS,
     DIAGNOSTICS_FIELD_CONTRACT,
 ]
 
@@ -64,8 +58,14 @@ RELEASE_ARTIFACTS = [
 def _load_json(path: Path) -> dict:
     """Load and return parsed JSON from the given path."""
     validated_path = validate_read_path(path, purpose="schema drift artifact")
-    with open(validated_path, encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(validated_path, encoding="utf-8") as f:
+            value = json.load(f)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"unable to read {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"schema drift artifact must be an object: {path}")
+    return value
 
 
 def gate_release_artifact_existence() -> list:
@@ -96,55 +96,13 @@ def _check_metrics_registry_structure(reg: dict) -> list:
     return errors
 
 
-def _check_reason_registry_structure(report: dict) -> list:
-    """Check reason-registry-report.json structural invariants."""
-    errors = []
-    if report.get("schema_version") != 1:
-        errors.append("reason-registry-report.json: schema_version != 1")
-    if not isinstance(report.get("total_count"), int):
-        errors.append(
-            "reason-registry-report.json: total_count missing or invalid"
-        )
-    return errors
-
-
-def _check_generated_artifacts_structure(listing: dict) -> list:
-    """Check generated-reason-artifacts.json structural invariants."""
-    errors = []
-    if listing.get("schema_version") != 1:
-        errors.append(
-            "generated-reason-artifacts.json: schema_version != 1"
-        )
-    artifacts = listing.get("generated_artifacts", [])
-    if not isinstance(artifacts, list) or len(artifacts) == 0:
-        errors.append(
-            "generated-reason-artifacts.json: generated_artifacts "
-            "empty or missing"
-        )
-    return errors
-
-
 def gate_release_artifact_structure() -> list:
-    """Validate structural invariants of each release artifact."""
+    """Validate structural invariants of each schema artifact."""
     errors = []
 
     if METRICS_REGISTRY.exists():
         errors.extend(
             _check_metrics_registry_structure(_load_json(METRICS_REGISTRY))
-        )
-
-    if REASON_REGISTRY_REPORT.exists():
-        errors.extend(
-            _check_reason_registry_structure(
-                _load_json(REASON_REGISTRY_REPORT)
-            )
-        )
-
-    if GENERATED_REASON_ARTIFACTS.exists():
-        errors.extend(
-            _check_generated_artifacts_structure(
-                _load_json(GENERATED_REASON_ARTIFACTS)
-            )
         )
 
     if DIAGNOSTICS_FIELD_CONTRACT.exists():
@@ -179,6 +137,7 @@ def gate_metrics_registry() -> list:
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
+        timeout=60,
     )
     if result.returncode != 0:
         return [
@@ -382,31 +341,13 @@ def gate_dynconf_schema() -> list:
     return errors
 
 
-def gate_reason_codegen_drift() -> list:
-    """Run the reason codegen tool in --check mode to detect drift."""
-    if not REASON_CODEGEN.exists():
-        return ["tools/reason-codegen/generate.py not found"]
-
-    result = subprocess.run(
-        [sys.executable, str(REASON_CODEGEN), "--check"],
-        cwd=str(REPO_ROOT),
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        detail = (result.stdout + result.stderr).strip()
-        msg = detail if detail else (
-            "Reason codegen --check exited with non-zero "
-            "but produced no output"
-        )
-        return [f"Reason codegen drift detected:\n{msg}"]
-    return []
-
-
 def _run_gate(index, total, label, gate_fn):
     """Run a single gate and return errors list."""
     print(f"[{index}/{total}] {label}...")
-    errors = gate_fn()
+    try:
+        errors = gate_fn()
+    except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        errors = [f"gate raised a structured input error: {exc}"]
     if errors:
         for e in errors:
             print(f"  FAIL: {e}")
@@ -418,7 +359,7 @@ def _run_gate(index, total, label, gate_fn):
 def main() -> int:
     """Run all schema drift gates and report results."""
     all_errors = []
-    total = 5
+    total = 4
     passed = 0
 
     print("=== Schema Drift Gate Validator ===")
@@ -433,8 +374,6 @@ def main() -> int:
          gate_diagnostics_field_contract),
         ("Validating dynconf schema consistency",
          gate_dynconf_schema),
-        ("Validating reason codegen drift",
-         gate_reason_codegen_drift),
     ]
 
     for idx, (label, gate_fn) in enumerate(gates, 1):

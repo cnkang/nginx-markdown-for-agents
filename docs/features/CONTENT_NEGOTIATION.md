@@ -18,7 +18,7 @@ flowchart TD
     style Wildcard fill:#f90,color:#000
 ```
 
-This module implements HTTP content negotiation to serve Markdown representations of HTML content. Clients request Markdown using the standard `Accept` header, and the module decides whether to convert the response based on eligibility rules and configuration.
+This module implements HTTP content negotiation to serve Markdown representations of HTML content. Clients request Markdown using the standard `Accept` header. The module then decides whether to convert the response. Eligibility rules and configuration drive that decision.
 
 ## How It Works
 
@@ -54,7 +54,7 @@ Accept: text/html, text/markdown;q=0.9
 Accept: text/html, application/json, text/markdown
 ```
 
-The module looks for `text/markdown` in the Accept header. Quality values (q-parameters) are fully evaluated per RFC 9110 §12.5.1: the Rust negotiation engine (`markdown_negotiate_accept`) compares q-values across all listed media types and applies tie-break rules (specificity, source order) to determine preference ordering. For example, `Accept: text/html;q=0.8, text/markdown;q=0.9` correctly selects Markdown.
+The module looks for `text/markdown` in the Accept header. Quality values (q-parameters) are fully evaluated per RFC 9110 §12.5.1. The Rust negotiation engine (`markdown_negotiate_accept`) compares q-values across all listed media types. It applies tie-break rules (specificity, source order) to determine preference ordering. For example, `Accept: text/html;q=0.8, text/markdown;q=0.9` correctly selects Markdown.
 
 ### Wildcard Handling
 
@@ -160,7 +160,7 @@ Not all requests are eligible for conversion. The module checks:
 ### Request Method
 - `GET` → Eligible
 - `HEAD` → Eligible
-- `POST`, `PUT`, `DELETE`, etc. → Not eligible
+- `POST`, `PUT`, `DELETE`, and so on → Not eligible
 
 ### Response Status
 - `200 OK` → Eligible
@@ -175,14 +175,14 @@ Not all requests are eligible for conversion. The module checks:
 ### Response Size
 - The module uses the selected `markdown_streaming off|auto|force` mode:
   - **Full-buffer engine**: Responses within `markdown_limits conversion_memory=<size>` are eligible for conversion.
-  - **Streaming engine**: `auto` uses the internal bounded routing heuristic;
+  - **Streaming engine**: `auto` uses the internal bounded routing heuristic.
     `force` selects streaming where the request is otherwise eligible. The
-    working buffer is bounded by `markdown_limits streaming_buffer=<size>`.
+    working buffer stays bounded by `markdown_limits streaming_buffer=<size>`.
 - Responses that exceed all applicable limits → Not eligible (passthrough)
 
 ### Other Conditions
 - Range requests → Not eligible (bypass)
-- Chunked responses with excluded content types → May be bypassed (see
+- Chunked responses with excluded content types → May bypass conversion (see
   `markdown_stream_excluded_types`)
 
 ## Testing Content Negotiation
@@ -235,11 +235,11 @@ curl -H "Accept: */*" http://localhost/page.html
 
 ### Bot-Targeted Conversion (User-Agent Based)
 
-Some AI crawlers and agent bots do not send `Accept: text/markdown` in their requests. If you want these bots to receive Markdown automatically when they fetch `text/html` pages, you can use NGINX's `map` directive to rewrite the `Accept` header for matching User-Agent strings before the request reaches the upstream.
+Some AI crawlers and agent bots do not send `Accept: text/markdown` in their requests. If you want these bots to receive Markdown automatically when they fetch `text/html` pages, you can use NGINX's `map` directive. It rewrites the `Accept` header for matching User-Agent strings before the request reaches the upstream.
 
 This approach is useful because:
 
-- Many AI crawlers (ClaudeBot, GPTBot, etc.) request pages with a standard browser-like `Accept` header and have no built-in mechanism to ask for Markdown.
+- Many AI crawlers (ClaudeBot, GPTBot, and so on) request pages with a standard browser-like `Accept` header and have no built-in mechanism to ask for Markdown.
 - Injecting `Accept: text/markdown` at the NGINX layer lets the module's existing content negotiation logic handle the rest, without any code changes.
 - Operators retain full control over which bots receive Markdown and can add or remove User-Agent patterns through configuration alone.
 
@@ -273,9 +273,9 @@ With this configuration:
 
 - Requests from ClaudeBot, GPTBot, or Googlebot have their Accept header replaced with `text/markdown, text/html;q=0.9`, which causes the module to convert eligible `text/html` responses to Markdown.
 - Requests from all other clients keep their original Accept header. Browsers and normal tools continue to receive HTML as before.
-- The module's standard eligibility checks (status code, content type, size limits, etc.) still apply. Only responses that pass all checks are converted.
+- The module's standard eligibility checks (status code, content type, size limits, and so on) still apply. Only responses that pass all checks get converted.
 
-Note: If you also want to control the on/off switch per bot (rather than just the Accept header), you can combine this with a variable-driven `markdown_filter`:
+Note: If you also want to control the on/off switch per bot (rather than just the Accept header), combine this with a variable-driven `markdown_filter`. The variable approach controls the switch directly.
 
 ```nginx
 map $http_user_agent $is_ai_bot {
@@ -373,7 +373,7 @@ proxy_cache_key "$scheme$request_method$host$request_uri$http_accept";
 
 Check:
 1. Variable resolves to expected value (use `add_header X-Debug $var;`)
-2. Variable is evaluated at the correct phase
+2. The module evaluates the variable at the correct phase
 3. Map syntax is correct
 
 Debug variable values:
@@ -394,7 +394,7 @@ Using variables for `markdown_filter` adds minimal overhead. NGINX evaluates var
 ### Caching
 
 Proper content negotiation with `Vary: Accept` ensures correct caching:
-- HTML and Markdown variants are cached separately
+- The cache stores HTML and Markdown variants separately
 - Clients receive the correct variant
 - Cache hit rates remain high
 
@@ -407,7 +407,7 @@ Proper content negotiation with `Vary: Accept` ensures correct caching:
 
 ## Implementation Details
 
-The content negotiation logic is implemented in:
+The content negotiation logic lives in:
 - `src/ngx_http_markdown_accept.c` - Accept header parsing
 - `src/ngx_http_markdown_eligibility.c` - Eligibility checks
 - `src/ngx_http_markdown_filter_module.c` - Main filter logic

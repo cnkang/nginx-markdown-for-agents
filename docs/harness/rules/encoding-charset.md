@@ -14,7 +14,7 @@ Historical issues: `0eae34b`, `1b0df51`, `77a46d6`.
 
 Required:
 - Preserve incomplete UTF-8 tails across chunk boundaries and prepend to next chunk.
-- Flush charset decoders at EOF (`last=true`) so trailing buffered bytes are emitted or reported.
+- Flush charset decoders at EOF (`last=true`) so trailing buffered bytes get emitted or reported.
 - Do not rely on blanket lossy conversion before handling chunk-tail semantics.
 - When post-commit wrappers re-map errors, preserve original error classification/code for downstream handling and metrics.
 - html5ever's `discard_bom` flag strips U+FEFF at the start of **every**
@@ -23,7 +23,7 @@ Required:
   next `feed()`, html5ever strips it — diverging from single-chunk conversion
   where the same BOM is mid-stream and preserved.  The streaming tokenizer
   must set `discard_bom: false` and strip the stream-start BOM once in the
-  converter (after `utf8_tail` reassembly, so a split BOM is detected as a
+  converter (after `utf8_tail` reassembly, so a split BOM reads as a
   complete 3-byte unit).  The `bom_stripped` flag must not be set prematurely
   when the effective bytes start with 0xEF but are shorter than 3 bytes —
   defer until the next chunk reassembles the full sequence.
@@ -38,19 +38,19 @@ Required:
   payload formats.  In 0.9.1, gzip and deflate are streaming-eligible under
   the configured decompression/cache gates.  Brotli additionally requires a
   successful `libbrotlidec` probe under
-  `NGX_MARKDOWN_BROTLI_STREAMING=auto|on`; `off` or an `auto` probe failure
+  `NGX_MARKDOWN_BROTLI_STREAMING=auto|on`, `off` or an `auto` probe failure
   selects bounded full-buffer decompression instead of defining
   `NGX_HTTP_BROTLI`.  Brotli streaming reuses the same codec/member
-  lifecycle invariants as gzip/deflate: tail data must be rejected, truncated
-  final streams must be detected and rejected, no-progress must be guarded,
-  and decompression accounting stays response-wide.
+  lifecycle invariants as gzip/deflate: the module must reject tail data,
+  detect and reject truncated final streams, guard no-progress,
+  and keep decompression accounting response-wide.
 - Codec-specific lifecycle state must survive arbitrary NGINX input chunk
   boundaries and downstream backpressure resumes.  Downstream `NGX_AGAIN`
-  must not imply that compressed source input was consumed or may be advanced.
+  must not imply that compressed source input got consumed or may advance.
 - A gzip `Z_STREAM_END` completes one gzip member, not necessarily the HTTP
   response.  Both full-buffer and streaming decoders must consume every
   concatenated member exactly once.  The C fallback resets the inflater while
-  preserving remaining `avail_in`; the Rust full-buffer path uses a
+  preserving remaining `avail_in`, the Rust full-buffer path uses a
   multi-member decoder.  Streaming additionally accepts a boundary exactly
   between feeds.  Response finalization succeeds at a complete member boundary
   and rejects an incomplete final member.
@@ -65,8 +65,8 @@ Required:
   - raw deflate (RFC 1951): `windowBits = -15` (`-MAX_WBITS`)
   Mixing the two formats without sniffing causes silent data corruption
   or decompression failures on chunk boundaries.  The buffered path
-  retries on format mismatch; the streaming path cannot retry once
-  chunks are consumed, so the sniff is mandatory.
+  retries on format mismatch, the streaming path cannot retry once
+  the module consumes chunks, so the sniff is mandatory.
 - Truncated gzip members and deflate streams (either deflate format) must be
   explicitly rejected
   with a budget or integrity error, not silently accepted.  When
@@ -75,21 +75,21 @@ Required:
   error rather than returning partial output.
 - Test harnesses that produce compressed payloads for streaming
   decompression tests must use the correct deflate format matching
-  the test intent (raw deflate: `windowBits = -15`; zlib-wrapped:
+  the test intent (raw deflate: `windowBits = -15`, zlib-wrapped:
   `windowBits = 15`).  Mismatched compression modes between test
   payload and production decompressor produce false passes or false
   failures.
-- When the decompression implementation is shared between full-buffer and
+- When the decompression implementation shares between full-buffer and
   streaming,
   both paths must handle the same deflate formats.  If full-buffer uses
   `ngx_http_markdown_decompress_gzip`, the streaming path must independently
-  configure gzip framing and sniff both deflate formats; do not assume the
+  configure gzip framing and sniff both deflate formats, do not assume the
   two paths share format configuration or member lifecycle.
 
 - `Z_OK` and `Z_BUF_ERROR` have distinct semantics in `inflate()`:
   `Z_OK` means inflate made progress (consumed input and/or produced
-  output); `Z_BUF_ERROR` means no progress was made.  When the output
-  buffer is exhausted (`avail_out == 0`), both codes are recoverable by
+  output), `Z_BUF_ERROR` means no progress was made.  When the output
+  buffer exhausts (`avail_out == 0`), both codes stay recoverable by
   growing the buffer and retrying.  However, `Z_BUF_ERROR` with available
   output space, remaining input, and no change in `total_out` is an
   unexpected stall (potential format error or malformed stream) — the
