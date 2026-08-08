@@ -128,6 +128,7 @@ static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher;
 /* ── Inflight overload stub ────────────────────────────────────── */
 
 static ngx_atomic_int_t g_inflight_overload_total;
+static ngx_atomic_uint_t g_pending_output_requests;
 
 static ngx_inline ngx_atomic_int_t
 ngx_http_markdown_inflight_current(void)
@@ -139,6 +140,12 @@ static ngx_inline ngx_atomic_int_t
 ngx_http_markdown_inflight_overload_total(void)
 {
     return g_inflight_overload_total;
+}
+
+ngx_atomic_uint_t
+ngx_http_markdown_pending_output_current(void)
+{
+    return g_pending_output_requests;
 }
 
 /* ── Production function headers and implementation ───────────── */
@@ -166,6 +173,7 @@ test_collect_metrics_null_zone(void)
     TEST_SUBSECTION("collect_metrics with NULL metrics zone");
 
     ngx_http_markdown_metrics = NULL;
+    g_pending_output_requests = 7;
     memset(&out, 0xFF, sizeof(out));
 
     ngx_http_markdown_diagnostics_collect_metrics(&out);
@@ -174,6 +182,8 @@ test_collect_metrics_null_zone(void)
     TEST_ASSERT(out.delivery_total == 0, "delivery should be 0");
     TEST_ASSERT(out.requests_total == 0, "requests should be 0");
     TEST_ASSERT(out.failopen_total == 0, "failopen should be 0");
+    TEST_ASSERT(out.pending_output == 7,
+                "pending_output should survive a NULL metrics zone");
 
     TEST_PASS("NULL zone zeroes all fields");
 }
@@ -193,6 +203,7 @@ test_collect_metrics_with_data(void)
     g_metrics_data.perf.zero_copy_output_total = 7;
     g_metrics_data.perf.copied_output_total = 2;
     ngx_http_markdown_metrics = &g_metrics_data;
+    g_pending_output_requests = 3;
 
     ngx_http_markdown_diagnostics_collect_metrics(&out);
 
@@ -204,6 +215,8 @@ test_collect_metrics_with_data(void)
                 "zero_copy_output should be 7");
     TEST_ASSERT(out.copied_output_total == 2,
                 "copied_output should be 2");
+    TEST_ASSERT(out.pending_output == 3,
+                "pending_output should count requests with pending chains");
 
     TEST_PASS("Metrics collected correctly");
 }

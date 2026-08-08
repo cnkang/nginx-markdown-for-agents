@@ -642,7 +642,8 @@ ngx_http_markdown_diag_json_string(
     u_char               ch;
     size_t               needed;
 
-    if (pos == NULL || *pos == NULL || value == NULL
+    if (pos == NULL || *pos == NULL || last == NULL || value == NULL
+        || *pos > last
         || (size_t) (last - *pos) < 2)
     {
         return NGX_ERROR;
@@ -654,7 +655,7 @@ ngx_http_markdown_diag_json_string(
         ch = value[i];
         needed = (ch == '"' || ch == '\\') ? 2
                  : (ch < 0x20 ? 6 : 1);
-        if ((size_t) (last - p) < needed) {
+        if (p > last || (size_t) (last - p) < needed) {
             return NGX_ERROR;
         }
         if (ch == '"' || ch == '\\') {
@@ -848,11 +849,6 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     }
 
     streaming_buffer = effective.streaming_buffer;
-    if (streaming_buffer < 65536) {
-        streaming_buffer = 65536;
-    } else if (streaming_buffer > 1073741824) {
-        streaming_buffer = 1073741824;
-    }
 
     dynconf_state = ngx_http_markdown_diag_dynconf_state_name(dynconf.state);
     p = ngx_slprintf(p, last,

@@ -367,6 +367,20 @@ markdown_streaming_output_free(u_char *data, uintptr_t len)
     UNUSED(data); UNUSED(len);
 }
 
+void
+ngx_http_markdown_pending_output_set(ngx_chain_t **slot, ngx_chain_t *value)
+{
+    if (slot != NULL) {
+        *slot = value;
+    }
+}
+
+ngx_atomic_uint_t
+ngx_http_markdown_pending_output_current(void)
+{
+    return 0;
+}
+
 /* Include the postcommit source (for safe_finish, abort, guard, log) */
 #include "../../src/ngx_http_markdown_stream_postcommit.c"
 

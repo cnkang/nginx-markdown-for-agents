@@ -56,7 +56,9 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
     ngx_http_markdown_decision_t      decision;
     ngx_int_t                         rc;
 
-    if (r == NULL || ctx == NULL || conf == NULL) {
+    if (r == NULL || r->connection == NULL || r->pool == NULL
+        || ctx == NULL || conf == NULL)
+    {
         return NGX_ERROR;
     }
 
@@ -252,7 +254,8 @@ ngx_http_markdown_stream_error_pass_html(ngx_http_request_t *r,
             return NGX_ERROR;
         }
 
-        ctx->streaming.pending_output = chain;
+        ngx_http_markdown_pending_output_set(
+            &ctx->streaming.pending_output, chain);
         ctx->streaming.pending_meta.has_data =
             (ctx->stream_sm.replay_buf.size > 0) ? 1 : 0;
         ctx->streaming.pending_meta.bytes = ctx->stream_sm.replay_buf.size;

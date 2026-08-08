@@ -80,6 +80,12 @@ ngx_http_markdown_measure_content_encoding(
     ngx_http_request_t *r, const ngx_str_t **single_value,
     ngx_uint_t *match_count, size_t *total_len)
 {
+    if (r == NULL || single_value == NULL || match_count == NULL
+        || total_len == NULL)
+    {
+        return NGX_ERROR;
+    }
+
     *single_value = NULL;
     *match_count = 0;
     *total_len = 0;
@@ -89,6 +95,9 @@ ngx_http_markdown_measure_content_encoding(
          part = part->next)
     {
         const ngx_table_elt_t *headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return NGX_ERROR;
+        }
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
             if (headers[i].hash == 0) {
                 continue;
@@ -166,6 +175,10 @@ ngx_http_markdown_collect_content_encoding(ngx_http_request_t *r,
     size_t             total_len;
     u_char            *data;
     const ngx_str_t  *single_value;
+
+    if (r == NULL || r->pool == NULL || out == NULL) {
+        return NGX_ERROR;
+    }
 
     out->data = NULL;
     out->len = 0;

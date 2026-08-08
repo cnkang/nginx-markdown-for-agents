@@ -522,7 +522,8 @@ ngx_http_markdown_stream_postcommit_capture_pending(
     ngx_flag_t has_data,
     size_t output_bytes)
 {
-    ctx->streaming.pending_output = out;
+    ngx_http_markdown_pending_output_set(
+        &ctx->streaming.pending_output, out);
     ctx->streaming.pending_meta.has_data = has_data;
     ctx->streaming.pending_meta.bytes = output_bytes;
     ctx->streaming.pending_meta.zero_copy = 0;

@@ -487,7 +487,8 @@ ngx_http_markdown_streaming_cleanup(void *data)
      * tracking state so stale references are not observed after
      * cleanup runs.
      */
-    ctx->streaming.pending_output = NULL;
+    ngx_http_markdown_pending_output_set(
+        &ctx->streaming.pending_output, NULL);
 
     /*
      * Clear pending input chain.  Links are pool-allocated and will be
@@ -817,7 +818,8 @@ ngx_http_markdown_streaming_abandon_pending_after_fatal(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx)
 {
-    ctx->streaming.pending_output = NULL;
+    ngx_http_markdown_pending_output_set(
+        &ctx->streaming.pending_output, NULL);
     ctx->streaming.pending_meta.has_data = 0;
     ctx->streaming.pending_meta.bytes = 0;
     ctx->streaming.pending_meta.zero_copy = 0;
@@ -1156,7 +1158,8 @@ ngx_http_markdown_streaming_save_pending(
         return NGX_ERROR;
     }
 
-    ctx->streaming.pending_output = out;
+    ngx_http_markdown_pending_output_set(
+        &ctx->streaming.pending_output, out);
     ctx->streaming.pending_meta.has_data =
         (data != NULL && len > 0) ? 1 : 0;
     ctx->streaming.pending_meta.bytes = len;
@@ -1714,7 +1717,8 @@ ngx_http_markdown_streaming_resume_pending(
         return NGX_AGAIN;
     }
 
-    ctx->streaming.pending_output = NULL;
+    ngx_http_markdown_pending_output_set(
+        &ctx->streaming.pending_output, NULL);
 
     /* Backpressure resume: pending drain completed */
     if (ngx_http_markdown_streaming_delivery_ok(rc)) {
@@ -3581,6 +3585,7 @@ ngx_http_markdown_streaming_init_handle(
     ngx_pool_cleanup_t     *cln;
     uint32_t                init_rc;
     ngx_int_t               rc;
+    size_t                  prebuffer_limit;
 
     /*
      * Record the conversion attempt before any fallible initialization.
@@ -3598,7 +3603,10 @@ ngx_http_markdown_streaming_init_handle(
      * dynamic or programmatic configuration paths.  Fail before Rust sees
      * any input so fail-open can still forward the untouched current chain.
      */
-    if (ctx->streaming.prebuffer_limit == 0) {
+    prebuffer_limit = ctx->effective_conf != NULL
+        ? ctx->effective_conf->streaming_buffer
+        : conf->limits.streaming_buffer;
+    if (prebuffer_limit == 0) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: streaming precommit buffer is zero; "
             "refusing to consume input without recovery storage");
@@ -3796,7 +3804,8 @@ ngx_http_markdown_streaming_send_failopen_chain(
     rc = ngx_http_next_body_filter(r, out);
 
     if (rc == NGX_AGAIN) {
-        ctx->streaming.pending_output = out;
+        ngx_http_markdown_pending_output_set(
+            &ctx->streaming.pending_output, out);
         ctx->streaming.pending_meta.has_data = 1;
         ctx->streaming.pending_meta.main_terminal = cap_main_terminal;
         ctx->streaming.pending_meta.subrequest_terminal =

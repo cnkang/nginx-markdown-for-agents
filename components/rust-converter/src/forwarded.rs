@@ -822,7 +822,6 @@ fn split_forwarded_list(value: &str) -> Vec<String> {
     split_quoted(value, b',')
         .into_iter()
         .map(|m| m.trim().to_string())
-        .filter(|m| !m.is_empty())
         .collect()
 }
 

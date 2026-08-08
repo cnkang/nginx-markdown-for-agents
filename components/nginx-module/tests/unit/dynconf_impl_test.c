@@ -29,6 +29,12 @@
 #ifndef NGX_AGAIN
 #define NGX_AGAIN   -5
 #endif
+#ifndef NGX_HTTP_TOO_MANY_REQUESTS
+#define NGX_HTTP_TOO_MANY_REQUESTS 429
+#endif
+#ifndef NGX_HTTP_SERVICE_UNAVAILABLE
+#define NGX_HTTP_SERVICE_UNAVAILABLE 503
+#endif
 
 #ifndef NGX_LOG_ERR
 #define NGX_LOG_ERR    1
@@ -208,6 +214,7 @@ ngx_del_timer(ngx_event_t *ev)
     UNUSED(ev);
 }
 
+#include "../../src/markdown_converter.h"
 #include "../../src/ngx_http_markdown_dynconf_impl.h"
 
 #ifndef NGX_MAX_SIZE_T_VALUE
@@ -269,8 +276,8 @@ test_effective_conf_helpers_smoke(void)
                     == NGX_HTTP_MARKDOWN_LOG_DEBUG,
                 "log_verbosity should come from snapshot");
     TEST_ASSERT(ngx_http_markdown_effective_memory_budget(&eff, &conf)
-                    == 16 * 1024 * 1024,
-                "memory_budget should come from snapshot");
+                    == 8 * 1024 * 1024,
+                "memory_budget should remain static from conf");
 #ifdef MARKDOWN_STREAMING_ENABLED
     TEST_ASSERT(ngx_http_markdown_effective_streaming_budget(&eff, &conf)
                     == 12 * 1024 * 1024,
@@ -1575,7 +1582,7 @@ test_reload_all_keys(void)
         fprintf(f, "prune_noise=on\n");
         fprintf(f, "log_verbosity=error\n");
         fprintf(f, "streaming_budget=8m\n");
-        fprintf(f, "memory_budget=256k\n");
+        fprintf(f, "memory_budget=16m\n");
         fclose(f);
     }
 
@@ -1593,11 +1600,52 @@ test_reload_all_keys(void)
                 "log_verbosity=error applied");
     TEST_ASSERT(conf.stream.budget == 8 * 1024 * 1024,
                 "streaming_budget=8m applied");
-    TEST_ASSERT(conf.advanced.memory_budget == 256 * 1024,
-                "memory_budget=256k applied");
+    TEST_ASSERT(conf.advanced.memory_budget == 16 * 1024 * 1024,
+                "memory_budget=16m applied");
 
     unlink(tmpfile);
     TEST_PASS("reload: all keys in one file");
+}
+
+static void
+test_reload_rejects_streaming_over_memory(void)
+{
+    static const char *contents[] = {
+        "schema_version=0.9\nstreaming_budget=8m\nmemory_budget=256k\n",
+        "schema_version=0.9\nmemory_budget=256k\nstreaming_budget=8m\n"
+    };
+    const char                          *tmpfile;
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+    ngx_uint_t                           i;
+
+    for (i = 0; i < sizeof(contents) / sizeof(contents[0]); i++) {
+        tmpfile = "/tmp/dynconf_test_reload_budget_relation.conf";
+        {
+            FILE *f = fopen(tmpfile, "w");
+            TEST_ASSERT(f != NULL, "create budget relation fixture");
+            fputs(contents[i], f);
+            fclose(f);
+        }
+
+        memset(&watcher, 0, sizeof(watcher));
+        memset(&conf, 0, sizeof(conf));
+        set_ngx_str(&watcher.path, tmpfile);
+        watcher.active_snapshot.valid = 1;
+        watcher.active_snapshot.memory_budget = 512 * 1024;
+        watcher.active_snapshot.streaming_budget = 128 * 1024;
+
+        rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+        TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE,
+                    "streaming budget above memory budget must be rejected");
+        TEST_ASSERT(watcher.active_snapshot.memory_budget == 512 * 1024
+                    && watcher.active_snapshot.streaming_budget == 128 * 1024,
+                    "active snapshot must remain unchanged after rejection");
+        unlink(tmpfile);
+    }
+
+    TEST_PASS("reload rejects streaming budget above memory in either key order");
 }
 
 static void
@@ -2123,6 +2171,71 @@ test_apply_streaming_budget_large_valid(void)
                 "streaming_budget set to 1GiB");
 
     TEST_PASS("apply: streaming_budget with large valid value");
+}
+
+static void
+test_apply_ffi_streaming_budget_bounds(void)
+{
+    ngx_http_markdown_dynconf_snapshot_t  snapshot;
+    ngx_http_markdown_dynconf_snapshot_t  before;
+    FFIDynconfResult                      result;
+    ngx_int_t                             rc;
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.memory_budget = 128 * 1024;
+    snapshot.error_policy = 91;
+    snapshot.valid = 0;
+    memset(&result, 0, sizeof(result));
+    result.error_code = DYNCONF_OK;
+    result.filter = DYNCONF_NOT_SET_U8;
+    result.prune_noise = DYNCONF_NOT_SET_U8;
+    result.log_verbosity = DYNCONF_NOT_SET_U8;
+    result.error_policy = DYNCONF_NOT_SET_U8;
+
+    result.filter = DYNCONF_FILTER_ON;
+    result.prune_noise = DYNCONF_PRUNE_NOISE_ON;
+    result.log_verbosity = DYNCONF_LOG_DEBUG;
+    result.error_policy = 99;
+    rc = ngx_http_markdown_dynconf_apply_ffi_result(&snapshot, &result);
+    TEST_ASSERT(rc == NGX_ERROR,
+                "unsupported error policy is rejected");
+    TEST_ASSERT(snapshot.enabled == 0 && snapshot.prune_noise == 0
+                && snapshot.log_verbosity == 0
+                && snapshot.error_policy == 91 && snapshot.valid == 0,
+                "invalid policy must not partially mutate snapshot");
+
+    result.filter = DYNCONF_NOT_SET_U8;
+    result.prune_noise = DYNCONF_NOT_SET_U8;
+    result.log_verbosity = DYNCONF_NOT_SET_U8;
+    result.error_policy = DYNCONF_NOT_SET_U8;
+    result.streaming_buffer = 65535;
+    rc = ngx_http_markdown_dynconf_apply_ffi_result(&snapshot, &result);
+    TEST_ASSERT(rc == NGX_ERROR,
+                "streaming buffer below minimum is rejected");
+    TEST_ASSERT(snapshot.error_policy == 91 && snapshot.valid == 0,
+                "rejected FFI result must not partially mutate snapshot");
+
+    result.streaming_buffer = 1073741825;
+    before = snapshot;
+    rc = ngx_http_markdown_dynconf_apply_ffi_result(&snapshot, &result);
+    TEST_ASSERT(rc == NGX_ERROR,
+                "streaming buffer above maximum is rejected");
+    TEST_ASSERT(memcmp(&snapshot, &before, sizeof(snapshot)) == 0,
+                "upper-bound rejection must preserve the snapshot");
+
+    result.streaming_buffer = 256 * 1024;
+    before = snapshot;
+    rc = ngx_http_markdown_dynconf_apply_ffi_result(&snapshot, &result);
+    TEST_ASSERT(rc == NGX_ERROR,
+                "streaming buffer above conversion memory is rejected");
+    TEST_ASSERT(memcmp(&snapshot, &before, sizeof(snapshot)) == 0,
+                "memory-bound rejection must preserve the snapshot");
+
+    result.streaming_buffer = 64 * 1024;
+    rc = ngx_http_markdown_dynconf_apply_ffi_result(&snapshot, &result);
+    TEST_ASSERT(rc == NGX_OK && snapshot.streaming_budget == 64 * 1024,
+                "bounded streaming buffer is applied");
+    TEST_PASS("FFI streaming buffer validation is bounded and atomic");
 }
 
 static void
@@ -2973,6 +3086,7 @@ main(void)
     test_reload_no_newline_at_eof();
     test_reload_path_too_long();
     test_reload_all_keys();
+    test_reload_rejects_streaming_over_memory();
     test_reload_filter_overrides_complex();
     test_reload_verbosity_module_enum();
     test_reload_invalid_line_rejects_all();
@@ -3003,6 +3117,7 @@ main(void)
     test_apply_streaming_budget_does_not_mutate_on_error();
     test_apply_memory_budget_large_valid();
     test_apply_streaming_budget_large_valid();
+    test_apply_ffi_streaming_budget_bounds();
 
     TEST_SECTION("dynconf_impl: last-known-good (LKG) tests");
 
