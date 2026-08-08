@@ -37,6 +37,7 @@ import re
 import subprocess
 import sys
 from collections import Counter
+from collections.abc import Iterator
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -179,15 +180,20 @@ LIST_MARKER_RE = re.compile(r"^(?:[-*]|\d+[.)])\s+")
 # without a bold title (AGENTS.md required-list, harness rule docs).
 RULE_DOC_PREFIXES = ("AGENTS.md", "docs/harness/rules/")
 
-# Semicolons remain useful when a governance item contains several atomic
-# requirements. Keep the exemption narrow: ordinary guide prose still uses
-# the semicolon warning, while explicit rule items, release-gate templates,
-# and clauses that use the uppercase MUST specification keyword retain their
-# structural separators.
+# Rule-format items may contain several atomic requirements. Keep the
+# exemption narrow: ordinary guide prose still uses the length and semicolon
+# checks, while explicit rule items, release-gate templates, and MUST clauses
+# on repo-owned specification surfaces retain their structure.
 RELEASE_GATE_TEMPLATE_RE = re.compile(
     r"(?:release[-_]gate|go[-_]no[-_]go)[^\n]*template", re.IGNORECASE
 )
 MUST_SPECIFICATION_RE = re.compile(r"\bMUST\b")
+MUST_SPECIFICATION_PREFIXES = (
+    "AGENTS.md",
+    "docs/architecture/",
+    "docs/harness/",
+    "docs/project/release-gates/",
+)
 
 # Reference line carrying a formal title: "- ADR-0019: 0.9.0 Production
 # Readiness Release Gate Framework", "- RFC 7932 (Brotli Compressed Data
@@ -229,33 +235,8 @@ NOUN_CHAIN_ALLOWLIST = {
 }
 
 
-def _sentences(
-    prose: str, governance: bool = False
-) -> list[tuple[str, bool, bool]]:
-    """Split prose into (sentence, rule_item_line, ref_line) units.
-
-    Each line is processed first; the line's flags decide which checks
-    apply. Rule-item lines, governance list items, and reference lines keep
-    their structural formatting (see RULE_ITEM_RE / REF_LINE_RE).
-    """
-    out: list[tuple[str, bool, bool]] = []
-    for line in prose.split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        rule_item = bool(RULE_ITEM_RE.match(line)) or (
-            governance and bool(LIST_MARKER_RE.match(line))
-        )
-        ref_line = bool(REF_LINE_RE.match(line))
-        for s in SENT_SPLIT_RE.split(line):
-            s = s.strip()
-            if len(s) > 3:
-                out.append((s, rule_item, ref_line))
-    return out
-
-
-def _is_structural_semicolon_line(line: str, rel: str) -> bool:
-    """Return whether semicolons on a line are part of rule structure."""
+def _is_structural_rule_line(line: str, rel: str) -> bool:
+    """Return whether a line belongs to an exempt rule-format structure."""
     stripped = line.strip()
     if RULE_ITEM_RE.match(stripped):
         return True
@@ -263,24 +244,54 @@ def _is_structural_semicolon_line(line: str, rel: str) -> bool:
         return True
     if RELEASE_GATE_TEMPLATE_RE.search(rel) and LIST_MARKER_RE.match(stripped):
         return True
-    return bool(MUST_SPECIFICATION_RE.search(stripped))
+    return rel.startswith(MUST_SPECIFICATION_PREFIXES) and bool(
+        MUST_SPECIFICATION_RE.search(stripped)
+    )
 
 
-def _prose_semicolon_count(prose: str, rel: str) -> int:
-    """Count semicolons outside structural rule items and their continuations."""
-    count = 0
+def _structural_rule_lines(prose: str, rel: str) -> Iterator[tuple[str, bool]]:
+    """Yield prose lines and whether they belong to a structural rule item."""
     in_structural_item = False
     for line in prose.splitlines():
         if not line.strip():
             in_structural_item = False
             continue
-        structural_line = _is_structural_semicolon_line(line, rel)
+        structural_line = _is_structural_rule_line(line, rel)
         continuation = in_structural_item and line.startswith((" ", "\t"))
+        structural = structural_line or continuation
         if structural_line:
             in_structural_item = True
         elif not continuation:
             in_structural_item = False
-        if ";" in line and not (structural_line or continuation):
+        yield line, structural
+
+
+def _sentences(prose: str, rel: str) -> list[tuple[str, bool, bool]]:
+    """Split prose into (sentence, structural_line, ref_line) units.
+
+    Each line is processed first; the line's flags decide which checks apply.
+    Structural rule items and their continuations keep their formatting.
+    Reference lines keep formal-title exemptions (see REF_LINE_RE).
+    """
+    out: list[tuple[str, bool, bool]] = []
+    for raw_line, structural in _structural_rule_lines(prose, rel):
+        line = raw_line
+        line = line.strip()
+        if not line:
+            continue
+        ref_line = bool(REF_LINE_RE.match(line))
+        for s in SENT_SPLIT_RE.split(line):
+            s = s.strip()
+            if len(s) > 3:
+                out.append((s, structural, ref_line))
+    return out
+
+
+def _prose_semicolon_count(prose: str, rel: str) -> int:
+    """Count semicolons outside structural rule lines."""
+    count = 0
+    for line, structural in _structural_rule_lines(prose, rel):
+        if ";" in line and not structural:
             count += line.count(";")
     return count
 
@@ -290,9 +301,7 @@ def audit(text: str, path: Path, limit: int | None) -> list[str]:
     prose = _prose_only(text)
     warnings: list[str] = []
     rel = str(path.relative_to(ROOT)) if path.is_absolute() else str(path)
-    rule_doc = rel.startswith(RULE_DOC_PREFIXES)
-
-    for s, rule_item, ref_line in _sentences(prose, rule_doc):
+    for s, rule_item, ref_line in _sentences(prose, rel):
         if rule_item:
             continue  # rule-checklist item: length is structural
         rule_text = LIST_MARKER_RE.sub("", s, count=1)
