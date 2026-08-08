@@ -179,6 +179,16 @@ LIST_MARKER_RE = re.compile(r"^(?:[-*]|\d+[.)])\s+")
 # without a bold title (AGENTS.md required-list, harness rule docs).
 RULE_DOC_PREFIXES = ("AGENTS.md", "docs/harness/rules/")
 
+# Semicolons remain useful when a governance item contains several atomic
+# requirements. Keep the exemption narrow: ordinary guide prose still uses
+# the semicolon warning, while explicit rule items, release-gate templates,
+# and clauses that use the uppercase MUST specification keyword retain their
+# structural separators.
+RELEASE_GATE_TEMPLATE_RE = re.compile(
+    r"(?:release[-_]gate|go[-_]no[-_]go)[^\n]*template", re.IGNORECASE
+)
+MUST_SPECIFICATION_RE = re.compile(r"\bMUST\b")
+
 # Reference line carrying a formal title: "- ADR-0019: 0.9.0 Production
 # Readiness Release Gate Framework", "- RFC 7932 (Brotli Compressed Data
 # Format)", "- Rule 55: ...". Noun chains inside these are document names.
@@ -244,6 +254,37 @@ def _sentences(
     return out
 
 
+def _is_structural_semicolon_line(line: str, rel: str) -> bool:
+    """Return whether semicolons on a line are part of rule structure."""
+    stripped = line.strip()
+    if RULE_ITEM_RE.match(stripped):
+        return True
+    if rel.startswith(RULE_DOC_PREFIXES) and LIST_MARKER_RE.match(stripped):
+        return True
+    if RELEASE_GATE_TEMPLATE_RE.search(rel) and LIST_MARKER_RE.match(stripped):
+        return True
+    return bool(MUST_SPECIFICATION_RE.search(stripped))
+
+
+def _prose_semicolon_count(prose: str, rel: str) -> int:
+    """Count semicolons outside structural rule items and their continuations."""
+    count = 0
+    in_structural_item = False
+    for line in prose.splitlines():
+        if not line.strip():
+            in_structural_item = False
+            continue
+        structural_line = _is_structural_semicolon_line(line, rel)
+        continuation = in_structural_item and line.startswith((" ", "\t"))
+        if structural_line:
+            in_structural_item = True
+        elif not continuation:
+            in_structural_item = False
+        if ";" in line and not (structural_line or continuation):
+            count += line.count(";")
+    return count
+
+
 def audit(text: str, path: Path, limit: int | None) -> list[str]:
     """Return warning lines for one file."""
     prose = _prose_only(text)
@@ -287,7 +328,7 @@ def audit(text: str, path: Path, limit: int | None) -> list[str]:
         warnings.append(
             f"multi-word noun chain '{chain}': expand with prepositions"
         )
-    semi = prose.count(";")
+    semi = _prose_semicolon_count(prose, rel)
     if semi:
         warnings.append(f"{semi} semicolon(s) in prose: split into sentences")
 

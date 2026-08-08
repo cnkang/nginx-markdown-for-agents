@@ -62,6 +62,38 @@ def test_semicolon_detected_in_prose():
     assert any("semicolon" in w for w in warnings)
 
 
+def test_governance_structural_semicolon_is_exempt():
+    text = "- Never send body data before headers; header forwarding must stay explicit.\n"
+    warnings = cws.audit(text, Path("AGENTS.md"), None)
+    assert not any("semicolon" in w for w in warnings)
+
+
+def test_governance_structural_semicolon_continuation_is_exempt():
+    text = "- First requirement; second requirement\n  continuation; final requirement.\n"
+    warnings = cws.audit(text, Path("AGENTS.md"), None)
+    assert not any("semicolon" in w for w in warnings)
+
+
+def test_must_specification_semicolon_is_exempt():
+    text = "The validator MUST reject invalid input; the caller MUST report the failure.\n"
+    warnings = cws.audit(text, Path("docs/guides/x.md"), None)
+    assert not any("semicolon" in w for w in warnings)
+
+
+def test_release_gate_template_semicolon_is_exempt():
+    text = "- Verify the artifact; reject a mismatched checksum.\n"
+    warnings = cws.audit(
+        text, Path("docs/project/release-gates/go-no-go-template.md"), None
+    )
+    assert not any("semicolon" in w for w in warnings)
+
+
+def test_normal_guide_semicolon_still_warns():
+    text = "The guide explains the first behavior; it then describes the second.\n"
+    warnings = cws.audit(text, Path("docs/guides/x.md"), None)
+    assert any("semicolon" in w for w in warnings)
+
+
 def test_code_block_excluded_from_prose_scan():
     text = "```\nThe file is edited by the agent; e.g. don't.\n```\n"
     warnings = cws.audit(text, Path("x.md"), None)

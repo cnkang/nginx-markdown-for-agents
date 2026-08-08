@@ -59,19 +59,19 @@ own objects, provenance is not copied into every scenario record:
 2. **Fallback-rate consistency.** The stored `fallback_rate` in each scenario
    must equal `precommit_failopen_total / streaming_requests_total` (or 0.0
    when `streaming_requests_total == 0`). The evidence gate cross-checks this
-   via `_fallback_rate_consistency_violations`, a mismatch is a gate failure.
+  via `_fallback_rate_consistency_violations`; a mismatch is a gate failure.
    `streaming_fallback_total` remains a separate path-routing counter. The
    module must not substitute it for the pre-commit fail-open ratio.
 3. **Immutable baseline retention.** Once a release gate generates and uses a
    baseline evidence pack, it becomes an immutable audit record.
-   Subsequent regeneration does not overwrite it, the old pack stays preserved
+   Subsequent regeneration does not overwrite it; the old pack stays preserved
    with its own digest.
 4. **Fail closed on missing provenance.** The blocking gate
    (`make release-gates-check-091`) must reject any baseline policy that is
    missing any required provenance field, rather than skipping it silently.
 5. **Raw artifact binding.** For `verbatim_run` baselines, the gate
    recomputes the SHA-256 of the raw artifact file and verifies it matches
-   `source_artifact_sha256`, the finalized report (minus `baseline_policy`)
+   `source_artifact_sha256`; the finalized report (minus `baseline_policy`)
    must be byte-identical to the raw report.
 6. **Scenario source environment.** If `baseline_policy.scenario_sources`
    exists, each entry must declare `platform`, `load_generator`, and

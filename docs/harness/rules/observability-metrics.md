@@ -13,7 +13,7 @@ paths:
 Historical issues: `d2d836f`, `5288c1b`, `19c896c`, `bc35a1f`.
 
 Required:
-- Encode skip-reason mapping explicitly, do not rely on indirect checks that can misclassify edge cases.
+- Encode skip-reason mapping explicitly; do not rely on indirect checks that can misclassify edge cases.
 - Keep reason-code behavior and tests aligned when eligibility logic changes.
 - For protocol edge statuses (for example 206), map to the intended reason consistently even in malformed upstream scenarios.
 - When adding a new reason code string definition and accessor function, the
@@ -54,7 +54,7 @@ Required:
 Historical issues: `478db96`, `b905fee`, `461908f`, `9f3885e`.
 
 Required:
-- Detect and fail on response rendering truncation, never silently emit partial metrics payloads.
+- Detect and fail on response rendering truncation; never silently emit partial metrics payloads.
 - Set response metadata (status/content-length/content-type) only after final body length is known.
 - Keep metrics struct/schema evolution synchronized across C code, tests, docs, and snapshots.
 - When SHM-backed metrics struct layout changes, enforce a hot-reload compatibility strategy:

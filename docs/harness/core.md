@@ -85,8 +85,8 @@ Define the checkable outcome before calling work done:
 - refactor: behavior that must remain unchanged
 - review: concrete risks, missing tests, and regressions
 
-Use the narrowest meaningful verification that proves that outcome. If a
-you skip a stronger check, record why.
+Use the narrowest meaningful verification that proves that outcome. If you
+skip a stronger check, record why.
 
 Warnings are not cleanup theater. Do not silence a warning by weakening checks,
 shrinking coverage, or deleting behavior unless the warning itself proves the

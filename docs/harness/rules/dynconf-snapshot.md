@@ -92,7 +92,7 @@ Required:
   reload returns `RELOAD_APPLIED` or `RELOAD_NO_CHANGE`.
   `applied_mtime` is also updated to `last_mtime` on
   `RELOAD_DRY_RUN_OK` / `RELOAD_DRY_RUN_FAIL` to suppress repeated
-  re-validation of the same file content, it must not advance on
+  re-validation of the same file content; it must not advance on
   `RELOAD_INVALID_FILE` / `RELOAD_IO_ERROR` so the timer retries the
   reload on the next poll cycle.
 - When `last_mtime != applied_mtime`, the timer handler must retry

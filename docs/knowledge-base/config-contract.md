@@ -136,18 +136,11 @@ dynconf validation path. Defaults are inheritance-based (`NGX_CONF_UNSET`).
 | `decompression_ratio` | Maximum decompressed/input ratio |
 | `max_inflight` | Per-worker concurrent conversion bound |
 
-## Removed Surface (do not reference in 0.9.2 docs/configs)
+## Removed Surface
 
-- OTel: `markdown_otel`, `markdown_otel_endpoint` (ADR-0027)
-- Profiles: `markdown_profile` presets `balanced` / `strict_cache` / `streaming_first`
-- Per-path metrics: `markdown_metrics_format`, `markdown_metrics_per_path*`
-- Shadow/zero-copy knobs: `markdown_streaming_shadow`, `markdown_streaming_zero_copy`
-- LLM surface: `markdown_llm_provider`, `markdown_chars_per_token`
-- Standalone limits unified into `markdown_limits`: `markdown_stream_precommit_buffer`,
-  `markdown_stream_flush_min`, `markdown_parse_timeout`, `markdown_parser_budget`,
-  `markdown_decompress_max_size`
-
-Full list (38 removals): `docs/guides/0.9.2-breaking-changes.md`.
+Removed directives are invalid in 0.9.2 and must not appear in documentation
+or configuration examples. See `docs/guides/0.9.2-breaking-changes.md` for the
+authoritative names and migration guidance.
 
 ## Document Updates
 

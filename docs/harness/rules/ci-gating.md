@@ -149,7 +149,7 @@ Required:
   - The change must wire every newly added gate or validator test file into a
     blocking CI job and the workflow's change-detection path filter in the same
     changeset. A test that exists in the repository but never runs in CI is
-    not a gate, the critical tag logic must not execute for the first time
+    not a gate; the critical tag logic must not execute for the first time
     at tag creation.
   - Release evidence that aggregates measurements from multiple runs must
     validate every component's provenance environment against the declared
