@@ -73,7 +73,7 @@ Required:
 - Under `set -e`, command substitutions whose exit status drives
   an error-reporting branch must sit directly in the `if` condition
   (`if output=$(cmd); then ... else ... fi`) or otherwise made explicitly
-  tolerant. Do not assign first and check `$?` afterward, a non-zero command
+  tolerant. Do not assign first and check `$?` afterward; a non-zero command
   substitution can exit the script before diagnostics, summaries, or artifact
   generation run.
 - For HTTP HEAD validation in curl-based harness scripts, use `curl --head`

@@ -24,14 +24,14 @@ priority chain.
 ## Harness Map
 - `AGENTS.md` remains the Codex-first contract and engineering rule map.
 - `AGENTS.md` and `docs/harness/` are the owning harness truth surfaces for
-  tracked repository behavior. Make/CI/checkers must consume these, not local
+  tracked repository behavior; Make/CI/checkers must consume these, not local
   adapter-only summaries.
 - `docs/harness/README.md` is the repo-owned harness entrypoint.
 - `docs/harness/core.md` defines the execution loop, conflict protocol, and
   status semantics.
 - `docs/harness/routing-manifest.json` is the canonical structured routing
-  source, `docs/harness/routing-manifest.md` is the readable overlay.
-- `docs/harness/rules/` contains detailed error-prevention rules grouped by domain. AGENTS.md provides the index.
+  source; `docs/harness/routing-manifest.md` is the readable overlay.
+- `docs/harness/rules/` contains detailed error-prevention rules grouped by domain; AGENTS.md provides the index.
 - Optional local spec inputs are read-only for local spec-oriented work. Do not
   write harness caches, annotations, or durable repo truth into local adapter
   surfaces.
@@ -47,12 +47,12 @@ priority chain.
 - Use NGINX return-code semantics correctly: `NGX_OK`, `NGX_DECLINED`, `NGX_AGAIN`, `NGX_DONE`, `NGX_ERROR`.
 - In HTTP phases/filters, treat `NGX_AGAIN` as suspend-and-resume, not success.
 - Finalize requests with the correct code path (`ngx_http_finalize_request`) when redirect/subrequest/finalization semantics require it.
-- Never send body data before headers, header forwarding state must be explicit and idempotent.
+- Never send body data before headers; header forwarding state must be explicit and idempotent.
 
 ### Memory and concurrency model
 - Prefer NGINX pool allocation for request-lifetime data.
-- Avoid unbounded allocations in request path, every growing buffer must have an explicit cap.
-- Avoid global mutable state, bind long-lived state to config/cycle structures.
+- Avoid unbounded allocations in request path; every growing buffer must have an explicit cap.
+- Avoid global mutable state; bind long-lived state to config/cycle structures.
 - Avoid blocking behavior and blocking libraries in worker request path.
 
 ### C style and conventions
@@ -156,7 +156,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
   another branch.
 - When remediating SonarCloud findings for a PR, fetch findings from
   `api/issues/search` with explicit `componentKeys`, `pullRequest`,
-  and `statuses=OPEN,CONFIRMED`, do not rely solely on dashboard
+  and `statuses=OPEN,CONFIRMED`; do not rely solely on dashboard
   "top issues" summaries, which may include already-closed items.
 
 ### Repository operation safety
@@ -168,12 +168,12 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 - Commit only changes tied to the current request. Before each commit, review
   the staged diff and summarize what changed.
 - Run the relevant checks before pushing when practical. Use normal push
-  access only, do not force-push, rewrite history, change remotes, change
+  access only; do not force-push, rewrite history, change remotes, change
   repository settings, manage collaborators, alter branch protection, or
   delete branches unless the user explicitly requested that operation.
 - Do not use wildcard cleanup deletes, scripted deletion loops, or broad
   recursive deletion commands. Delete only literal named paths required by the
-  task, ask first when multiple deletions or recursive cleanup are necessary.
+  task; ask first when multiple deletions or recursive cleanup are necessary.
 
 ### Pre-output Checklist (domain-grouped)
 
@@ -182,28 +182,28 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-converter, **S** = shell, **P** = python, **D** = docs
 
 **Streaming & Backpressure** (C)
-- NGX_AGAIN resume honors chain ownership: module-owned chains persist, downstream-owned chains drain with NULL, last_buf never overwrites pending data [1]
-- Fail-open return codes correct, replay buffer init/append failure → precommit_error [2,38]
-- failopen_completed prevents duplicate finalize, failopen_count after downstream NGX_OK or NGX_DONE, uniform across ALL fail-open paths (streaming, buffered, buffer-init/append, header filter) [38]
-- UTF-8 tails preserved across chunk boundaries, flush at EOF, streaming tokenizer discard_bom=false, strip stream-start BOM in converter [4]
-- Full-buffer and streaming gzip/deflate/Brotli preserve codec/member lifecycle, streaming state survives arbitrary chunks and backpressure resumes, gzip member resets keep response-wide budgets, the module rejects truncated final streams/members, tests match production routing/formats [44]
-- Terminal-sent latch must not be set on NGX_AGAIN, latch only after successful downstream return [47]
-- Auth Cache-Control commit failure routes through precommit_error, multi-header aggregation checks any_public before has_private [51]
+- NGX_AGAIN resume honors chain ownership: module-owned chains persist; downstream-owned chains drain with NULL; last_buf never overwrites pending data [1]
+- Fail-open return codes correct; replay buffer init/append failure → precommit_error [2,38]
+- failopen_completed prevents duplicate finalize; failopen_count after downstream NGX_OK or NGX_DONE; uniform across ALL fail-open paths (streaming, buffered, buffer-init/append, header filter) [38]
+- UTF-8 tails preserved across chunk boundaries; flush at EOF; streaming tokenizer discard_bom=false; strip stream-start BOM in converter [4]
+- Full-buffer and streaming gzip/deflate/Brotli preserve codec/member lifecycle; streaming state survives arbitrary chunks and backpressure resumes; gzip member resets keep response-wide budgets; the module rejects truncated final streams/members; tests match production routing/formats [44]
+- Terminal-sent latch must not be set on NGX_AGAIN; latch only after successful downstream return [47]
+- Auth Cache-Control commit failure routes through precommit_error; multi-header aggregation checks any_public before has_private [51]
 - Derived-state reconciliation on multi-context drain: ALL derived state reconciled for EVERY popped context [52]
 
 **Memory & Budget** (C, R)
-- All budgets enforced, auxiliary buffers freed on all exits [3]
-- No unbounded allocations, pool-preferred [Baseline]
-- Resizable buffers (buffer.data, scratch, growable decompression buffers) use ngx_alloc/ngx_free exclusively, fixed-size pool-lifetime decompression workspaces may use ngx_pnalloc/ngx_pfree [43]
+- All budgets enforced; auxiliary buffers freed on all exits [3]
+- No unbounded allocations; pool-preferred [Baseline]
+- Resizable buffers (buffer.data, scratch, growable decompression buffers) use ngx_alloc/ngx_free exclusively; fixed-size pool-lifetime decompression workspaces may use ngx_pnalloc/ngx_pfree [43]
 - Every ngx_alloc-backed buffer has matching ngx_free on all exit paths [43]
 
 **Observability & Metrics** (C, R, D)
 - New metrics: complete lifecycle (struct→snapshot→renderer→write site) [8,23]
 - New reason codes: definition + accessor + log_decision() callsite [7,23]
-- Gauge at correct event. NGX_AGAIN not success, delivery ≠ decision counters [8,23]
+- Gauge at correct event; NGX_AGAIN not success; delivery ≠ decision counters [8,23]
 - Cross-boundary metrics: verify complete producer→consumer chain [23]
 - Multi-path exit: symmetric success/failure metrics on every path [23]
-- Metric names match actual semantics, unit suffix matches resolution [8]
+- Metric names match actual semantics; unit suffix matches resolution [8]
 - Format string specifiers match argument list in all renderers (count and type) [8]
 - ngx_log_debugN / ngx_log_errorN suffix digit matches actual argument count [8]
 - `bash tools/harness/detect_ngx_log_arg_count.sh` — harness gate (make harness-security-checks) for suffix-digit mismatch [8]
@@ -213,60 +213,60 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Prefer helper functions over literal FFI struct init [15]
 - Read foreign-owned struct fields BEFORE free/release [15]
 - FFI error code classification covers all header-defined codes [15]
-- FFI operations validate NULL/empty key inputs, guards on both sides of FFI boundary. NULL/empty-input test coverage [46]
+- FFI operations validate NULL/empty key inputs; guards on both sides of FFI boundary; NULL/empty-input test coverage [46]
 - Zero-length value (value_len==0): C-side sets target field to NULL/0, not a zero-length pool alloc [46]
-- Non-trivial Rust FFI exports wrapped in catch_unwind, panic returns error code, not UB [15]
+- Non-trivial Rust FFI exports wrapped in catch_unwind; panic returns error code, not UB [15]
 - Fail-closed fallback: FFI output struct initialized to safe default before catch_unwind [15]
-- Atomic write after catch: closure computes return values, fields written only after Ok [15]
+- Atomic write after catch: closure computes return values; fields written only after Ok [15]
 - FFI resources managed by Drop guards within catch_unwind for panic safety [15]
 - FFI enums use explicit #[repr(u8)] / #[repr(i32)] for layout safety [15]
 - FFI handle consumed after safe_finish/free — no pointer reuse after consumption [15]
 - cbindgen header drift: run make check-headers after Rust FFI changes [15]
-- FFI fat-pointer safety: use as_mut_ptr + mem::forget for slice ownership transfer, empty results return NULL [53]
+- FFI fat-pointer safety: use as_mut_ptr + mem::forget for slice ownership transfer; empty results return NULL [53]
 
 **C Safety** (C)
-- No implicit declarations, narrowing cast needs bounds check + overflow path [24]
-- Const-correctness, no const-dropping casts, no macro-shadow declarations [24]
+- No implicit declarations; narrowing cast needs bounds check + overflow path [24]
+- Const-correctness; no const-dropping casts; no macro-shadow declarations [24]
 - Forward declarations match definitions (same changeset) [24]
-- Forward declarations appear after all typedefs they reference, at file scope [24]
-- NOSONAR annotations include reason + rule ref, bare `/* NOSONAR */` forbidden, only for NGINX API contract [24]
+- Forward declarations appear after all typedefs they reference; at file scope [24]
+- NOSONAR annotations include reason + rule ref; bare `/* NOSONAR */` forbidden; only for NGINX API contract [24]
 - `bash tools/harness/detect_nosonar_discipline.sh` — harness gate (make harness-security-checks) for bare NOSONAR [24]
 - No unguarded ops on NULL/uninitialized/invalid values [Baseline]
-- Orphan comment closers: every */ must have a matching /*, `python3 tools/harness/detect_orphan_comment_close.py` — harness gate (make harness-security-checks) [56]
+- Orphan comment closers: every */ must have a matching /*; `python3 tools/harness/detect_orphan_comment_close.py` — harness gate (make harness-security-checks) [56]
 - #ifdef-guarded function visibility: code outside must not reference functions declared inside #ifdef GUARD. `bash tools/harness/detect_ifdef_guard_visibility.sh` — harness gate (make harness-security-checks) [57]
 
 **NGINX Idioms** (C)
 - Full ngx_list_part_t chain iteration (part→next) [28]
 - Flag clearing after gated op succeeds [29]
-- NUL-terminate ngx_str_t before C API calls, length-bounded matching [30]
-- Cross-TU field visibility: shared headers for multi-file consumers, sentinel consistency [30]
-- Snapshot race: read active_snapshot once at header_filter entry, bind via helper [34]
-- effective_conf NULL-safe access, cross-TU field visibility, sentinel consistency [45]
-- NGX_DONE terminal: return immediately after finalize_request, callers check NGX_DONE [39]
-- Multi-step header modification atomic: abort on first failure, no partial apply [39]
-- Bounded transaction snapshots: capacity overflow fails before mutation, never silently truncate rollback state [39]
+- NUL-terminate ngx_str_t before C API calls; length-bounded matching [30]
+- Cross-TU field visibility: shared headers for multi-file consumers; sentinel consistency [30]
+- Snapshot race: read active_snapshot once at header_filter entry; bind via helper [34]
+- effective_conf NULL-safe access; cross-TU field visibility; sentinel consistency [45]
+- NGX_DONE terminal: return immediately after finalize_request; callers check NGX_DONE [39]
+- Multi-step header modification atomic: abort on first failure; no partial apply [39]
+- Bounded transaction snapshots: capacity overflow fails before mutation; never silently truncate rollback state [39]
 - Header lookup/iteration filters hash==0 (invalidated) entries [40]
-- Content-Type OWS separator accepts HTAB, trailing OWS excluded before parameter comparison [50]
-- Hardcoded HTTP status in reject paths: return conf->error_status instead of NGX_HTTP_BAD_GATEWAY, `bash tools/harness/detect_hardcoded_http_status.sh` — advisory [59]
+- Content-Type OWS separator accepts HTAB; trailing OWS excluded before parameter comparison [50]
+- Hardcoded HTTP status in reject paths: return conf->error_status instead of NGX_HTTP_BAD_GATEWAY; `bash tools/harness/detect_hardcoded_http_status.sh` — advisory [59]
 
 **HTML Sanitizer & Output Safety** (C, R, D)
-- Void elements self-closing, skip-mode name-aware [5]
-- In-link markers accumulated, code-block raw/fence state preserved across text-event boundaries, media URL extraction [6]
-- Streaming code fence language identifier buffered across text-event boundaries, language- prefix matching [6]
+- Void elements self-closing; skip-mode name-aware [5]
+- In-link markers accumulated; code-block raw/fence state preserved across text-event boundaries; media URL extraction [6]
+- Streaming code fence language identifier buffered across text-event boundaries; language- prefix matching [6]
 - Implied or batched structural closures unwind inner-to-outer before enclosing block state [6]
-- Link/URL escaping at every emission site, reject control chars [27]
+- Link/URL escaping at every emission site; reject control chars [27]
 
 **Testing & Coverage** (C, T, R)
-- Every bug fix has regression test, cross-boundary + malformed cases [14]
-- No dead stores, loop vars in for, every var consumed by assertion [16]
+- Every bug fix has regression test; cross-boundary + malformed cases [14]
+- No dead stores; loop vars in for; every var consumed by assertion [16]
 - Side-effect tests drive outcome through production branching, not manual mutation [14]
-- Rust: no unused helpers, #[cfg(feature)] import safety, doctests by visibility [22]
+- Rust: no unused helpers; #[cfg(feature)] import safety; doctests by visibility [22]
 - Coverage: 80% aggregate (90% critical paths) [25]
-- E2E nginx.conf: explicit `markdown_streaming` matching test intent, no implicit auto + blocking directive [60]
+- E2E nginx.conf: explicit `markdown_streaming` matching test intent; no implicit auto + blocking directive [60]
 
 **Shell** (S)
-- Use `[[` for all conditional tests (not `[`), case has default `*)`, messages to stderr, explicit return, usage matches flags [18]
-- macOS bash 3.2 compatible, no GNU-only flags, empty array expansion safe under set -u [11]
+- Use `[[` for all conditional tests (not `[`); case has default `*)`; messages to stderr; explicit return; usage matches flags [18]
+- macOS bash 3.2 compatible; no GNU-only flags; empty array expansion safe under set -u [11]
 - Merge nested `if` without `else` into compound `&&` conditions [18]
 - No unsanitized path interpolation [12]
 
@@ -424,23 +424,23 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   executables must match a fixed canonical allowlist before subprocess use [33]
 - Single-artifact CLI tools should emit stdout for caller redirection instead
   of accepting an unnecessary caller-controlled write path [33]
-- Config nesting matches code, accept both key names [8b]
+- Config nesting matches code; accept both key names [8b]
 - Harness checks affect pass/fail, not INFO-only [19]
 
 **Docs & Tooling** (D)
-- Metric names match emitted keys. Accept header in verification commands [9]
+- Metric names match emitted keys; Accept header in verification commands [9]
 - No regex with overlapping quantifiers [10]
-- C examples use C99+, markdown escaping in examples [27]
+- C examples use C99+; markdown escaping in examples [27]
 - Workflow/script/dependency security docs must mention the matching local
   targets (`make security-static`, `make supply-chain`) and whether the gate is
   PR-blocking or report-oriented visibility [48]
-- THIRD-PARTY-NOTICES must stay in sync with resolved dependency versions,
+- THIRD-PARTY-NOTICES must stay in sync with resolved dependency versions;
   add/remove/update entries in same changeset as Cargo.lock changes [49]
 
 **If the change would violate any item, redesign it before writing.** Do not write code that breaks an item.
 
 ### During coding
-- Preserve NGINX event-driven semantics, no hidden blocking calls.
+- Preserve NGINX event-driven semantics; no hidden blocking calls.
 - Add/adjust tests in the same change set for each fixed behavior.
 - Keep docs and validators synced when user-facing or SOP behavior changes.
 - Clean up imports, variables, helpers, and docs references made unused by the
@@ -460,7 +460,7 @@ Follow evidence-first verification (no completion claim without fresh command ou
 - Schema changes: `make schema-drift-check` (generates metrics-registry/diagnostics-field-contract/dynconf-precedence artifacts from renderer + schemas, then validates drift, wired into release-gates-check-092 and CI release-092-contract-gates)
 - Reason-code changes: `make reason-codegen-check` (reason registry vs generated code, error classification coverage)
 - Release matrix changes: `make release-matrix-check` (canonical docs/release/release-matrix.json vs the checked-in schema. ABI/feature digest binding, fail-closed on aliases)
-- Candidate freeze / release evidence changes: `make release-candidate-evidence-check`, `make artifact-registry-check`, `make release-evidence-manifest-check` (generic pre-freeze gates. FIXTURE=... runs checked-in positive/negative fixtures and is gate regression coverage only, never candidate evidence)
+- Candidate freeze / release evidence changes: `make release-candidate-evidence-check`, `make artifact-registry-check`, `make release-evidence-manifest-check` (generic pre-freeze gates; FIXTURE=... runs checked-in positive/negative fixtures and is gate regression coverage only, never candidate evidence)
 - Fuzz/soak qualification gates: `make test-rust-fuzz-qualification` (15 min or 100k executions per blocking target, whichever is later), `make test-e2e-rust-soak` (30 min at concurrency 16 with RSS/memory/latency recording). FIXTURE mode as above
 - Performance evidence check: `make perf-evidence-check` (non-blocking, module benchmark harness, report-only)
 - Rust converter/streaming changes: `make test-rust`

@@ -19,7 +19,7 @@ Required:
 - Streaming chunk-split fuzz targets must exercise multi-boundary patterns (for
   example many small chunks plus skewed large chunks), not only a single
   two-chunk split.
-- Keep unit/property/fuzz/integration coverage coherent, do not rely on a single test layer.
+- Keep unit/property/fuzz/integration coverage coherent; do not rely on a single test layer.
 - Parameterized tests must actually consume per-case inputs to drive the code
   path under test (no loops that ignore the case value and only mutate counters).
 - Prefer exercising shared routing/helpers used by production semantics over

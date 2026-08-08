@@ -58,7 +58,7 @@ Required:
   invalidates the alias.  Reassignment of a compiled-pattern variable to a
   dynamic value upgrades the binding to `COMPILED_DYNAMIC_PATTERN` (not plain
   `DYNAMIC_VALUE`) so subsequent `compiled.search/match/sub/findall` calls
-  emit a REVIEW referencing the original `compile_line`, this applies to
+  emit a REVIEW referencing the original `compile_line`; this applies to
   Assign, AnnAssign, and AugAssign.  An initially dynamic `re.compile()` emits
   its REVIEW at the compile site only. A second compiled-method REVIEW stays
   reserved for actual reassignment.  Lexical `del` writes a DELETED tombstone
