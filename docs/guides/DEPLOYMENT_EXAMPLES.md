@@ -341,7 +341,7 @@ http {
 
         location /docs/ {
             markdown_filter on;
-            # Override memory limit for large doc pages
+            # Apply a tighter memory limit for this docs location
             markdown_limits conversion_memory=16m;
             proxy_pass http://backend;
         }

@@ -32,7 +32,7 @@ advances the bundled boundary to ABI version **2**. The earlier reset:
 
 These changes are intentionally breaking at the internal FFI boundary. The
 release updates both bundled sides atomically, so operators do not migrate C calls.
-Operators must install or build the complete v0.9.1 module rather than mixing
+Operators must install or build the complete v0.9.2 module rather than mixing
 an older Rust archive or header with the new C module.
 
 ## Explicit ABI alignment

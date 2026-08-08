@@ -12,10 +12,11 @@ token-estimate mode, and any other explicit conversion option. Two requests
 that agree on every element of this tuple must produce byte-identical
 response bodies.
 
-**Unrelated request headers are NOT part of the determinism identity.** The
-`Accept`, `User-Agent`, `Accept-Language`, and other request headers that do
-not participate in the effective input tuple may vary freely between runs
-without affecting the response body.
+**Only headers that participate in the effective input tuple are part of the
+determinism identity.** `Accept` is an explicit Markdown-negotiation input and
+must therefore remain the same when comparing converted responses. Headers
+such as `User-Agent` and `Accept-Language` do not participate in the tuple and
+may vary freely unless the implementation explicitly adds them as inputs.
 
 **Version compatibility policy:** the 1.x compatibility policy does NOT
 promise byte-for-byte output stability across patch versions. Correctness,
