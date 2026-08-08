@@ -10,8 +10,8 @@ This document provides a human-readable companion.
 
 Each metric has a **direction** that determines how threshold comparisons work:
 
-- **lower_is_better** — a regression means the value *increased* (e.g., latency, memory)
-- **higher_is_better** — a regression means the value *decreased* (e.g., throughput)
+- **lower_is_better** — a regression means the value *increased* (for example latency, memory)
+- **higher_is_better** — a regression means the value *decreased* (for example throughput)
 - **informational** — tracked for analysis only. Not subject to threshold gating
 
 | Name | Unit | Collection Method | Aggregation | Direction | Description |

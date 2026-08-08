@@ -39,7 +39,7 @@ This cookbook walks you through enabling the Markdown filter module in a "start 
 
 The recommended approach:
 
-1. Pick a single, low-traffic, static-content path (e.g., `/docs` or `/help`).
+1. Pick a single, low-traffic, static-content path (for example `/docs` or `/help`).
 2. Enable on an internal or staging host first.
 3. Observe for at least one full traffic cycle before expanding.
 4. Expand gradually — more paths, then more hosts.
@@ -564,7 +564,7 @@ http {
 }
 ```
 
-Start with a single low-traffic static-content path (e.g., `/docs` or `/help`) before expanding the `map` to broader patterns.
+Start with a single low-traffic static-content path (for example `/docs` or `/help`) before expanding the `map` to broader patterns.
 
 ---
 
@@ -668,7 +668,7 @@ http {
 
 Keep `markdown_accept strict` (the default) during initial rollout. With `strict`, only explicit `text/markdown` in the Accept header triggers conversion. Clients sending `Accept: */*` or `Accept: text/*` receive HTML unchanged.
 
-If you later want wildcard Accept values (e.g., `text/*`) to trigger conversion, set `markdown_accept wildcard` and expand the `map`:
+If you later want wildcard Accept values (for example `text/*`) to trigger conversion, set `markdown_accept wildcard` and expand the `map`:
 
 ```nginx
     map $http_accept $markdown_by_accept {
@@ -843,7 +843,7 @@ http {
 }
 ```
 
-Adjust the percentage as confidence grows (e.g., 5% → 25% → 50% → 100%). Follow each increase with a 24-hour observation period. Observe metrics between each step.
+Adjust the percentage as confidence grows (for example 5% → 25% → 50% → 100%). Follow each increase with a 24-hour observation period. Observe metrics between each step.
 
 Trade-offs: broader coverage than internal-only, provides statistical sampling of real traffic. However, the same client may see different behavior across requests (conversion is not sticky per client). Use `$remote_addr` for rough client-level consistency, or `$request_id` for per-request randomization.
 

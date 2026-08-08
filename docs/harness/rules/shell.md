@@ -49,7 +49,7 @@ Required:
 - For repeated assertions in multi-case e2e scripts, centralize checks in helper
   functions (for example HTTP status/header/body assertions) to keep failure
   semantics consistent and reduce copy/paste drift.
-- Checks documented as required assertions must fail the case/run when missing;
+- Checks documented as required assertions must fail the case/run when missing,
   do not leave them as INFO-only log lines.
 - `--plan`/dry-run style modes must short-circuit unconditionally before
   runtime prerequisites (for example `NGINX_BIN` checks), regardless of other
@@ -60,7 +60,7 @@ Required:
 - When one tooling script orchestrates other repo scripts, the caller must match
   the callee's real interface contract exactly (flag vs environment variable vs
   positional argument). Do not pass synthetic flags that the callee does not
-  parse; verify against the callee's `usage()`/option parser in the same
+  parse, verify against the callee's `usage()`/option parser in the same
   changeset.
 - Cross-script invocations in CI/tooling paths must not assume executable bits
   the script preserves them in all environments. Prefer `bash path/to/script.sh` (or ensure
@@ -73,7 +73,7 @@ Required:
 - Under `set -e`, command substitutions whose exit status drives
   an error-reporting branch must sit directly in the `if` condition
   (`if output=$(cmd); then ... else ... fi`) or otherwise made explicitly
-  tolerant. Do not assign first and check `$?` afterward; a non-zero command
+  tolerant. Do not assign first and check `$?` afterward, a non-zero command
   substitution can exit the script before diagnostics, summaries, or artifact
   generation run.
 - For HTTP HEAD validation in curl-based harness scripts, use `curl --head`

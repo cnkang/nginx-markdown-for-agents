@@ -13,7 +13,7 @@ The html5ever parser implements the HTML5 specification's entity decoding algori
 1. **Named Entities**: Common entities like `&amp;`, `&lt;`, `&gt;`, `&quot;`, `&#39;`, `&nbsp;` decode to their corresponding characters
 2. **Decimal Numeric Entities**: Entities like `&#65;` (A), `&#48;` (0) decode to their Unicode characters
 3. **Hexadecimal Numeric Entities**: Entities like `&#x41;` (A), `&#x20AC;` (€) decode to their Unicode characters
-4. **Unicode Entities**: All valid Unicode entities decode, including special characters like smart quotes, currency symbols, etc.
+4. **Unicode Entities**: All valid Unicode entities decode, including special characters like smart quotes, currency symbols, and so on
 
 ### Text Extraction
 
@@ -52,7 +52,7 @@ The converter can represent and decode all valid Unicode characters. This covers
 
 ### Double-Encoded Entities
 
-If HTML contains double-encoded entities (e.g., `&amp;lt;`), html5ever decodes them only once:
+If HTML contains double-encoded entities (for example `&amp;lt;`), html5ever decodes them only once:
 - `&amp;lt;` → `&lt;` (not `<`)
 - `&amp;amp;` → `&amp;` (not `&`)
 
@@ -108,8 +108,8 @@ The parser performs entity decoding once during HTML parsing, not during Markdow
 Using html5ever's built-in entity decoding ensures:
 - **Specification Compliance**: Follows HTML5 specification exactly
 - **Comprehensive Support**: The converter supports all valid HTML entities
-- **Edge Case Handling**: The converter handles malformed entities, invalid code points, etc. correctly
-- **Security**: No risk of entity-related vulnerabilities (XSS, etc.)
+- **Edge Case Handling**: The converter handles malformed entities, invalid code points, and so on correctly
+- **Security**: No risk of entity-related vulnerabilities (XSS, and so on)
 
 ## Requirements Satisfied
 
@@ -120,7 +120,7 @@ The implementation:
 - ✅ Decodes common named entities (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&#39;`)
 - ✅ Handles numeric entities (decimal and hexadecimal)
 - ✅ Supports all Unicode characters
-- ✅ Works correctly in all HTML contexts (text, attributes, code, etc.)
+- ✅ Works correctly in all HTML contexts (text, attributes, code, and so on)
 - ✅ Has comprehensive test coverage
 
 ## References

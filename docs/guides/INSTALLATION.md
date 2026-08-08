@@ -938,8 +938,8 @@ Look for `nginx_markdown_requests_total`,
 
 The default configuration uses `markdown_error_policy pass` (fail-open). This means:
 
-- If the module attempts a conversion and the conversion **fails** (e.g., timeout, converter error), it returns the original HTML response with `Content-Type: text/html`.
-- This is **distinct** from requests that were never eligible for conversion (e.g., wrong `Content-Type`, non-200 status, missing `Accept: text/markdown` header). Those are "skipped" requests, not "fail-open."
+- If the module attempts a conversion and the conversion **fails** (for example timeout, converter error), it returns the original HTML response with `Content-Type: text/html`.
+- This is **distinct** from requests that were never eligible for conversion (for example wrong `Content-Type`, non-200 status, missing `Accept: text/markdown` header). Those are "skipped" requests, not "fail-open."
 - To detect fail-open events, inspect the NGINX error log for conversion failure messages.
 
 ---
@@ -1089,7 +1089,7 @@ ERROR: Architecture "s390x" is not supported. Supported: x86_64, aarch64
 ```
 
 **Root Cause:**
-Pre-built binaries are only available for `x86_64` and `aarch64` architectures. Other architectures (e.g., `s390x`, `ppc64le`, `armv7l`) are not in the release matrix.
+Pre-built binaries are only available for `x86_64` and `aarch64` architectures. Other architectures (for example `s390x`, `ppc64le`, `armv7l`) are not in the release matrix.
 
 **Resolution Steps:**
 
@@ -1116,7 +1116,7 @@ dlopen() ... failed (Error relocating ... symbol not found)
 or the install script reports a libc detection mismatch.
 
 **Root Cause:**
-The user installed a glibc-linked binary on a musl-based system (e.g., Alpine Linux), or the reverse. The two C standard library implementations are not ABI-compatible.
+The user installed a glibc-linked binary on a musl-based system (for example Alpine Linux), or the reverse. The two C standard library implementations are not ABI-compatible.
 
 **Resolution Steps:**
 
@@ -1269,7 +1269,7 @@ The module only converts a response when all eligibility requirements are met. I
 The eligibility requirements are:
 
 1. **HTTP status 200** — the upstream response must have status code `200 OK`. Redirects (3xx), client errors (4xx), and server errors (5xx) are not eligible.
-2. **Upstream `Content-Type: text/html`** — the upstream response must have `Content-Type: text/html` (with any charset parameter). Other content types (e.g., `application/json`, `text/plain`) are not eligible.
+2. **Upstream `Content-Type: text/html`** — the upstream response must have `Content-Type: text/html` (with any charset parameter). Other content types (for example `application/json`, `text/plain`) are not eligible.
 3. **Request `Accept` includes `text/markdown`** — the client request must include `text/markdown` in the `Accept` header. Without this, the module does not activate.
 4. **Response size within effective limits** — the upstream response body must
    not exceed the effective full-buffer or streaming limit. If
@@ -1327,7 +1327,7 @@ The upstream response for those pages does not meet the eligibility criteria. Co
    curl -sI http://localhost/path/to/page | grep -i content-type
    ```
 4. If the upstream returns a different content type, the module correctly skips conversion. Conversion only applies to HTML content.
-5. If the upstream returns a non-200 status, resolve the upstream issue first (e.g., fix the redirect chain, resolve the 404).
+5. If the upstream returns a non-200 status, resolve the upstream issue first. For example, fix the redirect chain or resolve the 404.
 
 ---
 

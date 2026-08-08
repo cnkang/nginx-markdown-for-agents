@@ -43,7 +43,7 @@ handling, header value forwarding, or content-injection prevention changes.
   separators rejected, IPv6 bracket literals validated, fallback to server
   name on invalid input
 - Rust escaping iterates over `chars()`, not `bytes()`, so multi-byte code
-  points are handled atomically
+  points get handled atomically
 - No new `write!` / `format!` that interpolates untrusted text in Markdown
   link labels `[...]` or destinations `(...)` / `<...>`
 

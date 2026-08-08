@@ -46,7 +46,7 @@ Python tooling, and `shellcheck` on shell scripts.
 - Shell: static analysis via shellcheck (not cognitive complexity)
 
 **What it does NOT check:**
-- Shell cognitive complexity (no reliable tool; shellcheck covers static issues)
+- Shell cognitive complexity (no reliable tool, shellcheck covers static issues)
 - Test fixture files (excluded from scan paths)
 - Generated code, vendored code, build artifacts
 
@@ -89,7 +89,7 @@ apt install shellcheck    # Debian/Ubuntu
 - A legitimate-looking large lookup table or NGINX lifecycle function still
   the module must decompose it when it exceeds a configured threshold.
 - Do not suppress warnings or raise thresholds to accommodate a violation.
-- Existing violations are subject to the same blocking rule as new violations;
+- Existing violations are subject to the same blocking rule as new violations,
   the current tree must be clean before delivery.
 
 **Shell note:** Shell scripts get checked with `shellcheck` for static issues

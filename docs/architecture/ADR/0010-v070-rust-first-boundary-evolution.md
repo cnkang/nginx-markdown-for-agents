@@ -91,35 +91,35 @@ NGINX-coupled responsibilities.
 ### Positive Consequences
 
 - **Testability**: Pure Rust logic is trivially unit-testable without NGINX
-  infrastructure; property-based tests cover negotiation and decision paths.
+  infrastructure, property-based tests cover negotiation and decision paths.
 - **Safety**: Memory-safe Rust eliminates classes of bugs in parsing, validation,
   and decision logic.
 - **Single source of truth**: Reason codes, error categories, and decision logic
   have one canonical definition—no C/Rust semantic forks.
 - **CI enforcement**: Header drift checks and layout tests catch ABI
   incompatibilities before merge.
-- **Incremental migration**: Existing stable FFI functions remain unchanged;
+- **Incremental migration**: Existing stable FFI functions remain unchanged,
   new functions are additive.
 
 ### Negative Consequences
 
-- **FFI surface growth**: More FFI functions and structs to maintain; mitigated
+- **FFI surface growth**: More FFI functions and structs to maintain, mitigated
   by helper constructors and CI drift checks.
-- **Build dependency**: All contributors need the Rust toolchain; mitigated by
+- **Build dependency**: All contributors need the Rust toolchain, mitigated by
   existing CI infrastructure.
 - **Coordination cost**: C and Rust changes for the same feature must land
-  together; mitigated by Rule 15 (FFI cross-language boundary) enforcement.
-- **Debugging complexity**: Cross-language stack traces are harder to read;
+  together, mitigated by Rule 15 (FFI cross-language boundary) enforcement.
+- **Debugging complexity**: Cross-language stack traces are harder to read,
   mitigated by structured logging at the FFI boundary.
 
 ## Alternatives Considered
 
 ### Keep Pure Logic in C
 
-**Pros:** No FFI overhead for new functions; single-language debugging.
+**Pros:** No FFI overhead for new functions, single-language debugging.
 
-**Cons:** Loses memory safety for parsing/validation; harder to test without
-NGINX; duplicates logic that Rust already handles well.
+**Cons:** Loses memory safety for parsing/validation, harder to test without
+NGINX, duplicates logic that Rust already handles well.
 
 **Why not chosen:** The v0.5.0–v0.6.x experience showed that C-side pure logic
 accumulates subtle bugs (buffer overflows, missing error paths) that Rust's type
@@ -129,8 +129,8 @@ system prevents at compile time.
 
 **Pros:** Maximizes Rust safety coverage.
 
-**Cons:** Requires unsafe Rust wrappers around all NGINX APIs; loses NGINX
-idiom familiarity; massive migration scope.
+**Cons:** Requires unsafe Rust wrappers around all NGINX APIs, loses NGINX
+idiom familiarity, massive migration scope.
 
 **Why not chosen:** NGINX API usage is inherently unsafe and C-idiomatic. The
 cost of wrapping every NGINX function in safe Rust abstractions exceeds the

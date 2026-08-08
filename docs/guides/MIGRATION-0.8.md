@@ -185,7 +185,7 @@ The `ngx_http_markdown_ctx_t` struct has changed in 0.8.0:
   `MARKDOWN_STREAMING_ENABLED`) and includes the full state machine context.
 - `ctx->streaming` sub-struct has new fields for the v0.8.0 streaming
   architecture (completion latches, failopen_replay_buf, pending output
-  bytes tracking, etc.).
+  bytes tracking, and so on).
 - `ctx->streaming.commit_state` field semantics changed from the v0.6.x
   meaning.
 

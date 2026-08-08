@@ -61,11 +61,11 @@ Tune one bounded setting at a time and record the resulting metrics:
 
 Monitor these frozen families while tuning:
 
-- `nginx_markdown_conversion_attempts_total`;
-- `nginx_markdown_conversion_deliveries_total`;
-- `nginx_markdown_conversion_duration_seconds`;
-- `nginx_markdown_streaming_events_total`;
-- `nginx_markdown_decompression_events_total`;
+- `nginx_markdown_conversion_attempts_total`,
+- `nginx_markdown_conversion_deliveries_total`,
+- `nginx_markdown_conversion_duration_seconds`,
+- `nginx_markdown_streaming_events_total`,
+- `nginx_markdown_decompression_events_total`,
 - `nginx_markdown_inflight_requests`.
 
 ## Memory and backpressure

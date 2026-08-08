@@ -156,20 +156,20 @@ No subsequent call may re-feed the same compressed data.
 - **Brotli-disabled builds** (`NGX_HTTP_BROTLI` undefined): identical public
   ABI, zero Brotli linker references, no unconditional dependency added
 - **Official Brotli-enabled builds** (release artifacts): intentionally depend
-  on `libbrotlidec` at build time and runtime (DEB: `libbrotli1`; RPM:
-  `libbrotli`; Homebrew: `depends_on "brotli"`)
+  on `libbrotlidec` at build time and runtime (DEB: `libbrotli1`. RPM:
+  `libbrotli`. Homebrew: `depends_on "brotli"`)
 - All Brotli streaming code guarded by `#ifdef NGX_HTTP_BROTLI` — enforced by
   `detect_ifdef_guard_visibility.sh` CI gate
 
 ### Build-Control Mechanism
 
 Configure-time environment variable `NGX_MARKDOWN_BROTLI_STREAMING` (values:
-`auto` | `on` | `off`; default `auto`):
+`auto` | `on` | `off`, default `auto`):
 
-- `on`: probe for `<brotli/decode.h>` + `libbrotlidec`; define
-  `NGX_HTTP_BROTLI`; link decoder. Configure failure if dependency missing.
+- `on`: probe for `<brotli/decode.h>` + `libbrotlidec`, define
+  `NGX_HTTP_BROTLI`, link decoder. Configure failure if dependency missing.
 - `off`: no probing, no linking, Brotli remains on full-buffer Rust FFI path.
-- `auto`: probe silently; success enables streaming, failure falls back.
+- `auto`: probe silently, success enables streaming, failure falls back.
 
 ### Go/No-Go Freeze Criteria
 

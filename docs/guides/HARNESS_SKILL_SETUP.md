@@ -26,7 +26,7 @@ npx skills ls
 
 Notes:
 
-- `--full-depth` is required because this repository stores skills under
+- The repository requires `--full-depth` because it stores skills under
   `skills/` instead of at the repo root.
 - This installs a project-scoped skill by default (recommended for contributors).
 - If your setup prompts for an agent target, select the agent you use in your

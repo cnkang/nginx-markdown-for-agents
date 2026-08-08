@@ -51,7 +51,7 @@ OTel may return in a future release (1.1+) if ALL of the following
 conditions are met:
 
 1. **Stable upstream dependency**: An NGINX-native OTel module
-   (e.g., `ngx_otel_module`) reaches stable release status, providing
+   (for example `ngx_otel_module`) reaches stable release status, providing
    standardized span context propagation without per-module reimplementation.
 
 2. **Complete feature scope**: The reintroduced implementation must cover at

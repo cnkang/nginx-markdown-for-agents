@@ -110,7 +110,7 @@ NGINX source tree and configuration.
 ### libc Constraints
 
 - When published, prebuilt packages may target both glibc and musl variants.
-- A glibc-built module will not load on a musl-based system (e.g., Alpine
+- A glibc-built module will not load on a musl-based system (for example Alpine
   Linux) and vice versa.
 - Use `ldd --version` to determine your libc type.
 

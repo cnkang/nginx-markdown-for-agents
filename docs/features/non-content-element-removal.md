@@ -52,7 +52,7 @@ The implementation includes comprehensive unit tests:
 
 4. **`test_multiple_non_content_removal`**: Tests removal of multiple non-content elements in one document
 5. **`test_nested_non_content_removal`**: Tests removal of non-content elements nested within other elements
-6. **`test_script_with_attributes_removal`**: Tests removal of script tags with attributes (type, src, etc.)
+6. **`test_script_with_attributes_removal`**: Tests removal of script tags with attributes (type, src, and so on)
 7. **`test_style_in_head_removal`**: Tests removal of style tags in the `<head>` section
 8. **`test_inline_script_removal`**: Tests removal of inline JavaScript event handlers in script tags
 9. **`test_content_preservation_around_non_content`**: Verifies that content before and after non-content elements stays preserved correctly
@@ -134,11 +134,11 @@ The current implementation focuses on the three core non-content elements. Futur
 
 ## Related: Form Element Content Preservation
 
-Form-related elements (`<form>`, `<button>`, `<select>`, `<textarea>`, `<fieldset>`, `<label>`, `<option>`, etc.) get separate handling from non-content elements. Instead of removing them entirely, the module strips their HTML tags while preserving child text content in the Markdown output. This ensures AI agents retain meaningful information such as labels, button captions, and option lists. See `docs/features/security.md` Layer 2 for details.
+Form-related elements (`<form>`, `<button>`, `<select>`, `<textarea>`, `<fieldset>`, `<label>`, `<option>`, and so on) get separate handling from non-content elements. Instead of removing them entirely, the module strips their HTML tags while preserving child text content in the Markdown output. This ensures AI agents retain meaningful information such as labels, button captions, and option lists. See `docs/features/security.md` Layer 2 for details.
 
 ## Related: Embedded Content Element Handling
 
-Embedded content elements (`<iframe>`, `<object>`, `<embed>`) also use a strip-tag-keep-content approach. The module extracts the `src`/`data` URL as a Markdown link (using the `title` attribute as label when available). Any fallback child text stays preserved. It suppresses dangerous URL schemes (`javascript:`, `data:`, etc.). See `docs/features/security.md` Layer 2 for details.
+Embedded content elements (`<iframe>`, `<object>`, `<embed>`) also use a strip-tag-keep-content approach. The module extracts the `src`/`data` URL as a Markdown link (using the `title` attribute as label when available). Any fallback child text stays preserved. It suppresses dangerous URL schemes (`javascript:`, `data:`, and so on). See `docs/features/security.md` Layer 2 for details.
 
 ## Related: Media Element URL Extraction
 

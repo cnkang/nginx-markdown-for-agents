@@ -106,12 +106,12 @@ python3 tools/docs/check_writing_style.py [--strict|--changed|--baseline [N]] [-
 - Default: reports warnings, exits 0 — safe for CI and local use.
 - `--strict`: exits 1 when warnings exist (opt-in gate).
 - `--changed`: exits 1 when a changed file (working tree + staged since
-  `--base`, default HEAD) introduces a warning that did not exist before.
-  This is the per-changeset gate (harness Rule 63): new or edited prose
-  must not add violations, while pre-existing warnings in a file stay
-  allowed until the file gets cleaned up.
+  `--base`, default HEAD) introduces any warning. This is the per-changeset
+  gate (harness Rule 63): new or edited prose must not add violations. The
+  repository now passes the full audit with zero warnings, so a warning in
+  any touched file fails the gate.
 - `--baseline [N]`: exits 1 when the repository-wide warning total exceeds
-  the retained budget N (default 295, see `DEFAULT_BASELINE` in the
+  the retained budget N (default 0, see `DEFAULT_BASELINE` in the
   checker). Guards against regressions. Lower N as docs improve.
 - `--limit N`: cap warnings per file.
 - The checker excludes code blocks, tables, headings, and inline code. It

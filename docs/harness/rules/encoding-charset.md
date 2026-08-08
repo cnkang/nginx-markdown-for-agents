@@ -38,7 +38,7 @@ Required:
   payload formats.  In 0.9.1, gzip and deflate are streaming-eligible under
   the configured decompression/cache gates.  Brotli additionally requires a
   successful `libbrotlidec` probe under
-  `NGX_MARKDOWN_BROTLI_STREAMING=auto|on`; `off` or an `auto` probe failure
+  `NGX_MARKDOWN_BROTLI_STREAMING=auto|on`, `off` or an `auto` probe failure
   selects bounded full-buffer decompression instead of defining
   `NGX_HTTP_BROTLI`.  Brotli streaming reuses the same codec/member
   lifecycle invariants as gzip/deflate: the module must reject tail data,
@@ -50,7 +50,7 @@ Required:
 - A gzip `Z_STREAM_END` completes one gzip member, not necessarily the HTTP
   response.  Both full-buffer and streaming decoders must consume every
   concatenated member exactly once.  The C fallback resets the inflater while
-  preserving remaining `avail_in`; the Rust full-buffer path uses a
+  preserving remaining `avail_in`, the Rust full-buffer path uses a
   multi-member decoder.  Streaming additionally accepts a boundary exactly
   between feeds.  Response finalization succeeds at a complete member boundary
   and rejects an incomplete final member.
@@ -65,7 +65,7 @@ Required:
   - raw deflate (RFC 1951): `windowBits = -15` (`-MAX_WBITS`)
   Mixing the two formats without sniffing causes silent data corruption
   or decompression failures on chunk boundaries.  The buffered path
-  retries on format mismatch; the streaming path cannot retry once
+  retries on format mismatch, the streaming path cannot retry once
   the module consumes chunks, so the sniff is mandatory.
 - Truncated gzip members and deflate streams (either deflate format) must be
   explicitly rejected
@@ -75,7 +75,7 @@ Required:
   error rather than returning partial output.
 - Test harnesses that produce compressed payloads for streaming
   decompression tests must use the correct deflate format matching
-  the test intent (raw deflate: `windowBits = -15`; zlib-wrapped:
+  the test intent (raw deflate: `windowBits = -15`, zlib-wrapped:
   `windowBits = 15`).  Mismatched compression modes between test
   payload and production decompressor produce false passes or false
   failures.
@@ -83,12 +83,12 @@ Required:
   streaming,
   both paths must handle the same deflate formats.  If full-buffer uses
   `ngx_http_markdown_decompress_gzip`, the streaming path must independently
-  configure gzip framing and sniff both deflate formats; do not assume the
+  configure gzip framing and sniff both deflate formats, do not assume the
   two paths share format configuration or member lifecycle.
 
 - `Z_OK` and `Z_BUF_ERROR` have distinct semantics in `inflate()`:
   `Z_OK` means inflate made progress (consumed input and/or produced
-  output); `Z_BUF_ERROR` means no progress was made.  When the output
+  output), `Z_BUF_ERROR` means no progress was made.  When the output
   buffer exhausts (`avail_out == 0`), both codes stay recoverable by
   growing the buffer and retrying.  However, `Z_BUF_ERROR` with available
   output space, remaining input, and no change in `total_out` is an

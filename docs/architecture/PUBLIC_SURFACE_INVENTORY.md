@@ -12,9 +12,9 @@ The extraction and drift-check decision appears in
 
 The evidence order for this inventory is:
 
-1. the NGINX command table and production request path;
-2. production-path unit and end-to-end tests;
-3. generated Rust/C FFI headers and their in-repository callers;
+1. the NGINX command table and production request path,
+2. production-path unit and end-to-end tests,
+3. generated Rust/C FFI headers and their in-repository callers,
 4. operator documentation.
 
 When those sources disagree, the production path is the current behavior and
@@ -247,19 +247,19 @@ stay binding regardless.
 
 The public surface is ready to freeze only when all of the following are true:
 
-- every active directive is either stable or explicitly experimental;
+- every active directive is either stable or explicitly experimental,
 - removed directives are absent from the command table and use the standard
-  NGINX unknown-directive migration behavior;
-- the diagnostics endpoint and its documentation describe the same wire JSON;
+  NGINX unknown-directive migration behavior,
+- the diagnostics endpoint and its documentation describe the same wire JSON,
 - the module rejects diagnostics mutation methods and no undocumented rollback API
   or response schema exists. The endpoint exposes read-only state only.
-- the diagnostics schema contains exactly the seven frozen top-level fields;
+- the diagnostics schema contains exactly the seven frozen top-level fields,
 - the metrics catalog, reason-family mapping, and label set match the production
-  renderer;
-- OTel is absent from production code and the command table;
+  renderer,
+- OTel is absent from production code and the command table,
 - `markdown_trusted_proxies` has one documented, tested context/inheritance
-  contract;
+  contract,
 - all FFI declarations have an in-repository consumer or a documented reason to
-  remain internal;
+  remain internal,
 - `make docs-check`, `make test-nginx-unit`, `make test-rust`, and the relevant
   production E2E gates pass.

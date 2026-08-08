@@ -37,7 +37,7 @@ ingested by `tools/perf/evidence_gate.py`) must carry all of the following:
 | `normalization` | Normalization mode applied | `"none"` for `verbatim_run`; `"conservative"` for `conservative_normalized` |
 
 **Evidence object levels.** These fields are intentionally scoped to their
-own objects; provenance is not copied into every scenario record:
+own objects, provenance is not copied into every scenario record:
 
 - `baseline_policy` carries `source_git_commit`, `source_run`,
   `source_artifact`, `source_artifact_sha256`, `measurement_timestamp`, and
@@ -59,19 +59,19 @@ own objects; provenance is not copied into every scenario record:
 2. **Fallback-rate consistency.** The stored `fallback_rate` in each scenario
    must equal `precommit_failopen_total / streaming_requests_total` (or 0.0
    when `streaming_requests_total == 0`). The evidence gate cross-checks this
-   via `_fallback_rate_consistency_violations`; a mismatch is a gate failure.
+   via `_fallback_rate_consistency_violations`, a mismatch is a gate failure.
    `streaming_fallback_total` remains a separate path-routing counter and must
    the module must not substitute it for the pre-commit fail-open ratio.
 3. **Immutable baseline retention.** Once a release gate generates and uses a
    baseline evidence pack, it becomes an immutable audit record.
-   Subsequent regeneration does not overwrite it; the old pack stays preserved
+   Subsequent regeneration does not overwrite it, the old pack stays preserved
    with its own digest.
 4. **Fail closed on missing provenance.** The blocking gate
    (`make release-gates-check-091`) must reject any baseline policy that is
    missing any required provenance field, rather than skipping it silently.
 5. **Raw artifact binding.** For `verbatim_run` baselines, the gate
    recomputes the SHA-256 of the raw artifact file and verifies it matches
-   `source_artifact_sha256`; the finalized report (minus `baseline_policy`)
+   `source_artifact_sha256`, the finalized report (minus `baseline_policy`)
    must be byte-identical to the raw report.
 6. **Scenario source environment.** If `baseline_policy.scenario_sources`
    exists, each entry must declare `platform`, `load_generator`, and
@@ -80,21 +80,21 @@ own objects; provenance is not copied into every scenario record:
 
 **Verification:**
 - `RELEASE_GATE_ALLOW_SKIP_MODULE=1 make release-gates-check-091` — blocking
-  gate (requires `NGINX_BIN` or `RELEASE_GATE_ALLOW_SKIP_MODULE=1`); validates
+  gate (requires `NGINX_BIN` or `RELEASE_GATE_ALLOW_SKIP_MODULE=1`), validates
   `baseline_policy`, top-level `module_benchmark` environment/identity,
   and each scenario's evidence objects at their respective levels.
-- `make perf-evidence-check` — non-blocking report-only mode; validates the
+- `make perf-evidence-check` — non-blocking report-only mode, validates the
   same invariant for PR visibility.
 - `python3 -m pytest tools/perf/tests/` — perf tooling test suite
-  (692 tests); must pass.
+  (692 tests), must pass.
 - Inspect `perf/baselines/module-baseline-091.json` `baseline_policy` and
-  confirm it carries the six policy provenance fields above; inspect
+  confirm it carries the six policy provenance fields above, inspect
   `module_benchmark` and scenario records for their separate schemas.
 
 **Why this rule.** Without a single contract, evidence provenance fields
 appeared one at a time as blockers surfaced (seven commits). The result
 was working but undocumented as a unit — the next person to extend the gate
-had no way to know which fields were required vs. optional. This rule captures
+had no way to tell required from optional fields. This rule captures
 the invariant the seven commits collectively established.
 
 ---
@@ -136,7 +136,7 @@ normalization sequence because key aliases (`nginx` / `nginx_version`,
    a second, inconsistent lookup.
 
 **Verification:**
-- `python3 -m pytest tools/release/matrix/tests/ -v --tb=short` — 114 tests;
+- `python3 -m pytest tools/release/matrix/tests/ -v --tb=short` — 114 tests,
   all must pass. These tests exercise both canonical (`nginx_version`/`os_type`)
   and legacy (`nginx`/`os`) key entries through the shared normalization path.
 
@@ -162,7 +162,7 @@ sort) in the same way.
   `source_artifact_digest`), `normalization` added, `source_environment`
   moved to `scenario_sources`. Replaced "bounded metrics only" and
   "fallback-rate truth" with accurate fallback-rate consistency contract
-  (stored vs. counter-derived) and raw-artifact binding. Added
+  (stored versus counter-derived) and raw-artifact binding. Added
   `_fallback_rate_consistency_violations` to evidence gate.
 - **2026-07-29**: Added Rules 61–62 after v0.9.0→HEAD fix-commit recurrence
   analysis identified two incremental-design gaps: the 7-commit performance

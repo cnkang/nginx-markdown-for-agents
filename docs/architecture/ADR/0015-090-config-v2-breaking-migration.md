@@ -66,16 +66,16 @@ Stub set: `markdown_on_wildcard`, `markdown_etag`,
 ### Cross-directive conflict rules (validated at `nginx -t`)
 
 - `markdown_cache_validation full` + `markdown_streaming force` → **error**
-  (streaming cannot generate a strong ETag for chunked output; headers commit
+  (streaming cannot generate a strong ETag for chunked output, headers commit
   before the transformed body is known — see ADR-0017).
-- `markdown_cache_validation full` + `markdown_streaming auto` → **warning**;
+- `markdown_cache_validation full` + `markdown_streaming auto` → **warning**,
   at runtime the module blocks streaming and the request uses full-buffer with full
   validation, reason code `streaming_block_full_cache_validation` (ADR-0018).
 - `markdown_accept force` + `markdown_auth_policy deny` → **warning** (dangerous).
 
 ### Dynconf schema version
 
-Dynconf JSON gains an explicit `schema_version` field; 0.9.0 = `"0.9"`.
+Dynconf JSON gains an explicit `schema_version` field. 0.9.0 = `"0.9"`.
 Missing/unknown version → error. Static config and dynconf share one Rust
 validator core.
 
@@ -83,7 +83,7 @@ validator core.
 
 ### Positive Consequences
 
-- Small, auditable 1.0 config surface; clear breaking boundary.
+- Small, auditable 1.0 config surface, clear breaking boundary.
 - `nginx -t` fails fast with actionable migration hints instead of silent
   unknown-directive errors.
 - One validator core for static + dynconf eliminates drift.
@@ -94,7 +94,7 @@ validator core.
 - Reject-only stubs add parser entries that exist only to error (removed in 1.0).
 - No in-band rollback command is part of the config schema. For dynamic
   configuration, 0.9.2 restores a prior valid file by atomic replacement and
-  reuses the normal watcher validation path; the worker-consistency decision
+  reuses the normal watcher validation path, the worker-consistency decision
   appears in [ADR-0026](0026-dynconf-file-restore-contract.md).
 
 ## Alternatives Considered
@@ -104,7 +104,7 @@ validator core.
 - **Drop directives with no stub (rely on NGINX unknown-directive error)**:
   rejected — NGINX cannot emit a migration hint, producing poor operator UX.
 - **Per-location `markdown_trusted_proxies`**: rejected — per-location trust
-  creates local trust-bypass risk; http-only is auditable (ADR-0016).
+  creates local trust-bypass risk, http-only is auditable (ADR-0016).
 
 ## References
 

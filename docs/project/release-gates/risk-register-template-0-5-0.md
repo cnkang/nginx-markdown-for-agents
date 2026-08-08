@@ -16,7 +16,7 @@ Each sub-spec uses this template to maintain a risk register. The Go/No-Go revie
 
 ## Required Fields
 
-1. **Risk Identifier** (#): Unique identifier (R1, R2, etc.)
+1. **Risk Identifier** (#): Unique identifier (R1, R2, and so on)
 2. **Risk Description**: Specific description of the risk
 3. **Likelihood**: Low, Medium, or High
 4. **Impact**: Low, Medium, or High

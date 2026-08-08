@@ -3,7 +3,7 @@
 > ⚠️ **RETIRED IN 0.9.0** — The `markdown_large_body_threshold` directive
 > documented in this playbook is a **reject-only stub** in 0.9.0+. Setting it
 > in `nginx.conf` causes `nginx -t` to fail with a migration hint. There is no
-> Config V2 replacement; the incremental-path threshold is no longer
+> Config V2 replacement, the incremental-path threshold is no longer
 > user-configurable. This playbook stays as a historical reference for
 > pre-0.9.0 deployments. For current rollout guidance, use the
 > [Rollout Cookbook](ROLLOUT_COOKBOOK.md) and
@@ -131,7 +131,7 @@ curl -s -H "Accept: text/markdown" http://localhost/docs/internal/large-page > /
 curl -s http://localhost/markdown-metrics | grep incremental_path_hits
 ```
 
-Alternatively, temporarily lower the threshold for validation (e.g., `markdown_large_body_threshold 1k;`), reload, send a request, verify `incremental_path_hits > 0`, then restore the production threshold and reload again.
+Alternatively, temporarily lower the threshold for validation (for example `markdown_large_body_threshold 1k;`), reload, send a request, verify `incremental_path_hits > 0`, then restore the production threshold and reload again.
 
 **Proceed to Phase 2 only after all checks pass.**
 
@@ -380,7 +380,7 @@ This immediately routes all requests back to the full-buffer path. In-flight req
 
 ### Emergency Rollback (Single Command)
 
-If you need to roll back without editing the config file (e.g., during an incident), restore the pre-rollout backup:
+If you need to roll back without editing the config file (for example during an incident), restore the pre-rollout backup:
 
 ```bash
 cp /usr/local/nginx/conf/nginx.conf.pre-rollout /usr/local/nginx/conf/nginx.conf && \
@@ -497,7 +497,7 @@ Record the following for post-incident review:
 
 - Timestamp of rollback
 - Phase that triggered the rollback
-- Trigger condition observed (error rate, latency, etc.)
+- Trigger condition observed (error rate, latency, and so on)
 - Metrics snapshot before and after rollback
 - Any error log entries related to the issue
 

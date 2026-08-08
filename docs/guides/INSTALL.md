@@ -25,7 +25,7 @@ source build, Homebrew), see [INSTALLATION.md](./INSTALLATION.md).
 
 Each prebuilt package targets a specific combination of:
 
-- **NGINX version** (exact nginx.org stable release, e.g., `1.26.3`)
+- **NGINX version** (exact nginx.org stable release, for example `1.26.3`)
 - **Architecture** (`amd64`/`x86_64` or `arm64`/`aarch64`)
 
 ### Determine Your Environment

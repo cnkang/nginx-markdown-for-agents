@@ -160,7 +160,7 @@ Not all requests are eligible for conversion. The module checks:
 ### Request Method
 - `GET` → Eligible
 - `HEAD` → Eligible
-- `POST`, `PUT`, `DELETE`, etc. → Not eligible
+- `POST`, `PUT`, `DELETE`, and so on → Not eligible
 
 ### Response Status
 - `200 OK` → Eligible
@@ -239,7 +239,7 @@ Some AI crawlers and agent bots do not send `Accept: text/markdown` in their req
 
 This approach is useful because:
 
-- Many AI crawlers (ClaudeBot, GPTBot, etc.) request pages with a standard browser-like `Accept` header and have no built-in mechanism to ask for Markdown.
+- Many AI crawlers (ClaudeBot, GPTBot, and so on) request pages with a standard browser-like `Accept` header and have no built-in mechanism to ask for Markdown.
 - Injecting `Accept: text/markdown` at the NGINX layer lets the module's existing content negotiation logic handle the rest, without any code changes.
 - Operators retain full control over which bots receive Markdown and can add or remove User-Agent patterns through configuration alone.
 
@@ -273,7 +273,7 @@ With this configuration:
 
 - Requests from ClaudeBot, GPTBot, or Googlebot have their Accept header replaced with `text/markdown, text/html;q=0.9`, which causes the module to convert eligible `text/html` responses to Markdown.
 - Requests from all other clients keep their original Accept header. Browsers and normal tools continue to receive HTML as before.
-- The module's standard eligibility checks (status code, content type, size limits, etc.) still apply. Only responses that pass all checks get converted.
+- The module's standard eligibility checks (status code, content type, size limits, and so on) still apply. Only responses that pass all checks get converted.
 
 Note: If you also want to control the on/off switch per bot (rather than just the Accept header), combine this with a variable-driven `markdown_filter`. The variable approach controls the switch directly.
 

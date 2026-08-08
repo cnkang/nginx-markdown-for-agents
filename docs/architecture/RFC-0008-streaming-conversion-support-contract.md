@@ -84,7 +84,7 @@ True streaming does NOT cover:
   mutating semantics.
 - **Non-HTML content**: JSON APIs, file downloads, images, CSS, JavaScript.
 - **Features requiring full-document correctness** unless that feature already
-  has an incremental implementation — e.g., strict Markdown-variant ETag
+  has an incremental implementation — for example strict Markdown-variant ETag
   comparison, full-text-scan front matter, and normalization modes requiring
   the complete document.
 - **Compressed responses** MUST pass through the controlled
@@ -284,7 +284,7 @@ the response before the module commits headers according to `markdown_on_error`.
 
 The following scenarios MUST NOT use streaming and MUST automatically switch to
 full-buffer conversion, provided the response remains within configured
-full-buffer resource limits (e.g., `markdown_max_size`, memory budget):
+full-buffer resource limits (for example `markdown_max_size`, memory budget):
 
 - Strict ETag / `If-None-Match` handling that requires computing an ETag from
   the complete Markdown output.
@@ -377,7 +377,7 @@ Before entering true streaming, the header filter MUST complete these decisions:
 If the module selects true streaming:
 
 - The module MUST remove `Content-Length` from the outgoing response headers.
-  It MUST also mark the internal response length unknown (e.g., setting
+  It MUST also mark the internal response length unknown (for example setting
   `r->headers_out.content_length_n = -1` and clearing the
   `content_length` header where applicable).
 - Chunked downstream follows standard NGINX output behavior.

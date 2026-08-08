@@ -28,7 +28,7 @@ surface, wrapper parity, or harness governance for 0.6.3.
 - `runtime-streaming` when migrated scenarios interact with streaming behavior
 - `nginx-protocol-safety` when status/header/body semantics change
 - `docs-tooling-drift` when migration status, parity tables, or release docs
-  are updated
+  update
 
 ## Sync Points
 

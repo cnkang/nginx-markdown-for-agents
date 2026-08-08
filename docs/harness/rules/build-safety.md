@@ -93,6 +93,6 @@ code (429/503). The fix returned `conf->error_status` in all reject paths.
 - Scans C source files containing reject/error handling code
 - Flags `return NGX_HTTP_BAD_GATEWAY` in reject/error context
 - Skips lines containing `conf->error_status` (correct pattern)
-- Advisory mode by default; `--strict` for blocking
+- Advisory mode by default, `--strict` for blocking
 
 **Verification**: `bash tools/harness/detect_hardcoded_http_status.sh`

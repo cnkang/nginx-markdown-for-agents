@@ -2,22 +2,22 @@
 
 **Date**: 2026-08-07
 **Branch**: `dev/wip-0.9.2-harness` (base: `dev/wip-0.9.2`)
-**Scope**: `AGENTS.md` Rule 1–62 vs `docs/harness/rules/*.md`, `tools/harness/`, `Makefile`, `.github/workflows/`; branch diff vs `main` (171 commits, 456 files).
-**Method**: Programmatic 3-way rule index comparison; script existence checks (37 rule-referenced + 39 Makefile/workflow-referenced); Makefile target existence; verification-command spot runs. Read-only.
+**Scope**: `AGENTS.md` Rule 1–62 vs `docs/harness/rules/*.md`, `tools/harness/`, `Makefile`, `.github/workflows/`, branch diff vs `main` (171 commits, 456 files).
+**Method**: Programmatic 3-way rule index comparison, script existence checks (37 rule-referenced + 39 Makefile/workflow-referenced). Makefile target existence, verification-command spot runs. Read-only.
 
 ## Summary
 
 - Findings: 15 (High 3 / Medium 5 / Low 7)
-- Verified-clean: Rule 1–62 index ↔ frontmatter ↔ rules/README 3-way consistent; all referenced scripts exist; all 25 AGENTS.md verification targets exist in Makefile; frontmatter YAML parseable.
+- Verified-clean: Rule 1–62 index ↔ frontmatter ↔ rules/README 3-way consistent. All referenced scripts exist, and all 25 AGENTS.md verification targets exist in Makefile. Frontmatter YAML parses cleanly.
 
 ## Branch-diff overview (main..HEAD)
 
-171 commits (2026-07-30 → 08-07), 456 files, +280,188/−23,231. Themes: 82 fix, 22 docs, 16 feat, 14 refactor, 12 test, 10 build, 7 chore, 8 ci/perf/style. Surfaces: nginx-module 0.9.2 breaking removals + limits/dynconf/reason/v1-metrics; rust-converter streaming lifecycle + ABI freeze; release wave5 generic pre-freeze gates; release matrix canonicalization; perf baselines; tools/harness public-surface tooling; CI nightly/weekly observation.
+171 commits (2026-07-30 → 08-07), 456 files, +280,188/−23,231. Themes: 82 fix, 22 docs, 16 feat, 14 refactor, 12 test, 10 build, 7 chore, 8 ci/perf/style. Surfaces: nginx-module 0.9.2 breaking removals plus limits/dynconf/reason/v1-metrics, and rust-converter streaming lifecycle plus ABI freeze. Also release wave5 generic pre-freeze gates, release matrix canonicalization, perf baselines, and tools/harness public-surface tooling. CI runs nightly and weekly observation.
 
 ## Findings
 
 ### F1 (High) — `AGENTS.md:453-465` — `make release-gates-check-092` missing from "Before declaring completion"
-- **Evidence**: Makefile:900 defines `release-gates-check-092` (blocking gate, used by ci.yml 092 job + nightly-perf.yml:369); routing-manifest v092-gates family exists; AGENTS.md has zero "092" references.
+- **Evidence**: Makefile:900 defines `release-gates-check-092` (blocking gate, used by ci.yml 092 job + nightly-perf.yml:369), routing-manifest v092-gates family exists. AGENTS.md has zero "092" references.
 - **Fix**: Add entry after the 0.9.1 line, mirroring the `RELEASE_GATE_ALLOW_SKIP_*` contract notes.
 
 ### F2 (High) — Rule 41 verification command fails against current code — `docs/harness/rules/shell.md:93` + 4 detector scripts
@@ -25,26 +25,26 @@
 - **Fix**: Replace `\s` → `[[:space:]]` and `\w` → `[[:alnum:]_]` in those four scripts (behavior-preserving), then re-run the verification command → zero hits.
 
 ### F3 (High) — 0.9.2 new gates not indexed in AGENTS.md / rules
-- **Evidence**: `public-surface-drift-check` (Makefile:255; ci.yml:382,422; 092 gate step 2/7), `schema-drift-check` (Makefile:258), `reason-codegen-check` (Makefile:290; ci.yml:424) — none appear in AGENTS.md verification list; no rule file names the public-surface detector (observability-metrics.md:39 has unnamed prose under Rule 7).
-- **Fix**: Add the three targets to AGENTS.md verification list; add a public-surface detector reference to observability-metrics.md (Rule 23 section).
+- **Evidence**: `public-surface-drift-check` (Makefile:255, ci.yml:382,422. 092 gate step 2/7), `schema-drift-check` (Makefile:258), `reason-codegen-check` (Makefile:290, ci.yml:424) — none appear in AGENTS.md verification list, no rule file names the public-surface detector (observability-metrics.md:39 has unnamed prose under Rule 7).
+- **Fix**: Add the three targets to AGENTS.md verification list, add a public-surface detector reference to observability-metrics.md (Rule 23 section).
 
 ### F4 (Medium) — `AGENTS.md:208,232,234,235,279` — 5 detectors labeled "CI gate" but not wired to any workflow
 - **Evidence**: `detect_ngx_log_arg_count.sh`, `detect_nosonar_discipline.sh`, `detect_orphan_comment_close.py`, `detect_ifdef_guard_visibility.sh`, `detect_workflow_input_injection.sh` run only under local `make harness-security-checks`.
 - **Fix**: Relabel to "harness gate (make harness-security-checks)" — do not add CI wiring in pre-freeze.
 
 ### F5 (Medium) — `docs/harness/rules/version-consistency.md:122-123` — gate membership description stale
-- **Evidence**: `make harness-check` (Makefile:250-253) does not run `detect_version_consistency.sh`; harness-security-checks is invoked only by harness-check-full (Makefile:265), release-gates-check-092, and ci.yml.
+- **Evidence**: `make harness-check` (Makefile:250-253) does not run `detect_version_consistency.sh`, harness-security-checks runs only under harness-check-full (Makefile:265), release-gates-check-092, and ci.yml.
 - **Fix**: Correct the membership description.
 
 ### F6 (Medium) — `AGENTS.md:579` Document Updates table diverges from `docs/harness/README.md:93-95`
-- **Evidence**: AGENTS.md has one 0.9.2 log row; README has three. Missing: public-surface drift gates (12+ commits), dead-FFI classifier, complexity zero-exemption policy, 092 gate wiring, schema-drift/reason-codegen validators.
+- **Evidence**: AGENTS.md has one 0.9.2 log row. README has three. Missing: public-surface drift gates (12+ commits), dead-FFI classifier, complexity zero-exemption policy, 092 gate wiring, schema-drift/reason-codegen validators.
 - **Fix**: Consolidate into 2-3 0.9.2 rows covering all of the above.
 
 ### F7 (Medium) — `docs/harness/routing-manifest.json` + `.md` — 3 new gates have no verification family (Rule 36)
 - **Fix**: Add `public-surface-drift`, `schema-drift`, `reason-codegen` families (commands, path patterns, keywords) to json + md.
 
 ### F8 (Medium) — `tools/harness/detect_ffi_dead_exports.py` orphan
-- **Evidence**: Added in this window (f2029297); no Makefile/workflow/rule reference.
+- **Evidence**: Added in this window (f2029297), no Makefile/workflow/rule reference.
 - **Fix**: Wire into `make harness-security-checks` and index in ffi-crosslang.md (or delete — keep, low risk).
 
 ### F9 (Low) — `tools/harness/normalize_cbindgen_header.py` not indexed (used by Makefile:101).
@@ -60,7 +60,7 @@
 - **Fix**: Add an index row (domain fuzz-infrastructure).
 
 ### F13 (Low) — `tools/harness/audit_reason_codes.sh` orphan (only archive docs reference); overlaps reason-codegen.
-- **Fix**: Mark legacy in header; no wiring in pre-freeze.
+- **Fix**: Mark legacy in header, no wiring in pre-freeze.
 
 ### F14 (Low) — `.github/workflows/nightly-observation.yml` / `weekly-observation.yml` not registered in AGENTS.md/routing-manifest.
 - **Fix**: Add an observation family entry (informational).
@@ -135,21 +135,21 @@ Additional structural inconsistencies found and fixed:
    ADR-0023 in the first round) lived in the lone `docs/architecture/decisions/`
    directory with an `ADR-` filename prefix, while the canonical location is
    `docs/architecture/ADR/` with `NNNN-description.md` naming (26 existing
-   records). Moved to `docs/architecture/ADR/0027-otel-removal-reintroduction-conditions.md`;
-   `decisions/` directory removed; ADR/README.md index + Document Updates log
+   records). Moved to `docs/architecture/ADR/0027-otel-removal-reintroduction-conditions.md`,
+   `decisions/` directory removed. ADR/README.md index + Document Updates log
    updated. All references are plain-text "ADR-0027" mentions (no path links),
    so no reference churn.
 2. **docs/release/ vs docs/releases/**: `docs/release/release-matrix.json`
    was a lone leftover — commit f8292eb8 ("merge docs/release/ into
    docs/releases/") predated the matrix file (created later by 463a622e), so
    it never got consolidated. Moved to
-   `docs/releases/release-matrix.json`; updated `validate_release_matrix.py`
+   `docs/releases/release-matrix.json`, updated `validate_release_matrix.py`
    (docstring + MATRIX_PATH + output), its tests, Makefile comment, and the
    routing-manifest release-matrix family note. `docs/release/` removed.
 3. **docs/README.md index gaps**: `releases/`, `development/`, `evidence/`,
    `operations/` directories were absent from the Documentation Sections
    index (all have real consumers: gate-validated paths, feature-doc evidence,
-   release notes). Added index entries; no directory moves needed.
+   release notes). Added index entries, no directory moves needed.
 
 Verified: `make release-matrix-check` PASS, matrix/ docs/ gates pytest 251
 passed, `make docs-check` PASS.

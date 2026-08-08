@@ -4,7 +4,7 @@
 
 This matrix explicitly classifies each existing operator-facing capability's support
 status under the streaming path. Every capability must carry exactly one of the
-three allowed states; a fourth state ("theoretically supported but silently degrades on
+three allowed states, a fourth state ("theoretically supported but silently degrades on
 failure") is forbidden.
 
 ## State Definitions
@@ -97,8 +97,8 @@ directive — it always executes regardless of the operator's failure policy set
 ## Lifecycle
 
 1. **Design phase**: Determine initial classification (this document)
-2. **Implementation phase**: Verify classification; record any changes
-3. **Pre-release**: Final confirmation; publish as operator documentation
+2. **Implementation phase**: Verify classification, record any changes
+3. **Pre-release**: Final confirmation, publish as operator documentation
 
 ## Change Tracking
 

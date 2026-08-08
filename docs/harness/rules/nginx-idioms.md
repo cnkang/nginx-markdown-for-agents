@@ -180,7 +180,7 @@ Required:
   rc = ngx_http_output_filter(r, &out);  /* double-send after finalize */
   ```
 - When a helper function calls `ngx_http_finalize_request`, its doc comment
-  must state "Returns NGX_DONE after finalizing the request; caller must not
+  must state "Returns NGX_DONE after finalizing the request, caller must not
   continue processing."
 - Multi-step header/response modification operations (for example header plan
   apply with ETag set, Vary append, custom header add) must be atomic: if any
@@ -189,7 +189,7 @@ Required:
   partially applied headers — downstream consumers will see inconsistent state.
 - Fixed-capacity transaction snapshots must detect capacity overflow before
   the first mutation and return `NGX_ERROR`.  Never silently omit matching
-  state from a rollback snapshot; a rollback set that does not cover every
+  state from a rollback snapshot, a rollback set that does not cover every
   mutable entry cannot satisfy the atomicity contract.
 
 Verification:
@@ -207,7 +207,7 @@ Historical issues: `ebcf7a3c` (L-01).
 
 Required:
 - All header lookup/iteration functions must skip entries where `hash == 0`.
-  NGINX marks deleted or invalidated headers by zeroing the hash field; reading
+  NGINX marks deleted or invalidated headers by zeroing the hash field, reading
   such entries returns stale or garbage data.
 - The filter must appear inside the iteration loop, before any field access:
   ```c
@@ -239,7 +239,7 @@ Required:
 - When parsing `Content-Type` headers for streaming eligibility checks,
   accept both space (`SP`, 0x20) and horizontal tab (`HTAB`, 0x09) as
   optional whitespace (OWS) separators per RFC 7230.  Some clients send
-  `text/markdown;\tcharset=utf-8` with a tab after the semicolon; rejecting
+  `text/markdown;\tcharset=utf-8` with a tab after the semicolon, rejecting
   HTAB causes false-negative eligibility decisions.
 - Exclude trailing OWS after the parameter value.  A Content-Type like
   `text/markdown; charset=utf-8` (trailing space) must not fail the

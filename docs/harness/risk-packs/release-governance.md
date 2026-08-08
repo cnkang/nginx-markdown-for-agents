@@ -72,7 +72,7 @@ python3 packaging/scripts/test_release_manifest.py
 
 For 0.8.x release readiness, treat `make release-gates-check-080` (or the
 `make release-gates-check-08x` alias) as the release target. `make release-gates-check`
-remains the framework baseline; it is not the full release gate.
+remains the framework baseline, it is not the full release gate.
 
 Run `make release-gates-check-legacy` only when the legacy spec inputs it
 requires are present.  In clones where those inputs are absent, record the

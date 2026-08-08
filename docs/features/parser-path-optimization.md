@@ -246,7 +246,7 @@ path.
 
 The fast path is a qualification gate, not a separate converter. Qualifying
 documents use the same `traverse_node` code path, but the converter can
-eliminate unreachable branches during traversal (e.g., table handling, form
+eliminate unreachable branches during traversal (for example table handling, form
 control handling, embedded content handling are unreachable for fast-path
 documents). `SecurityValidator` remains fully active.
 
@@ -299,7 +299,7 @@ Depth counts from the document root node (depth 0). A text node inside
   lightweight (tag-name comparison only) and terminates early on the first
   disqualifying node.
 - The allowed element set is intentionally conservative. Some elements that
-  the fast path could handle (e.g., `<dl>`, `<dt>`, `<dd>`) stay
+  the fast path could handle (for example `<dl>`, `<dt>`, `<dd>`) stay
   excluded to keep the qualification logic simple.
 - The fast path does not skip `SecurityValidator` checks. It reduces branch
   overhead in the traversal, not security validation.
@@ -421,7 +421,7 @@ path is taken:
 - Dangerous element removal (`script`, `style`, `noscript`, and others in
   `DANGEROUS_ELEMENTS`)
 - Event handler attribute stripping (`on*` prefix)
-- Dangerous URL detection (`javascript:`, `data:`, etc.)
+- Dangerous URL detection (`javascript:`, `data:`, and so on)
 - DOM depth validation
 
 Pruning `<script>`, `<style>`, and `<noscript>` earlier is security-positive —

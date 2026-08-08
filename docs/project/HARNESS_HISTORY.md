@@ -24,7 +24,7 @@ That setup worked for one local environment, but it was not a stable open-source
 contract. The project introduced the harness to turn those scattered habits into a
 tracked, reviewable, and executable repository asset.
 
-## Problems It Was Created to Prevent
+## Problems the Harness Prevents
 
 The harness exists to reduce a specific class of repeated engineering failures.
 

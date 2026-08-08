@@ -14,8 +14,8 @@ Historical issues: `dbb5722`, `dfeffc4`, `ceeaf38`, `5970807`, `366ecf0e`.
 
 Required:
 - When Rust FFI structs, options, defaults, or error codes change, update all affected boundaries in the same change set: Rust ABI/options code, public C headers, NGINX call sites, tests, and operator-facing scripts.
-- **Initialization-before-ownership-transfer ordering**: When an FFI export allocates a resource and transfers ownership to C (for example via `Box::into_raw`, `as_mut_ptr` + `mem::forget`, or similar), the allocation must be fully initialized **before** the ownership transfer. Do not call the ownership-transfer function on a partially-initialized value. If initialization fails, free the resource on the Rust side and return an error code — never transfer a partially-initialized resource to C. Historical issue: commit `366ecf0e` fixed a use-after-free where `Box::into_raw` was called before initialization completed. This ordering prevents use-after-free.
-- Treat FFI comments and header docs as part of the interface contract; stale interface docs are a bug, not a cleanup item.
+- **Initialization-before-ownership-transfer ordering**: When an FFI export allocates a resource and transfers ownership to C (for example via `Box::into_raw`, `as_mut_ptr` + `mem::forget`, or similar), the allocation must be fully initialized **before** the ownership transfer. Do not call the ownership-transfer function on a partially-initialized value. If initialization fails, free the resource on the Rust side and return an error code — never transfer a partially-initialized resource to C. Historical issue: commit `366ecf0e` fixed a use-after-free where the module called `Box::into_raw` before initialization completed. This ordering prevents use-after-free.
+- Treat FFI comments and header docs as part of the interface contract, stale interface docs are a bug, not a cleanup item.
 - Add at least one boundary-level test when introducing or changing an FFI option/error path (for example header-level, feature-independence, or end-to-end verification).
 - **When adding a field to any FFI struct (for example `MarkdownResult`, `MarkdownOptions`, `StreamingStats`), apply this complete-sync checklist:**
   1. **Rust side**: add the field to the `#[repr(C)]` struct with correct type and documentation.
@@ -24,7 +24,7 @@ Required:
   4. **Cleanup/reset functions**: if the struct has associated `reset_*()`, `free_*()`, or cleanup helpers, they must zero/reset the new field to maintain API symmetry.
   5. **Test helper constructors**: any `empty_result()`, `zeroed_result()`, or similar test helper must include the new field.
 - **Prefer helper functions over literal initialization for FFI structs**: When writing test code that needs a zeroed/empty FFI struct, **always use existing helper functions** (for example `empty_result()`, `zeroed_result()`, `ffi_test_empty_result()`) rather than writing `StructName { field: value, ... }` literals. This reduces future maintenance cost when the struct gains new fields — only the helper needs updating, not every call site. If no helper exists for a struct, create one before writing multiple literal initializations.
-- **Lifecycle ordering rule: read data from foreign-owned structs BEFORE calling their associated free/release function.** Do not access fields after `markdown_result_free()`, `markdown_converter_free()`, or similar cleanup calls — the memory may be invalidated, zeroed, or returned to the allocator. Capture values to local variables first, then free.
+- **Lifecycle ordering rule: read data from foreign-owned structs BEFORE calling their associated free/release function.** Do not access fields after `markdown_result_free()`, `markdown_converter_free()`, or similar cleanup calls — the memory may get invalidated, zeroed, or returned to the allocator. Capture values to local variables first, then free.
 - In C unit tests that stub FFI lifecycle helpers (for example
   `markdown_result_free()`), clear **all** struct fields covered by the public
   ABI (pointer, length, and numeric/error fields). Partial clears create false
@@ -77,15 +77,14 @@ Required:
   within the `catch_unwind` closure.  If the function panics after
   acquiring the resource, the Drop guard must release it so the caller
   does not leak or double-free.  Do not rely on the C caller to clean up
-  after a failed FFI call — the C side may not know which resources were
-  acquired before the failure.
+  after a failed FFI call — the C side may not know which resources the C side acquired before the failure.
 - **FFI enum layout safety**: All enums that cross the FFI boundary must
   use an explicit `#[repr(u8)]`, `#[repr(i32)]`, or similar fixed-width
   representation.  Rust's default enum layout is implementation-defined
   and can change between compiler versions, causing silent discriminant
   truncation when C reads the wrong width.  When exposing a new enum via
   FFI, add a compile-time assertion (`const _: () = assert!(size_of::<E>()
-  == expected);`) or a debug guard that verifies the discriminant fits the
+  == expected),`) or a debug guard that verifies the discriminant fits the
   expected width.
 - **FFI handle consumption contract**: When an FFI handle (for example
   `MarkdownConverterHandle`, `HeaderPlanHandle`) passes to a
@@ -106,9 +105,9 @@ Verification:
   the wrapper covers non-trivial FFI exports.
 - `grep -rnE '#\[no_mangle\]|#\[unsafe\(no_mangle\)\]' components/rust-converter/src/`
   — every hit should either be inside a `catch_unwind` or have a comment
-  explaining why it is trivial enough to skip.  Both the legacy
-  `#[no_mangle]` and the Rust 2024 `#[unsafe(no_mangle)]` forms must be
-  recognised; the detector `detect_ffi_panic_safety.sh` matches both.
+  explaining why it is trivial enough to skip.  The detector must recognise
+  both the legacy `#[no_mangle]` and the Rust 2024 `#[unsafe(no_mangle)]`
+  forms, `detect_ffi_panic_safety.sh` matches both.
 - `bash tools/harness/detect_ffi_panic_safety.sh --strict` — classifies
   every FFI export into direct_catch / delegated_catch /
   safe_init_helper / safe_static_lookup / free_helper /
@@ -122,11 +121,11 @@ Verification:
 - `make check-headers` — verify both C header copies are in sync.
 - `PYTHONPATH=. python3 tools/harness/detect_ffi_dead_exports.py --check`
   — classify FFI header exports as production-called / test-only /
-  loader-abi / dead; wired into `make harness-security-checks` (Rule 15
+  loader-abi / dead, wired into `make harness-security-checks` (Rule 15
   public-surface hygiene).  Complementary but independent of
   `detect_public_surface_drift.py`.
 - `python3 tools/harness/normalize_cbindgen_header.py` — post-processes the
-  generated header (used by `make rust-lib`); run it after any `cbindgen`
+  generated header (used by `make rust-lib`), run it after any `cbindgen`
   regeneration before `make copy-headers`.
 - **FFI header drift CI gate**: When `cbindgen` generates C headers,
   a CI step must regenerate the header from Rust source and compare it
@@ -154,7 +153,7 @@ Required:
   `Reset`), verify the C-side handler explicitly checks for NULL data
   pointer and zero length on all string/buffer inputs before passing them
   to Rust.  A NULL `ngx_str_t.data` with non-zero `len` has undefined behavior
-  behavior; a zero `len` with non-NULL `data` is semantically empty.
+  behavior, a zero `len` with non-NULL `data` is semantically empty.
 - On the Rust side, FFI entry points that receive raw pointers must
   validate them before dereferencing.  Use `if key.is_null() || key_len
   == 0` guard patterns.  Do not rely on the caller to have already
@@ -204,9 +203,9 @@ Required:
   ```
   This ensures that only the data pointer passes to C. The allocation
   leaks intentionally so the C-side free helper manages it.
-- **Empty-result NULL convention**: FFI functions that return a pointer to a buffer (e.g., a string or byte array) must return `NULL` if the result is empty, rather than a pointer to a zero-length allocation. This allows C free helpers to simply check `if (ptr == NULL) return;` and avoid calling the allocator for empty buffers, reducing overhead and avoiding implementation-defined behavior of zero-length allocations.
+- **Empty-result NULL convention**: FFI functions that return a pointer to a buffer (for example a string or byte array) must return `NULL` if the result is empty, rather than a pointer to a zero-length allocation. This allows C free helpers to simply check `if (ptr == NULL) return;` and avoid calling the allocator for empty buffers, reducing overhead and avoiding implementation-defined behavior of zero-length allocations.
 
 Verification:
 - `grep -rn 'as_mut_ptr' components/rust-converter/src/` — verify ownership transfer uses the `as_mut_ptr` + `mem::forget` pattern for slices.
 - `grep -rn 'Box::into_raw' components/rust-converter/src/` — verify `Box::into_raw` is NOT used for transferring slice/Vec ownership to C (the single-object `Box::into_raw(Box::new(...))` handle pattern is exempt).  The canonical helper for slice ownership transfer is `ffi::memory::leak_boxed_slice_to_raw`.
-- `grep -rn 'null_mut' components/rust-converter/src/ffi/` — verify empty buffers assign NULL via `ptr::null_mut()` (both `ptr::null_mut()` and `std::ptr::null_mut()` forms). The NULL convention applies through field assignments (e.g., `result_ref.output = ptr::null_mut();`), not return statements.
+- `grep -rn 'null_mut' components/rust-converter/src/ffi/` — verify empty buffers assign NULL via `ptr::null_mut()` (both `ptr::null_mut()` and `std::ptr::null_mut()` forms). The NULL convention applies through field assignments (for example `result_ref.output = ptr::null_mut();`), not return statements.

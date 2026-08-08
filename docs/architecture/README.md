@@ -35,7 +35,7 @@ Use it when you need more than deployment guidance but less than source-level im
 - `CONFIG_BEHAVIOR_MAP.md` maps public directives to runtime behavior.
 - `PUBLIC_SURFACE_INVENTORY.md` records the evidence-backed 1.0 freeze
   classification for directives, wire schemas, observability, and FFI.
-- `REPOSITORY_STRUCTURE.md` explains how the repository is organized.
+- `REPOSITORY_STRUCTURE.md` explains how the repository organizes itself.
 - `HARNESS_ARCHITECTURE.md` explains the repo-owned harness, its truth surfaces,
   and its relationship to local-only inputs.
 - `docs/harness/` describes task-routing overlays and check orchestration without

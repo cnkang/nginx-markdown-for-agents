@@ -87,7 +87,7 @@ It should not yet be understood as a true streaming or peak-memory-reduction pat
 > A 64 MiB HTML document currently translates to roughly 2.5GB-3GB of peak RAM consumption during Rust DOM tree construction. That is an empirical ~40x memory bloat factor. 
 > 
 > Because NGINX uses a multi-worker concurrency model, increasing this limit
-> (e.g., to 1 GB) exposes the server to extreme OOM (Out Of Memory) risks.
+> (for example to 1 GB) exposes the server to extreme OOM (Out Of Memory) risks.
 > Just 4 concurrent 1 GB requests would demand over 160 GB of RAM. This triggers the OS OOM Killer, crashes NGINX workers, and takes down all other in-flight requests. It also creates a massive DoS attack vector.
 > 
 > **To safely support GB-scale responses in the future**, the architecture must be fundamentally shifted from DOM-tree building to a **Streaming SAX Parser**. True stream processing maintains $O(1)$ memory by discarding parsed chunks instantly. It is the only safe way to surpass the 64 MiB limit without unbounded memory amplification.

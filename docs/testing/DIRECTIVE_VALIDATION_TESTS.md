@@ -410,7 +410,7 @@ All directive handlers provide clear error messages:
 
 4. **Invalid format:**
    - Message: "invalid [type] \"%s\" in \"%s\" directive, must be in format ..."
-   - Occurs when value format is incorrect (e.g., content type without slash)
+   - Occurs when value format is incorrect (for example content type without slash)
 
 ---
 

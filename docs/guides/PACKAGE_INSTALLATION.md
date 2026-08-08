@@ -36,7 +36,7 @@ architecture. The target NGINX version must match the installed NGINX ABI.
 
 DEB and RPM packages are built on glibc-based build images and target
 glibc-based distributions only. For musl-based environments (Alpine Linux,
-etc.), use the pre-built binary tarball from the Release Binaries workflow or
+and so on), use the pre-built binary tarball from the Release Binaries workflow or
 build from source.
 
 DEB format:

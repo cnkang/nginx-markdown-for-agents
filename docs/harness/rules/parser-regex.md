@@ -35,7 +35,7 @@ Required:
   - Dynamic regex injection: CLI args, env vars, file content as patterns
   - `re.DOTALL` with an unescaped greedy `.*` over full documents.  Lazy
     `.*?`, possessive `.*+`, escaped dots, and character-class literals do
-    not trigger this broad advisory check; they still pass through the normal
+    not trigger this broad advisory check, they still pass through the normal
     structural ReDoS checks.
 - The detector extracts Python regex usage via the standard library `ast` module,
   covering: `re.compile`, `re.search`, `re.match`, `re.fullmatch`,
@@ -58,12 +58,12 @@ Required:
   invalidates the alias.  Reassignment of a compiled-pattern variable to a
   dynamic value upgrades the binding to `COMPILED_DYNAMIC_PATTERN` (not plain
   `DYNAMIC_VALUE`) so subsequent `compiled.search/match/sub/findall` calls
-  emit a REVIEW referencing the original `compile_line`; this applies to
+  emit a REVIEW referencing the original `compile_line`, this applies to
   Assign, AnnAssign, and AugAssign.  An initially dynamic `re.compile()` emits
   its REVIEW at the compile site only. A second compiled-method REVIEW stays
   reserved for actual reassignment.  Lexical `del` writes a DELETED tombstone
   in the current scope instead of walking outer scopes, so a function-local
-  `del p` no longer removes a module binding; `global`/`nonlocal` are
+  `del p` no longer removes a module binding, `global`/`nonlocal` are
   partially modeled (honored for delete routing) and otherwise conservative.
   Function/lambda defaults, decorators, return annotations, and parameter
   the detector evaluates annotations in the enclosing scope before the function name
@@ -76,11 +76,11 @@ Required:
   the detector merges adjacent literals.  For example, `abc\w+` keeps `abc` as a
   separate literal atom so the detector recognizes `\w+` as having a multi-char
   literal separator prefix.  Segment analysis treats `re.escape()` as
-  protecting only its own operand; a concatenation like
+  protecting only its own operand, a concatenation like
   `re.escape(x) + r"(a+)+$"` is still analyzed for the static tail, and any
   dangerous static segment produces an ERROR regardless of escaped/dynamic
   neighbors.  The detector represents an escaped-only composition with a literal atom
-  and analyzes its static scaffold; safe scaffolds produce no REVIEW.
+  and analyzes its static scaffold, safe scaffolds produce no REVIEW.
 - Pattern source classification: `STATIC_LITERAL`, `STATIC_CONCAT`,
   `STATIC_FORMATTED`, `ESCAPED_DYNAMIC`, `DYNAMIC`, `UNKNOWN`.
 - Severity levels: `ERROR` (confirmed ReDoS or dangerous static scaffold),
@@ -109,7 +109,7 @@ Required:
   extracted.  Pattern-file options (`-f`/`--file`, multiple supported) get
   resolved relative to the shell script directory, validated to stay within
   the repository root (absolute paths, `..` traversal, and symlink escapes
-  the detector rejects them), reads as UTF-8, and analyzes per line; read/encoding
+  the detector rejects them), reads as UTF-8, and analyzes per line, read/encoding
   failures (OSError, UnicodeDecodeError, IsADirectoryError) produce a
   ScanError plus a conservative REVIEW instead of crashing.  `shlex` parse
   errors produce ScanError.

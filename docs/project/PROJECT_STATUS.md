@@ -51,7 +51,7 @@ pending until the blocking gates pass.
   migration stubs plus 14 active directives and 5 standalone limit directives.
   The public surface drops from 63 directives to 25, and the bundled Rust/C
   FFI ABI moves to version 2.
-- **Release-gates-check-092**: Additive on 091; adds public-surface drift
+- **Release-gates-check-092**: Additive on 091, adds public-surface drift
   check, version consistency gate (0.9.2), and reason-code registry
   completeness gate.
 - **Streaming reason code normalization documentation**: C-only streaming
@@ -109,16 +109,16 @@ pending until the blocking gates pass.
     `components/nginx-module/tests/e2e/test_streaming_e2e.py` and
     `components/nginx-module/tests/e2e/test_streaming_failure_cache_e2e.py`.
 - Harness rule/governance alignment:
-  - routing manifest includes Rust harness ownership surfaces;
+  - routing manifest includes Rust harness ownership surfaces,
   - harness checks enforce Rust harness contract and migration-policy guards for
     migrated shell wrappers and removed Python E2E surfaces.
 - Final mainline hardening before the v0.6.3 tag:
   - release/performance tooling path validation uses `REPO_ROOT` as the
-    repository-boundary source of truth;
+    repository-boundary source of truth,
   - release binary matrix targets current NGINX versions `1.30.1` and
-    `1.31.0`;
+    `1.31.0`,
   - local runner path and round-trip temp-file tests keep artifacts under the
-    repository root;
+    repository root,
   - development test dependencies align with the current CI baseline.
 
 ### Repository Harness Updates
@@ -139,12 +139,12 @@ pending until the blocking gates pass.
   - `markdown_dynamic_config` directive for runtime configuration reload without
     NGINX restart, with snapshot isolation and reload retry contract.
   - Dynconf snapshot isolation: `dynconf_enabled=0` locations are never
-    influenced by the global snapshot; `header_filter` reads the snapshot
+    influenced by the global snapshot, `header_filter` reads the snapshot
     exactly once to eliminate race windows.
   - Unknown dynconf keys cause atomic reload rejection (entire file rejected).
 - Snapshot race elimination (v0.6.2):
   - `active_snapshot` read once at `header_filter` entry into function-lifetime
-    `snap_copy`; effective conf built once from that copy.
+    `snap_copy`, effective conf built once from that copy.
   - Deferred-state latches cleared on both success and failure resume paths.
 - dynconf_path_configured lifecycle:
   - Flag lives in `main_conf_t` (per-reload isolation), not file-scope static.
@@ -162,14 +162,14 @@ pending until the blocking gates pass.
 - Production readiness release:
   - Streaming engine as default (`markdown_streaming_engine auto`).
   - Noise pruning default enabled (`markdown_prune_noise on`).
-  - Unified memory budget (`markdown_memory_budget`, 0.6.0; retired in 0.9.0 as `markdown_limits`) superseding dual
+  - Unified memory budget (`markdown_memory_budget`, 0.6.0, retired in 0.9.0 as `markdown_limits`) superseding dual
     `markdown_max_size` + `markdown_streaming_budget`.
   - OpenTelemetry tracing integration (self-implemented OTLP HTTP/protobuf).
   - Per-path metrics with cardinality control.
   - OS package manager distribution (APT, YUM/DNF, Homebrew).
   - Helm chart with Ingress annotation support.
   - Coverage gate as CI merge requirement.
-  - MDX and Org-mode flavor selectors (experimental at the time; removed in
+  - MDX and Org-mode flavor selectors (experimental at the time, removed in
     v0.9.1 because they never provided distinct conversion semantics).
   - Dynamic configuration hot-reload (`markdown_dynamic_config`).
   - ADR-0006 (OTel), ADR-0007 (Streaming Default), ADR-0008 (Noise Pruning Default).
@@ -234,10 +234,10 @@ The 0.3.0 release includes:
 - Event handler attribute sanitization now uses `on*` prefix matching instead of a static allowlist, following the OWASP/DOMPurify convention
 - Form-related elements now use strip-tag-keep-content instead of full removal, preserving child text for AI agents
 - Embedded content elements (`iframe`, `object`, `embed`) now use strip-tag-keep-content instead of full removal
-- Image conversion now preserves the `title` attribute in Markdown syntax; missing/blocked image URLs emit `alt` text as plain text
-- Media elements (`video`, `audio`) now have their `src` URL extracted as a Markdown link; video `poster` thumbnails extracted as Markdown images
+- Image conversion now preserves the `title` attribute in Markdown syntax, missing/blocked image URLs emit `alt` text as plain text
+- Media elements (`video`, `audio`) now have their `src` URL extracted as a Markdown link, video `poster` thumbnails extracted as Markdown images
 - Image map `<area>` elements now have their `href` extracted as Markdown links
-- X-Forwarded-Host/Proto headers are no longer trusted by default; added CIDR-based `markdown_trusted_proxies <CIDR>...` directive (default: off — no forwarded headers honored)
+- X-Forwarded-Host/Proto headers are no longer trusted by default, added CIDR-based `markdown_trusted_proxies <CIDR>...` directive (default: off — no forwarded headers honored)
 - Decompression buffer estimation now logs a warning when the estimated output exceeds 50 MB
 - CI jobs for clang compiler and AddressSanitizer/UndefinedBehaviorSanitizer smoke tests
 - SonarCloud Quality Gate Status badge in both English and Chinese READMEs
@@ -323,7 +323,7 @@ The 0.3.0 release includes:
 - Automatic upstream decompression (gzip, brotli, deflate)
 - Authentication-aware caching (Cache-Control: private)
 - Variable-driven configuration support
-- Large response routing (retired `markdown_large_body_threshold` directive; no Config V2 replacement)
+- Large response routing (retired `markdown_large_body_threshold` directive, no Config V2 replacement)
 - Forwarded header trust control with `markdown_trusted_proxies` directive
 
 ## Test Coverage
@@ -332,7 +332,7 @@ The project includes tests at multiple levels:
 
 ### Rust Tests
 
-- Unit tests for all core modules (converter, parser, security, etc.)
+- Unit tests for all core modules (converter, parser, security, and so on)
 - Integration tests for FFI boundary and lifecycle management
 - Property-based tests for invariants and edge cases
 - Timeout and error handling tests
@@ -393,7 +393,7 @@ When deploying:
 
 1. **Start incrementally**: Enable on one location or path first
 2. **Monitor behavior**: Use the metrics endpoint to track conversions
-3. **Set appropriate limits**: Configure `markdown_limits` (e.g., `conversion_memory=<size> conversion_timeout=<time>`)
+3. **Set appropriate limits**: Configure `markdown_limits` (for example `conversion_memory=<size> conversion_timeout=<time>`)
 4. **Choose failure mode**: Select `markdown_error_policy` based on requirements
 5. **Test caching**: Verify cache behavior with your CDN or caching layer
 6. **Review security**: Ensure authentication policies match your security model
@@ -405,7 +405,7 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 ### Current Release Line (0.9.x)
 
 The 0.9.x release line is the current maintained line. The current
-release is 0.9.2 (development line); 0.9.1 is the previous release — a
+release is 0.9.2 (development line). 0.9.1 is the previous release — a
 baseline-consolidation and compatibility-reset release that adds
 hybrid zero-copy streaming output, gzip/deflate/Brotli streaming decompression,
 performance evidence gates, and a doctor advice tool, on top of the 0.9.0
@@ -424,7 +424,7 @@ breaking-release foundation.
 - **Full-buffer compressed copy reduction**: header accumulation helper and
   streaming-first routing reduce unnecessary copies for compressed responses.
 - **Performance evidence gate**: `make release-gates-check-091` (blocking for
-  release tags) plus `make perf-evidence-check` (report-only); module
+  release tags) plus `make perf-evidence-check` (report-only), module
   benchmark harness exercises 8 scenarios including Brotli streaming.
 - **Doctor advice tool**: `make doctor` provides module-aware configuration
   diagnostics and actionable fix suggestions.
@@ -435,14 +435,14 @@ breaking-release foundation.
   visibility (57), workflow input injection (58), hardcoded HTTP status in
   reject paths (59), E2E config directive consistency (60), performance
   evidence provenance invariant (61), release-matrix key normalization
-  invariant (62); new detectors `detect_orphan_comment_close.py`,
+  invariant (62), new detectors `detect_orphan_comment_close.py`,
   `detect_ifdef_guard_visibility.sh`, `detect_workflow_input_injection.sh`,
-  `detect_hardcoded_http_status.sh`, `detect_e2e_streaming_config.py`;
+  `detect_hardcoded_http_status.sh`, `detect_e2e_streaming_config.py`,
   new rule documentation `release-integrity.md`.
 - **Config simplification**: `markdown_streaming off|auto|force` is the sole
-  public processing-path selector; `markdown_streaming_engine` removed.
+  public processing-path selector, `markdown_streaming_engine` removed.
   `markdown_auto_decompress` directive registration fix.
-- **FFI ABI reset**: bundled Rust/C boundary reset to ABI 1; NGINX validates
+- **FFI ABI reset**: bundled Rust/C boundary reset to ABI 1. NGINX validates
   `markdown_abi_version()` during preconfiguration.
 - **Security**: right-most Forwarded element selection, Cache-Control
   quote-aware parsing with malformed fail-closed, workflow input sanitization
@@ -498,9 +498,9 @@ breaking-release foundation.
   `ngx_alloc`/`ngx_free` exclusively for resizable buffer backing stores
   (Rule 43).
 - Implied closure correctness (Rule 6): structural closures now unwind
-  inner-to-outer; the Rust converter consumes implied closures before the
+  inner-to-outer, the Rust converter consumes implied closures before the
   sanitizer Skip decision and mirrors them to the state machine.
-- FFI safety: centralized header plan reset for panic safety; parser working-set
+- FFI safety: centralized header plan reset for panic safety, parser working-set
   estimation with overflow-safe budget enforcement.
 - Streaming decompression budget and memory accounting (Rule 3, Rule 44).
 - Code fence language handling: `lang-` prefix support and sanitization in the
@@ -545,7 +545,7 @@ breaking-release foundation.
 - SSE/NDJSON conversion (out of scope for this release line)
 - Full parser rewrite (incremental improvements only)
 - Edge-CDN deployment model (origin-near architecture retained)
-- Implementing `markdown_stream_flush_interval` (reserved for a future release;
+- Implementing `markdown_stream_flush_interval` (reserved for a future release,
   current use causes `nginx -t` to fail)
 
 ### Implemented Features (0.8.x line)
@@ -588,7 +588,7 @@ breaking-release foundation.
 
 The following limitations appear in the documentation:
 
-1. **Streaming Is Default**: Streaming is the default engine; full-buffer is
+1. **Streaming Is Default**: Streaming is the default engine, full-buffer is
    the fallback for explicit opt-out or engine-selection override
 2. **HTML Input**: Requires HTML input (uncompressed or automatically decompressed)
 3. **Conversion Fidelity**: Some complex HTML structures may not convert perfectly to Markdown

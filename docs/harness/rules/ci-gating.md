@@ -22,7 +22,7 @@ Required:
 - Remove redundant CI steps that can desynchronize behavior or waste runtime.
 - **Supply chain hardening (GitHub Actions)**:
   - All third-party GitHub Actions must pin to immutable commit SHA
-    references, not mutable version tags (`v4`, `v1`, etc.).  Include a
+    references, not mutable version tags (`v4`, `v1`, and so on).  Include a
     version comment for human readability:
     ```yaml
     uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29  # v4.1.6
@@ -33,7 +33,7 @@ Required:
     not exempt — pin them to SHA as well.
   - Workflow changes must pass `actionlint` and the focused supplemental
     static security gate in `security-static.yml`. CodeQL remains the primary
-    C/C++ and Rust SAST workflow; supplemental Semgrep rules should cover
+    C/C++ and Rust SAST workflow, supplemental Semgrep rules should cover
     workflow/script/release/config risks, not duplicate CodeQL language scans.
 - **Supply chain hardening (binary downloads)**:
   - Downloaded binaries and source tarballs in CI workflows and Dockerfiles
@@ -63,7 +63,7 @@ Required:
   - When refactoring C struct layout (flat fields → nested sub-structs,
     field renames), update all validator scripts and release-gate regex
     patterns that reference the old field paths in the same change set.
-  - `make release-gates-check` must catch regex/pattern drift; if it does
+  - `make release-gates-check` must catch regex/pattern drift, if it does
     not, the gate validator itself has a bug.
 - **Release/package chain invariants**:
   - Use exactly one canonical dynamic module filename across NGINX build
@@ -71,7 +71,7 @@ Required:
     docs, smoke tests, and install-layout gates.  If the addon output changes,
     update all of those surfaces and the validator in the same change set.
     Package-format-specific module directories must match the target
-    nginx.org package `--modules-path`; for example RPM packages must not
+    nginx.org package `--modules-path`, for example RPM packages must not
     install under a DEB-only module directory when nginx.org RPMs load modules
     from `/usr/lib64/nginx/modules`.
   - Every NGINX source version requested by release workflows or release
@@ -103,7 +103,7 @@ Required:
     run the install-layout gate against its output.
   - Package dependency constraints must be satisfiable by the target distro
     package manager.  If the distro package appends a release suffix or epoch,
-    do not exact-match only the upstream NGINX source version; use a
+    do not exact-match only the upstream NGINX source version, use a
     distro-resolvable package EVR or a non-exact floor plus ABI smoke coverage.
     Prebuilt dynamic-module packages must constrain the supported NGINX minor
     ABI range with both a floor and an exclusive next-minor ceiling unless a
@@ -137,23 +137,23 @@ Required:
     platform's documented success criteria exactly.  A tag gate evaluating
     GitHub required status checks must accept every conclusion GitHub counts
     as satisfying (`success`, `skipped`, `neutral`) and keep rejecting all
-    others; required contexts may come from both the Checks API and the
+    others, required contexts may come from both the Checks API and the
     Commit Status API, so the gate must evaluate both sources before declaring a
     context missing.
   - When consuming structured API requirements, preserve every constraint
     field, not just the primary identifier.  A ruleset required check carries
     an optional `integration_id` pinning the GitHub App that must produce the
-    result; dropping it makes the custom gate strictly more permissive than
+    result, dropping it makes the custom gate strictly more permissive than
     the ruleset it enforces.
   - A newly added gate or validator test file must wire into a blocking
     CI job and into the workflow's change-detection path filter in the same
     changeset.  A test that exists in the repository but never runs in CI is
-    not a gate; the critical tag logic must not execute for the first time
+    not a gate, the critical tag logic must not execute for the first time
     at tag creation.
   - Release evidence that aggregates measurements from multiple runs must
     validate every component's provenance environment against the declared
     comparison environment.  Top-level environment claims (platform, load
-    generator, runtime version) do not imply component-level consistency; a
+    generator, runtime version) do not imply component-level consistency, a
     component measured in a diverging environment must be split into
     environment-truthful evidence or the gate must fail closed instead of
     comparing across environments.
@@ -166,7 +166,7 @@ Required:
   - Workflows, release gates, and documentation renderers that consume
     `tools/release-matrix.json` must use the repository's current checked-in
     schema.  If the matrix schema changes, update all active consumers in the
-    same change set; a release workflow must not keep reading stale aliases
+    same change set, a release workflow must not keep reading stale aliases
     such as `matrix`, `nginx`, `os_type`, or `support_tier: full` after the
     source of truth has moved to `entries`, `nginx_version`, `libc`, and
     `support_tier: supported`.
@@ -197,7 +197,7 @@ Required:
     values such as `extraVolumes` and `extraVolumeMounts`.
   - Local K8s smoke tests must use an explicit kind kube-context for every
     Helm/kubectl operation.  If a test deploys a stock NGINX image without the
-    module, it must disable module-specific directives; if it reuses a
+    module, it must disable module-specific directives, if it reuses a
     pre-existing cluster, it must not delete that cluster during cleanup.
     Runtime assertions must count structured pod fields with one item per line,
     not by grepping collapsed one-line jsonpath output.
@@ -215,7 +215,7 @@ Required:
       commit before hashing or publishing it. A URL plus a computed checksum
       does not by itself prove which commit supplied the downloaded bytes.
     - In the Homebrew formula, the `version` stanza must appear before the
-      `sha256` stanza.  `brew audit --strict` requires this ordering; a
+      `sha256` stanza.  `brew audit --strict` requires this ordering, a
       formula with `sha256` before `version` fails the audit even if both
       values are correct.
     - The formula's NGINX dependency version must derive from package

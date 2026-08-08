@@ -252,9 +252,8 @@ docs-check: docs-check-base
 # docs-style-check-regression: files changed since HEAD (working tree +
 # staged) must have zero warnings; blocks new prose that violates the style.
 # docs-style-check-baseline: total warnings must not exceed the retained
-# budget (295, see DEFAULT_BASELINE in check_writing_style.py); lowers as
-# docs improve. Pass --base=<ref> via STYLE_BASE to diff against another
-# ref (e.g. CI merge-base).
+# budget (0, see DEFAULT_BASELINE in check_writing_style.py); the maintained
+# docs now pass the audit clean, so any warning fails this gate.
 docs-style-check:
 	python3 tools/docs/check_writing_style.py
 

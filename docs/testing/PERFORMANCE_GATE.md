@@ -40,11 +40,11 @@ and medium tiers, then invokes the threshold engine. Blocking verdicts fail
 the job. The engine logs warnings but the job passes.
 
 Artifacts uploaded:
-- `perf-measurement-<platform>.json` (Measurement Report, e.g. `perf-measurement-linux-x86_64.json`)
-- `perf-verdict-<platform>.json` (Verdict Report, e.g. `perf-verdict-linux-x86_64.json`)
+- `perf-measurement-<platform>.json` (Measurement Report, for example `perf-measurement-linux-x86_64.json`)
+- `perf-verdict-<platform>.json` (Verdict Report, for example `perf-verdict-linux-x86_64.json`)
 
 Platform identifiers use `uname`-style naming: `linux-x86_64` for GitHub
-Actions Ubuntu runners, `darwin-arm64` for Apple Silicon macOS, etc.
+Actions Ubuntu runners, `darwin-arm64` for Apple Silicon macOS, and so on
 
 ### Nightly Full (`nightly-perf.yml`)
 

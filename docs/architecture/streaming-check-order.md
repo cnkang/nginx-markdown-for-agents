@@ -114,7 +114,7 @@ the request passes through without ever reaching the streaming path selector.
   user-configured `stream_types`, and the streaming engine selector
   (step 9, Rule 7) provides a final defense layer.
 - **Verdict**: CONFIRMED -- implicitly excluded by content_type allowlist
-  before streaming; explicitly excluded by `stream_type_excluded()` for
+  before streaming, explicitly excluded by `stream_type_excluded()` for
   defense-in-depth.
 
 ### Resource limits -- size_limit (Requirement 1) -- PASS
@@ -127,7 +127,7 @@ the request passes through without ever reaching the streaming path selector.
 - **Note**: When Content-Length is absent (chunked), the check passes and size
   the module defers enforcement to the body filter (budget tracking during streaming
   feed calls -- covered by the streaming input contract.
-- **Verdict**: CONFIRMED -- static limit checked before streaming; dynamic
+- **Verdict**: CONFIRMED -- static limit checked before streaming, dynamic
   budget enforced during streaming (separate concern).
 
 ### Compression handling (Requirement 3) -- PASS
@@ -138,7 +138,7 @@ the request passes through without ever reaching the streaming path selector.
   If UNKNOWN format -> fail-open passthrough immediately (never reaches
   streaming). If supported -> sets `decompression.needed` flag for body filter.
 - **Ordering**: Executes at step 8, before streaming candidate (step 9).
-- **Verdict**: CONFIRMED -- unsupported compression rejected before streaming;
+- **Verdict**: CONFIRMED -- unsupported compression rejected before streaming,
   supported compression flagged for controlled decompression in body filter.
 
 ---
@@ -216,11 +216,11 @@ Verified in `components/nginx-module/src/ngx_http_markdown_eligibility.c` (lines
 
 ### AGENTS.md Rule Compliance
 
-- **Rule 12 (security)**: Function is read-only comparison; no interpolation
+- **Rule 12 (security)**: Function is read-only comparison, no interpolation
   of untrusted values.
-- **Rule 27 (sanitization)**: No output emission; purely boolean gate.
+- **Rule 27 (sanitization)**: No output emission, purely boolean gate.
 - **Rule 30 (NUL-terminate)**: Uses `ngx_strncasecmp` (length-bounded) and
-  `ngx_strlchr` (pointer-bounded); no C standard library string calls that
+  `ngx_strlchr` (pointer-bounded), no C standard library string calls that
   require NUL termination.
 
 ### Existing Test Coverage
