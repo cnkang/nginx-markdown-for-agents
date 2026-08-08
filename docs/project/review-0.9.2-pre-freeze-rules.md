@@ -108,15 +108,18 @@ repo, were never produced by CI, and were not wired into any workflow —
 the target failed on a clean checkout (baseline branch reproduced the
 2/5-gate failure).  Remediated:
 
-- Added `tools/release/gates/generate_schema_artifacts.py` — idempotent
-  generator deriving the 3 artifacts from the v1 renderer header,
-  diagnostics.schema.json, dynconf.schema.json, and the dynconf precedence
-  header (reason-codegen pattern).
-- `make schema-drift-check` now runs generator + validator (4/4 schema gates pass).
+- Added `schemas/metrics-v1.registry.json` and
+  `schemas/dynconf-precedence-v1.json` as independent canonical contracts.
+- Updated `tools/release/gates/generate_schema_artifacts.py` to project those
+  contracts (and `schemas/diagnostics.schema.json`) into release artifacts,
+  while checking the renderer, dynconf schema, Rust allowlist, and precedence
+  header independently.
+- `make schema-drift-check` now passes one `SCHEMA_RELEASE_VERSION` to both
+  generator and validator, so the gate is reusable for another release line.
 - Wired into CI `release-092-contract-gates` job and `release-gates-check-092`
   step [2/7] (matches the step's declared "schema drift checks" scope).
-- Added `tools/release/gates/tests/test_generate_schema_artifacts.py`
-  (7 tests, incl. end-to-end validator round-trip).
+- Added focused canonical-projection and end-to-end validator coverage in
+  `tools/release/gates/tests/test_generate_schema_artifacts.py`.
 - AGENTS.md schema-drift-check entry updated to describe the generation step.
 
 Verification (fresh runs, all green):
