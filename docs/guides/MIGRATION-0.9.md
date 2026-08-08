@@ -1,5 +1,12 @@
 # Migration Guide: 0.9.0 (Breaking Release)
 
+> **Historical guide.** This guide covers the 0.8.x → 0.9.0 migration
+> only. The 0.9.2 release removed features that this guide recommends,
+> for example the `markdown_profile` system and the reject-only migration
+> stubs. If you upgrade directly to 0.9.2, read
+> [MIGRATION-0.9.2.md](MIGRATION-0.9.2.md) first. Use this guide only for
+> 0.9.0-era context.
+
 ## Overview
 
 **0.8.x → 0.9.0 is a breaking release.** This is the last breaking opportunity
@@ -38,9 +45,10 @@ The following breaking changes require configuration and/or tooling updates:
    - `markdown_trust_forwarded_headers` → `markdown_trusted_proxies`
    - `markdown_on_wildcard` → removed. Use `markdown_accept wildcard`
 
-3. **Profile system introduction** — `markdown_profile` provides tested
+3. **Profile system introduction** — `markdown_profile` provided tested
    production defaults (`balanced`, `strict_cache`, `streaming_first`).
-   Explicit directives override profile defaults.
+   The 0.9.2 release removed the profile system. Explicit directives
+   override profile defaults.
 
 4. **Error policy consolidation** — `markdown_error_policy pass|fail_closed`
    replaces `markdown_on_error pass|reject`. The `reject` value
@@ -58,10 +66,12 @@ The following breaking changes require configuration and/or tooling updates:
 ---
 
 The release removes several legacy directives and replaces them with Config V2.
-Removed directives stay as **reject-only stubs**: the parser entry still
-exists, but the only behavior is to fail `nginx -t` with an actionable
-migration hint. There is **no alias compatibility** and **no legacy fallback
-behavior** — this keeps the breaking-release boundary unambiguous.
+In 0.9.0 and 0.9.1, removed directives stayed as **reject-only stubs**: the
+parser entry still existed, and the only behavior was to fail `nginx -t`
+with an actionable migration hint. The 0.9.2 release deleted those stubs,
+so removed directives now fail `nginx -t` with the standard `unknown
+directive` error. There is **no alias compatibility** and **no legacy
+fallback behavior** — this keeps the breaking-release boundary unambiguous.
 
 If a directive you use is not yet listed below, consult the `nginx -t` error
 message, which always names the replacement.

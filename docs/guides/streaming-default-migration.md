@@ -3,7 +3,7 @@
 **Version**: 0.8.0
 **Audience**: Operators upgrading from 0.5.x/0.6.x/0.7.x to 0.8.0
 
-> **v0.9.1+ operators:** the 0.9.1 release removed `markdown_streaming_engine` and replaced it with `markdown_streaming`. If you are reading this guide for the streaming behavior changes, please replace `markdown_streaming_engine off;` with `markdown_streaming off;` in your configuration files.
+> **v0.9.1+ operators:** the 0.9.1 release removed `markdown_streaming_engine` and replaced it with `markdown_streaming`. If you are reading this guide for the streaming behavior changes, please replace `markdown_streaming_engine off;` with `markdown_streaming off;` in your configuration files. The configuration examples in this guide use the 0.8.0-era directive names.
 >
 > **v0.9.2 operators:** the 0.9.2 release also removed `markdown_stream_threshold`. The auto-route threshold is now fixed internally at 1 MiB and is not operator-configurable. The table below describing `markdown_stream_threshold` is historical and no longer applies.
 
@@ -223,6 +223,7 @@ curl -s -H "Accept: text/markdown" http://localhost/page | head -50
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Clarified that configuration examples use 0.8.0-era directive names |
 | 0.8.3 | 2026-06-26 | Kang | No changes; version alignment with 0.8.3 release |
 | 0.8.0 | 2026-06-16 | Kang | Updated for 0.8.0: markdown_streaming_auto_threshold removed, $variable support removed, default threshold changed to 1m |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |

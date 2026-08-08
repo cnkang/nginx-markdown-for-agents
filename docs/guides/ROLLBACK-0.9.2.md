@@ -103,7 +103,7 @@ Key reversions:
 | `markdown_streaming auto` | `markdown_streaming_engine auto` |
 | `markdown_streaming force` | `markdown_streaming_engine on` |
 | `markdown_flavor commonmark` | `markdown_flavor commonmark` (unchanged) |
-| `markdown_otel on` | `markdown_otel_tracing on` (partial — some 0.9.1 OTel directives have no 0.9.0 equivalent) |
+| `markdown_otel on` | `markdown_otel_tracing on` (partial — some 0.9.1 OTel directives have no 0.9.0 equivalent; note that 0.9.2 removed OTel entirely, so no 0.9.2 configuration contains either form) |
 
 ### Step 3: Install 0.9.0 binary and validate
 
@@ -199,4 +199,5 @@ from their current values under the downgraded module.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Clarified that OTel directives exist in no 0.9.2 configuration (OTel removed) |
 | 0.9.2 | 2026-07-30 | Kang | Initial rollback guide for 0.9.2 |
