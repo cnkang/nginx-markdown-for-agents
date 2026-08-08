@@ -340,7 +340,7 @@ ETag generation adds minimal overhead:
 
 ### Conditional Request Cost
 
-With `full_support` mode:
+With `full` mode:
 - Conditional requests still require conversion
 - ETag must be generated to compare
 - Cost: Same as normal conversion

@@ -35,6 +35,8 @@ before/after examples.
   directives (`markdown_stream_precommit_buffer`, `markdown_stream_flush_min`,
   `markdown_parse_timeout`, `markdown_parser_budget`,
   `markdown_decompress_max_size`) are unified into `markdown_limits`
+  (`markdown_stream_flush_min` has no replacement; use downstream buffering or
+  the remaining `markdown_limits` keys as appropriate).
   key=value syntax (`streaming_buffer=`, `parser_timeout=`, `parser_memory=`,
   `decompressed_size=`).
 - **Profile presets removed.** `balanced` / `strict_cache` / `streaming_first`

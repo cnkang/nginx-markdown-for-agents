@@ -115,9 +115,9 @@ When conversion fails (either `failed_open` or `failed_closed`), the module also
 | Failure Reason Code | Meaning |
 |---------------------|---------|
 | `conversion_error` | HTML parse or conversion error — the input HTML could not be processed |
-| `memory_budget_exceeded` | Memory limit reached (`markdown_limits conversion_memory=` or parser budget) |
-| `timeout` | Parser execution exceeded `markdown_parse_timeout` |
-| `budget_exceeded` | Parser memory exceeded `markdown_parser_budget` |
+| `memory_budget_exceeded` | Memory limit reached (`markdown_limits conversion_memory=` or `parser_memory=`) |
+| `timeout` | Parser execution exceeded `markdown_limits parser_timeout=` |
+| `budget_exceeded` | Parser memory exceeded `markdown_limits parser_memory=` |
 | `ffi_panic` | Internal/system error (unexpected Rust↔C panic) |
 | `decompression_error` / `decompression_budget_exceeded` / `decompression_format_error` / `decompression_truncated_input` / `decompression_io_error` | Decompression failures (see [Automatic Decompression](../features/AUTOMATIC_DECOMPRESSION.md)) |
 | `replay_error` | Fail-open replay buffer init/append failure |
