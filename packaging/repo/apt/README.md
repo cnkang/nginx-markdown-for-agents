@@ -7,7 +7,7 @@ clients.
 > **Note**: This is a self-hosted, unofficial repository template. It is not
 > part of the Debian, Ubuntu, or any other official distribution archive.
 > For the latest GitHub Release artifacts, use the GitHub Release DEB artifacts
-> with `SHA256SUMS`; `pkg.example.com` and the commands below are operator
+> with `SHA256SUMS`. `pkg.example.com` and the commands below are operator
 > examples for repositories you publish yourself.
 
 ---
@@ -156,9 +156,9 @@ dpkg-sig --verify nginx-module-markdown-for-agents_*.deb
 
 ## Key Rotation
 
-When the signing key is rotated:
+When you rotate the signing key:
 
-1. The new key is published at the same URL (`gpg.key`)
+1. You publish the new key at the same URL (`gpg.key`)
 2. A transition period allows both old and new keys
 3. Release announcements include the new key fingerprint
 4. Users should re-import the key:
@@ -168,7 +168,7 @@ curl -fsSL https://pkg.example.com/nginx-markdown/gpg.key | \
     sudo gpg --dearmor -o /usr/share/keyrings/nginx-markdown-archive-keyring.gpg
 ```
 
-Key rotation is documented in the project's
+The project documents key rotation in its
 [PACKAGE_DISTRIBUTION.md](../../docs/guides/PACKAGE_DISTRIBUTION.md) guide.
 
 ---
@@ -229,9 +229,9 @@ in the project repository.
 
 ## Security
 
-- All packages are signed with GPG
-- Repository metadata (Release) is signed (Release.gpg + InRelease)
-- The signing key is distributed over HTTPS only
+- GPG signs all packages
+- The repository signs metadata (Release) with Release.gpg + InRelease
+- The system distributes the signing key over HTTPS only
 - Report security issues via the project's security policy
 
 ---

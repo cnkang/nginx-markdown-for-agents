@@ -7,7 +7,7 @@ normal clients.
 > **Note**: This is a self-hosted, unofficial repository template. It is not
 > part of Fedora, EPEL, AlmaLinux, Amazon Linux, or any other official
 > distribution archive. For the latest GitHub Release artifacts, use the GitHub
-> Release RPM artifacts with `SHA256SUMS`; `pkg.example.com` and the commands
+> Release RPM artifacts with `SHA256SUMS`. `pkg.example.com` and the commands
 > below are operator examples for repositories you publish yourself.
 
 ---
@@ -73,7 +73,7 @@ sudo nginx -t && sudo systemctl reload nginx
 ```
 
 > **Note:** The `load_module` directive is only valid in the main context.
-> Placing it inside a `conf.d/` fragment that is included within the `http`
+> Placing it inside a `conf.d/` fragment within the `http`
 > block will cause an NGINX configuration error.
 
 ### 5. Verify
@@ -166,9 +166,9 @@ rpm -qi gpg-pubkey-XXXXXXXX-YYYYYYYY
 
 ## Key Rotation
 
-When the signing key is rotated:
+When you rotate the signing key:
 
-1. The new key is published at the same URL (`gpg.key`)
+1. You publish the new key at the same URL (`gpg.key`)
 2. A transition period allows both old and new keys to verify packages
 3. Release announcements include the new key fingerprint
 4. Users should re-import the key:
@@ -178,9 +178,9 @@ sudo rpm --import https://pkg.example.com/nginx-markdown/gpg.key
 ```
 
 5. Old packages remain verifiable with the old key during the transition
-6. After the transition period, only the new key is used for signing
+6. After the transition period, only the new key signs artifacts
 
-Key rotation is documented in the project's
+The project documents key rotation in its
 [PACKAGE_DISTRIBUTION.md](../../docs/guides/PACKAGE_DISTRIBUTION.md) guide.
 
 ---
@@ -216,7 +216,7 @@ sudo yum install <self-hosted-module-package-name>
 
 ### "Signature verification failed" error
 
-This may indicate the package was tampered with or the key is outdated:
+This may indicate package tampering or an outdated key:
 
 ```bash
 # Re-import the latest key
@@ -264,9 +264,9 @@ in the project repository.
 
 ## Security
 
-- All RPM packages are signed with GPG (`rpm --addsign`)
-- Repository metadata (`repomd.xml`) is signed (`repomd.xml.asc`)
-- The signing key is distributed over HTTPS only
+- GPG signs all RPM packages (`rpm --addsign`)
+- The repository signs metadata (`repomd.xml`) with `repomd.xml.asc`
+- The system distributes the signing key over HTTPS only
 - `repo_gpgcheck=1` in the repo config verifies metadata signatures
 - `gpgcheck=1` verifies individual package signatures
 - Report security issues via the project's security policy
