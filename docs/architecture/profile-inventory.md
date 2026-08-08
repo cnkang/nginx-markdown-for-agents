@@ -10,8 +10,9 @@
 ---
 
 This file preserves the pre-freeze profile-field map as historical evidence. The
-`markdown_profile` directive and every opaque profile bundle described below
-the release removed from 0.9.2 and must not appear in an active configuration. For the
+0.9.2 release removed the `markdown_profile` directive and every opaque
+profile bundle described below. They must not appear in an active
+configuration. For the
 current command-table state and evidence-backed stability classification, use
 [PUBLIC_SURFACE_INVENTORY.md](PUBLIC_SURFACE_INVENTORY.md). In particular,
 parser-stored OTel placeholders are not proof of production behavior. For
@@ -103,8 +104,8 @@ Maps to two struct fields:
 
 ### Observability / Operations
 
-The OTel entries below describe the historical configuration surface. OTel
-the 0.9.2 production contract removed it and these names are not active
+The OTel entries below describe the historical configuration surface. The
+0.9.2 production contract removed OTel, so these names are not active
 profile fields in the current module.
 
 | Directive | Default | Context | Notes |
@@ -254,7 +255,7 @@ Dynconf-mutable fields (the only fields in the effective-conf view today):
 - `memory_budget`
 - `streaming_budget` (when streaming enabled)
 
-### 3.3 Profile Integration Point (to implement)
+### 3.3 Profile Integration Point (not implemented — feature removed)
 
 The planned merge order is:
 

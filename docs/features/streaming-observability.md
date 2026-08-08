@@ -24,9 +24,9 @@ observability comes through:
 
 The renderer emits a fixed transition allowlist: `commit`, `fallback`,
 `safe_finish_start`, `abort_start`, `resume_success`, and `resume_failure`.
-The `reason` label is a fixed compile-time binding to the canonical reason
-key. It is not looked up dynamically from the registry at render time.  The
-internal C path-selection enum is not used for this family.
+The `reason` label is a fixed compile-time binding in the C streaming
+renderer. It is not looked up dynamically from the registry at render time.
+The internal C path-selection enum is not used for this family.
 
 The six series currently map to the following snapshot counters:
 

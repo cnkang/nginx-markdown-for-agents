@@ -16,7 +16,8 @@ release-gates wave (final wave).
 
 ### Frozen names (1.0-stable)
 
-- Make target: `make release-gates-check-090` (**new**, does not exist yet).
+- Make target: `make release-gates-check-090` (new at the time of writing
+  and implemented since).
 - Validators: `tools/release/gates/validate_release_gates_090.py`,
   `validate_config_directives.py` (merged validator covering v0.7.0–v0.8.0 directives).
 - Production-examples smoke: `make test-production-examples-nginx-t` and
@@ -95,5 +96,6 @@ Kang
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Clarified release-gates-check-090 target existence note |
 | 0.9.1 | 2026-07-14 | Kang | Add `RELEASE_GATE_ALLOW_SKIP_MODULE=1` env-limited skip for `test-production-examples-nginx-t`, mirroring the 091 module-benchmark skip contract |
 | 0.9.0 | 2026-06-30 | Kang | Initial ADR — 0.9.0 gate name/structure/blocking-semantics freeze |

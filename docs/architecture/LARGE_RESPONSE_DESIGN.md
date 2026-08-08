@@ -96,9 +96,11 @@ The build compiles the incremental API only when you enable the `incremental` Ru
 
 ## Threshold Router
 
-> ⚠️ **RETIRED IN 0.9.0** — The `markdown_large_body_threshold` directive is a
-> **reject-only stub** in 0.9.0+. Setting it in `nginx.conf` causes `nginx -t`
-> to fail with a migration hint. There is no Config V2 replacement. The
+> ⚠️ **RETIRED IN 0.9.0, REMOVED IN 0.9.2** — The `markdown_large_body_threshold`
+> directive was a **reject-only stub** in 0.9.0 and 0.9.1. The 0.9.2 release
+> deleted the stub, so setting it in `nginx.conf` now fails `nginx -t`
+> with the standard `unknown directive` error. There is no Config V2
+> replacement. The
 > internal `routing.large_body_threshold` struct field persists for the
 > feature-gated incremental path, but the threshold is no longer
 > user-configurable. The following sections remain as historical design

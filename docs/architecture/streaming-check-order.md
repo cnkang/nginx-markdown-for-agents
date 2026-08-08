@@ -1,5 +1,10 @@
 # Streaming Security Check Order Verification
 
+> **Historical verification (0.7.x).** The current 0.9.2 eligibility audit
+> lives in
+> [streaming-eligibility-audit.md](streaming-eligibility-audit.md).
+> This file records the 0.7.x-era check-order verification.
+
 | Field | Value |
 |-------|-------|
 | Scope | Streaming Security, Resource Limits, and Compression |

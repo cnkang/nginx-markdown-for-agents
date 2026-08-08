@@ -1,5 +1,10 @@
 # Deterministic Output Implementation Summary
 
+> **Archived.** This file is a 0.6.2-era implementation summary. The
+> current contract lives in
+> [deterministic-output.md](deterministic-output.md). This file stays as
+> a historical record.
+
 ## Overview
 
 Implemented comprehensive deterministic output normalization for the NGINX Markdown Converter. This ensures stable ETags and predictable caching behavior. Converting identical HTML input multiple times now produces byte-for-byte identical Markdown output. The normalization guarantees stable output across runs.
@@ -327,5 +332,6 @@ The implementation is complete for the current design scope and supports stable,
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Marked archived; current contract lives in deterministic-output.md |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

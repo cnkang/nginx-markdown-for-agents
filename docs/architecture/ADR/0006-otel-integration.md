@@ -1,6 +1,6 @@
 # ADR-0006: OpenTelemetry Integration Architecture
 
-**Status**: Accepted
+**Status**: Superseded by ADR-0027
 **Date**: 2026-04-28
 **Context**: v0.6.0 Production Readiness Release
 
