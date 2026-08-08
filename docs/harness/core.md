@@ -95,7 +95,7 @@ behavior is invalid. Fix the underlying problem or escalate it explicitly.
 ## Status Semantics
 
 - `PASS`: the check ran and matched the contract
-- `FAIL`: the contract is broken and the task blocks
+- `FAIL`: contract validation failed. The task cannot proceed.
 - `SKIP_NOT_PRESENT`: optional local-only input was not present or got excluded
   from repository validation by Git ignore rules
 - `WARN_NEEDS_AUTHOR_REVIEW`: the harness found a likely drift that the

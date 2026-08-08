@@ -46,9 +46,8 @@ Required:
 - Local `gitleaks` execution must scan exactly Git-tracked worktree content so
   the rule covers tracked edits while ignored local adapters, caches, and build
   state cannot create findings for files absent from a clean checkout. Any
-  tracked-file materialization must omit tracked paths that are absent because
-  the harness deleted them in the worktree and preserves unusual filenames with
-  NUL-safe traversal.
+  tracked-file materialization must omit tracked paths that the worktree no
+  longer contains and preserve unusual filenames with NUL-safe traversal.
 - Semgrep CE rules must stay high-confidence and repo-specific. Focus them on
   repository workflow, shell, Python tooling, and C module patterns. This
   includes direct CLI-derived path I/O before harness validation helpers,

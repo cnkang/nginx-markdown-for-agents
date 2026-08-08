@@ -71,8 +71,8 @@ Required:
 - All URL values must reject percent-encoded control characters (`%00`–`%1F`,
   `%7F`) before scheme validation.  Scheme-prefix checks alone are
   insufficient for obfuscated payloads.
-- All forwarded header values (for example `X-Forwarded-Host`, `X-Forwarded-Proto`)
-  the module must validate them: extract first-hop value only, reject control characters /
+- The module must validate all forwarded header values (for example
+  `X-Forwarded-Host`, `X-Forwarded-Proto`): extract the first-hop value only, reject control characters /
   spaces / path separators, validate IPv6 bracket literals, and fall back to
   server name on invalid input.
 - Every new emission site for links, images, or URLs must call the shared

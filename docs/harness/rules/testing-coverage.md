@@ -52,8 +52,8 @@ Required:
   `tools/corpus/validate_corpus.sh` (or `make test-benchmark`) before merge.
 - Corpus `.meta.json` `page-type` values must use the validator's current
   canonical taxonomy (`clean-article`, `documentation`, `nav-heavy`,
-  `boilerplate-heavy`, or `complex-common`) unless the validator and coverage
-  the harness updates checks in the same change set. Use fixture-specific detail fields
+  `boilerplate-heavy`, or `complex-common`) unless the change also updates
+  the validator and coverage checks in the same change set. Use fixture-specific detail fields
   such as `archetype` or `streaming_notes.high_risk_structures` for narrower
   traits like media-rich content.
 - Regression tests for classification logic, routing decisions, or metrics

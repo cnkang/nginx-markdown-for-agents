@@ -86,8 +86,8 @@ apt install shellcheck    # Debian/Ubuntu
 ```
 
 **Handling flagged functions:**
-- A legitimate-looking large lookup table or NGINX lifecycle function still
-  the module must decompose it when it exceeds a configured threshold.
+- When a legitimate-looking lookup table or NGINX lifecycle function exceeds a
+  configured threshold, the module team must decompose it.
 - Do not suppress warnings or raise thresholds to accommodate a violation.
 - Existing violations are subject to the same blocking rule as new violations,
   the current tree must be clean before delivery.

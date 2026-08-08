@@ -276,13 +276,22 @@ def validate_contract(
     _compare_maps(errors, "markdown_limits", expected_limits, actual_limits, ())
 
     ffi_count = len(inventory["ffi_exports"])
-    if not re.search(rf"## FFI Surface \({ffi_count} exports, ABI v{inventory['ffi_abi_version']}\)", contract_text):
-        errors.append("FFI: export count or ABI heading does not match inventory")
+    if not re.search(
+        rf"## FFI Surface Summary \({ffi_count} exports, ABI v{inventory['ffi_abi_version']}\)",
+        contract_text,
+    ):
+        errors.append("FFI: summary export count or ABI heading does not match inventory")
     if f"**Classification:** all `{inventory['ffi_classification']}`" not in contract_text:
         errors.append("FFI: classification does not match inventory")
     header = inventory["ffi_exports"][0]["generated_header"]
     if f"**Generated header:** `{header}`" not in contract_text:
         errors.append("FFI: generated header does not match inventory")
+    if (
+        "Complete export names and signatures live in" not in contract_text
+        or "public-surface-inventory.json" not in contract_text
+        or "the generated header" not in contract_text
+    ):
+        errors.append("FFI: summary must point to complete inventory and generated-header surfaces")
     return errors
 
 

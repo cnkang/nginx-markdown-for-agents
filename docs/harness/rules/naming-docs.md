@@ -35,5 +35,5 @@ Required:
   of the type and the meaning of each field/variant, especially for types
   that cross language or module boundaries (FFI structs, shared config types).
 - Shell scripts must document each function with a comment block stating
-  purpose, arguments, output, and exit behaviour.  Repeated string constants
-  the script must extract them into `readonly` variables with a descriptive name.
+  purpose, arguments, output, and exit behaviour. The script must extract
+  repeated string constants into `readonly` variables with descriptive names.

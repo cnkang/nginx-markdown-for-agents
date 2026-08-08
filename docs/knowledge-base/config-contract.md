@@ -108,12 +108,14 @@ Frozen v1 registry. `bounded` = labeled with bounded-cardinality values.
 | 25 | `bypass_no_transform` | `markdown_skipped_total` |
 | 26 | `encoding_header_invalid` | `markdown_errors_total` |
 
-## FFI Surface (47 exports, ABI v2)
+## FFI Surface Summary (47 exports, ABI v2)
 
 - **ABI version:** 2 (frozen for 0.9.2)
 - **Classification:** all `INTERNAL_ONLY`
 - **Generated header:** `components/rust-converter/include/markdown_converter.h`
 - Signature format: `name(params) -> return_type`
+- Complete export names and signatures live in
+  `docs/harness/public-surface-inventory.json` and the generated header.
 
 ## markdown_limits Keys
 
