@@ -294,12 +294,9 @@ def _prose_semicolon_count(prose: str, rel: str) -> int:
     return count
 
 
-def audit(text: str, path: Path, limit: int | None) -> list[str]:
-    """Return warning lines for one file."""
-    prose = _prose_only(text)
+def _sentence_warnings(prose: str, rel: str) -> list[str]:
     warnings: list[str] = []
-    rel = str(path.relative_to(ROOT)) if path.is_absolute() else str(path)
-    for s, rule_item, ref_line in _sentences(prose, rel):
+    for s, rule_item, _ in _sentences(prose, rel):
         if rule_item:
             continue  # rule-checklist item: length is structural
         rule_text = LIST_MARKER_RE.sub("", s, count=1)
@@ -312,21 +309,14 @@ def audit(text: str, path: Path, limit: int | None) -> list[str]:
             warnings.append(
                 f"long instruction ({n}w > {SENT_INSTRUCTION_MAX}): {s[:100]}"
             )
+    return warnings
 
-    for m in LATIN_RE.finditer(prose):
-        warnings.append(f"Latin abbreviation '{m.group(0)}': spell it out")
-    for m in CONTRACTION_RE.finditer(prose):
-        warnings.append(f"contraction '{m.group(0)}': avoid in prose")
-    for m in PASSIVE_RE.finditer(prose):
-        warnings.append(f"passive-ish '{m.group(0)}': prefer active voice")
+
+def _noun_chain_warnings(prose: str, rel: str) -> list[str]:
+    warnings: list[str] = []
     for chain, chain_start in _noun_chains(prose):
-        # Cross-line merges may glue an allowlisted proper noun to
-        # neighboring prose (e.g. "See\nPrometheus Metrics Guide\n\nCapture").
-        # If the chain contains an allowlisted formal title, it is a proper
-        # noun, not prose bloat.
         if any(al in chain for al in NOUN_CHAIN_ALLOWLIST):
             continue
-        # skip noun chains on reference lines (document titles)
         line_start = prose.rfind("\n", 0, chain_start) + 1
         line_end = prose.find("\n", chain_start)
         if line_end == -1:
@@ -337,10 +327,31 @@ def audit(text: str, path: Path, limit: int | None) -> list[str]:
         warnings.append(
             f"multi-word noun chain '{chain}': expand with prepositions"
         )
+    return warnings
+
+
+def _pattern_warnings(prose: str, rel: str) -> list[str]:
+    warnings: list[str] = []
+    for m in LATIN_RE.finditer(prose):
+        warnings.append(f"Latin abbreviation '{m.group(0)}': spell it out")
+    for m in CONTRACTION_RE.finditer(prose):
+        warnings.append(f"contraction '{m.group(0)}': avoid in prose")
+    for m in PASSIVE_RE.finditer(prose):
+        warnings.append(f"passive-ish '{m.group(0)}': prefer active voice")
+    warnings.extend(_noun_chain_warnings(prose, rel))
     semi = _prose_semicolon_count(prose, rel)
     if semi:
         warnings.append(f"{semi} semicolon(s) in prose: split into sentences")
+    return warnings
 
+
+def audit(text: str, path: Path, limit: int | None) -> list[str]:
+    """Return warning lines for one file."""
+    prose = _prose_only(text)
+    warnings: list[str] = []
+    rel = str(path.relative_to(ROOT)) if path.is_absolute() else str(path)
+    warnings.extend(_sentence_warnings(prose, rel))
+    warnings.extend(_pattern_warnings(prose, rel))
     return warnings[:limit] if limit else warnings
 
 
@@ -453,35 +464,24 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> int:
-    parser = _build_parser()
-    args = parser.parse_args()
-    if args.limit is not None and args.limit < 0:
-        parser.error("--limit must be non-negative")
-    if args.baseline is not None and args.baseline < 0:
-        parser.error("--baseline must be non-negative")
-
-    base = None
+def _select_files(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> tuple[list[Path], str | None]:
     if args.changed:
         if not args.base:
             parser.error("--base is required with --changed")
         base = _resolve_base(args.base)
         if base is None:
             parser.error(f"--base does not name a valid commit: {args.base}")
+        return _changed_md_files(base), base
+    if args.paths:
+        return [ROOT / path for path in args.paths], None
+    return _tracked_md_files(), None
 
-        files = _changed_md_files(base)
-        if not files:
-            print(
-                "No changed maintained Markdown files since "
-                f"{args.base}; nothing to check."
-            )
-            print("OK: --changed found no changed files")
-            return 0
-    elif args.paths:
-        files = [ROOT / path for path in args.paths]
-    else:
-        files = _tracked_md_files()
 
+def _audit_files(
+    files: list[Path], args: argparse.Namespace, base: str | None
+) -> tuple[int, int]:
     total = 0
     new_total = 0
     base_counts: dict[Path, Counter] = {}
@@ -491,20 +491,23 @@ def main() -> int:
         if not f.exists():
             continue
         text = f.read_text(encoding="utf-8", errors="ignore")
-        for w in audit(text, f, args.limit):
+        for warning in audit(text, f, args.limit):
             rel = f.relative_to(ROOT)
-            print(f"WARN {rel}: {w}")
+            print(f"WARN {rel}: {warning}")
             total += 1
             if args.changed:
                 before = base_counts.get(f, Counter())
-                if before.get(w, 0) <= 0:
+                if before.get(warning, 0) <= 0:
                     print(f"  (NEW in {base} -> now)")
                     new_total += 1
                 else:
-                    before[w] -= 1
+                    before[warning] -= 1
+    return total, new_total
 
-    print(f"\nWriting-style warnings: {total} (file(s): {len(files)})")
-    print("This check is advisory (STE-inspired, non-native-reader friendly).")
+
+def _report_result(
+    args: argparse.Namespace, base: str | None, total: int, new_total: int
+) -> int:
     if args.strict and total:
         print("FAIL: strict mode found warnings")
         return 1
@@ -527,6 +530,30 @@ def main() -> int:
     else:
         print("OK: advisory only (no exit-code failure)")
     return 0
+
+
+def main() -> int:
+    parser = _build_parser()
+    args = parser.parse_args()
+    if args.limit is not None and args.limit < 0:
+        parser.error("--limit must be non-negative")
+    if args.baseline is not None and args.baseline < 0:
+        parser.error("--baseline must be non-negative")
+
+    files, base = _select_files(parser, args)
+    if args.changed and not files:
+        print(
+            "No changed maintained Markdown files since "
+            f"{args.base}; nothing to check."
+        )
+        print("OK: --changed found no changed files")
+        return 0
+
+    total, new_total = _audit_files(files, args, base)
+
+    print(f"\nWriting-style warnings: {total} (file(s): {len(files)})")
+    print("This check is advisory (STE-inspired, non-native-reader friendly).")
+    return _report_result(args, base, total, new_total)
 
 
 if __name__ == "__main__":
