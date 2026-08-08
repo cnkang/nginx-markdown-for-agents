@@ -62,9 +62,9 @@ Required:
   positional argument). Do not pass synthetic flags that the callee does not
   parse, verify against the callee's `usage()`/option parser in the same
   changeset.
-- Cross-script invocations in CI/tooling paths must not assume executable bits
-  the script preserves them in all environments. Prefer `bash path/to/script.sh` (or ensure
-  the executable bit stays enforced) so coverage/release pipelines do not fail with
+- Callers in CI/tooling paths must not assume that executable bits remain set in
+  all environments. Prefer `bash path/to/script.sh` (or ensure the executable
+  bit stays enforced) so coverage/release pipelines do not fail with
   `Permission denied`.
 - Under `set -e`, command substitutions that intentionally inspect failure-path
   responses (for example truncated-stream curl probes) must not abort before

@@ -2,7 +2,8 @@
 
 ## Overview
 
-Each sub-spec uses this template to maintain a risk register. The Go/No-Go review reviews risk registers during the Go/No-Go review.
+Each sub-spec uses this template to maintain a risk register. The Go/No-Go
+review examines each risk register during the Go/No-Go review.
 
 ## Template
 
@@ -45,7 +46,7 @@ The following risk categories must be explicitly registered:
 
 1. Each sub-spec initializes its risk register during the design phase
 2. New risks discovered during implementation must enter the register promptly
-3. The Go/No-Go review reviews risk registers
+3. The Go/No-Go review examines risk registers
 4. Streaming architecture transition-specific risks must be explicitly registered
 
 ## Document Updates

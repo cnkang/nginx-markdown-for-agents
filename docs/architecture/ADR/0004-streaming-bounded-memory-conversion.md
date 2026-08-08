@@ -163,7 +163,8 @@ Streaming ships behind feature flags and progressive rollout:
 
 ### Proposed Configuration Surface (initial)
 
-The exact naming can refine in implementation review, but behavior should include:
+Implementation review can refine the exact naming, but the behavior should
+include:
 
 1. streaming enable/disable switch (default off)
 2. per-request streaming memory budget

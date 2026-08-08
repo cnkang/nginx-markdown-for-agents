@@ -13,7 +13,8 @@ Historical issues: `23165d9`, `2c7d6a9`, `0eae34b`, `1b0df51`.
 
 Required:
 - Enforce all configured budgets (including total working-set budget), not only per-buffer budgets.
-- Any auxiliary heap expansion buffer must be explicitly freed on all exits, copy final data back to pool-owned memory if needed.
+- Free any auxiliary heap expansion buffer on every exit. Then copy final data
+  back to pool-owned memory when needed.
 - Any collector strings/buffers (for example link text, sniff buffers) must respect configured limits.
 - Track peak memory from real resident state, not only counters.
 - Do not hardcode stage limits in downstream components when a configured

@@ -13,9 +13,9 @@ apply path interleaves allocation with mutation. Because NGINX pool allocation
 **cannot roll back**, an allocation failure mid-apply can leave headers
 partially mutated — a correctness and fail-open hazard (AGENTS.md Rule 39).
 
-The current scattered-mutation map and the documented full-response-synthesis
-the working inventory records exceptions locally for 0.9.0. This ADR freezes
-the resulting contract.
+The local 0.9.0 working inventory records exceptions from the current
+scattered-mutation map and the documented full-response-synthesis contract.
+This ADR freezes the resulting contract.
 
 ## Decision
 
@@ -127,7 +127,7 @@ expansion.
 ### Negative
 
 - Prepare must over-allocate worst-case header entries up front.
-- Existing scattered mutations must migrate into HeaderPlan.
+- The implementation must migrate existing scattered mutations into HeaderPlan.
 - Fault-injection test surface grows.
 
 ## Alternatives Considered

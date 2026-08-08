@@ -14,9 +14,11 @@ Historical issues: `8440ac3`, `dbcdad8`, `77a46d6`.
 
 Required:
 - Treat HTML void elements as self-closing by semantics, not only tokenizer flags.
-- Skip-mode exit for dangerous elements must be name-aware, mismatched closing tags must not prematurely exit skip mode.
+- Skip-mode exit for dangerous elements must be name-aware. Mismatched closing
+  tags must not prematurely exit skip mode.
 - Keep nesting-depth accounting saturation-safe and invariant-preserving under malformed HTML.
-- When using tokenizer-level streams, do not assume tree-builder implicit tags (for example implicit `</head>`), state transitions must be explicit.
+- When using tokenizer-level streams, do not assume tree-builder implicit tags
+  (for example implicit `</head>`). Keep state transitions explicit.
 
 ---
 

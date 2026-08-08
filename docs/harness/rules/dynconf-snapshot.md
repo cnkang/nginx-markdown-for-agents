@@ -125,7 +125,7 @@ Historical issues: d91dd419, 7e1227a9, 31e017d9, 327bfe99, 4b97d0a7.
 
 Required:
 - When request-path code reads `ctx->effective_conf` fields (for example
-  `markdown_limits`), the code must handle the case where
+  `markdown_limits`), the implementation must handle the case where
   `effective_conf` is NULL.  This can occur in early header_filter paths
   before snapshot binding, or after allocation failure.  A NULL `effective_conf`
   must fall back to `conf->` with an explicit comment documenting why `eff` is

@@ -298,9 +298,9 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   normalize the symbol table once, tolerate non-fatal per-member archive
   diagnostics, and fail only when the captured symbol table is empty or a
   required exported symbol is absent [13]
-- Release Rust static libraries that pass GNU binutils validation and linked
-  into the NGINX C module must emit native target objects that the
-  target `nm`/linker can inspect. Do not enable an LTO/archive format that makes
+- The release build must emit native target objects for Rust static libraries
+  that pass GNU binutils validation and link into the NGINX C module so the
+  target `nm`/linker can inspect them. Do not enable an LTO/archive format that makes
   required exported FFI symbols invisible to the release validation toolchain
   unless the workflow also installs and uses a compatible symbol validator and
   linker for that format [13]
@@ -311,7 +311,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - All workflows capable of producing release package artifacts must apply the
   same Rust release build invariants: `--locked`, intended feature set,
   explicit target triple, and the matching target output directory. If a
-  a workflow stays only for compatibility, mark it as non-canonical and
+  workflow stays only for compatibility, mark it as non-canonical and
   gate that status explicitly [13]
 - Standalone package workflows use the canonical package name and install
   layout, run `check_install_layout.sh` before upload, and do not ask RPM SPECs
@@ -321,9 +321,9 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   equivalent step-level `shell: bash` before relying on bashisms [13]
 - Release Dockerfiles that copy and execute repository scripts install every
   interpreter named by those scripts' shebangs before first execution, or
-  invoke only scripts valid for the base image's guaranteed shell. Minimal
-  images must not assume `/usr/bin/env bash` exists unless `bash` installs
-  in the same stage [13]
+  invoke only scripts valid for the base image's guaranteed shell. The image
+  build must install `bash` in the same stage before any minimal image assumes
+  `/usr/bin/env bash` exists [13]
 - Package dependency constraints must either use distro-resolvable package
   versions/EVRs or non-exact version floors. Do not exact-match a naked
   upstream NGINX source version when distro packages append release suffixes
@@ -338,17 +338,17 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   before using them in paths, package metadata, RPM macros, or artifact names
   [13]
 - Package smoke tests must select external package repositories from the
-  detected target distro family, do not route Amazon Linux through CentOS
+  detected target distro family. Do not route Amazon Linux through CentOS
   repository paths [13]
 - Container-job package smoke images must include the tools required before
   the first workflow step runs, including `tar` or `git` for `actions/checkout`.
-  Minimal images that lack checkout prerequisites must test through a
-  host-checkout plus `docker run` smoke pattern instead of running as the job
-  container [13]
+  When a minimal image lacks checkout prerequisites, the release job must test
+  it through a host-checkout plus `docker run` smoke pattern instead of running
+  it as the job container [13]
 - Tag release gates in GitHub Actions must run only repository-owned validators
   and artifacts available in a clean CI checkout. Do not call legacy or
   local-spec validators that require user-local Kiro/spec directories unless
-  those inputs get checked into the repository or download explicitly first
+  the repository checks in those inputs or the release job downloads them first
   [13]
 - When newer release gates reuse prior-version validators, assertions about
   the active project version, package version, or release line must

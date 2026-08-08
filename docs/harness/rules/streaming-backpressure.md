@@ -48,9 +48,10 @@ Historical issues: dev/wip-0.6.6 commits 2138760–2283428 (silent data loss
 on replay buffer init/append failure, duplicate finalize on terminal buffer).
 
 Required:
-- Any buffer used to store original upstream bytes for fail-open replay
-  (for example `failopen_replay_buf`) must initialize before streaming
-  enters Pre-Commit.  Initialization failure must abort the streaming
+- Before streaming enters Pre-Commit, the module must initialize any buffer
+  used to store original upstream bytes for fail-open replay (for example
+  `failopen_replay_buf`) before entering Pre-Commit. Initialization failure
+  must abort the streaming
   handle and route through `precommit_error` — never silently continue
   streaming without a fail-open recovery path.
 - Append failure to the replay buffer (budget exceeded, capacity limit)
@@ -82,8 +83,8 @@ Required:
   filter fail-open paths (unsupported compression, ctx-alloc failure,
   inflight overload, inflight cleanup-alloc failure).  The decision to
   fail-open gets recorded separately via `log_decision()` /
-  `log_failure_decision()` at the decision point. The delivery counter
-  the code must not touch it until the downstream filter returns.
+  `log_failure_decision()` at the decision point. The module must leave the
+  delivery counter unchanged until the downstream filter returns.
 
 Verification:
 - `grep -rn 'failopen_replay_buf\|failopen_replay_initialized' components/nginx-module/src/`
@@ -217,9 +218,10 @@ items by file type:
 3. No blocking calls, no raw malloc/free, no global mutable state. (Baseline)
 4. Return codes (`NGX_OK`, `NGX_AGAIN`, `NGX_DECLINED`, `NGX_ERROR`, `NGX_DONE`) used with correct semantics. (Baseline, Rule 2)
 5. Backpressure: if the change touches body-filter output, confirm pending-chain and `last_buf` ordering stay preserved. (Rule 1)
-   At every `NGX_AGAIN` boundary, identify who owns the unsent chain. Module-owned
-   the module resubmits chains, it drains downstream-owned chains with a `NULL`
-   input and must never receive the original chain twice.
+   At every `NGX_AGAIN` boundary, identify who owns the unsent chain. For
+   module-owned chains, the module resubmits them. For downstream-owned chains,
+   it drains them with a `NULL` input and must never receive the original chain
+   twice.
 6. Memory budgets enforced on every allocation path, auxiliary buffers freed on all exits. (Rule 3)
 7. UTF-8 chunk-boundary safety if touching streaming text paths. (Rule 4)
 8. **No unguarded operations on values that may be NULL/uninitialized/invalid** — this includes dereference, relational comparison (`>`, `<`), arithmetic, or field access through pointers. Use explicit guards or boolean flags set at the production site. (Baseline C style)
@@ -236,7 +238,7 @@ items by file type:
 19. `ngx_str_t` token matching must be length-bounded: never call `ngx_strcasecmp()` on config/header values unless they are explicitly NUL-terminated. For directive keyword matching, require exact length equality and use `ngx_strncasecmp(..., expected_len)` (or a shared helper that enforces both). This prevents out-of-bounds reads on short/truncated inputs.
 20. Coverage: if this change adds or modifies production code paths, verify that aggregate e2e or unit test coverage does not regress below 80% (90% for critical paths). (Rule 25)
 21. Naming and documentation: every new or modified function has a block comment (purpose, parameters, return values). Variables and types use descriptive names. Complex logic has inline comments explaining *why*. (Rule 26)
-22. Markdown output escaping: every new emission site for links, images, or URLs must call the shared escaping helper. No raw string interpolation in Markdown link labels `[...]` or destinations `(...)` / `<...>`. URL values must reject percent-encoded control characters before scheme validation. the module must validate forwarded header values (first-hop extraction, control char rejection, IPv6 bracket validation, fallback to server name). (Rule 27)
+22. Markdown output escaping: every new emission site for links, images, or URLs must call the shared escaping helper. No raw string interpolation in Markdown link labels `[...]` or destinations `(...)` / `<...>`. URL values must reject percent-encoded control characters before scheme validation. The module must validate forwarded header values (first-hop extraction, control char rejection, IPv6 bracket validation, fallback to server name). (Rule 27)
 23. Full `ngx_list_part_t` chain iteration: any function iterating `ngx_list_t` must traverse the full `part → part->next` chain, not only the first part. When aggregating flags from multiple headers of the same name, check the aggregated result before branching on per-header flags. (Rule 28)
 24. Flag clearing ordering: flags gating operations must clear **after** the gated operation succeeds, not before. Pattern: `if (flag) { rc = op(); if (rc == NGX_OK) flag = 0; }`. Doc comments must state the clearing contract. (Rule 29)
 25. NUL-termination of `ngx_str_t`: before passing `ngx_str_t.data` to C APIs requiring NUL-terminated input (`ngx_strcasecmp`, `stat()`, `ngx_file_info()`, `opendir()`, `strstr()`), copy to a stack/pool buffer and append `'\0'`. Prefer length-bounded NGINX APIs (`ngx_strncasecmp`, `ngx_strlchr`) when possible. For directive matching, require exact length equality first. (Rule 30)

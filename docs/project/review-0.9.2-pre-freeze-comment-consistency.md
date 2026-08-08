@@ -20,7 +20,7 @@
 - **Verify**: `make test-nginx-unit`, grep for stale names (`max_size`, `parser_budget`) in the block.
 
 ### C-H2 (High) — `components/rust-converter/src/ffi/abi.rs:792,818` + generated `components/nginx-module/src/markdown_converter.h:1428-1431`
-- **Issue**: `error_policy` doc says "0=pass, 1=fail_closed; 255=not set" — wrong encoding. Actual `ErrorPolicy` (`config/profile.rs:66-73`): `Pass=0, Status=1, FailClosed=2`.
+- **Issue**: `error_policy` doc says "0=pass, 1=fail_closed, 255=not set" — wrong encoding. Actual `ErrorPolicy` (`config/profile.rs:66-73`): `Pass=0, Status=1, FailClosed=2`.
 - **Evidence**: C-side `filter_module.h:439-443` correctly documents 0/1/2. The generated header inherits the stale Rust doc.
 - **Fix**: Correct both Rust doc comments to "0=pass, 1=status, 2=fail_closed" and regenerate the FFI header (`make rust-lib` + `make copy-headers`, then `make check-headers`).
 - **Verify**: `make check-headers`, grep header for updated text.
@@ -30,7 +30,7 @@
 - **Fix**: Delete the orphan block at 45-60.
 
 ### C-M2 (Medium) — `components/nginx-module/src/ngx_http_markdown_streaming_impl.h:132-166`
-- **Issue**: "they are cleared in step()" — no `step()` function exists in the file. `finalize_request` (3453), `send_deferred_lastbuf` (1465), and `record_pending_terminal_success`/`resume_failure` (1589/1613) clear the latches.
+- **Issue**: The comment claims that `step()` clears the latches, but no `step()` function exists in the file. `finalize_request` (3453), `send_deferred_lastbuf` (1465), and `record_pending_terminal_success`/`resume_failure` (1589/1613) clear them.
 - **Fix**: Replace "cleared in step()" with "cleared by their owning helpers at the respective finalization stage".
 
 ### C-M3 (Medium) — `components/nginx-module/src/ngx_http_markdown_streaming_impl.h:326-345 vs 1449-1456`
@@ -38,12 +38,12 @@
 - **Fix**: Unify both to the four-value list.
 
 ### C-M4 (Medium) — zero-copy path comment contradiction
-- **Issue**: `output_decision_impl.h:11,22` says "Zero-copy was removed in 0.9.2 (directive deleted); always pool-copy", while `streaming_impl.h:2362-2441` (and 1076-1077, 1557-1561) document an active zero-copy path (`send_zero_copy_feed_output`, `save_pending(zero_copy=1)`, `perf.zero_copy_output_total`), and `metrics_impl.h:1170-1171` still counts "Zero-Copy Output Total". Decision functions always return POOL_COPY today.
+- **Issue**: `output_decision_impl.h:11,22` says "0.9.2 removed zero-copy because it deleted the directive, so the module always pool-copies", while `streaming_impl.h:2362-2441` (and 1076-1077, 1557-1561) document an active zero-copy path (`send_zero_copy_feed_output`, `save_pending(zero_copy=1)`, `perf.zero_copy_output_total`), and `metrics_impl.h:1170-1171` still counts "Zero-Copy Output Total". Decision functions always return POOL_COPY today.
 - **Fix**: Keep the retained path but annotate it as a retained dead/legacy path: update comments in `output_decision_impl.h` to say the code path stays retained but never selected since 0.9.2, and clarify in `streaming_impl.h` zero-copy comments that the path is non-active (decision always POOL_COPY). Leave code untouched (pre-freeze).
 
 ### C-M5 (Medium) — `components/nginx-module/src/markdown_converter.h:1086-1089` (FFI doc, op_type 2)
 - **Issue**: "the C caller must substitute the actual ETag value from MarkdownResult.etag" — C side (`header_plan.c:639-645`) treats op_type 2 as a no-op zero entry. ETag is set independently via `fullcov_prepare_etag`, tests (`header_plan_apply_test.c:756-778`) assert no mutation.
-- **Fix**: Reword to "op_type 2 is an all-zero placeholder entry; C treats it as no-op; actual ETag is set by the C side".
+- **Fix**: Reword to "op_type 2 is an all-zero placeholder entry, C treats it as no-op, and the C side sets the actual ETag".
 
 ### C-M6 (Medium) — `components/nginx-module/src/ngx_http_markdown_dynconf_impl.h:68-75`
 - **Issue**: `NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_LEN 72` documented as "64 hex chars + NUL" (=65). Actual layout (`copy_digest` 2558-2570): "sha256:" prefix (7) + 64 hex + NUL = 72.
@@ -51,7 +51,7 @@
 
 ### C-M7 (Medium) — `components/nginx-module/src/ngx_http_markdown_payload_impl.h:1269-1275`
 - **Issue**: "On every failure class the function follows a fail-open strategy" — false for `on_error == REJECT`, which finalizes with `conf->error_status` (fail-closed).
-- **Fix**: "Routed by error policy: pass → fail-open original forwarding; fail_closed → configured error status".
+- **Fix**: "Route by error policy: pass → fail-open original forwarding, fail_closed → configured error status".
 
 ### C-M8 (Medium) — `components/nginx-module/src/ngx_http_markdown_stream_replay.c:231-242`
 - **Issue**: "points the buffer at the replay data" — implementation (276-283) is `ngx_palloc` + `ngx_memcpy` copy into the request pool.
@@ -74,7 +74,7 @@
 - **Fix**: Remove Cache-Control from commit list, note in-place rewrite under prepare.
 
 ### C-M13 (Medium) — `components/nginx-module/src/ngx_http_markdown_stream_postcommit.c:375-388`
-- **Issue**: "will be enhanced when the body filter is wired" — body filter is long wired. HTML signature scan is the final implementation.
+- **Issue**: "the body filter will enhance this later" — the body filter is already wired. HTML signature scanning is the final implementation.
 - **Fix**: Drop the placeholder sentence.
 
 ### C-M14 (Medium) — `components/nginx-module/src/ngx_http_markdown_streaming_decomp_impl.h:1602-1612`

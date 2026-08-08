@@ -41,7 +41,7 @@ validation.
 ### Negative Consequences
 
 - Operators need filesystem access to replace the watched configuration file.
-- Restore is asynchronous and must verify through diagnostics or normal
+- Operators must verify asynchronous restore through diagnostics or normal
   reload logs.
 - The LKG snapshot is not a public command and cannot itself repair a file.
 
