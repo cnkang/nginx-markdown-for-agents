@@ -1,7 +1,7 @@
 # Decompression Budget and Error Handling
 
 This page describes the bounded decompression contract in 0.9.2. The runtime
-the runtime flow appears in [`AUTOMATIC_DECOMPRESSION.md`](AUTOMATIC_DECOMPRESSION.md).
+flow appears in [`AUTOMATIC_DECOMPRESSION.md`](AUTOMATIC_DECOMPRESSION.md).
 
 ## Configuration
 

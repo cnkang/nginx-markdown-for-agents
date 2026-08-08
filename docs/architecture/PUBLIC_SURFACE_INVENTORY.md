@@ -235,6 +235,7 @@ append-only promise applies to the FFI export set.
 | Incremental conversion | `markdown_incremental_new_with_code`, `markdown_incremental_feed`, `markdown_incremental_finalize`, `markdown_incremental_free` |
 | Streaming conversion | `markdown_streaming_new_with_code`, `markdown_streaming_feed`, `markdown_streaming_finalize`, `markdown_streaming_abort`, `markdown_streaming_safe_finish`, `markdown_streaming_output_free` |
 | Reason registry | `markdown_reason_code_str`, `markdown_reason_code_metric_key`, `markdown_reason_code_count` |
+| Encoding chain and hash helpers | `markdown_chain_decode_free`, `markdown_chain_decode_result_init`, `markdown_decode_encoding_chain`, `markdown_parse_encoding_chain`, `markdown_sha256_hex` |
 
 Internal status does not weaken the safety contract. Struct layout, ownership,
 panic containment, result initialization, and generated-header drift remain

@@ -52,6 +52,12 @@ If you need rollout steps, operator checklists, or directive syntax, go back to:
 - [CONFIGURATION_STRUCTURE.md](CONFIGURATION_STRUCTURE.md)
 - [COOPERATIVE_TIMEOUT.md](COOPERATIVE_TIMEOUT.md)
 
+### Parser, limits, and optimization
+
+- [PARSER_BUDGET.md](PARSER_BUDGET.md)
+- [PARSER_INTERRUPT_FEASIBILITY.md](PARSER_INTERRUPT_FEASIBILITY.md)
+- [parser-path-optimization.md](parser-path-optimization.md)
+
 ## What Belongs Here
 
 - behavior that is too detailed for user-facing guides
@@ -65,5 +71,6 @@ Keep setup instructions and rollout steps in [../guides/README.md](../guides/REA
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Added parser, limits, and optimization index section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

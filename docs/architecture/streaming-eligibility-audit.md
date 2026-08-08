@@ -45,7 +45,7 @@ encoding, memory, or backpressure safety rules.
 
 Gzip and both supported deflate framings use the incremental decoder when the
 streaming gates pass. Brotli uses the incremental decoder only when the
-the build compiles the feature. Otherwise it uses the bounded full-buffer Rust FFI path.
+build compiles the feature. Otherwise it uses the bounded full-buffer Rust FFI path.
 Unsupported encodings pass through or follow the configured error policy.
 
 Every decoder has a terminal success or failure event. Gzip member resets do
