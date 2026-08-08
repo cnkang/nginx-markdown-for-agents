@@ -37,7 +37,7 @@ values, rationale, and update procedures.
 
 Triggers when Rust code, perf config, or workflow files change. Runs small
 and medium tiers, then invokes the threshold engine. Blocking verdicts fail
-the job; warnings are logged but the job passes.
+the job. The engine logs warnings but the job passes.
 
 Artifacts uploaded:
 - `perf-measurement-<platform>.json` (Measurement Report, e.g. `perf-measurement-linux-x86_64.json`)
@@ -81,7 +81,7 @@ Measurement Report, invokes the threshold engine for a Verdict Report,
 and prints a text summary to stderr.
 
 ### 0.9.1 Release Gate Evidence
-For the 0.9.1 release, evidence is gathered via the following targets:
+For the 0.9.1 release, the team gathers evidence via the following targets:
 - `make release-gates-check-091`: (Blocking) Verifies all core architectural and functional requirements.
 - `make perf-evidence-check`: (Non-blocking) Verifies that 0.9.1 meets performance baselines across the target matrix.
 
@@ -90,13 +90,13 @@ For deep analysis, use:
 - `tools/perf/run_module_benchmark.sh`: Runs a standalone benchmark of the module.
 
 When invoked directly, `threshold_engine.py` emits the Verdict Report JSON to
-stdout and diagnostics to stderr. Redirect stdout to the intended artifact;
-the Python process does not accept a caller-controlled output path.
+stdout and diagnostics to stderr. Redirect stdout to the intended artifact.
+The Python process does not accept a caller-controlled output path.
 
 ## Baseline Management
 
-Baselines are stored in `perf/baselines/<platform>.json` and must be
-generated on the target platform:
+`perf/baselines/<platform>.json` stores the baselines. You must generate
+them on the target platform:
 
 1. Run `tools/perf/run_perf_baseline.sh --update-baseline` on the target
    CI runner (or locally for local baselines), or trigger `nightly-perf`
@@ -107,8 +107,8 @@ generated on the target platform:
 
 ### Canonical Module Baseline Policy
 
-Do not fabricate or improve measured evidence. Only documented conservative
-normalization of latency/throughput is allowed; path, fallback, output, memory,
+Do not fabricate or improve measured evidence. The policy allows only documented conservative
+normalization of latency/throughput. Path, fallback, output, memory,
 and environment evidence must remain verbatim.
 
 The immutable truth fields are `streaming_path_hits`, `fullbuffer_path_hits`,
@@ -116,8 +116,8 @@ The immutable truth fields are `streaming_path_hits`, `fullbuffer_path_hits`,
 `decompression_streaming_total`, `decompression_fullbuffer_total`,
 `zero_copy_output_total`, `copied_output_total`, `baseline_rss_bytes`,
 `peak_rss_bytes`, `input_bytes`, scenario status and metadata, platform, load
-generator, and NGINX version. RPS may only be rounded downward or lowered;
-latency and TTFB may only be rounded upward or raised. Never increase RPS,
+generator, and NGINX version. You may only round RPS downward or lower it.
+You may only round latency and TTFB upward or raise them. Never increase RPS,
 decrease latency/TTFB, or alter truth evidence.
 
 Keep the raw workflow artifact and record the artifact/run, source Git commit,
@@ -138,7 +138,7 @@ The evidence objects remain layered: `baseline_policy` carries policy
 provenance, top-level `module_benchmark` carries platform/load-generator/NGINX
 environment plus `git_commit` and `timestamp`, and each scenario carries its
 metadata, `load_integrity`, `metrics`, and `response_correctness`. Optional
-`baseline_policy.scenario_sources` entries are checked for environment
+`baseline_policy.scenario_sources` entries get checked for environment
 consistency only when supplied.
 
 The canonical workflow retains response probes at
@@ -151,12 +151,12 @@ normalized headers, Markdown content type, and empty content encoding to match
 the probe JSON. It then requires exact finalized/probe
 `response_correctness` object equality and enforces strict boolean/integer
 tail and curl fields before
-running the performance evidence and release gates. The canonical upload is
-performed only after those checks pass and contains the finalized JSON, raw
-JSON, and this probe directory. Canonical artifacts are retained for 30 days;
-failure-only debug artifacts use the shorter diagnostic retention period.
+running the performance evidence and release gates. The canonical upload
+happens only after those checks pass and contains the finalized JSON, raw
+JSON, and this probe directory. Canonical artifacts stay retained for 30 days.
+Failure-only debug artifacts use the shorter diagnostic retention period.
 
-The former `historical_audit_exception` is retained only for historical
+The former `historical_audit_exception` stays only for historical
 validator coverage and is not used by the active release baseline. Future
 baselines must identify a repository-contained raw artifact and must not use
 an empty, `unknown`, or `not-recorded` `source_artifact`.
@@ -195,7 +195,7 @@ above to bootstrap.
 
 ### Threshold engine errors
 
-- **Schema version mismatch**: The baseline was generated with a different
+- **Schema version mismatch**: The generator produced the baseline with a different
   schema version. Re-generate the baseline with `--update-baseline`.
 - **JSON parse error**: Check that the measurement and baseline files are
   valid JSON. The error message includes the file path and parse details.

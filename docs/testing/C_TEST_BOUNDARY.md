@@ -27,8 +27,8 @@ compiler/toolchain behavior that cannot be meaningfully expressed in Rust.
 ### 1. NGINX Module Glue and Lifecycle Hooks
 
 **Why C:** NGINX module registration, phase handler installation, filter chain
-wiring, and request lifecycle callbacks are expressed entirely through NGINX C
-APIs (`ngx_http_module_t`, `ngx_command_t`, `ngx_http_top_header_filter`,
+wiring, and request lifecycle callbacks use NGINX C
+APIs exclusively (`ngx_http_module_t`, `ngx_command_t`, `ngx_http_top_header_filter`,
 `ngx_http_top_body_filter`). These APIs have no Rust equivalent in this
 codebase. Testing them requires direct access to NGINX stub structures
 (`ngx_http_request_t`, `ngx_http_core_module`, `ngx_cycle_t`) that are only
@@ -56,13 +56,13 @@ available in C.
 
 ### 2. Configuration Parsing and Merge Logic
 
-**Why C:** NGINX configuration is parsed and merged through NGINX C APIs
+**Why C:** NGINX parses and merges configuration through NGINX C APIs
 (`ngx_conf_t`, `ngx_command_t`, `ngx_conf_merge_value`, `ngx_conf_set_*_slot`).
 The merge semantics — how `http {}`, `server {}`, and `location {}` blocks
 inherit and override values — are NGINX-internal behavior. Testing them requires
 constructing `ngx_conf_t` and `ngx_http_*_conf_t` structures directly in C.
 The dynconf (dynamic configuration) subsystem also operates on NGINX pool
-memory and must be tested at the C level.
+memory. 
 
 **Concrete examples:**
 
@@ -127,13 +127,13 @@ smoke check that the test harness itself is functional — must remain in C.
 
 ### 5. ABI and FFI Boundary Validation
 
-**Why C:** The Rust converter is linked into the NGINX module as a C-callable
+**Why C:** The Rust converter links into the NGINX module as a C-callable
 library. The ABI boundary — the `#[repr(C)]` structs, function signatures, and
-memory ownership contracts defined in `markdown_converter.h` — must be
-validated from the C side. This includes verifying that the header compiles
+memory ownership contracts defined in `markdown_converter.h` — must validate
+from the C side. This includes verifying that the header compiles
 cleanly, that struct layouts match expectations, and that the C module correctly
 handles all FFI error codes and result fields. These checks require C
-compilation and cannot be expressed in Rust without circular dependency.
+compilation. Rust cannot express them without a circular dependency.
 
 **Concrete examples:**
 
@@ -176,7 +176,7 @@ structures and NGINX SHM APIs.
 
 **Why C:** Some behaviors are sensitive to the C compiler, optimization level,
 or sanitizer instrumentation. AddressSanitizer (ASan) and UndefinedBehaviorSanitizer
-(UBSan) operate at the C/C++ level and cannot be applied to Rust code in the
+(UBSan) operate at the C/C++ level and cannot apply to Rust code in the
 same way. The `make test-nginx-unit-sanitize-smoke` target compiles the C
 module with sanitizers enabled and runs the unit suite under them. Similarly,
 the clang smoke target (`make test-nginx-unit-clang-smoke`) validates that the
@@ -203,8 +203,8 @@ E2E harness.
 ### Tests That Belong in C
 
 A test belongs in C when it validates **NGINX C module behavior** — that is,
-behavior that is expressed through NGINX C APIs, NGINX data structures, or
-C-language semantics that have no equivalent in the Rust harness.
+behavior that uses NGINX C APIs, NGINX data structures, or
+C-language semantics that have no equivalent in the Rust harness. 
 
 Ask: does the test require any of the following?
 
@@ -241,14 +241,14 @@ If the answer to any of these is yes, the test belongs in C.
 
 ---
 
-### Tests That May Be Expressed in Rust E2E
+### Tests That May Use the Rust E2E Harness
 
-A test may be expressed in the Rust E2E harness when it validates
-**product/runtime behavior** — that is, observable HTTP behavior that can be
-verified through real HTTP requests and responses against a running NGINX
+A test may use the Rust E2E harness when it validates
+**product/runtime behavior** — that is, observable HTTP behavior that
+verifies through real HTTP requests and responses against a running NGINX
 instance, without needing to inspect internal C structures.
 
-Ask: can the test be expressed entirely as:
+Ask: can the test express entirely as:
 
 - An HTTP request (method, URL, headers, body) sent to a running NGINX
 - An assertion on the HTTP response (status code, response headers, response
@@ -300,7 +300,7 @@ Note that some concerns appear in **both** layers. For example:
   correctly?) — this is a Rust E2E concern.
 
 Both tests are correct and complementary. The C test validates the internal
-implementation; the Rust E2E test validates the externally observable contract.
+implementation. The Rust E2E test validates the externally observable contract.
 They are not duplicates.
 
 ---
@@ -309,7 +309,7 @@ They are not duplicates.
 
 The `docs/project/0.6.3-test-surface-audit.md` classifies every in-scope test
 file. All files in `components/nginx-module/tests/unit/` and
-`components/nginx-module/tests/integration/` are classified **Keep as C** in
+`components/nginx-module/tests/integration/` classify as **Keep as C** in
 that audit. This document provides the authoritative rationale for that
 classification.
 

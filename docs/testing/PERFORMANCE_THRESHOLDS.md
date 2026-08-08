@@ -32,11 +32,11 @@ deviation_pct = (current - baseline) / baseline * 100
 
 For `lower_is_better` metrics, a positive deviation means regression.
 For `higher_is_better` metrics, a negative deviation means regression
-(thresholds are expressed as negative numbers).
+(thresholds appear as negative numbers).
 
 ## Configuration File
 
-Thresholds are stored in `perf/thresholds.json`, organized by platform,
+`perf/thresholds.json` stores thresholds, organized by platform,
 sample tier, and metric. Each entry includes a `rationale` field explaining
 the threshold choice.
 

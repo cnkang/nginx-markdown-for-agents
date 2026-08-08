@@ -326,7 +326,7 @@ cd components/nginx-module/tests
    - Streaming decompression handles arbitrary chunk boundaries
 
 3. **Error Conditions**
-   - Malformed, truncated, and trailing Brotli streams are handled without
+   - The module handles malformed, truncated, and trailing Brotli streams without
      worker failure under the configured error policy
    - Unit tests assert the exact typed error classification for each case
    - Budget exceeded preserves the original Brotli response
@@ -454,8 +454,8 @@ make -C components/nginx-module/tests unit
 The downstream backpressure mechanism (NGX_AGAIN handling, pending output save,
 resume drain) is **codec-agnostic** — it operates on the outgoing Markdown chain
 after decompression, not on compressed input. Once the decompressor produces
-bytes and those are converted to Markdown, the downstream delivery path is
-identical regardless of codec (gzip, deflate, or Brotli).
+bytes and the module converts those to Markdown, the downstream delivery path
+stays identical regardless of codec (gzip, deflate, or Brotli).
 
 **Existing coverage that proves backpressure correctness for Brotli:**
 
