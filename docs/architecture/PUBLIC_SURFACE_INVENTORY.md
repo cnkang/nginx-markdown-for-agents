@@ -139,8 +139,10 @@ nginx_markdown_dynconf_reloads_total
 nginx_markdown_build_info
 ```
 
-The checked-in metrics registry is authoritative. The renderer
-must emit exactly these families in Prometheus 0.0.4 format. The label sets
+`schemas/metrics-v1.registry.json` is authoritative. The versioned
+`artifacts/release/<version>/metrics-registry.json` file is only its generated
+projection. The renderer must emit exactly these families in Prometheus 0.0.4
+format. The label sets
 stay closed and bounded: outcomes/stages/reasons use the frozen taxonomy,
 engine is `full_buffer|streaming`, transition is the six-value lifecycle
 allowlist, and encoding/outcome/reason use the registry allowlists. Path, URI,
