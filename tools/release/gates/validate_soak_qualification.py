@@ -737,6 +737,20 @@ def _validated_nginx_binary() -> pathlib.Path | None:
     return resolved
 
 
+def _validated_module() -> pathlib.Path | None:
+    """Resolve MODULE_SO and reject missing or unreadable module files."""
+    raw_path = os.environ.get("MODULE_SO", "")
+    if not raw_path:
+        return None
+    try:
+        resolved = validate_read_path(raw_path, purpose="MODULE_SO")
+    except FileNotFoundError:
+        return None
+    if not resolved.is_file() or not os.access(resolved, os.R_OK):
+        return None
+    return resolved
+
+
 def _runtime_directory() -> pathlib.Path:
     """Return a private runtime directory under the repository build tree."""
     configured = os.environ.get("SOAK_RUNTIME_DIR")
@@ -759,24 +773,29 @@ def _runtime_directory() -> pathlib.Path:
 
 
 def handle_missing_nginx(args: argparse.Namespace, manifest: dict) -> int | None:
-    """Record a justified skip when NGINX_BIN is unavailable, or None to
-    continue. Returns an exit code when the soak cannot run."""
-    if _validated_nginx_binary() is not None:
+    """Require both NGINX_BIN and MODULE_SO, or record an explicit skip."""
+    missing = []
+    if _validated_nginx_binary() is None:
+        missing.append("NGINX_BIN")
+    if _validated_module() is None:
+        missing.append("MODULE_SO")
+    if not missing:
         return None
+    missing_text = " and ".join(missing)
     if args.allow_skip_soak:
         record = {
             "schema_version": RECORD_SCHEMA_VERSION,
             "candidate_sha": manifest["candidate_sha"],
             "run_id": f"soak-{int(time.time())}",
             "status": "skip",
-            "skip_reason": "NGINX_BIN not set or binary not found",
+            "skip_reason": f"{missing_text} not set or unavailable",
             "policy_reference": "release short-soak qualification thresholds",
         }
         output_path = _write_record(record, args)
-        print(f"SKIP: NGINX_BIN not set; skip recorded at {output_path}")
+        print(f"SKIP: {missing_text} unavailable; skip recorded at {output_path}")
         return 0
     print(
-        "ERROR: NGINX_BIN not set or binary not found; "
+        f"ERROR: {missing_text} not set or unavailable; "
         "set NGINX_BIN (and MODULE_SO) or pass --allow-skip-soak",
         file=sys.stderr,
     )
