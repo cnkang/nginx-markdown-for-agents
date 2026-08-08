@@ -37,11 +37,12 @@ tutorial.
 | `markdown_token_estimate` | `on|off` | off | http/server/location |
 | `markdown_trusted_proxies` | `<CIDR>... | off` | off | http |
 
-## Dynconf Keys (6)
+## Dynconf Keys (5 runtime-mutable + schema_version metadata)
 
-Runtime-mutable keys for `markdown_dynamic_config`. Unknown/duplicate keys,
-invalid types, and out-of-range values reject the whole file. `schema_version`
-must be present and equal `1`.
+The file contains five runtime-mutable keys for `markdown_dynamic_config` plus
+required `schema_version` metadata. Unknown/duplicate keys, invalid types, and
+out-of-range values reject the whole file. `schema_version` must be present and
+equal `1`.
 
 | Key | Type | Allowed values | Default | Inheritance |
 |---|---|---|---|---|

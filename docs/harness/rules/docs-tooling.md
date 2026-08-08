@@ -72,16 +72,18 @@ requirements. The style gate exists to keep maintained docs readable by
 translators, NMT engines, and LLMs (see `docs/development/WRITING_GUIDE.md`).
 
 Required:
-- Maintained Markdown (root docs + `docs/`, excluding `docs/archive/` and
-  gitignored paths) must follow the STE-inspired prose rules in
+- Maintained Markdown (current reader-facing root docs + `docs/`, excluding
+  `docs/archive/` and gitignored paths) must follow the
+  STE-inspired prose rules in
   `docs/development/WRITING_GUIDE.md`: sentences ≤ 25 words (descriptive) /
   ≤ 20 words (instructions), active voice, no Latin abbreviations
   (`e.g.`/`i.e.`/`etc.`), no contractions, no multi-word noun chains
   (≥ 4 capitalized words), no semicolon chains in prose.
 - Files changed in the current changeset must introduce **zero** new
-  warnings: `make docs-style-check-regression` (or
-  `python3 tools/docs/check_writing_style.py --changed`) must pass.
-  A new warning in a changed file fails the gate.
+  warnings. Set `STYLE_BASE` to the target branch commit and run
+  `make docs-style-check-regression` (or
+  `python3 tools/docs/check_writing_style.py --changed --base REF`). The target
+  requires a valid base, and invalid references fail closed.
 - The repository-wide warning budget must not grow:
   `make docs-style-check-baseline` (or
   `python3 tools/docs/check_writing_style.py --baseline`) fails when the
@@ -89,7 +91,7 @@ Required:
   (`tools/docs/check_writing_style.py`). The maintained docs now pass the
   audit with zero warnings, so any new warning fails this gate. The checker
   exempts structural surfaces — rule-checklist items, allowlisted formal
-  titles, reference lines, and quoted source citations — so the scan
+  titles, reference lines, and explicitly labelled source-citation lines — so the scan
   targets genuine prose violations only.
 - Preserve meaning when rewriting passive voice to active: keep the
   original subject/object direction (`X is exceeded` → `the conversion

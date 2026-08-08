@@ -31,7 +31,8 @@ it, never copy it into this directory.
 ### 2. Public surface is the frozen contract
 
 0.9.2 freezes the public surface: **25 active directives, 0 reject-only
-directives (all stubs removed), 6 dynconf keys, 12 metric families, 27
+directives (all stubs removed), 5 runtime-mutable dynconf keys plus required
+`schema_version` metadata, 12 metric families, 27
 reason codes, 47 FFI exports, ABI v2**. Anything outside this surface is
 either removed (38 directives total) or not part of the contract. The
 authoritative source is
@@ -51,7 +52,7 @@ configs reference a removed directive, they are stale. See
 |---|---|---|
 | Active directives | 25 | `config-contract.md` |
 | Removed directives (total) | 38 | `docs/guides/0.9.2-breaking-changes.md` |
-| Dynconf keys | 6 (`filter`, `prune_noise`, `log_verbosity`, `error_policy`, `streaming_buffer`, `schema_version`) | `config-contract.md` |
+| Dynconf keys | 5 runtime-mutable + `schema_version` metadata (`filter`, `prune_noise`, `log_verbosity`, `error_policy`, `streaming_buffer`) | `config-contract.md` |
 | Metric families | 12 | `config-contract.md` |
 | Reason codes | 27 (0–26) | `config-contract.md` |
 | FFI exports | 47, ABI v2, all `INTERNAL_ONLY` | `config-contract.md` |
@@ -62,7 +63,8 @@ configs reference a removed directive, they are stale. See
 ## Contract Files (load on demand)
 
 - `config-contract.md` — **The frozen 0.9.2 contract in one place**: full
-  25-directive table (syntax, default, context), the 6 dynconf keys with
+  25-directive table (syntax, default, context), five runtime-mutable dynconf
+  keys plus required `schema_version` metadata with
   allowed values, the 12 metric families, reason-code list, FFI summary, and
   `markdown_limits` key semantics. Load this for any directive/default/
   metric question.
