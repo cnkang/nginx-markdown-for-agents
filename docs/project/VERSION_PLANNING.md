@@ -85,9 +85,9 @@ is clearly marked as historical or migration guidance.
 
 ### Public Surface Review
 
-Before the v1.0 freeze, every provisional or implementation-oriented public
-the project must classify the surface as stable, experimental, internal, or removed. The
-review includes:
+Before the v1.0 freeze, the project must classify every provisional or
+implementation-oriented public surface as stable, experimental, internal, or
+removed. The review includes:
 
 - Markdown flavors such as MDX and Org mode;
 - streaming shadow and zero-copy controls;

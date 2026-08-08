@@ -69,7 +69,7 @@ Stub set: `markdown_on_wildcard`, `markdown_etag`,
   (streaming cannot generate a strong ETag for chunked output; headers commit
   before the transformed body is known — see ADR-0017).
 - `markdown_cache_validation full` + `markdown_streaming auto` → **warning**;
-  at runtime streaming blocks and the request uses full-buffer with full
+  at runtime the module blocks streaming and the request uses full-buffer with full
   validation, reason code `streaming_block_full_cache_validation` (ADR-0018).
 - `markdown_accept force` + `markdown_auth_policy deny` → **warning** (dangerous).
 

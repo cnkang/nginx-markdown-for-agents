@@ -341,13 +341,13 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   repository paths [13]
 - Container-job package smoke images must include the tools required before
   the first workflow step runs, including `tar` or `git` for `actions/checkout`.
-  Minimal images that lack checkout prerequisites must go through a
+  Minimal images that lack checkout prerequisites must test through a
   host-checkout plus `docker run` smoke pattern instead of running as the job
   container [13]
 - Tag release gates in GitHub Actions must run only repository-owned validators
   and artifacts available in a clean CI checkout. Do not call legacy or
   local-spec validators that require user-local Kiro/spec directories unless
-  those inputs check into the repository or download explicitly first
+  those inputs get checked into the repository or download explicitly first
   [13]
 - When newer release gates reuse prior-version validators, assertions about
   the active project version, package version, or release line must be
@@ -436,7 +436,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - THIRD-PARTY-NOTICES must stay in sync with resolved dependency versions;
   add/remove/update entries in same changeset as Cargo.lock changes [49]
 
-**If any item would violate, redesign the change before writing it.** Do not write code that breaks an item.
+**If any item would be violated, redesign the change before writing it.** Do not write code that breaks an item.
 
 ### During coding
 - Preserve NGINX event-driven semantics; no hidden blocking calls.

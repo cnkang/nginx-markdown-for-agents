@@ -6,8 +6,8 @@
 
 ## Question
 
-Can the HTML parser be safely interrupted mid-parse when a timeout or
-does the memory budget exceed?
+Can the HTML parser be safely interrupted mid-parse when a timeout occurs
+or the memory budget is exceeded?
 
 ## Short Answer
 

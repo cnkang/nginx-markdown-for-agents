@@ -62,7 +62,7 @@ The merge semantics — how `http {}`, `server {}`, and `location {}` blocks
 inherit and override values — are NGINX-internal behavior. Testing them requires
 constructing `ngx_conf_t` and `ngx_http_*_conf_t` structures directly in C.
 The dynconf (dynamic configuration) subsystem also operates on NGINX pool
-memory. 
+memory, so its tests must run at the C level.
 
 **Concrete examples:**
 
