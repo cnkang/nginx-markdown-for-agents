@@ -43,6 +43,11 @@ METRICS_CONTRACT = REPO_ROOT / "schemas" / "metrics-v1.registry.json"
 DYNCONF_PRECEDENCE_CONTRACT = (
     REPO_ROOT / "schemas" / "dynconf-precedence-v1.json"
 )
+DYNCONF_IMPLEMENTATION_SOURCES = [
+    "schemas/dynconf.schema.json",
+    "components/rust-converter/src/dynconf/schema.rs",
+    "components/nginx-module/src/ngx_http_markdown_dynconf_precedence.h",
+]
 
 # Schema paths
 DYNCONF_SCHEMA = REPO_ROOT / "schemas" / "dynconf.schema.json"
@@ -388,6 +393,21 @@ def _check_precedence_contract_projection() -> list[str]:
                 f"dynconf precedence artifact field '{field}' does not match "
                 "schemas/dynconf-precedence-v1.json"
             )
+    expected_contract_source = "schemas/dynconf-precedence-v1.json"
+    if report.get("contract_source") != expected_contract_source:
+        errors.append(
+            "dynconf precedence artifact contract_source must be "
+            f"{expected_contract_source}"
+        )
+    if report.get("implementation_sources") != DYNCONF_IMPLEMENTATION_SOURCES:
+        errors.append(
+            "dynconf precedence artifact implementation_sources must be "
+            f"{DYNCONF_IMPLEMENTATION_SOURCES!r}"
+        )
+    if "source" in report:
+        errors.append(
+            "dynconf precedence artifact must not use the ambiguous source field"
+        )
     errors.extend(_check_precedence_header_contract(contract))
     return errors
 

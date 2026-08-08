@@ -147,7 +147,12 @@ def generate_metrics_registry() -> dict:
     contract = _read_json(METRICS_CONTRACT_PATH)
     result = dict(contract)
     result["generator"] = Path(__file__).name
-    result["source"] = str(RENDERER_PATH.relative_to(SOURCE_ROOT))
+    result["contract_source"] = str(
+        METRICS_CONTRACT_PATH.relative_to(SOURCE_ROOT)
+    )
+    result["implementation_sources"] = [
+        str(RENDERER_PATH.relative_to(SOURCE_ROOT))
+    ]
     return result
 
 
@@ -223,7 +228,14 @@ def generate_dynconf_precedence_report() -> dict:
 
     result = dict(contract)
     result["generator"] = Path(__file__).name
-    result["source"] = str(DYNCONF_SCHEMA_PATH.relative_to(SOURCE_ROOT))
+    result["contract_source"] = str(
+        DYNCONF_PRECEDENCE_CONTRACT_PATH.relative_to(SOURCE_ROOT)
+    )
+    result["implementation_sources"] = [
+        str(DYNCONF_SCHEMA_PATH.relative_to(SOURCE_ROOT)),
+        str(DYNCONF_RUST_SCHEMA_PATH.relative_to(SOURCE_ROOT)),
+        str(PRECEDENCE_HEADER_PATH.relative_to(SOURCE_ROOT)),
+    ]
     return result
 
 

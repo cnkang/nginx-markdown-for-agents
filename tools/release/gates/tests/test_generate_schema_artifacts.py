@@ -40,6 +40,10 @@ def test_metrics_registry_matches_canonical_families():
     assert families == canonical["families"]
     assert registry["schema_version"] == canonical["schema_version"]
     assert registry["format"] == canonical["format"]
+    assert registry["contract_source"] == "schemas/metrics-v1.registry.json"
+    assert registry["implementation_sources"] == [
+        "components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h"
+    ]
 
 
 def test_metrics_registry_histogram_contract():
@@ -110,6 +114,28 @@ def test_metrics_registry_projection_rejects_contract_drift():
     assert errors
 
 
+def test_metrics_registry_provenance_is_independent_and_explicit():
+    """Metrics evidence identifies its contract and implementation inputs."""
+    canonical = json.loads(
+        (REPO_ROOT / "schemas" / "metrics-v1.registry.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    artifact = gen.generate_metrics_registry()
+    artifact["contract_source"] = "components/other-renderer.h"
+    errors = metrics_validator.validate_registry_matches_contract(
+        artifact, canonical
+    )
+    assert any("contract_source" in error for error in errors)
+
+    artifact = gen.generate_metrics_registry()
+    artifact["source"] = "components/other-renderer.h"
+    errors = metrics_validator.validate_registry_matches_contract(
+        artifact, canonical
+    )
+    assert any("ambiguous source" in error for error in errors)
+
+
 def test_metrics_registry_build_info_gauge():
     """build_info is a gauge with value 1."""
     registry = gen.generate_metrics_registry()
@@ -162,6 +188,12 @@ def test_dynconf_precedence_report_covers_all_schema_keys():
         report["five_tier_precedence_hierarchy"]
         == canonical["five_tier_precedence_hierarchy"]
     )
+    assert report["contract_source"] == "schemas/dynconf-precedence-v1.json"
+    assert report["implementation_sources"] == [
+        "schemas/dynconf.schema.json",
+        "components/rust-converter/src/dynconf/schema.rs",
+        "components/nginx-module/src/ngx_http_markdown_dynconf_precedence.h",
+    ]
 
 
 def test_dynconf_precedence_header_drift_is_rejected():
