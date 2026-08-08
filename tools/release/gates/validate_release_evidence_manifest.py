@@ -152,17 +152,18 @@ def _check_entry(entry: dict, index: int, seen_ids: set, reasons: list) -> None:
         reasons.append(
             f"malformed: entries[{index}] blocking must be a boolean")
 
-    if entry.get("blocking") is True:
-        if status == "pending":
-            reasons.append(
-                f"blocking-pending: entries[{index}] "
-                f"(category={entry.get('category')!r}) is blocking with "
-                f"status=pending")
-        elif status == "fail":
-            reasons.append(
-                f"blocking-pending: entries[{index}] "
-                f"(category={entry.get('category')!r}) is blocking with "
-                f"status=fail")
+    if entry.get("blocking") is True and status != "pass":
+        reasons.append(
+            f"blocking-pending: entries[{index}] "
+            f"(category={entry.get('category')!r}) is blocking with "
+            f"status={status!r}; blocking entries must pass")
+
+    if status == "skip":
+        for field in ("justification", "policy_reference"):
+            if not isinstance(entry.get(field), str) or not entry[field].strip():
+                reasons.append(
+                    f"malformed: entries[{index}] status=skip requires "
+                    f"non-empty {field}")
 
 
 def run_fixture_gate(args) -> int:

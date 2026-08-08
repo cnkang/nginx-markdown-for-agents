@@ -390,8 +390,7 @@ def test_registry_histogram_has_correct_boundaries():
         / "metrics-registry.json"
     )
     if not registry_path.exists():
-        # Skip if artifact not yet produced
-        return
+        raise AssertionError(f"metrics registry artifact missing: {registry_path}")
 
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
     families = registry.get("families", [])
@@ -422,7 +421,7 @@ def test_registry_histogram_is_only_histogram():
         / "metrics-registry.json"
     )
     if not registry_path.exists():
-        return
+        raise AssertionError(f"metrics registry artifact missing: {registry_path}")
 
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
     families = registry.get("families", [])

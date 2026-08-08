@@ -58,8 +58,14 @@ RELEASE_ARTIFACTS = [
 def _load_json(path: Path) -> dict:
     """Load and return parsed JSON from the given path."""
     validated_path = validate_read_path(path, purpose="schema drift artifact")
-    with open(validated_path, encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(validated_path, encoding="utf-8") as f:
+            value = json.load(f)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"unable to read {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"schema drift artifact must be an object: {path}")
+    return value
 
 
 def gate_release_artifact_existence() -> list:
@@ -131,6 +137,7 @@ def gate_metrics_registry() -> list:
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
+        timeout=60,
     )
     if result.returncode != 0:
         return [
@@ -337,7 +344,10 @@ def gate_dynconf_schema() -> list:
 def _run_gate(index, total, label, gate_fn):
     """Run a single gate and return errors list."""
     print(f"[{index}/{total}] {label}...")
-    errors = gate_fn()
+    try:
+        errors = gate_fn()
+    except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        errors = [f"gate raised a structured input error: {exc}"]
     if errors:
         for e in errors:
             print(f"  FAIL: {e}")

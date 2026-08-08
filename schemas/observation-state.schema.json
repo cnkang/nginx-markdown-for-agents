@@ -36,6 +36,17 @@
     "domains": {
       "type": "object",
       "description": "Per-domain observation payloads. Each domain carries its own payload shape; thresholds are referenced, never restated.",
+      "required": [
+        "coverage",
+        "performance",
+        "fuzz",
+        "soak",
+        "security",
+        "signature",
+        "provenance",
+        "documentation",
+        "residual-risk"
+      ],
       "additionalProperties": false,
       "properties": {
         "coverage": {

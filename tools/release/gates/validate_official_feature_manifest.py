@@ -19,6 +19,7 @@ import hashlib
 import json
 import pathlib
 import sys
+import tomllib
 from argparse import ArgumentParser
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
@@ -40,20 +41,28 @@ def manifest_digest(manifest: dict) -> str:
 def check_cargo_features(cargo_toml: str, failures: list) -> None:
     """Verify Cargo default features agree with the manifest and no
     forbidden feature name is used."""
-    default_line = next(
-        (line.strip() for line in cargo_toml.splitlines() if line.strip().startswith("default =")),
-        None,
-    )
-    if default_line is None:
-        failures.append("Cargo.toml has no [features] default line")
+    try:
+        cargo = tomllib.loads(cargo_toml)
+    except tomllib.TOMLDecodeError as exc:
+        failures.append(f"Cargo.toml is not valid TOML: {exc}")
+        return
+    features = cargo.get("features")
+    if not isinstance(features, dict):
+        failures.append("Cargo.toml has no [features] table")
+        return
+    defaults = features.get("default")
+    if not isinstance(defaults, list) or not all(
+        isinstance(feature, str) for feature in defaults
+    ):
+        failures.append("Cargo.toml [features].default must be an array of strings")
         return
     for feature in EXPECTED:
-        if feature not in default_line:
+        if feature not in defaults:
             failures.append(
                 f"Cargo default features do not include manifest feature {feature!r}"
             )
     for name in FORBIDDEN_FEATURE_NAMES:
-        if f'"{name}"' in cargo_toml:
+        if name in features:
             failures.append(f"forbidden Cargo feature name {name!r} is used")
 
 
