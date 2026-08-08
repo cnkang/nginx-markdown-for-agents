@@ -119,12 +119,17 @@ def file_digest(path: Path) -> str:
 
 def git_head_sha() -> str:
     """Return the current git HEAD SHA or raise ValueError."""
-    proc = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ValueError(f"malformed: cannot resolve git HEAD: {exc}") from exc
     if proc.returncode != 0:
         raise ValueError(
             f"malformed: cannot resolve git HEAD: {proc.stderr.strip()}"
@@ -189,8 +194,12 @@ def _check_manifest_digest_fields(manifest: dict, reasons: list) -> None:
         "release_matrix_digest",
     ):
         value = manifest.get(digest_field)
-        if value is not None and not isinstance(value, str):
-            reasons.append(f"malformed: {digest_field} must be a string")
+        if value is not None and (
+            not isinstance(value, str) or not DIGEST_PATTERN.fullmatch(value)
+        ):
+            reasons.append(
+                f"malformed: {digest_field} must be a sha256 digest"
+            )
 
 
 def _check_required_input(

@@ -33,7 +33,11 @@ def _normalize_tier(tier: str) -> str:
     Returns:
         normalized_tier (str): The input string trimmed, lowercased, with spaces and hyphens replaced by underscores.
     """
-    return tier.strip().lower().replace(" ", "_").replace("-", "_")
+    normalized = tier.strip().lower().replace(" ", "_").replace("-", "_")
+    # INSTALLATION.md retains the historical display label "Full" while the
+    # canonical release matrix uses "supported". Compare the two vocabularies
+    # at this presentation boundary instead of reintroducing a legacy matrix.
+    return "full" if normalized == "supported" else normalized
 
 
 def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
@@ -50,18 +54,23 @@ def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
     with open(validated, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    if not isinstance(data, dict) or not isinstance(data.get("matrix"), list):
+    if not isinstance(data, dict) or not isinstance(data.get("entries"), list):
         return []
 
     entries = []
     entries.extend(
         (
-            item["nginx"],
-            item["os_type"],
-            item["arch"],
+            item["nginx_version"],
+            item["libc"],
+            {"amd64": "x86_64", "arm64": "aarch64"}.get(
+                item["arch"], item["arch"]
+            ),
             _normalize_tier(item["support_tier"]),
         )
-        for item in data["matrix"]
+        for item in data["entries"]
+        if item.get("artifact_type") == "dynamic-module"
+        and item.get("support_tier") == "supported"
+        and item.get("libc") in {"glibc", "musl"}
     )
     return sorted(entries)
 

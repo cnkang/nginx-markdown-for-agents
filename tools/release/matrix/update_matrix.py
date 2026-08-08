@@ -428,7 +428,33 @@ def _read_matrix_json(path: Path) -> dict:
 
 def _matrix_entry_list(data: dict, path: Path) -> list:
     """Return the matrix entry list from supported schema variants."""
-    matrix_entries = data.get("matrix") or data.get("entries")
+    if isinstance(data.get("entries"), list) and "matrix" not in data:
+        matrix_entries = []
+        for index, entry in enumerate(data["entries"]):
+            if not isinstance(entry, dict):
+                _matrix_error(
+                    f"Invalid matrix entry at index {index} in {path}: "
+                    f"expected dict, got {type(entry).__name__}"
+                )
+            if (
+                entry.get("artifact_type") == "dynamic-module"
+                and entry.get("support_tier") == "supported"
+                and entry.get("libc") in OS_TYPES
+                and entry.get("arch") in {"amd64", "arm64"}
+            ):
+                matrix_entries.append(
+                    {
+                        "nginx": entry["nginx_version"],
+                        "os_type": entry["libc"],
+                        "arch": {"amd64": "x86_64", "arm64": "aarch64"}[
+                            entry["arch"]
+                        ],
+                        "support_tier": "full",
+                    }
+                )
+        return matrix_entries
+
+    matrix_entries = data.get("matrix")
     if not isinstance(matrix_entries, list):
         _matrix_error(f"Invalid matrix structure in {path}: matrix must be a list")
     return matrix_entries
@@ -641,8 +667,7 @@ def write_matrix(path: Path, data: dict) -> None:
 
     Parameters:
         path (Path): Destination path inside the repository where the matrix JSON will be written.
-        data (dict): Full matrix data to write. Callers update fields such as
-            ``updated_at`` before invoking this function.
+        data (dict): Full matrix data to write.
     """
     tmp_path = path.with_suffix(f"{path.suffix}.tmp")
     try:
@@ -925,6 +950,84 @@ def _update_entries_for_added_versions(data: dict, diff: MatrixDiff) -> None:
             _update_entry_version_for_track(entry, track_map)
 
 
+def _canonical_dynamic_entry(
+    legacy_entry: dict, existing: dict | None = None
+) -> dict:
+    """Project one generated install row into the canonical entry schema."""
+    version = legacy_entry["nginx"]
+    libc = legacy_entry["os_type"]
+    arch = {"x86_64": "amd64", "aarch64": "arm64"}[legacy_entry["arch"]]
+    if existing is not None:
+        entry = dict(existing)
+        entry["nginx_version"] = version
+        entry["nginx_channel"] = classify_version(version)
+        entry["libc"] = libc
+        entry["arch"] = arch
+        entry["support_tier"] = "supported"
+        return entry
+
+    return {
+        "nginx_version": version,
+        "nginx_channel": classify_version(version),
+        "os": "linux",
+        "libc": libc,
+        "arch": arch,
+        "artifact_type": "dynamic-module",
+        "test_level": "smoke-test" if libc == "glibc" else "docker-validation",
+        "support_tier": "supported",
+        "release_blocking": libc == "glibc",
+        "owner_workflow": (
+            ".github/workflows/release-packages.yml"
+            if libc == "glibc"
+            else ".github/workflows/release-binaries.yml"
+        ),
+    }
+
+
+def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
+    """Replace generated dynamic-module rows while preserving other artifacts."""
+    entries = data.get("entries")
+    if not isinstance(entries, list):
+        _matrix_error("Canonical release matrix is missing an entries list")
+
+    existing_by_key = {
+        (entry.get("nginx_version"), entry.get("libc"), entry.get("arch")): entry
+        for entry in entries
+        if isinstance(entry, dict) and entry.get("artifact_type") == "dynamic-module"
+    }
+    dynamic_entries = [
+        _canonical_dynamic_entry(
+            legacy_entry,
+            existing_by_key.get(
+                (
+                    legacy_entry["nginx"],
+                    legacy_entry["os_type"],
+                    {"x86_64": "amd64", "aarch64": "arm64"}[legacy_entry["arch"]],
+                )
+            ),
+        )
+        for legacy_entry in merged
+    ]
+    other_entries = [
+        entry
+        for entry in entries
+        if not (
+            isinstance(entry, dict)
+            and entry.get("artifact_type") == "dynamic-module"
+        )
+    ]
+    dynamic_entries.sort(
+        key=lambda entry: (
+            version_tuple(entry["nginx_version"]),
+            entry["libc"],
+            entry["arch"],
+        )
+    )
+    data["entries"] = dynamic_entries + other_entries
+    data.pop("updated_at", None)
+    data.pop("matrix", None)
+
+
 def _run_write_mode(
     data: dict,
     merged: list[dict],
@@ -944,12 +1047,14 @@ def _run_write_mode(
     except OSError:
         matrix_backup = None
 
-    # Update updated_at timestamp
-    data["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    data["matrix"] = merged
+    if isinstance(data.get("entries"), list) and "matrix" not in data:
+        _replace_canonical_dynamic_entries(data, merged)
+    else:
+        data["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        data["matrix"] = merged
 
-    # Update entries with the new version numbers if they exist
-    _update_entries_for_added_versions(data, diff)
+        # Update entries with the new version numbers if they exist
+        _update_entries_for_added_versions(data, diff)
 
     # Write matrix via crash-safe temp+rename
     try:

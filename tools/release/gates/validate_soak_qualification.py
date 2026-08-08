@@ -31,6 +31,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -413,21 +414,43 @@ def run_ab_chunk(url: str, concurrency: int, seconds: int, output_dir: pathlib.P
     validated_output_dir = validate_write_path_within_root(
         output_dir, REPO_ROOT, purpose="soak raw logs"
     )
-    ab = subprocess.run(
-        [
-            "/usr/sbin/ab",
-            "-t",
-            str(seconds),
-            "-c",
-            str(concurrency),
-            "-k",
-            validated_url,
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=seconds * 4,
-    )
+    ab_path = shutil.which("ab")
+    if not ab_path:
+        return {
+            "p50_ms": 0.0,
+            "p99_ms": 0.0,
+            "failed_requests": 0,
+            "completed_requests": 0,
+            "rps": 0.0,
+            "_returncode": -1,
+            "_error": "ab executable not found",
+        }
+    try:
+        ab = subprocess.run(
+            [
+                ab_path,
+                "-t",
+                str(seconds),
+                "-c",
+                str(concurrency),
+                "-k",
+                validated_url,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=max(1, seconds * 4),
+        )
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "p50_ms": 0.0,
+            "p99_ms": 0.0,
+            "failed_requests": 0,
+            "completed_requests": 0,
+            "rps": 0.0,
+            "_returncode": -1,
+            "_error": f"ab timed out: {exc}",
+        }
     report = parse_ab_report(ab.stdout or ab.stderr)
     raw_dir = validated_output_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
@@ -542,8 +565,22 @@ def find_worker_pid(runtime_dir: pathlib.Path) -> int:
     while time.time() < deadline:
         if pid_file.is_file():
             try:
-                return int(pid_file.read_text().strip())
+                master_pid = int(pid_file.read_text().strip())
+                ps = subprocess.run(
+                    ["ps", "-axo", "pid=,ppid=,comm="],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=10,
+                )
+                if ps.returncode == 0:
+                    for line in ps.stdout.splitlines():
+                        fields = line.split(None, 2)
+                        if len(fields) == 3 and fields[1] == str(master_pid):
+                            return int(fields[0])
             except ValueError:
+                pass
+            except (OSError, subprocess.SubprocessError):
                 pass
         time.sleep(0.5)
     return -1
@@ -751,7 +788,9 @@ def real_main(args: argparse.Namespace) -> int:
     base_url = f"http://127.0.0.1:{port}"
     runtime_dir, corpus, nginx = prepare_runtime(base_url, manifest, module_so)
     try:
-        if not wait_for_ready(f"{base_url}/{corpus['small']}"):
+        ready_fixture = next(iter(corpus.values()), None)
+        if not ready_fixture or not wait_for_ready(
+                f"{base_url}/{ready_fixture}"):
             print("ERROR: nginx did not become ready", file=sys.stderr)
             return 1
         worker_pid = find_worker_pid(runtime_dir)

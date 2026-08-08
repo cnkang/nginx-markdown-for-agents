@@ -337,45 +337,45 @@ markdown_stream_types text;     # Error: invalid format, must be "type/subtype"
 ```nginx
 http {
     markdown_filter on;
-    markdown_limits memory=5m;
+    markdown_limits conversion_memory=5m;
     
     server {
-        # Inherits: markdown_filter on, markdown_limits memory=5m
+        # Inherits: markdown_filter on, markdown_limits conversion_memory=5m
         
         location /api {
             markdown_filter off;  # Overrides parent
-            # Inherits: markdown_limits memory=5m
+            # Inherits: markdown_limits conversion_memory=5m
         }
     }
 }
 ```
 
 **Expected:**
-- `/api`: filter off, limits memory=5m
-- Other locations: filter on, limits memory=5m
+- `/api`: filter off, limits conversion_memory=5m
+- Other locations: filter on, limits conversion_memory=5m
 
 ### Test 2: Multi-level inheritance
 ```nginx
 http {
     markdown_filter on;
-    markdown_limits timeout=10s;
+    markdown_limits conversion_timeout=10s;
     markdown_error_policy pass;
     
     server {
-        markdown_limits timeout=5s;  # Overrides http level
+        markdown_limits conversion_timeout=5s;  # Overrides http level
         # Inherits: markdown_filter on, markdown_error_policy pass
         
         location /docs {
             markdown_error_policy fail_closed;  # Overrides server level
-            # Inherits: markdown_filter on, markdown_limits timeout=5s
+            # Inherits: markdown_filter on, markdown_limits conversion_timeout=5s
         }
     }
 }
 ```
 
 **Expected:**
-- `/docs`: filter on, timeout 5s, error_policy fail_closed
-- Other locations: filter on, timeout 5s, error_policy pass
+- `/docs`: filter on, conversion_timeout 5s, error_policy fail_closed
+- Other locations: filter on, conversion_timeout 5s, error_policy pass
 
 ### Test 3: Array directive inheritance
 ```nginx

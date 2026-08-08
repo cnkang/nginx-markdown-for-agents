@@ -688,6 +688,9 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 
     ngx_http_markdown_merge_advanced_values(conf, prev);
 
+    conf->decompress.max_size_explicit =
+        max_size_set || prev->decompress.max_size_explicit;
+
     /* Merge unified limits (per-key inheritance) */
     ngx_conf_merge_msec_value(conf->limits.conversion_timeout,
         prev->limits.conversion_timeout,
@@ -723,7 +726,9 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
      */
     conf->timeout = conf->limits.conversion_timeout;
     conf->decompress.parse_timeout = conf->limits.parser_timeout;
-    conf->max_size = conf->limits.conversion_memory;
+    if (!conf->decompress.max_size_explicit) {
+        conf->max_size = conf->limits.conversion_memory;
+    }
     conf->decompress.parser_budget = conf->limits.parser_memory;
     conf->stream.budget = conf->limits.streaming_buffer;
     conf->decompress.max_size = conf->limits.decompressed_size;

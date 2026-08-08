@@ -66,6 +66,8 @@ class TestLegacyAliases:
                     "libc": "glibc",
                     "arch": "x86_64-unknown-linux-gnu",
                     "artifact_type": "rpm",
+                    "feature_manifest_digest": "sha256:" + "0" * 64,
+                    "abi_version": 2,
                 }
             ],
         }

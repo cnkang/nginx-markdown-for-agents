@@ -859,8 +859,8 @@ test_default_inheritance(void)
     init_conf(&child);
     merge_stream_config(&child, &parent);
 
-    TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_OFF,
-        "default streaming policy should be off");
+    TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_AUTO,
+        "default streaming policy should be auto");
     TEST_ASSERT(child.stream.excluded_types == NULL,
         "default excluded_types should be NULL");
 

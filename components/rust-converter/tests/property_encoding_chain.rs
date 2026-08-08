@@ -74,36 +74,45 @@ fn flip_case(s: &str, index: usize) -> String {
 /// Generate a syntactically valid chain value with arbitrary SP/HTAB
 /// whitespace placement and mixed casing.
 fn arb_chain_value(max_tokens: usize) -> impl Strategy<Value = String> {
-    (
-        1usize..=max_tokens,
-        proptest::collection::vec(arb_token(), 0..=max_tokens),
-    )
-        .prop_flat_map(move |(count, _)| {
-            proptest::collection::vec(arb_token(), count).prop_map(|tokens| {
+    (1usize..=max_tokens).prop_flat_map(move |count| {
+        (
+            proptest::collection::vec(arb_token(), count),
+            proptest::collection::vec(arb_ows(), count),
+            proptest::collection::vec(arb_ows(), count),
+            proptest::collection::vec(arb_separator(), count.saturating_sub(1)),
+        )
+            .prop_map(|(tokens, before, after, separators)| {
                 let mut out = String::new();
                 for (i, tok) in tokens.iter().enumerate() {
                     if i > 0 {
-                        out.push_str(prop_choose_ws());
+                        out.push_str(&separators[i - 1]);
                     }
-                    out.push_str(prop_ws_before());
+                    out.push_str(&before[i]);
                     out.push_str(tok);
-                    out.push_str(prop_ws_after());
+                    out.push_str(&after[i]);
                 }
                 out
             })
-        })
+    })
 }
 
-fn prop_ws_before() -> &'static str {
-    ["", " ", "\t", "  ", " \t"][0]
+fn arb_ows() -> impl Strategy<Value = String> {
+    prop::sample::select(vec![
+        String::new(),
+        " ".to_string(),
+        "\t".to_string(),
+        "  ".to_string(),
+        " \t".to_string(),
+    ])
 }
 
-fn prop_ws_after() -> &'static str {
-    ["", " ", "\t", "  ", " \t"][0]
-}
-
-fn prop_choose_ws() -> &'static str {
-    [", ", ",", " ,", " \t, "][0]
+fn arb_separator() -> impl Strategy<Value = String> {
+    prop::sample::select(vec![
+        ", ".to_string(),
+        ",".to_string(),
+        " ,".to_string(),
+        " \t, ".to_string(),
+    ])
 }
 
 // ─── Property 22: chain parsing ──────────────────────────────────────────────
@@ -115,25 +124,17 @@ proptest! {
     fn p22_normalized_tokens_in_declaration_order(value in arb_chain_value(5)) {
         let layers = parse_encoding_chain(value.as_bytes());
         if let Ok(layers) = layers {
-            let mut prev_i = 0usize;
-            for (i, tok) in value.split([',']).enumerate() {
+            let expected = value.split(',').map(|tok| {
                 let tok = tok.trim_matches([' ', '\t']);
-                if tok.is_empty() {
-                    continue;
+                match tok.to_ascii_lowercase().as_str() {
+                    "gzip" => Encoding::Gzip,
+                    "deflate" => Encoding::Deflate,
+                    "br" => Encoding::Br,
+                    "identity" => Encoding::Identity,
+                    other => panic!("unexpected token in valid chain: {other}"),
                 }
-                /* Every non-empty slice must correspond to a layer in
-                 * declaration order. */
-                let expected = tok.to_ascii_lowercase();
-                assert!(
-                    i >= prev_i,
-                    "declaration order violated"
-                );
-                prev_i = i;
-                let _ = expected;
-            }
-            /* Identity layers are preserved in the parse result. */
-            let count: usize = layers.iter().filter(|e| **e != Encoding::Identity).count();
-            assert!(count <= 3, "depth must be <= 3");
+            }).collect::<Vec<_>>();
+            assert_eq!(layers, expected, "parser changed declaration order");
         }
     }
 
@@ -143,11 +144,15 @@ proptest! {
         let layers = parse_encoding_chain(value.as_bytes());
         match layers {
             Ok(layers) => {
-                for e in &layers {
-                    assert_ne!(*e, Encoding::Identity, "identity allowed");
-                }
-                /* If the value parsed cleanly, every token was supported. */
-                let _ = layers;
+                /* If the value parsed cleanly, every layer is supported;
+                 * identity is a valid no-op and must remain allowed. */
+                assert!(layers.iter().all(|e| matches!(
+                    e,
+                    Encoding::Gzip
+                        | Encoding::Deflate
+                        | Encoding::Br
+                        | Encoding::Identity
+                )));
             }
             Err(e) => {
                 match e {

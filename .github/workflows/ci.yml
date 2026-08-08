@@ -10,6 +10,7 @@ on:
       - "components/**"
       - "schemas/**"
       - "tools/**"
+      - "tools/reason-codegen/**"
       - "tests/**"
       - "docs/**"
       - "perf/**"
@@ -37,6 +38,7 @@ on:
       - "components/**"
       - "schemas/**"
       - "tools/**"
+      - "tools/reason-codegen/**"
       - "tests/**"
       - "docs/**"
       - "perf/**"
@@ -431,7 +433,6 @@ jobs:
           make reason-codegen-check
           PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
           make -C components/nginx-module/tests unit-streaming_impl
-          PYTHONPATH=. python3 tools/release/gates/validate_official_feature_manifest.py --write
           PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
           PYTHONPATH=. python3 tools/release/gates/validate_official_feature_manifest.py
 
@@ -829,9 +830,6 @@ jobs:
 
       - name: Install Python test dependencies
         run: pip install -r requirements-dev.txt
-
-      - name: Prepare official build feature manifest
-        run: PYTHONPATH=. python3 tools/release/gates/validate_official_feature_manifest.py --write
 
       - name: Run release-matrix Python tests
         run: PYTHONPATH=. python3 -m pytest -q tools/release/matrix/tests/

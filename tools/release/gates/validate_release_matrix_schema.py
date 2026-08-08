@@ -57,8 +57,13 @@ def run_normalization(doc: dict) -> tuple[bool, str]:
         capture_output=True,
         text=True,
         check=False,
+        timeout=30,
     )
     if proc.returncode == 0:
+        try:
+            json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            return False, "normalizer returned invalid JSON"
         return True, proc.stdout
     return False, proc.stderr.strip()
 
@@ -151,6 +156,8 @@ def positive_cases() -> list:
                         "libc": "glibc",
                         "arch": "x86_64-unknown-linux-gnu",
                         "artifact_type": "rpm",
+                        "feature_manifest_digest": "sha256:" + "0" * 64,
+                        "abi_version": 2,
                     }
                 ],
             },

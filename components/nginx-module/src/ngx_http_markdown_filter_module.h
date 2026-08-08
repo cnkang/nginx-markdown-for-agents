@@ -803,7 +803,7 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
     } while (0)
 
     NGX_MD_MERGE_STREAM(policy, ngx_uint_t, -1,
-                        NGX_HTTP_MARKDOWN_STREAMING_OFF);
+                        NGX_HTTP_MARKDOWN_STREAMING_AUTO);
     NGX_MD_MERGE_STREAM(policy_explicit, ngx_flag_t, -1, 0);
 
     if (conf->stream.excluded_types == (ngx_array_t *) -1) {

@@ -109,18 +109,31 @@ def frozen_abi_version() -> int:
 
 
 def run_normalization() -> dict:
-    proc = subprocess.run(
-        [sys.executable, str(NORMALIZE_PATH), str(MATRIX_PATH)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(NORMALIZE_PATH), str(MATRIX_PATH)],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise SystemExit(f"ERROR: matrix normalization could not complete: {exc}") from exc
     if proc.returncode != 0:
         raise SystemExit(
             "ERROR: matrix normalization failed (fail closed): "
             f"{proc.stderr.strip() or proc.stdout.strip()}"
         )
-    return json.loads(proc.stdout)
+    try:
+        normalized = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(
+            f"ERROR: matrix normalization returned invalid JSON: {exc}"
+        ) from exc
+    if not isinstance(normalized, dict):
+        raise SystemExit("ERROR: matrix normalization returned a non-object")
+    return normalized
 
 
 def validate_schema(matrix: dict) -> None:
