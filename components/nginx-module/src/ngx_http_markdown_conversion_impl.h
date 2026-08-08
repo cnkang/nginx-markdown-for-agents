@@ -1804,7 +1804,8 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
     }
 
     if (rc == NGX_AGAIN) {
-        ctx->fullbuffer.pending_output = out;
+        ngx_http_markdown_pending_output_set(
+            &ctx->fullbuffer.pending_output, out);
         ctx->fullbuffer.pending_has_data = 1;
         r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
 
@@ -1857,7 +1858,8 @@ ngx_http_markdown_body_filter_resume_pending(ngx_http_request_t *r,
         NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_resume_total);
     }
 
-    ctx->fullbuffer.pending_output = NULL;
+    ngx_http_markdown_pending_output_set(
+        &ctx->fullbuffer.pending_output, NULL);
     ctx->fullbuffer.pending_has_data = 0;
     r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
 

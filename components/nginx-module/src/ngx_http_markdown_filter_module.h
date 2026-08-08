@@ -92,6 +92,11 @@ typedef struct ngx_http_markdown_effective_conf_s
 ngx_int_t ngx_http_markdown_next_body_filter(ngx_http_request_t *r,
     ngx_chain_t *in);
 
+/* Track the number of requests that currently own pending output chains. */
+void ngx_http_markdown_pending_output_set(ngx_chain_t **slot,
+    ngx_chain_t *value);
+ngx_atomic_uint_t ngx_http_markdown_pending_output_current(void);
+
 /*
  * Processing path constants for threshold router
  */

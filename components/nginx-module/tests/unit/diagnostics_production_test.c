@@ -210,6 +210,7 @@ static int g_output_filter_calls;
 static ngx_chain_t *g_last_output_chain;
 static int g_discard_rc;
 static int g_alloc_fail_after = -1;
+static size_t g_effective_streaming_buffer = 2 * 1024 * 1024;
 
 static void *
 test_alloc(size_t size, int zero)
@@ -435,7 +436,7 @@ ngx_http_markdown_diagnostics_get_effective(
     out->log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
     out->error_policy = mcf->on_error;
     out->error_status = mcf->error_status;
-    out->streaming_buffer = 2 * 1024 * 1024;
+    out->streaming_buffer = g_effective_streaming_buffer;
     out->filter_source = NGX_HTTP_MARKDOWN_PROVENANCE_STATIC;
     out->prune_noise_source = NGX_HTTP_MARKDOWN_PROVENANCE_STATIC;
     out->log_verbosity_source = NGX_HTTP_MARKDOWN_PROVENANCE_STATIC;
@@ -652,6 +653,8 @@ test_access_and_json_builder(void)
     TEST_ASSERT(b.pos != NULL && b.last > b.pos, "buffer should be populated");
     TEST_ASSERT((size_t) (b.end - b.start)
                 == NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE
+                   + (6 * (sizeof(((ngx_http_markdown_diag_dynconf_t *) 0)
+                               ->last_error) - 1))
                    + NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE,
                 "JSON buffer should account for recorded decisions");
 
@@ -731,6 +734,35 @@ test_json_preserves_unified_error_policy(void)
 
 
 static void
+test_json_preserves_effective_streaming_buffer(void)
+{
+    ngx_http_request_t       r;
+    ngx_connection_t         c;
+    ngx_http_markdown_conf_t conf;
+    struct sockaddr_in       addr;
+    ngx_buf_t                 b;
+    ngx_int_t                 rc;
+
+    TEST_SUBSECTION("diagnostics preserve effective streaming buffer");
+
+    reset_test_state();
+    init_request(&r, &c, &conf, &addr);
+    g_effective_streaming_buffer = 65535;
+    memset(&b, 0, sizeof(b));
+
+    rc = ngx_http_markdown_diagnostics_build_json(&r, &b);
+    TEST_ASSERT(rc == NGX_OK,
+                "diagnostics JSON should render the effective buffer");
+    TEST_ASSERT(strstr((const char *) b.pos,
+                       "\"streaming_buffer\":65535") != NULL,
+                "diagnostics must not replace the effective buffer value");
+
+    g_effective_streaming_buffer = 2 * 1024 * 1024;
+    TEST_PASS("Diagnostics preserve the effective streaming buffer");
+}
+
+
+static void
 test_diagnostics_has_no_legacy_profile_surface(void)
 {
     ngx_http_request_t       r;
@@ -795,6 +827,8 @@ test_json_buffer_scales_with_ring_count(void)
     TEST_ASSERT(rc == NGX_OK, "large diagnostics JSON should succeed");
 
     expected_size = NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE
+                    + (6 * (sizeof(((ngx_http_markdown_diag_dynconf_t *) 0)
+                                ->last_error) - 1))
                     + (150 * NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE);
     TEST_ASSERT((size_t) (b.end - b.start) == expected_size,
                 "JSON buffer should scale with recorded decisions");
@@ -1016,6 +1050,7 @@ main(void)
     test_recording_request_resets_between_config_cycles();
     test_access_and_json_builder();
     test_json_preserves_unified_error_policy();
+    test_json_preserves_effective_streaming_buffer();
     test_diagnostics_has_no_legacy_profile_surface();
     test_json_buffer_scales_with_ring_count();
     test_json_builder_rejects_invalid_ring_state();

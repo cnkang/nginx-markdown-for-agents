@@ -220,12 +220,13 @@ ngx_http_markdown_exit_worker(ngx_cycle_t *cycle)
     } else {
         markdown_converter_free(ngx_http_markdown_converter);
         ngx_http_markdown_converter = NULL;
-        ngx_http_markdown_metrics = NULL;
 
         ngx_log_error(NGX_LOG_INFO, cycle->log, 0,
                       "markdown: converter cleaned up in worker process (pid: %P)",
                       ngx_pid);
     }
+
+    ngx_http_markdown_metrics = NULL;
 }
 
 #endif /* NGX_HTTP_MARKDOWN_LIFECYCLE_IMPL_H */
