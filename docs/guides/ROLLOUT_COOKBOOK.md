@@ -44,7 +44,7 @@ The recommended approach:
 3. Observe for at least one full traffic cycle before expanding.
 4. Expand gradually — more paths, then more hosts.
 
-All patterns in this cookbook use existing NGINX configuration primitives (`map`, `geo`, `split_clients`, `location` blocks) combined with the module's `markdown_filter $variable` capability. No new directives are required.
+All patterns in this cookbook use existing NGINX configuration primitives (`map`, `geo`, `split_clients`, `location` blocks) combined with the module's `markdown_filter $variable` capability. You need no new directives.
 
 ### Target Audience
 
@@ -745,7 +745,7 @@ http {
 
 UA-based targeting depends on clients sending accurate User-Agent strings. It is not a security boundary — any client can spoof a User-Agent. Use this pattern for convenience, not access control.
 
-Note: `proxy_set_header Accept` only modifies the header sent upstream to the backend — it does not change the incoming request header that the module evaluates. The `markdown_accept wildcard` directive is required here so that bots whose original `Accept` header does not include `text/markdown` are still eligible for conversion when the filter is enabled by `$is_ai_bot`.
+Note: `proxy_set_header Accept` only modifies the header sent upstream to the backend — it does not change the incoming request header that the module evaluates. You need the `markdown_accept wildcard` directive here. Without it, bots whose original `Accept` header does not include `text/markdown` stay ineligible when you enable the filter via `$is_ai_bot`. You need this directive for the pattern to work. Without it, such bots stay ineligible.
 
 #### Verification
 
@@ -843,7 +843,7 @@ http {
 }
 ```
 
-Adjust the percentage as confidence grows (e.g., 5% → 25% → 50% → 100%). Each increase should be followed by a 24-hour observation period.
+Adjust the percentage as confidence grows (e.g., 5% → 25% → 50% → 100%). Follow each increase with a 24-hour observation period. Observe metrics between each step.
 
 Trade-offs: broader coverage than internal-only, provides statistical sampling of real traffic. However, the same client may see different behavior across requests (conversion is not sticky per client). Use `$remote_addr` for rough client-level consistency, or `$request_id` for per-request randomization.
 
@@ -932,7 +932,7 @@ These page types share common traits that make them ideal first candidates:
 - Content-Type is consistently `text/html`
 - Response sizes are within typical `markdown_limits` limits
 
-Once these paths are stable (conversion success rate > 95%, no `FAIL_SYSTEM` codes, latency within `markdown_limits`), expand to additional content paths following the [Rollout Stages](#rollout-stages) sequence.
+Once these paths are stable (conversion success rate > 95%, no `FAIL_SYSTEM` codes, latency within `markdown_limits`), expand to additional content paths. Follow the [Rollout Stages](#rollout-stages) sequence for each expansion.
 
 ### Excluding Page Types from Conversion Scope
 
@@ -940,7 +940,7 @@ Use `location` blocks or `map` directives to keep risky page types out of your c
 
 #### Using Location Blocks for Explicit Exclusions
 
-The most direct approach — set `markdown_filter off` in `location` blocks for paths you want to exclude, and enable conversion only in specific content paths:
+The most direct approach: set `markdown_filter off` in `location` blocks for paths you want to exclude. Then enable conversion only in specific content paths:
 
 ```nginx
 http {
@@ -1060,9 +1060,9 @@ http {
 }
 ```
 
-The `map` approach is easier to maintain as your rollout scope grows — add or remove paths in the `map` block without creating new `location` blocks. Combine it with explicit `location` overrides for critical exclusions (like `/api`) as a safety net.
+The `map` approach is easier to maintain as your rollout scope grows. You add or remove paths in the `map` block without creating new `location` blocks. Combine it with explicit `location` overrides for critical exclusions (like `/api`) as a safety net.
 
-Note: Even if a risky page type is accidentally included in your conversion scope, the module's eligibility checks provide a safety net. API endpoints are skipped via `not_eligible`, streaming endpoints via `not_eligible`. However, relying on eligibility checks alone adds noise to your decision logs and metrics. Explicit exclusions keep your rollout scope clean and your observation data meaningful.
+Note: Even if a risky page type is accidentally included in your conversion scope, the module's eligibility checks provide a safety net. The module skips API endpoints via `not_eligible`, streaming endpoints via `not_eligible`. However, relying on eligibility checks alone adds noise to your decision logs and metrics. Explicit exclusions keep your rollout scope clean and your observation data meaningful. The safety net catches accidental scope mistakes. It does not replace explicit scope control.
 
 ---
 
@@ -1084,19 +1084,19 @@ This is the most important default: it means a module upgrade or installation ne
 
 When conversion fails (HTML parse error, timeout, memory limit), the module serves the original HTML response unchanged. The client never sees a 502 or broken response due to a conversion problem.
 
-Fail-open (`pass`) is the safe choice for production because conversion is an enhancement, not a requirement. If the converter encounters HTML it cannot handle, the worst outcome is that the client receives the same HTML it would have received without the module. Metrics and decision logs still record the failure (as `failed_open`) so you can investigate, but client experience is unaffected.
+Fail-open (`pass`) is the safe choice for production because conversion is an enhancement, not a requirement. If the converter encounters HTML it cannot handle, the worst outcome is that the client receives the same HTML. This equals the response without the module. Metrics and decision logs still record the failure (as `failed_open`) so you can investigate. Client experience stays unaffected. This makes `pass` the safe default. The module never breaks responses on conversion errors. It degrades to the original HTML. The worst case equals no module at all.
 
 #### `markdown_accept strict`
 
 With `off`, only requests containing an explicit `Accept: text/markdown` media type trigger conversion. Wildcard Accept values like `Accept: */*` or `Accept: text/*` — which browsers and many HTTP clients send by default — do not trigger conversion.
 
-This prevents accidental conversion of browser traffic. Without this default, a standard browser request (`Accept: text/html, */*`) could match the wildcard and receive Markdown instead of HTML, breaking the page rendering. Keeping `off` during rollout ensures only clients that specifically request Markdown receive it.
+This prevents accidental conversion of browser traffic. Without this default, a standard browser request (`Accept: text/html, */*`) could match the wildcard and receive Markdown instead of HTML. That would break the page rendering. Keeping `off` during rollout ensures only clients that specifically request Markdown receive it.
 
 #### `markdown_log_verbosity info`
 
-At `info` level, the module emits a decision log entry for every request that enters the decision chain — conversions, skips, and failures alike. This gives you full visibility into module behavior without requiring `debug` level, which adds extended fields (filter value, Accept header, upstream status) and increases log volume.
+At `info` level, the module emits a decision log entry for every request that enters the decision chain. This covers conversions, skips, and failures alike. This gives you full visibility into module behavior without requiring `debug` level. The `debug` level adds extended fields (filter value, Accept header, upstream status) and increases log volume. Choose `info` for rollout monitoring.
 
-During rollout, `info` is the right level: you can see every decision the module makes, correlate with metrics, and diagnose unexpected behavior. After rollout stabilizes, you may raise verbosity to `warn` to reduce log volume — at that level, only failure outcomes (`failed_open`, `failed_closed`) are logged.
+During rollout, `info` is the right level. You can see every decision the module makes, correlate with metrics, and diagnose unexpected behavior. After rollout stabilizes, you may raise verbosity to `warn` to reduce log volume. At that level, the module logs only failure outcomes (`failed_open`, `failed_closed`). The `warn` level logs failures only. Rollout uses `info` for full visibility. Steady state can drop to `warn`.
 
 ### Changing Defaults During Rollout
 
@@ -1118,7 +1118,7 @@ Keep `markdown_error_policy pass` until:
 1. Your rollout has been stable for multiple traffic cycles (at least 48 hours in production).
 2. Your `failed_open` count is zero or near-zero for all enabled scopes.
 3. You have reviewed the failure reason codes (`FAIL_CONVERSION`, `FAIL_RESOURCE_LIMIT`, `FAIL_SYSTEM`) and resolved any underlying issues.
-4. You have a specific operational reason to reject failed conversions (e.g., you need to guarantee Markdown-only responses for a downstream consumer).
+4. You have a specific operational reason to reject failed conversions. For example, you need to guarantee Markdown-only responses for a downstream consumer.
 
 Even then, consider enabling `fail_closed` only in narrow scopes (specific `location` blocks) rather than globally, and monitor closely after the change. If failures appear, switch back to `pass` immediately by setting `markdown_error_policy pass` and running `nginx -s reload`.
 
@@ -1127,7 +1127,7 @@ Even then, consider enabling `fail_closed` only in narrow scopes (specific `loca
 
 ## Observation Guidance
 
-This section is the comprehensive reference for monitoring module behavior during rollout. The [Rollout Stages](#rollout-stages) observation checkpoints provide stage-specific commands — this section explains what to monitor, why, and how to interpret the results.
+This section is the comprehensive reference for monitoring module behavior during rollout. The [Rollout Stages](#rollout-stages) observation checkpoints provide stage-specific commands. This section explains what to monitor, why, and how to interpret the results.
 
 Use this guidance at every observation checkpoint and whenever you need to assess whether the module is behaving as expected.
 
@@ -1135,10 +1135,10 @@ Use this guidance at every observation checkpoint and whenever you need to asses
 
 The module exposes `/markdown-metrics` as a localhost-only Prometheus text
 0.0.4 endpoint. It always emits the exact twelve families listed in the
-[Prometheus Metrics Guide](prometheus-metrics.md); the `Accept` header cannot
+[Prometheus Metrics Guide](prometheus-metrics.md). The `Accept` header cannot
 select a legacy JSON or human-readable representation.
 
-The primary rollout ratios are derived from the frozen families:
+The primary rollout ratios come from the frozen families:
 
 ```text
 conversion_delivery_rate = sum(nginx_markdown_conversion_deliveries_total)
@@ -1336,7 +1336,7 @@ When a trigger fires:
 
 1. Do not expand to the next rollout stage.
 2. Check the decision logs and metrics to understand the scope of the issue.
-3. If the issue is isolated to a single path, consider narrowing your rollout scope to exclude that path.
+3. If the issue appears on a single path only, consider narrowing your rollout scope to exclude that path. Isolated issues point to path-specific causes. Scope narrowing targets the affected path only. A single-path issue usually has a single cause. Exclude the path and observe.
 4. If the issue is widespread, consider rolling back — see the Rollback Guide (`ROLLBACK_GUIDE.md`) for procedures.
 5. Resolve the underlying issue before resuming rollout expansion.
 

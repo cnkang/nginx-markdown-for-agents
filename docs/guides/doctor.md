@@ -260,7 +260,7 @@ The doctor tool runs as a smoke test in CI via
 
 1. The tool runs without crashing
 2. JSON output is valid
-3. At least 3 checks are reported
+3. The tool reports at least 3 checks
 4. JSON schema structure is correct
 
 ## Remediation Hints (0.9.1)
@@ -287,7 +287,7 @@ appropriate release artifact. The recommendation appears in:
 
 ## Environment Compatibility (0.9.1)
 
-The tool is designed to work correctly on:
+The tool works correctly on:
 
 - **macOS** (bash 3.2+): No GNU-only flags, compatible with system bash
 - **Linux** (Ubuntu/Debian, CentOS/RHEL): Detects package type and glibc

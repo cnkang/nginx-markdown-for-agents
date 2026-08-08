@@ -3,7 +3,7 @@
 ## Overview
 
 This guide covers upgrading to nginx-markdown-for-agents 0.9.2 from 0.9.1.
-0.9.2 is a **breaking release**: the configuration surface is reduced from
+0.9.2 is a **breaking release**. The release reduces the configuration surface from
 63 directives to 25, and configurations using any removed directive fail
 `nginx -t` with `unknown directive` until migrated. Review
 [0.9.2-breaking-changes.md](0.9.2-breaking-changes.md) and
@@ -13,9 +13,9 @@ this guide.
 
 > Publication status: 0.9.2 is currently a development candidate. At the
 > time of writing, no `v0.9.2` tag, GitHub Release, package checksum, Docker
-> image, or Helm repository entry is asserted. The prebuilt, Helm, and Docker
-> commands below are release-time templates and must only be used after those
-> artifacts are published and independently verified. For the current
+> image, or Helm repository entry gets asserted. The prebuilt, Helm, and Docker
+> commands below are release-time templates and must only run after those
+> the project publishes artifacts and verifies them independently. For the current
 > candidate, build from the exact branch commit or use locally produced
 > artifacts.
 

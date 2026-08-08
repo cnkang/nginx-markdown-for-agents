@@ -2,7 +2,7 @@
 
 ## Overview
 
-**0.9.0 → 0.9.1 is a breaking release.** The 0.9.0 release was intended as the
+**0.9.0 → 0.9.1 is a breaking release.** The 0.9.0 release intended to be the
 last breaking release before v1.0. The freeze was deliberately extended through
 v0.9.1 because v1.0 had not shipped, adoption remained limited, and the final
 toolchain, dependency, configuration, and ABI audit found cleanup worth
@@ -57,7 +57,7 @@ rustc --version
 
 ### 2. `markdown_streaming_engine` Removed → `markdown_streaming`
 
-The `markdown_streaming_engine` directive is removed from the active contract.
+The active contract removed the `markdown_streaming_engine` directive.
 Use `markdown_streaming off|auto|force` instead.
 
 **Migration mapping:**
@@ -129,7 +129,7 @@ refuses startup if the linked Rust archive and generated C header disagree.
 
 **Impact:** The converter ABI is an internal boundary of the bundled module,
 not a standalone third-party SDK contract. Source builders must rebuild with
-the 0.9.1 Rust archive. Prebuilt module users are unaffected (the bundled
+the 0.9.1 Rust archive. Prebuilt module users stay unaffected (the bundled
 module is already matched).
 
 ---
@@ -248,7 +248,7 @@ freeze:
 - `nginx_markdown_failures_total` now uses truthful bounded categories:
   `conversion_error`, `resource_limit`, and `system_error`.
 - The misleading gauge-like `nginx_markdown_conversion_duration_seconds{le=...}`
-  is replaced by the cumulative counter family
+  the cumulative counter family replaces it
   `nginx_markdown_conversion_latency_bucket_total{le=...}`.
 
 **Dashboard migration:**

@@ -8,8 +8,9 @@ distribution, import instructions for end users, key rotation, CI/CD
 integration, and security considerations.
 
 Current public package channel: GitHub Release DEB/RPM artifacts with
-checksum verification. Public APT/YUM repositories are not available yet; GPG
-key publication for repository metadata applies to future self-hosted repository publication.
+checksum verification. Public APT/YUM repositories are not available yet.
+GPG key publication for repository metadata applies to future self-hosted
+repository publication.
 
 ---
 
@@ -52,8 +53,8 @@ gpg --edit-key <KEY_ID>
 ### Future Repository Signing Key Template
 
 The current public package channel uses GitHub Release artifacts plus
-`SHA256SUMS`. Fill this table only when a public repository signing key is
-generated for a future APT/YUM repository channel.
+`SHA256SUMS`. Fill this table only when the project generates a public
+repository signing key for a future APT/YUM repository channel.
 
 | Field | Value |
 |-------|-------|
@@ -67,7 +68,7 @@ generated for a future APT/YUM repository channel.
 
 ## 2. Key Distribution
 
-The public key is distributed through multiple channels to ensure availability
+The project distributes the public key through multiple channels to ensure availability
 and verifiability.
 
 ### Distribution Channels
@@ -164,7 +165,7 @@ Expected fingerprint:
 
 ## 4. Key Rotation Process
 
-Key rotation is required when a key is compromised, approaching expiry, or as
+Key rotation becomes required when a key gets compromised, approaches expiry, or as
 part of periodic security hygiene.
 
 ### Step-by-Step Procedure
@@ -256,7 +257,7 @@ gpg --keyserver keys.openpgp.org --send-keys <OLD_KEY_ID>
 
 ## 5. CI/CD Integration
 
-The GPG signing key is stored in GitHub Actions secrets for automated package
+GitHub Actions secrets store the GPG signing key for automated package
 signing during the release workflow.
 
 ### Required Secrets
@@ -320,8 +321,8 @@ rpm -K nginx-markdown-module-*.rpm
 
 - **Primary key offline**: Keep the primary private key on an air-gapped
   machine or hardware security module (HSM). Only the signing subkey should
-  be used in CI.
-- **CI secrets**: GitHub Actions secrets are encrypted at rest and masked in
+  appear in CI.
+- **CI secrets**: GitHub Actions encrypts secrets at rest and masks them in
   logs. Limit access to repository administrators.
 - **Backup**: Store an encrypted backup of the primary key and revocation
   certificate in a secure, separate location.
@@ -335,7 +336,7 @@ rpm -K nginx-markdown-module-*.rpm
 
 ### Compromise Response
 
-If the signing key is suspected to be compromised:
+If you suspect the signing key got compromised, rotate immediately:
 
 1. **Immediately** revoke the compromised key:
    ```bash
@@ -358,7 +359,7 @@ If the signing key is suspected to be compromised:
 ### Best Practices
 
 - Use a dedicated signing subkey (not the primary key) in CI.
-- Set calendar reminders for key expiry (if expiry is configured).
+- Set calendar reminders for key expiry (if you configure expiry).
 - Periodically verify that published packages match expected signatures.
 - Monitor for unauthorized package publications.
 - Keep GPG software updated on CI runners.

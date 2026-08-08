@@ -32,7 +32,7 @@ kubectl exec -n ingress-nginx <pod> -- nginx -V 2>&1 | grep markdown
 
 ### Disable
 
-Remove `markdown_filter on` from ConfigMap; module remains loaded but inactive.
+Remove `markdown_filter on` from ConfigMap. The module remains loaded but inactive.
 
 ### Rollback
 
@@ -43,7 +43,7 @@ Revert Deployment image tag to upstream Ingress Controller image.
 ## Custom Ingress Controller Image Build
 
 This section documents how to build a custom NGINX Ingress Controller image
-that includes the `ngx_http_markdown_filter_module`. The Dockerfile is located
+that includes the `ngx_http_markdown_filter_module`. The Dockerfile lives
 at `examples/kubernetes/Dockerfile.ingress`.
 
 ### Prerequisites
@@ -302,7 +302,7 @@ helm install nginx-markdown charts/nginx-markdown \
   --set-string markdown.loadModule=/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
 ```
 
-When `markdown.enabled=true`, `markdown.loadModule` is required. The chart does
+When `markdown.enabled=true`, the chart requires `markdown.loadModule`. The chart does
 not create a `hostPath` mount from that value. If a deployment needs additional
 volumes or mounts, use the explicit opt-in `extraVolumes` and
 `extraVolumeMounts` values.
@@ -387,7 +387,7 @@ All options:
 ------------------------------------------------------------
 ```
 
-Exit code `0` means all checks passed; `1` means one or more failed.
+Exit code `0` means all checks passed. `1` means one or more failed.
 
 ---
 
@@ -492,7 +492,7 @@ PASS: Scale
 ============================================================
 ```
 
-Exit code `0` means all scenarios passed; `1` means one or more failed.
+Exit code `0` means all scenarios passed. `1` means one or more failed.
 The namespace is automatically deleted on exit (cleanup trap).
 
 ---
@@ -509,7 +509,7 @@ the module is properly loaded.
 |------|---------|
 | Docker (or Podman) | Build and inspect the container image |
 
-No Kubernetes cluster is required — this test operates entirely with
+This test needs no Kubernetes cluster — it operates entirely with
 local Docker commands.
 
 #### What It Verifies
@@ -574,7 +574,7 @@ All options:
 RESULT: PASS (4/4 checks passed)
 ```
 
-Exit code `0` means all checks passed; `1` means one or more failed;
+Exit code `0` means all checks passed. `1` means one or more failed.
 `2` means a usage error or missing prerequisites.
 
 ---
