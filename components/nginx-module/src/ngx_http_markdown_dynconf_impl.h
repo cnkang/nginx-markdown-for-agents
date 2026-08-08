@@ -34,6 +34,16 @@
 #include <stdlib.h>
 #include <sys/types.h>
 
+#if defined(__APPLE__)
+#define NGX_HTTP_MARKDOWN_STAT_MTIME_NSEC(fi) ((fi).st_mtimespec.tv_nsec)
+#elif defined(__linux__) \
+    && ((defined(_POSIX_C_SOURCE) && _POSIX_C_SOURCE >= 200809L) \
+        || defined(_GNU_SOURCE))
+#define NGX_HTTP_MARKDOWN_STAT_MTIME_NSEC(fi) ((fi).st_mtim.tv_nsec)
+#else
+#define NGX_HTTP_MARKDOWN_STAT_MTIME_NSEC(fi) 0L
+#endif
+
 /* NGINX defines this in ngx_config.h; keep standalone unit builds portable. */
 #ifndef NGX_MAX_SIZE_T_VALUE
 #define NGX_MAX_SIZE_T_VALUE  ((size_t) -1)
@@ -486,11 +496,8 @@ ngx_http_markdown_build_effective_conf(
     ngx_http_markdown_select_effective_error(
         eff, snap, conf, mask, snap_valid);
 
-    if (snap_valid) {
-        eff->memory_budget = snap->memory_budget;
-    } else {
-        eff->memory_budget = conf->advanced.memory_budget;
-    }
+    /* memory_budget is static in the v0.9.2 dynconf schema. */
+    eff->memory_budget = conf->advanced.memory_budget;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     ngx_http_markdown_select_effective_streaming(
@@ -542,9 +549,7 @@ ngx_http_markdown_effective_memory_budget(
     const ngx_http_markdown_effective_conf_t *eff,
     const ngx_http_markdown_conf_t *conf)
 {
-    if (eff != NULL) {
-        return eff->memory_budget;
-    }
+    (void) eff;
     return conf->advanced.memory_budget;
 }
 
@@ -664,15 +669,7 @@ ngx_http_markdown_dynconf_check(ngx_http_markdown_dynconf_watcher_t *watcher,
      * Falls back to 0 (second-only precision) on other platforms
      * or test stubs.
      */
-#if defined(__APPLE__)
-    cur_mtime_nsec = fi.st_mtimespec.tv_nsec;
-#elif defined(__linux__) && defined(_POSIX_C_SOURCE) && _POSIX_C_SOURCE >= 200809L
-    cur_mtime_nsec = fi.st_mtim.tv_nsec;
-#elif defined(__linux__) && defined(_GNU_SOURCE)
-    cur_mtime_nsec = fi.st_mtim.tv_nsec;
-#else
-    cur_mtime_nsec = 0;
-#endif
+    cur_mtime_nsec = NGX_HTTP_MARKDOWN_STAT_MTIME_NSEC(fi);
 
     /* Compare all metadata fields.  Any change triggers reload. */
     if (cur_dev != watcher->file_state.file_dev
@@ -957,13 +954,8 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
         watcher->file_state.file_ino = fi.st_ino;
         watcher->file_state.file_size = (off_t) fi.st_size;
         watcher->file_state.file_mtime_sec = ngx_file_mtime(&fi);
-#if defined(__APPLE__)
-        watcher->file_state.file_mtime_nsec = fi.st_mtimespec.tv_nsec;
-#elif defined(__linux__) && defined(_GNU_SOURCE)
-        watcher->file_state.file_mtime_nsec = fi.st_mtim.tv_nsec;
-#else
-        watcher->file_state.file_mtime_nsec = 0;
-#endif
+        watcher->file_state.file_mtime_nsec =
+            NGX_HTTP_MARKDOWN_STAT_MTIME_NSEC(fi);
     }
 
     /* Allocate the timer event from the cycle pool. */

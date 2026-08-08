@@ -389,13 +389,13 @@ def check_reason_code_registry(repo: Path) -> dict:
 
 def check_public_surface_inventory(repo: Path) -> dict:
     """Verify public surface inventory exists and is parseable JSON."""
-    inventory = repo / "docs/harness/public-surface-inventory.json"
+    inventory = repo / REASON_INVENTORY_RELATIVE_PATH
     if not inventory.exists():
         return {"name": "public_surface_inventory", "status": "fail",
                 "message": "public-surface-inventory.json not found"}
     try:
-        data = json.loads(inventory.read_text())
-    except json.JSONDecodeError as exc:
+        data = json.loads(inventory.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         return {"name": "public_surface_inventory", "status": "fail",
                 "message": f"invalid JSON: {exc}"}
     if not isinstance(data, dict):

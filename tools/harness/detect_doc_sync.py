@@ -38,6 +38,9 @@ from lib.path_validation import validate_read_path
 DIRECTIVES_PATH = Path(
     "components/nginx-module/src/ngx_http_markdown_config_directives_impl.h"
 )
+DIRECTIVE_NAMES_PATH = Path(
+    "components/nginx-module/src/ngx_http_markdown_directive_names.h"
+)
 HANDLERS_PATH = Path(
     "components/nginx-module/src/ngx_http_markdown_config_handlers_impl.h"
 )
@@ -188,6 +191,22 @@ def _extract_directive_entry(content: str, directive: str) -> str | None:
     )
     match = pattern.search(content)
     return match[1] if match is not None else None
+
+
+def _expand_directive_macros(content: str) -> str:
+    """Expand canonical directive-name macros before table inspection."""
+    definitions = dict(
+        re.findall(
+            r"^#define\s+(NGX_HTTP_MARKDOWN_DIRECTIVE_[A-Z0-9_]+)\s+\\\s*\"([^\"]+)\"",
+            content,
+            flags=re.MULTILINE,
+        )
+    )
+    return re.sub(
+        r"ngx_string\((NGX_HTTP_MARKDOWN_DIRECTIVE_[A-Z0-9_]+)\)",
+        lambda match: f'ngx_string("{definitions.get(match[1], match[1])}")',
+        content,
+    )
 
 
 def _check_directive_table(content: str) -> List[str]:
@@ -487,10 +506,19 @@ def _check_retired_metrics(project_root: Path) -> List[str]:
     ]
 
 
+def _read_directive_source(project_root: Path, errors: List[str]) -> str | None:
+    """Read the command table and expand its shared name inventory."""
+    directives = _read_required(project_root, DIRECTIVES_PATH, errors)
+    directive_names = _read_required(project_root, DIRECTIVE_NAMES_PATH, errors)
+    if directives is None or directive_names is None:
+        return directives
+    return _expand_directive_macros(f"{directives}\n{directive_names}")
+
+
 def check_public_config_contract(project_root: Path) -> List[str]:
     """Validate the frozen v0.9.1 operator-facing configuration contract."""
     errors: List[str] = []
-    directives = _read_required(project_root, DIRECTIVES_PATH, errors)
+    directives = _read_directive_source(project_root, errors)
     handlers = _read_required(project_root, HANDLERS_PATH, errors)
     chart_template = _read_required(project_root, CHART_TEMPLATE_PATH, errors)
     chart_values = _read_required(project_root, CHART_VALUES_PATH, errors)

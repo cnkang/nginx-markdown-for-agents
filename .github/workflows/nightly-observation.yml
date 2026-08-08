@@ -104,12 +104,23 @@ jobs:
           row = next((r for r in rows if r.get("row_id") == row_id), None)
           if row is None:
               raise SystemExit(f"matrix row {row_id!r} not found in release/scope/sanitizer-support-matrix.json")
+          expected_ci = {
+              "workflow": ".github/workflows/nightly-observation.yml",
+              "job": "sanitizer",
+              "matrix_key": "row_id",
+          }
+          if row.get("ci") != expected_ci:
+              raise SystemExit(f"sanitizer row {row_id!r} has invalid CI binding")
+          if any(row.get(key) != value for key, value in expected_ci.items()):
+              raise SystemExit(f"sanitizer row {row_id!r} has invalid CI identity")
           expected_commands = {
               "asan-ubsan": "make test-nginx-unit-sanitize-smoke",
               "lsan": "ASAN_OPTIONS=detect_leaks=1 make test-nginx-unit-sanitize-smoke",
           }
-          if row.get("blocking") and row.get("command") != expected_commands.get(row_id):
+          if row.get("blocking") is True and row.get("command") != expected_commands.get(row_id):
               raise SystemExit(f"unexpected command for blocking row {row_id!r}")
+          if not isinstance(row.get("blocking"), bool):
+              raise SystemExit(f"sanitizer row {row_id!r} blocking must be boolean")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"blocking={row['blocking']}\n")
               output.write(f"skip_reason={row.get('skip_reason', '')}\n")

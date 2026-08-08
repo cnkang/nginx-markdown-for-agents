@@ -179,7 +179,11 @@ def _validate_inflight_gauge(families):
 
 def validate_specific_constraints(registry):
     """Validate spec-specific constraints from requirements."""
-    families = {family["name"]: family for family in registry.get("families", [])}
+    families = {
+        family["name"]: family
+        for family in registry.get("families", [])
+        if isinstance(family, dict) and isinstance(family.get("name"), str)
+    }
     errors = _validate_byte_counters(families)
     errors.extend(_validate_streaming_constraints(families))
     errors.extend(_validate_build_info(families))
@@ -287,7 +291,9 @@ def validate_no_synonym_duplicates(registry):
     base_names = set()
     for name in names:
         # Strip prefix and suffix
-        base = name.replace("nginx_markdown_", "").rstrip("s")
+        base = name.removeprefix("nginx_markdown_")
+        if base.endswith("s"):
+            base = base.removesuffix("s")
         if base in base_names:
             errors.append(
                 f"Potential synonym/plural duplicate: {name}"
@@ -337,7 +343,7 @@ def _run_synonym_section(registry):
     print("[4/5] Checking for synonym/plural duplicates...")
     errors = validate_no_synonym_duplicates(registry)
     if errors:
-        _print_section_errors(errors, prefix="WARN")
+        _print_section_errors(errors, prefix="FAIL")
     else:
         print("  PASS: No synonym or plural duplicates")
     return errors

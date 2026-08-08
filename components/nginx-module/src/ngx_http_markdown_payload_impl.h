@@ -1145,6 +1145,7 @@ ngx_http_markdown_decompress_via_rust(
                          "failed, rc=%ud, error_category=%ud",
                          ffi_rc, chain_result.error_category);
 
+            markdown_chain_decode_free(&chain_result);
             return ngx_http_markdown_decompression_error(ffi_rc);
         }
 

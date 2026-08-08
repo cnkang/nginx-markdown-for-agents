@@ -16,6 +16,17 @@
 #include <stdlib.h>
 #include "ngx_http_markdown_diagnostics.h"
 
+static ngx_int_t
+ngx_http_markdown_conf_args_ready(
+    const ngx_conf_t *cf,
+    ngx_uint_t min_nelts)
+{
+    return cf != NULL
+        && cf->args != NULL
+        && cf->args->elts != NULL
+        && cf->args->nelts >= min_nelts;
+}
+
 /*
  * Case-insensitive comparison of an ngx_str_t argument against a
  * known NUL-terminated expected string.
@@ -713,7 +724,11 @@ ngx_http_markdown_limits(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_str_t                *value;
     ngx_http_markdown_limits_seen_t  seen;
 
-    if (mcf == NULL || mcf->limits.configured) {
+    if (mcf == NULL || !ngx_http_markdown_conf_args_ready(cf, 2)) {
+        return NGX_CONF_ERROR;
+    }
+
+    if (mcf->limits.configured) {
         return "is duplicate";
     }
 
@@ -811,6 +826,12 @@ ngx_http_markdown_trusted_proxies(ngx_conf_t *cf, ngx_command_t *cmd,
      * use before dispatch.  Keep this guard for direct calls and defensive
      * protection if the command flags ever regress.
      */
+    if (cf == NULL || cmd == NULL || mmcf == NULL
+        || !ngx_http_markdown_conf_args_ready(cf, 2))
+    {
+        return NGX_CONF_ERROR;
+    }
+
     if (!(cf->cmd_type & NGX_HTTP_MAIN_CONF)) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
             "\"%V\" directive is only valid in the http context, not in "
@@ -913,6 +934,12 @@ ngx_http_markdown_filter(ngx_conf_t *cf,
 
     (void) cmd;
 
+    if (mcf == NULL || cmd == NULL
+        || !ngx_http_markdown_conf_args_ready(cf, 2))
+    {
+        return NGX_CONF_ERROR;
+    }
+
     if (mcf->enabled_source != NGX_HTTP_MARKDOWN_ENABLED_UNSET) {
         return "is duplicate";
     }
@@ -1010,6 +1037,12 @@ ngx_http_markdown_error_policy(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_http_markdown_conf_t *mcf = conf;
     ngx_str_t                *value;
 
+    if (mcf == NULL || cmd == NULL
+        || !ngx_http_markdown_conf_args_ready(cf, 2))
+    {
+        return NGX_CONF_ERROR;
+    }
+
     value = cf->args->elts;
 
     if (mcf->on_error != NGX_CONF_UNSET_UINT) {
@@ -1073,6 +1106,12 @@ ngx_http_markdown_auth_policy(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_http_markdown_conf_t *mcf = conf;
     ngx_str_t                *value;
 
+    if (mcf == NULL || cmd == NULL
+        || !ngx_http_markdown_conf_args_ready(cf, 2))
+    {
+        return NGX_CONF_ERROR;
+    }
+
     value = cf->args->elts;
 
     if (mcf->policy.auth_policy != NGX_CONF_UNSET_UINT) {
@@ -1106,6 +1145,11 @@ ngx_http_markdown_auth_cookies(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_http_markdown_conf_t *mcf = conf;
     const ngx_str_t          *value;
     ngx_str_t                *pattern;
+
+    if (mcf == NULL || !ngx_http_markdown_conf_args_ready(cf, 2))
+    {
+        return NGX_CONF_ERROR;
+    }
 
     value = cf->args->elts;
 
@@ -1150,6 +1194,12 @@ ngx_http_markdown_cache_validation(ngx_conf_t *cf, ngx_command_t *cmd, void *con
     static u_char             full_str[] = "full";
     ngx_http_markdown_conf_t *mcf = conf;
     ngx_str_t                *value;
+
+    if (mcf == NULL || cmd == NULL
+        || !ngx_http_markdown_conf_args_ready(cf, 2))
+    {
+        return NGX_CONF_ERROR;
+    }
 
     value = cf->args->elts;
 
@@ -1209,6 +1259,11 @@ ngx_http_markdown_streaming(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_http_markdown_conf_t *mcf = conf;
     ngx_str_t                *value;
 
+    if (mcf == NULL || !ngx_http_markdown_conf_args_ready(cf, 2))
+    {
+        return NGX_CONF_ERROR;
+    }
+
     value = cf->args->elts;
 
     /*
@@ -1262,6 +1317,11 @@ ngx_http_markdown_log_verbosity(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     static u_char             debug_str[] = "debug";
     ngx_http_markdown_conf_t *mcf = conf;
     ngx_str_t                *value;
+
+    if (mcf == NULL || !ngx_http_markdown_conf_args_ready(cf, 2))
+    {
+        return NGX_CONF_ERROR;
+    }
 
     value = cf->args->elts;
 
@@ -1325,6 +1385,12 @@ ngx_http_markdown_content_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_str_t                *type;
     u_char                   *slash;
     const u_char             *next_slash;
+
+    if (mcf == NULL || cmd == NULL
+        || !ngx_http_markdown_conf_args_ready(cf, 2))
+    {
+        return NGX_CONF_ERROR;
+    }
 
     value = cf->args->elts;
 
@@ -1407,6 +1473,12 @@ ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     static u_char             org_str[] = "org-mode";
     ngx_http_markdown_conf_t *mcf = conf;
     ngx_str_t                *value;
+
+    if (mcf == NULL || cmd == NULL
+        || !ngx_http_markdown_conf_args_ready(cf, 2))
+    {
+        return NGX_CONF_ERROR;
+    }
 
     value = cf->args->elts;
 
@@ -1510,6 +1582,10 @@ ngx_http_markdown_diagnostics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void
 
     (void) cmd;
 
+    if (mcf == NULL || !ngx_http_markdown_conf_args_ready(cf, 2)) {
+        return NGX_CONF_ERROR;
+    }
+
     value = cf->args->elts;
 
     if (ngx_http_markdown_arg_equals(&value[1],
@@ -1590,6 +1666,10 @@ ngx_http_markdown_set_dynconf_path(ngx_conf_t *cf, ngx_command_t *cmd,
     /* H-only dynconf directives still own the location snapshot consumed by
      * workers.  Resolve that loc_conf explicitly instead of treating the
      * command's main-conf offset as a location-config pointer. */
+    if (cf == NULL || !ngx_http_markdown_conf_args_ready(cf, 2)) {
+        return NGX_CONF_ERROR;
+    }
+
     mcf = ngx_http_conf_get_module_loc_conf(
         cf, ngx_http_markdown_filter_module);
 
@@ -1647,10 +1727,13 @@ ngx_http_markdown_dynconf_flag(ngx_conf_t *cf,
     ngx_flag_t                *slot;
 
     (void) conf;
+    if (cf == NULL || !ngx_http_markdown_conf_args_ready(cf, 2)) {
+        return NGX_CONF_ERROR;
+    }
+
     mcf = ngx_http_conf_get_module_loc_conf(
         cf, ngx_http_markdown_filter_module);
-    if (mcf == NULL || cf == NULL || cf->args == NULL
-        || cf->args->nelts != 2)
+    if (mcf == NULL || cf->args->nelts != 2)
     {
         return NGX_CONF_ERROR;
     }
@@ -1719,6 +1802,10 @@ ngx_http_markdown_stream_excluded_types_handler(ngx_conf_t *cf,
     const u_char             *next_slash;
 
     (void) cmd;
+
+    if (mcf == NULL || !ngx_http_markdown_conf_args_ready(cf, 2)) {
+        return NGX_CONF_ERROR;
+    }
 
     value = cf->args->elts;
 

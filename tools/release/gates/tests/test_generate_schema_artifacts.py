@@ -166,25 +166,59 @@ def test_dynconf_rust_allowlist_drift_is_rejected(monkeypatch):
         gen.generate_dynconf_precedence_report()
 
 
-def test_generated_artifacts_pass_schema_drift_validator():
+def test_generated_artifacts_pass_schema_drift_validator(tmp_path, monkeypatch):
     """End-to-end: write artifacts then validate with the drift gate."""
-    artifact_dir = REPO_ROOT / "artifacts" / "release" / "0.9.2"
+    artifact_dir = tmp_path / "artifacts" / "release" / "0.9.2"
     artifact_dir.mkdir(parents=True, exist_ok=True)
-
-    for name, data in {
-        "metrics-registry.json": gen.generate_metrics_registry(),
-        "diagnostics-field-contract.json": gen.generate_diagnostics_field_contract(),
-        "dynconf-precedence-report.json": gen.generate_dynconf_precedence_report(),
-    }.items():
-        (artifact_dir / name).write_text(
-            json.dumps(data, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+    monkeypatch.setattr(gen, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(gen, "DEFAULT_VERSION", "0.9.2")
+    gen.main([])
 
     sys.path.insert(
         0, str(REPO_ROOT / "tools" / "release" / "gates")
     )
     import validate_schema_drift  # noqa: E402
+
+    monkeypatch.setattr(validate_schema_drift, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(
+        validate_schema_drift,
+        "RELEASE_ARTIFACT_DIR",
+        artifact_dir,
+    )
+    monkeypatch.setattr(
+        validate_schema_drift,
+        "METRICS_REGISTRY",
+        artifact_dir / "metrics-registry.json",
+    )
+    monkeypatch.setattr(
+        validate_schema_drift,
+        "DIAGNOSTICS_FIELD_CONTRACT",
+        artifact_dir / "diagnostics-field-contract.json",
+    )
+    monkeypatch.setattr(
+        validate_schema_drift,
+        "DYNCONF_PRECEDENCE_REPORT",
+        artifact_dir / "dynconf-precedence-report.json",
+    )
+    monkeypatch.setattr(
+        validate_schema_drift,
+        "RELEASE_ARTIFACTS",
+        [
+            artifact_dir / "dynconf-precedence-report.json",
+            artifact_dir / "metrics-registry.json",
+            artifact_dir / "diagnostics-field-contract.json",
+        ],
+    )
+    monkeypatch.setattr(
+        validate_schema_drift,
+        "DYNCONF_SCHEMA",
+        REPO_ROOT / "schemas" / "dynconf.schema.json",
+    )
+    monkeypatch.setattr(
+        validate_schema_drift,
+        "DIAGNOSTICS_SCHEMA",
+        REPO_ROOT / "schemas" / "diagnostics.schema.json",
+    )
 
     errors = []
     errors.extend(validate_schema_drift.gate_release_artifact_existence())

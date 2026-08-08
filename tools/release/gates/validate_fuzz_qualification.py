@@ -69,14 +69,14 @@ STAT_ELAPSED_PATTERN = re.compile(r"stat::elapsed_seconds:\s*([\d.]+)")
 DONE_RUNS_PATTERN = re.compile(r"Done\s+(\d+)\s+runs?\s+in\s+([\d.]+)\s+second")
 FAILURE_MARKER_PATTERN = re.compile(
     r"ERROR: libFuzzer|==ERROR: AddressSanitizer|SUMMARY: AddressSanitizer"
-    r"|CRASH|runtime error:")
+    r"|SUMMARY: UndefinedBehaviorSanitizer|runtime error:")
 
 REQUIRED_TARGET_FIELDS = ("name", "seed", "required_minutes",
                           "required_executions", "blocking")
 REQUIRED_SEED_FIELDS = ("target", "seed_path", "digest")
 OBSERVATION_FIELDS = ("elapsed_seconds_total", "executions_total", "crashes",
                       "sanitizer_findings")
-PER_TARGET_IDENTITY_FIELDS = ("target", "seed", "corpus_dir", "raw_log_ref",
+PER_TARGET_IDENTITY_FIELDS = ("target", "seed", "corpus_dir", "seed_path", "raw_log_ref",
                               "status")
 
 # (field, kind, positive, non-empty, expected description)
@@ -392,6 +392,9 @@ def _run_target_soak(target: str, seed: int, required_executions: int,
         total_elapsed += elapsed
         if failure:
             break
+        if (total_executions >= required_executions
+                and total_elapsed >= required_seconds):
+            break
     else:
         failure = (f"threshold not reached within "
                    f"{MAX_FUZZ_INVOCATIONS} invocations")
@@ -411,6 +414,7 @@ def _run_target_soak(target: str, seed: int, required_executions: int,
         "crashes": crashes,
         "sanitizer_findings": sanitizer_findings,
         "corpus_dir": str(CORPUS_ROOT / validated_target),
+        "seed_path": "",
         "raw_log_ref": str(validated_log_path.relative_to(REPO_ROOT)),
         "status": status,
         "failure_reason": failure,
@@ -440,7 +444,7 @@ def _run_target_record(entry: dict, seed_path: str) -> dict:
     log_path = REPO_ROOT / DEFAULT_LOG_DIR / f"{entry['name']}.log"
     record = _run_target_soak(entry["name"], int(entry["seed"]),
                               required_executions, required_seconds, log_path)
-    record["corpus_dir"] = seed_path
+    record["seed_path"] = seed_path
     return record
 
 

@@ -107,7 +107,17 @@
         "details": {
           "type": "object"
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"status": {"const": "skip"}}
+          },
+          "then": {
+            "required": ["justification", "policy_reference"]
+          }
+        }
+      ]
     },
     "residual_risk_record": {
       "type": "object",

@@ -98,6 +98,8 @@ Per-version release notes and release checklists (one file per release line).
 
 - 0.9.2 release notes and pre-freeze checklist
 - canonical release matrix: [release-matrix.json](releases/release-matrix.json)
+- package/artifact support matrix: [`tools/release-matrix.json`](../tools/release-matrix.json)
+  (schema 1.0. This is separate from the release-contract matrix above)
 
 ### `development/`
 
