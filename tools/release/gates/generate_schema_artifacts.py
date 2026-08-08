@@ -2,16 +2,17 @@
 """Generate release schema-drift artifacts from source of truth.
 
 Generates the three release artifacts consumed by ``validate_schema_drift.py``
-from their source-of-truth implementations:
+from checked-in canonical contracts and implementation cross-checks:
 
-- ``metrics-registry.json`` — derived from the v1 renderer header
-  (``components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h``):
-  the frozen 12-family metric contract.
+- ``metrics-registry.json`` — projected from
+  ``schemas/metrics-v1.registry.json`` and cross-checked against the v1
+  renderer header (``components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h``).
 - ``diagnostics-field-contract.json`` — derived from
   ``schemas/diagnostics.schema.json`` (``effective_config`` definition).
-- ``dynconf-precedence-report.json`` — derived from ``schemas/dynconf.schema.json``
-  and the dynconf precedence header
-  (``components/nginx-module/src/ngx_http_markdown_dynconf_precedence.h``).
+- ``dynconf-precedence-report.json`` — projected from
+  ``schemas/dynconf-precedence-v1.json`` and cross-checked against
+  ``schemas/dynconf.schema.json``, the Rust allowlist, and the dynconf
+  precedence header (``components/nginx-module/src/ngx_http_markdown_dynconf_precedence.h``).
 
 All artifacts are written under ``artifacts/release/<version>/`` (git-ignored
 generated evidence).  The generator is idempotent; ``validate_schema_drift.py``
@@ -66,67 +67,13 @@ PRECEDENCE_HEADER_PATH = (
     / "src"
     / "ngx_http_markdown_dynconf_precedence.h"
 )
+METRICS_CONTRACT_PATH = SOURCE_ROOT / "schemas" / "metrics-v1.registry.json"
+DYNCONF_PRECEDENCE_CONTRACT_PATH = (
+    SOURCE_ROOT / "schemas" / "dynconf-precedence-v1.json"
+)
 
-# Streaming transition label values are closed-allowlisted by contract.
-STREAMING_TRANSITION_VALUES = [
-    "commit",
-    "fallback",
-    "safe_finish_start",
-    "abort_start",
-    "resume_success",
-    "resume_failure",
-]
-
-# Histogram bucket boundaries for conversion_duration_seconds (frozen).
-HISTOGRAM_BUCKET_BOUNDARIES = [
-    0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 5.0,
-]
-
-# Forbidden label names per the frozen metric contract.
-FORBIDDEN_LABELS = {"path", "uri", "host", "client", "query", "address"}
-
-FIVE_TIER_PRECEDENCE_HIERARCHY = [
-    {
-        "tier": 1,
-        "source": "request_variable",
-        "scope": "filter only",
-        "description": "NGINX request variable evaluation (e.g., markdown_filter $var)",
-    },
-    {
-        "tier": 2,
-        "source": "static",
-        "scope": "server/location explicit",
-        "description": "Server/location explicit static configuration (block bit set)",
-    },
-    {
-        "tier": 3,
-        "source": "dynconf",
-        "scope": "where block bit NOT set",
-        "description": "Dynconf runtime override (block bit NOT set)",
-    },
-    {
-        "tier": 4,
-        "source": "http_baseline",
-        "scope": "http block",
-        "description": "Inherited http baseline (http-block merged value)",
-    },
-    {
-        "tier": 5,
-        "source": "default",
-        "scope": "compile-time",
-        "description": "Built-in default (compile-time default)",
-    },
-]
-
-PRECEDENCE_SOURCE_MARKERS = {
-    "request_variable": "request variable evaluation",
-    "static": "explicit static configuration",
-    "dynconf": "dynconf runtime override",
-    "http_baseline": "inherited http baseline",
-    "default": "built-in default",
-}
 PRECEDENCE_TIER_PATTERN = re.compile(
-    r"^\s*\*\s+([1-5])\.\s+(.+?)\s*$", re.MULTILINE
+    r"^\s*\*\s+([1-9][0-9]*)\.\s+(.+?)\s*$", re.MULTILINE
 )
 KNOWN_KEYS_PATTERN = re.compile(
     r"(?ms)^\s*(?:pub\s+)?const\s+KNOWN_KEYS\s*:\s*&\[&str\]\s*="
@@ -160,10 +107,12 @@ def _extract_rust_dynconf_keys(content: str) -> set[str]:
     return set(keys)
 
 
-def _extract_precedence_hierarchy(content: str) -> list[dict]:
-    """Extract and validate the frozen precedence hierarchy from the header."""
+def _extract_precedence_hierarchy(
+    content: str, expected_hierarchy: list[dict]
+) -> list[dict]:
+    """Extract and validate the precedence hierarchy against its contract."""
     matches = PRECEDENCE_TIER_PATTERN.findall(content)
-    expected_tiers = [entry["tier"] for entry in FIVE_TIER_PRECEDENCE_HIERARCHY]
+    expected_tiers = [entry["tier"] for entry in expected_hierarchy]
     actual_tiers = [int(tier) for tier, _ in matches]
     if actual_tiers != expected_tiers:
         raise ValueError(
@@ -173,144 +122,33 @@ def _extract_precedence_hierarchy(content: str) -> list[dict]:
 
     hierarchy = []
     for expected, (tier_text, description) in zip(
-        FIVE_TIER_PRECEDENCE_HIERARCHY, matches
+        expected_hierarchy, matches
     ):
-        lower_description = description.lower()
-        sources = [
-            source
-            for source, marker in PRECEDENCE_SOURCE_MARKERS.items()
-            if marker in lower_description
-        ]
-        if len(sources) != 1 or sources[0] != expected["source"]:
+        if description != expected["description"]:
             raise ValueError(
                 f"dynconf precedence header tier {tier_text} does not match "
                 f"expected source {expected['source']!r}"
             )
-        if description != expected["description"]:
+        if int(tier_text) != expected["tier"]:
             raise ValueError(
-                f"dynconf precedence header tier {tier_text} description "
-                "drifted from the frozen contract"
+                f"dynconf precedence header tier {tier_text} number "
+                "drifted from the canonical contract"
             )
 
         parsed = dict(expected)
-        parsed["source"] = sources[0]
         parsed["description"] = description
         hierarchy.append(parsed)
 
     return hierarchy
 
 
-def _extract_family_type(content: str, family: str) -> str:
-    """Extract the Prometheus type for one family from renderer TYPE lines."""
-    match = re.search(
-        r"# TYPE " + re.escape(family) + r" (counter|gauge|histogram)",
-        content,
-    )
-    if match is None:
-        raise ValueError(f"renderer has no # TYPE line for {family}")
-    return match.group(1)
-
-
-def _extract_family_labels(content: str, family: str) -> list[dict]:
-    """
-    Extract label names and their observed values for one metric family from
-    the renderer's literal metric lines.
-
-    Returns a list of ``{"name": ..., "values": [...]}`` entries.
-    """
-    marker = f"# HELP {family}"
-    start = content.find(marker)
-    if start < 0:
-        raise ValueError(f"renderer has no # HELP line for {family}")
-    next_help = content.find("# HELP ", start + len(marker))
-    block = content[start:] if next_help < 0 else content[start:next_help]
-
-    # For the histogram family the bucket lines use {engine=...,le=...};
-    # label extraction below uses the engine lines found in the block.
-    label_values: dict[str, set[str]] = {}
-    for source in re.findall(r"\{([^{}]*)\}", block):
-        for key, value in re.findall(
-            r"([A-Za-z_]\w*)=\\\"([^\\\"]*)\\\"", source, flags=re.ASCII
-        ):
-            if key == "le":
-                continue
-            label_values.setdefault(key, set()).add(value)
-
-    labels = [
-        {"name": name, "values": sorted(values)}
-        for name, values in sorted(label_values.items())
-    ]
-
-    # Enforce the closed allowlist for the streaming transition label.
-    if family == "nginx_markdown_streaming_events_total":
-        transition = next(
-            (label for label in labels if label["name"] == "transition"),
-            None,
-        )
-        if transition is None:
-            raise ValueError(
-                "streaming events renderer has no transition label")
-        observed = set(transition["values"])
-        expected = set(STREAMING_TRANSITION_VALUES)
-        if observed != expected:
-            raise ValueError(
-                "streaming transition values drift: "
-                f"observed={sorted(observed)!r}, expected={sorted(expected)!r}")
-        for label in labels:
-            if label["name"] == "transition":
-                label["values"] = list(STREAMING_TRANSITION_VALUES)
-    return labels
-
-
 def generate_metrics_registry() -> dict:
-    """Generate metrics-registry.json from the v1 renderer header."""
-    content = _read_text(RENDERER_PATH)
-
-    # All families are declared with # TYPE lines in the renderer.
-    type_matches = re.findall(
-        r"# TYPE (nginx_markdown_\w+) (counter|gauge|histogram)", content
-    )
-    families: list[dict] = []
-    for family_name, family_type in type_matches:
-        entry: dict = {
-            "name": family_name,
-            "type": family_type,
-            "labels": _extract_family_labels(content, family_name),
-        }
-        if family_type == "histogram":
-            entry["bucket_count"] = len(HISTOGRAM_BUCKET_BOUNDARIES)
-            entry["bucket_boundaries"] = list(HISTOGRAM_BUCKET_BOUNDARIES)
-            # The renderer formats histogram labels with %s placeholders;
-            # the engine label is a closed two-value set.
-            entry["labels"] = [
-                {"name": "engine", "values": ["full_buffer", "streaming"]}
-            ]
-        if family_name == "nginx_markdown_build_info":
-            entry["value"] = 1
-        families.append(entry)
-
-    # The renderer emits exactly 12 families (frozen contract).
-    if len(families) != 12:
-        raise ValueError(
-            f"renderer declares {len(families)} families, expected 12"
-        )
-
-    # Structural sanity: label names must never use forbidden labels.
-    for family in families:
-        for label in family["labels"]:
-            if label["name"] in FORBIDDEN_LABELS:
-                raise ValueError(
-                    f"family {family['name']} uses forbidden label "
-                    f"{label['name']}"
-                )
-
-    return {
-        "schema_version": 1,
-        "format": "prometheus_text_004",
-        "generator": Path(__file__).name,
-        "source": str(RENDERER_PATH.relative_to(SOURCE_ROOT)),
-        "families": families,
-    }
+    """Project the canonical metrics contract into a release artifact."""
+    contract = _read_json(METRICS_CONTRACT_PATH)
+    result = dict(contract)
+    result["generator"] = Path(__file__).name
+    result["source"] = str(RENDERER_PATH.relative_to(SOURCE_ROOT))
+    return result
 
 
 def generate_diagnostics_field_contract() -> dict:
@@ -347,7 +185,8 @@ def generate_diagnostics_field_contract() -> dict:
 
 
 def generate_dynconf_precedence_report() -> dict:
-    """Generate dynconf-precedence-report.json from schema + precedence header."""
+    """Project the canonical precedence contract after implementation checks."""
+    contract = _read_json(DYNCONF_PRECEDENCE_CONTRACT_PATH)
     schema = _read_json(DYNCONF_SCHEMA_PATH)
     schema_properties = set(schema.get("properties", {}))
     schema_keys = {
@@ -355,6 +194,18 @@ def generate_dynconf_precedence_report() -> dict:
     }
     if not schema_keys:
         raise ValueError("dynconf.schema.json has no properties")
+
+    contract_fields = set(
+        contract.get("field_specific_provenance_rules", {})
+        .get("fields", {})
+    )
+    if schema_keys != contract_fields:
+        schema_only = sorted(schema_keys - contract_fields)
+        contract_only = sorted(contract_fields - schema_keys)
+        raise ValueError(
+            "dynconf schema keys drifted from canonical precedence contract: "
+            f"schema_only={schema_only!r}, contract_only={contract_only!r}"
+        )
 
     rust_keys = _extract_rust_dynconf_keys(_read_text(DYNCONF_RUST_SCHEMA_PATH))
     if schema_properties != rust_keys:
@@ -365,30 +216,15 @@ def generate_dynconf_precedence_report() -> dict:
             f"schema_only={schema_only!r}, rust_only={rust_only!r}"
         )
 
-    precedence_hierarchy = _extract_precedence_hierarchy(
-        _read_text(PRECEDENCE_HEADER_PATH)
+    _extract_precedence_hierarchy(
+        _read_text(PRECEDENCE_HEADER_PATH),
+        contract["five_tier_precedence_hierarchy"],
     )
 
-    return {
-        "schema_version": 1,
-        "generator": Path(__file__).name,
-        "source": str(DYNCONF_SCHEMA_PATH.relative_to(SOURCE_ROOT)),
-        "five_tier_precedence_hierarchy": precedence_hierarchy,
-        "field_specific_provenance_rules": {
-            "fields": {
-                key: {
-                    "allowed_provenance": [
-                        "request_variable",
-                        "static",
-                        "dynconf",
-                        "http_baseline",
-                        "default",
-                    ]
-                }
-                for key in sorted(schema_keys)
-            }
-        },
-    }
+    result = dict(contract)
+    result["generator"] = Path(__file__).name
+    result["source"] = str(DYNCONF_SCHEMA_PATH.relative_to(SOURCE_ROOT))
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:
