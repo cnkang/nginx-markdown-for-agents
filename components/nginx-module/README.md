@@ -1,8 +1,11 @@
 # NGINX Markdown Filter Module
 
-This directory contains the NGINX-facing part of the project: the C module that plugs into the NGINX filter chain and delegates HTML-to-Markdown conversion to the Rust converter.
+This directory contains the NGINX-facing part of the project. The C
+module plugs into the NGINX filter chain and delegates HTML-to-Markdown
+conversion to the Rust converter.
 
-If the repository `README.md` explains the product, this component is where the NGINX-specific request, response, and configuration behavior actually lives.
+The repository `README.md` explains the product. This component holds the
+NGINX-specific request, response, and configuration behavior.
 
 ## Responsibilities
 
@@ -14,7 +17,8 @@ The module is responsible for:
 - applying request and configuration policy inside NGINX
 - calling the Rust converter through a stable FFI boundary
 
-In practice, this is the layer that decides whether a request should stay as HTML, become Markdown, or fail according to configured policy.
+In practice, this layer decides whether a request stays as HTML, becomes
+Markdown, or fails according to configured policy.
 
 ## Source Layout
 
@@ -114,11 +118,11 @@ For canonical architecture and repository-layout notes, prefer [../../docs/archi
 
 ## Removed: Streaming Threshold Directive
 
-The `markdown_stream_threshold` directive and threshold-based routing were
-removed in 0.9.2. Since 0.9.2 the processing path is selected solely by the
-`markdown_streaming off|auto|force` directive, and buffering is controlled by
-`markdown_limits streaming_buffer=`. `markdown_limits` uses the current keys,
-for example `conversion_memory=` for the full-buffer memory ceiling.
+The 0.9.2 release removed the `markdown_stream_threshold` directive and
+threshold-based routing. Since 0.9.2 the `markdown_streaming off|auto|force`
+directive selects the processing path, and `markdown_limits
+streaming_buffer=` controls buffering. `markdown_limits` uses the current
+keys, for example `conversion_memory=` for the full-buffer memory ceiling.
 
 Configurations that still set `markdown_stream_threshold` fail `nginx -t`
 with `unknown directive` until migrated. See

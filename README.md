@@ -428,7 +428,7 @@ For the full list of changes across prior versions (including breaking configura
 
 ## Future Roadmap
 
-Post-v0.9.1 and towards the v1.0.0 milestone:
+Post-v0.9.2 and towards the v1.0.0 milestone:
 
 - **Observability interoperability**: Keep the frozen Prometheus and
   diagnostics contracts compatible with external monitoring systems without

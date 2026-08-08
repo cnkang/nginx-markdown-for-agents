@@ -2,9 +2,12 @@
 
 This directory contains the HTML-to-Markdown conversion engine used by the NGINX module.
 
-It focuses on predictable output, memory safety, and a stable C FFI boundary so the NGINX module can call into it without re-implementing parsing or sanitization logic in C.
+It focuses on predictable output, memory safety, and a stable C FFI
+boundary. The NGINX module can call into it without re-implementing
+parsing or sanitization logic in C.
 
-This is the part of the project that turns eligible HTML into a deterministic Markdown representation while enforcing the converter's safety rules.
+This component turns eligible HTML into a deterministic Markdown
+representation. It enforces the converter's safety rules.
 
 ## Responsibilities
 
@@ -14,7 +17,8 @@ This is the part of the project that turns eligible HTML into a deterministic Ma
 - expose conversion results through a C-compatible FFI
 - provide optional metadata such as token estimates and YAML front matter
 
-If you are changing parsing, sanitization, Markdown rendering, or metadata generation, this is usually the component you need to inspect first.
+When you change parsing, sanitization, Markdown rendering, or metadata
+generation, inspect this component first.
 
 ## Quick Commands
 
@@ -38,7 +42,7 @@ The crate includes an optional incremental processing API behind a feature gate.
 
 ### Enabling
 
-The `incremental` feature is included in the crate's default feature set. To
+The crate's default feature set includes the `incremental` feature. To
 select it explicitly in a no-default-features build:
 
 ```bash
@@ -74,7 +78,7 @@ let markdown = conv.finalize().unwrap();
 
 ### FFI Functions
 
-Four C-callable functions are exported when the feature is enabled:
+The feature exports four C-callable functions when enabled:
 
 | Function | Purpose |
 |----------|---------|
@@ -83,7 +87,7 @@ Four C-callable functions are exported when the feature is enabled:
 | `markdown_incremental_finalize` | Finalize conversion and write the result |
 | `markdown_incremental_free` | Free the handle without finalizing |
 
-The pre-v1 ABI reset removed the redundant pointer-only constructor; bundled C
+The pre-v1 ABI reset removed the redundant pointer-only constructor. Bundled C
 callers use `_new_with_code` so construction failures remain classifiable.
 
 ### Limitations
