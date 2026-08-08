@@ -32,11 +32,11 @@ conservative without improving or fabricating measured evidence.
 
 Every canonical baseline must retain the raw workflow artifact and record the
 artifact/run, original Git commit, adjustment rule, person or reason, and date
-in machine-locatable `baseline_policy` metadata. The active 0.9.1 module
+in machine-locatable `baseline_policy` metadata. The active 0.9.2 module
 baseline is a verbatim run from source commit
-`cab92df229b0b68cb02d88817a208e009f3ce106`, workflow run
-`30405031983/attempts/1`, measured at `2026-07-28T22:41:12Z`, with raw digest
-`a511b90f82d05f827ea011faccec3ff5b3aead892943180f98e617c6c09aad12`.
+`97672b57d4479febbf6d9a3d947a339236b698f3`, workflow run
+`30604344481/attempts/1`, measured at `2026-07-31T04:36:09Z`, with raw digest
+`ebcd73ec55c4e85a6cdbc85371832342d97b2edcdf06c56cf5bb7a91f0ab5c92`.
 The former `historical_audit_exception` stays only for historical audit
 coverage. It is not an active release-baseline policy.
 
@@ -86,6 +86,10 @@ Key findings from this run:
 
 - `rustc 1.93.1 (01f6ddf75 2026-02-11)`
 - `cargo 1.93.1 (083ac5135 2025-12-15)`
+
+This records the measurement environment for the baseline snapshot. The
+project MSRV is Rust 1.97. Re-measure with the current toolchain before
+treating these numbers as release evidence.
 
 ### NGINX Runtime
 
@@ -439,6 +443,7 @@ Single-request validation (`curl`, `Accept: text/markdown`):
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Clarified toolchain section as measurement environment (project MSRV is 1.97) |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

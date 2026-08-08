@@ -47,7 +47,6 @@ available in C.
 | `unit/head_request_test.c` | HEAD request handling in the filter, body suppression semantics |
 | `unit/passthrough_test.c` | Pass-through (non-conversion) path, `NGX_DECLINED` semantics in the filter chain |
 | `unit/decision_log_test.c` | Decision log formatting and reason code emission via `ngx_log_error` |
-| `unit/otel_impl_test.c` | OpenTelemetry integration implementation within the NGINX module |
 | `unit/protocol_correctness_test.c` | HTTP protocol correctness in filter responses (status, headers, body ordering) |
 | `unit/reason_code_test.c` | Reason code string definitions and accessor functions used by `ngx_http_markdown_log_decision()` |
 | `integration/nginx_runtime_integration_test.c` | Module load, config apply, and request lifecycle against a real NGINX stub runtime |
