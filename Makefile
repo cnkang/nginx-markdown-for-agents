@@ -53,6 +53,7 @@ PREFIX ?= /usr
 LIBDIR ?= $(PREFIX)/lib
 DESTDIR ?=
 STYLE_BASE ?= HEAD
+SCHEMA_RELEASE_VERSION ?= 0.9.2
 MODULE_INSTALL_DIR := $(LIBDIR)/nginx/modules
 NGINX_MODULES_AVAILABLE_DIR := $(PREFIX)/share/nginx/modules-available
 DOC_INSTALL_DIR := $(PREFIX)/share/doc/nginx-markdown-for-agents
@@ -286,8 +287,8 @@ public-surface-drift-check:
 	python3 tools/harness/detect_public_surface_drift.py
 
 schema-drift-check:
-	python3 tools/release/gates/generate_schema_artifacts.py
-	python3 tools/release/gates/validate_schema_drift.py
+	python3 tools/release/gates/generate_schema_artifacts.py --version "$(SCHEMA_RELEASE_VERSION)"
+	python3 tools/release/gates/validate_schema_drift.py --version "$(SCHEMA_RELEASE_VERSION)"
 
 harness-check-full:
 	$(MAKE) docs-check-base
@@ -948,7 +949,7 @@ release-gates-check-092: release-gates-check-091
 	$(MAKE) release-perf-evidence-blocking BASELINE_VERSION=092
 	@echo "  [2/7] Public surface and dynconf schema drift checks"
 	$(MAKE) public-surface-drift-check
-	$(MAKE) schema-drift-check
+	$(MAKE) schema-drift-check SCHEMA_RELEASE_VERSION=0.9.2
 	@echo "  [3/7] Version consistency (0.9.2)"
 	bash tools/harness/detect_version_consistency.sh
 	@echo "  [4/7] Reason code registry completeness"

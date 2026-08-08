@@ -3,9 +3,8 @@ Schema-drift artifact generator tests.
 
 Verifies ``generate_schema_artifacts.py``:
 
-- Generates metrics-registry.json with exactly the 12 frozen families
-  (counter/gauge/histogram), the histogram bucket contract, the
-  streaming transition allowlist, and the build_info gauge value 1
+- Projects metrics-registry.json from the canonical family, histogram,
+  streaming-transition, and build-info contract
 - Generates diagnostics-field-contract.json matching
   diagnostics.schema.json effective_config properties
 - Generates dynconf-precedence-report.json with the five-tier hierarchy
@@ -24,21 +23,23 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
 from tools.release.gates import generate_schema_artifacts as gen  # noqa: E402
+from tools.release.gates import validate_metrics_registry as metrics_validator  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
-def test_metrics_registry_has_twelve_families():
-    """The generated registry must contain exactly the 12 frozen families."""
+def test_metrics_registry_matches_canonical_families():
+    """The generated registry must project the canonical family contract."""
     registry = gen.generate_metrics_registry()
+    canonical = json.loads(
+        (REPO_ROOT / "schemas" / "metrics-v1.registry.json").read_text(
+            encoding="utf-8"
+        )
+    )
     families = registry["families"]
-    assert len(families) == 12
-    assert registry["schema_version"] == 1
-    assert registry["format"] == "prometheus_text_004"
-    names = {family["name"] for family in families}
-    assert "nginx_markdown_requests_total" in names
-    assert "nginx_markdown_streaming_peak_memory_bytes" in names
-    assert "nginx_markdown_build_info" in names
+    assert families == canonical["families"]
+    assert registry["schema_version"] == canonical["schema_version"]
+    assert registry["format"] == canonical["format"]
 
 
 def test_metrics_registry_histogram_contract():
@@ -52,37 +53,61 @@ def test_metrics_registry_histogram_contract():
     assert len(histograms) == 1
     hist = histograms[0]
     assert hist["name"] == "nginx_markdown_conversion_duration_seconds"
-    assert hist["bucket_count"] == 10
-    assert hist["bucket_boundaries"] == gen.HISTOGRAM_BUCKET_BOUNDARIES
+    canonical = json.loads(
+        (REPO_ROOT / "schemas" / "metrics-v1.registry.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    canonical_hist = next(
+        family
+        for family in canonical["families"]
+        if family["type"] == "histogram"
+    )
+    assert hist["bucket_count"] == canonical_hist["bucket_count"]
+    assert hist["bucket_boundaries"] == canonical_hist["bucket_boundaries"]
     label_names = {label["name"] for label in hist["labels"]}
     assert label_names == {"engine"}
 
 
 def test_metrics_registry_streaming_transition_allowlist():
-    """streaming_events_total uses the closed transition allowlist."""
+    """streaming_events_total uses the canonical closed transition allowlist."""
     registry = gen.generate_metrics_registry()
+    canonical = json.loads(
+        (REPO_ROOT / "schemas" / "metrics-v1.registry.json").read_text(
+            encoding="utf-8"
+        )
+    )
     families = {
         family["name"]: family for family in registry["families"]
     }
     family = families["nginx_markdown_streaming_events_total"]
     labels = {label["name"]: label for label in family["labels"]}
     assert "transition" in labels
-    assert labels["transition"]["values"] == gen.STREAMING_TRANSITION_VALUES
+    canonical_family = next(
+        family
+        for family in canonical["families"]
+        if family["name"] == "nginx_markdown_streaming_events_total"
+    )
+    canonical_labels = {
+        label["name"]: label for label in canonical_family["labels"]
+    }
+    assert labels["transition"]["values"] == canonical_labels["transition"]["values"]
     assert "event" not in labels
 
 
-def test_streaming_transition_allowlist_rejects_missing_renderer_value():
-    """Observed renderer values must match the closed transition contract."""
-    content = (
-        '# HELP nginx_markdown_streaming_events_total events\n'
-        '# TYPE nginx_markdown_streaming_events_total counter\n'
-        'nginx_markdown_streaming_events_total{transition=\\"start\\"} 1\n'
-    )
-
-    with pytest.raises(ValueError, match="transition values drift"):
-        gen._extract_family_labels(
-            content, "nginx_markdown_streaming_events_total"
+def test_metrics_registry_projection_rejects_contract_drift():
+    """The release artifact cannot silently diverge from the canonical contract."""
+    canonical = json.loads(
+        (REPO_ROOT / "schemas" / "metrics-v1.registry.json").read_text(
+            encoding="utf-8"
         )
+    )
+    artifact = gen.generate_metrics_registry()
+    artifact["families"][0]["type"] = "gauge"
+    errors = metrics_validator.validate_registry_matches_contract(
+        artifact, canonical
+    )
+    assert errors
 
 
 def test_metrics_registry_build_info_gauge():
@@ -128,18 +153,15 @@ def test_dynconf_precedence_report_covers_all_schema_keys():
     fields = report["field_specific_provenance_rules"]["fields"]
     assert set(fields.keys()) == schema_keys
 
-    hierarchy = report["five_tier_precedence_hierarchy"]
-    assert len(hierarchy) == 5
-    tiers = [tier["tier"] for tier in hierarchy]
-    assert tiers == [1, 2, 3, 4, 5]
-    sources = [tier["source"] for tier in hierarchy]
-    assert sources == [
-        "request_variable",
-        "static",
-        "dynconf",
-        "http_baseline",
-        "default",
-    ]
+    canonical = json.loads(
+        (REPO_ROOT / "schemas" / "dynconf-precedence-v1.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert (
+        report["five_tier_precedence_hierarchy"]
+        == canonical["five_tier_precedence_hierarchy"]
+    )
 
 
 def test_dynconf_precedence_header_drift_is_rejected():
@@ -158,7 +180,12 @@ def test_dynconf_precedence_header_drift_is_rejected():
     )
 
     with pytest.raises(ValueError, match="tier 1"):
-        gen._extract_precedence_hierarchy(mutated)
+        gen._extract_precedence_hierarchy(
+            mutated,
+            gen._read_json(gen.DYNCONF_PRECEDENCE_CONTRACT_PATH)[
+                "five_tier_precedence_hierarchy"
+            ],
+        )
 
 
 def test_dynconf_rust_allowlist_drift_is_rejected(monkeypatch):
@@ -193,7 +220,6 @@ def test_generated_artifacts_pass_schema_drift_validator(tmp_path, monkeypatch):
     )
     import validate_schema_drift  # noqa: E402
 
-    monkeypatch.setattr(validate_schema_drift, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(
         validate_schema_drift,
         "RELEASE_ARTIFACT_DIR",
