@@ -32,7 +32,7 @@ Required:
   reproduce the calculation (for example
   `sum(rate(nginx_markdown_decompression_events_total{outcome="failed"}[5m])) / sum(rate(nginx_markdown_decompression_events_total[5m]))`).
   Verify
-  that the denominator is scoped to the same population as the numerator —
+  that the denominator scopes to the same population as the numerator —
   using a global request count as denominator for a streaming-only failure
   count will dilute the rate during partial rollout and mask real problems.
 - Verification commands in operator docs (curl + grep/jq/python) must specify
@@ -55,11 +55,11 @@ Required:
 
 ### 49. THIRD-PARTY-NOTICES drift with dependency changes
 Required:
-- When any dependency is added, removed, or has its version changed (in
+- When any dependency arrives, leaves, or changes version (in
   Cargo.toml, Cargo.lock, or C/NGINX build files), the corresponding entry
-  in `THIRD-PARTY-NOTICES` must be updated in the same changeset.
+  in `THIRD-PARTY-NOTICES` must update in the same changeset.
 - Version numbers in THIRD-PARTY-NOTICES must match the resolved versions in
   `Cargo.lock` (not the semver range in Cargo.toml).
-- New dependencies must be added with correct license type, copyright notice,
-  and license text. Removed dependencies must be deleted.
+- New dependencies must enter with correct license type, copyright notice,
+  and license text. Removed dependencies must delete.
 - Verify with: `diff <(grep '^version =' Cargo.lock) <(grep '[0-9]\+\.[0-9]\+' THIRD-PARTY-NOTICES)`

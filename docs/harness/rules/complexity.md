@@ -63,12 +63,12 @@ Python tooling, and `shellcheck` on shell scripts.
 **C thresholds rationale:** NGINX glue layers have inherent complexity from
 lifecycle management, error branches, macros, and state machines. CCN 25 and
 length 180 are generous enough to accommodate legitimate NGINX patterns while
-still requiring every overgrown function to be refactored before delivery.
+still requiring every overgrown function to refactor before delivery.
 
 Every violation is blocking. The harness has no baseline exception list,
 suppression mechanism, or threshold waiver. If a function exceeds a threshold,
 extract helpers, simplify the control flow, or redesign the boundary until the
-reported violation is removed.
+the team removes the reported violation.
 
 **When to run:**
 - Before committing changes to C, Rust, Python, or shell code
@@ -87,12 +87,12 @@ apt install shellcheck    # Debian/Ubuntu
 
 **Handling flagged functions:**
 - A legitimate-looking large lookup table or NGINX lifecycle function still
-  must be decomposed when it exceeds a configured threshold.
+  the module must decompose it when it exceeds a configured threshold.
 - Do not suppress warnings or raise thresholds to accommodate a violation.
 - Existing violations are subject to the same blocking rule as new violations;
   the current tree must be clean before delivery.
 
-**Shell note:** Shell scripts are checked with `shellcheck` for static issues
+**Shell note:** Shell scripts get checked with `shellcheck` for static issues
 and maintainability. Cognitive Complexity is not a hard metric for shell
 scripts — there is no reliable tool, and shell scripts in this project are
 primarily orchestration glue, not core logic.

@@ -21,7 +21,7 @@ Required:
 - Baseline/bootstrap modes must not upload/compare artifacts incorrectly.
 - Remove redundant CI steps that can desynchronize behavior or waste runtime.
 - **Supply chain hardening (GitHub Actions)**:
-  - All third-party GitHub Actions must be pinned to immutable commit SHA
+  - All third-party GitHub Actions must pin to immutable commit SHA
     references, not mutable version tags (`v4`, `v1`, etc.).  Include a
     version comment for human readability:
     ```yaml
@@ -37,12 +37,12 @@ Required:
     workflow/script/release/config risks, not duplicate CodeQL language scans.
 - **Supply chain hardening (binary downloads)**:
   - Downloaded binaries and source tarballs in CI workflows and Dockerfiles
-    must be verified against a known-good checksum (SHA256 minimum).
+    the harness must verify them against a known-good checksum (SHA256 minimum).
   - Maintain checksums in a version-controlled file (for example
     `packaging/checksums.sha256`) and reference it in download scripts.
   - Forbid the `curl URL | sudo tar` pattern.  Use download→verify→extract
     as separate steps.
-  - When a new version of an external dependency is adopted, update the
+  - When a new version of an external dependency arrives, update the
     checksum file in the same change set.
   - Artifact-producing builder images must use repository-reviewed
     multi-architecture manifest digests. Keep a readable tag before
@@ -56,9 +56,9 @@ Required:
     Rust toolchain via `rustup`, it must use a verified installer script
     (for example `packaging/scripts/install-verified-rustup.sh`) that validates the
     downloaded `rustup-init` checksum before execution.  The installer
-    must be invoked with an explicit `bash` invocation (not `sh`) to
-    ensure bash-only syntax is supported.  Release-gate validators must
-    verify the installer script exists and is referenced in the workflow.
+    the developer must invoke it with an explicit `bash` invocation (not `sh`) to
+    ensure bash-only syntax works.  Release-gate validators must
+    verify the installer script exists and appears in the workflow.
 - **Validator/gate regex synchronization**:
   - When refactoring C struct layout (flat fields → nested sub-structs,
     field renames), update all validator scripts and release-gate regex
@@ -93,7 +93,7 @@ Required:
   - Every workflow capable of producing release package artifacts must apply
     the same Rust release build invariants: `--locked`, intended feature set,
     explicit target triple, and the matching target output directory.  If a
-    workflow is retained only as a compatibility path, mark it as non-canonical
+    a workflow stays only as a compatibility path, mark it as non-canonical
     and validate that status in the release gate.
   - Standalone package workflows must use the same package name and install
     layout as the canonical nFPM path.  If a workflow packages a prebuilt
@@ -119,33 +119,33 @@ Required:
     every interpreter named by those scripts' shebangs before the first
     execution, or invoke only scripts valid for the base image's guaranteed
     shell.  Minimal base images such as Alpine must not assume
-    `/usr/bin/env bash` exists unless `bash` is installed in the same image
+    `/usr/bin/env bash` exists unless `bash` installs in the same image
     stage before the script runs.
   - Package smoke tests for architecture-specific artifacts must run on a
     matching runner architecture or an explicit emulation path.
   - Container-job package smoke images must contain prerequisites needed before
     the first workflow step, including `tar` or `git` for `actions/checkout`.
-    Minimal images that lack checkout prerequisites must be exercised through a
+    Minimal images that lack checkout prerequisites must exercise through a
     host-checkout plus `docker run` smoke pattern instead of as the job
     container.
   - Tag release gates in GitHub Actions must run only repository-owned
     validators and artifacts available in a clean CI checkout.  Legacy or
     local-spec validators that require user-local Kiro/spec directories must not
-    run in tag release CI unless those inputs are checked into the repository or
+    run in tag release CI unless those inputs check into the repository or
     explicitly downloaded first.
   - Custom gates that reimplement platform gating semantics must match the
     platform's documented success criteria exactly.  A tag gate evaluating
     GitHub required status checks must accept every conclusion GitHub counts
     as satisfying (`success`, `skipped`, `neutral`) and keep rejecting all
     others; required contexts may come from both the Checks API and the
-    Commit Status API, so both sources must be evaluated before declaring a
+    Commit Status API, so the gate must evaluate both sources before declaring a
     context missing.
   - When consuming structured API requirements, preserve every constraint
     field, not just the primary identifier.  A ruleset required check carries
     an optional `integration_id` pinning the GitHub App that must produce the
     result; dropping it makes the custom gate strictly more permissive than
     the ruleset it enforces.
-  - A newly added gate or validator test file must be wired into a blocking
+  - A newly added gate or validator test file must wire into a blocking
     CI job and into the workflow's change-detection path filter in the same
     changeset.  A test that exists in the repository but never runs in CI is
     not a gate; the critical tag logic must not execute for the first time
@@ -158,8 +158,8 @@ Required:
     environment-truthful evidence or the gate must fail closed instead of
     comparing across environments.
   - When a newer release gate reuses prior-version validators, any assertion
-    about the active project version, package version, or release line must be
-    parameterized by the caller.  A prior-version validator may keep its
+    about the active project version, package version, or release line must
+    take the version from the caller.  A prior-version validator may keep its
     standalone default, but it must not hard-fail a newer release gate solely
     because `Cargo.toml`, package metadata, or chart metadata has advanced to
     the newer release version.
@@ -180,7 +180,7 @@ Required:
   - Package maintainer scripts must accept the lifecycle arguments passed by
     each target package manager.  Advisory post-install scripts must recognize
     RPM numeric `%post` arguments and must not make an otherwise successful
-    install fail only because an unfamiliar lifecycle argument was observed.
+    install fail only because the test observed an unfamiliar lifecycle argument.
   - Public install docs must match the currently published package channel.
     Bare APT/YUM repository install commands are forbidden until the repository
     URL, signing key, and release workflow are real and validated.  If only
@@ -191,7 +191,7 @@ Required:
     writable runtime/temp mounts in the rendered pod spec.
   - Helm charts that support optional dynamic modules must keep default renders
     compatible with stock images, must fail clearly when module-specific
-    directive families are enabled without an explicit in-image module path
+    directive families enable without an explicit in-image module path
     (including metrics directives), and must not create implicit `hostPath`
     mounts from module path values.  Custom volumes must be explicit opt-in
     values such as `extraVolumes` and `extraVolumeMounts`.
@@ -218,7 +218,7 @@ Required:
       `sha256` stanza.  `brew audit --strict` requires this ordering; a
       formula with `sha256` before `version` fails the audit even if both
       values are correct.
-    - The formula's NGINX dependency version must be derived from package
+    - The formula's NGINX dependency version must derive from package
       metadata (for example `nginx --version` output or the dependency
       formula's `version`), not hardcoded to a specific upstream version.
       Hardcoded versions drift when the NGINX formula updates.
@@ -234,7 +234,7 @@ Required:
       by the formula's dependency, not against a separately-specified NGINX
       source tree.  Building against a different version produces a module
       binary with ABI mismatch.
-    - When `cbindgen` is required for a source-build formula, the formula
+    - When a source-build formula requires `cbindgen`, the formula
       must install `cbindgen` as a build dependency before the build step.
       A missing `cbindgen` causes the Rust converter to fail generating C
       headers, breaking the source build.

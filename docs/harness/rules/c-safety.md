@@ -27,8 +27,8 @@ Required:
 - For decoder/API structs that use narrower counters (for example zlib
   `avail_in/avail_out`), validate bounds before assignment and fail safely
   rather than truncating.
-- Const-correctness is required for read-only data paths (parameters and local
-  pointers). When writing or modifying a function, qualify pointer parameters
+- Read-only data paths (parameters and local
+  pointers) require const-correctness. When writing or modifying a function, qualify pointer parameters
   as `const` when the function does not modify the pointed-to data — this
   applies to struct pointers, array pointers, and string pointers alike.
   Do not drop `const` qualifiers via cast unless the callee contract
@@ -37,7 +37,7 @@ Required:
   all call sites, forward declarations, and header prototypes in the same
   change set.
 - **NGINX callback signature exception**: do not add `const` to parameters
-  whose type is dictated by NGINX framework callback signatures.  Key
+  whose type NGINX framework callback signatures dictate.  Key
   examples:
   - `ngx_command_t.set` handler: `ngx_command_t *cmd` must remain non-const
     (the NGINX `ngx_command_s` struct defines `set` as
@@ -53,7 +53,7 @@ Required:
 - Forward declarations must not shadow or redeclare NGINX macro identifiers
   (for example `ngx_log_error`, `ngx_memzero`, `ngx_str_set`). Before adding a
   declaration in impl headers, confirm the symbol is not a macro in NGINX
-  headers. If a callable API is needed, declare the underlying function symbol
+  headers. If a callable API becomes needed, declare the underlying function symbol
   (for example `ngx_log_error_core`) and keep signature parity with the
   canonical declaration in the owning header, including `const` qualifiers.
 - **Forward declaration ordering**: Forward declarations must appear
@@ -75,8 +75,8 @@ Required:
   ``NGINX callback signature``, ``ngx_str_t.data is u_char* per NGINX
   API``, ``zlib z_stream.next_in requires Bytef* without ZLIB_CONST``,
   ``callback typedef dictates parameter type``.  NOSONAR must NOT be
-  used for non-callback const issues that can be fixed by qualifying
-  the parameter — it is only for cases where the NGINX API contract
+  used for non-callback const issues that qualifying the parameter fixes
+  — it is only for cases where the NGINX API contract
   prevents the fix.
 - Treat static-analysis findings that imply undefined behavior, data truncation,
   or invalid memory access risk as correctness/security issues and fix them in

@@ -32,7 +32,7 @@ paths:
 **P1 - Important**: Version mismatches can cause user confusion, deployment failures, and release inconsistencies.
 
 ## Description
-All version numbers across the project must be synchronized to reflect the current release version. This includes:
+All version numbers across the project must synchronize to reflect the current release version. This includes:
 - Main `Cargo.toml` (source of truth)
 - Helm Chart `version` and `appVersion` fields
 - Internal Cargo.toml dependencies (fuzz targets, corpus tools)
@@ -82,7 +82,7 @@ An unclassified workflow that installs Rust is a failure so a new workflow
 cannot silently introduce a floating compiler.
 
 The documentation gate also enforces release-state consistency: an
-`Unreleased` changelog entry must not be described as stable in the project
+`Unreleased` changelog entry must not appear as stable in the project
 status or release notes. The tag-only
 `tools/release/gates/validate_release_metadata.py` gate applies the inverse
 contract at publication time: the tagged version must have a concrete,
@@ -92,11 +92,11 @@ release notes.
 ## Exclusions
 The following are intentionally NOT checked:
 - **Homebrew Formula** (`packaging/homebrew/nginx-markdown-module.rb`): The `url` and `sha256` fields are intentionally kept at the previous release version. The `homebrew-tap-publish.yml` workflow automatically rewrites these fields during release.
-- **Historical CHANGELOG entries**: Version numbers in changelog history are expected to reference past versions.
+- **Historical CHANGELOG entries**: Version numbers in changelog history reference past versions.
 - **Documentation historical references**: Mentions of past versions in migration guides, compatibility notes, etc.
 
 ## Remediation
-When version inconsistency is detected:
+When the detector finds a version inconsistency:
 
 1. **Identify the source of truth**: Check `components/rust-converter/Cargo.toml` for the current version
 2. **Update Helm Chart**:
@@ -118,7 +118,7 @@ When version inconsistency is detected:
    use floating `stable` for blocking or release builds.
 
 ## Integration
-This detector is integrated into:
+This detector integrates into:
 - `make harness-security-checks`: Runs as part of the harness security check suite
 - `make release-gates-check-092`: Blocking step of the current 0.9.2 release gate
 - CI `release-092-contract-gates` job: Runs version consistency on PRs

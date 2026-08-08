@@ -44,7 +44,7 @@ Historical issues: `5e9a2b1`, `c4d7f80`.
 
 Required:
 - Flags that gate operations (for example `reload_pending`, `staging_dirty`,
-  `config_applied`) must be cleared **after** the gated operation succeeds,
+  `config_applied`) must clear **after** the gated operation succeeds,
   not before the attempt.  Clearing before the operation removes the retry
   path on failure.
 - Correct pattern: `if (flag) { rc = op(); if (rc == NGX_OK) flag = 0; }`
@@ -72,7 +72,7 @@ Required:
   `'\0'`.
 - Prefer length-bounded NGINX APIs (`ngx_strncasecmp`, `ngx_strlchr`,
   `ngx_strnstr`) when the length is known, avoiding the copy entirely.
-- When a length-bounded API is not available and a copy is needed, use
+- When a length-bounded API is not available and a copy becomes needed, use
   `ngx_pnalloc(pool, len + 1)` and `ngx_memcpy` + NUL-terminate.  Free the
   buffer from the pool when the pool lifetime covers the usage.
 - Line-oriented parsers that read files or buffers must handle the final
@@ -82,7 +82,7 @@ Required:
   length equality first and use `ngx_strncasecmp(..., expected_len)` to
   prevent out-of-bounds reads on short or truncated inputs.
 - **Cross-translation-unit visibility**: When a configuration-derived field
-  (for example `effective_body_buffer_limit`) is consumed in multiple
+  (for example `effective_body_buffer_limit`) spans multiple
   source files, its declaration and accessor function must be in a shared
   header file (for example `filter_module.h`), not declared `static` in
   one `.c` file.  A `static` declaration in a source file is invisible to
@@ -98,8 +98,8 @@ Required:
 
 Verification:
 - `grep -rn 'ngx_strcasecmp\|ngx_file_info\|stat(' components/nginx-module/src/`
-- For each hit, verify the input is guaranteed NUL-terminated or that a
-  length-bounded alternative should be used instead.
+- For each hit, verify the input guarantees NUL-termination or that a
+  a length-bounded alternative should run instead.
 - `grep -rn "while.*\\\\n\|split_on.*\\\\n" components/rust-converter/src/` —
   verify EOF-last-line handling in Rust line iterators.
 
@@ -122,8 +122,8 @@ Required:
   a developer copies a block within the same file (for example config
   handlers, auth/otel helper functions).  When adding a new code block
   that is similar to an existing block in the same file, check whether the
-  two blocks can be unified into a shared helper.  If a code block of 5+
-  lines is duplicated (non-adjacent) within the same file, extract the
+  two blocks can unify into a shared helper.  If a code block of 5+
+  lines repeats (non-adjacent) within the same file, extract the
   common logic into a function.  CI tooling (`detect_duplicate_code.py`)
   should flag both adjacent duplicates (3+ identical consecutive lines
   immediately repeated) and non-adjacent duplicates (5+ identical
@@ -134,7 +134,7 @@ Required:
   a single `if (zrc == Z_OK || zrc == Z_BUF_ERROR)` block), verify that
   the two branches are truly semantically equivalent before merging.
   Branches that share the same *shape* but differ in error classification,
-  log label, retry semantics, or side effects must not be collapsed into
+  log label, retry semantics, or side effects must not collapse into
   a single path — the apparent duplication encodes a real semantic
   distinction.  Before consolidating, document: (a) what the two branches
   share (control flow, resource handling), and (b) how they differ (error
@@ -226,7 +226,7 @@ Required:
 
 Verification:
 - `grep -rn 'part->nelts\|part.nelts' components/nginx-module/src/`
-- For each header iteration loop, verify `hash == 0` is checked before
+- For each header iteration loop, verify the code checks `hash == 0` before
   accessing header fields.
 - `bash tools/harness/detect_header_hash_filter.sh`
 

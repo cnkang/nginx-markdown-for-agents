@@ -13,7 +13,7 @@ paths:
 Historical issues: `48edb7c`, `0a08d08`, `3a9f3cd`, `dcbf923`, `2a23415`, `253431c`.
 
 Required:
-- Every bug fix must be accompanied by at least one targeted regression test.
+- Every bug fix must ship with at least one targeted regression test.
 - For streaming/parser/sanitizer fixes, include cross-boundary and malformed-input cases.
 - For streaming text-path fixes, include non-ASCII multibyte split cases (UTF-8 boundary tests).
 - Streaming chunk-split fuzz targets must exercise multi-boundary patterns (for
@@ -53,7 +53,7 @@ Required:
 - Corpus `.meta.json` `page-type` values must use the validator's current
   canonical taxonomy (`clean-article`, `documentation`, `nav-heavy`,
   `boilerplate-heavy`, or `complex-common`) unless the validator and coverage
-  checks are updated in the same change set. Use fixture-specific detail fields
+  the harness updates checks in the same change set. Use fixture-specific detail fields
   such as `archetype` or `streaming_notes.high_risk_structures` for narrower
   traits like media-rich content.
 - Regression tests for classification logic, routing decisions, or metrics
@@ -85,8 +85,8 @@ Required:
 - When a test assigns a variable to verify a cast or representation, ensure the variable is actually read by a `TEST_ASSERT` before the function ends.
 - Initialize variables at declaration when the compiler cannot prove they are always assigned before use (for example variables set only inside conditional branches).
 - Output variables passed by pointer to helpers (for example
-  `foo(..., &last_buf, ..., &fallback_cl)`) must be initialized before the call
-  even when the callee is expected to assign them on success; early-return
+  `foo(..., &last_buf, ..., &fallback_cl)`) must initialize before the call
+  even when the callee assigns them on success; early-return
   paths in test/prod helpers can otherwise read indeterminate storage.
 
 ---

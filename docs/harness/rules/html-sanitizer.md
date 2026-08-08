@@ -24,7 +24,7 @@ Required:
 Historical issues: `1688e80`, `77a46d6`, `2c7d6a9`.
 
 Required:
-- In-link formatting markers (bold/italic/inline-code) must be accumulated in link text, not flushed outside link context.
+- In-link formatting markers (bold/italic/inline-code) must accumulate in link text, not flush outside link context.
 - When one parser event implicitly or explicitly closes multiple open
   structures, unwind them from innermost to outermost and mirror the same
   closure order into sanitizer, state-machine, and emitter state. Closing an
@@ -44,12 +44,12 @@ Required:
   A streaming emitter that only reads the first text event's language
   bytes will produce an empty or truncated class attribute when the
   fence language spans a chunk boundary.
-- Blockquote markers must be emitted consistently on entry and after newline boundaries.
+- Blockquote markers must emit consistently on entry and after newline boundaries.
 - URL extraction parity must include media-bearing elements, not only `img`
   (at minimum `video`, `audio`, `source`, `track`, and `area` where
   applicable), with regression tests that cover missing-attribute and
   attribute-present branches.
-- Human-readable fallback/detail strings that are carried in enums or result
+- Human-readable fallback/detail strings that ride in enums or result
   types (for example `UnsupportedStructure(...)`) must use stable internal
   identifiers, not user-influenced payloads.
 
@@ -64,13 +64,13 @@ Required:
   link structure and enable content-injection attacks.
 - All text emitted inside Markdown link destinations `(...)` or autolinks
   `<...>` must escape `\`, `(`, `)`, `<`, `>`, spaces, and control characters.
-  In Rust, iterate over `chars()` not `bytes()` so multi-byte code points are
+  In Rust, iterate over `chars()` not `bytes()` so multi-byte code points get
   handled atomically.
 - All URL values must reject percent-encoded control characters (`%00`–`%1F`,
   `%7F`) before scheme validation.  Scheme-prefix checks alone are
   insufficient for obfuscated payloads.
 - All forwarded header values (for example `X-Forwarded-Host`, `X-Forwarded-Proto`)
-  must be validated: extract first-hop value only, reject control characters /
+  the module must validate them: extract first-hop value only, reject control characters /
   spaces / path separators, validate IPv6 bracket literals, and fall back to
   server name on invalid input.
 - Every new emission site for links, images, or URLs must call the shared
