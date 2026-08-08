@@ -76,7 +76,7 @@ def test_governance_structural_semicolon_continuation_is_exempt():
 
 def test_must_specification_semicolon_is_exempt():
     text = "The validator MUST reject invalid input; the caller MUST report the failure.\n"
-    warnings = cws.audit(text, Path("docs/guides/x.md"), None)
+    warnings = cws.audit(text, Path("docs/architecture/x.md"), None)
     assert not any("semicolon" in w for w in warnings)
 
 
@@ -88,10 +88,36 @@ def test_release_gate_template_semicolon_is_exempt():
     assert not any("semicolon" in w for w in warnings)
 
 
+def test_release_gate_template_long_rule_item_is_exempt():
+    text = "- Verify " + " ".join(["the artifact"] * 20) + ".\n"
+    warnings = cws.audit(
+        text, Path("docs/project/release-gates/go-no-go-template.md"), None
+    )
+    assert not any("long sentence" in w for w in warnings)
+
+
+def test_must_specification_long_clause_is_exempt():
+    text = "The validator MUST reject " + " ".join(["invalid input"] * 15) + ".\n"
+    warnings = cws.audit(text, Path("docs/architecture/x.md"), None)
+    assert not any("long sentence" in w for w in warnings)
+
+
+def test_narrative_must_does_not_get_structural_exemption():
+    text = "The guide mentions MUST in a narrative sentence; it continues here.\n"
+    warnings = cws.audit(text, Path("docs/guides/x.md"), None)
+    assert any("semicolon" in w for w in warnings)
+
+
 def test_normal_guide_semicolon_still_warns():
     text = "The guide explains the first behavior; it then describes the second.\n"
     warnings = cws.audit(text, Path("docs/guides/x.md"), None)
     assert any("semicolon" in w for w in warnings)
+
+
+def test_normal_guide_long_sentence_still_warns():
+    text = "The guide " + " ".join(["describes behavior"] * 15) + ".\n"
+    warnings = cws.audit(text, Path("docs/guides/x.md"), None)
+    assert any("long sentence" in w for w in warnings)
 
 
 def test_code_block_excluded_from_prose_scan():
