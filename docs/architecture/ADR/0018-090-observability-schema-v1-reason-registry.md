@@ -17,11 +17,11 @@ single, additive-only observability schema.
 ### Single reason-code source of truth
 
 The Rust `decision/reason_code.rs` `ReasonCode` enum is the **single source**.
-C consumes it via FFI (`select_reason`, ADR-0016); the C-side string table and
-parallel codes are removed or become FFI shims. Naming rules:
+C consumes it via FFI (`select_reason`, ADR-0016), the C-side string table and
+the release removes parallel codes or turns them into FFI shims. Naming rules:
 
-- Wire/label form is `lower_snake_case` (e.g. `streaming_block_full_cache_validation`).
-- Discriminants are **never reused**; deprecated codes keep their slot.
+- Wire/label form is `lower_snake_case` (for example `streaming_block_full_cache_validation`).
+- Discriminants are **never reused**, deprecated codes keep their slot.
 - 1.0+ is **additive-only**: add variants, never remove/renumber.
 
 The 0.9.0 registry adds the cross-cutting decision codes the consistency review
@@ -29,7 +29,7 @@ identified, including: `forwarded_header_untrusted`, `forwarded_header_trusted`,
 `trusted_proxies_not_configured`, `streaming_block_full_cache_validation`,
 `streaming_block_small_body`, `streaming_block_inflight_limit`,
 `bypass_range_request`, `bypass_no_transform`, `bypass_content_encoding`, and
-`streaming_mid_flight_error` (post-commit; C internal `STREAMING_FAIL_POSTCOMMIT`
+`streaming_mid_flight_error` (post-commit. C internal `STREAMING_FAIL_POSTCOMMIT`
 is an implementation detail mapped to this canonical name).
 
 ### Metrics label whitelist (no high cardinality)
@@ -42,16 +42,16 @@ metrics keep their existing cardinality cap (`markdown_metrics_per_path_cardinal
 ### Diagnostics JSON schema v1
 
 Diagnostics JSON carries `schema_version: 1`. The field set is frozen as the v1
-contract; 1.0+ changes are additive-only. Diagnostics output is desensitized:
-forwarded-header decisions are reported by reason code, never by echoing raw
+contract. 1.0+ changes are additive-only. Diagnostics output desensitizes:
+the module reports forwarded-header decisions by reason code, never by echoing raw
 untrusted header values.
 
 ### Response header stability contract
 
-Frozen response-header behavior: `Content-Type: text/markdown` on conversion;
-`Vary: Accept` (deduped); `Content-Length` invalidated for streaming;
-`Last-Modified` preserved from source; ETag only as defined by ADR-0017
-(full-buffer transformed ETag under `cache_validation full`; none in streaming).
+Frozen response-header behavior: `Content-Type: text/markdown` on conversion,
+`Vary: Accept` (deduped), `Content-Length` invalidated for streaming,
+`Last-Modified` preserved from source. ETag only as defined by ADR-0017
+(full-buffer transformed ETag under `cache_validation full`, none in streaming).
 
 ### Single-source enforcement
 
@@ -63,7 +63,7 @@ unvalidated parallel public list). `make check-headers` covers FFI drift.
 
 ### Positive
 
-- One reason registry; no C/Rust semantic fork.
+- One reason registry, no C/Rust semantic fork.
 - Bounded metric cardinality protects SHM and scrape cost.
 - Versioned diagnostics schema enables safe consumer evolution.
 

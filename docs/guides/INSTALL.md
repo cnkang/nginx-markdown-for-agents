@@ -10,7 +10,7 @@ tag-specific: verify that the selected GitHub Release contains the exact asset
 and `SHA256SUMS` before downloading. If it does not, use the
 [Manual Source Build](./INSTALLATION.md#6-secondary-manual-source-build).
 
-> **Important:** Prebuilt packages are compiled against a specific nginx.org
+> **Important:** The project compiles prebuilt packages against a specific nginx.org
 > stable version. They are NOT universal shared libraries. NGINX validates
 > the module binary compatibility signature at load time, and loading will
 > fail if the signatures do not match. See
@@ -25,7 +25,7 @@ source build, Homebrew), see [INSTALLATION.md](./INSTALLATION.md).
 
 Each prebuilt package targets a specific combination of:
 
-- **NGINX version** (exact nginx.org stable release, e.g., `1.26.3`)
+- **NGINX version** (exact nginx.org stable release, for example `1.26.3`)
 - **Architecture** (`amd64`/`x86_64` or `arm64`/`aarch64`)
 
 ### Determine Your Environment
@@ -148,7 +148,7 @@ Content-Type: text/markdown; charset=utf-8
 Vary: Accept
 ```
 
-If the response returns `Content-Type: text/markdown`, the module is loaded and
+If the response returns `Content-Type: text/markdown`, the module loads and
 converting HTML to Markdown for agent clients.
 
 ---
@@ -202,9 +202,9 @@ For the full list of supported versions and architectures, see the
 [Compatibility Matrix](./INSTALLATION.md#7-compatibility-matrix).
 
 For Kubernetes and Helm deployments, see
-[`KUBERNETES_DEPLOYMENT.md`](./KUBERNETES_DEPLOYMENT.md); the Helm chart runs
+[`KUBERNETES_DEPLOYMENT.md`](./KUBERNETES_DEPLOYMENT.md). The Helm chart runs
 with stock NGINX by default and requires an explicit module-enabled image plus
-`markdown.loadModule` when markdown directives are enabled.
+`markdown.loadModule` when markdown directives turn on.
 
 ### Automated Diagnostics
 

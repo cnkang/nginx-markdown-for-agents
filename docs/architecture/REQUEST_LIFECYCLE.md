@@ -33,20 +33,20 @@ NGINX configuration lifecycle.
 ## Engine selection
 
 `markdown_streaming off` selects bounded full-buffer conversion. `auto` uses a
-bounded internal response-shape heuristic; it does not expose a threshold
+bounded internal response-shape heuristic. It does not expose a threshold
 directive. `force` requests streaming after the hard eligibility gates pass.
 
 Full cache validation, unsupported encodings, excluded content types, and
 build-disabled streaming features can still select full-buffer or passthrough.
-The selected engine is latched before the first conversion attempt, and the
-attempt metric increments at most once per request.
+The module latches the selected engine before the first conversion attempt.
+The attempt metric increments at most once per request.
 
 ## Body filter and decompression
 
 The body filter retains input ownership across downstream `NGX_AGAIN` and
 feeds the selected conversion path without unbounded growth. Compressed
 responses use the decoder selected by `markdown_auto_decompress` and the
-encoding. Decompression limits are configured under `markdown_limits`:
+encoding. `markdown_limits` configures the decompression limits:
 
 ```nginx
 markdown_limits conversion_memory=64m conversion_timeout=10s
@@ -60,21 +60,21 @@ member is a failure.
 
 ## Commit and delivery
 
-Headers are committed before the first converted body buffer. A pre-commit
+The module commits headers before the first converted body buffer. A pre-commit
 failure can use the configured fail-open policy and replay the original
-buffered response. After commit, the module cannot replay the original body;
-it enters safe-finish or abort handling.
+buffered response. After commit, the module cannot replay the original body.
+It enters safe-finish or abort handling.
 
 Downstream return codes have strict meanings:
 
-- `NGX_OK`: the submitted chain was accepted;
-- `NGX_AGAIN`: suspend and retain the correct pending-chain owner;
-- `NGX_DONE`: terminal finalize path; return immediately after finalization;
-- `NGX_ERROR`: terminal failure path.
+- `NGX_OK`: the module accepted the submitted chain
+- `NGX_AGAIN`: suspend and retain the correct pending-chain owner
+- `NGX_DONE`: terminal finalize path. Return immediately after finalization
+- `NGX_ERROR`: terminal failure path
 
 Delivery counters advance only after successful terminal delivery. A request
-produces one terminal request outcome, while streaming transitions and
-decompression events are recorded at their own bounded event points.
+produces one terminal request outcome. Streaming transitions and
+decompression events record at their own bounded event points.
 
 ## Verification surfaces
 

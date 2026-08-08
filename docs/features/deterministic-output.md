@@ -5,7 +5,7 @@
 **Contract:** within the same module version and build feature set, identical
 effective inputs produce byte-identical response bodies.
 
-**Determinism identity:** the effective input tuple is defined as the
+**Determinism identity:** the effective input tuple consists of the
 upstream HTML bytes plus every explicit conversion option — base URL,
 content type, markdown flavor, pruning configuration, front matter mode,
 token-estimate mode, and any other explicit conversion option. Two requests
@@ -43,7 +43,7 @@ The converter applies the following normalization rules to all Markdown output:
 
 ### 1. Line Endings (CRLF → LF)
 
-**Rule**: All line endings are normalized to LF (`\n`), never CRLF (`\r\n`).
+**Rule**: The module normalizes all line endings to LF (`\n`), never CRLF (`\r\n`).
 
 **Rationale**: Different systems use different line endings (Windows: CRLF, Unix/Linux/macOS: LF). Normalizing to LF ensures consistent output across platforms.
 
@@ -55,9 +55,9 @@ Output: "Line 1\nLine 2\n"
 
 ### 2. Consecutive Blank Lines
 
-**Rule**: Multiple consecutive blank lines are collapsed to a single blank line.
+**Rule**: The module collapses multiple consecutive blank lines to a single blank line.
 
-**Rationale**: Markdown uses blank lines to separate block elements. Multiple blank lines don't add semantic meaning and create inconsistent output.
+**Rationale**: Markdown uses blank lines to separate block elements. Multiple blank lines do not add semantic meaning and create inconsistent output.
 
 **Example**:
 ```
@@ -67,9 +67,9 @@ Output: "Para 1\n\nPara 2"
 
 ### 3. Trailing Whitespace
 
-**Rule**: Trailing whitespace (spaces and tabs) is removed from all lines.
+**Rule**: The module removes trailing whitespace (spaces and tabs) from all lines.
 
-**Rationale**: Trailing whitespace is invisible and doesn't affect Markdown rendering. Removing it ensures consistent output and prevents spurious diffs.
+**Rationale**: Trailing whitespace is invisible and does not affect Markdown rendering. Removing it ensures consistent output and prevents spurious diffs.
 
 **Example**:
 ```
@@ -92,12 +92,12 @@ Input:  "Content\n"         → Output: "Content\n"
 
 ### 5. Whitespace Normalization
 
-**Rule**: Consecutive spaces within text are collapsed to a single space, **except**:
+**Rule**: The module collapses consecutive spaces within text to a single space, **except**:
 - Inside fenced code blocks (` ``` `)
 - Inside inline code (` ` `)
 - At the start of lines (for list indentation)
 
-**Rationale**: Multiple spaces in regular text don't affect Markdown rendering but create inconsistent output. Code blocks and inline code must preserve exact spacing for correctness.
+**Rationale**: Multiple spaces in regular text do not affect Markdown rendering but create inconsistent output. Code blocks and inline code must preserve exact spacing for correctness.
 
 **Example**:
 ```
@@ -128,7 +128,7 @@ Output: "- Item\n  - Nested"  (leading spaces preserved)
 
 ### 7. Markdown Escaping
 
-**Rule**: Special Markdown characters are escaped consistently according to context.
+**Rule**: The module escapes special Markdown characters consistently according to context.
 
 **Rationale**: Ensures that special characters in HTML content are correctly represented in Markdown without breaking formatting.
 
@@ -138,7 +138,7 @@ Output: "- Item\n  - Nested"  (leading spaces preserved)
 
 ### 8. DOM Attribute Order
 
-**Rule**: HTML attributes are processed in the order they appear in the DOM (insertion order).
+**Rule**: The module processes HTML attributes in the order they appear in the DOM (insertion order).
 
 **Rationale**: The html5ever parser maintains consistent attribute ordering. By processing attributes in DOM order, we ensure deterministic output even when HTML has attributes in different orders.
 
@@ -153,7 +153,7 @@ Output: ![Description](image.png)
 
 ## Implementation
 
-The normalization is implemented in the `normalize_output()` function in
+The `normalize_output()` function implements the normalization in
 `components/rust-converter/src/converter/normalize.rs`:
 
 ```rust
@@ -244,7 +244,7 @@ This example:
 
 ## Configuration
 
-Currently, normalization is always enabled and cannot be disabled. This ensures consistent behavior across all deployments.
+Currently, normalization is always enabled. The module offers no disable switch. This ensures consistent behavior across all deployments.
 
 Future versions may add configuration options:
 

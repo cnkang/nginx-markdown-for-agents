@@ -128,7 +128,7 @@ The minimized input is written to `components/rust-converter/fuzz/artifacts/<tar
 
 ### Security classification
 
-Any finding reported by a sanitizer (ASan, UBSan, MSan) is classified as a
+Any sanitizer finding (ASan, UBSan, MSan) counts as a
 **security defect** and must follow the project's security vulnerability
 reporting process. Do NOT commit crash artifacts that trigger sanitizer reports
 to public branches. Report via the project's private security channel or GitHub
@@ -154,7 +154,7 @@ When modifying converter logic that affects a fuzz target:
 
 1. Verify the target still builds: `cargo +nightly fuzz build`
 2. Run a smoke test to confirm no regressions: `make test-rust-fuzz-smoke`
-3. If new code paths are introduced, add seed corpus inputs that exercise them
+3. If you introduce new code paths, add seed corpus inputs that exercise them
 4. Update the target's input model documentation if the byte layout changes
 
 ### Handling crashes found by CI
@@ -171,7 +171,7 @@ When modifying converter logic that affects a fuzz target:
    git add -f components/rust-converter/fuzz/corpus/<target>/regression_<descriptive_name>.bin
    ```
 7. Verify the fix: `cargo +nightly fuzz run <target> -- -max_total_time=30`
-8. Close the issue only after regression input is committed and CI passes
+8. Close the issue only after you commit the regression input and CI passes
 
 ### PR checklist for fuzz-related changes
 
@@ -216,7 +216,7 @@ components/rust-converter/fuzz/corpus/
 - Keep individual files small (under 1KB preferred for fast iteration)
 - Use descriptive filenames that indicate the input's purpose
 - Regression files use the `regression_<description>.bin` naming convention
-- Seed corpus files are committed via `git add -f` (the directory may be
+- Developers commit seed corpus files via `git add -f` (the directory may be
   partially gitignored for generated content)
 
 > For detailed corpus classification (seed, generated, crash, regression,
@@ -227,7 +227,7 @@ components/rust-converter/fuzz/corpus/
 
 ## Corpus Classification
 
-The project's fuzz corpus is divided into five categories, each with different
+The project's fuzz corpus divides into five categories, each with different
 storage locations, version control strategies, and lifecycle management.
 
 ### Classification Overview

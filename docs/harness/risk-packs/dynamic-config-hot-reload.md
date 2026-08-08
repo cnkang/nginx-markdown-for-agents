@@ -26,7 +26,7 @@ retry state, or worker lifecycle integration changes.
 
 - `nginx-protocol-safety` when runtime config changes request eligibility or
   response behavior
-- `observability-metrics` when reload success/failure is logged or counted
+- `observability-metrics` when the module logs or counts reload success/failure
 - `docs-tooling-drift` when configuration docs or examples change
 
 ## Sync Points
@@ -35,15 +35,15 @@ retry state, or worker lifecycle integration changes.
   bounds, units, accepted values, and error behavior.
 - `reload_pending` or equivalent retry latches must remain set after failed
   reloads and clear only after a successful apply.
-- `applied_mtime` must be updated only after a successful reload
+- `applied_mtime` must update only after a successful reload
   (RELOAD_APPLIED or RELOAD_NO_CHANGE).  When `last_mtime !=
   applied_mtime`, the timer handler must retry the reload on the next
   poll cycle.
 - Unknown config keys must cause `NGX_ERROR` (atomic reload rejection)
-  rather than silent `NGX_DECLINED` (ignore).  The entire file is
-  rejected on any unrecognized key.
+  rather than silent `NGX_DECLINED` (ignore).  The module rejects the
+  entire file on any unrecognized key.
 - Worker timer setup and cleanup must match NGINX lifecycle ownership rules.
-- File paths used by reload code must be bounded, sanitized, and
+- File paths used by reload code must stay bounded, sanitized, and
   NUL-terminated before file-system APIs receive them.
 - Runtime reload tests must include final-line-without-newline, parse failure,
   retry, and successful apply cases.

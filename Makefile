@@ -52,6 +52,7 @@ MODULE_SO ?= build/ngx_http_markdown_filter_module.so
 PREFIX ?= /usr
 LIBDIR ?= $(PREFIX)/lib
 DESTDIR ?=
+STYLE_BASE ?= HEAD
 MODULE_INSTALL_DIR := $(LIBDIR)/nginx/modules
 NGINX_MODULES_AVAILABLE_DIR := $(PREFIX)/share/nginx/modules-available
 DOC_INSTALL_DIR := $(PREFIX)/share/doc/nginx-markdown-for-agents
@@ -63,7 +64,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         test-nginx-integration test-e2e test-e2e-rust test-all test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
         test-corpus-determinism reason-codegen-check \
-        harness-check harness-check-full harness-security-checks test-harness regex-security-check e2e-streaming-config-check sonar-encoding-check release-supply-chain-check public-surface-drift-check schema-drift-check \
+        harness-check harness-check-full harness-security-checks test-harness regex-security-check e2e-streaming-config-check sonar-encoding-check release-supply-chain-check public-surface-drift-check schema-drift-check kb-contract-check \
         security-static security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny \
         supply-chain supply-chain-trivy supply-chain-sbom \
         complexity-check \
@@ -244,6 +245,34 @@ docs-check-base:
 docs-check: docs-check-base
 	python3 tools/harness/check_harness_sync.py
 	PYTHONPATH=. python3 tools/harness/detect_doc_sync.py
+	$(MAKE) kb-contract-check
+	$(MAKE) docs-style-check-regression
+	$(MAKE) docs-style-check-baseline
+
+# STE-inspired writing-style gates (non-native-reader friendly, see
+# docs/development/WRITING_GUIDE.md and harness Rule 63).
+# docs-style-check: advisory scan, never blocks.
+# docs-style-check-regression: files changed since STYLE_BASE (working tree +
+# staged) must have zero warnings. Local invocations default to HEAD; CI must
+# provide the actual fetched comparison base.
+# docs-style-check-baseline: total warnings must not exceed the retained
+# budget (0, see DEFAULT_BASELINE in check_writing_style.py); the maintained
+# docs now pass the audit clean, so any warning fails this gate.
+docs-style-check:
+	python3 tools/docs/check_writing_style.py
+
+docs-style-check-strict:
+	python3 tools/docs/check_writing_style.py --strict
+
+docs-style-check-regression:
+	@test -n "$(STYLE_BASE)" || { echo "FAIL: STYLE_BASE is required for docs-style-check-regression" >&2; exit 1; }
+	python3 tools/docs/check_writing_style.py --changed --base "$(STYLE_BASE)"
+
+docs-style-check-baseline:
+	python3 tools/docs/check_writing_style.py --baseline
+
+kb-contract-check:
+	python3 tools/docs/check_kb_contract.py
 
 release-notes:
 	python3 tools/render_release_matrix_docs.py --release-notes

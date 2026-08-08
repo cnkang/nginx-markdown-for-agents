@@ -2,7 +2,8 @@
 
 ## Overview
 
-Each sub-spec uses this template to maintain a risk register. Risk registers are reviewed during the Go/No-Go review.
+Each sub-spec uses this template to maintain a risk register. The Go/No-Go
+review examines each risk register during the Go/No-Go review.
 
 ## Template
 
@@ -16,7 +17,7 @@ Each sub-spec uses this template to maintain a risk register. Risk registers are
 
 ## Required Fields
 
-1. **Risk Identifier** (#): Unique identifier (R1, R2, etc.)
+1. **Risk Identifier** (#): Unique identifier (R1, R2, and so on)
 2. **Risk Description**: Specific description of the risk
 3. **Likelihood**: Low, Medium, or High
 4. **Impact**: Low, Medium, or High
@@ -44,8 +45,8 @@ The following risk categories must be explicitly registered:
 ## Usage
 
 1. Each sub-spec initializes its risk register during the design phase
-2. New risks discovered during implementation must be added promptly
-3. Risk registers are reviewed during the Go/No-Go review
+2. New risks discovered during implementation must enter the register promptly
+3. The Go/No-Go review examines risk registers
 4. Streaming architecture transition-specific risks must be explicitly registered
 
 ## Document Updates

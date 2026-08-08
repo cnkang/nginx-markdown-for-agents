@@ -4,7 +4,7 @@
 
 The `TokenEstimator` provides a fast, **deterministic** character-based heuristic for estimating token counts in Markdown text. This is useful for LLM context window planning when converting HTML to Markdown.
 
-The estimate is exposed by the NGINX module as the `X-Markdown-Tokens` response header (decimal integer token count) when `markdown_token_estimate on;` is configured. The module does **not** use a BPE tokenizer and does not model any specific LLM provider.
+The NGINX module exposes the estimate as the `X-Markdown-Tokens` response header (decimal integer token count) when you configure `markdown_token_estimate on;`. The module does **not** use a BPE tokenizer and does not model any specific LLM provider.
 
 ## Implementation Details
 
@@ -17,8 +17,8 @@ estimated_tokens = ceil(character_count / chars_per_token)
 ```
 
 - **Default**: 4.0 characters per token (typical for English prose) — a fixed
-  built-in constant since 0.9.2; no provider-derived defaults remain
-- **Deterministic**: identical input always yields identical output; no
+  built-in constant since 0.9.2. No provider-derived defaults remain
+- **Deterministic**: identical input always yields identical output. No
   randomness, no language detection, no model-specific behavior
 - **Fast**: no tokenizer dependency, just character counting
 - **Approximate**: not a replacement for actual tokenization
@@ -103,11 +103,11 @@ println!("Markdown will use approximately {} tokens", tokens);
 - Directive: `markdown_token_estimate on|off` (default off)
 - Response header: `X-Markdown-Tokens: <decimal integer>`
 - Units: tokens, integer, decimal representation
-- The estimate is computed with the fixed 4.0 chars/token heuristic (no
-  operator-tunable ratio since the `markdown_chars_per_token` directive was
-  removed in 0.9.2)
-- When `markdown_token_estimate off;`, no estimate is computed and no header
-  is emitted (zero conversion overhead)
+- The module computes the estimate with the fixed 4.0 chars/token heuristic (no
+  operator-tunable ratio since the `markdown_chars_per_token` directive
+  disappeared in 0.9.2)
+- When `markdown_token_estimate off;`, the module computes no estimate and emits no header
+  (zero conversion overhead)
 
 ## Test Coverage
 

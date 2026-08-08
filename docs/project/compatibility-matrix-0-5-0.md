@@ -3,8 +3,8 @@
 ## Overview
 
 This matrix explicitly classifies each existing operator-facing capability's support
-status under the streaming path. Every capability must be assigned exactly one of the
-three allowed states; a fourth state ("theoretically supported but silently degrades on
+status under the streaming path. Every capability must carry exactly one of the
+three allowed states, a fourth state ("theoretically supported but silently degrades on
 failure") is forbidden.
 
 ## State Definitions
@@ -44,7 +44,7 @@ failure") is forbidden.
 
 Capabilities classified as `streaming-supported` work correctly under the streaming
 path with no fallback required. Some carry a *(conditional)* qualifier, meaning they
-depend on a prerequisite being satisfied:
+depend on a satisfied prerequisite:
 
 - **Header-filter prerequisites** (rows 12, 14): These capabilities complete their
   work in the NGINX header filter phase, which runs before the body filter chain.
@@ -60,7 +60,7 @@ depend on a prerequisite being satisfied:
 - **Response-header ETag** (row 10): The ETag is a hash of the complete Markdown
   output. In streaming mode, response headers (including `Content-Type` and `Vary`)
   are sent at the Commit Boundary — the moment the first Markdown chunk is ready.
-  At that point the ETag has not been computed yet. Including a partial or
+  At that point the ETag has not computed yet. Including a partial or
   placeholder ETag would violate HTTP semantics.
 
 - **`full_support` conditional requests** (row 13): Markdown-variant `If-None-Match`
@@ -82,7 +82,7 @@ Trigger conditions:
   or deeply nested, exceeding the lookahead budget. The Rust engine signals
   `ERROR_STREAMING_FALLBACK`.
 
-- **Table conversion** (row 16): A `<table>` element is encountered that requires
+- **Table conversion** (row 16): A `<table>` element appears that requires
   full structural analysis (column count, alignment, cell spans) beyond the
   lookahead budget. The Rust engine signals `ERROR_STREAMING_FALLBACK`.
 
@@ -97,12 +97,12 @@ directive — it always executes regardless of the operator's failure policy set
 ## Lifecycle
 
 1. **Design phase**: Determine initial classification (this document)
-2. **Implementation phase**: Verify classification; record any changes
-3. **Pre-release**: Final confirmation; publish as operator documentation
+2. **Implementation phase**: Verify classification, record any changes
+3. **Pre-release**: Final confirmation, publish as operator documentation
 
 ## Change Tracking
 
-Any classification change must be recorded in this section and updated in all
+Any classification change must record in this section and update in all
 affected documents.
 
 | Date | Capability | Previous State | New State | Reason | Affected Documents |
@@ -111,7 +111,7 @@ affected documents.
 
 ## Sub-Capability Split Rules
 
-- The canonical row set is owned by spec #12
+- Spec #12 owns the canonical row set
 - Downstream sub-specs (#13–#18) may split a canonical row into documented
   sub-capability rows
 - Downstream sub-specs must not introduce new top-level operator-facing capability

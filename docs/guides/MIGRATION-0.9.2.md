@@ -7,7 +7,7 @@
 ## Overview
 
 **0.9.2 is the final breaking release before 1.0.** The configuration surface
-has been reduced from 63 directives to exactly 25. All removed directives now
+shrank from 63 directives to exactly 25. All removed directives now
 produce NGINX's standard "unknown directive" error during `nginx -t`.
 
 After 0.9.2, all 1.x releases maintain backward compatibility for a minimum of
@@ -33,7 +33,7 @@ After 0.9.2, all 1.x releases maintain backward compatibility for a minimum of
 
 ### `markdown_profile` → explicit settings
 
-The profile directive is removed. Use explicit directive settings instead.
+The profile directive no longer exists. Use explicit directive settings instead.
 
 ```nginx
 # BEFORE (0.9.1)
@@ -86,7 +86,7 @@ location /markdown-metrics {
 
 ### `markdown_metrics_per_path` / `markdown_metrics_per_path_cardinality` → removed
 
-Per-path metrics have been removed to avoid unbounded cardinality.
+The module removed per-path metrics to avoid unbounded cardinality.
 
 ```nginx
 # BEFORE (0.9.1)
@@ -129,7 +129,7 @@ markdown_buffer_chunked off;
 
 ### `markdown_streaming_shadow` → removed
 
-Shadow mode comparison has been removed.
+Shadow mode comparison no longer exists.
 
 ```nginx
 # BEFORE (0.9.1)
@@ -148,12 +148,12 @@ Zero-copy output is now an internal optimization, not operator-controlled.
 markdown_streaming_zero_copy on;
 
 # AFTER (0.9.2)
-# Remove the directive. Zero-copy is managed internally.
+# Remove the directive. The module manages zero-copy internally.
 ```
 
 ### `markdown_llm_provider` / `markdown_chars_per_token` → removed
 
-LLM provider selection has been removed. Token estimation uses a fixed ratio.
+LLM provider selection no longer exists. Token estimation uses a fixed ratio.
 
 ```nginx
 # BEFORE (0.9.1)
@@ -167,7 +167,7 @@ markdown_token_estimate on;
 
 ### `markdown_stream_types` → replaced by `markdown_stream_excluded_types`
 
-The positive allowlist is removed. Use the exclusion list instead.
+The positive allowlist no longer exists. Use the exclusion list instead.
 
 ```nginx
 # BEFORE (0.9.1)
@@ -189,7 +189,7 @@ responses (no Content-Length) always stream.
 markdown_stream_threshold 512k;
 
 # AFTER (0.9.2)
-# Remove the directive. The threshold is fixed at 1 MiB internally.
+# Remove the directive. The threshold stays fixed at 1 MiB internally.
 ```
 
 ### `markdown_stream_precommit_buffer` / `markdown_stream_flush_min` → `markdown_limits streaming_buffer=`
@@ -208,7 +208,7 @@ markdown_limits streaming_buffer=512k;
 
 ### `markdown_parse_timeout` / `markdown_parser_budget` / `markdown_decompress_max_size` → `markdown_limits`
 
-These standalone directives are unified into `markdown_limits`.
+`markdown_limits` unifies these standalone directives.
 
 ```nginx
 # BEFORE (0.9.1)
@@ -222,7 +222,7 @@ markdown_limits parser_timeout=10s parser_memory=32m decompressed_size=20m;
 
 ### `markdown_otel` / `markdown_otel_endpoint` → removed
 
-The experimental OpenTelemetry subsystem has been removed entirely.
+The experimental OpenTelemetry subsystem no longer exists.
 
 ```nginx
 # BEFORE (0.9.1)
@@ -238,7 +238,7 @@ markdown_otel_endpoint http://otel-collector:4317;
 ## Removed Reject-Only Directives (19)
 
 These directives already caused `nginx -t` failure with a migration hint in
-0.9.0/0.9.1. In 0.9.2, the migration stubs are removed entirely and NGINX
+0.9.0/0.9.1. In 0.9.2, the migration stubs no longer exist. NGINX
 produces its standard "unknown directive" error.
 
 | Removed Directive | Replacement |
@@ -365,4 +365,5 @@ curl -s http://localhost/nginx-markdown/diagnostics | python3 -m json.tool | hea
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Hermes | Non-native-reader writing pass: active voice for removal descriptions. |
 | 0.9.2 | 2026-07-30 | Kang | Complete rewrite for 0.9.2 breaking freeze: 25-directive contract, before/after examples for all removed directives |

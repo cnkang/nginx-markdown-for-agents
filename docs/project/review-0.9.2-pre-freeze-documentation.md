@@ -2,7 +2,7 @@
 
 **Date**: 2026-08-07
 **Branch**: `dev/wip-0.9.2-harness` (base: `dev/wip-0.9.2`)
-**Scope**: Git-tracked `.md` files under `docs/` (204 files; 45 deep-read, remainder targeted grep cross-validation) + root-level/component READMEs, CHANGELOG, THIRD-PARTY-NOTICES, packaging/chart/matrix carriers (32 files reviewed).
+**Scope**: Git-tracked `.md` files under `docs/` (204 files. 45 deep-read, remainder targeted grep cross-validation) + root-level/component READMEs, CHANGELOG, THIRD-PARTY-NOTICES, packaging/chart/matrix carriers (32 files reviewed).
 **Method**: Cross-validated against code truth (25 directives, `markdown_limits` 8 keys, 12 metric families, 27 reason codes, ABI v2, MSRV 1.97, Cargo.lock). No files modified during review.
 
 ## Summary
@@ -14,7 +14,7 @@
 ## Findings — docs/
 
 ### D-H1 (High) — `docs/releases/0.9.2-release-notes.md:166`
-- **Issue**: Compatibility table "Metric names/labels | Unchanged" contradicts 0.9.2's replacement of legacy families with the 12-family v1 freeze (v1 renderer introduced 2026-08-04; absent in v0.9.1 tag). Contradicts `docs/guides/prometheus-metrics.md:134-136`.
+- **Issue**: Compatibility table "Metric names/labels | Unchanged" contradicts 0.9.2's replacement of legacy families with the 12-family v1 freeze (v1 renderer introduced 2026-08-04, absent in v0.9.1 tag). Contradicts `docs/guides/prometheus-metrics.md:134-136`.
 - **Fix**: Change to "Metric families | legacy multi-format families | twelve-family v1 freeze (removes per-path/shadow/legacy debug families)".
 
 ### D-H2 — `docs/features/DECISION_CHAIN.md:142-144`
@@ -30,7 +30,7 @@
 - **Fix**: `markdown_limits decompressed_size=`.
 
 ### D-H5 — `docs/features/DECISION_CHAIN.md:180-181`
-- **Issue**: `markdown_parse_timeout` (default 30s) and `markdown_parser_budget` (default 64m) deleted; defaults wrong.
+- **Issue**: `markdown_parse_timeout` (default 30s) and `markdown_parser_budget` (default 64m) deleted, defaults wrong.
 - **Fix**: `markdown_limits parser_timeout=` (default 10s) and `parser_memory=` (default 32m).
 
 ### D-H6 — `docs/architecture/SYSTEM_ARCHITECTURE.md:231-233`
@@ -46,7 +46,7 @@
 - **Fix**: `markdown_limits decompressed_size=`, independent of `conversion_memory=`.
 
 ### D-H9 — `docs/architecture/SYSTEM_ARCHITECTURE.md:297-300`
-- **Issue**: `markdown_parse_timeout`/`markdown_parser_budget` deleted; wrong FFI codes (Timeout=9, BudgetExceeded=10, ReplayError=11, not 10/11).
+- **Issue**: `markdown_parse_timeout`/`markdown_parser_budget` deleted, wrong FFI codes (Timeout=9, BudgetExceeded=10, ReplayError=11, not 10/11).
 - **Fix**: limits keys + corrected codes.
 
 ### D-H10 — `docs/architecture/observability-schema-v1.md:58-70`
@@ -54,7 +54,7 @@
 - **Fix**: Add the missing family.
 
 ### D-H11 — `docs/project/PROJECT_STATUS.md:385`
-- **Issue**: `markdown_limits memory=<size> timeout=<time>` keys don't exist.
+- **Issue**: `markdown_limits memory=<size> timeout=<time>` keys do not exist.
 - **Fix**: `conversion_memory=` / `conversion_timeout=`.
 
 ### D-H12 — `docs/testing/DIRECTIVE_VALIDATION_TESTS.md:33`
@@ -90,9 +90,9 @@
 ## Findings — root-level docs / version carriers
 
 ### R-H1 (High) — `THIRD-PARTY-NOTICES:199`
-- **Issue**: serde_json declared 1.0.150; `components/rust-converter/Cargo.lock` resolves 1.0.151. Violates Rule 49. Checker `tools/ci/check_third_party_notices.py` only validates `[dependencies]`; serde_json is a dev-dependency so the drift escapes CI.
-- **Fix**: Update entry to 1.0.151; consider checker coverage for dev-deps (note as follow-up).
-- **Verify**: `python3 tools/ci/check_third_party_notices.py`; grep Cargo.lock.
+- **Issue**: serde_json declared 1.0.150, `components/rust-converter/Cargo.lock` resolves 1.0.151. Violates Rule 49. Checker `tools/ci/check_third_party_notices.py` only validates `[dependencies]`, serde_json is a dev-dependency so the drift escapes CI.
+- **Fix**: Update entry to 1.0.151, consider checker coverage for dev-deps (note as follow-up).
+- **Verify**: `python3 tools/ci/check_third_party_notices.py`, grep Cargo.lock.
 
 ### R-H2 (High) — `components/nginx-module/README.md:69-95`
 - **Issue**: Entire "Streaming Threshold Directive" section documents deleted `markdown_stream_threshold` and threshold routing mechanism.
@@ -104,9 +104,9 @@
 
 ### R-H4 (High) — `tools/release-matrix.json:413-440`
 - **Issue**: File carries legacy top-level `matrix` array (20 stale entries with `nginx`/`os_type`/`support_tier:"full"` aliases) + `updated_at`. Violates own schema (`additionalProperties:false`) and Rule 62 (alias coexistence).
-- **Evidence**: `normalize_matrix.py:88-90` fail-closes when both `entries` and `matrix` present. Consumers `validate_matrix_install_consistency.py:65` and `check_packaging_consistency.py:313` read legacy `matrix` — they must be migrated to the canonical `entries`/normalization path in the same change.
-- **Fix**: Remove legacy `matrix` array + `updated_at`; update the two consumers to read `entries` (with key normalization via `normalize_matrix.load_and_normalize` where feasible).
-- **Verify**: `python3 -m pytest tools/release/matrix/tests tools/docs/tests -q`; run both consumers.
+- **Evidence**: `normalize_matrix.py:88-90` fail-closes when both `entries` and `matrix` present. Consumers `validate_matrix_install_consistency.py:65` and `check_packaging_consistency.py:313` read legacy `matrix` — they must migrate to the canonical `entries` array.
+- **Fix**: Remove legacy `matrix` array + `updated_at`, update the two consumers to read `entries` (with key normalization via `normalize_matrix.load_and_normalize` where feasible).
+- **Verify**: `python3 -m pytest tools/release/matrix/tests tools/docs/tests -q`, run both consumers.
 
 ### R-M1 — `README.md:373` / `README_zh-CN.md:370` — doc nav lists only MIGRATION-0.9/0.8; add MIGRATION-0.9.1.md and MIGRATION-0.9.2.md links.
 ### R-M2 — `README.md:440-453` / `README_zh-CN.md:431-444` — Document Updates table missing 0.9.2 row. Add.

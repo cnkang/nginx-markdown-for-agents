@@ -7,7 +7,7 @@
 ## Scope decisions (pre-freeze)
 
 - Comment/doc/rule-only changes. No behavior changes to production C/Rust paths.
-- Dead-code paths identified in review are **documented, not removed** (pre-freeze risk control), except nothing is deleted.
+- The review documents dead-code paths rather than removing them (pre-freeze risk control). Nothing gets deleted.
 - `tools/release-matrix.json` legacy `matrix` array removal requires migrating two consumers (`validate_matrix_install_consistency.py`, `check_packaging_consistency.py`) to canonical `entries` in the same change.
 - THIRD-PARTY-NOTICES serde_json 1.0.150 → 1.0.151 (Rule 49).
 - No CI workflow additions in pre-freeze (F4 relabeled instead of wired).
