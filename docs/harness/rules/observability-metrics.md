@@ -38,7 +38,8 @@ Required:
   that would hide rollout risk at `warn` verbosity.
 - Keep the public-surface inventory contract synchronized with source, not just
   by symbol name. Directive entries include classification, handler, context,
-  argument contract, defaults, syntax, migration target, and OTel status,
+  argument contract, defaults, syntax, migration target, and removal
+  classification,
   metric entries include type, labels, order, and bounded-cardinality policy,
   reason entries include discriminant, variant string, metric family, C
   accessor, and registry count. Duplicate, malformed, or symlink-escaped
