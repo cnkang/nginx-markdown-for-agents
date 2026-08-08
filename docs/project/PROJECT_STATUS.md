@@ -5,9 +5,8 @@
 This project is a production-oriented NGINX filter module backed by a Rust HTML-to-Markdown converter (via FFI). It performs HTTP content negotiation and returns Markdown when clients request `Accept: text/markdown`.
 
 The repository also includes a repo-owned harness for spec resolution, agent
-routing, risk overlays, and harness-specific validation. That harness is
-tracked in public docs and tools rather than living only in private local
-steering files.
+routing, risk overlays, and harness-specific validation. Public docs and tools
+track that harness rather than private local steering files.
 
 ## Current Assessment
 
@@ -21,11 +20,12 @@ dynconf dry-run and last-known-good failed-reload protection with atomic file
 restore, DEB/RPM packaging pipeline, Kubernetes
 deployment examples, FFI ABI layout verification, CI supply-chain hardening,
 supplemental static security checks, report-oriented supply-chain visibility, and a
-repo-owned harness for agent workflow governance. Core features are
-implemented and tested. The codebase includes unit, integration, E2E,
+repo-owned harness for agent workflow governance. The project has
+implemented and tested the core feature set. The codebase includes unit, integration, E2E,
 fuzz-oriented validation entrypoints, and harness-specific validation
 entrypoints, along with documentation covering installation, configuration,
 operations, architecture, and contributor-facing harness maintenance.
+The project implements and tests the core feature set. It ships working features with verified behavior.
 
 ### Current Release Line 0.9.2
 
@@ -38,25 +38,25 @@ pending until the blocking gates pass.
 #### 0.9.2 (current development)
 
 - **OTel removal**: The experimental OTel directives and implementation are
-  absent from the 0.9.2 production surface; ADR-0027 records conditions for a
+  absent from the 0.9.2 production surface. ADR-0027 records conditions for a
   possible future redesign.
-- **Metrics freeze**: The production metrics endpoint is replaced by the
-  twelve-family v1 contract (`requests_total`, `conversion_attempts_total`,
+- **Metrics freeze**: The twelve-family v1 contract replaces the production
+  metrics endpoint (`requests_total`, `conversion_attempts_total`,
   `conversion_deliveries_total`, `conversion_duration_seconds`,
   `input_bytes_total`, `output_bytes_total`, `inflight_requests`,
   `streaming_events_total`, `streaming_peak_memory_bytes`,
-  `decompression_events_total`, `dynconf_reloads_total`, `build_info`),
-  replacing the legacy multi-format, per-path, shadow, and debug families.
-- **Directive removal (38 total) and ABI 2**: 19 reject-only migration stubs
-  plus 14 active directives and 5 standalone limit directives are removed;
-  the public surface drops from 63 directives to 25, and the bundled Rust/C
+  `decompression_events_total`, `dynconf_reloads_total`, `build_info`).
+  This replaces the legacy multi-format, per-path, shadow, and debug families.
+- **Directive removal (38 total) and ABI 2**: The release removes 19 reject-only
+  migration stubs plus 14 active directives and 5 standalone limit directives.
+  The public surface drops from 63 directives to 25, and the bundled Rust/C
   FFI ABI moves to version 2.
 - **Release-gates-check-092**: Additive on 091; adds public-surface drift
   check, version consistency gate (0.9.2), and reason-code registry
   completeness gate.
 - **Streaming reason code normalization documentation**: C-only streaming
-  reason codes use UPPERCASE format; documented as a known inconsistency
-  to be resolved in 1.x when migrating to Rust enum (lowercase snake_case).
+  reason codes use UPPERCASE format. This is a documented known inconsistency
+  to resolve in 1.x when migrating to Rust enum (lowercase snake_case).
 - **README consistency verification**: English and Chinese READMEs verified
   for version, directive, and default-value consistency.
 
@@ -119,7 +119,7 @@ pending until the blocking gates pass.
     `1.31.0`;
   - local runner path and round-trip temp-file tests keep artifacts under the
     repository root;
-  - development test dependencies are aligned with the current CI baseline.
+  - development test dependencies align with the current CI baseline.
 
 ### Repository Harness Updates
 
@@ -187,7 +187,7 @@ pending until the blocking gates pass.
     scope.
 - Harness and governance:
   - Repo-owned harness docs and checks promoted as canonical truth surfaces.
-  - `make harness-check` and `make harness-check-full` are wired as executable
+  - `make harness-check` and `make harness-check-full` wired as executable
     validation entrypoints.
 
 ### Release 0.4.0 Updates (historical)
@@ -195,11 +195,11 @@ pending until the blocking gates pass.
 - 0.4.0 release-gate validation and tests refined based on automated code-review feedback:
   - Metric naming validation now supports histogram `_seconds_bucket/_sum/_count` series while keeping stricter rejection of ambiguous suffixes.
   - Checklist verifiability checks now include checked items and ignore fenced code examples.
-  - Release-gate constants are centralized in a shared module to reduce drift between tooling, tests, and governance docs.
-  - File read and directory listing paths in release-gate checks are hardened for graceful failure reporting.
+  - Release-gate constants centralized in a shared module to reduce drift between tooling, tests, and governance docs.
+  - File read and directory listing paths in release-gate checks hardened for graceful failure reporting.
 - Release checklist wording now explicitly requires both Rust proptest and Python Hypothesis property-based test suites.
 
-This assessment is based on:
+This assessment rests on:
 
 - Implementation of core features and runtime configurability
 - Test coverage across unit, integration, E2E, and property-based tests
@@ -208,10 +208,10 @@ This assessment is based on:
 - Shared-memory metrics aggregation across workers in the module implementation
 - Further decomposition of the NGINX module into focused config wiring/core/handlers, request-state, payload buffering/replay, conversion/output, lifecycle, and metrics helper units
 - Shared native-build helper logic for Rust/NGINX verification scripts, including aligned macOS deployment-target handling
-- Delegated runtime validations now reuse an exported module-enabled `NGINX_BIN` only when it has a reusable runtime layout; otherwise they fall back to self-building their own native NGINX runtime
-- The GitHub Actions `runtime-regressions` job now retains the validated IMS runtime and reuses its `NGINX_BIN` for chunked and large-response checks instead of rebuilding native NGINX three times
-- Canonical E2E coverage now lives under `tools/e2e/`, with `make test-e2e` delegating to a focused proxy/TLS, chunked, and large-response suite instead of maintaining a second full inline runner
-- The Rust converter now keeps the public `ffi.rs` and `metadata.rs` entrypoints while pushing ABI decoding, memory handling, export wiring, metadata traversal, and URL resolution into focused submodules
+- Delegated runtime validations now reuse an exported module-enabled `NGINX_BIN` only when it has a reusable runtime layout. Otherwise they fall back to self-building their own native NGINX runtime
+- The GitHub Actions `runtime-regressions` job now retains the validated IMS runtime and reuses its `NGINX_BIN` for chunked and large-response checks. This avoids rebuilding native NGINX three times
+- Canonical E2E coverage now lives under `tools/e2e/`. `make test-e2e` delegates to a focused proxy/TLS, chunked, and large-response suite instead of maintaining a second full inline runner
+- The Rust converter now keeps the public `ffi.rs` and `metadata.rs` entrypoints. It pushes ABI decoding, memory handling, export wiring, metadata traversal, and URL resolution into focused submodules
 - `cargo-fuzz` targets and nightly fuzz workflow for parser, FFI, and security-validator paths
 - A separate non-blocking Darwin/macOS smoke workflow validates native Rust build plus real-nginx runtime checks on GitHub-hosted macOS
 - Release artifacts and installation tooling
@@ -344,7 +344,7 @@ Run with: `cargo test --all` or `make test-rust`
 ### NGINX Module Tests
 
 - Unit tests for major components (30+ test targets)
-- Standalone tests that don't require system NGINX
+- Standalone tests that do not require system NGINX
 - Mock-based tests for filter chain behavior
 - Configuration parsing and merge tests
 - Header manipulation and cache-control tests
@@ -458,8 +458,8 @@ breaking-release foundation.
   replace 0.8.x legacy directives.
 - **Profile system**: `markdown_profile` (strict_cache, balanced, streaming_first)
   for one-line preset deployments.
-- **0.8.x migration**: 0.9.0 is a breaking release; legacy directive
-  names are rejected at `nginx -t` with a migration hint. See
+- **0.8.x migration**: 0.9.0 is a breaking release. `nginx -t` rejects legacy
+  directive names with a migration hint. See
   [MIGRATION-0.9.md](../guides/MIGRATION-0.9.md) for the full mapping.
 - Breaking: removed `markdown_max_size`, `markdown_timeout`,
   `markdown_streaming_budget`, `markdown_on_error`,
@@ -586,7 +586,7 @@ breaking-release foundation.
 
 ## Known Limitations
 
-The following limitations are documented:
+The following limitations appear in the documentation:
 
 1. **Streaming Is Default**: Streaming is the default engine; full-buffer is
    the fallback for explicit opt-out or engine-selection override
@@ -594,7 +594,8 @@ The following limitations are documented:
 3. **Conversion Fidelity**: Some complex HTML structures may not convert perfectly to Markdown
 4. **Performance Overhead**: Large documents incur conversion overhead (mitigated by caching)
 
-These limitations are acceptable for current use cases and may be addressed in future releases.
+These limitations are acceptable for current use cases. Future releases may
+address them.
 
 ## Documentation Status
 
@@ -752,7 +753,7 @@ fuzzing workflows, and shared metrics aggregation for observability.
 - Multi-platform support (macOS, Linux, Docker)
 
 ### Current State
-Core features are implemented and tested. The focus is on operational validation, performance optimization, and community feedback integration.
+The project has implemented and tested the core features. The focus is on operational validation, performance optimization, and community feedback integration. This phase completes the production readiness picture. The project has implemented and tested the core feature set.
 
 ### Getting Started
 - **Evaluate**: Read the [README](../../README.md) and [DEPLOYMENT_EXAMPLES](../guides/DEPLOYMENT_EXAMPLES.md)

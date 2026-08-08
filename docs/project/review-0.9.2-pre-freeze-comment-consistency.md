@@ -30,7 +30,7 @@
 - **Fix**: Delete the orphan block at 45-60.
 
 ### C-M2 (Medium) — `components/nginx-module/src/ngx_http_markdown_streaming_impl.h:132-166`
-- **Issue**: "they are cleared in step()" — no `step()` function exists in the file. Latches are cleared by `finalize_request` (3453), `send_deferred_lastbuf` (1465), `record_pending_terminal_success`/`resume_failure` (1589/1613).
+- **Issue**: "they are cleared in step()" — no `step()` function exists in the file. `finalize_request` (3453), `send_deferred_lastbuf` (1465), and `record_pending_terminal_success`/`resume_failure` (1589/1613) clear the latches.
 - **Fix**: Replace "cleared in step()" with "cleared by their owning helpers at the respective finalization stage".
 
 ### C-M3 (Medium) — `components/nginx-module/src/ngx_http_markdown_streaming_impl.h:326-345 vs 1449-1456`
@@ -39,7 +39,7 @@
 
 ### C-M4 (Medium) — zero-copy path comment contradiction
 - **Issue**: `output_decision_impl.h:11,22` says "Zero-copy was removed in 0.9.2 (directive deleted); always pool-copy", while `streaming_impl.h:2362-2441` (and 1076-1077, 1557-1561) document an active zero-copy path (`send_zero_copy_feed_output`, `save_pending(zero_copy=1)`, `perf.zero_copy_output_total`), and `metrics_impl.h:1170-1171` still counts "Zero-Copy Output Total". Decision functions always return POOL_COPY today.
-- **Fix**: Keep the retained path but annotate it as retained dead/legacy path: update comments in `output_decision_impl.h` to say the code path is retained but never selected since 0.9.2, and clarify in `streaming_impl.h` zero-copy comments that the path is non-active (decision always POOL_COPY). Leave code untouched (pre-freeze).
+- **Fix**: Keep the retained path but annotate it as a retained dead/legacy path: update comments in `output_decision_impl.h` to say the code path is retained but never selected since 0.9.2, and clarify in `streaming_impl.h` zero-copy comments that the path is non-active (decision always POOL_COPY). Leave code untouched (pre-freeze).
 
 ### C-M5 (Medium) — `components/nginx-module/src/markdown_converter.h:1086-1089` (FFI doc, op_type 2)
 - **Issue**: "the C caller must substitute the actual ETag value from MarkdownResult.etag" — C side (`header_plan.c:639-645`) treats op_type 2 as a no-op zero entry; ETag is set independently via `fullcov_prepare_etag`; tests (`header_plan_apply_test.c:756-778`) assert no mutation.

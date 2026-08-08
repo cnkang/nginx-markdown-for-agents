@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document defines the release gates framework for `nginx-markdown-for-agents` 0.5.0. The release is managed as a release train containing 7 P0 sub-specs, all of which must pass gates before release.
+This document defines the release gates framework for `nginx-markdown-for-agents` 0.5.0. The release runs as a release train containing 7 P0 sub-specs, all of which must pass gates before release.
 
 ## Current Architecture Status Statement
 
@@ -10,7 +10,7 @@ The current `IncrementalConverter` (`components/rust-converter/src/incremental.r
 
 - The NGINX side fully buffers the entire response body before calling Rust FFI
 - The Rust-side `IncrementalConverter`'s `feed_chunk()` only appends data to an internal `Vec<u8>` buffer
-- `finalize()` passes all accumulated bytes to `html5ever` + `RcDom` to build a complete DOM tree at once; memory consumption is proportional to document size
+- `finalize()` passes all accumulated bytes to `html5ever` + `RcDom` to build a complete DOM tree at once. Memory consumption is proportional to document size
 - The 64 MiB hard limit protects the system from OOM but does not address the architectural bottleneck
 - The current incremental FFI interface (`markdown_incremental_new()`, `feed()`, `finalize()`, `free()`) is API/ABI scaffolding, not a true streaming processing path
 
@@ -22,9 +22,9 @@ The sole primary goal of 0.5.0 is **true streaming / bounded-memory architecture
 
 0.5.0 adopts a dual-engine architecture (see ADR-0004):
 
-- **Engine A (Full-Buffer Engine)**: The existing full-buffer DOM conversion path, serving as the default safe baseline; behavior unchanged in 0.5.0
+- **Engine A (Full-Buffer Engine)**: The existing full-buffer DOM conversion path, serving as the default safe baseline. Behavior unchanged in 0.5.0
 - **Engine B (Streaming Engine)**: The new true streaming conversion path, **disabled by default**, enabled only through explicit configuration
-- Engine selection is **request-scoped and policy-driven**; no global irreversible switch exists
+- Engine selection is **request-scoped and policy-driven**. No global irreversible switch exists
 - Both engines share the same security baseline (sanitization, XSS/XXE/SSRF protection)
 - Backward compatibility with 0.4.0 is a mandatory requirement
 
@@ -45,14 +45,14 @@ The 0.5.0 release contains the following P0 sub-specs:
 **Release train rules:**
 
 1. All P0 sub-specs must pass DoD assessment before Go/No-Go review
-2. All 7 sub-specs are P0; none can be excluded
+2. All 7 sub-specs are P0. The team cannot exclude any
 3. Sub-specs share a single release milestone and version number (0.5.0)
-4. Cross-spec conventions (naming, reason codes, test matrix) are defined here and inherited by all sub-specs
-5. Go/No-Go must be based on Streaming Evidence, not merely on implementation completeness
+4. This document defines cross-spec conventions (naming, reason codes, test matrix) and all sub-specs inherit thempecs
+5. Go/No-Go must base on Streaming Evidence, not merely on implementation completeness
 
 ## Release Gate Categories
 
-Release gates are organized into five categories, each containing verifiable gate items:
+The release gates organize into five categories, each containing verifiable gate items:
 
 | Gate Category | Verification Scope | Verification Method |
 |---------------|-------------------|---------------------|
@@ -65,7 +65,7 @@ Release gates are organized into five categories, each containing verifiable gat
 ### Documentation Gates
 
 - All 7 sub-specs have requirements and design documents
-- All new operator-facing surfaces are documented
+- All new operator-facing surfaces appear in documentation
 - Streaming configuration guide is complete
 - Rollout cookbook is complete (including streaming enable, shadow mode, gradual expansion)
 - Compatibility matrix documentation is complete
@@ -88,7 +88,7 @@ Release gates are organized into five categories, each containing verifiable gat
 
 - Full-buffer path default behavior unchanged from 0.4.0 — verified by e2e tests
 - Streaming path disabled by default
-- Each capability's classification in the compatibility matrix is verified
+- Each capability's classification in the compatibility matrix gets verified
 - New configuration directives have documented default values
 - Existing `markdown_*` directive behavior unchanged
 
@@ -104,7 +104,7 @@ Release gates are organized into five categories, each containing verifiable gat
 - Streaming path peak memory does not grow linearly with document size (bounded-memory evidence)
 - Streaming path has measurable TTFB improvement for large responses
 - Streaming path vs full-buffer path output diff on test corpus is within acceptable range
-- Streaming path rollback has been verified in test environment
+- Streaming path rollback verified in test environment
 
 ## P0 / P1 / Deferred
 

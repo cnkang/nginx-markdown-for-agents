@@ -9,7 +9,7 @@
 
 ## Streaming Evidence Requirements
 
-The Go/No-Go decision must be based on the following verifiable artifacts:
+The Go/No-Go decision must rest on the following verifiable artifacts:
 
 | Evidence Item | Verification Method |
 |--------------|---------------------|
@@ -25,7 +25,7 @@ The Go/No-Go decision must be based on the following verifiable artifacts:
 - Any P0 sub-spec DoD fails → **No-Go** (fix and re-evaluate)
 - Any Streaming Evidence insufficient → **No-Go** (design intent does not substitute for actual evidence)
 - P1 status does not affect the Go/No-Go decision
-- Gate items that cannot be satisfied must have explicit exceptions recorded
+- Gate items that cannot pass must have explicit exceptions recorded
 
 ## Decision Record Template
 

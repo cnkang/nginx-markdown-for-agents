@@ -3,7 +3,7 @@
 ## Purpose
 This file defines repository-specific engineering rules for AI agents working on `nginx-markdown-for-agents`.
 
-These rules are distilled from:
+The rules come from two sources:
 - NGINX official development constraints in the Kiro local development guide (when present)
 - Historical fix/doc and hidden-fix commits across local branches and remote-only commits (deduplicated by commit SHA)
 
@@ -66,7 +66,7 @@ priority chain.
 - For POSIX string helpers (for example `strcasecmp`, `strncasecmp`), include
   `<strings.h>` explicitly in the translation unit or shared header. Do not
   rely on transitive includes or implicit declarations.
-- **Never dereference or perform relational operations on values that may be uninitialized, NULL, or invalid without an explicit guard.** This includes: pointer comparisons (`p > q`, `p < q`), pointer arithmetic, field access through pointers, array indexing with unvalidated bounds. When the validity of a value depends on runtime state (for example `pos/last` may both be NULL in empty buffers), use an explicit boolean flag set at the production site rather than inferring state from value relationships.
+- **Never dereference or perform relational operations on values that may be uninitialized, NULL, or invalid without an explicit guard.** This includes: pointer comparisons (`p > q`, `p < q`), pointer arithmetic, field access through pointers, array indexing with unvalidated bounds. When the validity of a value depends on runtime state (for example `pos/last` may both be NULL in empty buffers), use an explicit boolean flag set at the production site. Do not infer state from value relationships.
 
 ## Rule Index
 
@@ -75,7 +75,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | Rule | Domain File | Summary |
 |------|-------------|---------|
 | 1 | streaming-backpressure | Resume NGX_AGAIN according to chain ownership; never duplicate or overwrite pending data |
-| 2 | streaming-backpressure | Correct return codes in fail-open branches; don't advance unconsumed buffer positions; cross-ref Rule 38 for replay buffer |
+| 2 | streaming-backpressure | Correct return codes in fail-open branches; do not advance unconsumed buffer positions; cross-ref Rule 38 for replay buffer |
 | 3 | memory-budget | Enforce all budgets; free auxiliary buffers on all exits; track peak memory |
 | 4 | encoding-charset | Preserve incomplete UTF-8 tails across chunks; flush decoders at EOF |
 | 5 | html-sanitizer | Void elements self-closing; skip-mode name-aware; nesting-depth saturation-safe |
@@ -161,8 +161,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 ### Repository operation safety
 - Keep diffs tied to the current request. Do not mix behavior changes with
   unrelated formatting sweeps, renames, broad reorganization, new dependencies,
-  or abstractions for one caller unless they are required for correctness or
-  verification.
+  or abstractions for one caller unless correctness or verification needs them.
 - Mention unrelated dead code, cleanup opportunities, or design concerns
   separately instead of fixing them inside the current patch.
 - Commit only changes tied to the current request. Before each commit, review
@@ -233,7 +232,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - `bash tools/harness/detect_nosonar_discipline.sh` — harness gate (make harness-security-checks) for bare NOSONAR [24]
 - No unguarded ops on NULL/uninitialized/invalid values [Baseline]
 - Orphan comment closers: every */ must have a matching /*; `python3 tools/harness/detect_orphan_comment_close.py` — harness gate (make harness-security-checks) [56]
-- #ifdef-guarded function visibility: functions declared inside #ifdef GUARD must not be referenced outside; `bash tools/harness/detect_ifdef_guard_visibility.sh` — harness gate (make harness-security-checks) [57]
+- #ifdef-guarded function visibility: functions declared inside #ifdef GUARD must not be referenced outside. `bash tools/harness/detect_ifdef_guard_visibility.sh` — harness gate (make harness-security-checks) [57]
 
 **NGINX Idioms** (C)
 - Full ngx_list_part_t chain iteration (part→next) [28]
@@ -277,7 +276,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   before extraction or execution [13]
 - Release source builds require a full reviewed commit ID and verify the fetched
   commit exactly before executing repository code [13]
-- Workflow input injection: ${{ inputs.* }} must be routed through env: before use in shell run blocks; `bash tools/harness/detect_workflow_input_injection.sh` — harness gate (make harness-security-checks) [58]
+- Workflow input injection: route ${{ inputs.* }} through env: before use in shell run blocks. `bash tools/harness/detect_workflow_input_injection.sh` — harness gate (make harness-security-checks) [58]
 - Workflow secrets are step-scoped to their minimal consumer. Repository build,
   test, setup, and coverage steps must not inherit unrelated credentials [48]
 - Validator/gate regex patterns match actual struct field paths [13]
@@ -298,9 +297,9 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   normalize the symbol table once, tolerate non-fatal per-member archive
   diagnostics, and fail only when the captured symbol table is empty or a
   required exported symbol is absent [13]
-- Release Rust static libraries that are validated with GNU binutils and linked
-  into the NGINX C module must be emitted as native target objects that the
-  target `nm`/linker can inspect; do not enable an LTO/archive format that makes
+- Release Rust static libraries that pass GNU binutils validation and linked
+  into the NGINX C module must emit native target objects that the
+  target `nm`/linker can inspect. Do not enable an LTO/archive format that makes
   required exported FFI symbols invisible to the release validation toolchain
   unless the workflow also installs and uses a compatible symbol validator and
   linker for that format [13]
@@ -311,7 +310,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - All workflows capable of producing release package artifacts must apply the
   same Rust release build invariants: `--locked`, intended feature set,
   explicit target triple, and the matching target output directory. If a
-  workflow is retained only for compatibility, mark it as non-canonical and
+  a workflow stays only for compatibility, mark it as non-canonical and
   gate that status explicitly [13]
 - Standalone package workflows use the canonical package name and install
   layout, run `check_install_layout.sh` before upload, and do not ask RPM SPECs
@@ -322,7 +321,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Release Dockerfiles that copy and execute repository scripts install every
   interpreter named by those scripts' shebangs before first execution, or
   invoke only scripts valid for the base image's guaranteed shell. Minimal
-  images must not assume `/usr/bin/env bash` exists unless `bash` is installed
+  images must not assume `/usr/bin/env bash` exists unless `bash` installs
   in the same stage [13]
 - Package dependency constraints must either use distro-resolvable package
   versions/EVRs or non-exact version floors. Do not exact-match a naked
@@ -342,13 +341,13 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   repository paths [13]
 - Container-job package smoke images must include the tools required before
   the first workflow step runs, including `tar` or `git` for `actions/checkout`.
-  Minimal images that lack checkout prerequisites must be tested through a
-  host-checkout plus `docker run` smoke pattern instead of as the job container
-  [13]
+  Minimal images that lack checkout prerequisites must go through a
+  host-checkout plus `docker run` smoke pattern instead of running as the job
+  container [13]
 - Tag release gates in GitHub Actions must run only repository-owned validators
   and artifacts available in a clean CI checkout. Do not call legacy or
   local-spec validators that require user-local Kiro/spec directories unless
-  those inputs are checked into the repository or explicitly downloaded first
+  those inputs check into the repository or download explicitly first
   [13]
 - When newer release gates reuse prior-version validators, assertions about
   the active project version, package version, or release line must be
@@ -382,7 +381,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   output, and avoid deleting clusters that existed before the test [13]
 - Helm charts that support optional dynamic modules must keep stock-image
   defaults renderable without module directives, require an explicit in-image
-  module path when any module directive family is enabled (including metrics),
+  module path when any module directive family turns on (including metrics),
   and must not derive implicit `hostPath` mounts from module paths. Use explicit
   opt-in extra volume values for custom mounts instead [13]
 - Static security workflows must not duplicate CodeQL's C/C++ and Rust SAST
@@ -397,7 +396,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   materializing the tracked scan scope [48]
 - Supply-chain visibility workflows such as Trivy, SBOM generation, and
   OpenSSF Scorecard may run on PR, push, schedule, and manual triggers, but
-  remain report-oriented unless a specific blocking threshold is adopted. Do
+  remain report-oriented unless a specific blocking threshold gets adopted. Do
   not describe them as hard blocking gates without documenting the
   runtime/noise tradeoff and enforcing threshold semantics [48]
 - Local Trivy scans must exclude Git-ignored adapter state and generated
@@ -405,17 +404,17 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   files and prior SBOM output cannot create findings or memory pressure [48]
 - Runnable CI and example Dockerfiles must end with a non-root `USER`. NGINX
   images must also listen on an unprivileged port and move PID/temp paths to
-  locations writable by that user; a scanner-only `USER` declaration that
+  locations writable by that user. A scanner-only `USER` declaration that
   breaks container startup is forbidden [48]
 - Deployable Basic Auth examples must use an SSL listener or a loopback-only
   backend behind a mandatory co-located TLS terminator. Credential-bearing
   client examples must use HTTPS [48]
 - Release artifact path traversal protection: validate manifest filenames resolve within artifact directory before accessing [54]
-- Homebrew formula SHA-256 hashes the exact bytes served by its declared URL;
-  the downloaded tag archive's normalized content must equal a local
-  `git archive` of the resolved tag commit; Formula source, version, and archive
-  identity derive from that commit; version stanza precedes sha256; nginx
-  version derives from dependency metadata; formula gate and release verify use
+- Homebrew formula SHA-256 hashes the exact bytes served by its declared URL.
+  The downloaded tag archive's normalized content must equal a local
+  `git archive` of the resolved tag commit. Formula source, version, and archive
+  identity derive from that commit. Version stanza precedes sha256. Nginx
+  version derives from dependency metadata. Formula gate and release verify use
   the same audit standard [13]
 
 **Python** (P)
@@ -437,7 +436,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - THIRD-PARTY-NOTICES must stay in sync with resolved dependency versions;
   add/remove/update entries in same changeset as Cargo.lock changes [49]
 
-**If any item would be violated, redesign the change before writing it.**
+**If any item would violate, redesign the change before writing it.** Do not write code that breaks an item.
 
 ### During coding
 - Preserve NGINX event-driven semantics; no hidden blocking calls.
@@ -493,7 +492,7 @@ Follow evidence-first verification (no completion claim without fresh command ou
 - If warnings were part of the task or findings, include the exact warning
   sweep command(s) and whether residual warnings remain.
 
-If full suite is too heavy for current scope, run the narrowest relevant target set and explicitly report what was not run.
+If full suite is too heavy for current scope, run the narrowest relevant target set. Explicitly report what was not run.
 
 ### After fixing bugs or addressing review findings
 - Evaluate whether the fix reveals a generalizable pattern that should be
@@ -510,11 +509,11 @@ If full suite is too heavy for current scope, run the narrowest relevant target 
   is incomplete.
 
 ## Definition of Done for Agent Changes
-- Pre-output checklist was applied to every file written or modified (no write-first-fix-later).
+- Apply the pre-output checklist to every file written or modified (no write-first-fix-later).
 - Behavior is correct for nominal and edge-case paths.
 - Added/updated regression tests cover the fixed failure mode.
 - Related docs/validators/CI triggers stay consistent.
-- Verification commands were run in the current session and results were checked.
+- Run verification commands in the current session and check the results.
 
 ## Rule Maintenance (Meta-Rule)
 
@@ -524,8 +523,8 @@ review cycle, the agent must evaluate whether `AGENTS.md` needs updating:
 1. **Pattern extraction**: For each fix, ask: "Is this a one-off typo, or does
    it represent a class of mistakes that could recur in different code?"  If
    the latter, extract a generalizable rule.
-2. **Generalize, don't enumerate**: Rules should describe the *principle* that
-   was violated, not just the specific instance.  Bad: "check
+2. **Generalize, do not enumerate**: Rules should describe the *principle* that
+   the rule was violated, not just the specific instance.  Bad: "check
    `ERROR_BUDGET_EXCEEDED` alongside `ERROR_MEMORY_LIMIT`."  Good: "when
    classifying values into semantic categories across language boundaries,
    cover all source-defined values that map to the category, not just the
@@ -549,9 +548,9 @@ review cycle, the agent must evaluate whether `AGENTS.md` needs updating:
    that perform the same write and apply the same guard.  A rule that says
    "do X in path A" implicitly requires "do X in every path that does the
    same thing."
-6. **Checklist sync**: If a new rule is added or an existing rule is
-   strengthened, update the corresponding pre-output checklist item(s) so
-   the rule is enforced at write time, not discovered at review time.
+6. **Checklist sync**: If you add a new rule or strengthen an existing rule,
+   update the corresponding pre-output checklist item(s) so
+   the rule enforces at write time, not at review time.
 7. **Scope**: Only add rules that are actionable and verifiable before code
    is written.  Avoid vague aspirational statements.  Every rule should
    answer: "What specific check does the agent perform, and what does

@@ -4,7 +4,7 @@ This directory contains the maintained documentation for `nginx-markdown-for-age
 
 If you are new to the project, start with [README.md](../README.md). It explains what the module does, why you would use it, and how to verify a first deployment quickly.
 
-Think of this directory as the maintained map behind that landing page: guides for rollout and operations, feature notes for implementation details, and testing references for validation work.
+Think of this directory as the maintained map behind that landing page. It holds guides for rollout and operations, feature notes for implementation details, and testing references for validation work.
 
 ## Choose a Starting Point
 
@@ -102,13 +102,13 @@ Per-version release notes and release checklists (one file per release line).
 ### `development/`
 
 Implementation plans for in-flight release lines (for example the 0.9.2
-implementation plan); consumed during development and archived when the
+implementation plan). Consumed during development and archived when the
 release ships.
 
 ### `evidence/`
 
 Machine-readable evidence artifacts referenced by feature docs (for example
-corpus-diff tables); treated as read-only reference data.
+corpus-diff tables). Treated as read-only reference data.
 
 ### `operations/`
 

@@ -2,7 +2,7 @@
 
 This guide defines how to write the project's documentation so that it is
 easy to read for **non-native English speakers** and easy to translate for
-**machine translation engines and LLMs**. It is inspired by
+**machine translation engines and LLMs**. It draws from
 [ASD-STE100 Simplified Technical English](https://www.asd-ste100.org), the
 aerospace standard for controlled technical language, adapted for software
 documentation.
@@ -23,12 +23,12 @@ Long sentences are the single biggest readability failure in technical
 documentation. Split them.
 
 **Before (28 words):**
-> The streaming engine is selected when the response exceeds the buffer
+> The module selects the streaming engine when the response exceeds the buffer
 > threshold and the configured policy permits incremental delivery, which
 > requires the cache validation mode not to be `full`.
 
 **After (2 sentences, 14 + 12 words):**
-> The streaming engine is selected when the response exceeds the buffer
+> The module selects the streaming engine when the response exceeds the buffer
 > threshold. The policy must permit incremental delivery, and cache
 > validation must not be `full`.
 
@@ -78,7 +78,7 @@ documentation. Split them.
 
 ## 6. Machine-Translation Friendly Writing
 
-The docs are consumed by translators, NMT engines, and LLMs:
+Translators, NMT engines, and LLMs consume the docs:
 
 - Use "that" to introduce subordinate clauses: "Make sure **that** the file
   exists." (many target languages cannot omit the equivalent word)

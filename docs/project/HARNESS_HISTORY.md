@@ -1,7 +1,7 @@
 # Harness History and Scope
 
 This note records why the repo-owned harness exists, which mistakes it was
-created to prevent, and what it intentionally does not try to become.
+built to prevent, and what it intentionally does not try to become.
 
 Use it when you want the project-level rationale behind the harness, not the
 day-to-day execution contract. For execution rules, see
@@ -21,7 +21,7 @@ assistance was still fragmented across:
 - ad hoc execution memory inside individual sessions
 
 That setup worked for one local environment, but it was not a stable open-source
-contract. The harness was introduced to turn those scattered habits into a
+contract. The project introduced the harness to turn those scattered habits into a
 tracked, reviewable, and executable repository asset.
 
 ## Problems It Was Created to Prevent
@@ -65,7 +65,7 @@ discipline instead of forcing contributors to rediscover them manually.
 
 The harness is deliberately scoped.
 
-- Runtime architecture docs remain separate; the harness complements them
+- Runtime architecture docs remain separate. The harness complements them
   rather than replacing them.
 - Private spec content stays out of tracked repository files.
 - The repository is not an agent platform or orchestration service — the
