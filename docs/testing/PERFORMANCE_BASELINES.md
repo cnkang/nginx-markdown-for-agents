@@ -6,8 +6,8 @@
 including Brotli streaming, on native Linux x86_64 with NGINX 1.24.0)
 
 **Historical Scenario Measurement:** 2026-07-19 (Brotli streaming on NGINX
-1.30.4; archival only)
-**Scope:** Local release-build microbenchmarks for the Rust converter FFI path, the C conditional-request handler (`If-None-Match`) using the standalone test harness with real Rust FFI, and local real-NGINX HTTP E2E baselines.
+1.30.4, archival only)
+**Scope:** Local release-build microbenchmarks for the Rust converter FFI path. They also cover the C conditional-request handler (`If-None-Match`) using the standalone test harness with real Rust FFI. They include local real-NGINX HTTP E2E baselines.
 
 ## Summary
 
@@ -16,7 +16,7 @@ This file replaces the previous placeholder template with real local baseline da
 ### Canonical Evidence and Threshold Normalization
 
 Canonical module baselines separate measured truth from conservatively
-normalized performance thresholds. The following fields must be copied
+normalized performance thresholds. You must copy the following fields
 verbatim from the real canonical run: `streaming_path_hits`,
 `fullbuffer_path_hits`, `streaming_requests_total`,
 `precommit_failopen_total`, `decompression_streaming_total`,
@@ -24,10 +24,10 @@ verbatim from the real canonical run: `streaming_path_hits`,
 `copied_output_total`, `baseline_rss_bytes`, `peak_rss_bytes`, `input_bytes`,
 scenario status and metadata, platform, load generator, and NGINX version.
 
-For long-lived release thresholds, RPS may be rounded downward or lowered and
-latency/TTFB may be rounded upward or raised. RPS may not be increased,
-latency/TTFB may not be decreased, and path, fallback, output, memory, or
-environment evidence may not be changed. This makes the threshold more
+For long-lived release thresholds, RPS may round downward or lower and
+latency/TTFB may round upward or raise. RPS must not increase,
+latency/TTFB must not decrease, and path, fallback, output, memory, or
+environment evidence must not change. This makes the threshold more
 conservative without improving or fabricating measured evidence.
 
 Every canonical baseline must retain the raw workflow artifact and record the
@@ -37,12 +37,12 @@ baseline is a verbatim run from source commit
 `cab92df229b0b68cb02d88817a208e009f3ce106`, workflow run
 `30405031983/attempts/1`, measured at `2026-07-28T22:41:12Z`, with raw digest
 `a511b90f82d05f827ea011faccec3ff5b3aead892943180f98e617c6c09aad12`.
-The former `historical_audit_exception` is retained only for historical audit
-coverage and is not an active release-baseline policy.
+The former `historical_audit_exception` stays only for historical audit
+coverage. It is not an active release-baseline policy.
 
-The provenance schema is layered: `baseline_policy` contains source artifact,
-run, commit, digest, measurement timestamp, and normalization; top-level
-`module_benchmark` contains environment and measurement identity; scenario
+The provenance schema has layers. `baseline_policy` contains source artifact,
+run, commit, digest, measurement timestamp, and normalization. Top-level
+`module_benchmark` contains environment and measurement identity. Scenario
 records contain scenario metadata, `load_integrity`, `metrics`, and
 `response_correctness`. `scenario_sources` is optional and receives
 environment-consistency validation only when present.
@@ -50,22 +50,21 @@ environment-consistency validation only when present.
 The canonical module benchmark retains response probes at
 `perf/baselines/module-baseline-091-raw-probes/`, derived from the raw report
 output path. The workflow validates non-empty `.headers`, `.body`, and `.json`
-files for all eight scenarios, verifies each probe's verdict, curl exit code,
-body SHA-256, and validates the complete response-correctness schema
+files for all eight scenarios. It verifies each probe's verdict, curl exit code,
+and body SHA-256. It validates the complete response-correctness schema
 (`http_status`, normalized `headers`, content metadata, body metadata,
 correctness markers, verdict, failure reason, and artifact names). It parses
 the final HTTP response block from each retained `.headers` artifact and
 requires the parsed status, headers, content type, and content encoding to
 match the probe JSON. The finalized `response_correctness` object must then
-match each probe object exactly before uploading canonical evidence. Canonical
-artifacts are retained for 30 days for release audit review.
+match each probe object exactly before uploading canonical evidence. The workflow retains canonical artifacts for 30 days for release audit review.
 
-CI now also records non-blocking performance artifacts from the same `perf_baseline` example. The workflow stores the full benchmark output plus `/usr/bin/time -v` captures for the medium, medium-front-matter, and large single-sample runs. Those artifacts are for regression comparison and trend review; they are not merge-blocking thresholds yet.
+CI now also records non-blocking performance artifacts from the same `perf_baseline` example. The workflow stores the full benchmark output plus `/usr/bin/time -v` captures for the medium, medium-front-matter, and large single-sample runs. Those artifacts are for regression comparison and trend review. They are not merge-blocking thresholds yet.
 
 In module evidence, `fallback_rate` means pre-commit fail-open rate
 (`precommit_failopen_total / streaming_requests_total`). It is intentionally
 separate from `streaming_fallback_total`, which records requests routed away
-from the streaming path; the two counters must not be substituted for one
+from the streaming path. You must not substitute the two counters for one
 another when interpreting a baseline.
 
 Key findings from this run:
@@ -129,7 +128,7 @@ make -C components/nginx-module/tests unit-conditional_requests
 
 What it measures:
 
-- `if_modified_since_only` path (declines early; no conversion)
+- `if_modified_since_only` path (declines early, no conversion)
 - `full_support` path with matching `If-None-Match` (conversion + ETag compare + 304 path)
 - `full_support` path with non-matching `If-None-Match` (conversion + ETag compare + decline)
 
@@ -178,7 +177,7 @@ Source output from `./test_conditional_requests_real --bench-conditional`:
 
 ### Interpretation
 
-- `full_support` is significantly more expensive than `if_modified_since_only`, which is expected because it performs conversion to generate/compare ETag.
+- `full_support` is significantly more expensive than `if_modified_since_only`. `full` performs conversion to generate/compare ETag, so the gap follows. The extra conversion work explains it. The benchmark measures this difference.
 - The matching path is slower than the non-matching path in this microbench due to the extra 304 response setup path in the harness.
 
 ## Memory Usage (Process-Level, `/usr/bin/time -l`)
@@ -232,15 +231,15 @@ The `Perf Baseline Artifact` job in `.github/workflows/ci.yml` records:
 
 This keeps performance references attached to PRs and workflow runs without turning the current baseline into a hard pass/fail gate.
 
-The historical latency tables below were captured before the extra front-matter sample was added to the harness. Treat the new sample as a regression-comparison artifact until a fresh full baseline snapshot is recorded.
+The historical latency tables below predate the extra front-matter sample added to the harness. Treat the new sample as a regression-comparison artifact until a fresh full baseline snapshot exists. The harness records a fresh snapshot on the next full run. This keeps the tables comparable. The next run updates them.
 
 ## FFI Baselines — Large Tiers (Pending Measurement)
 
-The following tiers were added to `perf/metrics-schema.json` as part of the large-response optimization work. Baseline data will be populated once the incremental processing path is enabled and profiled end-to-end.
+The large-response optimization work added the following tiers to `perf/metrics-schema.json`. The team will populate baseline data once the incremental processing path turns on and gets profiled end-to-end. The team populates these tables after the profiling pass.
 These rows are regression-comparison targets, not 0.8.0 release-blocking
 thresholds.
 
-Samples are generated by `tools/corpus/generate_large_samples.sh` in four variants per tier: `plain-html`, `front-matter`, `token-estimation`, `nested-tables-code`.
+`tools/corpus/generate_large_samples.sh` generates samples in four variants per tier: `plain-html`, `front-matter`, `token-estimation`, `nested-tables-code`.
 
 ### large-100k (~100KB)
 
@@ -262,19 +261,22 @@ Samples are generated by `tools/corpus/generate_large_samples.sh` in four varian
 
 ## Memory Peak Sampling Methodology
 
-Memory peak values in this document are collected using `tools/perf/memory_observer.sh`. The script supports two platforms with different collection strategies:
+Memory peak values in this document come from `tools/perf/memory_observer.sh`. The script supports two platforms with different collection strategies:
 
 ### Linux — `os_reported_peak`
 
-On Linux, the script reads `VmHWM` from `/proc/<pid>/status` after the target process exits. `VmHWM` is the kernel-tracked high-water mark for resident set size over the entire process lifetime. This is an exact peak value maintained by the OS.
+On Linux, the script reads `VmHWM` from `/proc/<pid>/status` after the target process exits.
+`VmHWM` is the kernel-tracked high-water mark for resident set size over the entire process lifetime.
+This exact peak value comes from the OS.
 
 ### macOS — `sampled_peak`
 
-On macOS, the script polls `ps -o rss` at a configurable interval (e.g., `--interval 100` for 100 ms) and records the maximum observed value. Because this is a polling-based approach, the reported peak may be lower than the true peak if a short-lived memory spike occurs between samples.
+On macOS, the script polls `ps -o rss` at a configurable interval (e.g., `--interval 100` for 100 ms) and records the maximum observed value. Because this is a polling-based approach, the reported peak may be lower than the true peak. A short-lived memory spike can occur between samples and go unobserved.
 
 ### Cross-Platform Comparison Caveat
 
-Memory values collected on Linux (`os_reported_peak`) and macOS (`sampled_peak`) use fundamentally different collection methods. **Do not compare absolute memory values across platforms.** Instead, compare relative changes (e.g., incremental vs. full-buffer path) within the same platform and collection method.
+Memory values collected on Linux (`os_reported_peak`) and macOS (`sampled_peak`) use fundamentally different collection methods.
+**Do not compare absolute memory values across platforms.** Instead, compare relative changes (e.g., incremental vs. full-buffer path) within the same platform and collection method. Absolute values differ across platforms.
 
 ### Usage
 
@@ -340,19 +342,19 @@ do not claim a measured relative speedup.
 
 1. If optimizing for request latency, prioritize parser-path profiling/optimization before FFI micro-optimizations.
 2. Keep `if_modified_since_only` as a documented performance tradeoff for deployments that can accept weaker Markdown-variant conditional semantics.
-3. Only evaluate zero-copy C/Rust buffer handoff if profiling shows copy cost is a material share of end-to-end latency on target workloads.
+3. Evaluate zero-copy C/Rust buffer handoff only when profiling shows a material copy cost. The cost must be a significant share of end-to-end latency on target workloads.
 4. Add a separate full NGINX HTTP E2E baseline report (real server, real client load) when validating production rollout capacity.
 5. Populate large-100k and large-5m baseline tables once incremental path profiling is complete.
 6. Collect memory peak baselines for large tiers using `tools/perf/memory_observer.sh`.
 
 ## Real NGINX HTTP E2E Baselines (Local, NGINX 1.28.2 Stable)
 
-### Why this section was added
+### Why this section exists
 
-- A real HTTP E2E benchmark was executed against **NGINX stable `1.28.2`** (released 2026-02-04).
+- A real HTTP E2E benchmark ran against **NGINX stable `1.28.2`** (released 2026-02-04).
 - During this work, a correctness bug was found and fixed before final measurements:
   - Large Markdown responses (~1MB HTML input) stalled and timed out with `0` bytes sent.
-  - Root cause: the body filter copied bytes into its accumulation buffer but did **not** mark incoming copy-filter temp buffers as consumed, causing upstream buffering to stall after ~`2 x 32KB`.
+  - Root cause: the body filter copied bytes into its accumulation buffer but did **not** mark incoming copy-filter temp buffers as consumed. This caused upstream buffering to stall after ~`2 x 32KB`.
   - Fix: after copying a chunk into the module-owned buffer, advance the input buffer (`buf->pos = buf->last`) so NGINX copy filter can recycle temp buffers.
 
 ### Methodology (E2E)
