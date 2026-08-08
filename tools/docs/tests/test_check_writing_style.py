@@ -11,6 +11,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 # Allow imports from tools/docs/
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -34,6 +36,18 @@ def test_long_sentence_detected():
     text = f"{words}.\n"
     warnings = cws.audit(text, Path("x.md"), None)
     assert any("long sentence" in w for w in warnings)
+
+
+def test_descriptive_sentence_uses_descriptive_limit():
+    text = "The module " + " ".join(["word"] * 21) + ".\n"
+    warnings = cws.audit(text, Path("x.md"), None)
+    assert not any("long instruction" in w for w in warnings)
+
+
+def test_imperative_sentence_uses_instruction_limit():
+    text = "Run " + " ".join(["word"] * 20) + ".\n"
+    warnings = cws.audit(text, Path("x.md"), None)
+    assert any("long instruction" in w for w in warnings)
 
 
 def test_short_sentence_passes():
@@ -78,6 +92,12 @@ def test_contraction_detected():
     assert any("contraction" in w for w in warnings)
 
 
+def test_capitalized_contraction_detected():
+    text = "Don't skip this validation.\n"
+    warnings = cws.audit(text, Path("x.md"), None)
+    assert any("contraction 'Don't'" in w for w in warnings)
+
+
 def test_limit_caps_warnings():
     text = "The file is edited by the agent; another is checked; a third is read.\n"
     warnings = cws.audit(text, Path("x.md"), limit=1)
@@ -86,6 +106,9 @@ def test_limit_caps_warnings():
 
 def test_is_maintained_scope():
     assert cws._is_maintained("AGENTS.md") is True
+    assert cws._is_maintained("CONTRIBUTING.md") is True
+    assert cws._is_maintained("SECURITY.md") is True
+    assert cws._is_maintained("CHANGELOG.md") is True
     assert cws._is_maintained("docs/features/security.md") is True
     assert cws._is_maintained("docs/archive/old-note.md") is False
 
@@ -112,10 +135,82 @@ def test_normal_doc_long_list_item_still_flagged():
 
 
 def test_quoted_source_citation_exempt():
-    # Quoted source-comment references stay verbatim and are not audited.
-    text = '- **Issue**: doc says "0=pass, 1=fail_closed; 255=not set" and "Zero-copy was removed; always pool-copy".\n'
+    # Explicitly labelled source citations stay verbatim and are not audited.
+    text = '- **Source citation**: "0=pass, 1=fail_closed; 255=not set" and "Zero-copy was removed; always pool-copy".\n'
     warnings = cws.audit(text, Path("docs/project/x.md"), None)
     assert warnings == []
+
+
+def test_unlabelled_quoted_prose_is_audited():
+    text = 'The module says "The file is edited by the agent; e.g. it isn\'t safe."\n'
+    warnings = cws.audit(text, Path("docs/project/x.md"), None)
+    assert any("passive-ish" in w for w in warnings)
+    assert any("Latin abbreviation" in w for w in warnings)
+    assert any("contraction" in w for w in warnings)
+    assert any("semicolon" in w for w in warnings)
+
+
+def test_rust_doc_comment_fence_is_excluded():
+    text = "/// ```\n/// The file is edited by the agent; e.g. don't.\n/// ```\n"
+    warnings = cws.audit(text, Path("CONTRIBUTING.md"), None)
+    assert warnings == []
+
+
+def test_main_requires_explicit_base_for_changed(monkeypatch):
+    monkeypatch.setattr(cws.sys, "argv", ["check_writing_style.py", "--changed"])
+    with pytest.raises(SystemExit) as exc_info:
+        cws.main()
+    assert exc_info.value.code == 2
+
+
+@pytest.mark.parametrize("base_args", [["--base", "HEAD"], ["--base=HEAD"]])
+def test_main_accepts_both_base_forms(monkeypatch, base_args):
+    seen = []
+    monkeypatch.setattr(
+        cws.sys,
+        "argv",
+        ["check_writing_style.py", "--changed", *base_args],
+    )
+    monkeypatch.setattr(cws, "_resolve_base", lambda ref: ref)
+    monkeypatch.setattr(
+        cws,
+        "_changed_md_files",
+        lambda base: seen.append(base) or [],
+    )
+    assert cws.main() == 0
+    assert seen == ["HEAD"]
+
+
+def test_main_rejects_unknown_option(monkeypatch):
+    monkeypatch.setattr(
+        cws.sys,
+        "argv",
+        ["check_writing_style.py", "--strcit"],
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        cws.main()
+    assert exc_info.value.code == 2
+
+
+def test_changed_mode_computes_base_warnings_once(monkeypatch):
+    calls = []
+    file_path = Path(__file__).resolve()
+    monkeypatch.setattr(cws.sys, "argv", ["check_writing_style.py", "--changed", "--base", "HEAD"])
+    monkeypatch.setattr(cws, "_resolve_base", lambda ref: ref)
+    monkeypatch.setattr(cws, "_changed_md_files", lambda base: [file_path])
+    monkeypatch.setattr(
+        cws,
+        "_base_warning_counts",
+        lambda files, base: calls.append((files, base)) or {file_path: cws.Counter()},
+    )
+    monkeypatch.setattr(cws, "audit", lambda text, path, limit: [])
+    assert cws.main() == 0
+    assert len(calls) == 1
+
+
+def test_makefile_passes_explicit_style_base():
+    makefile = (cws.ROOT / "Makefile").read_text(encoding="utf-8")
+    assert 'check_writing_style.py --changed --base "$(STYLE_BASE)"' in makefile
 
 
 def test_reference_line_noun_chain_exempt():
