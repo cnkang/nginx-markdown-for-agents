@@ -128,11 +128,11 @@ This detector integrates into:
 ## Example Output
 ```text
 INFO: Checking version consistency...
-PASS: Main Cargo.toml version: 0.9.1
-PASS: Chart.yaml version: 0.9.1
-PASS: Chart.yaml appVersion: 0.9.1
-PASS: fuzz/Cargo.toml dep version: 0.9.1
-PASS: corpus/Cargo.toml dep version: 0.9.1
+PASS: Main Cargo.toml version: 0.9.2
+PASS: Chart.yaml version: 0.9.2
+PASS: Chart.yaml appVersion: 0.9.2
+PASS: fuzz/Cargo.toml dep version: 0.9.2
+PASS: corpus/Cargo.toml dep version: 0.9.2
 Rust baseline consistency check PASSED: toolchain=1.97.0, MSRV=1.97
 INFO: Homebrew formula: 0.8.3 (intentionally previous; updated by publish workflow)
 

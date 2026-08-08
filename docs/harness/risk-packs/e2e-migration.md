@@ -9,7 +9,7 @@ surface, wrapper parity, or harness governance for 0.6.3.
 - touched migrated wrapper paths under `tools/e2e/verify_*_e2e.sh`
 - touched `tools/e2e/run_e2e_suite.sh`
 - touched migration docs (`docs/project/0.6.3-e2e-parity.md`,
-  `docs/project/0.6.3-test-surface-audit.md`, `docs/testing/E2E_TESTS.md`)
+  `docs/testing/E2E_TESTS.md`)
 - keywords like `e2e-harness`, `bootstrap`, `reuse mode`, `wrapper parity`,
   `test-e2e-rust`
 
@@ -64,4 +64,5 @@ cargo test --manifest-path tools/e2e-harness/Cargo.toml --all-features
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Removed reference to non-existent 0.6.3-test-surface-audit.md |
 | 0.6.3 | 2026-05-12 | Kang | Initial migration risk pack for Rust-first E2E harness rollout |
