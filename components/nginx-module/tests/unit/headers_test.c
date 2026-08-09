@@ -179,6 +179,9 @@ ngx_list_push(ngx_list_t *list)
     }
 
     elts = (ngx_table_elt_t *) last->elts;
+    if (list->last == NULL) {
+        list->last = last;
+    }
     return &elts[last->nelts++];
 }
 
@@ -369,6 +372,8 @@ new_request(void)
     r.pool = pool;
     r.connection = conn;
     init_headers_list(&r.headers_out.headers, 32, pool);
+    /* The returned request is copied, so never retain a stack address. */
+    r.headers_out.headers.last = NULL;
     return r;
 }
 
