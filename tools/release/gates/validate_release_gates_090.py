@@ -564,10 +564,6 @@ def check_profile_explicit_inheritance(repo: Path) -> dict:
         repo / "components/nginx-module/src/ngx_http_markdown_config_core_impl.h"
     )
     test_file = repo / "components/nginx-module/tests/unit/profile_test.c"
-    directives = (
-        repo
-        / "components/nginx-module/src/ngx_http_markdown_config_directives_impl.h"
-    )
     directive_text = _read_directive_registry(repo)
     if directive_text is None:
         return {"name": "profile_explicit_inheritance", "status": "fail",
