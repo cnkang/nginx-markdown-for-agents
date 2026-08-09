@@ -65,7 +65,8 @@ struct ngx_list_part_s {
 };
 
 typedef struct {
-    ngx_list_part_t part;
+    ngx_list_part_t *last;
+    ngx_list_part_t  part;
     size_t size;
     ngx_uint_t nalloc;
     void *pool;
@@ -447,6 +448,7 @@ ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
 static void
 init_headers_list(ngx_list_t *list, ngx_uint_t capacity)
 {
+    list->last = &list->part;
     list->size = sizeof(ngx_table_elt_t);
     list->nalloc = capacity;
     list->pool = NULL;

@@ -76,8 +76,13 @@
 typedef intptr_t ngx_err_t;
 typedef struct ngx_connection_s ngx_connection_t;
 
+typedef struct {
+    void  **main_conf;
+} ngx_http_conf_ctx_t;
+
 struct ngx_module_s {
-    int dummy;
+    int         dummy;
+    ngx_uint_t  ctx_index;
 };
 
 struct ngx_pool_s {
@@ -124,6 +129,7 @@ struct ngx_shm_zone_s {
 
 struct ngx_conf_s {
     ngx_pool_t *pool;
+    void        *ctx;
 };
 
 /* Global module symbol required by the config implementation header. */
