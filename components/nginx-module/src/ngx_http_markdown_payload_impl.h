@@ -57,6 +57,7 @@ static void ngx_http_markdown_log_decision_with_category(
     const ngx_http_markdown_effective_conf_t *eff,
     const ngx_str_t *reason_code, const ngx_str_t *error_category);
 static void ngx_http_markdown_metric_inc_failopen(
+    const ngx_http_markdown_effective_conf_t *eff,
     const ngx_http_markdown_conf_t *conf);
 static const ngx_str_t *ngx_http_markdown_compression_name(
     ngx_http_markdown_compression_type_e compression_type);
@@ -533,7 +534,8 @@ ngx_http_markdown_handle_buffer_init_failure(ngx_http_request_t *r,
      * failure, or NGX_AGAIN that never resumes successfully).
      */
     if (rc == NGX_OK || rc == NGX_DONE) {
-        ngx_http_markdown_metric_inc_failopen(conf);
+        ngx_http_markdown_metric_inc_failopen(
+            ctx->effective_conf, conf);
     }
 
     /*
@@ -604,7 +606,8 @@ ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
      * replay send later fails.
      */
     if (rc == NGX_OK || rc == NGX_DONE) {
-        ngx_http_markdown_metric_inc_failopen(conf);
+        ngx_http_markdown_metric_inc_failopen(
+            ctx->effective_conf, conf);
     }
 
     /*

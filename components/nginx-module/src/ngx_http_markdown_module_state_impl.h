@@ -280,6 +280,10 @@ ngx_http_markdown_record_dynconf_reload(ngx_uint_t error_code)
         NGX_HTTP_MARKDOWN_METRIC_INC(
             results.dynconf_reloads.failure_invalid_type);
         break;
+    case NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO:
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            results.dynconf_reloads.failure_file_error);
+        break;
     case DYNCONF_ERR_VALUE_OUT_OF_RANGE:
         NGX_HTTP_MARKDOWN_METRIC_INC(
             results.dynconf_reloads.failure_out_of_range);
@@ -380,17 +384,19 @@ ngx_http_markdown_metric_inc_skip(
  * the same check and future fail-open paths cannot drift.
  *
  * Parameters:
- *   conf - module location configuration
+ *   eff  - request-bound effective configuration snapshot
+ *   conf - module location configuration fallback
  */
 static void
 ngx_http_markdown_metric_inc_failopen(
+    const ngx_http_markdown_effective_conf_t *eff,
     const ngx_http_markdown_conf_t *conf)
 {
-    if (conf == NULL) {
+    if (eff == NULL && conf == NULL) {
         return;
     }
 
-    if (conf->on_error
+    if (ngx_http_markdown_effective_error_policy(eff, conf)
         == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)
     {
         NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);

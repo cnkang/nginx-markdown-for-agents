@@ -345,7 +345,17 @@ ngx_http_markdown_detect_compression(ngx_http_request_t *r)
     if (h == NULL || h->value.len == 0) {
         return NGX_HTTP_MARKDOWN_COMPRESSION_NONE;
     }
-    
+
+    /*
+     * Content-Encoding is a chain grammar, not a single token.  The
+     * precommit path parses comma-separated values with the Rust chain
+     * validator; do not emit the single-token "unsupported" warning before
+     * that parser has classified a valid multi-layer response.
+     */
+    if (ngx_strlchr(h->value.data, h->value.data + h->value.len, ',') != NULL) {
+        return NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN;
+    }
+
     /* Check for gzip compression (case-insensitive, gzip compression detection) */
     if (h->value.len == sizeof("gzip") - 1
         && ngx_strncasecmp(h->value.data,

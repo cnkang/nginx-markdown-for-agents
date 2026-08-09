@@ -23,7 +23,27 @@ void markdown_result_free(struct MarkdownResult *result);
 static void ngx_http_markdown_record_system_failure(
     ngx_http_markdown_ctx_t *ctx);
 static void ngx_http_markdown_metric_inc_failopen(
+    const ngx_http_markdown_effective_conf_t *eff,
     const ngx_http_markdown_conf_t *conf);
+
+/*
+ * Clear full-buffer ownership state when request-pool teardown interrupts a
+ * backpressured response before the normal resume path can drain it.
+ */
+static void
+ngx_http_markdown_fullbuffer_cleanup(void *data)
+{
+    ngx_http_markdown_ctx_t  *ctx;
+
+    ctx = data;
+    if (ctx == NULL) {
+        return;
+    }
+
+    ngx_http_markdown_pending_output_set(
+        &ctx->fullbuffer.pending_output, NULL);
+    ctx->fullbuffer.pending_has_data = 0;
+}
 static ngx_int_t ngx_http_markdown_reject_or_fail_open_buffered_response(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf, const char *debug_message);
@@ -83,6 +103,9 @@ static const u_char ngx_http_markdown_empty_header_value[] = "";
  * the validated direct Host/scheme inputs.
  */
 #define NGX_HTTP_MARKDOWN_FORWARDING_INPUT_MAX  8192
+
+/* Internal result used to distinguish a matched value rejected by the cap. */
+#define NGX_HTTP_MARKDOWN_FORWARDING_HEADER_TOO_LARGE  (-1001)
 
 /* Match one request header against a case-insensitive field name. */
 static ngx_flag_t
@@ -144,7 +167,7 @@ ngx_http_markdown_accumulate_header_value_len(ngx_uint_t match_count,
     if (*total_len > NGX_HTTP_MARKDOWN_FORWARDING_INPUT_MAX
         || value_len > NGX_HTTP_MARKDOWN_FORWARDING_INPUT_MAX - *total_len)
     {
-        return NGX_DECLINED;
+        return NGX_HTTP_MARKDOWN_FORWARDING_HEADER_TOO_LARGE;
     }
 
     *total_len += value_len;
@@ -247,8 +270,9 @@ ngx_http_markdown_copy_request_header_values(
  * zero-copy view into NGINX request storage.
  *
  * Returns NGX_OK with `out` populated, NGX_DECLINED when no matching field
- * line exists, or NGX_ERROR for invalid storage, overflow, or allocation
- * failure.
+ * line exists, NGX_HTTP_MARKDOWN_FORWARDING_HEADER_TOO_LARGE when a matching
+ * value exceeds the input cap, or NGX_ERROR for invalid storage, overflow,
+ * or allocation failure.
  */
 static ngx_int_t
 ngx_http_markdown_collect_request_header_values(
@@ -332,11 +356,24 @@ ngx_http_markdown_collect_forwarding_header(
     if (rc == NGX_ERROR) {
         return NGX_ERROR;
     }
-    *present = 1;
     if (rc == NGX_DECLINED) {
+        *present = 0;
         value->data = NULL;
         value->len = 0;
+        return NGX_OK;
     }
+    if (rc == NGX_HTTP_MARKDOWN_FORWARDING_HEADER_TOO_LARGE) {
+        /* Preserve presence so Rust keeps the malformed-header precedence. */
+        *present = 1;
+        value->data = NULL;
+        value->len = 0;
+        return NGX_OK;
+    }
+    if (rc != NGX_OK) {
+        return NGX_ERROR;
+    }
+
+    *present = 1;
     return NGX_OK;
 }
 
