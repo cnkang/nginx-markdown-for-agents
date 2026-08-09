@@ -398,6 +398,18 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_EXCLUDED     0x08000000
 #define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_METRICS       0x10000000
 
+/*
+ * Dynconf block mask bits are part of the shared configuration contract.
+ * The precedence header repeats these definitions only as a standalone
+ * fallback for translation units that do not include this public header.
+ */
+#define NGX_HTTP_MARKDOWN_BLOCK_FILTER           (1 << 0)
+#define NGX_HTTP_MARKDOWN_BLOCK_PRUNE_NOISE      (1 << 1)
+#define NGX_HTTP_MARKDOWN_BLOCK_LOG_VERBOSITY    (1 << 2)
+#define NGX_HTTP_MARKDOWN_BLOCK_ERROR_POLICY     (1 << 3)
+#define NGX_HTTP_MARKDOWN_BLOCK_STREAMING_BUFFER (1 << 4)
+#define NGX_HTTP_MARKDOWN_DYNCONF_FIELD_COUNT    5
+
 #define NGX_HTTP_MARKDOWN_PROVENANCE_STATIC           0
 #define NGX_HTTP_MARKDOWN_PROVENANCE_DYNCONF          1
 #define NGX_HTTP_MARKDOWN_PROVENANCE_REQUEST_VARIABLE 2
