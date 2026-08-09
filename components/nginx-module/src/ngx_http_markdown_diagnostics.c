@@ -632,51 +632,86 @@ ngx_http_markdown_diag_time(u_char *p, u_char *last, ngx_msec_t stamp)
 }
 
 
+static ngx_int_t
+ngx_http_markdown_diag_json_put_byte(
+    u_char **pos, u_char *last, u_char value)
+{
+    u_char  *current;
+
+    if (pos == NULL || last == NULL) {
+        return NGX_ERROR;
+    }
+
+    current = *pos;
+    if (current == NULL || current >= last) {
+        return NGX_ERROR;
+    }
+
+    *current = value;
+    *pos = current + 1;
+
+    return NGX_OK;
+}
+
+
 /* Append one length-bounded JSON string, escaping syntax and controls. */
 static ngx_int_t
 ngx_http_markdown_diag_json_string(
     u_char **pos, u_char *last, const u_char *value, size_t len)
 {
     static const u_char  hex[] = "0123456789abcdef";
-    u_char              *p;
     u_char               ch;
-    size_t               needed;
 
     if (pos == NULL || *pos == NULL || last == NULL || value == NULL
-        || *pos > last
-        || (size_t) (last - *pos) < 2)
+        || *pos > last)
     {
         return NGX_ERROR;
     }
 
-    p = *pos;
-    *p++ = '"';
-    for (size_t i = 0; i < len; i++) {
-        ch = value[i];
-        needed = (ch == '"' || ch == '\\') ? 2
-                 : (ch < 0x20 ? 6 : 1);
-        if (p > last || (size_t) (last - p) < needed) {
-            return NGX_ERROR;
-        }
-        if (ch == '"' || ch == '\\') {
-            *p++ = '\\';
-            *p++ = ch;
-        } else if (ch < 0x20) {
-            *p++ = '\\';
-            *p++ = 'u';
-            *p++ = '0';
-            *p++ = '0';
-            *p++ = hex[ch >> 4];
-            *p++ = hex[ch & 0x0f];
-        } else {
-            *p++ = ch;
-        }
-    }
-    if (p >= last) {
+    if (ngx_http_markdown_diag_json_put_byte(pos, last, '"') != NGX_OK) {
         return NGX_ERROR;
     }
-    *p++ = '"';
-    *pos = p;
+
+    for (size_t i = 0; i < len; i++) {
+        ch = value[i];
+
+        if (ch == '"' || ch == '\\') {
+            if (ngx_http_markdown_diag_json_put_byte(
+                    pos, last, '\\') != NGX_OK
+                || ngx_http_markdown_diag_json_put_byte(
+                    pos, last, ch) != NGX_OK)
+            {
+                return NGX_ERROR;
+            }
+        } else if (ch < 0x20) {
+            if (ngx_http_markdown_diag_json_put_byte(
+                    pos, last, '\\') != NGX_OK
+                || ngx_http_markdown_diag_json_put_byte(
+                    pos, last, 'u') != NGX_OK
+                || ngx_http_markdown_diag_json_put_byte(
+                    pos, last, '0') != NGX_OK
+                || ngx_http_markdown_diag_json_put_byte(
+                    pos, last, '0') != NGX_OK
+                || ngx_http_markdown_diag_json_put_byte(
+                    pos, last, hex[ch >> 4]) != NGX_OK
+                || ngx_http_markdown_diag_json_put_byte(
+                    pos, last, hex[ch & 0x0f]) != NGX_OK)
+            {
+                return NGX_ERROR;
+            }
+        } else {
+            if (ngx_http_markdown_diag_json_put_byte(
+                    pos, last, ch) != NGX_OK)
+            {
+                return NGX_ERROR;
+            }
+        }
+    }
+
+    if (ngx_http_markdown_diag_json_put_byte(pos, last, '"') != NGX_OK) {
+        return NGX_ERROR;
+    }
+
     return NGX_OK;
 }
 
