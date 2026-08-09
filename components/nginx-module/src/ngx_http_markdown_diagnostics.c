@@ -636,7 +636,7 @@ ngx_http_markdown_diag_time(u_char *p, u_char *last, ngx_msec_t stamp)
 
 static ngx_int_t
 ngx_http_markdown_diag_json_put_byte(
-    u_char **pos, u_char *last, u_char value)
+    u_char **pos, const u_char *last, u_char value)
 {
     u_char  *current;
 

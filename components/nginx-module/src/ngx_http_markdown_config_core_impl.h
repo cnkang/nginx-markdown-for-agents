@@ -292,7 +292,7 @@ static ngx_int_t
 ngx_http_markdown_register_loc_validation(
     ngx_conf_t *cf, const ngx_http_markdown_conf_t *conf)
 {
-    ngx_http_conf_ctx_t          *http_ctx;
+    const ngx_http_conf_ctx_t    *http_ctx;
     ngx_http_markdown_main_conf_t *main_conf;
 
     if (cf == NULL || cf->ctx == NULL) {
