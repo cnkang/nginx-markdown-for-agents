@@ -80,6 +80,12 @@ ngx_http_markdown_measure_content_encoding(
     ngx_http_request_t *r, const ngx_str_t **single_value,
     ngx_uint_t *match_count, size_t *total_len)
 {
+    if (r == NULL || single_value == NULL || match_count == NULL
+        || total_len == NULL)
+    {
+        return NGX_ERROR;
+    }
+
     *single_value = NULL;
     *match_count = 0;
     *total_len = 0;
@@ -89,6 +95,9 @@ ngx_http_markdown_measure_content_encoding(
          part = part->next)
     {
         const ngx_table_elt_t *headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return NGX_ERROR;
+        }
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
             if (headers[i].hash == 0) {
                 continue;
@@ -167,6 +176,10 @@ ngx_http_markdown_collect_content_encoding(ngx_http_request_t *r,
     u_char            *data;
     const ngx_str_t  *single_value;
 
+    if (r == NULL || r->pool == NULL || out == NULL) {
+        return NGX_ERROR;
+    }
+
     out->data = NULL;
     out->len = 0;
 
@@ -220,38 +233,82 @@ ngx_http_markdown_parse_encoding_chain_ffi(const ngx_http_request_t *r,
 {
     FFIEncodingChainResult   result;
     u_char                   classification;
+    ngx_uint_t               layer_capacity;
 
     (void) r;
     ngx_memzero(&result, sizeof(result));
+
+    if (ctx == NULL || combined == NULL
+        || (combined->len > 0 && combined->data == NULL))
+    {
+        if (ctx != NULL) {
+            ctx->decompression.chain_parsed = 1;
+            ctx->decompression.layer_count = 0;
+            ctx->decompression.needed = 0;
+            ctx->decompression.done = 0;
+            ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_NONE;
+            ngx_memzero(ctx->decompression.layers,
+                        sizeof(ctx->decompression.layers));
+        }
+        return DECOMP_CATEGORY_INVALID_ARGS;
+    }
 
     classification = markdown_parse_encoding_chain(
         (const uint8_t *) combined->data, combined->len, &result);
 
     ctx->decompression.chain_parsed = 1;
-    ctx->decompression.layer_count = result.layer_count;
-    ngx_memcpy(ctx->decompression.layers, result.layers,
-               sizeof(ctx->decompression.layers));
 
-    if (classification == ENCODING_CHAIN_VALID) {
-        if (result.layer_count == 0) {
-            return ENCODING_CHAIN_VALID;
-        }
-        /* Map the first layer to the legacy type enum for routing
-         * compatibility (single-layer streaming path). */
-        switch (result.layers[0]) {
-        case 0:
-            ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_GZIP;
-            break;
-        case 1:
-            ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE;
-            break;
-        case 2:
-            ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI;
-            break;
-        default:
-            ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN;
-            break;
-        }
+    if (classification != ENCODING_CHAIN_VALID) {
+        ctx->decompression.layer_count = 0;
+        ctx->decompression.needed = 0;
+        ctx->decompression.done = 0;
+        ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_NONE;
+        ngx_memzero(ctx->decompression.layers,
+                    sizeof(ctx->decompression.layers));
+        return classification;
+    }
+
+    layer_capacity = sizeof(ctx->decompression.layers)
+                     / sizeof(ctx->decompression.layers[0]);
+    if (result.layer_count > layer_capacity) {
+        ctx->decompression.layer_count = 0;
+        ctx->decompression.needed = 0;
+        ctx->decompression.done = 0;
+        ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_NONE;
+        ngx_memzero(ctx->decompression.layers,
+                    sizeof(ctx->decompression.layers));
+        return DECOMP_CATEGORY_INVALID_ARGS;
+    }
+
+    ctx->decompression.layer_count = result.layer_count;
+    ngx_memzero(ctx->decompression.layers,
+                sizeof(ctx->decompression.layers));
+    if (result.layer_count > 0) {
+        ngx_memcpy(ctx->decompression.layers, result.layers,
+                   result.layer_count
+                   * sizeof(ctx->decompression.layers[0]));
+    }
+
+    if (result.layer_count == 0) {
+        ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_NONE;
+        return ENCODING_CHAIN_VALID;
+    }
+
+    /* Map the first layer to the legacy type enum for routing
+     * compatibility (single-layer streaming path). */
+    switch (result.layers[0]) {
+    case 0:
+        ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_GZIP;
+        break;
+    case 1:
+        ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE;
+        break;
+    case 2:
+        ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI;
+        break;
+    default:
+        ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN;
+        break;
     }
 
     return classification;
@@ -1190,7 +1247,8 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
         return NGX_ERROR;
     }
     
-    /* Allocate transferable output using the ctx->buffer allocator family. */
+    /* Allocate transferable output using the same ngx_alloc/ngx_free
+     * allocator family as ctx->buffer (Rule 43). */
     output_data = ngx_http_markdown_decomp_alloc_output(r, output_size,
         ngx_http_markdown_decomp_zlib_cleanup, &stream);
     if (output_data == NULL) {
@@ -1376,7 +1434,8 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
         BrotliDecoderDestroyInstance(decoder);
         return NGX_ERROR;
     }
-    /* Allocate transferable output using the ctx->buffer allocator family. */
+    /* Allocate transferable output using the same ngx_alloc/ngx_free
+     * allocator family as ctx->buffer (Rule 43). */
     output_data = ngx_http_markdown_decomp_alloc_output(r, output_size,
         ngx_http_markdown_decomp_brotli_cleanup, decoder);
     if (output_data == NULL) {

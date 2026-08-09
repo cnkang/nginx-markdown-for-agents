@@ -92,6 +92,11 @@ typedef struct ngx_http_markdown_effective_conf_s
 ngx_int_t ngx_http_markdown_next_body_filter(ngx_http_request_t *r,
     ngx_chain_t *in);
 
+/* Track the number of requests that currently own pending output chains. */
+void ngx_http_markdown_pending_output_set(ngx_chain_t **slot,
+    ngx_chain_t *value);
+ngx_atomic_uint_t ngx_http_markdown_pending_output_current(void);
+
 /*
  * Processing path constants for threshold router
  */
@@ -598,8 +603,6 @@ typedef enum {
  * - enabled: NGX_CONF_UNSET (inherit from parent)
  * - enabled_source: NGX_HTTP_MARKDOWN_ENABLED_UNSET (inherit from parent)
  * - enabled_complex: NULL
- * - max_size: 10MB (10 * 1024 * 1024 bytes)
- * - timeout: 5000ms (5 seconds)
  * - on_error: NGX_HTTP_MARKDOWN_ON_ERROR_PASS (fail-open)
  * - flavor: NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK
  * - token_estimate: NGX_CONF_UNSET (off by default)
@@ -612,16 +615,27 @@ typedef enum {
  * - log_verbosity: NGX_HTTP_MARKDOWN_LOG_INFO
  * - stream_excluded_types: NULL (no exclusions by default)
  * - auto_decompress: 1 (on by default)
- * - decompress_max_size: same as max_size (inherited after memory_budget override)
- * - parse_timeout: 30000ms (30 seconds)
- * - parser_budget: 64MB (64 * 1024 * 1024 bytes)
- * - large_body_threshold: NGX_HTTP_MARKDOWN_THRESHOLD_OFF
  * - ops.diagnostics_enabled: 0 (off by default)
  * - advanced.dynconf_dry_run: 0 (off by default)
  *
- * Streaming defaults when MARKDOWN_STREAMING_ENABLED is compiled in:
- * - stream.budget: NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT
- * - on_error: NGX_HTTP_MARKDOWN_ON_ERROR_PASS
+ * Unified limits defaults (0.9.2 frozen contract; merged via the
+ * NGX_HTTP_MARKDOWN_LIMITS_*_DEFAULT macros):
+ * - limits.conversion_timeout:
+ *   NGX_HTTP_MARKDOWN_LIMITS_CONVERSION_TIMEOUT_DEFAULT (30000ms)
+ * - limits.parser_timeout:
+ *   NGX_HTTP_MARKDOWN_LIMITS_PARSER_TIMEOUT_DEFAULT (10000ms)
+ * - limits.conversion_memory:
+ *   NGX_HTTP_MARKDOWN_LIMITS_CONVERSION_MEMORY_DEFAULT (64MB)
+ * - limits.parser_memory:
+ *   NGX_HTTP_MARKDOWN_LIMITS_PARSER_MEMORY_DEFAULT (32MB)
+ * - limits.streaming_buffer:
+ *   NGX_HTTP_MARKDOWN_LIMITS_STREAMING_BUFFER_DEFAULT (2MB)
+ * - limits.decompressed_size:
+ *   NGX_HTTP_MARKDOWN_LIMITS_DECOMPRESSED_SIZE_DEFAULT (10MB)
+ * - limits.decompression_ratio:
+ *   NGX_HTTP_MARKDOWN_LIMITS_DECOMPRESSION_RATIO_DEFAULT (100)
+ * - limits.max_inflight:
+ *   NGX_HTTP_MARKDOWN_LIMITS_MAX_INFLIGHT_DEFAULT (64)
  *
  * v0.8.0 streaming config defaults (streaming configuration directives):
  * - stream.policy: auto
@@ -794,7 +808,7 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
     } while (0)
 
     NGX_MD_MERGE_STREAM(policy, ngx_uint_t, -1,
-                        NGX_HTTP_MARKDOWN_STREAMING_OFF);
+                        NGX_HTTP_MARKDOWN_STREAMING_AUTO);
     NGX_MD_MERGE_STREAM(policy_explicit, ngx_flag_t, -1, 0);
 
     if (conf->stream.excluded_types == (ngx_array_t *) -1) {
@@ -957,7 +971,9 @@ typedef struct {
         ngx_flag_t               pending_has_data;
     } fullbuffer;
 
-    /* Threshold router path selection (NGX_HTTP_MARKDOWN_PATH_FULLBUFFER or NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) */
+    /* Threshold router path selection (NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+     * NGX_HTTP_MARKDOWN_PATH_INCREMENTAL, or
+     * NGX_HTTP_MARKDOWN_PATH_STREAMING) */
     ngx_uint_t                   processing_path;
 
     /* Copy of the active dynconf snapshot into request pool at header_filter

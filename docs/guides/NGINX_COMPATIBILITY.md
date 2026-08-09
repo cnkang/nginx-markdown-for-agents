@@ -14,7 +14,7 @@ For full troubleshooting and package-level compatibility details, see the
 The minimum supported NGINX version is **1.24.0**. The compatibility matrix
 lists the selected nginx.org official stable and mainline releases targeted by
 the release workflows. A matrix entry does not guarantee that a package asset
-is published for a particular tag; verify the GitHub Release assets before
+the project publishes for a particular tag. Verify the GitHub Release assets before
 downloading or build from source.
 
 > **Canonical source:** [`tools/release-matrix.json`](../../tools/release-matrix.json)
@@ -61,7 +61,7 @@ configure options than the module expects.
 
 ### When It Is Not Required
 
-Prebuilt packages from this project are compiled against the exact nginx.org
+The project compiles prebuilt packages against the exact nginx.org
 official source for each target version. If you install a prebuilt package on
 a matching nginx.org official build, `--with-compat` is not required because
 the signatures already match.
@@ -72,8 +72,8 @@ the signatures already match.
   NGINX 1.26.3 will not load on NGINX 1.24.0, regardless of `--with-compat`.
 - **Does not eliminate all signature differences.** Some configure options
   still affect the signature even with `--with-compat` enabled.
-- **Does not make modules universally portable.** The module must still be
-  compiled against the exact NGINX version it will run on.
+- **Does not make modules universally portable.** The module must still
+  compile against the exact NGINX version it will run on.
 
 ---
 
@@ -110,13 +110,13 @@ NGINX source tree and configuration.
 ### libc Constraints
 
 - When published, prebuilt packages may target both glibc and musl variants.
-- A glibc-built module will not load on a musl-based system (e.g., Alpine
+- A glibc-built module will not load on a musl-based system (for example Alpine
   Linux) and vice versa.
 - Use `ldd --version` to determine your libc type.
 
 ### macOS Limitations
 
-- No prebuilt macOS binaries are provided.
+- The project provides no prebuilt macOS binaries.
 - macOS users must build from source or use the Homebrew tap (convenience
   tier).
 - Apple Silicon (M1/M2/M3) requires the `aarch64-apple-darwin` Rust target.
@@ -125,7 +125,7 @@ NGINX source tree and configuration.
 
 The module defaults to `markdown_error_policy pass` (fail-open). If the
 conversion fails at runtime (timeout, memory budget exceeded, converter
-error), the original HTML response is returned unchanged. This is a safety
+error), the module returns the original HTML response unchanged. This is a safety
 design choice, not a compatibility limitation, but operators should be aware
 that conversion failures are silent from the client perspective.
 

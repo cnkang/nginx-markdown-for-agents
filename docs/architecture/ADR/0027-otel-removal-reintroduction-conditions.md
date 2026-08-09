@@ -1,4 +1,4 @@
-# ADR-0023: OpenTelemetry Removal and Reintroduction Conditions
+# ADR-0027: OpenTelemetry Removal and Reintroduction Conditions
 
 ## Status
 
@@ -16,16 +16,16 @@ integration since v0.8.0. The implementation provided:
 - Per-conversion span creation with W3C traceparent propagation
 - Span attributes: flavor, engine, content_type, input/output bytes, reason_code
 - OTLP/JSON export via NGINX subrequest to an internal endpoint
-- Log-level diagnostic fallback when no collector endpoint was configured
+- Log-level diagnostic fallback when no collector endpoint existed
 
 The OTel surface consisted of two active directives (`markdown_otel on|off` and
 `markdown_otel_endpoint <uri>`) plus five reject-only directives for unimplemented
 features (tracing, metrics, service_name, span_buffer_size, export_timeout).
 
-As part of the 0.9.2 final pre-v1 breaking freeze, the OTel subsystem is
-removed entirely because:
+As part of the 0.9.2 final pre-v1 breaking freeze, the 0.9.2 release removes
+the OTel subsystem entirely because:
 
-1. **Incomplete implementation**: Only basic span creation was implemented.
+1. **Incomplete implementation**: The release implemented only basic span creation.
    Retry buffering, export timeouts, metrics export, and service-name override
    were never implemented (reject-only stubs).
 2. **Unproven in production**: No production deployment validated the tracing
@@ -47,11 +47,11 @@ Remove all OTel implementation from the 0.9.2 release:
 
 ## Reintroduction Conditions
 
-OTel may be reintroduced in a future release (1.1+) if ALL of the following
+OTel may return in a future release (1.1+) if ALL of the following
 conditions are met:
 
 1. **Stable upstream dependency**: An NGINX-native OTel module
-   (e.g., `ngx_otel_module`) reaches stable release status, providing
+   (for example `ngx_otel_module`) reaches stable release status, providing
    standardized span context propagation without per-module reimplementation.
 
 2. **Complete feature scope**: The reintroduced implementation must cover at
@@ -65,8 +65,8 @@ conditions are met:
    outage, and correct span correlation across distributed traces.
 
 4. **No request-path blocking**: OTel export must never block the NGINX event
-   loop. Subrequest-based export or async buffered export are acceptable;
-   synchronous HTTP calls to collectors are not.
+   loop. Subrequest-based export or async buffered export are acceptable.
+   Synchronous HTTP calls to collectors are not.
 
 5. **Feature-gated**: The reintroduced OTel support must be behind a
    compile-time feature flag until the soak criteria above are met in the
@@ -83,5 +83,5 @@ conditions are met:
 - No observability data loss: the module's built-in metrics endpoint
   (`markdown_metrics`) and diagnostics endpoint (`markdown_diagnostics`)
   continue to provide per-request decision visibility.
-- Migration guidance is documented in `docs/guides/MIGRATION-0.9.2.md` and
+- Migration guidance appears in `docs/guides/MIGRATION-0.9.2.md` and
   the CHANGELOG.

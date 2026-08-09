@@ -2,6 +2,13 @@
 
 **Audience**: Operators upgrading from 0.7.x to 0.8.0
 
+> **Historical guide.** This guide covers the 0.7.x → 0.8.0 migration.
+> Later releases removed the directives it teaches
+> (`markdown_streaming_engine`, `markdown_stream_threshold`). If you
+> upgrade from 0.8.x or older to 0.9.2, read
+> [MIGRATION-0.9.2.md](MIGRATION-0.9.2.md) and
+> [0.9.2-breaking-changes.md](0.9.2-breaking-changes.md) instead.
+
 ## Overview
 
 v0.8.0 introduces the **true streaming contract**: the module can now convert
@@ -11,8 +18,8 @@ and only activates for responses that meet size/transfer criteria.
 
 **Key guarantee**: Setting `markdown_streaming_engine off` produces behavior
 identical to 0.7.x. However, **0.8.0 removes v0.6.x streaming compatibility**:
-configurations using `markdown_streaming_auto_threshold` or
-`markdown_streaming_engine $variable` must be updated before upgrading.
+you must update configurations using `markdown_streaming_auto_threshold` or
+`markdown_streaming_engine $variable` before upgrading.
 See sections 5 and 10 below.
 
 ---
@@ -110,7 +117,7 @@ have changed status in 0.8.0:
 | `markdown_streaming_budget` | Still available as path-specific override | `markdown_memory_budget` (unified) |
 | `markdown_streaming_auto_threshold` | **Removed** — `nginx -t` will fail with "unknown directive" | `markdown_stream_threshold` |
 
-**`markdown_streaming_auto_threshold` is REMOVED in 0.8.0.** It is not
+**`markdown_streaming_auto_threshold` disappears in 0.8.0.** It is not
 deprecated — it is gone. NGINX will refuse to start if your configuration
 contains this directive. You **must** update your configuration before
 upgrading:
@@ -148,9 +155,9 @@ the streaming path budget (see
 ### 6. FFI `MarkdownOptions` layout changed
 
 The Rust/C FFI `MarkdownOptions` struct now includes `flush_threshold`, which
-is populated from `markdown_stream_flush_min`.
+gets populated from `markdown_stream_flush_min`.
 
-**Impact**: NGINX configuration compatibility is unchanged, but integrations
+**Impact**: NGINX configuration compatibility stays unchanged, but integrations
 that construct `MarkdownOptions` directly must rebuild against the 0.8.0
 headers and initialize `flush_threshold` explicitly. Use `0` to preserve the
 default immediate-flush behavior.
@@ -159,7 +166,7 @@ default immediate-flush behavior.
 
 The `FFIHeaderEntry` struct's `op_type` field now supports value `3`
 (delete-all entries matching the header name). Old binaries that only
-recognize `op_type` values 0–2 must not be mixed with 0.8.0 shared
+recognize `op_type` values 0–2 must not mix with 0.8.0 shared
 libraries.
 
 **Impact**: Third-party code that consumes `FFIHeaderEntry` arrays from the
@@ -171,11 +178,11 @@ mutation.
 The C function `ngx_http_markdown_check_eligibility()` now requires a
 `const ngx_http_markdown_effective_conf_t *eff` parameter (4th argument)
 for dynconf-safe eligibility evaluation. All call sites must pass the
-effective config; `NULL` is accepted but falls back to live conf (weaker
-consistency guarantee per Rule 34).
+effective config. The function accepts `NULL` but falls back to live conf
+(weaker consistency guarantee per Rule 34).
 
-**Impact**: Any code calling this function must be updated. The function
-cannot be called with the old 3-argument signature.
+**Impact**: Any code calling this function needs an update. The old
+3-argument signature no longer works.
 
 ### 9. Streaming context layout changes
 
@@ -185,7 +192,7 @@ The `ngx_http_markdown_ctx_t` struct has changed in 0.8.0:
   `MARKDOWN_STREAMING_ENABLED`) and includes the full state machine context.
 - `ctx->streaming` sub-struct has new fields for the v0.8.0 streaming
   architecture (completion latches, failopen_replay_buf, pending output
-  bytes tracking, etc.).
+  bytes tracking, and so on).
 - `ctx->streaming.commit_state` field semantics changed from the v0.6.x
   meaning.
 
@@ -198,18 +205,18 @@ header. The layout is not binary-compatible with 0.7.x.
 v0.8.0 **does not preserve** 0.6.x streaming compatibility:
 
 - `NGX_HTTP_MARKDOWN_STREAMING_ENGINE_*` constants (OFF=0, ON=1, AUTO=2)
-  have been removed. Use `NGX_HTTP_MARKDOWN_STREAM_ENGINE_*` (OFF=0,
+  no longer exist. Use `NGX_HTTP_MARKDOWN_STREAM_ENGINE_*` (OFF=0,
   AUTO=1, ON=2) instead. Note the different AUTO/ON values.
 - `markdown_streaming_auto_threshold` directive is **removed** — it is not
   deprecated or bridged. `nginx -t` will fail with "unknown directive".
   Use `markdown_stream_threshold` instead.
 - `markdown_streaming_engine` no longer accepts `$variable` — only the enum
-  values `off`, `auto`, `on` are accepted. Variable-driven per-request engine
+  values `off`, `auto`, `on`. Variable-driven per-request engine
   selection is no longer supported.
-- `ngx_http_markdown_streaming_cfg_t` struct and `conf->streaming` field have
-  been removed. Runtime code reads from `conf->stream.*` exclusively.
+- `ngx_http_markdown_streaming_cfg_t` struct and `conf->streaming` field no
+  longer exist. Runtime code reads from `conf->stream.*` exclusively.
 - `ngx_http_markdown_bridge_legacy_stream_values` and
-  `ngx_http_markdown_merge_streaming_values` functions have been removed.
+  `ngx_http_markdown_merge_streaming_values` functions no longer exist.
 - `ngx_http_markdown_select_processing_path` no longer falls back to
   `conf->streaming.engine` from the v0.6.x compatibility bridge.
 - Diagnostics now shows `threshold_explicit` instead of
@@ -217,20 +224,20 @@ v0.8.0 **does not preserve** 0.6.x streaming compatibility:
 - Dynconf snapshot no longer includes `markdown_streaming_auto_threshold` alias.
 
 **Impact**: Configurations that use `markdown_streaming_auto_threshold` or
-`markdown_streaming_engine $variable` **must be updated before upgrading to
-0.8.0**. NGINX will refuse to start with the old directives. C/Rust FFI
-must be upgraded in lockstep — mixing 0.7.x and 0.8.0 components causes
+`markdown_streaming_engine $variable` **need updating before you upgrade to
+0.8.0**. NGINX will refuse to start with the old directives. You must upgrade
+C/Rust FFI in lockstep — mixing 0.7.x and 0.8.0 components causes
 FFI layout mismatches.
 
-### 11. Rust converter and C module must be upgraded together
+### 11. Rust converter and C module need a matched upgrade
 
-The Rust converter shared library and the NGINX C module must always be
-deployed as a matched pair. Mixing a 0.8.0 Rust library with a 0.7.x C
+The Rust converter shared library and the NGINX C module must always deploy
+as a matched pair. Mixing a 0.8.0 Rust library with a 0.7.x C
 module (or vice versa) will result in FFI layout mismatches, incorrect
 `FFIHeaderEntry` processing, and potential memory corruption.
 
-**Impact**: Package deployment workflows must ensure both components are
-upgraded atomically. The RPM/DEB package dependencies enforce this via the
+**Impact**: Package deployment workflows must ensure both components upgrade
+atomically. The RPM/DEB package dependencies enforce this via the
 NGINX module ABI range constraint.
 
 ---
@@ -263,9 +270,9 @@ markdown_stream_threshold 5m;
 **Default:** `256k`
 
 Size of the pre-commit replay buffer. During the streaming pre-commit phase,
-converted output is buffered up to this size. If an error occurs before the
-commit boundary, the buffered content is discarded and the original HTML is
-replayed to the client (fail-open behavior per `markdown_streaming_on_error`).
+converted output buffers up to this size. If an error occurs before the
+commit boundary, the buffered content gets discarded and the module replays
+the original HTML to the client (fail-open behavior per `markdown_streaming_on_error`).
 
 Setting this to `0` disables pre-commit HTML replay — errors immediately
 trigger the configured error policy without fallback.
@@ -284,10 +291,10 @@ markdown_stream_precommit_buffer 0;
 **Default:** `16k`
 
 Minimum Markdown output batch size before flushing downstream. The engine
-accumulates converted output until this threshold is reached, then flushes.
+accumulates converted output until it reaches this threshold, then flushes.
 This reduces per-byte overhead and backpressure from many small writes.
 
-Must be greater than zero (`0` is rejected by `nginx -t`).
+Must be greater than zero (`nginx -t` rejects `0`).
 
 ```nginx
 # Lower latency with smaller batches
@@ -304,7 +311,7 @@ markdown_stream_flush_min 64k;
 
 Additional MIME types to exclude from streaming. These are additive to the
 built-in hard exclusions (`text/event-stream`, `application/x-ndjson`,
-`application/stream+json`). Built-in exclusions cannot be removed.
+`application/stream+json`). Built-in exclusions stay fixed.
 
 ```nginx
 # Exclude CSV and XML feeds from streaming
@@ -323,14 +330,14 @@ markdown_stream_excluded_types text/csv application/atom+xml;
 
 > **Note for v0.9.0+ operators:** The directives marked 'unchanged' below (including `markdown_on_error`, `markdown_on_wildcard`, `markdown_conditional_requests`, `markdown_trust_forwarded_headers`) were subsequently removed or renamed in v0.9.0. Please refer to [MIGRATION-0.9.md](MIGRATION-0.9.md) for current directive names.
 
-The following behaviors are identical between 0.7.x and 0.8.0. No operator
-action is required for these areas.
+The following behaviors are identical between 0.7.x and 0.8.0. These areas
+require no operator action.
 
 ### Full-buffer conversion path
 
 When `markdown_streaming_engine off` is set (or when auto mode selects
-full-buffer for a given response), behavior is identical to 0.7.x. The entire
-response is buffered, converted, and sent with a `Content-Length` header.
+full-buffer for a given response), behavior is identical to 0.7.x. The module
+buffers the entire response, converts it, and sends it with a `Content-Length` header.
 
 ### All non-streaming directives
 
@@ -371,20 +378,20 @@ not available (chunked output has no pre-computed ETag).
 
 ### Fail-open behavior
 
-The default `markdown_on_error pass` policy is unchanged. Conversion failures
+The default `markdown_on_error pass` policy stays unchanged. Conversion failures
 in the full-buffer path still serve original HTML transparently.
 
 ### Metrics endpoint
 
-The `/markdown-metrics` endpoint format is unchanged. New streaming counters
+The `/markdown-metrics` endpoint format stays unchanged. New streaming counters
 are additive — existing metric series remain with identical semantics.
-Prometheus and JSON formats are both still supported.
+Prometheus and JSON formats are both still supported. Existing integrations keep working.
 
 ### Dynamic configuration (dynconf)
 
 The dynamic configuration watcher, file format, and supported runtime keys
-are unchanged. Streaming-specific runtime tuning continues to use the
-`streaming_budget` dynconf key.
+stay unchanged. Streaming-specific runtime tuning continues to use the
+`streaming_budget` dynconf key. The key name remains the same.
 
 ### Shadow mode
 
@@ -397,6 +404,7 @@ output parity before enabling streaming for live traffic.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Marked guide historical |
 | 0.8.3 | 2026-06-26 | Kang | No changes; version alignment with 0.8.3 release |
 | 0.8.0 | 2026-06-16 | Kang | Initial migration guide |
 | 0.8.0 | 2026-06-16 | Codex | Added missing streaming reason codes: `not_html`, `compressed`, `not_candidate`, `accept_mismatch` |

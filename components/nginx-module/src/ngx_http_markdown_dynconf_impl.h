@@ -34,6 +34,16 @@
 #include <stdlib.h>
 #include <sys/types.h>
 
+#if defined(__APPLE__)
+#define NGX_HTTP_MARKDOWN_STAT_MTIME_NSEC(fi) ((fi).st_mtimespec.tv_nsec)
+#elif defined(__linux__) \
+    && ((defined(_POSIX_C_SOURCE) && _POSIX_C_SOURCE >= 200809L) \
+        || defined(_GNU_SOURCE))
+#define NGX_HTTP_MARKDOWN_STAT_MTIME_NSEC(fi) ((fi).st_mtim.tv_nsec)
+#else
+#define NGX_HTTP_MARKDOWN_STAT_MTIME_NSEC(fi) 0L
+#endif
+
 /* NGINX defines this in ngx_config.h; keep standalone unit builds portable. */
 #ifndef NGX_MAX_SIZE_T_VALUE
 #define NGX_MAX_SIZE_T_VALUE  ((size_t) -1)
@@ -49,6 +59,10 @@
  * Dynamic config watch interval in milliseconds.
  */
 #define NGX_HTTP_MARKDOWN_DYNCONF_WATCH_MS  1000
+
+/* Streaming buffer bounds shared by static and dynamic configuration. */
+#define NGX_HTTP_MARKDOWN_DYNCONF_STREAMING_BUFFER_MIN  65536
+#define NGX_HTTP_MARKDOWN_DYNCONF_STREAMING_BUFFER_MAX  1073741824
 
 /*
  * Backstop full content-digest check frequency in timer ticks.
@@ -66,7 +80,8 @@
 #define NGX_HTTP_MARKDOWN_DYNCONF_BACKSTOP_TICKS  30
 
 /*
- * SHA-256 hex digest length (64 hex chars + NUL terminator).
+ * SHA-256 hex digest length: 72 = 'sha256:' prefix (7) + 64 hex
+ * chars + NUL terminator.
  */
 #define NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_LEN  72
 
@@ -485,11 +500,8 @@ ngx_http_markdown_build_effective_conf(
     ngx_http_markdown_select_effective_error(
         eff, snap, conf, mask, snap_valid);
 
-    if (snap_valid) {
-        eff->memory_budget = snap->memory_budget;
-    } else {
-        eff->memory_budget = conf->advanced.memory_budget;
-    }
+    /* memory_budget is static in the v0.9.2 dynconf schema. */
+    eff->memory_budget = conf->advanced.memory_budget;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     ngx_http_markdown_select_effective_streaming(
@@ -663,15 +675,7 @@ ngx_http_markdown_dynconf_check(ngx_http_markdown_dynconf_watcher_t *watcher,
      * Falls back to 0 (second-only precision) on other platforms
      * or test stubs.
      */
-#if defined(__APPLE__)
-    cur_mtime_nsec = fi.st_mtimespec.tv_nsec;
-#elif defined(__linux__) && defined(_POSIX_C_SOURCE) && _POSIX_C_SOURCE >= 200809L
-    cur_mtime_nsec = fi.st_mtim.tv_nsec;
-#elif defined(__linux__) && defined(_GNU_SOURCE)
-    cur_mtime_nsec = fi.st_mtim.tv_nsec;
-#else
-    cur_mtime_nsec = 0;
-#endif
+    cur_mtime_nsec = NGX_HTTP_MARKDOWN_STAT_MTIME_NSEC(fi);
 
     /* Compare all metadata fields.  Any change triggers reload. */
     if (cur_dev != watcher->file_state.file_dev
@@ -956,13 +960,8 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
         watcher->file_state.file_ino = fi.st_ino;
         watcher->file_state.file_size = (off_t) fi.st_size;
         watcher->file_state.file_mtime_sec = ngx_file_mtime(&fi);
-#if defined(__APPLE__)
-        watcher->file_state.file_mtime_nsec = fi.st_mtimespec.tv_nsec;
-#elif defined(__linux__) && defined(_GNU_SOURCE)
-        watcher->file_state.file_mtime_nsec = fi.st_mtim.tv_nsec;
-#else
-        watcher->file_state.file_mtime_nsec = 0;
-#endif
+        watcher->file_state.file_mtime_nsec =
+            NGX_HTTP_MARKDOWN_STAT_MTIME_NSEC(fi);
     }
 
     /* Allocate the timer event from the cycle pool. */
@@ -1082,8 +1081,170 @@ ngx_http_markdown_dynconf_stop(ngx_http_markdown_dynconf_watcher_t *watcher,
 }
 
 
+static ngx_int_t
+ngx_http_markdown_dynconf_apply_streaming_buffer(
+    const ngx_http_markdown_dynconf_snapshot_t *snapshot,
+    ngx_http_markdown_dynconf_snapshot_t *candidate,
+    const FFIDynconfResult *result)
+{
+#ifdef MARKDOWN_STREAMING_ENABLED
+    if (result->streaming_buffer == DYNCONF_NOT_SET_U64) {
+        return NGX_OK;
+    }
+
+    if (result->streaming_buffer
+            < NGX_HTTP_MARKDOWN_DYNCONF_STREAMING_BUFFER_MIN
+        || result->streaming_buffer
+            > NGX_HTTP_MARKDOWN_DYNCONF_STREAMING_BUFFER_MAX
+        || result->streaming_buffer > NGX_MAX_SIZE_T_VALUE
+        || (snapshot->memory_budget != 0
+            && result->streaming_buffer > snapshot->memory_budget))
+    {
+        return NGX_ERROR;
+    }
+
+    candidate->streaming_budget = (size_t) result->streaming_buffer;
+#else
+    (void) snapshot;
+    (void) candidate;
+
+    if (result->streaming_buffer != DYNCONF_NOT_SET_U64) {
+        return NGX_ERROR;
+    }
+#endif
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_dynconf_apply_filter(
+    ngx_http_markdown_dynconf_snapshot_t *candidate,
+    const FFIDynconfResult *result)
+{
+    if (result->filter == DYNCONF_NOT_SET_U8) {
+        return NGX_OK;
+    }
+
+    if (result->filter != DYNCONF_FILTER_ON
+        && result->filter != DYNCONF_FILTER_OFF)
+    {
+        return NGX_ERROR;
+    }
+
+    candidate->enabled = result->filter == DYNCONF_FILTER_ON;
+    candidate->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
+    candidate->enabled_complex = NULL;
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_dynconf_apply_prune_noise(
+    ngx_http_markdown_dynconf_snapshot_t *candidate,
+    const FFIDynconfResult *result)
+{
+    if (result->prune_noise == DYNCONF_NOT_SET_U8) {
+        return NGX_OK;
+    }
+
+    if (result->prune_noise != DYNCONF_PRUNE_NOISE_ON
+        && result->prune_noise != DYNCONF_PRUNE_NOISE_OFF)
+    {
+        return NGX_ERROR;
+    }
+
+    candidate->prune_noise = result->prune_noise == DYNCONF_PRUNE_NOISE_ON;
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_dynconf_apply_log_verbosity(
+    ngx_http_markdown_dynconf_snapshot_t *candidate,
+    const FFIDynconfResult *result)
+{
+    if (result->log_verbosity == DYNCONF_NOT_SET_U8) {
+        return NGX_OK;
+    }
+
+    if (result->log_verbosity > DYNCONF_LOG_DEBUG) {
+        return NGX_ERROR;
+    }
+
+    candidate->log_verbosity = result->log_verbosity;
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_dynconf_apply_error_policy(
+    ngx_http_markdown_dynconf_snapshot_t *candidate,
+    const FFIDynconfResult *result)
+{
+    if (result->error_policy == DYNCONF_NOT_SET_U8) {
+        return NGX_OK;
+    }
+
+    switch (result->error_policy) {
+    case DYNCONF_POLICY_PASS:
+        candidate->error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+        candidate->error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+        break;
+    case DYNCONF_POLICY_FAIL_CLOSED:
+        candidate->error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+        candidate->error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+        break;
+    case DYNCONF_POLICY_STATUS_429:
+        candidate->error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+        candidate->error_status = NGX_HTTP_TOO_MANY_REQUESTS;
+        break;
+    case DYNCONF_POLICY_STATUS_503:
+        candidate->error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+        candidate->error_status = NGX_HTTP_SERVICE_UNAVAILABLE;
+        break;
+    default:
+        return NGX_ERROR;
+    }
+
+    return NGX_OK;
+}
+
+
 /* The line-oriented parser remains only for its legacy unit-test contract.
  * Production reloads use the bounded Rust JSON/FFI parser below. */
+static ngx_int_t
+ngx_http_markdown_dynconf_apply_ffi_result(
+    ngx_http_markdown_dynconf_snapshot_t *snapshot,
+    const FFIDynconfResult *result)
+{
+    ngx_http_markdown_dynconf_snapshot_t candidate;
+
+    if (snapshot == NULL || result == NULL || result->error_code != DYNCONF_OK) {
+        return NGX_ERROR;
+    }
+
+    candidate = *snapshot;
+
+    /* Validate before applying any field so a rejected result is atomic. */
+    if (ngx_http_markdown_dynconf_apply_streaming_buffer(
+            snapshot, &candidate, result) != NGX_OK
+        || ngx_http_markdown_dynconf_apply_filter(&candidate, result) != NGX_OK
+        || ngx_http_markdown_dynconf_apply_prune_noise(&candidate, result)
+           != NGX_OK
+        || ngx_http_markdown_dynconf_apply_log_verbosity(&candidate, result)
+           != NGX_OK
+        || ngx_http_markdown_dynconf_apply_error_policy(&candidate, result)
+           != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    candidate.valid = 1;
+    *snapshot = candidate;
+    return NGX_OK;
+}
+
 #if defined(NGX_HTTP_MARKDOWN_DYNCONF_LEGACY_TEST)
 
 /*
@@ -1509,6 +1670,14 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_dynconf_snapshot_t *snapshot,
             {
                 return NGX_ERROR;
             }
+            if (budget < NGX_HTTP_MARKDOWN_DYNCONF_STREAMING_BUFFER_MIN
+                || budget > NGX_HTTP_MARKDOWN_DYNCONF_STREAMING_BUFFER_MAX)
+            {
+                ngx_log_error(NGX_LOG_WARN, log, 0,
+                              "markdown: streaming_budget is outside "
+                              "the allowed range (64k..1g)");
+                return NGX_ERROR;
+            }
             snapshot->streaming_budget = budget;
         }
 #else
@@ -1566,6 +1735,35 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_dynconf_snapshot_t *snapshot,
         return NGX_ERROR;
     }
 
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_dynconf_validate_budget_relationship(
+    const ngx_http_markdown_dynconf_snapshot_t *snapshot,
+    ngx_log_t *log)
+{
+#ifdef MARKDOWN_STREAMING_ENABLED
+    if (snapshot == NULL) {
+        return NGX_ERROR;
+    }
+
+    if (snapshot->memory_budget != 0
+        && snapshot->streaming_budget != 0
+        && snapshot->streaming_budget > snapshot->memory_budget)
+    {
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+                      "markdown: streaming_budget (%uz) exceeds "
+                      "memory_budget (%uz)",
+                      snapshot->streaming_budget,
+                      snapshot->memory_budget);
+        return NGX_ERROR;
+    }
+#else
+    (void) snapshot;
+    (void) log;
+#endif
     return NGX_OK;
 }
 
@@ -2218,6 +2416,17 @@ ngx_http_markdown_dynconf_reload_dryrun(
             line_num, log, &applied, &watcher->diagnostic_state.last_validation);
     }
 
+    if (ngx_http_markdown_dynconf_validate_budget_relationship(
+            &watcher->staging_snapshot, log) != NGX_OK)
+    {
+        ngx_http_markdown_dynconf_record_error(
+            &watcher->diagnostic_state.last_validation, 0,
+            (const u_char *) "streaming_budget",
+            sizeof("streaming_budget") - 1,
+            (const u_char *) "exceeds memory_budget",
+            sizeof("exceeds memory_budget") - 1);
+    }
+
     /* Final validation: if any errors were accumulated across all
        lines, mark invalid and report; otherwise mark valid. */
     if (watcher->diagnostic_state.last_validation.total_errors > 0) {
@@ -2353,6 +2562,12 @@ ngx_http_markdown_dynconf_reload_normal(
                       "in \"%V\"; expected schema_version = "
                       NGX_HTTP_MARKDOWN_DYNCONF_SCHEMA_VERSION_09,
                       &watcher->path);
+        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
+    }
+
+    if (ngx_http_markdown_dynconf_validate_budget_relationship(
+            &watcher->staging_snapshot, log) != NGX_OK)
+    {
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
     }
 
@@ -2597,66 +2812,6 @@ ngx_http_markdown_dynconf_record_error(
     watcher->diagnostic_state.last_error_len = length;
 }
 
-
-static ngx_int_t
-ngx_http_markdown_dynconf_apply_ffi_result(
-    ngx_http_markdown_dynconf_snapshot_t *snapshot,
-    const FFIDynconfResult *result)
-{
-    if (snapshot == NULL || result == NULL || result->error_code != DYNCONF_OK) {
-        return NGX_ERROR;
-    }
-
-    if (result->filter != DYNCONF_NOT_SET_U8) {
-        snapshot->enabled = result->filter == DYNCONF_FILTER_ON;
-        snapshot->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
-        snapshot->enabled_complex = NULL;
-    }
-    if (result->prune_noise != DYNCONF_NOT_SET_U8) {
-        snapshot->prune_noise = result->prune_noise == DYNCONF_PRUNE_NOISE_ON;
-    }
-    if (result->log_verbosity != DYNCONF_NOT_SET_U8) {
-        snapshot->log_verbosity = result->log_verbosity;
-    }
-    if (result->error_policy != DYNCONF_NOT_SET_U8) {
-        switch (result->error_policy) {
-        case DYNCONF_POLICY_PASS:
-            snapshot->error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
-            snapshot->error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
-            break;
-        case DYNCONF_POLICY_FAIL_CLOSED:
-            snapshot->error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
-            snapshot->error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
-            break;
-        case DYNCONF_POLICY_STATUS_429:
-            snapshot->error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
-            snapshot->error_status = NGX_HTTP_TOO_MANY_REQUESTS;
-            break;
-        case DYNCONF_POLICY_STATUS_503:
-            snapshot->error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
-            snapshot->error_status = NGX_HTTP_SERVICE_UNAVAILABLE;
-            break;
-        default:
-            return NGX_ERROR;
-        }
-    }
-#ifdef MARKDOWN_STREAMING_ENABLED
-    if (result->streaming_buffer != DYNCONF_NOT_SET_U64) {
-        if (result->streaming_buffer > NGX_MAX_SIZE_T_VALUE) {
-            return NGX_ERROR;
-        }
-        snapshot->streaming_budget = (size_t) result->streaming_buffer;
-    }
-#else
-    if (result->streaming_buffer != DYNCONF_NOT_SET_U64) {
-        return NGX_ERROR;
-    }
-#endif
-    snapshot->valid = 1;
-    return NGX_OK;
-}
-
-
 /* Reload the bounded file, validate its JSON result, and publish it atomically.
  * The staged snapshot and digest copies are request-independent, so all
  * validation completes before active state or last-known-good state changes.
@@ -2773,6 +2928,7 @@ ngx_http_markdown_dynconf_reload(
 }
 
 #endif /* NGX_HTTP_MARKDOWN_DYNCONF_LEGACY_TEST */
+
 
 
 #endif /* NGX_HTTP_MARKDOWN_DYNCONF_IMPL_H */

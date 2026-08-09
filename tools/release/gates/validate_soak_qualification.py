@@ -47,6 +47,9 @@ from lib.path_validation import (  # noqa: E402
     validate_read_path,
     validate_write_path_within_root,
 )
+from lib.executable_validation import (  # noqa: E402
+    resolve_approved_executable,
+)
 DEFAULT_MANIFEST = (
     REPO_ROOT / "artifacts" / "release" / "0.9.2" / "short-soak-scenario-manifest.json"
 )
@@ -413,21 +416,43 @@ def run_ab_chunk(url: str, concurrency: int, seconds: int, output_dir: pathlib.P
     validated_output_dir = validate_write_path_within_root(
         output_dir, REPO_ROOT, purpose="soak raw logs"
     )
-    ab = subprocess.run(
-        [
-            "/usr/sbin/ab",
-            "-t",
-            str(seconds),
-            "-c",
-            str(concurrency),
-            "-k",
-            validated_url,
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=seconds * 4,
-    )
+    ab_path = resolve_approved_executable("ab")
+    if not ab_path:
+        return {
+            "p50_ms": 0.0,
+            "p99_ms": 0.0,
+            "failed_requests": 0,
+            "completed_requests": 0,
+            "rps": 0.0,
+            "_returncode": -1,
+            "_error": "ab executable not found",
+        }
+    try:
+        ab = subprocess.run(
+            [
+                ab_path,
+                "-t",
+                str(seconds),
+                "-c",
+                str(concurrency),
+                "-k",
+                validated_url,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=max(1, seconds * 4),
+        )
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "p50_ms": 0.0,
+            "p99_ms": 0.0,
+            "failed_requests": 0,
+            "completed_requests": 0,
+            "rps": 0.0,
+            "_returncode": -1,
+            "_error": f"ab timed out: {exc}",
+        }
     report = parse_ab_report(ab.stdout or ab.stderr)
     raw_dir = validated_output_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
@@ -536,15 +561,52 @@ def build_corpus(runtime_dir: pathlib.Path, manifest: dict) -> dict:
     return corpus
 
 
+def _read_master_pid(pid_file: pathlib.Path) -> int | None:
+    """Read a valid NGINX master PID, or return None while it starts."""
+    if not pid_file.is_file():
+        return None
+    try:
+        return int(pid_file.read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _find_worker_child(ps_output: str, master_pid: int) -> int:
+    """Find the first process whose parent is the NGINX master."""
+    for line in ps_output.splitlines():
+        fields = line.split(None, 2)
+        if len(fields) == 3 and fields[1] == str(master_pid):
+            return int(fields[0])
+    return -1
+
+
+def _query_worker_pid(master_pid: int) -> int:
+    """Query the process table for a worker of the supplied master PID."""
+    try:
+        ps = subprocess.run(
+            ["ps", "-axo", "pid=,ppid=,comm="],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return -1
+    if ps.returncode != 0:
+        return -1
+    return _find_worker_child(ps.stdout, master_pid)
+
+
 def find_worker_pid(runtime_dir: pathlib.Path) -> int:
+    """Wait briefly for the NGINX master and return one worker PID."""
     pid_file = runtime_dir / "nginx.pid"
     deadline = time.time() + 15
     while time.time() < deadline:
-        if pid_file.is_file():
-            try:
-                return int(pid_file.read_text().strip())
-            except ValueError:
-                pass
+        master_pid = _read_master_pid(pid_file)
+        if master_pid is not None:
+            worker_pid = _query_worker_pid(master_pid)
+            if worker_pid > 0:
+                return worker_pid
         time.sleep(0.5)
     return -1
 
@@ -677,6 +739,20 @@ def _validated_nginx_binary() -> pathlib.Path | None:
     return resolved
 
 
+def _validated_module() -> pathlib.Path | None:
+    """Resolve MODULE_SO and reject missing or unreadable module files."""
+    raw_path = os.environ.get("MODULE_SO", "")
+    if not raw_path:
+        return None
+    try:
+        resolved = validate_read_path(raw_path, purpose="MODULE_SO")
+    except FileNotFoundError:
+        return None
+    if not resolved.is_file() or not os.access(resolved, os.R_OK):
+        return None
+    return resolved
+
+
 def _runtime_directory() -> pathlib.Path:
     """Return a private runtime directory under the repository build tree."""
     configured = os.environ.get("SOAK_RUNTIME_DIR")
@@ -699,24 +775,29 @@ def _runtime_directory() -> pathlib.Path:
 
 
 def handle_missing_nginx(args: argparse.Namespace, manifest: dict) -> int | None:
-    """Record a justified skip when NGINX_BIN is unavailable, or None to
-    continue. Returns an exit code when the soak cannot run."""
-    if _validated_nginx_binary() is not None:
+    """Require both NGINX_BIN and MODULE_SO, or record an explicit skip."""
+    missing = []
+    if _validated_nginx_binary() is None:
+        missing.append("NGINX_BIN")
+    if _validated_module() is None:
+        missing.append("MODULE_SO")
+    if not missing:
         return None
+    missing_text = " and ".join(missing)
     if args.allow_skip_soak:
         record = {
             "schema_version": RECORD_SCHEMA_VERSION,
             "candidate_sha": manifest["candidate_sha"],
             "run_id": f"soak-{int(time.time())}",
             "status": "skip",
-            "skip_reason": "NGINX_BIN not set or binary not found",
+            "skip_reason": f"{missing_text} not set or unavailable",
             "policy_reference": "release short-soak qualification thresholds",
         }
         output_path = _write_record(record, args)
-        print(f"SKIP: NGINX_BIN not set; skip recorded at {output_path}")
+        print(f"SKIP: {missing_text} unavailable; skip recorded at {output_path}")
         return 0
     print(
-        "ERROR: NGINX_BIN not set or binary not found; "
+        f"ERROR: {missing_text} not set or unavailable; "
         "set NGINX_BIN (and MODULE_SO) or pass --allow-skip-soak",
         file=sys.stderr,
     )
@@ -751,7 +832,9 @@ def real_main(args: argparse.Namespace) -> int:
     base_url = f"http://127.0.0.1:{port}"
     runtime_dir, corpus, nginx = prepare_runtime(base_url, manifest, module_so)
     try:
-        if not wait_for_ready(f"{base_url}/{corpus['small']}"):
+        ready_fixture = next(iter(corpus.values()), None)
+        if not ready_fixture or not wait_for_ready(
+                f"{base_url}/{ready_fixture}"):
             print("ERROR: nginx did not become ready", file=sys.stderr)
             return 1
         worker_pid = find_worker_pid(runtime_dir)

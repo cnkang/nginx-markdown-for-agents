@@ -43,22 +43,6 @@ static void ngx_http_markdown_streaming_record_postcommit_category(
     const ngx_http_markdown_conf_t *conf, uint32_t error_code);
 
 /*
- * Streaming body filter main entry point.
- *
- * Implements the streaming state machine lifecycle:
- * Idle -> PreCommit -> PostCommit -> Finalized.
- * Handles backpressure recovery, fallback to full-buffer,
- * and fail-open passthrough.
- *
- * r  - current HTTP request
- * in - incoming chain of upstream buffers (NULL on resume)
- *
- * Returns:
- *   NGX_OK      on success
- *   NGX_AGAIN   on downstream backpressure
- *   NGX_ERROR   on unrecoverable failure
- */
-/*
  * Process a single upstream buffer through the streaming pipeline.
  *
  * Decompresses (if needed), enforces cumulative size limits,
@@ -161,8 +145,8 @@ ngx_http_markdown_streaming_send_output(
  *     success/failure metrics must record only after the deferred send.
  *
  * Only one of the three latches may be set at any point during a
- * single finalization pass; they are cleared in step() after the
- * finalization is complete.
+ * single finalization pass; they are cleared by their owning helpers
+ * at the respective finalization stage.
  */
 static ngx_int_t
 ngx_http_markdown_streaming_finalize_request(
@@ -334,9 +318,7 @@ ngx_http_markdown_streaming_record_postcommit_failure(
  * conf - location configuration
  *
  * Returns:
- *   NGX_OK    on successful terminal send
- *   NGX_AGAIN on persistent backpressure
- *   NGX_ERROR on send failure
+ *   NGX_OK, NGX_DONE, NGX_AGAIN, or NGX_ERROR
  */
 static ngx_int_t
 ngx_http_markdown_streaming_send_deferred_lastbuf(
@@ -505,7 +487,8 @@ ngx_http_markdown_streaming_cleanup(void *data)
      * tracking state so stale references are not observed after
      * cleanup runs.
      */
-    ctx->streaming.pending_output = NULL;
+    ngx_http_markdown_pending_output_set(
+        &ctx->streaming.pending_output, NULL);
 
     /*
      * Clear pending input chain.  Links are pool-allocated and will be
@@ -835,7 +818,8 @@ ngx_http_markdown_streaming_abandon_pending_after_fatal(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx)
 {
-    ctx->streaming.pending_output = NULL;
+    ngx_http_markdown_pending_output_set(
+        &ctx->streaming.pending_output, NULL);
     ctx->streaming.pending_meta.has_data = 0;
     ctx->streaming.pending_meta.bytes = 0;
     ctx->streaming.pending_meta.zero_copy = 0;
@@ -1174,7 +1158,8 @@ ngx_http_markdown_streaming_save_pending(
         return NGX_ERROR;
     }
 
-    ctx->streaming.pending_output = out;
+    ngx_http_markdown_pending_output_set(
+        &ctx->streaming.pending_output, out);
     ctx->streaming.pending_meta.has_data =
         (data != NULL && len > 0) ? 1 : 0;
     ctx->streaming.pending_meta.bytes = len;
@@ -1548,6 +1533,12 @@ static void
 ngx_http_markdown_streaming_account_pending_output(
     ngx_http_markdown_ctx_t *ctx, ngx_int_t rc)
 {
+    /*
+     * Zero-copy pending delivery is retained accounting only: since
+     * 0.9.2 no pending chain can carry the zero_copy flag (the output
+     * decision is always POOL_COPY), so the zero-copy counter stays
+     * at zero by construction.
+     */
     if (ngx_http_markdown_streaming_delivery_ok(rc)
         && ctx->streaming.pending_meta.bytes > 0)
     {
@@ -1726,7 +1717,8 @@ ngx_http_markdown_streaming_resume_pending(
         return NGX_AGAIN;
     }
 
-    ctx->streaming.pending_output = NULL;
+    ngx_http_markdown_pending_output_set(
+        &ctx->streaming.pending_output, NULL);
 
     /* Backpressure resume: pending drain completed */
     if (ngx_http_markdown_streaming_delivery_ok(rc)) {
@@ -2366,6 +2358,11 @@ ngx_http_markdown_streaming_send_zero_copy_feed_output(
      *
      * On failure, check owner_transferred to determine if we can
      * fallback to pool-copy (caller still owns the buffer).
+     *
+     * Retained but never selected since 0.9.2: the output decision
+     * always returns POOL_COPY (see ngx_http_markdown_hybrid_output_decision),
+     * so this function is dead in the current release.  The code is
+     * kept intact (pre-freeze), not removed.
      */
     zb = ngx_http_markdown_rust_buf_create_ex(r->pool, out_data, out_len,
                                               &owner_transferred);
@@ -2461,6 +2458,10 @@ ngx_http_markdown_streaming_send_feed_output(
     decision = ngx_http_markdown_hybrid_output_decision(
         conf, /* chunk_is_terminal */ 0, bp_active);
 
+    /*
+     * Zero-copy branch: retained but never selected since 0.9.2
+     * (decision is always POOL_COPY).
+     */
     if (decision == NGX_HTTP_MARKDOWN_OUTPUT_ZERO_COPY) {
         return ngx_http_markdown_streaming_send_zero_copy_feed_output(
             r, ctx, out_data, out_len);
@@ -3524,7 +3525,9 @@ ngx_http_markdown_streaming_init_buffers(
         }
     }
 
-    ctx->streaming.prebuffer_limit = conf->limits.streaming_buffer;
+    ctx->streaming.prebuffer_limit = ctx->effective_conf != NULL
+        ? ctx->effective_conf->streaming_buffer
+        : conf->limits.streaming_buffer;
     if (ctx->streaming.prebuffer_limit > 0) {
         rc = ngx_http_markdown_buffer_init(
             &ctx->streaming.prebuffer,
@@ -3582,6 +3585,7 @@ ngx_http_markdown_streaming_init_handle(
     ngx_pool_cleanup_t     *cln;
     uint32_t                init_rc;
     ngx_int_t               rc;
+    size_t                  prebuffer_limit;
 
     /*
      * Record the conversion attempt before any fallible initialization.
@@ -3599,7 +3603,10 @@ ngx_http_markdown_streaming_init_handle(
      * dynamic or programmatic configuration paths.  Fail before Rust sees
      * any input so fail-open can still forward the untouched current chain.
      */
-    if (conf->limits.streaming_buffer == 0) {
+    prebuffer_limit = ctx->effective_conf != NULL
+        ? ctx->effective_conf->streaming_buffer
+        : conf->limits.streaming_buffer;
+    if (prebuffer_limit == 0) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: streaming precommit buffer is zero; "
             "refusing to consume input without recovery storage");
@@ -3797,7 +3804,8 @@ ngx_http_markdown_streaming_send_failopen_chain(
     rc = ngx_http_next_body_filter(r, out);
 
     if (rc == NGX_AGAIN) {
-        ctx->streaming.pending_output = out;
+        ngx_http_markdown_pending_output_set(
+            &ctx->streaming.pending_output, out);
         ctx->streaming.pending_meta.has_data = 1;
         ctx->streaming.pending_meta.main_terminal = cap_main_terminal;
         ctx->streaming.pending_meta.subrequest_terminal =

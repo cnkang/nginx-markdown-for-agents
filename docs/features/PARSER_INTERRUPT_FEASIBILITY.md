@@ -6,8 +6,8 @@
 
 ## Question
 
-Can the HTML parser be safely interrupted mid-parse when a timeout or
-memory budget is exceeded?
+Can the HTML parser be safely interrupted mid-parse when a timeout occurs
+or the memory budget gets exceeded?
 
 ## Short Answer
 
@@ -47,10 +47,10 @@ Since mid-parse interruption is not feasible, v0.7.0 uses:
    from reaching the parser.
 2. **Cooperative timeout** (`markdown_limits parser_timeout=<time>`, default 10s): Checked
    at checkpoints during DOM traversal (every 100 nodes) and at pipeline
-   boundaries. The uninterruptible parse phase is bounded by input size.
+   boundaries. Input size bounds the uninterruptible parse phase.
 3. **Memory budget** (`markdown_limits parser_memory=<size>`, default 32m): Enforced via
-   `MemoryBudget` stage checks in the streaming path; input-size proxy in
-   the full-buffer path.
+   `MemoryBudget` stage checks in the streaming path. It acts as an input-size
+   proxy in the full-buffer path.
 4. **Implicit depth limit**: State stack budget (64 KiB) bounds nesting to
    ~1000 levels in the streaming path.
 

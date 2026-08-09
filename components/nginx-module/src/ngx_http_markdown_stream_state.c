@@ -138,7 +138,8 @@ ngx_http_markdown_stream_decide(const ngx_http_markdown_stream_ctx_t *ctx,
 
     /*
      * Terminal states: PASSTHROUGH, POST_COMMIT_SAFE_FINISH,
-     * POST_COMMIT_ABORT.  Any event stays in the current state.
+     * POST_COMMIT_ABORT.  Any event stays in the current state
+     * (state unchanged; action remains the terminal action).
      * Post-commit terminals must NEVER produce PASS_HTML or
      * REJECT_STATUS.
      */

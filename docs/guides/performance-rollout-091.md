@@ -1,5 +1,14 @@
 # Performance Rollout and Rollback Guide — 0.9.1 Optimizations
 
+> **Superseded in 0.9.2.** This document applies only to the 0.9.1 release
+> line. 0.9.2 removes `markdown_streaming_zero_copy`, `markdown_profile`,
+> and the other directives referenced below, configuring them fails `nginx -t`
+> with an `unknown directive` error. In 0.9.2, zero-copy delivery is an
+> internal optimization selected automatically from buffer ownership and
+> backpressure state, and profile-based switching is no longer available.
+> For 0.9.2 behavior, see [CONFIGURATION.md](CONFIGURATION.md) and
+> [0.9.2-breaking-changes.md](0.9.2-breaking-changes.md).
+
 ## Table of Contents
 
 1. [Overview](#overview)
@@ -23,13 +32,13 @@ rebuild, no NGINX restart, and no downtime.
 
 ### Key Principle
 
-Every optimization can be disabled without a binary rebuild:
+Operators can disable every optimization without a binary rebuild. They all keep a runtime toggle:
 
 - **Zero-copy output**: disabled via `markdown_streaming_zero_copy off` + HUP
 - **Streaming decompression**: disabled via profile switch or
   `markdown_auto_decompress off`
 - **Full-buffer copy reduction**: internal implementation detail with no
-  configuration surface; rolled back only via code revert and rebuild
+  configuration surface. Rollback happens only via code revert and rebuild
 
 ### Related Documents
 
@@ -124,13 +133,13 @@ and spawns new worker processes. New requests in the new workers evaluate the
 directive at the body-filter entry point. When set to `off`, the hybrid
 decision logic unconditionally selects the pool-copy path for all output
 chunks, bypassing the buffer factory entirely. In-flight requests on old
-workers complete with their existing configuration; no request is interrupted.
+workers complete with their existing configuration. The reload interrupts no request.
 
 **Memory Lifecycle and Safety Invariants:**
 
-To prevent use-after-free and ensure absolute memory safety during asynchronous downstream transmissions, the Rust-owned memory buffers allocated for zero-copy streaming chunks are managed via NGINX request pool cleanup handlers. Consequently, *Rust-allocated buffers are not freed immediately after a single chunk is successfully delivered downstream*; rather, they persist in memory throughout the request duration and are released in batch when the NGINX request pool is destroyed upon request termination.
+NGINX request pool cleanup handlers manage the Rust-owned memory buffers allocated for zero-copy streaming chunks. This prevents use-after-free and ensures memory safety during asynchronous downstream transmissions. Consequently, *Rust-allocated buffers are not freed immediately after a single chunk is successfully delivered downstream*. Rather, they persist in memory throughout the request duration. The pool releases them in batch when it destroys the NGINX request pool upon request termination.
 
-For long-lived streaming responses with many chunks, this tail retention can cause memory usage to accumulate in the request pool, potentially resulting in a higher worker RSS peak. Due to this characteristic, `markdown_streaming_zero_copy` is kept **disabled by default**, serving as an opt-in optimization under explicit profile selection (such as `streaming_first`) where latency reduction is highly prioritized over strict request-lifetime RSS floors.
+For long-lived streaming responses with many chunks, this tail retention can cause memory usage to accumulate in the request pool. It can result in a higher worker RSS peak. Due to this characteristic, `markdown_streaming_zero_copy` stays **disabled by default**. It serves as an opt-in optimization under explicit profile selection (such as `streaming_first`). Latency reduction outweighs strict RSS floors there.
 
 **Scope:** Per-location. Different locations can independently enable or
 disable zero-copy output.
@@ -225,7 +234,7 @@ Streaming decompression requires ALL FOUR conditions to be met:
 2. Streaming engine selected for the request
 3. `cache_validation` is NOT `full`
 4. Encoding supported by streaming decompressor (gzip, zlib-wrapped deflate
-   RFC 1950, or raw deflate RFC 1951); Brotli uses bounded full-buffer
+   RFC 1950, or raw deflate RFC 1951). Brotli uses bounded full-buffer
    decompression
 
 Switching the profile from `streaming_first` to `balanced` or `strict_cache`
@@ -282,7 +291,7 @@ and observable behavior. Rollback requires a code revert and binary rebuild:
 
 The copy reduction removes the redundant apply-back copy in the internal
 decompression pipeline. Rust FFI output is still copied once into an
-`ngx_alloc` buffer; after budget checks, that buffer is swapped into
+`ngx_alloc` buffer. After budget checks, that buffer swaps into
 `ctx->buffer.data`. The optimization preserves:
 - Identical fail-open semantics (original compressed buffer intact on failure)
 - Identical decompression budget enforcement

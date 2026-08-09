@@ -196,7 +196,7 @@ Section B: Rust Conversion Engine Dependencies
 
 --------------------------------------------------------------------------------
 
-14. serde_json 1.0.150
+14. serde_json 1.0.151
     https://github.com/serde-rs/json
     License: MIT OR Apache-2.0
     Copyright (c) 2014 The serde-rs Developers

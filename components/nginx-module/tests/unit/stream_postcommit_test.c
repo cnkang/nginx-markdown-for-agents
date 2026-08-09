@@ -264,6 +264,7 @@ static int test_streaming_abort_called;
 static int test_output_free_called;
 static u_char *test_output_free_data;
 static uintptr_t test_output_free_len;
+static ngx_atomic_uint_t test_pending_output_requests;
 
 /* Stub: markdown_streaming_safe_finish */
 uint32_t
@@ -291,6 +292,28 @@ markdown_streaming_output_free(u_char *data, uintptr_t len)
     test_output_free_called++;
     test_output_free_data = data;
     test_output_free_len = len;
+}
+
+void
+ngx_http_markdown_pending_output_set(ngx_chain_t **slot, ngx_chain_t *value)
+{
+    if (slot == NULL) {
+        return;
+    }
+    if (*slot == NULL && value != NULL) {
+        test_pending_output_requests++;
+    } else if (*slot != NULL && value == NULL
+               && test_pending_output_requests > 0)
+    {
+        test_pending_output_requests--;
+    }
+    *slot = value;
+}
+
+ngx_atomic_uint_t
+ngx_http_markdown_pending_output_current(void)
+{
+    return test_pending_output_requests;
 }
 
 /* Include the postcommit source (for guard function) */
@@ -358,6 +381,7 @@ static void test_setup(void)
     test_output_free_called = 0;
     test_output_free_data = NULL;
     test_output_free_len = 0;
+    test_pending_output_requests = 0;
     test_abort_metric_count = 0;
     test_safe_finish_metric_count = 0;
 }
@@ -846,8 +870,14 @@ static void test_safe_finish_backpressure_preserves_pending_chain(void)
                 "request should be marked buffered on backpressure");
     TEST_ASSERT(test_output_free_called == 1,
                 "Rust output should still be freed after pool copy");
+    TEST_ASSERT(ngx_http_markdown_pending_output_current() == 1,
+                "pending-output counter should increment on backpressure");
     TEST_ASSERT(test_streaming_abort_called == 0,
                 "streaming abort must not be called on backpressure");
+    ngx_http_markdown_pending_output_set(
+        &ctx.streaming.pending_output, NULL);
+    TEST_ASSERT(ngx_http_markdown_pending_output_current() == 0,
+                "pending-output counter should decrement when released");
     TEST_PASS("safe_finish backpressure preserves pending chain");
 }
 

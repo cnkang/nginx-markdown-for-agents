@@ -39,17 +39,19 @@ EXPECTED_ASSET_TEMPLATE = (
 
 def load_matrix(path: Path) -> list[dict]:
     """
-    Load and validate the release matrix JSON and return its "matrix" entries.
+    Load and validate the canonical release matrix JSON and return the
+    dynamic-module entries in the install.sh naming vocabulary.
     
-    Validates that the top-level JSON value is an object containing a "matrix" key
-    whose value is a list of objects.
+    Validates that the top-level JSON value is an object containing an
+    ``entries`` list. Only supported dynamic-module entries for glibc or musl
+    are projected into the legacy artifact-name fields used by install.sh.
     
     Returns:
         list[dict]: The list of matrix entry dictionaries.
     
     Raises:
-        ValueError: If the parsed JSON is not an object, the "matrix" key is missing,
-        the "matrix" value is not a list, or any item in the list is not a dict.
+        ValueError: If the parsed JSON is not an object, the ``entries`` key is
+        missing, the ``entries`` value is not a list, or any item is not a dict.
     """
     validated = validate_read_path(path, purpose="install matrix")
     with open(validated, "r", encoding="utf-8") as f:
@@ -61,21 +63,38 @@ def load_matrix(path: Path) -> list[dict]:
             f"got {type(data).__name__}"
         )
 
-    if "matrix" not in data:
-        raise ValueError(f"Invalid matrix file {path}: missing 'matrix' key")
+    if "entries" not in data:
+        raise ValueError(f"Invalid matrix file {path}: missing 'entries' key")
 
-    matrix = data["matrix"]
-    if not isinstance(matrix, list):
+    entries = data["entries"]
+    if not isinstance(entries, list):
         raise ValueError(
-            f"Invalid matrix file {path}: 'matrix' must be a list, "
-            f"got {type(matrix).__name__}"
+            f"Invalid matrix file {path}: 'entries' must be a list, "
+            f"got {type(entries).__name__}"
         )
 
-    for i, entry in enumerate(matrix):
+    matrix = []
+    for i, entry in enumerate(entries):
         if not isinstance(entry, dict):
             raise ValueError(
                 f"Invalid matrix entry at index {i} in {path}: "
                 f"expected dict, got {type(entry).__name__}"
+            )
+        if (
+            entry.get("artifact_type") == "dynamic-module"
+            and entry.get("support_tier") == "supported"
+            and entry.get("libc") in INSTALL_DETECTABLE_OS_TYPES
+        ):
+            arch = {"amd64": "x86_64", "arm64": "aarch64"}.get(
+                entry.get("arch"), entry.get("arch")
+            )
+            matrix.append(
+                {
+                    "nginx": entry.get("nginx_version"),
+                    "os_type": entry.get("libc"),
+                    "arch": arch,
+                    "support_tier": "full",
+                }
             )
 
     return matrix

@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 """
 detect_html_sanitizer_invariants.py — HTML Sanitizer Invariant Detection
-                                                                          (Rule 5, 6, 27)
-
-Rule 5 (html-sanitizer): Void elements (img, br, hr, input, etc.) must not
-  have closing tags. The sanitizer must handle them correctly.
+                                                                           (Rule 6, 27)
 
 Rule 6 (html-sanitizer): Nested elements must be properly closed in reverse
   order. The sanitizer must maintain a stack and close elements correctly.
@@ -18,8 +15,7 @@ Detection strategy:
   
   1. URL safety: Check that dangerous URL schemes (javascript:, data:, vbscript:)
      are explicitly blocked somewhere in the codebase.
-  2. Void element awareness: Check that void elements are recognized as such.
-  3. Nesting depth limits: Check that there's protection against deeply nested HTML.
+  2. Nesting depth limits: Check that there's protection against deeply nested HTML.
 
 This is a conservative detector — it only flags clear security gaps.
 

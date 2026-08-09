@@ -13,6 +13,7 @@
       "crashes": 0,
       "sanitizer_findings": 0,
       "corpus_dir": "components/rust-converter/fuzz/corpus/parser_html",
+      "seed_path": "components/rust-converter/fuzz/corpus/parser_html",
       "raw_log_ref": "artifacts/release/0.9.2/fuzz-logs/parser_html.log",
       "status": "pass"
     },
@@ -24,6 +25,7 @@
       "crashes": 0,
       "sanitizer_findings": 0,
       "corpus_dir": "components/rust-converter/fuzz/corpus/convert_html",
+      "seed_path": "components/rust-converter/fuzz/corpus/convert_html",
       "raw_log_ref": "artifacts/release/0.9.2/fuzz-logs/convert_html.log",
       "status": "pass"
     }

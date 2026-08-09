@@ -69,17 +69,17 @@ The converter classifies elements into three categories using `SanitizeAction`:
 - `<noscript>` - Alternative content, usually redundant with main content
 
 **Form Elements — Tags Stripped, Content Preserved** (`SanitizeAction::StripElement`):
-- `<form>`, `<button>`, `<select>`, `<textarea>`, `<fieldset>`, `<legend>`, `<label>`, `<option>`, `<optgroup>`, `<datalist>`, `<output>` - Tags are removed but child text content is preserved in the Markdown output. This ensures AI agents see meaningful content (labels, button captions, option lists) without raw HTML leaking into the output.
-- `<input>` (void form control) - Descriptive text is extracted from attributes in priority order: `aria-label` > `placeholder` > `value`. Hidden inputs (`type="hidden"`) are suppressed entirely.
+- `<form>`, `<button>`, `<select>`, `<textarea>`, `<fieldset>`, `<legend>`, `<label>`, `<option>`, `<optgroup>`, `<datalist>`, `<output>` - The module removes tags but preserves child text content in the Markdown output. This ensures AI agents see meaningful content (labels, button captions, option lists) without raw HTML leaking into the output.
+- `<input>` (void form control) - The module extracts descriptive text from attributes in priority order: `aria-label` > `placeholder` > `value`. It suppresses hidden inputs (`type="hidden"`) entirely. The module drops them from the output.
 
 **Embedded Content Elements — Tags Stripped, URL Extracted, Fallback Preserved** (`SanitizeAction::StripElement`):
-- `<iframe>`, `<object>`, `<embed>` - Tags are removed. The `src` (iframe/embed) or `data` (object) URL is extracted as a Markdown link, using the `title` attribute as the link label when available. Fallback child text between the tags is preserved. Dangerous URL schemes (`javascript:`, `data:`, etc.) are suppressed — only safe URLs appear in the output.
+- `<iframe>`, `<object>`, `<embed>` - The module removes tags. It extracts the `src` (iframe/embed) or `data` (object) URL as a Markdown link, using the `title` attribute as the link label when available. Fallback child text between the tags stays in the output. It suppresses dangerous URL schemes (`javascript:`, `data:`, and so on) — only safe URLs appear in the output. The module blocks unsafe schemes entirely.
 
 **Media Elements — URL Extracted, Fallback Preserved** (handled in traversal):
-- `<video>`, `<audio>` - The `src` URL is extracted as a Markdown link (with `title` as label). Video `poster` thumbnails are extracted as Markdown images. Fallback child text is preserved via normal child traversal.
-- `<source>` - The `src` URL is extracted as a Markdown link with `type` as label (e.g., `[video/mp4](url)`).
-- `<track>` - The `src` URL is extracted as a Markdown link with `label` as link text (e.g., `[English](subs.vtt)`).
-- `<area>` - The `href` is extracted as a Markdown link with `alt` or `title` as link text.
+- `<video>`, `<audio>` - The module extracts the `src` URL as a Markdown link (with `title` as label). Video `poster` thumbnails become Markdown images. Fallback child text stays via normal child traversal.
+- `<source>` - The module extracts the `src` URL as a Markdown link with `type` as label (for example `[video/mp4](url)`).
+- `<track>` - The module extracts the `src` URL as a Markdown link with `label` as link text (for example `[English](subs.vtt)`).
+- `<area>` - The module extracts the `href` as a Markdown link with `alt` or `title` as link text.
 
 **Implementation**:
 ```rust
@@ -101,7 +101,7 @@ pub fn check_element(&self, tag_name: &str) -> SanitizeAction {
 **Location**: `src/security.rs` - `SecurityValidator::is_event_handler()`
 
 **Event Handlers Removed**:
-All attributes starting with `on` (with length > 2) are removed via prefix matching, following the OWASP/DOMPurify convention. This covers all current and future event handlers, including:
+The module removes all attributes starting with `on` (with length > 2) via prefix matching, following the OWASP/DOMPurify convention. This covers all current and future event handlers, including:
 - `onclick`, `ondblclick`, `onmousedown`, `onmouseup`
 - `onmouseover`, `onmousemove`, `onmouseout`
 - `onkeydown`, `onkeypress`, `onkeyup`
@@ -153,14 +153,14 @@ pub fn is_dangerous_url(&self, url: &str) -> bool {
 
 **Applied to**:
 - `<a href="...">` - Links
-- `<img src="...">` - Images (when URL is blocked, `alt` text is preserved as plain text; `title` attribute is included in Markdown image syntax)
+- `<img src="...">` - Images (when the module blocks the URL, `alt` text stays as plain text. The `title` attribute appears in Markdown image syntax)
 - Embedded/media URL attributes including `<iframe src>`, `<object data>`, `<embed src>`, `<video src/poster>`, `<audio src>`, `<source src>`, `<track src>`, and `<area href>`
 
 ### Layer 5: Markdown Label Escaping
 
 **Location**: `src/converter/traversal.rs` - `MarkdownConverter::escape_link_label()`
 
-User-controlled text that appears inside Markdown link/image label brackets is escaped before emission. This prevents HTML text or attributes from breaking out of the label and injecting a new Markdown destination such as `](javascript:...)`.
+The module escapes user-controlled text that appears inside Markdown link/image label brackets before emission. This prevents HTML text or attributes from breaking out of the label. It stops injection of a new Markdown destination such as `](javascript:...)`.
 
 **Applied to**:
 - `<a>` child text before `[text](url)` emission
@@ -172,13 +172,13 @@ User-controlled text that appears inside Markdown link/image label brackets is e
 
 **Location**: `src/parser.rs` - html5ever parser
 
-**Mechanism**: html5ever is an HTML5 parser, not an XML parser. HTML5 does not support external entity references, so XXE attacks are prevented by design.
+**Mechanism**: html5ever is an HTML5 parser, not an XML parser. HTML5 does not support external entity references, so the design prevents XXE attacks.
 
 **Key Points**:
 - html5ever does NOT resolve external entities
 - html5ever does NOT process DOCTYPE declarations for entity definitions
 - html5ever does NOT load external DTDs
-- Entity references are treated as text content, not executable directives
+- Entity references become text content, not executable directives
 
 **Documentation**:
 ```rust
@@ -309,7 +309,7 @@ Instead, please report security issues via:
 
 ### Response Process
 
-This is a maintainer-run project, so response times are best effort and may be slower during holidays or periods of limited availability.
+This is a maintainer-run project. Response times are best effort and may be slower during holidays or periods of limited availability.
 
 1. **Acknowledgment**: Target within 14 calendar days
 2. **Assessment**: Target within 45 calendar days when enough detail is available
@@ -318,14 +318,14 @@ This is a maintainer-run project, so response times are best effort and may be s
 
 ### Security Updates
 
-Security updates are released as:
+The project releases security updates as:
 - Patch releases for critical vulnerabilities
 - Minor releases for moderate vulnerabilities
 - Documented in CHANGELOG.md with CVE references
 
 ## Operator Follow-Through
 
-The implementation details in this document feed into a few operator-facing concerns, but those concerns are maintained elsewhere:
+The implementation details in this document feed into a few operator-facing concerns. The project maintains those concerns elsewhere:
 
 - resource limits and failure policy: `docs/guides/CONFIGURATION.md`
 - metrics, logs, and troubleshooting: `docs/guides/OPERATIONS.md`
@@ -335,17 +335,17 @@ The implementation details in this document feed into a few operator-facing conc
 
 ### 1. Content Extraction Heuristics
 - Conversion is heuristic, not perfect
-- Some malicious content may be rendered as text
+- Some malicious content may render as text
 - This is acceptable as text cannot execute
 
 ### 2. CSS Injection
-- `<style>` tags are removed entirely
-- Inline `style` attributes are preserved (safe in Markdown)
+- The module removes `<style>` tags entirely
+- Inline `style` attributes stay (safe in Markdown)
 - CSS expressions cannot execute in Markdown output
 
 ### 3. HTML Entity Handling
-- HTML entities are decoded by html5ever
-- Malicious entity sequences are treated as text
+- html5ever decodes HTML entities
+- Malicious entity sequences become text
 - No entity expansion attacks possible
 
 ### 4. Unicode Normalization

@@ -25,7 +25,7 @@ When a developer modifies parser, sanitizer, or emitter modules under
 `components/rust-converter/src/`, they must assess whether the change affects
 the coverage scope of existing fuzz targets. If the change introduces new
 parsing paths, new input-handling branches, or modifies boundary conditions of
-existing behavior, the corresponding fuzz target should be updated to cover the
+existing behavior, the corresponding fuzz target should update to cover the
 new behavior.
 
 **Applicable scenarios:**
@@ -66,7 +66,7 @@ have continuous fuzzing coverage.
 
 **Requirements:**
 - PRs introducing new logic must include fuzz target updates or additions.
-- If new logic cannot be covered by existing targets, create a new target with
+- If existing targets cannot cover new logic, create a new target with
   a seed corpus.
 
 ---
@@ -119,7 +119,7 @@ behavior causes coverage guidance to fail and crashes to become unreproducible.
 
 **Description:**
 
-When fuzzing discovers a crash, the following workflow must be completed before
+When fuzzing discovers a crash, the following workflow must complete before
 closing the related issue:
 
 1. **Minimize**: Use `cargo fuzz tmin <target> <crash_file>` to reduce the
@@ -148,7 +148,7 @@ git add fuzz/corpus/<target>/regression_<issue_id>
 ```
 
 **Issue closure conditions:**
-- Minimized regression input is committed to the main repository.
+- The team commits minimized regression input to the main repository.
 - The target no longer crashes on the input after the fix.
 - CI fuzzing includes the regression input.
 
@@ -197,7 +197,7 @@ causes:
 **Description:**
 
 Fuzz CI workflows must not run for unrelated documentation-only changes (unless
-explicitly requested). This is implemented via GitHub Actions path filters
+explicitly requested). The harness implements this via GitHub Actions path filters
 (`paths` trigger conditions), ensuring PR fuzzing is only triggered when the
 following paths change:
 
@@ -252,8 +252,8 @@ includes:
    source/build/output paths writable for the action's mounted directories.
    The `/rustc` standard-library source staging directory and fixed
    `/usr/lib/libFuzzingEngine.a` destination used by the OSS-Fuzz compile
-   wrapper must be pre-created with ownership for that user; do not make the
-   whole `/usr/lib` directory writable. Every workflow invoking
+   The wrapper must pre-create those paths and set ownership for that user. Do
+   not make the whole `/usr/lib` directory writable. Every workflow invoking
    `build_fuzzers` must also pre-create `build-out` before the container action
    runs, so the action's root process cannot make the bind-mounted output
    directory unwritable to the final non-root project image.

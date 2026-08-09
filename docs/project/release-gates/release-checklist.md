@@ -1,8 +1,8 @@
 # 0.4.0 Unified Release Checklist
 
-This is the unified release checklist for the 0.4.0 Go/No-Go review. Every item below is derived from the four release gate categories defined in the 0.4.0 Overall Scope and Release Gates spec. Each item is verifiable by a specific artifact, command, or review action — not subjective judgment.
+This is the unified release checklist for the 0.4.0 Go/No-Go review. Every item below derives from the four release gate categories defined in the 0.4.0 Overall Scope and Release Gates spec. Each item is verifiable by a specific artifact, command, or review action — not subjective judgment.
 
-This checklist must be completed and archived as part of the 0.4.0 release record. Any item that cannot be satisfied must be escalated to the Go/No-Go review with a documented exception, including rationale, risk assessment, and mitigation plan.
+The team must complete and archive this checklist as part of the 0.4.0 release record. Any item that cannot pass escalates to the Go/No-Go review. It carries a documented exception with rationale, risk assessment, and mitigation plan.
 
 Requirements references: 10.1, 10.2, 10.3, 10.4, 10.5.
 
@@ -12,7 +12,7 @@ Requirements references: 10.1, 10.2, 10.3, 10.4, 10.5.
 
 - [x] All 6 sub-specs have requirements documents — verified by `make release-gates-check`
 - [x] All 6 sub-specs have design documents — verified by `make release-gates-check`
-- [x] All new configuration directives are documented in `docs/guides/`
+- [x] All new configuration directives appear in `docs/guides/` docs
 - [x] Installation guide in `docs/guides/` covers 0.4.0 changes — verified by `make docs-check`
 - [x] Rollout cookbook exists in `docs/guides/ROLLOUT_COOKBOOK.md`
 - [x] Metrics documentation in `docs/features/` covers metric names, labels, meanings, and scrape config

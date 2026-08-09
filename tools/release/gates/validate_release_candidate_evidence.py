@@ -42,6 +42,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 from lib.path_validation import validate_read_path  # noqa: E402
+from lib.executable_validation import (  # noqa: E402
+    resolve_approved_executable,
+)
 
 SCHEMA_VERSION = "release.candidate-evidence.v1"
 MANIFEST_SCHEMA_VERSION = "release.candidate-sha-manifest.v1"
@@ -119,12 +122,23 @@ def file_digest(path: Path) -> str:
 
 def git_head_sha() -> str:
     """Return the current git HEAD SHA or raise ValueError."""
-    proc = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    git = resolve_approved_executable("git")
+    if git is None:
+        raise ValueError(
+            "malformed: cannot resolve git HEAD: approved git executable "
+            "not found"
+        )
+    try:
+        proc = subprocess.run(
+            [git, "rev-parse", "HEAD"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ValueError(f"malformed: cannot resolve git HEAD: {exc}") from exc
     if proc.returncode != 0:
         raise ValueError(
             f"malformed: cannot resolve git HEAD: {proc.stderr.strip()}"
@@ -189,8 +203,12 @@ def _check_manifest_digest_fields(manifest: dict, reasons: list) -> None:
         "release_matrix_digest",
     ):
         value = manifest.get(digest_field)
-        if value is not None and not isinstance(value, str):
-            reasons.append(f"malformed: {digest_field} must be a string")
+        if value is not None and (
+            not isinstance(value, str) or not DIGEST_PATTERN.fullmatch(value)
+        ):
+            reasons.append(
+                f"malformed: {digest_field} must be a sha256 digest"
+            )
 
 
 def _check_required_input(
@@ -246,6 +264,14 @@ def _check_required_inputs(manifest: dict, reasons: list) -> None:
     if not isinstance(input_digests, dict):
         reasons.append(
             "missing-observation: input_digests must be an object")
+        return
+    if any(not isinstance(input_path, str) or not input_path
+           for input_path in required_inputs):
+        reasons.append(
+            "below-threshold: required_inputs must contain non-empty strings")
+        return
+    if len(set(required_inputs)) != len(required_inputs):
+        reasons.append("below-threshold: required_inputs must not contain duplicates")
         return
     if set(input_digests) != set(required_inputs):
         reasons.append(

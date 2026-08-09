@@ -11,9 +11,9 @@ It focuses on converter behavior and output shape. For NGINX directive syntax an
 - **FR-15.3**: Extract metadata from HTML (title, description, URL, image, author, published date)
 - **FR-15.4**: Generate YAML front matter block with extracted metadata
 - **FR-15.5**: Include resolved absolute URLs for images in front matter
-- **FR-15.6**: Feature toggle independence (can be enabled/disabled independently)
+- **FR-15.6**: Feature toggle independence (can enable/disable independently)
 - **FR-15.7**: Configurable via `include_front_matter` option
-- **FR-15.8**: When disabled, no front matter is included
+- **FR-15.8**: When disabled, the module includes no front matter
 
 ## Implementation Details
 
@@ -130,8 +130,8 @@ markdown_front_matter on;  # Enable YAML front matter
 ## Security Considerations
 
 - All metadata values are properly escaped to prevent YAML injection
-- Unicode characters are preserved correctly
-- No sensitive information is included in front matter by default
+- Unicode characters preserve correctly
+- The module includes no sensitive information in front matter by default
 - URL resolution respects the configured base_url
 
 ## Performance Impact
@@ -143,7 +143,7 @@ markdown_front_matter on;  # Enable YAML front matter
 
 ## Possible Extensions
 
-Areas that could be expanded later without changing the current feature contract:
+Areas that could expand later without changing the current feature contract:
 
 1. Configurable field selection (choose which fields to include)
 2. Custom field mapping (rename fields in output)

@@ -50,7 +50,7 @@ feature boundary.
 Tune one bounded setting at a time and record the resulting metrics:
 
 1. `markdown_streaming` controls the requested conversion engine.
-2. `markdown_cache_validation` controls whether complete output is required.
+2. `markdown_cache_validation` controls whether the module requires complete output.
 3. `markdown_auto_decompress` controls compressed-response conversion.
 4. `markdown_limits streaming_buffer` bounds streaming working memory.
 5. `markdown_limits conversion_memory` and `parser_memory` bound conversion
@@ -61,19 +61,19 @@ Tune one bounded setting at a time and record the resulting metrics:
 
 Monitor these frozen families while tuning:
 
-- `nginx_markdown_conversion_attempts_total`;
-- `nginx_markdown_conversion_deliveries_total`;
-- `nginx_markdown_conversion_duration_seconds`;
-- `nginx_markdown_streaming_events_total`;
-- `nginx_markdown_decompression_events_total`;
+- `nginx_markdown_conversion_attempts_total`,
+- `nginx_markdown_conversion_deliveries_total`,
+- `nginx_markdown_conversion_duration_seconds`,
+- `nginx_markdown_streaming_events_total`,
+- `nginx_markdown_decompression_events_total`,
 - `nginx_markdown_inflight_requests`.
 
 ## Memory and backpressure
 
 Streaming keeps bounded buffers and honors downstream backpressure. `NGX_AGAIN`
-means that pending output remains owned by the module or the downstream chain;
-it is not a delivery success. Delivery counters advance only after the
-terminal converted buffer is accepted.
+means that pending output remains owned by the module or the downstream chain.
+It is not a delivery success. Delivery counters advance only after the
+module accepts the terminal converted buffer.
 
 If the inflight gauge does not return to zero after traffic drains, stop the
 rollout and collect diagnostics before changing limits. Never solve an
@@ -83,4 +83,4 @@ allocation failure by removing a bound.
 
 Older release notes and migration documents may mention preset names or
 internal optimization switches. Those names describe historical releases and
-must not be copied into a current 0.9.2 configuration.
+must not copy into a current 0.9.2 configuration.

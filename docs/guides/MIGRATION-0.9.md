@@ -1,11 +1,18 @@
 # Migration Guide: 0.9.0 (Breaking Release)
 
+> **Historical guide.** This guide covers the 0.8.x → 0.9.0 migration
+> only. The 0.9.2 release removed features that this guide recommends,
+> for example the `markdown_profile` system and the reject-only migration
+> stubs. If you upgrade directly to 0.9.2, read
+> [MIGRATION-0.9.2.md](MIGRATION-0.9.2.md) first. Use this guide only for
+> 0.9.0-era context.
+
 ## Overview
 
 **0.8.x → 0.9.0 is a breaking release.** This is the last breaking opportunity
-before the 1.0.0 API freeze. All deprecated directives from prior releases are
-removed, the profile system is introduced, error policy is consolidated, and
-the observability surface is restructured.
+before the 1.0.0 API freeze. The release removes all deprecated directives from
+prior releases, introduces the profile system, consolidates error policy, and
+restructures the observability surface.
 
 If you are running 0.8.x in production, you must follow this guide before
 upgrading. There is **no backward-compatible mode** — 0.9.0 rejects old
@@ -36,32 +43,35 @@ The following breaking changes require configuration and/or tooling updates:
 2. **Directive removals/renames:**
    - `markdown_on_error` → `markdown_error_policy`
    - `markdown_trust_forwarded_headers` → `markdown_trusted_proxies`
-   - `markdown_on_wildcard` → removed; use `markdown_accept wildcard`
+   - `markdown_on_wildcard` → removed. Use `markdown_accept wildcard`
 
-3. **Profile system introduction** — `markdown_profile` provides tested
+3. **Profile system introduction** — `markdown_profile` provided tested
    production defaults (`balanced`, `strict_cache`, `streaming_first`).
-   Explicit directives override profile defaults.
+   The 0.9.2 release removed the profile system. Explicit directives
+   override profile defaults.
 
-4. **Error policy consolidation** — `markdown_on_error pass|reject` is
-   replaced by `markdown_error_policy pass|fail_closed`. The `reject` value
-   is renamed to `fail_closed` for clarity.
+4. **Error policy consolidation** — `markdown_error_policy pass|fail_closed`
+   replaces `markdown_on_error pass|reject`. The `reject` value
+   becomes `fail_closed` for clarity.
 
 5. **Inflight guard** — `markdown_limits max_inflight=N` introduces
    per-worker concurrency limits. When the inflight count exceeds the
    configured maximum, new requests receive the `overload` reason code
    and fall through without conversion.
 
-6. **Metrics consolidation** — per-reason metric keys (e.g.,
-   `markdown_skipped_accept_total`) are replaced by unified metric families
-   with a `reason` label (e.g., `nginx_markdown_skips_total{reason="skipped_accept"}`).
+6. **Metrics consolidation** — unified metric families with a `reason` label
+   replace per-reason metric keys (for example
+   `markdown_skipped_accept_total` → `nginx_markdown_skips_total{reason="skipped_accept"}`).
 
 ---
 
-Several legacy directives are removed and replaced by Config V2 directives.
-Removed directives are kept as **reject-only stubs**: the parser entry still
-exists, but the only behavior is to fail `nginx -t` with an actionable
-migration hint. There is **no alias compatibility** and **no legacy fallback
-behavior** — this keeps the breaking-release boundary unambiguous.
+The release removes several legacy directives and replaces them with Config V2.
+In 0.9.0 and 0.9.1, removed directives stayed as **reject-only stubs**: the
+parser entry still existed, and the only behavior was to fail `nginx -t`
+with an actionable migration hint. The 0.9.2 release deleted those stubs,
+so removed directives now fail `nginx -t` with the standard `unknown
+directive` error. There is **no alias compatibility** and **no legacy
+fallback behavior** — this keeps the breaking-release boundary unambiguous.
 
 If a directive you use is not yet listed below, consult the `nginx -t` error
 message, which always names the replacement.
@@ -72,9 +82,10 @@ message, which always names the replacement.
 
 ### `markdown_trust_forwarded_headers` → `markdown_trusted_proxies`
 
-The boolean trust model is removed. A request's forwarded headers
+The release removes the boolean trust model. A request's forwarded headers
 (`Forwarded`, `X-Forwarded-Proto`, `X-Forwarded-Host`) are now honored only
 when the request's direct source IP matches a configured trusted-proxy CIDR.
+The module honors these headers only for matching source IPs.
 
 `markdown_trust_forwarded_headers` and the never-shipped
 `markdown_forwarded_headers` are reject-only stubs:
@@ -111,7 +122,7 @@ http {
 
 ### Key differences
 
-- **http context only.** `markdown_trusted_proxies` is rejected in `server` and
+- **http context only.** `nginx -t` rejects `markdown_trusted_proxies` in `server` and
   `location` blocks (per-location trust creates a local trust-bypass risk that
   is hard to audit):
 
@@ -124,7 +135,7 @@ http {
   configured CIDR have their forwarded headers honored. A direct public client
   can no longer spoof `X-Forwarded-Host`.
 
-- **IPv4 and IPv6** CIDRs are validated at config time; an invalid CIDR fails
+- **IPv4 and IPv6** CIDRs get validated at config time. An invalid CIDR fails
   `nginx -t`:
 
   ```
@@ -452,7 +463,7 @@ profile "balanced" default (pass) in location /docs/
 ```
 
 **Note:** This is a warning, not an error. Explicit directives always override
-profile defaults. The warning helps you audit intentional overrides vs.
+profile defaults. The warning helps you audit intentional overrides versus
 accidental conflicts.
 
 ### Dashboards show no data after upgrade
@@ -581,6 +592,6 @@ layers for removed directives.** This is a deliberate design choice:
 - The breaking boundary is unambiguous: if `nginx -t` passes, your
   configuration is fully 0.9.0 compliant.
 
-If you need to maintain both 0.8.x and 0.9.0 configurations (e.g., during a
+If you need to maintain both 0.8.x and 0.9.0 configurations (for example during a
 staged rollout across a fleet), use separate configuration files and deploy
 the matching module binary with each configuration version.

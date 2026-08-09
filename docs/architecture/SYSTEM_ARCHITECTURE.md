@@ -1,10 +1,10 @@
 # System Architecture
 
-This document explains the runtime structure of `nginx-markdown-for-agents`, the responsibilities of each component, and the reasoning behind the main technology choices.
+This document explains the runtime structure of `nginx-markdown-for-agents`. It covers the responsibilities of each component and the reasoning behind the main technology choices.
 
 ## Design Goals
 
-The system is designed to do four things well:
+The system has four design goals:
 
 - add a Markdown representation to existing HTML responses without changing the application
 - keep request handling inside standard NGINX deployment and operations patterns
@@ -45,7 +45,7 @@ The split is deliberate.
 
 ### Why the NGINX-facing layer is C
 
-NGINX modules are built around NGINX's C APIs, request phases, memory pools, buffers, and filter-chain model. Putting the request-path integration in C means the module can:
+NGINX modules are built around NGINX's C APIs, request phases, memory pools, buffers, and filter-chain model. Putting the request-path integration in C lets the module:
 
 - fit naturally into normal NGINX module loading and configuration
 - manage NGINX request and response objects directly
@@ -54,7 +54,7 @@ NGINX modules are built around NGINX's C APIs, request phases, memory pools, buf
 
 ### Why the conversion engine is Rust
 
-HTML parsing and Markdown generation are the parts most exposed to malformed or hostile input and the parts most likely to grow in complexity over time. Rust is a better fit there because it provides:
+HTML parsing and Markdown generation are the parts most exposed to malformed or hostile input. They are also the parts most likely to grow in complexity over time. Rust is a better fit there because it provides:
 
 - stronger memory-safety guarantees for parsing untrusted input
 - a strong ecosystem for HTML parsing and supporting utilities
@@ -63,11 +63,11 @@ HTML parsing and Markdown generation are the parts most exposed to malformed or 
 
 ### Why not pure C
 
-A pure C implementation would reduce build complexity, but it would move the riskiest parsing and transformation code into the least forgiving part of the stack. For this project, maintainability and input safety matter more than keeping the entire system in one language.
+A pure C implementation would reduce build complexity. However, it would move the riskiest parsing and transformation code into the least forgiving part of the stack. For this project, maintainability and input safety matter more than keeping the entire system in one language.
 
 ### Why not an external service
 
-An external converter service would simplify NGINX module logic, but it would add network hops, new failure modes, deployment overhead, and an extra operational surface. This project is explicitly designed to keep conversion inline with the existing reverse-proxy path.
+An external converter service would simplify NGINX module logic. However, it would add network hops, new failure modes, deployment overhead, and an extra operational surface. This project is explicitly designed to keep conversion inline with the existing reverse-proxy path.
 
 ## Responsibility Split
 
@@ -103,11 +103,11 @@ The Rust converter is responsible for:
 - producing optional metadata such as token estimates and front matter
 - returning structured results through a stable C-compatible interface
 
-Inside the converter crate, the Markdown renderer is split into traversal, block handling, inline handling, table rendering, front-matter emission, and normalization helpers. The FFI boundary is also split into ABI, option-decoding, conversion, memory-management, and export units, while metadata extraction and URL resolution now live in separate helper modules. That reduces the amount of logic concentrated in a single source file without changing the public API or the C ABI.
+Inside the converter crate, the Markdown renderer splits into distinct units. These units cover traversal, block handling, inline handling, table rendering, front-matter emission, and normalization helpers. The FFI boundary splits into ABI, option-decoding, conversion, memory-management, and export units. Metadata extraction and URL resolution live in separate helper modules. This split keeps logic concentrated in smaller files. It leaves the public API and the C ABI unchanged.
 
 ## Why the FFI Boundary Is Small
 
-The C/Rust boundary is intentionally narrow. The NGINX module does not ask Rust to understand NGINX internals, and the Rust converter does not try to manage the HTTP lifecycle.
+The C/Rust boundary is intentionally narrow. The NGINX module does not ask Rust to understand NGINX internals. The Rust converter does not try to manage the HTTP lifecycle.
 
 That keeps the contract easier to reason about:
 
@@ -119,10 +119,10 @@ This reduces coupling and makes it easier to test each side independently.
 
 ### FFI Classification: INTERNAL_ONLY
 
-The FFI boundary is classified as `INTERNAL_ONLY`. Rust/C struct layouts,
+The project classifies the FFI boundary as `INTERNAL_ONLY`. Rust/C struct layouts,
 function signatures, and numeric constants may change between any two versions
-without notice. The Rust static library and NGINX module are released as one
-product; this project does not publish the generated header as a third-party
+without notice. The Rust static library and NGINX module ship as one
+product. This project does not publish the generated header as a third-party
 SDK or promise ABI compatibility to external callers.
 
 A 4-tuple ABI handshake executes during module preconfiguration, before any
@@ -162,7 +162,7 @@ Step-by-step:
 1. NGINX receives the request and evaluates the configured `markdown_filter` behavior.
 2. The module checks request and response eligibility such as method, status, content type, and policy exclusions.
 3. If needed, the module buffers the upstream body and decompresses supported encodings.
-4. The buffered payload is passed to the Rust converter through FFI.
+4. The module passes the buffered payload to the Rust converter through FFI.
 5. The converter returns Markdown output and optional metadata.
 6. The module updates headers such as `Content-Type`, `Vary`, and variant `ETag`, records shared metrics, then sends the Markdown response.
 
@@ -177,18 +177,18 @@ The architecture supports two conversion engines:
 - **Full-buffer engine** (default for small responses): buffers the full eligible response before conversion. This makes correctness, deterministic output, and header handling simpler. Tradeoffs:
   - larger responses consume more memory
   - conversion cannot start streaming output immediately
-  - very large or streaming-style content should usually be bypassed
+  - you should usually bypass very large or streaming-style content
 
-- **Streaming engine** (since v0.8.0, enabled via `markdown_streaming`): processes HTML incrementally through a bounded-memory pipeline (charset detection → tokenization → sanitization → state machine → emission). Tradeoffs:
+- **Streaming engine** (since v0.8.0, enabled via `markdown_streaming`): processes HTML incrementally through a bounded-memory pipeline. The pipeline runs charset detection, tokenization, sanitization, a state machine, and emission. Tradeoffs:
   - bounded memory per request (configurable via `markdown_limits streaming_buffer=<size>`)
   - first Markdown bytes available before upstream finishes
   - more complex state machine (fallback to full-buffer or passthrough on errors)
 
-The full-buffer tradeoff is documented in [ADR-0002](ADR/0002-full-buffering-approach.md). The streaming contract is in [RFC-0008](RFC-0008-streaming-conversion-support-contract.md) and [ADR-0011](ADR/0011-true-streaming-contract.md).
+The full-buffer tradeoff appears in [ADR-0002](ADR/0002-full-buffering-approach.md). The streaming contract is in [RFC-0008](RFC-0008-streaming-conversion-support-contract.md) and [ADR-0011](ADR/0011-true-streaming-contract.md).
 
 ### Shared observability state
 
-Runtime metrics are aggregated in shared memory so the metrics endpoint reports cross-worker totals instead of whichever worker handled the metrics request. This keeps alerting and capacity signals aligned with the whole NGINX instance rather than a single worker view.
+The module aggregates runtime metrics in shared memory. The metrics endpoint reports cross-worker totals. It reports totals instead of whichever worker handled the metrics request. This keeps alerting and capacity signals aligned with the whole NGINX instance rather than a single worker view.
 
 ### Inline conversion instead of offline publishing
 
@@ -196,13 +196,13 @@ The project chooses inline conversion because it keeps representation negotiatio
 
 ### Origin-near positioning
 
-Conversion runs at the reverse-proxy layer closest to the application, not at the CDN edge. This means the module converts the direct output of the application or CMS, before any downstream infrastructure has modified the page. It also means the operator controls the module configuration, failure policy, and rollout scope within their own infrastructure.
+Conversion runs at the reverse-proxy layer closest to the application, not at the CDN edge. This means the module converts the direct output of the application or CMS. It converts it before any downstream infrastructure has modified the page. It also means the operator controls the module configuration, failure policy, and rollout scope within their own infrastructure.
 
-This positioning aligns with the HTTP content negotiation model: the origin (or its reverse proxy) selects the best representation of a resource based on the client's Accept header. Cache semantics are simpler because the CDN layer caches the already-converted variant like any other response.
+This positioning aligns with the HTTP content negotiation model. The origin (or its reverse proxy) selects the best representation of a resource based on the client's Accept header. Cache semantics are simpler because the CDN layer caches the already-converted variant like any other response.
 
-The tradeoff is that conversion cost falls on the origin or reverse-proxy server rather than being distributed across edge nodes, and the operator must be able to install and configure the module. Edge-layer conversion (as Cloudflare's Markdown for Agents demonstrates) serves a different operational model — zero-touch enablement without origin changes. The two approaches can coexist.
+The tradeoff is that conversion cost falls on the origin or reverse-proxy server. It is not distributed across edge nodes. The operator must be able to install and configure the module. Edge-layer conversion (as Cloudflare's Markdown for Agents demonstrates) serves a different operational model. It offers zero-touch enablement without origin changes. The two approaches can coexist.
 
-This decision is documented in [ADR-0003](ADR/0003-inline-origin-near-conversion.md).
+This decision appears in [ADR-0003](ADR/0003-inline-origin-near-conversion.md).
 
 ## Where to Go Next
 
@@ -227,16 +227,17 @@ full-buffer and incremental streaming FFI entrypoints.
 ### Processing-Path Selection and Defaults
 `markdown_streaming` defaults to `auto`. In auto mode, known small
 responses remain on the full-buffer path while large or chunked responses can
-enter the streaming path. The default threshold is
-`markdown_stream_threshold` (default `1m`). The v0.6.x
-`markdown_streaming_auto_threshold` directive has been removed;
-use `markdown_stream_threshold` directly.
+enter the streaming path. The module fixes the threshold internally at 1 MiB. It is
+not a directive. The v0.6.x
+`markdown_streaming_auto_threshold` directive and the v0.9.2-removed
+`markdown_stream_threshold` directive have no replacement. The internal
+threshold is not operator-configurable.
 
 ### Streaming Body Filter
 The streaming body filter consumes upstream buffers incrementally and emits
 Markdown chunks without making the complete response body the default working
-set. Before any Markdown output is committed, the module can replay the
-original HTML from `markdown_stream_precommit_buffer` if conversion fails.
+set. Before the module commits any Markdown output, it can replay the
+original HTML from `markdown_limits streaming_buffer=` if conversion fails.
 After commit, failures are terminal because the response representation has
 already changed.
 
@@ -248,15 +249,14 @@ semantics, apply fallback policy before commit, and update metrics only on the
 correct success or failure path.
 
 ### Observability and Release Gate
-Streaming decisions, fallbacks, and post-commit failures are exposed through
-Prometheus metrics and diagnostics reason codes. The 0.8.0 release contract is
-validated by `make release-gates-check-080`, which layers streaming,
+The module exposes streaming decisions, fallbacks, and post-commit failures
+through Prometheus metrics and diagnostics reason codes. `make release-gates-check-080` validates the 0.8.0 release contract. This gate layers streaming,
 documentation, release-matrix, and clean-checkout checks on top of the earlier
 0.7.0 gates.
 
 ## v0.7.0 Subsystems
 
-The following Rust-first subsystems were introduced in v0.7.0 to move
+v0.7.0 introduced the following Rust-first subsystems. They move
 pure-logic decisions from C into Rust, improving testability and safety:
 
 ### Accept Negotiator (`negotiator.rs`)
@@ -279,8 +279,7 @@ logging and metrics.
 
 ### Header Plan (`header_plan.rs`)
 Builder for response header mutations (Content-Type, Content-Length, ETag,
-Vary). Generates an operation list that can be applied atomically by the
-C module.
+Vary). Generates an operation list that the C module can apply atomically.
 
 ### Security Extensions (`security.rs` additions)
 URL control-character rejection, X-Forwarded-Host/Proto parsing with host
@@ -288,72 +287,101 @@ validation, and Markdown link label/destination escaping for injection
 prevention.
 
 ### Bounded Decompression
-`markdown_decompress_max_size` directive limits decompressed output
-independently from `markdown_limits memory=<size>`, preventing zip-bomb attacks.
-`DecompressionBudgetExceeded` (FFI code 9) is classified as
-`resource_limit` in C.
+The `markdown_limits decompressed_size=` key limits decompressed output
+independently from `markdown_limits conversion_memory=`, preventing zip-bomb
+attacks. C classifies `DecompressionBudgetExceeded` (FFI code 9) as
+`resource_limit`.
 
 ### Parser Timeout and Budget
-`markdown_parse_timeout` (default 30s) and `markdown_parser_budget`
-(default 64m) directives limit parsing time and memory. New error codes
-`ParseTimeout` (10) and `ParseBudgetExceeded` (11) map to
+The `markdown_limits parser_timeout=` (default 10s) and `markdown_limits
+parser_memory=` (default 32m) keys limit parsing time and memory. Error codes
+`Timeout` (9) and `BudgetExceeded` (10) map to
 `resource_limit`.
 
 ### Diagnostics Endpoint (`ngx_http_markdown_diagnostics.c`)
 A dedicated HTTP handler exposes runtime state at
-`/nginx-markdown/diagnostics` when `markdown_diagnostics on` is configured. Returns JSON containing the current config snapshot, recent
+`/nginx-markdown/diagnostics` when you configure `markdown_diagnostics on`. It returns JSON containing the current config snapshot, recent
 decision summaries (reason codes, durations), and a metrics snapshot.
-Access is restricted by `allow` CIDR configuration; external access is
-denied by default.
+The `allow` CIDR configuration restricts access. The module denies external
+access by default.
 
-### Dynconf Dry-run and Last-Known-Good (`ngx_http_markdown_dynconf.c`)
+### Dynconf Dry-run and Last-Known-Good (`ngx_http_markdown_dynconf_snapshot.c`)
 `markdown_dynconf_dry_run on` validates a new configuration file on HUP
 without replacing the active snapshot. Validation results include line
 numbers, field names, and error reasons. On successful reload, the
-previous active snapshot is preserved as last-known-good (LKG) for diagnostics
-and failed-reload protection. There is no worker-local runtime restore API;
-operators restore a prior valid file atomically and let the normal watcher
+module preserves the previous active snapshot as last-known-good (LKG) for diagnostics
+and failed-reload protection. There is no worker-local runtime restore API.
+Operators restore a prior valid file atomically and let the normal watcher
 validate and apply it. Atomic rename prevents partial-file reads, but each
 worker has its own watcher cycle and may briefly expose a different
-`config_version`; diagnostics or request behavior verifies convergence. A
+`config_version`. Diagnostics or request behavior verifies convergence. A
 controlled NGINX reload is the strong synchronization boundary.
 `applied_mtime` updates only after successful application (Rule 35).
 
 ### Reason Code FFI Accessor (`reason_code.rs` + FFI)
-Reason codes are defined as a Rust enum (single source of truth). C
+A Rust enum defines the reason codes (single source of truth). C
 accesses reason code values and display strings through the
 `markdown_reason_code_str()` / `markdown_reason_code_metric_key()` FFI
 exports (wrapped C-side by `ngx_http_markdown_get_reason_code_str()` and
 `ngx_http_markdown_get_reason_code_metric_key()`). C-side independent
-`#define` constants are removed; all consumers go through the FFI accessor.
+`#define` constants no longer exist. All consumers go through the FFI accessor.
 This ensures Rust enum, C usage, docs, and metrics labels stay aligned.
 
-### Header Plan Atomic Application (`ngx_http_markdown_ffi_helpers.c`)
+### Header Plan Atomic Application (`ngx_http_markdown_header_plan.c`)
 The C module applies `FFIHeaderPlan` operations (set, delete, modify)
-atomically: all header mutations succeed or all are rolled back. This
-prevents partial header state when an allocation failure occurs mid-plan.
-The plan is built by Rust and returned as a single FFI struct; C iterates
+atomically. All header mutations succeed, or the module rolls them all back.
+This prevents partial header state when an allocation failure occurs mid-plan.
+The plan is built by Rust and returned as a single FFI struct. C iterates
 the operation list and applies changes to `r->headers_out`.
 
-## v0.9.1 Feature Set
+## v0.9.2 Current State
 
-v0.9.1 introduces critical performance and robustness enhancements to the conversion pipeline:
+v0.9.2 is the final pre-1.0 breaking release. It consolidates the public
+surface before the 1.0 LTS compatibility freeze:
+
+- **Directive consolidation**: The configuration surface shrinks from 63
+  directives to 25. The project removed all reject-only migration stubs and
+  the `markdown_streaming_zero_copy`, per-path metrics, shadow comparison,
+  profile, and OTel directives. Removed names fail `nginx -t`
+  with the standard `unknown directive` error.
+- **`markdown_limits` keys**: conversion_timeout, parser_timeout,
+  conversion_memory, parser_memory, streaming_buffer, decompressed_size,
+  decompression_ratio, and max_inflight replace the former standalone
+  limit directives.
+- **Metrics freeze**: The production endpoint emits the twelve-family v1
+  contract (see [observability-schema-v1.md](observability-schema-v1.md)).
+  Legacy multi-format, per-path, shadow, and debug families no longer exist.
+- **Streaming threshold**: The streaming auto-route threshold stays fixed
+  internally at 1 MiB and is not operator-configurable.
+- **ABI and FFI**: The bundled Rust/C boundary is at ABI version 2.
+
+The sections below describe subsystems and prior release lines. Where they
+describe directives that no longer exist in 0.9.2, treat the behavior as
+historical.
+
+## v0.9.1 Feature Set (historical)
+
+v0.9.1 introduced critical performance and robustness enhancements to the conversion pipeline:
 
 ### Zero-Copy Output
-To reduce CPU overhead and memory pressure in high-throughput streaming paths, 0.9.1 introduces a zero-copy output mechanism. When `markdown_streaming_zero_copy` is enabled, the module can deliver converted chunks directly to the NGINX response chain with minimal internal copying.
+To reduce CPU overhead and memory pressure in high-throughput streaming paths, 0.9.1 introduces a zero-copy output mechanism. When you enable `markdown_streaming_zero_copy`, the module can deliver converted chunks directly to the NGINX response chain with minimal internal copying.
+
+> **0.9.2**: 0.9.2 removed `markdown_streaming_zero_copy`. Zero-copy delivery
+> now selects automatically from buffer ownership and backpressure state. It
+> is not operator-configurable.
 
 ### Streaming Decompression
 Streaming conversion now supports on-the-fly gzip, deflate, and Brotli
-decompression. Deflate accepts both zlib-wrapped and raw framing; gzip
-preserves member and trailer integrity across arbitrary chunks and
-backpressure resumes. Brotli streaming (compiled in when `NGX_HTTP_BROTLI`
-is defined) shares the streaming, backpressure, and response-wide accounting
-invariants of gzip and deflate while enforcing Brotli's single-stream
-completion rules: tail data is rejected and truncated final streams are
-detected and rejected.
+decompression. Deflate accepts both zlib-wrapped and raw framing. Gzip
+preserves member and trailer integrity across arbitrary chunks, and
+backpressure resumes. Brotli streaming (compiled in when the build defines
+`NGX_HTTP_BROTLI`) shares the streaming, backpressure, and response-wide
+accounting invariants of gzip and deflate. It also enforces Brotli's
+single-stream completion rules. The module rejects tail data and detects
+and rejects truncated final streams.
 
 ### Full-Buffer Copy Reduction
-Internal optimizations have been applied to the full-buffer path to reduce unnecessary data duplication during the transition from the NGINX buffer to the Rust converter and back.
+The project applied internal optimizations to the full-buffer path. They reduce unnecessary data duplication during the transition from the NGINX buffer to the Rust converter and back.
 
 ### Performance Evidence & Gates
-The 0.9.1 release is guarded by strict performance evidence gates. The `make release-gates-check-091` target must pass, and performance regression is monitored via `make perf-evidence-check`. Operators can use `python3 tools/perf/doctor_advice.py` and `tools/perf/run_module_benchmark.sh` to tune the module for their specific workload.
+Strict performance evidence gates guard the 0.9.1 release. The `make release-gates-check-091` target must pass, and operators monitor performance regression via `make perf-evidence-check`. Operators can use `python3 tools/perf/doctor_advice.py` and `tools/perf/run_module_benchmark.sh` to tune the module for their specific workload.

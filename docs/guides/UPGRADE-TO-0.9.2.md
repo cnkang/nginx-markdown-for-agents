@@ -3,7 +3,7 @@
 ## Overview
 
 This guide covers upgrading to nginx-markdown-for-agents 0.9.2 from 0.9.1.
-0.9.2 is a **breaking release**: the configuration surface is reduced from
+0.9.2 is a **breaking release**. The release reduces the configuration surface from
 63 directives to 25, and configurations using any removed directive fail
 `nginx -t` with `unknown directive` until migrated. Review
 [0.9.2-breaking-changes.md](0.9.2-breaking-changes.md) and
@@ -13,9 +13,9 @@ this guide.
 
 > Publication status: 0.9.2 is currently a development candidate. At the
 > time of writing, no `v0.9.2` tag, GitHub Release, package checksum, Docker
-> image, or Helm repository entry is asserted. The prebuilt, Helm, and Docker
-> commands below are release-time templates and must only be used after those
-> artifacts are published and independently verified. For the current
+> image, or Helm repository entry gets asserted. The prebuilt, Helm, and Docker
+> commands below are release-time templates and must only run after those
+> the project publishes artifacts and verifies them independently. For the current
 > candidate, build from the exact branch commit or use locally produced
 > artifacts.
 
@@ -36,13 +36,22 @@ Choose the upgrade method matching your deployment:
 
 ```bash
 # Replace <nginx-version> and <os> with your target (e.g., 1.26.3, ubuntu22.04)
-curl -LO https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v0.9.2/ngx_http_markdown_filter_module-0.9.2-nginx<nginx-version>-<os>-x86_64.so
+MODULE_FILE="ngx_http_markdown_filter_module-0.9.2-nginx<nginx-version>-<os>-x86_64.so"
+curl --fail --location --remote-name "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v0.9.2/${MODULE_FILE}"
+curl --fail --location --remote-name https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v0.9.2/SHA256SUMS
 ```
 
 ### 2. Verify checksum
 
 ```bash
-sha256sum -c checksums-0.9.2.txt
+CHECKSUM_LINE="$(awk -v module_file="${MODULE_FILE}" '
+    NF == 2 && $2 == module_file { count++; line = $0 }
+    END { if (count != 1) exit 1; print line }
+' SHA256SUMS)" || {
+    echo "SHA256SUMS must contain exactly one ${MODULE_FILE} record" >&2
+    exit 1
+}
+printf '%s\n' "${CHECKSUM_LINE}" | sha256sum --check
 ```
 
 ### 3. Back up the current module
@@ -188,7 +197,7 @@ curl -s http://localhost/nginx-markdown/diagnostics | python3 -m json.tool
 ### 4. Metrics endpoint
 
 ```bash
-curl -s http://localhost/nginx-markdown/metrics
+curl --fail --silent --show-error http://localhost/markdown-metrics
 # Verify metric families are present and emitting
 ```
 

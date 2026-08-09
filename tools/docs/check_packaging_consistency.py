@@ -310,10 +310,18 @@ def check_matrix_consistency() -> list[str]:
 
     table_rows = _parse_matrix_table(m[1])
 
-    for entry in matrix_data.get("matrix", []):
-        if entry.get("support_tier", "").lower() != "full":
+    for entry in matrix_data.get("entries", []):
+        if (
+            entry.get("artifact_type") != "dynamic-module"
+            or entry.get("support_tier") != "supported"
+            or entry.get("libc") not in {"glibc", "musl"}
+        ):
             continue
-        nginx, os_type, arch = entry["nginx"], entry["os_type"], entry["arch"]
+        nginx = entry["nginx_version"]
+        os_type = entry["libc"]
+        arch = {"amd64": "x86_64", "arm64": "aarch64"}.get(
+            entry["arch"], entry["arch"]
+        )
         matching = [
             r for r in table_rows
             if r[0] == nginx and r[1] == os_type and r[2] == arch

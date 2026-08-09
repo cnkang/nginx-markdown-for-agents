@@ -14,7 +14,7 @@ from tools.release.matrix import validate_release_matrix as validator
 def fake_matrix_root(tmp_path: Path) -> Path:
     """Materialize the repo surface the validator reads under tmp_path."""
     root = tmp_path
-    (root / "docs/release").mkdir(parents=True)
+    (root / "docs/releases").mkdir(parents=True)
     (root / "schemas").mkdir(parents=True)
     (root / "tools/release/matrix").mkdir(parents=True)
     (root / "artifacts/release/0.9.2").mkdir(parents=True)
@@ -58,7 +58,7 @@ def canonical_entry() -> dict:
 
 
 def write_matrix(root: Path, doc: dict) -> None:
-    (root / "docs/release/release-matrix.json").write_text(
+    (root / "docs/releases/release-matrix.json").write_text(
         json.dumps(doc), encoding="utf-8"
     )
 
@@ -187,7 +187,8 @@ def test_mismatched_abi_fails(
         fake_matrix_root,
         {
             "schema_version": 1,
-            "entries": [{**canonical_entry(), "abi_version": 1}],
+            "entries": [{**canonical_entry(), "abi_version": 1,
+                          "feature_manifest_digest": expected_digest()}],
         },
     )
     with pytest.raises(SystemExit, match="binding drift"):

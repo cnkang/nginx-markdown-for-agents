@@ -26,7 +26,7 @@ Features:
 - Streaming and full-buffer conversion engines
 - Content negotiation via Accept headers (q-value based)
 - Automatic decompression with bounded budget
-- GFM/MDX flavor support
+- CommonMark/GFM flavor support
 - Noise pruning and token estimation
 - Conditional request support (ETag, If-Modified-Since)
 - Prometheus metrics endpoint

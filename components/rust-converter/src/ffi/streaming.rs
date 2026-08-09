@@ -97,6 +97,10 @@ fn effective_flush_threshold(raw: u32) -> usize {
 
 /// Configuration options for the streaming converter, passed from C to Rust.
 ///
+/// **Legacy type.** Superseded by `MarkdownOptions`; not consumed by any
+/// exported FFI function in the frozen 0.9.2 ABI. Retained for
+/// layout-stability tests only.
+///
 /// This `#[repr(C)]` struct is the purpose-built configuration interface for
 /// the streaming (incremental) conversion path. C callers populate this struct
 /// and pass a pointer to [`markdown_streaming_new_with_code`] (or a future overload that

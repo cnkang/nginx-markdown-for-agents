@@ -14,9 +14,9 @@
 //!
 //! # Wildcard Behavior
 //!
-//! `*/*` in the Accept header is treated as `q=1.0` for both text/markdown
-//! and text/html, unless `on_wildcard` is false (in which case `*/*` does
-//! not imply markdown preference).
+//! `*/*` in the Accept header is treated with its own q-value (default 1.0)
+//! for both text/markdown and text/html, unless `on_wildcard` is false (in
+//! which case `*/*` does not imply markdown preference).
 //!
 //! # Examples
 //!

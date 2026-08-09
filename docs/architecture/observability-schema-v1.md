@@ -36,9 +36,9 @@ endpoint. The response has exactly these seven top-level fields:
 - `recent_decisions`: bounded worker-local decision entries
 
 The schema rejects unknown fields and malformed types. The handler is
-read-only: GET and HEAD are accepted, HEAD computes the complete body length
+read-only: the endpoint accepts GET and HEAD, HEAD computes the complete body length
 without sending a body, and other methods return 405. Native NGINX
-allow/deny/auth directives can further restrict access; they cannot broaden
+allow/deny/auth directives can further restrict access. They cannot broaden
 the handler's built-in internal access boundary.
 
 Legacy `config_snapshot`, profile, streaming, duplicated metrics, and
@@ -64,16 +64,17 @@ nginx_markdown_input_bytes_total
 nginx_markdown_output_bytes_total
 nginx_markdown_inflight_requests
 nginx_markdown_streaming_events_total
+nginx_markdown_streaming_peak_memory_bytes
 nginx_markdown_decompression_events_total
 nginx_markdown_dynconf_reloads_total
 nginx_markdown_build_info
 ```
 
-Labels are bounded allowlists. Raw paths, URIs, hosts, users, profiles, and
+Labels stay bounded allowlists. Raw paths, URIs, hosts, users, profiles, and
 per-path dimensions are not emitted. Histogram rendering includes
 `_bucket`, `_sum`, `_count`, and `+Inf`. Delivery and output-byte
-counters advance only after downstream acceptance; request terminal outcomes
-and inflight cleanup are accounted for independently.
+counters advance only after downstream acceptance. Request terminal outcomes
+and inflight cleanup get accounted for independently.
 
 ## Internal Rust helpers and ABI
 

@@ -2,13 +2,13 @@
 
 ## Overview
 
-This document defines the process for evaluating and rejecting out-of-scope proposals, ensuring the 0.5.0 release stays focused on the streaming architecture transition.
+This document defines the process for evaluating and rejecting out-of-scope proposals. It keeps the 0.5.0 release focused on the streaming architecture transition.
 
 ## Core Criterion
 
 **Does the work directly serve the streaming mainline?**
 
-All scope evaluations use this as the core criterion. Work that cannot demonstrate a strong coupling to the streaming mainline must be demoted to P1 or deferred.
+All scope evaluations use this as the core criterion. The team must demote or defer work that cannot demonstrate a strong coupling to the streaming mainline.
 
 ## Evaluation Flow
 
@@ -44,11 +44,11 @@ The following topics are explicitly out of scope for 0.5.0 (referenced from `doc
 
 ## Evaluation Rules
 
-1. Any proposal not covered by an existing sub-spec must be evaluated against the 0.5.0 goal boundary and non-goals list before work begins
-2. Proposals matching non-goals are rejected and recorded as 0.6.x+ candidates
+1. The evaluator must check any proposal not covered by an existing sub-spec against the 0.5.0 goal boundary. The non-goals list applies too. Check before work begins
+2. The process rejects proposals matching non-goals and records them as 0.6.x+ candidates
 3. Ambiguous proposals require evaluation using the Boundary Description template followed by review
-4. Approved scope expansions must record rationale and be reflected in affected sub-spec documents
-5. P1 items may ship but must not block the release; when P1 work threatens the release timeline, defer rather than block
+4. Approved scope expansions must record rationale and reflect in affected sub-spec documents
+5. P1 items may ship but must not block the release. When P1 work threatens the release timeline, defer rather than block
 
 ## Scope Expansion Record Template
 

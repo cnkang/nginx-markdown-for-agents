@@ -893,7 +893,7 @@ run_scenario() {
   local raw_output="$NGINX_WORKDIR/${SC_NAME}_raw.csv"
   local url_path="/$SC_FIXTURE"
 
-  # ponytail: dynamically map scenario labels to actual traffic via query params
+  # dynamically map scenario labels to actual traffic via query params
   if [[ "$SC_COMPRESSION" == "gzip" ]]; then
     url_path="${url_path}?gzip=1"
   elif [[ "$SC_COMPRESSION" == "deflate" ]]; then

@@ -220,7 +220,7 @@ while IFS= read -r match; do
     line="$(echo "$match" | cut -d: -f2)"
     content="$(echo "$match" | cut -d: -f3-)"
     # Skip comment lines
-    if echo "$content" | grep -qE '^\s*#'; then
+    if echo "$content" | grep -qE '^[[:space:]]*#'; then
         continue
     fi
     # Skip grep/test assertions that match the pattern but are not output
@@ -273,11 +273,11 @@ while IFS= read -r match; do
     line="$(echo "$match" | cut -d: -f2)"
     content="$(echo "$match" | cut -d: -f3-)"
     # Skip comment lines
-    if echo "$content" | grep -qE '^\s*#'; then
+    if echo "$content" | grep -qE '^[[:space:]]*#'; then
         continue
     fi
     # Skip lines inside echo/printf (reporting the pattern itself)
-    if echo "$content" | grep -qE '^\s*(echo|printf)'; then
+    if echo "$content" | grep -qE '^[[:space:]]*(echo|printf)'; then
         continue
     fi
     # Skip test assertions that grep for bracket patterns
@@ -373,7 +373,7 @@ while IFS= read -r match; do
     line="$(echo "$match" | cut -d: -f2)"
     content="$(echo "$match" | cut -d: -f3-)"
     # Skip comment lines (lines starting with # or echo of description strings)
-    if echo "$content" | grep -qE '^\s*#'; then
+    if echo "$content" | grep -qE '^[[:space:]]*#'; then
         continue
     fi
     # Skip echo statements that are reporting the pattern itself (self-reference)

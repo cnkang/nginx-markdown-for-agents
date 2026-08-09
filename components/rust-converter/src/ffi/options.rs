@@ -34,8 +34,7 @@ use super::abi::MarkdownOptions;
 /// Fixed built-in chars-per-token ratio for token estimation.
 ///
 /// The heuristic is deterministic: `ceil(chars / 4.0)`.  No provider
-/// branding, no BPE tokenizer; retained as the single default source until
-/// the temporary FFI fields are frozen out by the current ABI contract.
+/// branding, no BPE tokenizer; fixed default since the 0.9.2 ABI freeze.
 pub(crate) const DEFAULT_CHARS_PER_TOKEN: f32 = 4.0;
 
 /// Minimum allowed chars-per-token ratio.
@@ -49,8 +48,6 @@ const CHARS_PER_TOKEN_MAX: f32 = 100.0;
 ///
 /// Non-positive inputs default to [`DEFAULT_CHARS_PER_TOKEN`] (4.0).
 /// Positive inputs are clamped to [CHARS_PER_TOKEN_MIN, CHARS_PER_TOKEN_MAX].
-/// FFI `u8` fixed-point callers can express raw non-zero values from 0.1 to
-/// 25.5; the wider clamp still protects internal Rust callers.
 pub(crate) fn clamp_chars_per_token(raw: f32) -> f32 {
     if raw <= 0.0 {
         DEFAULT_CHARS_PER_TOKEN

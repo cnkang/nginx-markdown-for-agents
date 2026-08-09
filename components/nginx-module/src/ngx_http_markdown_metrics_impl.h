@@ -2,6 +2,7 @@
 #define NGX_HTTP_MARKDOWN_METRICS_IMPL_H
 
 #include "ngx_http_markdown_metrics_json_perf_impl.h"
+#include "ngx_http_markdown_metrics_format.h"
 
 #ifndef NGX_MAX_SIZE_T_VALUE
 #define NGX_MAX_SIZE_T_VALUE ((size_t) -1)
@@ -947,27 +948,6 @@ ngx_http_markdown_metrics_validate_request(ngx_http_request_t *r)
     }
 
     return NGX_OK;
-}
-
-/*
- * Output format constants retained for bounded-renderer unit tests. The
- * public handler always selects Prometheus v1.
- */
-#define NGX_HTTP_MARKDOWN_METRICS_OUTPUT_TEXT        0
-#define NGX_HTTP_MARKDOWN_METRICS_OUTPUT_JSON        1
-#define NGX_HTTP_MARKDOWN_METRICS_OUTPUT_PROMETHEUS  2
-
-/*
- * Return the frozen public output format. The Accept header is deliberately
- * ignored: 0.9.2 has one wire format and does not retain compatibility
- * negotiation for removed JSON or legacy text responses.
- */
-static ngx_uint_t
-ngx_http_markdown_metrics_select_format(
-    const ngx_http_request_t *r)
-{
-    (void) r;
-    return NGX_HTTP_MARKDOWN_METRICS_OUTPUT_PROMETHEUS;
 }
 
 /*
@@ -2171,7 +2151,7 @@ ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
         return rc;
     }
 
-    /* Negotiate the response format before discarding any request body. */
+    /* Select the frozen response format before discarding any request body. */
     format = ngx_http_markdown_metrics_select_format(r);
 
     rc = ngx_http_discard_request_body(r);

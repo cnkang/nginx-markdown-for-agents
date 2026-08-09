@@ -1175,11 +1175,9 @@ ngx_http_markdown_per_path_lookup_and_update(
 /*
  * Record per-path metrics for a successful conversion.
  *
- * Looks up the request URI in the shared RB-tree.  If the path
- * is not found and the tree is below cardinality_limit, allocates
- * a new node from the slab pool and inserts it.  If at capacity,
- * increments overflow_count.  Updates per-path and aggregate
- * counters under the slab pool mutex.
+ * No-op placeholder since 0.9.2 (per-path metrics removed;
+ * the directive was deleted).  Retained only to keep the
+ * call sites stable across releases.
  *
  * Parameters:
  *   r          - the HTTP request (provides r->uri as the path key)
@@ -1806,7 +1804,8 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
     }
 
     if (rc == NGX_AGAIN) {
-        ctx->fullbuffer.pending_output = out;
+        ngx_http_markdown_pending_output_set(
+            &ctx->fullbuffer.pending_output, out);
         ctx->fullbuffer.pending_has_data = 1;
         r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
 
@@ -1859,7 +1858,8 @@ ngx_http_markdown_body_filter_resume_pending(ngx_http_request_t *r,
         NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_resume_total);
     }
 
-    ctx->fullbuffer.pending_output = NULL;
+    ngx_http_markdown_pending_output_set(
+        &ctx->fullbuffer.pending_output, NULL);
     ctx->fullbuffer.pending_has_data = 0;
     r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
 

@@ -224,3 +224,7 @@ def test_classify_finding_distinguishes_crashes_and_sanitizers() -> None:
         "ERROR: libFuzzer: deadly signal") == (1, 0)
     assert validator._classify_finding(
         "SUMMARY: AddressSanitizer: heap-buffer-overflow") == (0, 1)
+    assert validator._classify_finding(
+        "SUMMARY: UndefinedBehaviorSanitizer: signed integer overflow") == (0, 1)
+    assert validator._classify_finding(
+        "runtime error: load of misaligned address") == (0, 1)

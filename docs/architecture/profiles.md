@@ -4,8 +4,8 @@
 > described below were **removed in 0.9.2** (see
 > [MIGRATION-0.9.2.md](../guides/MIGRATION-0.9.2.md) and
 > [0.9.2-breaking-changes.md](../guides/0.9.2-breaking-changes.md)). This
-> document is retained as a historical design record of the pre-0.9.2
-> surface; it does not describe any active 0.9.2 behavior. The named profile
+> document stays as a historical design record of the pre-0.9.2
+> surface. It does not describe any active 0.9.2 behavior. The named profile
 > directive appears here only as an archived reference.
 
 | Field | Value |
@@ -34,10 +34,10 @@ Design constraints:
 
 - Profiles are **additive defaults**, not opaque presets — operators retain full
   visibility into what each profile sets and can override most fields.
-- Profiles do not introduce new runtime behavior; they only set existing
+- Profiles do not introduce new runtime behavior. They only set existing
   Config V2 directive defaults.
 - The profile set is small (three profiles) and frozen at 1.0.0. New profiles
-  may be added after 1.0 (additive-only), but existing profile semantics must
+  the project may add them after 1.0 (additive-only), but existing profile semantics must
   not change.
 
 ---
@@ -64,7 +64,7 @@ Key characteristics:
 - `markdown_cache_validation ims_only` — avoids ETag computation overhead
   while still supporting `If-Modified-Since` via the upstream's
   `Last-Modified`.
-- `markdown_streaming auto` — large responses stream; small ones buffer.
+- `markdown_streaming auto` — large responses stream. Small ones buffer.
 - No forced fields — all defaults can be overridden.
 - Values are intentionally close to Config V2 built-in defaults to minimize
   migration surprise.
@@ -76,7 +76,7 @@ low memory usage are the priority.
 
 Key characteristics:
 - `markdown_streaming force` (**forced**) — all eligible responses stream.
-- `markdown_cache_validation off` (**forced**) — no caching overhead; streaming
+- `markdown_cache_validation off` (**forced**) — no caching overhead. Streaming
   responses cannot carry an ETag.
 - `markdown_accept wildcard` — converts on `*/*` and `text/*` Accept headers,
   which many AI crawlers send.
@@ -97,7 +97,7 @@ Priority (highest first):
 2. Profile defaults from the active `markdown_profile`.
 3. Config V2 built-in defaults (compile-time constants).
 
-When no `markdown_profile` is declared, only built-in defaults apply (no
+When no `markdown_profile` appears in config, only built-in defaults apply (no
 implicit profile). This is intentional — 0.9.0 is a breaking release and does
 not default to any profile.
 
@@ -131,7 +131,7 @@ These apply regardless of whether a profile is active:
 
 ### Conflict Detection Timing
 
-- **`nginx -t`**: all conflicts are detected at configuration test time.
+- **`nginx -t`**: the test detects all conflicts at configuration test time.
 - **Dynconf dry-run**: conflict detection also runs during dynamic
   configuration validation.
 
@@ -139,7 +139,7 @@ These apply regardless of whether a profile is active:
 
 ## FFI Boundary Design
 
-Profile logic is implemented entirely in Rust. The C module handles only:
+Profile logic lives entirely in Rust. The C module handles only:
 1. Parsing the `markdown_profile` directive (enum value storage).
 2. Calling the Rust merge/conflict FFI during config merge.
 3. Applying the resulting effective values to the C config struct.
@@ -161,7 +161,7 @@ markdown_detect_conflicts(profile, explicit_flags, effective) → FFIConflict[]
 ```
 
 Profile expansion happens at config parse time. There is no runtime overhead —
-the effective config is computed once during `nginx -t` and cached in the
+the module computes the effective config once during `nginx -t` and caches it in the
 merged `ngx_http_markdown_conf_t` struct.
 
 ---
@@ -181,7 +181,7 @@ merged `ngx_http_markdown_conf_t` struct.
 
 ### Adding New Profiles (post-1.0)
 
-New profiles can be added following these rules:
+The project can add new profiles following these rules:
 1. Add a variant to `Profile` enum (Rust) and `FFIProfile` (C header).
 2. Implement `defaults()` for the new profile.
 3. Declare any forced fields.

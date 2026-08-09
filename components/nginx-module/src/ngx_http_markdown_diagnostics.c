@@ -74,6 +74,8 @@ static ngx_int_t ngx_http_markdown_diagnostics_build_json(
     ngx_http_request_t *r, ngx_buf_t *b);
 static size_t ngx_http_markdown_diagnostics_json_size(
     const ngx_http_markdown_diag_state_t *state);
+static ngx_int_t ngx_http_markdown_diag_json_string(
+    u_char **pos, u_char *last, const u_char *value, size_t len);
 
 
 /*
@@ -630,6 +632,55 @@ ngx_http_markdown_diag_time(u_char *p, u_char *last, ngx_msec_t stamp)
 }
 
 
+/* Append one length-bounded JSON string, escaping syntax and controls. */
+static ngx_int_t
+ngx_http_markdown_diag_json_string(
+    u_char **pos, u_char *last, const u_char *value, size_t len)
+{
+    static const u_char  hex[] = "0123456789abcdef";
+    u_char              *p;
+    u_char               ch;
+    size_t               needed;
+
+    if (pos == NULL || *pos == NULL || last == NULL || value == NULL
+        || *pos > last
+        || (size_t) (last - *pos) < 2)
+    {
+        return NGX_ERROR;
+    }
+
+    p = *pos;
+    *p++ = '"';
+    for (size_t i = 0; i < len; i++) {
+        ch = value[i];
+        needed = (ch == '"' || ch == '\\') ? 2
+                 : (ch < 0x20 ? 6 : 1);
+        if (p > last || (size_t) (last - p) < needed) {
+            return NGX_ERROR;
+        }
+        if (ch == '"' || ch == '\\') {
+            *p++ = '\\';
+            *p++ = ch;
+        } else if (ch < 0x20) {
+            *p++ = '\\';
+            *p++ = 'u';
+            *p++ = '0';
+            *p++ = '0';
+            *p++ = hex[ch >> 4];
+            *p++ = hex[ch & 0x0f];
+        } else {
+            *p++ = ch;
+        }
+    }
+    if (p >= last) {
+        return NGX_ERROR;
+    }
+    *p++ = '"';
+    *pos = p;
+    return NGX_OK;
+}
+
+
 static const char *
 ngx_http_markdown_diag_decision_stage(ngx_int_t code)
 {
@@ -798,11 +849,6 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     }
 
     streaming_buffer = effective.streaming_buffer;
-    if (streaming_buffer < 65536) {
-        streaming_buffer = 65536;
-    } else if (streaming_buffer > 1073741824) {
-        streaming_buffer = 1073741824;
-    }
 
     dynconf_state = ngx_http_markdown_diag_dynconf_state_name(dynconf.state);
     p = ngx_slprintf(p, last,
@@ -844,8 +890,12 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
         if (dynconf.state == NGX_HTTP_MARKDOWN_DIAG_DYNCONF_LKG_PRESERVED
             && dynconf.last_error_len > 0)
         {
-            p = ngx_slprintf(p, last, "\"%*s\"", dynconf.last_error_len,
-                dynconf.last_error);
+            if (ngx_http_markdown_diag_json_string(
+                    &p, last, dynconf.last_error,
+                    dynconf.last_error_len) != NGX_OK)
+            {
+                return NGX_ERROR;
+            }
         } else {
             p = ngx_slprintf(p, last, "null");
         }
@@ -855,8 +905,13 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
         p = ngx_slprintf(p, last,
             "\"generation\":null,\"source_digest\":null,"
             "\"active_digest\":null,\"lkg_digest\":null,"
-            "\"last_success\":null,\"last_error\":\"%*s\"",
-            dynconf.last_error_len, dynconf.last_error);
+            "\"last_success\":null,\"last_error\":");
+        if (ngx_http_markdown_diag_json_string(
+                &p, last, dynconf.last_error,
+                dynconf.last_error_len) != NGX_OK)
+        {
+            return NGX_ERROR;
+        }
     } else {
         p = ngx_slprintf(p, last,
             "\"generation\":null,\"source_digest\":null,"
@@ -939,6 +994,8 @@ ngx_http_markdown_diagnostics_json_size(
     }
 
     return NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE
+           + (6 * (sizeof(((ngx_http_markdown_diag_dynconf_t *) 0)
+                       ->last_error) - 1))
            + ((size_t) decision_count
               * NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE);
 }

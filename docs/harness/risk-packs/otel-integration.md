@@ -1,5 +1,12 @@
 # OTel Integration Pack
 
+> **ARCHIVED.** The 0.9.2 release removed the OTel subsystem
+> (`markdown_otel`, `markdown_otel_endpoint`, and the
+> `ngx_http_markdown_otel*` sources). This pack stays as a historical
+> record of the pre-0.9.2 risk surface. It has no active triggers. See
+> [ADR-0027](../../architecture/ADR/0027-otel-removal-reintroduction-conditions.md)
+> for the reintroduction conditions.
+
 ## Triggers
 
 Changes to `ngx_http_markdown_otel*`, OTel configuration directives, OTLP export logic, or span attribute definitions.
@@ -40,6 +47,7 @@ make docs-check
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Marked pack archived (OTel subsystem removed in 0.9.2) |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.6.0 | 2026-05-03 | Codex | Covered implementation-header and config/doc routing for OTel changes |
 | 0.6.0 | 2026-05-03 | Codex | Added trace-context header-list traversal sync point |

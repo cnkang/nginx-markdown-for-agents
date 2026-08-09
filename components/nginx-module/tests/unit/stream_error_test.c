@@ -134,6 +134,20 @@ ngx_http_markdown_metrics_record_postcommit_safe_finish(void)
 {
 }
 
+void
+ngx_http_markdown_pending_output_set(ngx_chain_t **slot, ngx_chain_t *value)
+{
+    if (slot != NULL) {
+        *slot = value;
+    }
+}
+
+ngx_atomic_uint_t
+ngx_http_markdown_pending_output_current(void)
+{
+    return 0;
+}
+
 /* Include the decision engine source directly */
 #include "../../src/ngx_http_markdown_stream_state.h"
 #include "../../src/ngx_http_markdown_stream_state.c"
@@ -757,6 +771,15 @@ static void test_null_parameters(void)
                 == NGX_ERROR, "null ctx");
     TEST_ASSERT(ngx_http_markdown_stream_on_error(&test_request, &ctx, NULL)
                 == NGX_ERROR, "null conf");
+
+    {
+        ngx_connection_impl_t *connection = test_request.connection;
+
+        test_request.connection = NULL;
+        TEST_ASSERT(ngx_http_markdown_stream_on_error(&test_request, &ctx,
+                    &conf) == NGX_ERROR, "null connection");
+        test_request.connection = connection;
+    }
     TEST_PASS("Null parameter validation");
 }
 

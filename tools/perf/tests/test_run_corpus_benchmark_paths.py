@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -47,6 +48,19 @@ def test_approved_executable_rejects_writable_path_entry(monkeypatch, tmp_path):
     )
 
     assert executable_validation.resolve_approved_executable("git") is None
+
+
+def test_approved_ab_rejects_path_shadowing(monkeypatch, tmp_path):
+    """A PATH-first fake ab must not become the soak load generator."""
+    fake_ab = tmp_path / "ab"
+    fake_ab.write_text("#!/bin/sh\n", encoding="utf-8")
+    fake_ab.chmod(0o755)
+    monkeypatch.setenv(
+        "PATH",
+        os.pathsep.join((str(tmp_path), os.environ.get("PATH", ""))),
+    )
+
+    assert executable_validation.resolve_approved_executable("ab") is None
 
 
 def test_discover_fixtures_persists_validated_html_path(tmp_path):

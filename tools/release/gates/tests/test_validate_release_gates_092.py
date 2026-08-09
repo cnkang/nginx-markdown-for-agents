@@ -91,6 +91,42 @@ def test_version_consistency_fails_when_sources_are_missing(tmp_path: Path) -> N
     assert "CHANGELOG.md: file not found" in result["message"]
 
 
+def test_version_consistency_reads_the_package_table(tmp_path: Path) -> None:
+    """A workspace version must not hide a mismatching package version."""
+    cargo_path = tmp_path / "components" / "rust-converter" / "Cargo.toml"
+    cargo_path.parent.mkdir(parents=True)
+    cargo_path.write_text(
+        "[workspace.package]\nversion = \"0.9.2\"\n\n"
+        "[package]\nname = \"fixture\"\nversion = \"0.9.1\"\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "CHANGELOG.md").write_text(
+        "## [0.9.2]\n", encoding="utf-8"
+    )
+
+    result = validator.check_version_consistency(tmp_path)
+
+    assert result["status"] == "fail"
+    assert "Cargo.toml: 0.9.1" in result["message"]
+
+
+def test_version_consistency_rejects_invalid_utf8_cargo_file(
+    tmp_path: Path,
+) -> None:
+    """Invalid Cargo.toml bytes must remain a reported gate mismatch."""
+    cargo_path = tmp_path / "components" / "rust-converter" / "Cargo.toml"
+    cargo_path.parent.mkdir(parents=True)
+    cargo_path.write_bytes(b"[package]\nversion = \xff\n")
+    (tmp_path / "CHANGELOG.md").write_text(
+        "## [0.9.2]\n", encoding="utf-8"
+    )
+
+    result = validator.check_version_consistency(tmp_path)
+
+    assert result["status"] == "fail"
+    assert "Cargo.toml: invalid TOML" in result["message"]
+
+
 def test_reason_code_registry_accepts_complete_fixture(tmp_path: Path) -> None:
     """A complete Rust/C/inventory registry must pass with its full count."""
     _write_reason_fixture(tmp_path)

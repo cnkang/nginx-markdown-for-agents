@@ -14,7 +14,7 @@
 //! - invalid literals/obfuscated values (userinfo, control chars, malformed
 //!   IPv6) are rejected; no DNS resolution is invoked
 //!
-//! All six positive and thirteen negative normative fixtures from
+//! All six positive and fourteen negative normative fixtures from
 //! Requirement 13 are executed under their stable case names.
 
 use nginx_markdown_converter::forwarded::{
@@ -129,7 +129,7 @@ proptest! {
 
 // ─── Normative fixtures (Requirement 13) ─────────────────────────────────────
 //
-// The six positive and thirteen negative examples are part of the contract;
+// The six positive and fourteen negative examples are part of the contract;
 // each carries its stable case name.
 
 /* Positive 1: aligned X-Forwarded chain. */
@@ -260,9 +260,23 @@ fn negative_3_partial_or_inconsistent_list_lengths() {
     assert_eq!(d.source, BaseUrlSource::Host);
 }
 
-/* Negative 4: unknown address. */
+/* Negative 4: an empty forwarded member is invalid, not ignorable. */
 #[test]
-fn negative_4_unknown_address() {
+fn negative_4_empty_xff_member() {
+    let t = cidrs(&["10.0.0.0/8"]);
+    let mut input = trusted_input("10.0.0.1");
+    input.x_forwarded_for = Some("198.51.100.7,,192.0.2.10");
+    input.x_forwarded_host = Some("example.com, edge.example.com, proxy.example.com");
+    input.x_forwarded_proto = Some("https, https, https");
+    input.x_forwarded_port = Some("443, 443, 443");
+    let d = decide_base_url(&input, &t);
+    assert_eq!(d.reason, BaseUrlReason::ForwardedInvalidValue);
+    assert_eq!(d.source, BaseUrlSource::Host);
+}
+
+/* Negative 5: unknown address. */
+#[test]
+fn negative_5_unknown_address() {
     let t = cidrs(&["10.0.0.0/8"]);
     let mut input = trusted_input("10.0.0.1");
     input.x_forwarded_for = Some("unknown");
@@ -274,9 +288,9 @@ fn negative_4_unknown_address() {
     assert_eq!(d.source, BaseUrlSource::Host);
 }
 
-/* Negative 5: obfuscated identifier. */
+/* Negative 6: obfuscated identifier. */
 #[test]
-fn negative_5_obfuscated_identifier() {
+fn negative_6_obfuscated_identifier() {
     let t = cidrs(&["10.0.0.0/8"]);
     let mut input = trusted_input("10.0.0.1");
     input.x_forwarded_for = Some("_hidden, 198.51.100.7");
@@ -288,9 +302,9 @@ fn negative_5_obfuscated_identifier() {
     assert_eq!(d.source, BaseUrlSource::Host);
 }
 
-/* Negative 6: userinfo. */
+/* Negative 7: userinfo. */
 #[test]
-fn negative_6_userinfo() {
+fn negative_7_userinfo() {
     let t = cidrs(&["10.0.0.0/8"]);
     let mut input = trusted_input("10.0.0.1");
     input.forwarded = Some("for=198.51.100.7;proto=https;host=user:pass@example.com");
@@ -299,9 +313,9 @@ fn negative_6_userinfo() {
     assert_eq!(d.source, BaseUrlSource::Host);
 }
 
-/* Negative 7: control character. */
+/* Negative 8: control character. */
 #[test]
-fn negative_7_control_character() {
+fn negative_8_control_character() {
     let t = cidrs(&["10.0.0.0/8"]);
     let mut input = trusted_input("10.0.0.1");
     input.x_forwarded_for = Some("198.51.100.7");
@@ -313,9 +327,9 @@ fn negative_7_control_character() {
     assert_eq!(d.source, BaseUrlSource::Host);
 }
 
-/* Negative 8: malformed IPv6. */
+/* Negative 9: malformed IPv6. */
 #[test]
-fn negative_8_malformed_ipv6() {
+fn negative_9_malformed_ipv6() {
     let t = cidrs(&["10.0.0.0/8"]);
     let mut input = trusted_input("10.0.0.1");
     input.x_forwarded_for = Some("[2001:db8::7");
@@ -327,9 +341,9 @@ fn negative_8_malformed_ipv6() {
     assert_eq!(d.source, BaseUrlSource::Host);
 }
 
-/* Negative 9: zone identifier. */
+/* Negative 10: zone identifier. */
 #[test]
-fn negative_9_zone_identifier() {
+fn negative_10_zone_identifier() {
     let t = cidrs(&["10.0.0.0/8"]);
     let mut input = trusted_input("10.0.0.1");
     input.x_forwarded_for = Some("2001:db8::7%25eth0");
@@ -341,9 +355,9 @@ fn negative_9_zone_identifier() {
     assert_eq!(d.source, BaseUrlSource::Host);
 }
 
-/* Negative 10: invalid scheme. */
+/* Negative 11: invalid scheme. */
 #[test]
-fn negative_10_invalid_scheme() {
+fn negative_11_invalid_scheme() {
     let t = cidrs(&["10.0.0.0/8"]);
     let mut input = trusted_input("10.0.0.1");
     input.x_forwarded_for = Some("198.51.100.7");
@@ -355,9 +369,9 @@ fn negative_10_invalid_scheme() {
     assert_eq!(d.source, BaseUrlSource::Host);
 }
 
-/* Negative 11: invalid port. */
+/* Negative 12: invalid port. */
 #[test]
-fn negative_11_invalid_port() {
+fn negative_12_invalid_port() {
     let t = cidrs(&["10.0.0.0/8"]);
     let mut input = trusted_input("10.0.0.1");
     input.x_forwarded_for = Some("198.51.100.7");
@@ -369,9 +383,9 @@ fn negative_11_invalid_port() {
     assert_eq!(d.source, BaseUrlSource::Host);
 }
 
-/* Negative 12: invalid host. */
+/* Negative 13: invalid host. */
 #[test]
-fn negative_12_invalid_host() {
+fn negative_13_invalid_host() {
     let t = cidrs(&["10.0.0.0/8"]);
     let mut input = trusted_input("10.0.0.1");
     input.forwarded = Some("for=198.51.100.7;proto=https;host=a..b");
@@ -380,9 +394,9 @@ fn negative_12_invalid_host() {
     assert_eq!(d.source, BaseUrlSource::Host);
 }
 
-/* Negative 13: trusted chain exhausted. */
+/* Negative 14: trusted chain exhausted. */
 #[test]
-fn negative_13_trusted_chain_exhausted() {
+fn negative_14_trusted_chain_exhausted() {
     let t = cidrs(&["10.0.0.0/8", "192.0.2.0/24"]);
     let mut input = trusted_input("10.0.0.1");
     input.x_forwarded_for = Some("192.0.2.1, 192.0.2.2");

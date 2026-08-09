@@ -34,6 +34,8 @@
       "status": "skip",
       "blocking": false,
       "evidence_ref": "",
+      "justification": "Documentation review is tracked separately from executable release evidence.",
+      "policy_reference": "release evidence policy: non-blocking documentation review",
       "observed_at": "2026-08-05T13:30:00Z"
     }
   ]

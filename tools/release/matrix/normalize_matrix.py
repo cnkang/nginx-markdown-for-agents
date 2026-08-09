@@ -117,6 +117,8 @@ def normalize_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
         ("libc", None),
         ("target", "arch"),
         ("artifact_type", None),
+        ("feature_manifest_digest", None),
+        ("abi_version", None),
     ):
         if required not in canonical:
             hint = f" (or {alias} alias)" if alias else ""
@@ -132,6 +134,10 @@ def _fold_entry_keys(entry: Dict[str, Any]) -> Dict[str, Any]:
     canonical: Dict[str, Any] = {}
     for key, value in entry.items():
         if key in CANONICAL_ENTRY_KEYS:
+            if key in canonical and canonical[key] != value:
+                raise MatrixNormalizationError(
+                    f"duplicate canonical key {key!r} disagrees with its earlier value"
+                )
             canonical[key] = value
         elif key in LEGACY_ALIASES:
             canonical_key = LEGACY_ALIASES[key]

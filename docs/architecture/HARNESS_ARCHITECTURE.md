@@ -87,7 +87,7 @@ implementation.
 - `docs/harness/risk-packs/*.md`
 - `tools/harness/*.py`
 
-This is the canonical tracked harness surface. It is designed to be readable by
+This is the canonical tracked harness surface. It aims to stay readable by
 humans and consumable by tools.
 
 ### 3. Optional local inputs and adapters
@@ -128,7 +128,7 @@ The markdown view must not introduce hidden semantics.
 
 ### Risk packs
 
-Risk packs are organized by technical hazard, not by task label. The current
+The harness organizes risk packs by technical hazard, not by task label. The current
 tracked set covers:
 
 - runtime streaming behavior
@@ -140,7 +140,7 @@ Each task may activate one primary pack plus zero or more supporting packs.
 
 ### Verification matrix
 
-The verification matrix is phased:
+The verification matrix phases:
 
 1. cheap blockers
 2. focused semantic checks
@@ -155,7 +155,7 @@ history-heavy analysis are escalation tools, not default taxes on every task.
 ### State carrier
 
 The harness keeps short-lived execution memory in a user-local state carrier,
-not in repo docs. The state carrier is used for:
+not in repo docs. The state carrier serves:
 
 - retry counts
 - drift evidence
@@ -180,16 +180,16 @@ author workflows.
 
 The harness is not intended to freeze after initial rollout.
 
-Two maintenance paths are expected:
+Two maintenance paths exist:
 
 - sync maintenance: keep repo truth, adapters, Make targets, and CI aligned
 - rule evolution: update packs or routing when repeated fixes, replay evidence,
   or historical commit patterns justify a stronger rule
 
 The sync gate exists to keep those truth surfaces from drifting apart. The
-maintenance loop is not only social process; it is backed by executable checks.
+maintenance loop is not only social process. Executable checks back it.
 
-The maintenance loop is supported by:
+The maintenance loop rests on:
 
 - `make harness-check`
 - `make harness-check-full`
@@ -199,7 +199,7 @@ The maintenance loop is supported by:
 
 ## Failure Boundaries
 
-The harness is designed to fail explicitly in four common situations:
+The harness fails explicitly in four common situations:
 
 - no confident spec binding
 - route confidence too low to pick a single safe path

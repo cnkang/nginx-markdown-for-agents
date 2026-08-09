@@ -17,8 +17,8 @@
 #   - config_core_impl.h, config_handlers_impl.h: config init/merge
 #   - config_impl.h: config merge helpers
 #   - exports.h: public API wrappers
-#   - log_decision_debug: fixed in v0.6.2 (reported as ERROR)
-#   - is_enabled: fixed in v0.6.2 (reported as ERROR)
+#   - log_decision_debug / is_enabled: migrated to effective_conf reads;
+#     if direct live conf reads reappear they are reported as ERROR
 #
 # Usage: bash tools/harness/detect_live_conf_reads.sh [directory]
 #   directory defaults to components/nginx-module/src
@@ -97,7 +97,7 @@ while IFS= read -r match; do
     fi
 
     # Skip lines that are comments
-    if echo "$content" | grep -qE '^\s*/\*|^\s*\*|^\s*//'; then
+    if echo "$content" | grep -qE '^[[:space:]]*/\*|^[[:space:]]*\*|^[[:space:]]*//'; then
         continue
     fi
 
@@ -208,7 +208,7 @@ if [[ -f "$is_enabled_file" ]]; then
                 iline="$(echo "$match" | cut -d: -f1)"
                 icontent="$(echo "$match" | cut -d: -f2-)"
                 # Allow the ternary fallback pattern ": conf->..."
-                if echo "$icontent" | grep -qE '^\s*:\s*conf->'; then
+                if echo "$icontent" | grep -qE '^[[:space:]]*:[[:space:]]*conf->'; then
                     echo "  OK      ${is_enabled_file}:${iline} — ternary fallback in eff check: ${icontent}" >&2
                     continue
                 fi
@@ -256,7 +256,7 @@ if [[ -f "$request_impl" ]]; then
             hf_end=$((hf_start + hf_end))
             # Count active_snapshot reads (excluding comments) in the function body
             snap_reads="$(sed -n "${hf_start},${hf_end}p" "$request_impl" 2>/dev/null \
-                | grep -vE '^\s*/\*|^\s*\*' \
+                | grep -vE '^[[:space:]]*/\*|^[[:space:]]*\*' \
                 | grep -c 'ngx_http_markdown_dynconf_watcher\.active_snapshot' || true)"
             if [[ "$snap_reads" -eq 1 ]]; then
                 echo "  OK      single active_snapshot read in header_filter (correct)" >&2
@@ -298,15 +298,15 @@ if [[ -f "$request_impl" ]]; then
         call_content="$(echo "$call_match" | cut -d: -f2-)"
         # Check if the call passes NULL as the eff argument
         # Pattern: handle_ctx_alloc_failure(r, conf, NULL) or handle_ctx_alloc_failure(r, conf) (2-arg old form)
-        if echo "$call_content" | grep -qE 'handle_ctx_alloc_failure\([^)]*,\s*NULL\s*\)' \
-            || echo "$call_content" | grep -qE 'handle_ctx_alloc_failure\([^)]*,\s*conf\s*\)$'; then
+        if echo "$call_content" | grep -qE 'handle_ctx_alloc_failure\([^)]*,[[:space:]]*NULL[[:space:]]*\)' \
+            || echo "$call_content" | grep -qE 'handle_ctx_alloc_failure\([^)]*,[[:space:]]*conf[[:space:]]*\)$'; then
             echo "  ERROR   ${request_impl}:${call_line} — handle_ctx_alloc_failure called with NULL/missing eff: ${call_content}" >&2
             errors=$((errors + 1))
         else
             echo "  OK      ${request_impl}:${call_line} — handle_ctx_alloc_failure receives eff: ${call_content}" >&2
         fi
     done < <(awk '
-        /ngx_http_markdown_handle_ctx_alloc_failure/ && !/^\s*\/\*/ && !/^\s*\*/ && !/static.*ngx_int_t/ {
+        /ngx_http_markdown_handle_ctx_alloc_failure/ && !/^[[:space:]]*\/\*/ && !/^[[:space:]]*\*/ && !/static.*ngx_int_t/ {
             line = NR
             text = $0
             depth = 0

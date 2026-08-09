@@ -309,7 +309,7 @@ check_config_valid() {
         return
     }
 
-    # ponytail: cleanup helper called at every return path — RETURN trap
+    # cleanup helper called at every return path — RETURN trap
     # leaks to caller on bash 3.2 (macOS default), so use explicit helper.
     _check_config_valid_cleanup() { rm -f "$tmp_conf"; }
 

@@ -121,7 +121,7 @@ Supported optional inputs include local spec pointers and adapter summaries.
 
 Rules for optional inputs:
 
-- absence is reported as `SKIP_NOT_PRESENT`, not failure
+- the harness reports absence as `SKIP_NOT_PRESENT`, not failure
 - presence may enable stricter local checks
 - repo-owned truth still wins if there is disagreement
 - local spec inputs are read-only, not a cache or annotation store
@@ -179,7 +179,7 @@ Before closing substantial harness work:
 
 - run `make harness-check`
 - run `make harness-check-full` when broader docs or release wiring changed
-- make sure new docs are linked from the relevant index pages
+- make sure new docs link from the relevant index pages
 - make sure the readable summary matches the structured manifest
 - make sure local-only helpers are still optional rather than required
 - add regression coverage for malformed optional inputs and degraded-state paths

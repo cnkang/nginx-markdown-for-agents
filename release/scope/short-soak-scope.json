@@ -5,6 +5,11 @@
   "duration_minutes": 30,
   "concurrency": 16,
   "corpus": ["small HTML", "medium HTML", "large HTML"],
+  "scenario_memory_bytes": {
+    "small": 33554432,
+    "medium": 67108864,
+    "large": 100663296
+  },
   "requirements": [
     "zero errors",
     "no crash/leak",

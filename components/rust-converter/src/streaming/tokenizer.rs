@@ -90,12 +90,13 @@ impl TokenSink for TokenSinkAdapter {
     /// ```ignore
     /// use html5ever::tokenizer::Token;
     /// use tendril::StrTendril;
-    /// use crate::{TokenSinkAdapter, StreamEvent};
+    /// use crate::streaming::tokenizer::TokenSinkAdapter;
+    /// use crate::streaming::types::StreamEvent;
     ///
     /// let adapter = TokenSinkAdapter::new();
     /// adapter.process_token(Token::CharacterTokens(StrTendril::from("hello")), 0);
-    /// let events = adapter.drain();
-    /// assert_eq!(events, vec![StreamEvent::Text("hello".to_string())]);
+    /// let batch = adapter.drain_batch();
+    /// assert_eq!(batch.events, vec![StreamEvent::Text("hello".to_string())]);
     /// ```
     fn process_token(&self, token: Token, _line_number: u64) -> TokenSinkResult<Self::Handle> {
         if matches!(&token, Token::EOFToken) {

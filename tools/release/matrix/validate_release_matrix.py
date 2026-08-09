@@ -2,7 +2,7 @@
 """Canonical release-matrix validation gate.
 
 Validates that the sole repository-owned release matrix
-(`docs/release/release-matrix.json`, schema version 1) is:
+(`docs/releases/release-matrix.json`, schema version 1) is:
 
 1. Schema-conformant against the immutable
    `schemas/release-matrix.schema.json` (draft 2020-12).
@@ -34,7 +34,7 @@ import subprocess
 import sys
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
-MATRIX_PATH = REPO_ROOT / "docs" / "release" / "release-matrix.json"
+MATRIX_PATH = REPO_ROOT / "docs" / "releases" / "release-matrix.json"
 SCHEMA_PATH = REPO_ROOT / "schemas" / "release-matrix.schema.json"
 NORMALIZE_PATH = (
     REPO_ROOT / "tools" / "release" / "matrix" / "normalize_matrix.py"
@@ -109,18 +109,31 @@ def frozen_abi_version() -> int:
 
 
 def run_normalization() -> dict:
-    proc = subprocess.run(
-        [sys.executable, str(NORMALIZE_PATH), str(MATRIX_PATH)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(NORMALIZE_PATH), str(MATRIX_PATH)],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise SystemExit(f"ERROR: matrix normalization could not complete: {exc}") from exc
     if proc.returncode != 0:
         raise SystemExit(
             "ERROR: matrix normalization failed (fail closed): "
             f"{proc.stderr.strip() or proc.stdout.strip()}"
         )
-    return json.loads(proc.stdout)
+    try:
+        normalized = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(
+            f"ERROR: matrix normalization returned invalid JSON: {exc}"
+        ) from exc
+    if not isinstance(normalized, dict):
+        raise SystemExit("ERROR: matrix normalization returned a non-object")
+    return normalized
 
 
 def validate_schema(matrix: dict) -> None:
@@ -202,7 +215,7 @@ def main() -> int:
     print(f"feature-manifest digest binding: {feature_manifest_digest()}")
     print(f"abi_version binding: {frozen_abi_version()}")
     print(
-        "PASS: docs/release/release-matrix.json is canonical, "
+        "PASS: docs/releases/release-matrix.json is canonical, "
         "schema-conformant, and ABI/feature-bound"
     )
     return 0
