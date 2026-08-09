@@ -56,3 +56,18 @@ def test_output_path_is_version_scoped() -> None:
 
     with pytest.raises(ValueError, match="output must be"):
         generator._output_path("0.9.2", "artifacts/other/manifest.json")
+
+
+def test_output_path_rejects_untrusted_version_components() -> None:
+    with pytest.raises(ValueError, match="Invalid release version"):
+        generator._output_path("0.9.2/../../outside", None)
+
+
+def test_output_path_accepts_only_the_canonical_output() -> None:
+    expected = generator._output_path(
+        "0.9.2", "artifacts/release/0.9.2/short-soak-scenario-manifest.json"
+    )
+
+    assert expected == ROOT / (
+        "artifacts/release/0.9.2/short-soak-scenario-manifest.json"
+    )
