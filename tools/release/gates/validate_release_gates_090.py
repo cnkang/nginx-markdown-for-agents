@@ -262,7 +262,14 @@ def check_inflight_guard(repo: Path) -> dict:
         return {"name": "inflight_guard", "status": "fail",
                 "message": "request_impl.h not found"}
     content = request_impl.read_text()
-    if "return conf->error_status;" not in content:
+    has_status_return = (
+        "return conf->error_status;" in content
+        or re.search(
+            r"return\s+ngx_http_markdown_effective_error_status\s*\(",
+            content,
+        ) is not None
+    )
+    if not has_status_return:
         return {"name": "inflight_guard", "status": "fail",
                 "message": "inflight overload does not return error_status"}
     return {"name": "inflight_guard", "status": "pass"}

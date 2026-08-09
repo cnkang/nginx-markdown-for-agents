@@ -63,6 +63,10 @@ HISTORICAL_ROOT_DOCS = {"CHANGELOG.md"}
 # citations) so the remaining scan targets genuine prose violations only.
 DEFAULT_BASELINE = 0
 
+SEMICOLON_WARNING_RE = re.compile(
+    r"^(?P<count>\d+) semicolon\(s\) in prose:"
+)
+
 SENT_DESCRIPTIVE_MAX = 25
 SENT_INSTRUCTION_MAX = 20
 NOUN_CHAIN_MAX = 3
@@ -430,6 +434,36 @@ def _base_warning_counts(files: list[Path], base: str) -> dict[Path, Counter]:
     return counts
 
 
+def _warning_is_new(warning: str, before: Counter) -> bool:
+    """Return whether a warning exceeds the matching base warning budget."""
+    match = SEMICOLON_WARNING_RE.match(warning)
+    if match:
+        current_count = int(match.group("count"))
+        base_counts = [
+            int(base_match.group("count"))
+            for base_warning in before
+            if (base_match := SEMICOLON_WARNING_RE.match(base_warning))
+        ]
+        return current_count > max(base_counts, default=0)
+
+    return before.get(warning, 0) <= 0
+
+
+def _report_warning(
+    rel: Path, warning: str, before: Counter, base: str | None
+) -> int:
+    """Print a warning and return one when it exceeds the base budget."""
+    print(f"WARN {rel}: {warning}")
+    if base is None:
+        return 0
+    if _warning_is_new(warning, before):
+        print(f"  (NEW in {base} -> now)")
+        return 1
+    if not SEMICOLON_WARNING_RE.match(warning):
+        before[warning] -= 1
+    return 0
+
+
 def _resolve_base(ref: str) -> str | None:
     """Resolve a user-supplied base ref, or return None when it is invalid."""
     if not ref or ref.startswith("-"):
@@ -484,24 +518,17 @@ def _audit_files(
 ) -> tuple[int, int]:
     total = 0
     new_total = 0
-    base_counts: dict[Path, Counter] = {}
-    if args.changed:
-        base_counts = _base_warning_counts(files, base)
+    base_counts = _base_warning_counts(files, base) if args.changed else {}
     for f in files:
         if not f.exists():
             continue
         text = f.read_text(encoding="utf-8", errors="ignore")
+        before = base_counts.get(f, Counter())
         for warning in audit(text, f, args.limit):
-            rel = f.relative_to(ROOT)
-            print(f"WARN {rel}: {warning}")
             total += 1
-            if args.changed:
-                before = base_counts.get(f, Counter())
-                if before.get(warning, 0) <= 0:
-                    print(f"  (NEW in {base} -> now)")
-                    new_total += 1
-                else:
-                    before[warning] -= 1
+            new_total += _report_warning(
+                f.relative_to(ROOT), warning, before, base if args.changed else None
+            )
     return total, new_total
 
 

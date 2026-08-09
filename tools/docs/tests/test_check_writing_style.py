@@ -226,6 +226,19 @@ def test_unlabelled_quoted_prose_is_audited():
     assert any("semicolon" in w for w in warnings)
 
 
+def test_changed_mode_only_flags_increased_semicolon_count():
+    base = cws.Counter(
+        {"36 semicolon(s) in prose: split into sentences": 1}
+    )
+
+    assert not cws._warning_is_new(
+        "35 semicolon(s) in prose: split into sentences", base
+    )
+    assert cws._warning_is_new(
+        "37 semicolon(s) in prose: split into sentences", base
+    )
+
+
 def test_rust_doc_comment_fence_is_excluded():
     text = "/// ```\n/// The file is edited by the agent; e.g. don't.\n/// ```\n"
     warnings = cws.audit(text, Path("CONTRIBUTING.md"), None)
