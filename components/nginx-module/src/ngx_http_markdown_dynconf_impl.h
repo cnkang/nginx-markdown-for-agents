@@ -1293,6 +1293,8 @@ ngx_http_markdown_dynconf_apply_ffi_result_with_log(
     return NGX_OK;
 }
 
+#if defined(NGX_HTTP_MARKDOWN_DYNCONF_LEGACY_TEST)
+
 static ngx_int_t
 ngx_http_markdown_dynconf_apply_ffi_result(
     ngx_http_markdown_dynconf_snapshot_t *snapshot,
@@ -1301,8 +1303,6 @@ ngx_http_markdown_dynconf_apply_ffi_result(
     return ngx_http_markdown_dynconf_apply_ffi_result_with_log(
         snapshot, result, NULL, NULL);
 }
-
-#if defined(NGX_HTTP_MARKDOWN_DYNCONF_LEGACY_TEST)
 
 /*
  * Maximum line length in the dynamic config file.
