@@ -76,6 +76,8 @@ static size_t ngx_http_markdown_diagnostics_json_size(
     const ngx_http_markdown_diag_state_t *state);
 static ngx_int_t ngx_http_markdown_diag_json_string(
     u_char **pos, u_char *last, const u_char *value, size_t len);
+static ngx_int_t ngx_http_markdown_diag_json_control(
+    u_char **pos, u_char *last, u_char value);
 
 
 /*
@@ -654,14 +656,38 @@ ngx_http_markdown_diag_json_put_byte(
 }
 
 
+static ngx_int_t
+ngx_http_markdown_diag_json_control(
+    u_char **pos, u_char *last, u_char value)
+{
+    static const u_char  hex[] = "0123456789abcdef";
+    u_char               escaped[6];
+
+    escaped[0] = '\\';
+    escaped[1] = 'u';
+    escaped[2] = '0';
+    escaped[3] = '0';
+    escaped[4] = hex[value >> 4];
+    escaped[5] = hex[value & 0x0f];
+
+    for (size_t i = 0; i < sizeof(escaped); i++) {
+        if (ngx_http_markdown_diag_json_put_byte(
+                pos, last, escaped[i]) != NGX_OK)
+        {
+            return NGX_ERROR;
+        }
+    }
+
+    return NGX_OK;
+}
+
+
 /* Append one length-bounded JSON string, escaping syntax and controls. */
 static ngx_int_t
 ngx_http_markdown_diag_json_string(
     u_char **pos, u_char *last, const u_char *value, size_t len)
 {
-    static const u_char  hex[] = "0123456789abcdef";
     u_char               ch;
-    u_char               escaped[6];
 
     if (pos == NULL || *pos == NULL || last == NULL || value == NULL
         || *pos > last)
@@ -685,18 +711,10 @@ ngx_http_markdown_diag_json_string(
                 return NGX_ERROR;
             }
         } else if (ch < 0x20) {
-            escaped[0] = '\\';
-            escaped[1] = 'u';
-            escaped[2] = '0';
-            escaped[3] = '0';
-            escaped[4] = hex[ch >> 4];
-            escaped[5] = hex[ch & 0x0f];
-            for (size_t i = 0; i < sizeof(escaped); i++) {
-                if (ngx_http_markdown_diag_json_put_byte(
-                        pos, last, escaped[i]) != NGX_OK)
-                {
-                    return NGX_ERROR;
-                }
+            if (ngx_http_markdown_diag_json_control(pos, last, ch)
+                != NGX_OK)
+            {
+                return NGX_ERROR;
             }
         } else {
             if (ngx_http_markdown_diag_json_put_byte(
