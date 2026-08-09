@@ -251,7 +251,7 @@ impl MarkdownConverter {
             output.push('\n');
         }
 
-        if let Some(context) = ctx.as_deref_mut() {
+        if let Some(context) = ctx {
             context.check_output_budget(output.len())?;
         }
 
@@ -332,7 +332,7 @@ impl MarkdownConverter {
 
         self.format_list_item_lines(output, &item_output, depth, ordered);
 
-        if let Some(context) = ctx.as_deref_mut() {
+        if let Some(context) = ctx {
             context.check_output_budget(output.len())?;
         }
 

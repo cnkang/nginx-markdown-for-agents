@@ -15,7 +15,9 @@
 //! - Single trailing newline on finalize
 
 use crate::error::ConversionError;
-use crate::security::{escape_link_label, escape_markdown_text};
+use crate::security::{
+    MarkdownTextEscapeState, escape_link_label, escape_markdown_text_with_state,
+};
 use crate::streaming::budget::MemoryBudget;
 use crate::streaming::sanitizer::is_dangerous_url;
 use crate::streaming::state_machine::{
@@ -135,10 +137,14 @@ pub struct IncrementalEmitter {
     flush_threshold: usize,
     /// Whether we are currently inside a code block (`<pre>`).
     in_code_block: bool,
+    /// Whether ordinary text should be emitted as inline-code content.
+    in_inline_code: bool,
     /// Count of consecutive blank lines emitted (for compression).
     consecutive_blank_lines: u32,
     /// Whether the last byte written was a newline.
     last_was_newline: bool,
+    /// Escape context for ordinary text split across tokenizer events.
+    markdown_escape_state: MarkdownTextEscapeState,
     /// Current list nesting depth (for indentation).
     list_depth: usize,
     /// Current blockquote nesting depth.
@@ -192,8 +198,10 @@ impl IncrementalEmitter {
             flushed: Vec::new(),
             flush_threshold: 0,
             in_code_block: false,
+            in_inline_code: false,
             consecutive_blank_lines: 0,
             last_was_newline: false,
+            markdown_escape_state: MarkdownTextEscapeState::default(),
             list_depth: 0,
             blockquote_depth: 0,
             needs_block_separator: false,
@@ -476,6 +484,7 @@ impl IncrementalEmitter {
                 self.code_block_buffer.clear();
             }
             StructuralContext::InlineCode => {
+                self.in_inline_code = true;
                 if self.in_link {
                     self.append_link_text("`");
                 } else {
@@ -618,6 +627,7 @@ impl IncrementalEmitter {
                 } else {
                     self.write_str("`")?;
                 }
+                self.in_inline_code = false;
             }
             StructuralContext::Blockquote => {
                 self.blockquote_depth = sm.blockquote_depth;
@@ -734,6 +744,12 @@ impl IncrementalEmitter {
             return Ok(());
         }
 
+        if self.in_inline_code {
+            self.write_str(text)?;
+            self.last_was_newline = text.ends_with('\n');
+            return Ok(());
+        }
+
         // Normalize text: collapse whitespace
         let normalized = normalize_text(text);
         if normalized.is_empty() {
@@ -741,7 +757,9 @@ impl IncrementalEmitter {
         }
 
         if escape_plain_text {
-            self.write_str(&escape_markdown_text(&normalized))?;
+            let mut escape_state = self.markdown_escape_state;
+            let escaped = escape_markdown_text_with_state(&normalized, &mut escape_state);
+            self.write_str(&escaped)?;
         } else {
             self.write_str(&normalized)?;
         }
@@ -912,14 +930,15 @@ impl IncrementalEmitter {
         let bytes = s.as_bytes();
         self.check_buffer_budget(bytes.len())?;
         // Normalize CRLF → LF as we write
-        for &b in bytes {
-            if b == b'\r' {
+        for ch in s.chars() {
+            if ch == '\r' {
                 // Skip \r; the following \n (if any) will be written
                 continue;
             }
-            if b == b'\n' {
+            if ch == '\n' {
                 if self.consecutive_blank_lines < 1 || !self.last_was_newline {
-                    self.buffer.push(b);
+                    self.buffer.push(b'\n');
+                    self.markdown_escape_state.advance('\n');
                     if self.last_was_newline {
                         self.consecutive_blank_lines =
                             self.consecutive_blank_lines.saturating_add(1);
@@ -933,11 +952,16 @@ impl IncrementalEmitter {
                         self.check_buffer_budget(prefix_size)?;
                         for _ in 0..self.blockquote_depth {
                             self.buffer.extend_from_slice(b"> ");
+                            self.markdown_escape_state.advance('>');
+                            self.markdown_escape_state.advance(' ');
                         }
                     }
                 }
             } else {
-                self.buffer.push(b);
+                let mut encoded = [0u8; 4];
+                let encoded = ch.encode_utf8(&mut encoded);
+                self.buffer.extend_from_slice(encoded.as_bytes());
+                self.markdown_escape_state.advance(ch);
                 self.last_was_newline = false;
                 self.consecutive_blank_lines = 0;
             }
@@ -948,7 +972,12 @@ impl IncrementalEmitter {
     /// Write raw bytes without normalization (used for code block fences).
     fn write_raw(&mut self, bytes: &[u8]) -> Result<(), ConversionError> {
         self.check_buffer_budget(bytes.len())?;
-        self.buffer.extend_from_slice(bytes);
+        for &byte in bytes {
+            self.buffer.push(byte);
+            if byte.is_ascii() {
+                self.markdown_escape_state.advance(byte as char);
+            }
+        }
         self.last_was_newline = bytes.last().copied() == Some(b'\n');
         Ok(())
     }
@@ -1968,6 +1997,22 @@ mod tests {
             end_tag("p"),
         ]);
         assert!(output.contains("`println!`"), "got: {}", output);
+    }
+
+    #[test]
+    fn test_inline_code_preserves_literal_markup_characters() {
+        let output = emit_html(&[
+            start_tag("p"),
+            start_tag("code"),
+            text("<div class=\"container\">"),
+            end_tag("code"),
+            end_tag("p"),
+        ]);
+        assert!(
+            output.contains("`<div class=\"container\">`"),
+            "got: {}",
+            output
+        );
     }
 
     // ── Blockquote tests ────────────────────────────────────────────
