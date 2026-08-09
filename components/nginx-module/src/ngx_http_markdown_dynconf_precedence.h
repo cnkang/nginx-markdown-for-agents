@@ -168,7 +168,6 @@ ngx_http_markdown_validate_snapshot_against_index(
     const ngx_http_markdown_loc_validation_index_t *index,
     size_t streaming_buffer, ngx_log_t *log)
 {
-    ngx_uint_t  i;
     ngx_uint_t  violated_count;
 
     if (index == NULL || index->entries == NULL || index->count == 0) {
@@ -177,7 +176,7 @@ ngx_http_markdown_validate_snapshot_against_index(
 
     violated_count = 0;
 
-    for (i = 0; i < index->count; i++) {
+    for (ngx_uint_t i = 0; i < index->count; i++) {
         if (!index->entries[i].applicable) {
             continue;
         }
