@@ -117,12 +117,49 @@ assert_streaming_markdown_response() {
     exit 1
   }
   if [[ -n "${end_token}" ]]; then
-    grep -q "${end_token}" "${body_file}" || {
+    markdown_token_present "${end_token}" "${body_file}" || {
       echo "${case_name} missing tail marker after conversion" >&2
       exit 1
     }
   fi
 
+  return 0
+}
+
+# Ordinary Markdown text escapes underscores to prevent accidental emphasis.
+# The upstream fixtures use controlled A-Z/0-9/underscore tokens, so this
+# helper checks both the legacy raw form and the escaped converted form.
+markdown_escape_token() {
+  local token="$1"
+
+  printf '%s' "${token}" | sed 's/_/\\_/g'
+  return 0
+}
+
+markdown_token_present() {
+  local token="$1"
+  local body_file="$2"
+  local escaped_token
+
+  if grep -Fq "${token}" "${body_file}"; then
+    return 0
+  fi
+  escaped_token="$(markdown_escape_token "${token}")"
+  grep -Fq "${escaped_token}" "${body_file}"
+  return $?
+}
+
+markdown_token_count() {
+  local token="$1"
+  local body_file="$2"
+  local escaped_token
+  local raw_count
+  local escaped_count
+
+  escaped_token="$(markdown_escape_token "${token}")"
+  raw_count="$(grep -Fo "${token}" "${body_file}" | wc -l | tr -d '[:space:]' || true)"
+  escaped_count="$(grep -Fo "${escaped_token}" "${body_file}" | wc -l | tr -d '[:space:]' || true)"
+  printf '%s' "$((raw_count + escaped_count))"
   return 0
 }
 
@@ -929,7 +966,7 @@ grep -q '# Chunked Small' "${RAW_DIR}/small.body" || {
   echo "small-valid missing converted heading marker" >&2
   exit 1
 }
-grep -q "${SMALL_END_TOKEN}" "${RAW_DIR}/small.body" || {
+markdown_token_present "${SMALL_END_TOKEN}" "${RAW_DIR}/small.body" || {
   echo "small-valid missing tail marker after conversion" >&2
   exit 1
 }
@@ -1333,8 +1370,8 @@ cmp -s "${RAW_DIR}/zc.body" "${RAW_DIR}/zc_slow.body" || {
   echo "FAIL: gzip streaming output differs from uncompressed same-source output" >&2
   exit 1
 }
-zc_gzip_tail_count="$(grep -o "${ZERO_COPY_END_TOKEN}" \
-  "${RAW_DIR}/zc_slow.body" | wc -l | tr -d '[:space:]')"
+zc_gzip_tail_count="$(markdown_token_count "${ZERO_COPY_END_TOKEN}" \
+  "${RAW_DIR}/zc_slow.body")"
 if [[ "${zc_gzip_tail_count}" != "1" ]]; then
   echo "FAIL: gzip streaming tail token count must be exactly one" \
     "(count=${zc_gzip_tail_count})" >&2
