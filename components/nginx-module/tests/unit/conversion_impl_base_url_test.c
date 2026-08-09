@@ -1093,6 +1093,15 @@ test_next_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     return g_next_body_filter_rc;
 }
 
+/* Minimal module-state shim for full-buffer pending-chain tests. */
+void
+ngx_http_markdown_pending_output_set(ngx_chain_t **slot, ngx_chain_t *value)
+{
+    if (slot != NULL) {
+        *slot = value;
+    }
+}
+
 /*
  * Reset all stub state to deterministic defaults for each test section.
  *
@@ -1312,6 +1321,63 @@ test_base_url_preserves_empty_forwarded_presence(void)
         "X-Forwarded-For must remain marshaled alongside empty Forwarded");
 
     TEST_PASS("empty Forwarded presence crosses the FFI boundary");
+}
+
+/*
+ * Test: an oversized Forwarded field remains present even when collection
+ * rejects its value, so valid X-Forwarded-* fields cannot become a fallback.
+ */
+static void
+test_base_url_preserves_oversized_forwarded_presence(void)
+{
+    ngx_http_request_t            r;
+    ngx_http_markdown_conf_t      conf;
+    ngx_http_markdown_main_conf_t main_conf;
+    ngx_table_elt_t               headers[2];
+    ngx_str_t                     base_url;
+    u_char                        oversized[
+        NGX_HTTP_MARKDOWN_FORWARDING_INPUT_MAX + 1];
+
+    TEST_SUBSECTION("base_url preserves oversized Forwarded presence");
+
+    reset_base_url_stub();
+    init_request(&r);
+    memset(&conf, 0, sizeof(conf));
+    memset(&main_conf, 0, sizeof(main_conf));
+    memset(oversized, 'a', sizeof(oversized));
+
+    set_str(&r.connection->addr_text, "10.1.2.3");
+    set_str(&r.uri, "/articles/page.html");
+    set_str(&r.headers_in.server, "origin.example.com");
+
+    memset(headers, 0, sizeof(headers));
+    set_str(&headers[0].key, "Forwarded");
+    headers[0].value.data = oversized;
+    headers[0].value.len = sizeof(oversized);
+    headers[0].hash = 1;
+    set_str(&headers[1].key, "X-Forwarded-For");
+    set_str(&headers[1].value, "203.0.113.9");
+    headers[1].hash = 1;
+    set_single_header_list(&r, headers, ARRAY_SIZE(headers));
+
+    r.loc_conf = &conf;
+    r.main_conf = (void *) &main_conf;
+
+    TEST_ASSERT(ngx_http_markdown_construct_base_url(&r, r.pool, &base_url)
+                    == NGX_OK,
+                "construct_base_url should accept the captured stub result");
+    free(base_url.data);
+
+    TEST_ASSERT(g_captured_base_url_input.forwarded != NULL,
+        "oversized Forwarded must retain a non-NULL presence sentinel");
+    TEST_ASSERT(g_captured_base_url_input.forwarded_len == 0,
+        "oversized Forwarded must not cross the configured input cap");
+    TEST_ASSERT(g_captured_base_url_input.x_forwarded_for != NULL
+        && g_captured_base_url_input.x_forwarded_for_len
+            == sizeof("203.0.113.9") - 1,
+        "X-Forwarded-For remains available without changing precedence");
+
+    TEST_PASS("oversized Forwarded presence crosses the FFI boundary");
 }
 
 /*
@@ -2522,6 +2588,7 @@ main(void)
 
     test_base_url_marshals_request_fields();
     test_base_url_preserves_empty_forwarded_presence();
+    test_base_url_preserves_oversized_forwarded_presence();
     test_base_url_unix_socket_flag();
     test_base_url_not_configured_marshaled();
     test_base_url_decision_failure_propagates();

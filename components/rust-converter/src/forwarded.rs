@@ -573,21 +573,29 @@ fn split_quoted(s: &str, sep: u8) -> Vec<String> {
 /// Returns `None` when the token has unbalanced quotes (a `"` appears
 /// without a matching closer, or a closer appears without an opener).
 fn unquote(value: &str) -> Option<String> {
+    if !value.starts_with('"') {
+        if value.contains('"') {
+            return None;
+        }
+        return Some(value.to_string());
+    }
+
     let mut out = String::with_capacity(value.len());
-    let mut chars = value.chars().peekable();
-    let mut in_quote = false;
+    let mut chars = value.chars();
+    let _opening_quote = chars.next();
+    let mut in_quote = true;
     let mut closed = false;
     while let Some(c) = chars.next() {
-        if c == '"' {
-            if in_quote {
-                in_quote = false;
-                closed = true;
-            } else if closed {
-                /* A second quote after a closed one: malformed. */
-                return None;
-            } else {
-                in_quote = true;
+        if closed {
+            if c == ' ' || c == '\t' {
+                continue;
             }
+            return None;
+        }
+
+        if c == '"' {
+            in_quote = false;
+            closed = true;
         } else if c == '\\' && in_quote {
             let esc = chars.next()?;
             out.push(esc);
@@ -595,7 +603,7 @@ fn unquote(value: &str) -> Option<String> {
             out.push(c);
         }
     }
-    if in_quote || (closed && !out.is_empty() && out.bytes().any(|b| b == b'"')) {
+    if in_quote || !closed {
         return None;
     }
     Some(out)
@@ -1213,6 +1221,7 @@ mod tests {
         assert!(parse_forwarded_elements("host").is_none());
         assert!(parse_forwarded_elements("host=a.com;").is_none());
         assert!(parse_forwarded_elements("host=\"unterminated").is_none());
+        assert!(parse_forwarded_elements("host=\"evil.example\"garbage").is_none());
         assert!(parse_forwarded_elements("for=1.2.3.4,").is_none());
         assert!(parse_forwarded_elements(",for=1.2.3.4").is_none());
     }

@@ -1088,6 +1088,25 @@ ngx_http_markdown_wrap_chain_decompression_output(
 }
 #endif /* !NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS */
 
+#ifdef NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS
+static ngx_int_t
+ngx_http_markdown_decompress_without_rust(
+    ngx_http_request_t *r, const ngx_http_markdown_ctx_t *ctx,
+    const ngx_chain_t *compressed_chain, ngx_chain_t **decompressed_chain)
+{
+    if (ctx->decompression.layer_count > 1) {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                      "markdown: multi-layer Content-Encoding requires "
+                      "Rust decompression support");
+        return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+    }
+
+    return ngx_http_markdown_decompress(
+        r, ctx->decompression.type,
+        compressed_chain, decompressed_chain);
+}
+#endif
+
 static ngx_int_t
 ngx_http_markdown_decompress_via_rust(
     ngx_http_request_t *r,
@@ -1097,10 +1116,8 @@ ngx_http_markdown_decompress_via_rust(
     ngx_chain_t **decompressed_chain)
 {
 #ifdef NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS
-    /* Fallback: use the C decompressor when Rust is unavailable. */
-    return ngx_http_markdown_decompress(
-        r, ctx->decompression.type,
-        compressed_chain, decompressed_chain);
+    return ngx_http_markdown_decompress_without_rust(
+        r, ctx, compressed_chain, decompressed_chain);
 #else
     FFIDecompResult        result;
     uint32_t               ffi_rc;
