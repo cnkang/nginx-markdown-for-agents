@@ -310,14 +310,33 @@ ngx_http_markdown_collect_forwarding_header(
     const ngx_http_request_t *r, const u_char *name, size_t name_len,
     ngx_str_t *value, ngx_flag_t *present)
 {
-    ngx_int_t  rc;
+    const ngx_str_t  *first_match;
+    ngx_int_t         rc;
+
+    if (r == NULL || name == NULL || name_len == 0
+        || value == NULL || present == NULL) {
+        return NGX_ERROR;
+    }
+
+    first_match = ngx_http_markdown_find_request_header_value(
+        r, name, name_len);
+    if (first_match == NULL) {
+        *present = 0;
+        value->data = NULL;
+        value->len = 0;
+        return NGX_OK;
+    }
 
     rc = ngx_http_markdown_collect_request_header_values(
         r, name, name_len, value);
     if (rc == NGX_ERROR) {
         return NGX_ERROR;
     }
-    *present = (rc == NGX_OK);
+    *present = 1;
+    if (rc == NGX_DECLINED) {
+        value->data = NULL;
+        value->len = 0;
+    }
     return NGX_OK;
 }
 
