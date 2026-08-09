@@ -1095,20 +1095,27 @@ ngx_http_markdown_dynconf_apply_streaming_buffer(
     const FFIDynconfResult *result)
 {
 #ifdef MARKDOWN_STREAMING_ENABLED
+    ngx_flag_t  has_location_index;
+
     if (result->streaming_buffer == DYNCONF_NOT_SET_U64) {
         return NGX_OK;
     }
 
+    has_location_index = snapshot->validation_index != NULL
+        && snapshot->validation_index->entries != NULL
+        && snapshot->validation_index->count > 0;
+
+    /* The bounded index owns per-location applicability and limits. */
     if (result->streaming_buffer
             < NGX_HTTP_MARKDOWN_DYNCONF_STREAMING_BUFFER_MIN
         || result->streaming_buffer
             > NGX_HTTP_MARKDOWN_DYNCONF_STREAMING_BUFFER_MAX
         || result->streaming_buffer > NGX_MAX_SIZE_T_VALUE
-        || (snapshot->conversion_memory != 0
+        || (!has_location_index && snapshot->conversion_memory != 0
             && snapshot->conversion_memory
                 != NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE
             && result->streaming_buffer > snapshot->conversion_memory)
-        || ((snapshot->conversion_memory == 0
+        || (!has_location_index && (snapshot->conversion_memory == 0
              || snapshot->conversion_memory
                 == NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE)
             && snapshot->memory_budget != 0
@@ -1230,11 +1237,16 @@ ngx_http_markdown_dynconf_apply_error_policy(
 /* The line-oriented parser remains only for its legacy unit-test contract.
  * Production reloads use the bounded Rust JSON/FFI parser below. */
 static ngx_int_t
-ngx_http_markdown_dynconf_apply_ffi_result(
+ngx_http_markdown_dynconf_apply_ffi_result_with_log(
     ngx_http_markdown_dynconf_snapshot_t *snapshot,
-    const FFIDynconfResult *result)
+    const FFIDynconfResult *result, ngx_log_t *log,
+    ngx_uint_t *failure_code)
 {
     ngx_http_markdown_dynconf_snapshot_t candidate;
+
+    if (failure_code != NULL) {
+        *failure_code = DYNCONF_ERR_INVALID_TYPE;
+    }
 
     if (snapshot == NULL || result == NULL || result->error_code != DYNCONF_OK) {
         return NGX_ERROR;
@@ -1244,8 +1256,14 @@ ngx_http_markdown_dynconf_apply_ffi_result(
 
     /* Validate before applying any field so a rejected result is atomic. */
     if (ngx_http_markdown_dynconf_apply_streaming_buffer(
-            snapshot, &candidate, result) != NGX_OK
-        || ngx_http_markdown_dynconf_apply_filter(&candidate, result) != NGX_OK
+            snapshot, &candidate, result) != NGX_OK)
+    {
+        if (failure_code != NULL) {
+            *failure_code = DYNCONF_ERR_VALUE_OUT_OF_RANGE;
+        }
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_dynconf_apply_filter(&candidate, result) != NGX_OK
         || ngx_http_markdown_dynconf_apply_prune_noise(&candidate, result)
            != NGX_OK
         || ngx_http_markdown_dynconf_apply_log_verbosity(&candidate, result)
@@ -1261,8 +1279,11 @@ ngx_http_markdown_dynconf_apply_ffi_result(
         && candidate.validation_index != NULL
         && ngx_http_markdown_validate_snapshot_against_index(
                candidate.validation_index,
-               candidate.streaming_budget, NULL) != NGX_OK)
+               candidate.streaming_budget, log) != NGX_OK)
     {
+        if (failure_code != NULL) {
+            *failure_code = DYNCONF_ERR_VALUE_OUT_OF_RANGE;
+        }
         return NGX_ERROR;
     }
 #endif
@@ -1270,6 +1291,15 @@ ngx_http_markdown_dynconf_apply_ffi_result(
     candidate.valid = 1;
     *snapshot = candidate;
     return NGX_OK;
+}
+
+static ngx_int_t
+ngx_http_markdown_dynconf_apply_ffi_result(
+    ngx_http_markdown_dynconf_snapshot_t *snapshot,
+    const FFIDynconfResult *result)
+{
+    return ngx_http_markdown_dynconf_apply_ffi_result_with_log(
+        snapshot, result, NULL, NULL);
 }
 
 #if defined(NGX_HTTP_MARKDOWN_DYNCONF_LEGACY_TEST)
@@ -2746,14 +2776,16 @@ ngx_http_markdown_dynconf_read_file(
 
     fd = ngx_open_file(path_buf, NGX_FILE_RDONLY, NGX_FILE_OPEN, 0);
     if (fd == NGX_INVALID_FILE) {
-        ngx_http_markdown_record_dynconf_reload(DYNCONF_ERR_INTERNAL);
+        ngx_http_markdown_record_dynconf_reload(
+            NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO);
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
     }
 
     /* Inspect the opened descriptor so the size check cannot race a path swap. */
     if (ngx_fd_info(fd, &file_info) == NGX_FILE_ERROR) {
         ngx_close_file(fd);
-        ngx_http_markdown_record_dynconf_reload(DYNCONF_ERR_INTERNAL);
+        ngx_http_markdown_record_dynconf_reload(
+            NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO);
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
     }
     if (file_info.st_size < 0
@@ -2769,7 +2801,8 @@ ngx_http_markdown_dynconf_read_file(
     *data = ngx_alloc(*file_size == 0 ? 1 : *file_size, log);
     if (*data == NULL) {
         ngx_close_file(fd);
-        ngx_http_markdown_record_dynconf_reload(DYNCONF_ERR_INTERNAL);
+        ngx_http_markdown_record_dynconf_reload(
+            NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO);
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
     }
 
@@ -2782,7 +2815,8 @@ ngx_http_markdown_dynconf_read_file(
             ngx_close_file(fd);
             ngx_free(*data);
             *data = NULL;
-            ngx_http_markdown_record_dynconf_reload(DYNCONF_ERR_INTERNAL);
+            ngx_http_markdown_record_dynconf_reload(
+                NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO);
             return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
         }
         bytes_read = (size_t) nread; /* CWE-190:guarded */
@@ -2839,6 +2873,32 @@ ngx_http_markdown_dynconf_record_error(
     watcher->diagnostic_state.last_error_len = length;
 }
 
+static void
+ngx_http_markdown_dynconf_record_candidate_error(
+    ngx_http_markdown_dynconf_watcher_t *watcher, ngx_uint_t error_code)
+{
+    static const u_char invalid_type[] =
+        "dynamic configuration candidate has an invalid value";
+    static const u_char out_of_range[] =
+        "dynamic configuration candidate is out of range";
+    const u_char  *message;
+    size_t         length;
+
+    if (watcher == NULL) {
+        return;
+    }
+
+    message = error_code == DYNCONF_ERR_VALUE_OUT_OF_RANGE
+        ? out_of_range : invalid_type;
+    length = ngx_strlen(message);
+    if (length > sizeof(watcher->diagnostic_state.last_error) - 1) {
+        length = sizeof(watcher->diagnostic_state.last_error) - 1;
+    }
+    ngx_memcpy(watcher->diagnostic_state.last_error, message, length);
+    watcher->diagnostic_state.last_error[length] = '\0';
+    watcher->diagnostic_state.last_error_len = length;
+}
+
 /* Reload the bounded file, validate its JSON result, and publish it atomically.
  * The staged snapshot and digest copies are request-independent, so all
  * validation completes before active state or last-known-good state changes.
@@ -2857,6 +2917,7 @@ ngx_http_markdown_dynconf_reload(
     u_char               next_active_digest[
         NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_LEN];
     FFIDynconfResult    result;
+    ngx_uint_t           failure_code;
 
     if (watcher == NULL || conf == NULL || log == NULL)
     {
@@ -2866,6 +2927,8 @@ ngx_http_markdown_dynconf_reload(
     /* Read and parse into a disposable FFI result before touching snapshots. */
     rc = ngx_http_markdown_dynconf_read_file(watcher, log, &data, &file_size);
     if (rc != NGX_OK) {
+        ngx_http_markdown_record_dynconf_reload(
+            NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO);
         watcher->diagnostic_state.last_result = rc;
         return rc;
     }
@@ -2890,14 +2953,23 @@ ngx_http_markdown_dynconf_reload(
 
     watcher->staging_snapshot = watcher->active_snapshot;
     /* Apply only validated fields to the staging copy. */
-    if (ngx_http_markdown_dynconf_apply_ffi_result(
-            &watcher->staging_snapshot, &result) != NGX_OK)
+    failure_code = DYNCONF_ERR_INVALID_TYPE;
+    if (ngx_http_markdown_dynconf_apply_ffi_result_with_log(
+            &watcher->staging_snapshot, &result, log,
+            &failure_code) != NGX_OK)
     {
         /* Invalid FFI values are a validation failure, not a partial reload. */
-        ngx_http_markdown_record_dynconf_reload(DYNCONF_ERR_INVALID_TYPE);
-        watcher->diagnostic_state.last_result = NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
+        ngx_http_markdown_record_dynconf_reload(failure_code);
+        ngx_http_markdown_dynconf_record_candidate_error(
+            watcher, failure_code);
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+            "markdown: dynamic configuration candidate rejected "
+            "(error_code=%ui)", failure_code);
+        watcher->diagnostic_state.last_result = conf->advanced.dynconf_dry_run
+            ? NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL
+            : NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
         markdown_dynconf_result_free(&result);
-        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
+        return watcher->diagnostic_state.last_result;
     }
 
     if (ngx_http_markdown_dynconf_copy_digest(

@@ -2180,6 +2180,7 @@ test_apply_ffi_streaming_budget_bounds(void)
     ngx_http_markdown_dynconf_snapshot_t  before;
     FFIDynconfResult                      result;
     ngx_int_t                             rc;
+    ngx_uint_t                             failure_code;
 
     memset(&snapshot, 0, sizeof(snapshot));
     snapshot.conversion_memory = 128 * 1024;
@@ -2247,8 +2248,18 @@ test_apply_ffi_streaming_budget_bounds(void)
                         &index, 128 * 1024, 0) == NGX_OK,
                     "location validation entry is recorded");
 
-        snapshot.conversion_memory = NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE;
+        snapshot.conversion_memory = 64 * 1024;
         snapshot.validation_index = &index;
+        result.streaming_buffer = 96 * 1024;
+        failure_code = 0;
+        rc = ngx_http_markdown_dynconf_apply_ffi_result_with_log(
+            &snapshot, &result, &g_log, &failure_code);
+        TEST_ASSERT(rc == NGX_OK,
+                    "location index limit overrides owner snapshot limit");
+        TEST_ASSERT(failure_code == DYNCONF_ERR_INVALID_TYPE,
+                    "successful candidate leaves failure code at default");
+
+        snapshot.conversion_memory = NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE;
         result.streaming_buffer = 256 * 1024;
         before = snapshot;
         rc = ngx_http_markdown_dynconf_apply_ffi_result(&snapshot, &result);

@@ -73,6 +73,10 @@ static void ngx_http_markdown_bind_request_snapshot(
 static ngx_int_t ngx_http_markdown_handle_ctx_alloc_failure(
     ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_effective_conf_t *eff);
+static ngx_int_t ngx_http_markdown_register_fullbuffer_cleanup(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx);
+static void ngx_http_markdown_record_path_hit(
+    const ngx_http_markdown_ctx_t *ctx);
 static ngx_int_t ngx_http_markdown_handle_encoding_collection_failure(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf,
@@ -91,6 +95,7 @@ static void ngx_http_markdown_log_decision(ngx_http_request_t *r,
     const ngx_http_markdown_effective_conf_t *eff,
     const ngx_str_t *reason_code);
 static void ngx_http_markdown_metric_inc_failopen(
+    const ngx_http_markdown_effective_conf_t *eff,
     const ngx_http_markdown_conf_t *conf);
 static ngx_http_output_header_filter_pt ngx_http_next_header_filter;
 static ngx_http_output_body_filter_pt ngx_http_next_body_filter;
@@ -268,7 +273,7 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
     rc = ngx_http_next_header_filter(r);
     /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
     if (rc == NGX_OK || rc == NGX_DONE) {
-        ngx_http_markdown_metric_inc_failopen(conf);
+        ngx_http_markdown_metric_inc_failopen(eff, conf);
     }
     return rc;
 }
@@ -334,7 +339,7 @@ ngx_http_markdown_handle_encoding_collection_failure(
             NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
     rc = ngx_http_next_header_filter(r);
     if (rc == NGX_OK || rc == NGX_DONE) {
-        ngx_http_markdown_metric_inc_failopen(conf);
+        ngx_http_markdown_metric_inc_failopen(eff, conf);
     }
     return rc;
 }
@@ -595,7 +600,8 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
         rc = ngx_http_next_header_filter(r);
         /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
         if (rc == NGX_OK || rc == NGX_DONE) {
-            ngx_http_markdown_metric_inc_failopen(conf);
+            ngx_http_markdown_metric_inc_failopen(
+                ctx->effective_conf, conf);
         }
         return rc;
     }
@@ -624,7 +630,8 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
         rc = ngx_http_next_header_filter(r);
         /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
         if (rc == NGX_OK || rc == NGX_DONE) {
-            ngx_http_markdown_metric_inc_failopen(conf);
+            ngx_http_markdown_metric_inc_failopen(
+                ctx->effective_conf, conf);
         }
         return rc;
     }
@@ -807,7 +814,8 @@ ngx_http_markdown_handle_encoding_header_invalid(
     rc = ngx_http_next_header_filter(r);
     /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
     if (rc == NGX_OK || rc == NGX_DONE) {
-        ngx_http_markdown_metric_inc_failopen(conf);
+        ngx_http_markdown_metric_inc_failopen(
+            ctx->effective_conf, conf);
     }
     return rc;
 }
@@ -1002,6 +1010,42 @@ path_selected:
 #endif
 }
 
+static ngx_int_t
+ngx_http_markdown_register_fullbuffer_cleanup(ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx)
+{
+    ngx_pool_cleanup_t  *cleanup;
+
+    cleanup = ngx_pool_cleanup_add(r->pool, 0);
+    if (cleanup == NULL) {
+        return NGX_ERROR;
+    }
+
+    cleanup->handler = ngx_http_markdown_fullbuffer_cleanup;
+    cleanup->data = ctx;
+    return NGX_OK;
+}
+
+static void
+ngx_http_markdown_record_path_hit(const ngx_http_markdown_ctx_t *ctx)
+{
+    if (!ctx->eligible) {
+        return;
+    }
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    if (ctx->processing_path == NGX_HTTP_MARKDOWN_PATH_STREAMING) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(path_hits.streaming);
+        return;
+    }
+#endif
+    if (ctx->processing_path == NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(path_hits.incremental);
+    } else {
+        NGX_HTTP_MARKDOWN_METRIC_INC(path_hits.fullbuffer);
+    }
+}
+
 /**
  * Determine whether the response should be converted and, if eligible,
  * initialize a per-request Markdown conversion context for body buffering.
@@ -1119,6 +1163,11 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
             r, conf, &early_eff);
     }
 
+    if (ngx_http_markdown_register_fullbuffer_cleanup(r, ctx) != NGX_OK) {
+        return ngx_http_markdown_handle_ctx_alloc_failure(
+            r, conf, &early_eff);
+    }
+
     /* Initialize context */
     ngx_http_markdown_init_ctx(r, ctx, filter_enabled);
 
@@ -1161,23 +1210,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
         return inflight_rc;
     }
 
-    if (ctx->eligible) {
-#ifdef MARKDOWN_STREAMING_ENABLED
-        if (ctx->processing_path
-            == NGX_HTTP_MARKDOWN_PATH_STREAMING)
-        {
-            NGX_HTTP_MARKDOWN_METRIC_INC(
-                path_hits.streaming);
-        } else
-#endif
-        if (ctx->processing_path
-            == NGX_HTTP_MARKDOWN_PATH_INCREMENTAL)
-        {
-            NGX_HTTP_MARKDOWN_METRIC_INC(path_hits.incremental);
-        } else {
-            NGX_HTTP_MARKDOWN_METRIC_INC(path_hits.fullbuffer);
-        }
-    }
+    ngx_http_markdown_record_path_hit(ctx);
 
     /*
      * Request in-memory buffers from upstream filters/modules.

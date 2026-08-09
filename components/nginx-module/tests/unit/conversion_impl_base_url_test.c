@@ -837,8 +837,10 @@ ngx_http_markdown_forward_headers(
 __attribute__((unused))
 static void
 ngx_http_markdown_metric_inc_failopen(
+    const ngx_http_markdown_effective_conf_t *eff,
     const ngx_http_markdown_conf_t *conf)
 {
+    UNUSED(eff);
     UNUSED(conf);
 }
 
@@ -1992,7 +1994,7 @@ test_collect_request_header_values_multi_part(void)
 }
 
 /*
- * Test: oversized forwarding metadata is ignored without allocating.
+ * Test: oversized forwarding metadata is classified without allocating.
  */
 static void
 test_collect_request_header_values_enforces_cap(void)
@@ -2019,11 +2021,11 @@ test_collect_request_header_values_enforces_cap(void)
         &r, (const u_char *) "Forwarded",
         sizeof("Forwarded") - 1, &result);
 
-    TEST_ASSERT(rc == NGX_DECLINED,
-                "oversized forwarding metadata must be ignored");
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_FORWARDING_HEADER_TOO_LARGE,
+                "oversized forwarding metadata must be classified");
     TEST_ASSERT(result.data == NULL && result.len == 0,
                 "oversized metadata must not allocate output");
-    TEST_PASS("forwarding metadata cap enforced");
+    TEST_PASS("forwarding metadata cap classification enforced");
 }
 
 /*
@@ -2481,6 +2483,29 @@ test_fullbuffer_resume_pending_lifecycle(void)
     TEST_PASS("Full-buffer resume pending lifecycle is symmetric");
 }
 
+static void
+test_fullbuffer_cleanup_clears_aborted_pending_state(void)
+{
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_chain_t              pending;
+
+    TEST_SUBSECTION("full-buffer cleanup clears aborted pending state");
+
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&pending, 0, sizeof(pending));
+    ctx.fullbuffer.pending_output = &pending;
+    ctx.fullbuffer.pending_has_data = 1;
+
+    ngx_http_markdown_fullbuffer_cleanup(&ctx);
+
+    TEST_ASSERT(ctx.fullbuffer.pending_output == NULL,
+                "cleanup must clear the full-buffer pending chain");
+    TEST_ASSERT(ctx.fullbuffer.pending_has_data == 0,
+                "cleanup must clear the full-buffer pending latch");
+
+    TEST_PASS("Full-buffer cleanup clears state after client abort");
+}
+
 /*
  * Verify miscellaneous conversion helper branches:
  * record_conversion_latency, record_system_failure, and
@@ -2612,6 +2637,7 @@ main(void)
     test_send_conversion_output_paths();
     test_fullbuffer_resume_does_not_resubmit_pending_chain();
     test_fullbuffer_resume_pending_lifecycle();
+    test_fullbuffer_cleanup_clears_aborted_pending_state();
     test_misc_conversion_helpers();
     test_conditional_bypass_bypasses_error_policy();
     test_record_per_path_retention_limits();

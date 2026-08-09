@@ -28,6 +28,9 @@ typedef struct ngx_http_markdown_loc_validation_index_s
 #define NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE ((size_t) -1)
 #endif
 
+/* C-side reload classification for file-system failures. */
+#define NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO 254
+
 /*
  * Forward declaration for dynconf snapshot type.
  * Full definition is in ngx_http_markdown_dynconf_impl.h.
@@ -394,29 +397,6 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DIAGNOSTICS  0x04000000
 #define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_EXCLUDED     0x08000000
 #define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_METRICS       0x10000000
-
-/*
- * Dynconf block mask bit definitions (0.9.2 precedence model).
- *
- * Each bit corresponds to one dynconf-mutable field.  When the bit
- * is set in a location's block mask, the dynconf overlay for that
- * field is blocked — the server/location explicit static value
- * takes precedence (tier 2 over tier 3).
- *
- * Bits are set during config parsing when a server or location block
- * explicitly configures the field.  An explicit setting in the http
- * block does NOT set the bit (http is the baseline that dynconf
- * overrides).  Bits propagate from parent to child via OR during
- * merge: a server that blocks a field blocks it for all child
- * locations unless the child explicitly configures the field (which
- * keeps the bit set with the child's own value).
- */
-#define NGX_HTTP_MARKDOWN_BLOCK_FILTER           (1 << 0)
-#define NGX_HTTP_MARKDOWN_BLOCK_PRUNE_NOISE      (1 << 1)
-#define NGX_HTTP_MARKDOWN_BLOCK_LOG_VERBOSITY    (1 << 2)
-#define NGX_HTTP_MARKDOWN_BLOCK_ERROR_POLICY     (1 << 3)
-#define NGX_HTTP_MARKDOWN_BLOCK_STREAMING_BUFFER (1 << 4)
-#define NGX_HTTP_MARKDOWN_DYNCONF_FIELD_COUNT    5
 
 #define NGX_HTTP_MARKDOWN_PROVENANCE_STATIC           0
 #define NGX_HTTP_MARKDOWN_PROVENANCE_DYNCONF          1

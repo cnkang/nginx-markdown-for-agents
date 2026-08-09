@@ -96,6 +96,7 @@ struct ngx_module_s {
 void *ngx_pnalloc(ngx_pool_t *pool, size_t size);
 void *ngx_alloc(size_t size, ngx_log_t *log);
 void ngx_free(void *p);
+static u_char *ngx_strlchr(u_char *p, u_char *last, u_char c);
 ngx_buf_t *ngx_calloc_buf(ngx_pool_t *pool);
 ngx_chain_t *ngx_alloc_chain_link(ngx_pool_t *pool);
 
@@ -173,6 +174,18 @@ ngx_pcalloc(ngx_pool_t *pool, size_t size)
 {
     (void) pool;
     return calloc(1, size);
+}
+
+static u_char *
+ngx_strlchr(u_char *p, u_char *last, u_char c)
+{
+    for (; p < last; p++) {
+        if (*p == c) {
+            return p;
+        }
+    }
+
+    return NULL;
 }
 
 ngx_buf_t *
@@ -510,6 +523,11 @@ test_detect_compression_variants(void)
     TEST_ASSERT(ngx_http_markdown_detect_compression(&r)
                 == NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI,
                 "brotli should be detected");
+
+    set_encoding(&r, "gzip, br");
+    TEST_ASSERT(ngx_http_markdown_detect_compression(&r)
+                == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN,
+                "multi-layer encoding should defer to chain parsing");
 
     set_encoding(&r, "zstd");
     TEST_ASSERT(ngx_http_markdown_detect_compression(&r)
