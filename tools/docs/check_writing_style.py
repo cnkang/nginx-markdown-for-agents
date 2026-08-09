@@ -473,23 +473,26 @@ def _resolve_base(ref: str) -> str | None:
     """Resolve a user-supplied base ref, or return None when it is invalid."""
     if not ref or SAFE_GIT_REF_RE.fullmatch(ref) is None:
         return None
-    commit_ref = f"{ref}^{{commit}}"
+
+    # Keep the user-supplied ref out of argv. Git reads this query from stdin,
+    # so a valid ref cannot be reinterpreted as an option or executable input.
     out = subprocess.run(
         [
             "git",
-            "rev-parse",
-            "--verify",
-            "--quiet",
-            "--end-of-options",
-            commit_ref,
+            "cat-file",
+            "--batch-check",
         ],
         cwd=ROOT,
         capture_output=True,
         text=True,
+        input=f"{ref}^{{commit}}\n",
     )
     if out.returncode != 0:
         return None
-    return out.stdout.strip()
+    fields = out.stdout.split()
+    if len(fields) < 2 or fields[1] != "commit":
+        return None
+    return fields[0]
 
 
 def _build_parser() -> argparse.ArgumentParser:
