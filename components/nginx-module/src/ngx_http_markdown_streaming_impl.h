@@ -1411,7 +1411,8 @@ ngx_http_markdown_streaming_record_postcommit_failure(
             &r->headers_out.content_type,
             (r->headers_out.content_length_n >= 0) ? 1 : 0,
             (r->headers_out.content_length_n < 0) ? 1 : 0,
-             (conf->on_error
+             (ngx_http_markdown_effective_error_policy(
+                  ctx->effective_conf, conf)
               == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
                 ? "fail_closed" : "pass");
 
@@ -2202,7 +2203,8 @@ ngx_http_markdown_streaming_precommit_error(
         NGX_HTTP_MARKDOWN_METRIC_INC(failures_conversion);
     }
 
-    if (conf->on_error
+    if (ngx_http_markdown_effective_error_policy(
+            ctx->effective_conf, conf)
         == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
     {
         /* Fail-closed: record reject metrics and reason */
@@ -2233,7 +2235,8 @@ ngx_http_markdown_streaming_precommit_error(
          */
         return ngx_http_filter_finalize_request(r,
             &ngx_http_markdown_filter_module,
-            (ngx_int_t) conf->error_status);
+            (ngx_int_t) ngx_http_markdown_effective_error_status(
+                ctx->effective_conf, conf));
     }
 
     /* Fail-open: pass original content */

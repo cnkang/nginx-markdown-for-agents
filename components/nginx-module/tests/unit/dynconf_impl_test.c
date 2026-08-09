@@ -2182,7 +2182,7 @@ test_apply_ffi_streaming_budget_bounds(void)
     ngx_int_t                             rc;
 
     memset(&snapshot, 0, sizeof(snapshot));
-    snapshot.memory_budget = 128 * 1024;
+    snapshot.conversion_memory = 128 * 1024;
     snapshot.error_policy = 91;
     snapshot.valid = 0;
     memset(&result, 0, sizeof(result));
@@ -2235,6 +2235,29 @@ test_apply_ffi_streaming_budget_bounds(void)
     rc = ngx_http_markdown_dynconf_apply_ffi_result(&snapshot, &result);
     TEST_ASSERT(rc == NGX_OK && snapshot.streaming_budget == 64 * 1024,
                 "bounded streaming buffer is applied");
+
+    {
+        ngx_http_markdown_loc_validation_index_t index;
+
+        memset(&index, 0, sizeof(index));
+        TEST_ASSERT(ngx_http_markdown_loc_index_init(&index, &g_pool)
+                        == NGX_OK,
+                    "location validation index initializes");
+        TEST_ASSERT(ngx_http_markdown_loc_index_add(
+                        &index, 128 * 1024, 0) == NGX_OK,
+                    "location validation entry is recorded");
+
+        snapshot.conversion_memory = NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE;
+        snapshot.validation_index = &index;
+        result.streaming_buffer = 256 * 1024;
+        before = snapshot;
+        rc = ngx_http_markdown_dynconf_apply_ffi_result(&snapshot, &result);
+        TEST_ASSERT(rc == NGX_ERROR,
+                    "streaming buffer above an applicable location limit is rejected");
+        TEST_ASSERT(memcmp(&snapshot, &before, sizeof(snapshot)) == 0,
+                    "location-limit rejection preserves the snapshot");
+    }
+
     TEST_PASS("FFI streaming buffer validation is bounded and atomic");
 }
 

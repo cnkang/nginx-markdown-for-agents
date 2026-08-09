@@ -171,16 +171,20 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
 
         if (dynconf_conf != NULL
             && dynconf_conf->advanced.dynconf_enabled
-            && dynconf_conf->advanced.dynconf_path.len > 0
-            && ngx_http_markdown_dynconf_start(
-                   &ngx_http_markdown_dynconf_watcher,
-                   cycle, &dynconf_conf->advanced.dynconf_path,
-                   dynconf_conf, cycle->log)
-               != NGX_OK)
+            && dynconf_conf->advanced.dynconf_path.len > 0)
         {
-            ngx_log_error(NGX_LOG_WARN, cycle->log, 0,
-                          "markdown: failed to start watcher");
-            /* Non-fatal: worker continues without hot-reload. */
+            ngx_http_markdown_dynconf_watcher.validation_index =
+                mcf->loc_validation_index;
+
+            if (ngx_http_markdown_dynconf_start(
+                    &ngx_http_markdown_dynconf_watcher,
+                    cycle, &dynconf_conf->advanced.dynconf_path,
+                    dynconf_conf, cycle->log) != NGX_OK)
+            {
+                ngx_log_error(NGX_LOG_WARN, cycle->log, 0,
+                              "markdown: failed to start watcher");
+                /* Non-fatal: worker continues without hot-reload. */
+            }
         }
 
         /*

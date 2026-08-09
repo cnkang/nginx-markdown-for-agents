@@ -238,7 +238,7 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
     NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
 
-    if (conf->on_error
+    if (ngx_http_markdown_effective_error_policy(eff, conf)
         == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
     {
         ngx_log_error(NGX_LOG_ERR,
@@ -251,7 +251,8 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
             ngx_http_markdown_reason_from_error_category(
                 NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
                 r->connection->log));
-        return (ngx_int_t) conf->error_status;
+        return (ngx_int_t) ngx_http_markdown_effective_error_status(
+            eff, conf);
     }
 
     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
@@ -309,7 +310,8 @@ ngx_http_markdown_handle_encoding_collection_failure(
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
     NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
 
-    if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
+    if (ngx_http_markdown_effective_error_policy(eff, conf)
+        == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown: Content-Encoding header collection failed, "
                       "rejecting (fail-closed)");
@@ -318,7 +320,8 @@ ngx_http_markdown_handle_encoding_collection_failure(
             ngx_http_markdown_reason_failed_closed(),
             ngx_http_markdown_reason_from_error_category(
                 NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
-        return (ngx_int_t) conf->error_status;
+        return (ngx_int_t) ngx_http_markdown_effective_error_status(
+            eff, conf);
     }
 
     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
@@ -562,7 +565,8 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
         /* Overloaded — apply error policy */
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
 
-        if (conf->on_error
+        if (ngx_http_markdown_effective_error_policy(
+                ctx->effective_conf, conf)
             == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
         {
             ngx_log_error(NGX_LOG_WARN,
@@ -572,7 +576,8 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
             ngx_http_markdown_log_decision(
                 r, conf, ctx->effective_conf,
                 ngx_http_markdown_reason_overload());
-            return conf->error_status;
+            return ngx_http_markdown_effective_error_status(
+                ctx->effective_conf, conf);
         }
 
         /* fail-open: pass through original response */
@@ -600,13 +605,15 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
         NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
 
-        if (conf->on_error
+        if (ngx_http_markdown_effective_error_policy(
+                ctx->effective_conf, conf)
             == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
         {
             ngx_http_markdown_log_decision(
                 r, conf, ctx->effective_conf,
                 ngx_http_markdown_reason_failed_closed());
-            return (ngx_int_t) conf->error_status;
+            return (ngx_int_t) ngx_http_markdown_effective_error_status(
+                ctx->effective_conf, conf);
         }
 
         ctx->eligible = 0;
@@ -759,7 +766,7 @@ ngx_http_markdown_update_deferred_body_path(
  *   conf - module location configuration
  *
  * Returns:
- *   conf->error_status on fail-closed
+ *   effective error status on fail-closed
  *   Result of ngx_http_next_header_filter on fail-open
  */
 static ngx_int_t
@@ -781,12 +788,16 @@ ngx_http_markdown_handle_encoding_header_invalid(
     ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
         ngx_http_markdown_reason_encoding_header_invalid());
 
-    if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
+    if (ngx_http_markdown_effective_error_policy(
+            ctx->effective_conf, conf)
+        == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                       "markdown: malformed Content-Encoding "
                       "chain, rejecting with status %ui",
-                      conf->error_status);
-        return (ngx_int_t) conf->error_status;
+                      ngx_http_markdown_effective_error_status(
+                          ctx->effective_conf, conf));
+        return (ngx_int_t) ngx_http_markdown_effective_error_status(
+            ctx->effective_conf, conf);
     }
 
     ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
@@ -1253,7 +1264,9 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
         ngx_http_markdown_log_buffered_decision_path(
             r, ctx, conf, NGX_HTTP_MARKDOWN_COND_PROCEED,
             NGX_HTTP_MARKDOWN_CONV_FAILED,
-            conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT
+            ngx_http_markdown_effective_error_policy(
+                ctx->effective_conf, conf)
+                == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT
                 ? "failed_closed" : "failed_open",
             elapsed_ms);
         return rc;
@@ -1267,7 +1280,9 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
             ngx_http_markdown_log_buffered_decision_path(
                 r, ctx, conf, NGX_HTTP_MARKDOWN_COND_PROCEED,
                 NGX_HTTP_MARKDOWN_CONV_FAILED,
-                conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT
+                ngx_http_markdown_effective_error_policy(
+                    ctx->effective_conf, conf)
+                    == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT
                     ? "failed_closed" : "failed_open",
                 elapsed_ms);
             return rc;
@@ -1300,7 +1315,9 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
         ngx_http_markdown_log_buffered_decision_path(
             r, ctx, conf, NGX_HTTP_MARKDOWN_COND_PROCEED,
             NGX_HTTP_MARKDOWN_CONV_FAILED,
-            conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT
+            ngx_http_markdown_effective_error_policy(
+                ctx->effective_conf, conf)
+                == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT
                 ? "failed_closed" : "failed_open",
             elapsed_ms);
 
