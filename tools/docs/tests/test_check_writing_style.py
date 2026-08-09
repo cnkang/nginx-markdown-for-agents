@@ -266,24 +266,31 @@ def test_resolve_base_rejects_argument_injection(monkeypatch, ref):
     assert cws._resolve_base(ref) is None
 
 
-def test_resolve_base_uses_end_of_options(monkeypatch):
+def test_resolve_base_keeps_ref_out_of_argv(monkeypatch):
     seen = {}
 
     def fake_run(command, **kwargs):
         seen["command"] = command
-        return SimpleNamespace(returncode=0, stdout="a" * 40 + "\n")
+        seen["input"] = kwargs["input"]
+        return SimpleNamespace(returncode=0, stdout="a" * 40 + " commit 1\n")
 
     monkeypatch.setattr(cws.subprocess, "run", fake_run)
 
     assert cws._resolve_base("HEAD") == "a" * 40
-    assert seen["command"] == [
-        "git",
-        "rev-parse",
-        "--verify",
-        "--quiet",
-        "--end-of-options",
-        "HEAD^{commit}",
-    ]
+    assert seen["command"] == ["git", "cat-file", "--batch-check"]
+    assert seen["input"] == "HEAD^{commit}\n"
+
+
+def test_resolve_base_rejects_non_commit_object(monkeypatch):
+    monkeypatch.setattr(
+        cws.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0, stdout="a" * 40 + " blob 1\n"
+        ),
+    )
+
+    assert cws._resolve_base("HEAD") is None
 
 
 @pytest.mark.parametrize("base_args", [["--base", "HEAD"], ["--base=HEAD"]])
