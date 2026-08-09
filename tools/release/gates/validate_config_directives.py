@@ -417,14 +417,13 @@ def _record_directive_prerequisite_failures(
             "prereq:config_directives_impl.h",
             "source file not found — cannot validate directives",
         )
-    directive_macros = {
-        macro: value
-        for macro, value in re.findall(
+    directive_macros = dict(
+        re.findall(
             r"#define\s+(NGX_HTTP_MARKDOWN_DIRECTIVE_[A-Z0-9_]+)"
             r"\s+\\\s*\"([^\"]+)\"",
             directive_names_src,
         )
-    }
+    )
     if not directive_names_src or not directive_macros:
         result.fail(
             "prereq:directive_names.h",
