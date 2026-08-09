@@ -90,7 +90,7 @@ def test_release_binaries_publishes_signed_checksum_chain() -> None:
     assert "sha256sum --check SHA256SUMS" in checksum_step["run"]
     assert signing_job["needs"] == "integrity-checksums"
     assert "github.event_name == 'release'" in signing_job["if"]
-    assert "release-signing" == signing_job["environment"]
+    assert signing_job["environment"] == "release-signing"
     assert "gpg-sign-checksums.sh" in workflow_text
     assert "binary-checksums-signature" in workflow_text
     assert "SHA256SUMS.asc" in workflow_text
