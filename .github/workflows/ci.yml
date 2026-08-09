@@ -838,6 +838,9 @@ jobs:
       - name: Generate official feature manifest
         run: PYTHONPATH=. python3 tools/release/gates/validate_official_feature_manifest.py --write
 
+      - name: Generate schema artifacts
+        run: python3 tools/release/gates/generate_schema_artifacts.py --version 0.9.2
+
       - name: Run release-matrix Python tests
         run: PYTHONPATH=. python3 -m pytest -q tools/release/matrix/tests/
 
