@@ -583,30 +583,22 @@ fn unquote(value: &str) -> Option<String> {
     let mut out = String::with_capacity(value.len());
     let mut chars = value.chars();
     let _opening_quote = chars.next();
-    let mut in_quote = true;
     let mut closed = false;
     while let Some(c) = chars.next() {
         if closed {
-            if c == ' ' || c == '\t' {
-                continue;
+            if c != ' ' && c != '\t' {
+                return None;
             }
-            return None;
+            continue;
         }
 
-        if c == '"' {
-            in_quote = false;
-            closed = true;
-        } else if c == '\\' && in_quote {
-            let esc = chars.next()?;
-            out.push(esc);
-        } else {
-            out.push(c);
+        match c {
+            '"' => closed = true,
+            '\\' => out.push(chars.next()?),
+            _ => out.push(c),
         }
     }
-    if in_quote || !closed {
-        return None;
-    }
-    Some(out)
+    closed.then_some(out)
 }
 
 /// Validate a `for=` forwarded address: a literal IPv4 or bracketed IPv6.
