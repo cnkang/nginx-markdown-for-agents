@@ -69,7 +69,7 @@ SEMICOLON_WARNING_RE = re.compile(
 SAFE_GIT_REF_RE = re.compile(
     r"^(?:HEAD|[0-9A-Fa-f]{7,40}|"
     r"(?:refs/(?:heads|tags|remotes)/|origin/)?"
-    r"[A-Za-z0-9][A-Za-z0-9._/-]*)(?:~[0-9]+|\^[0-9]*)?$"
+    r"[A-Za-z0-9][A-Za-z0-9._/-]*)$"
 )
 
 SENT_DESCRIPTIVE_MAX = 25
@@ -474,25 +474,59 @@ def _resolve_base(ref: str) -> str | None:
     if not ref or SAFE_GIT_REF_RE.fullmatch(ref) is None:
         return None
 
-    # Keep the user-supplied ref out of argv. Git reads this query from stdin,
-    # so a valid ref cannot be reinterpreted as an option or executable input.
-    out = subprocess.run(
+    # Enumerate refs with a fixed command. The user value is only used as an
+    # in-memory lookup key below and never reaches a subprocess.
+    refs = subprocess.run(
         [
             "git",
-            "cat-file",
-            "--batch-check",
+            "for-each-ref",
+            "--format=%(refname) %(objectname) %(objecttype) %(*objectname) %(*objecttype)",
         ],
         cwd=ROOT,
         capture_output=True,
         text=True,
-        input=f"{ref}^{{commit}}\n",
     )
-    if out.returncode != 0:
+    if refs.returncode != 0:
         return None
-    fields = out.stdout.split()
-    if len(fields) < 2 or fields[1] != "commit":
+
+    commits: dict[str, str] = {}
+    for line in refs.stdout.splitlines():
+        fields = line.split()
+        if len(fields) < 3:
+            continue
+        ref_name, object_name, object_type = fields[:3]
+        if object_type == "commit":
+            commit = object_name
+        elif (
+            object_type == "tag"
+            and len(fields) >= 5
+            and fields[4] == "commit"
+        ):
+            commit = fields[3]
+        else:
+            continue
+        commits[ref_name] = commit
+        if ref_name.startswith("refs/heads/"):
+            commits.setdefault(ref_name.removeprefix("refs/heads/"), commit)
+        elif ref_name.startswith("refs/remotes/"):
+            commits.setdefault(ref_name.removeprefix("refs/remotes/"), commit)
+
+    head = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if head.returncode == 0:
+        commits["HEAD"] = head.stdout.strip()
+
+    commit = commits.get(ref)
+    if commit:
+        return commit
+    if not re.fullmatch(r"[0-9A-Fa-f]{7,40}", ref):
         return None
-    return fields[0]
+    matches = {value for value in commits.values() if value.startswith(ref.lower())}
+    return matches.pop() if len(matches) == 1 else None
 
 
 def _build_parser() -> argparse.ArgumentParser:
