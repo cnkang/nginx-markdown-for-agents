@@ -73,7 +73,7 @@ DYNCONF_PRECEDENCE_CONTRACT_PATH = (
 )
 
 PRECEDENCE_TIER_PATTERN = re.compile(
-    r"^\s*\*\s+([1-9]\d*)\.\s+([^\r\n]+?)\s*$", re.MULTILINE
+    r"^[ \t]*\*[ \t]+([1-9]\d*)\.[ \t]+([^\r\n]+)$", re.MULTILINE
 )
 KNOWN_KEYS_PATTERN = re.compile(
     r"(?ms)^\s*(?:pub\s+)?const\s+KNOWN_KEYS\s*:\s*&\[&str\]\s*="
@@ -111,7 +111,10 @@ def _extract_precedence_hierarchy(
     content: str, expected_hierarchy: list[dict]
 ) -> list[dict]:
     """Extract and validate the precedence hierarchy against its contract."""
-    matches = PRECEDENCE_TIER_PATTERN.findall(content)
+    matches = [
+        (tier, description.rstrip())
+        for tier, description in PRECEDENCE_TIER_PATTERN.findall(content)
+    ]
     expected_tiers = [entry["tier"] for entry in expected_hierarchy]
     actual_tiers = [int(tier) for tier, _ in matches]
     if actual_tiers != expected_tiers:
