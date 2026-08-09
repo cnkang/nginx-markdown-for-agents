@@ -41,12 +41,13 @@ from collections.abc import Iterator
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+AGENTS_FILENAME = "AGENTS.md"
 ARCHIVE_SEGMENT = "docs/archive/"
 # CHANGELOG.md keeps historical release prose. Changed-mode still audits it so
 # an edited historical entry cannot add a new warning. Baseline mode excludes
 # the retained historical warning set and covers current reader-facing docs.
 MAINTAINED_ROOT_DOCS = {
-    "AGENTS.md",
+    AGENTS_FILENAME,
     "README.md",
     "README_zh-CN.md",
     "CONTRIBUTING.md",
@@ -185,7 +186,7 @@ LIST_MARKER_RE = re.compile(r"^(?:[-*]|\d+[.)])\s+")
 
 # Rule/governance documents whose list items are atomic checkpoints even
 # without a bold title (AGENTS.md required-list, harness rule docs).
-RULE_DOC_PREFIXES = ("AGENTS.md", "docs/harness/rules/")
+RULE_DOC_PREFIXES = (AGENTS_FILENAME, "docs/harness/rules/")
 
 # Rule-format items may contain several atomic requirements. Keep the
 # exemption narrow: ordinary guide prose still uses the length and semicolon
@@ -196,7 +197,7 @@ RELEASE_GATE_TEMPLATE_RE = re.compile(
 )
 MUST_SPECIFICATION_RE = re.compile(r"\bMUST\b")
 MUST_SPECIFICATION_PREFIXES = (
-    "AGENTS.md",
+    AGENTS_FILENAME,
     "docs/architecture/",
     "docs/harness/",
     "docs/project/release-gates/",
@@ -237,7 +238,6 @@ NOUN_CHAIN_ALLOWLIST = {
     "Why These Page Types Are Risky",
     "Xcode Command Line Tools",
     "Changing Defaults During Rollout",
-    "Performance Evidence Release Gate",
     "No-Progress Guard No False Positives",
 }
 
@@ -321,7 +321,7 @@ def _sentence_warnings(prose: str, rel: str) -> list[str]:
     return warnings
 
 
-def _noun_chain_warnings(prose: str, rel: str) -> list[str]:
+def _noun_chain_warnings(prose: str) -> list[str]:
     warnings: list[str] = []
     for chain, chain_start in _noun_chains(prose):
         if any(al in chain for al in NOUN_CHAIN_ALLOWLIST):
@@ -347,7 +347,7 @@ def _pattern_warnings(prose: str, rel: str) -> list[str]:
         warnings.append(f"contraction '{m.group(0)}': avoid in prose")
     for m in PASSIVE_RE.finditer(prose):
         warnings.append(f"passive-ish '{m.group(0)}': prefer active voice")
-    warnings.extend(_noun_chain_warnings(prose, rel))
+    warnings.extend(_noun_chain_warnings(prose))
     semi = _prose_semicolon_count(prose, rel)
     if semi:
         warnings.append(f"{semi} semicolon(s) in prose: split into sentences")
@@ -469,6 +469,34 @@ def _report_warning(
     return 0
 
 
+def _commit_from_ref_fields(fields: list[str]) -> str | None:
+    if len(fields) < 3:
+        return None
+    _, object_name, object_type = fields[:3]
+    if object_type == "commit":
+        return object_name
+    if object_type == "tag" and len(fields) >= 5 and fields[4] == "commit":
+        return fields[3]
+    return None
+
+
+def _collect_commit_refs(output: str) -> dict[str, str]:
+    """Build safe ref aliases from fixed-format git output."""
+    commits: dict[str, str] = {}
+    for line in output.splitlines():
+        fields = line.split()
+        commit = _commit_from_ref_fields(fields)
+        if commit is None:
+            continue
+        ref_name = fields[0]
+        commits[ref_name] = commit
+        if ref_name.startswith("refs/heads/"):
+            commits.setdefault(ref_name.removeprefix("refs/heads/"), commit)
+        elif ref_name.startswith("refs/remotes/"):
+            commits.setdefault(ref_name.removeprefix("refs/remotes/"), commit)
+    return commits
+
+
 def _resolve_base(ref: str) -> str | None:
     """Resolve a user-supplied base ref, or return None when it is invalid."""
     if not ref or SAFE_GIT_REF_RE.fullmatch(ref) is None:
@@ -489,27 +517,7 @@ def _resolve_base(ref: str) -> str | None:
     if refs.returncode != 0:
         return None
 
-    commits: dict[str, str] = {}
-    for line in refs.stdout.splitlines():
-        fields = line.split()
-        if len(fields) < 3:
-            continue
-        ref_name, object_name, object_type = fields[:3]
-        if object_type == "commit":
-            commit = object_name
-        elif (
-            object_type == "tag"
-            and len(fields) >= 5
-            and fields[4] == "commit"
-        ):
-            commit = fields[3]
-        else:
-            continue
-        commits[ref_name] = commit
-        if ref_name.startswith("refs/heads/"):
-            commits.setdefault(ref_name.removeprefix("refs/heads/"), commit)
-        elif ref_name.startswith("refs/remotes/"):
-            commits.setdefault(ref_name.removeprefix("refs/remotes/"), commit)
+    commits = _collect_commit_refs(refs.stdout)
 
     head = subprocess.run(
         ["git", "rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
@@ -582,9 +590,7 @@ def _audit_files(
     return total, new_total
 
 
-def _report_result(
-    args: argparse.Namespace, base: str | None, total: int, new_total: int
-) -> int:
+def _report_result(args: argparse.Namespace, total: int, new_total: int) -> int:
     if args.strict and total:
         print("FAIL: strict mode found warnings")
         return 1
@@ -630,7 +636,7 @@ def main() -> int:
 
     print(f"\nWriting-style warnings: {total} (file(s): {len(files)})")
     print("This check is advisory (STE-inspired, non-native-reader friendly).")
-    return _report_result(args, base, total, new_total)
+    return _report_result(args, total, new_total)
 
 
 if __name__ == "__main__":

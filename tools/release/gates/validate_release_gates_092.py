@@ -41,37 +41,46 @@ def find_repo_root() -> Path:
     return REPO_ROOT
 
 
+def _cargo_version_mismatch(path: Path) -> str | None:
+    if not path.exists():
+        return "Cargo.toml: file not found"
+    try:
+        cargo_data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        return f"Cargo.toml: invalid TOML ({exc})"
+    package = cargo_data.get("package")
+    version = package.get("version") if isinstance(package, dict) else None
+    if version != EXPECTED_VERSION:
+        return f"Cargo.toml: {version if version is not None else 'version not found'}"
+    return None
+
+
+def _changelog_version_mismatch(path: Path) -> str | None:
+    if not path.exists():
+        return f"{CHANGELOG_FILENAME}: file not found"
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return f"{CHANGELOG_FILENAME}: cannot read ({exc})"
+    if (
+        f"## [{EXPECTED_VERSION}]" not in content
+        and f"## v{EXPECTED_VERSION}" not in content
+    ):
+        return f"{CHANGELOG_FILENAME}: {EXPECTED_VERSION} header not found"
+    return None
+
+
 def check_version_consistency(repo: Path) -> dict:
     """Verify all version sources agree on 0.9.2."""
-    sources = {
-        "Cargo.toml": repo / "components/rust-converter/Cargo.toml",
-        CHANGELOG_FILENAME: repo / CHANGELOG_FILENAME,
-    }
     mismatches = []
-
-    cargo_toml = sources["Cargo.toml"]
-    if not cargo_toml.exists():
-        mismatches.append("Cargo.toml: file not found")
-    else:
-        try:
-            cargo_data = tomllib.loads(cargo_toml.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
-            mismatches.append(f"Cargo.toml: invalid TOML ({exc})")
-        else:
-            package = cargo_data.get("package")
-            version = package.get("version") if isinstance(package, dict) else None
-            if version != EXPECTED_VERSION:
-                mismatches.append(
-                    f"Cargo.toml: {version if version is not None else 'version not found'}")
-
-    changelog = sources[CHANGELOG_FILENAME]
-    if not changelog.exists():
-        mismatches.append(f"{CHANGELOG_FILENAME}: file not found")
-    else:
-        content = changelog.read_text()
-        if f"## [{EXPECTED_VERSION}]" not in content and f"## v{EXPECTED_VERSION}" not in content:
-            mismatches.append(
-                f"{CHANGELOG_FILENAME}: {EXPECTED_VERSION} header not found")
+    for mismatch in (
+        _cargo_version_mismatch(
+            repo / "components/rust-converter/Cargo.toml"
+        ),
+        _changelog_version_mismatch(repo / CHANGELOG_FILENAME),
+    ):
+        if mismatch is not None:
+            mismatches.append(mismatch)
 
     if mismatches:
         return {"name": "version_consistency", "status": "fail",

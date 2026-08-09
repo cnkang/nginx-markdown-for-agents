@@ -20,8 +20,6 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
-
 from tools.release.gates import generate_schema_artifacts as gen  # noqa: E402
 from tools.release.gates import validate_metrics_registry as metrics_validator  # noqa: E402
 
@@ -211,12 +209,11 @@ def test_dynconf_precedence_header_drift_is_rejected():
         1,
     )
 
+    contract = gen._read_json(gen.DYNCONF_PRECEDENCE_CONTRACT_PATH)
     with pytest.raises(ValueError, match="tier 1"):
         gen._extract_precedence_hierarchy(
             mutated,
-            gen._read_json(gen.DYNCONF_PRECEDENCE_CONTRACT_PATH)[
-                "five_tier_precedence_hierarchy"
-            ],
+            contract["five_tier_precedence_hierarchy"],
         )
 
 
@@ -247,9 +244,7 @@ def test_generated_artifacts_pass_schema_drift_validator(tmp_path, monkeypatch):
     monkeypatch.setattr(gen, "DEFAULT_VERSION", "0.9.2")
     gen.main([])
 
-    sys.path.insert(
-        0, str(REPO_ROOT / "tools" / "release" / "gates")
-    )
+    monkeypatch.syspath_prepend(str(REPO_ROOT / "tools" / "release" / "gates"))
     import validate_schema_drift  # noqa: E402
 
     monkeypatch.setattr(

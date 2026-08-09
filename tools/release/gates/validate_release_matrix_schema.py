@@ -40,11 +40,12 @@ CANONICAL_KEYS = {
     "feature_manifest_digest",
     "abi_version",
 }
+SHA256_PREFIX = "sha256:"
 
 
 def schema_digest() -> str:
     raw = SCHEMA_PATH.read_bytes()
-    return "sha256:" + hashlib.sha256(raw).hexdigest()
+    return SHA256_PREFIX + hashlib.sha256(raw).hexdigest()
 
 
 def run_normalization(doc: dict) -> tuple[bool, str]:
@@ -159,7 +160,7 @@ def positive_cases() -> list:
                         "libc": "glibc",
                         "arch": "x86_64-unknown-linux-gnu",
                         "artifact_type": "rpm",
-                        "feature_manifest_digest": "sha256:" + "0" * 64,
+                        "feature_manifest_digest": SHA256_PREFIX + "0" * 64,
                         "abi_version": 2,
                     }
                 ],
@@ -219,7 +220,7 @@ def canonical_entry() -> dict:
         "libc": "glibc",
         "target": "x86_64-unknown-linux-gnu",
         "artifact_type": "deb",
-        "feature_manifest_digest": "sha256:" + "0" * 64,
+        "feature_manifest_digest": SHA256_PREFIX + "0" * 64,
         "abi_version": 2,
     }
 
