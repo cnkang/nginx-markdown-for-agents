@@ -90,6 +90,7 @@ ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
 #define ngx_memzero(p, n)   memset((p), 0, (n))
 #define ngx_memcpy(dst, src, n) memcpy((dst), (src), (n))
 #define ngx_memmove(dst, src, n) memmove((dst), (src), (n))
+#define ngx_strlen(s)       strlen((const char *) (s))
 
 static ngx_int_t
 ngx_strncasecmp(u_char *s1, u_char *s2, size_t n)
