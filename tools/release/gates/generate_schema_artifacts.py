@@ -73,13 +73,13 @@ DYNCONF_PRECEDENCE_CONTRACT_PATH = (
 )
 
 PRECEDENCE_TIER_PATTERN = re.compile(
-    r"^\s*\*\s+([1-9][0-9]*)\.\s+(.+?)\s*$", re.MULTILINE
+    r"^\s*\*\s+([1-9]\d*)\.\s+([^\r\n]+?)\s*$", re.MULTILINE
 )
 KNOWN_KEYS_PATTERN = re.compile(
     r"(?ms)^\s*(?:pub\s+)?const\s+KNOWN_KEYS\s*:\s*&\[&str\]\s*="
     r"\s*&\[\s*(.*?)\s*\];"
 )
-VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 
 
 def _read_text(path: Path) -> str:

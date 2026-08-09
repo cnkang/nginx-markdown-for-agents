@@ -20,7 +20,7 @@ from lib.path_validation import validate_read_path  # noqa: E402
 
 
 DEFAULT_VERSION = "0.9.2"
-VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 METRICS_CONTRACT = "schemas/metrics-v1.registry.json"
 METRICS_IMPLEMENTATION_SOURCES = [
     "components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h",

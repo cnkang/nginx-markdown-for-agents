@@ -24,7 +24,7 @@ from lib.path_validation import validate_read_path  # noqa: E402
 
 
 DEFAULT_VERSION = "0.9.2"
-VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 
 # Release artifact paths.  configure_release_version updates these for the
 # CLI-selected version while preserving simple function-level test hooks.
@@ -118,7 +118,7 @@ def gate_release_artifact_existence() -> list[str]:
             continue
         try:
             _load_json(artifact_path)
-        except (json.JSONDecodeError, OSError, UnicodeError, ValueError) as exc:
+        except (OSError, ValueError) as exc:
             errors.append(f"Release artifact unreadable: {rel}: {exc}")
     return errors
 
@@ -350,11 +350,11 @@ def _check_precedence_header_contract(contract: dict) -> list[str]:
         content = validate_read_path(
             header_path, purpose="dynconf precedence implementation"
         ).read_text(encoding="utf-8")
-    except (OSError, UnicodeError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         return [f"dynconf precedence header unreadable: {exc}"]
 
     matches = re.findall(
-        r"^\s*\*\s+([1-9][0-9]*)\.\s+(.+?)\s*$",
+        r"^\s*\*\s+([1-9]\d*)\.\s+([^\r\n]+?)\s*$",
         content,
         flags=re.MULTILINE,
     )
@@ -443,7 +443,7 @@ def _run_gate(index, total, label, gate_fn):
     print(f"[{index}/{total}] {label}...")
     try:
         errors = gate_fn()
-    except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError) as exc:
         errors = [f"gate raised a structured input error: {exc}"]
     if errors:
         for error in errors:

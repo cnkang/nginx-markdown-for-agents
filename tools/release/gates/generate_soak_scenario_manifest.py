@@ -16,7 +16,7 @@ DEFAULT_VERSION = "0.9.2"
 MANIFEST_NAME = "short-soak-scenario-manifest.json"
 SCENARIO_IDS = ("small", "medium", "large")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 
 if str(REPO_ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "tools"))
