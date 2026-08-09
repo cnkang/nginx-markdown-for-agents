@@ -248,10 +248,11 @@ docs-check: docs-check-base
 	PYTHONPATH=. python3 tools/harness/detect_doc_sync.py
 	$(MAKE) kb-contract-check
 	$(MAKE) docs-style-check-regression
-	$(MAKE) docs-style-check-baseline
 
 # STE-inspired writing-style gates (non-native-reader friendly, see
 # docs/development/WRITING_GUIDE.md and harness Rule 63).
+# Routine docs-check keeps the changed-file regression gate; the repository-wide
+# style budget is reserved for full Harness and release validation.
 # docs-style-check: advisory scan, never blocks.
 # docs-style-check-regression: files changed since STYLE_BASE (working tree +
 # staged) must have zero warnings. Local invocations default to HEAD; CI must
@@ -292,6 +293,7 @@ schema-drift-check:
 
 harness-check-full:
 	$(MAKE) docs-check-base
+	$(MAKE) docs-style-check-baseline
 	python3 tools/harness/check_harness_sync.py --full
 	$(MAKE) release-gates-check
 	$(MAKE) harness-security-checks
@@ -945,21 +947,23 @@ release-gates-check-091: release-gates-check-090
 # Classification: BLOCKING
 release-gates-check-092: release-gates-check-091
 	@echo "=== 0.9.2 Release Gates (blocking) ==="
-	@echo "  [1/7] 0.9.2 performance evidence gate (blocking mode, baseline 092)"
+	@echo "  [1/8] 0.9.2 performance evidence gate (blocking mode, baseline 092)"
 	$(MAKE) release-perf-evidence-blocking BASELINE_VERSION=092
-	@echo "  [2/7] Public surface and dynconf schema drift checks"
+	@echo "  [2/8] Public surface and dynconf schema drift checks"
 	$(MAKE) public-surface-drift-check
 	$(MAKE) schema-drift-check SCHEMA_RELEASE_VERSION=0.9.2
-	@echo "  [3/7] Version consistency (0.9.2)"
+	@echo "  [3/8] Version consistency (0.9.2)"
 	bash tools/harness/detect_version_consistency.sh
-	@echo "  [4/7] Reason code registry completeness"
+	@echo "  [4/8] Reason code registry completeness"
 	PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
-	@echo "  [5/7] Streaming lifecycle unit test"
+	@echo "  [5/8] Streaming lifecycle unit test"
 	$(MAKE) -C $(NGINX_TEST_DIR) unit-streaming_impl
-	@echo "  [6/7] Official build feature manifest"
+	@echo "  [6/8] Official build feature manifest"
 	python3 tools/release/gates/validate_official_feature_manifest.py --write
-	@echo "  [7/7] Canonical release matrix"
+	@echo "  [7/8] Canonical release matrix"
 	PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
+	@echo "  [8/8] Repository docs style baseline"
+	$(MAKE) docs-style-check-baseline
 	@echo "=== 0.9.2 Release Gates: PASS ==="
 
 # release-matrix-check: Canonical release-matrix gate.
