@@ -685,6 +685,73 @@ def test_replace_canonical_dynamic_entries_preserves_unmanaged_dynamic_rows():
     assert ("1.24.0", "glibc", "amd64") in keys
 
 
+def test_replace_canonical_dynamic_entries_normalizes_alias_rows():
+    """Alias-shaped rows must match generated entries without a KeyError."""
+    data = {
+        "entries": [
+            {
+                "nginx": "1.26.3",
+                "os_type": "glibc",
+                "target": "amd64",
+                "artifact_type": "dynamic-module",
+                "support_tier": "supported",
+            }
+        ]
+    }
+    merged = [
+        {
+            "nginx_version": "1.26.3",
+            "libc": "glibc",
+            "target": "amd64",
+            "support_tier": "full",
+        }
+    ]
+
+    um._replace_canonical_dynamic_entries(data, merged)
+
+    dynamic = [
+        entry
+        for entry in data["entries"]
+        if entry.get("artifact_type") == "dynamic-module"
+    ]
+    assert len(dynamic) == 1
+    assert dynamic[0]["target"] == "amd64"
+
+
+def test_replace_canonical_dynamic_entries_rejects_duplicate_identities():
+    """Conflicting metadata must not be silently selected by dictionary order."""
+    data = {
+        "entries": [
+            {
+                "nginx_version": "1.26.3",
+                "libc": "glibc",
+                "arch": "amd64",
+                "artifact_type": "dynamic-module",
+                "release_blocking": True,
+                "owner_workflow": "release-packages.yml",
+            },
+            {
+                "nginx": "1.26.3",
+                "os_type": "glibc",
+                "target": "amd64",
+                "artifact_type": "dynamic-module",
+                "release_blocking": False,
+                "owner_workflow": "release-binaries.yml",
+            },
+        ]
+    }
+    merged = [
+        {
+            "nginx_version": "1.26.3",
+            "libc": "glibc",
+            "target": "x86_64",
+        }
+    ]
+
+    with pytest.raises(ValueError, match="duplicate existing dynamic"):
+        um._replace_canonical_dynamic_entries(data, merged)
+
+
 # ---------------------------------------------------------------------------
 # Property 12 — Key Uniqueness After Merge
 # ---------------------------------------------------------------------------

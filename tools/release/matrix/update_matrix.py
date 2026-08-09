@@ -35,6 +35,11 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 
+try:
+    from .normalize_matrix import normalize_entry_aliases
+except ImportError:
+    from normalize_matrix import normalize_entry_aliases
+
 # ---------------------------------------------------------------------------
 # Path constants (same pattern as validate_doc_matrix_sync.py)
 # ---------------------------------------------------------------------------
@@ -389,10 +394,7 @@ def _validate_manual_entries(manual_entries: list[dict], path: Path) -> None:
     seen_keys: dict[tuple[str, str, str], int] = {}
     duplicates: list[tuple[str, str, str]] = []
     for entry in manual_entries:
-        version = entry.get("nginx_version") or entry.get("nginx")
-        os_type = entry.get("os_type") or entry.get("os") or entry.get("libc")
-        arch = entry.get("arch")
-        key = (version, os_type, arch)
+        key = _matrix_entry_identity(entry)
         if key in seen_keys:
             duplicates.append(key)
         else:
@@ -426,6 +428,26 @@ def _read_matrix_json(path: Path) -> dict:
     return data
 
 
+def _supported_dynamic_entry(entry: dict) -> dict | None:
+    """Project a supported canonical row into the updater's legacy shape."""
+    if entry.get("artifact_type") != "dynamic-module":
+        return None
+    if entry.get("support_tier") != "supported":
+        return None
+    try:
+        version, os_type, arch = _matrix_entry_identity(entry)
+    except ValueError:
+        return None
+    if os_type not in OS_TYPES or arch not in {"x86_64", "aarch64"}:
+        return None
+    return {
+        "nginx": version,
+        "os_type": os_type,
+        "arch": arch,
+        "support_tier": "full",
+    }
+
+
 def _matrix_entry_list(data: dict, path: Path) -> list:
     """Return the matrix entry list from supported schema variants."""
     if isinstance(data.get("entries"), list) and "matrix" not in data:
@@ -436,22 +458,8 @@ def _matrix_entry_list(data: dict, path: Path) -> list:
                     f"Invalid matrix entry at index {index} in {path}: "
                     f"expected dict, got {type(entry).__name__}"
                 )
-            if (
-                entry.get("artifact_type") == "dynamic-module"
-                and entry.get("support_tier") == "supported"
-                and entry.get("libc") in OS_TYPES
-                and entry.get("arch") in {"amd64", "arm64"}
-            ):
-                matrix_entries.append(
-                    {
-                        "nginx": entry["nginx_version"],
-                        "os_type": entry["libc"],
-                        "arch": {"amd64": "x86_64", "arm64": "aarch64"}[
-                            entry["arch"]
-                        ],
-                        "support_tier": "full",
-                    }
-                )
+            if canonical := _supported_dynamic_entry(entry):
+                matrix_entries.append(canonical)
         return matrix_entries
 
     matrix_entries = data.get("matrix")
@@ -527,6 +535,45 @@ def load_matrix(path: Path) -> tuple[dict, list[dict], list[dict]]:
 # ---------------------------------------------------------------------------
 
 
+def _matrix_entry_identity(entry: dict) -> tuple[str, str, str]:
+    """Resolve one matrix row to the updater's canonical identity."""
+    normalized = normalize_entry_aliases(entry)
+    version = normalized.get("nginx_version")
+    os_type = normalized.get("libc")
+    if os_type is None and normalized.get("os") in OS_TYPES:
+        os_type = normalized["os"]
+    arch = normalized.get("target")
+    arch = {
+        "amd64": "x86_64",
+        "arm64": "aarch64",
+    }.get(arch, arch)
+    if isinstance(arch, str):
+        if arch.startswith("x86_64-"):
+            arch = "x86_64"
+        elif arch.startswith("aarch64-"):
+            arch = "aarch64"
+    if not all(
+        isinstance(value, str) and value
+        for value in (version, os_type, arch)
+    ):
+        raise ValueError("matrix entry has no complete nginx/os/arch identity")
+    return version, os_type, arch
+
+
+def _assert_unique_identities(entries: list[dict], label: str) -> None:
+    """Reject duplicate release identities before metadata can be discarded."""
+    seen: dict[tuple[str, str, str], int] = {}
+    for index, entry in enumerate(entries):
+        identity = _matrix_entry_identity(entry)
+        previous = seen.get(identity)
+        if previous is not None:
+            raise ValueError(
+                f"duplicate {label} matrix identity {identity} "
+                f"at indexes {previous} and {index}"
+            )
+        seen[identity] = index
+
+
 def _entry_sort_key(entry: dict) -> tuple[tuple[int, ...], str, str]:
     """Produce a sort key for a release matrix entry.
 
@@ -537,9 +584,7 @@ def _entry_sort_key(entry: dict) -> tuple[tuple[int, ...], str, str]:
         tuple: ``(version_tuple, os_type, arch)`` where ``version_tuple``
             comes from ``entry["nginx"]``.
     """
-    version = entry.get("nginx_version") or entry.get("nginx")
-    os_type = entry.get("os_type") or entry.get("os") or entry.get("libc")
-    arch = entry.get("arch")
+    version, os_type, arch = _matrix_entry_identity(entry)
     return (version_tuple(version), os_type, arch)
 
 
@@ -581,15 +626,15 @@ def merge_matrix(auto_entries: list[dict], manual_entries: list[dict]) -> list[d
     Returns:
         list[dict]: Merged matrix entries sorted as described.
     """
-    manual_keys: set[tuple[str, str, str]] = {
-        (e["nginx"], e["os_type"], e["arch"]) for e in manual_entries
-    }
+    _assert_unique_identities(auto_entries, "auto")
+    _assert_unique_identities(manual_entries, "manual")
+    manual_keys = {_matrix_entry_identity(e) for e in manual_entries}
 
     # Keep only auto entries whose key does not collide with a manual entry
     merged: list[dict] = [
         e
         for e in auto_entries
-        if (e["nginx"], e["os_type"], e["arch"]) not in manual_keys
+        if _matrix_entry_identity(e) not in manual_keys
     ]
     merged.extend(manual_entries)
     merged.sort(key=_entry_sort_key)
@@ -615,17 +660,15 @@ def diff_matrix(current_auto: list[dict], desired_auto: list[dict]) -> MatrixDif
             tuple: ``(nginx, os_type, arch, support_tier)`` where missing
                 support_tier is represented as ``""``.
         """
-        version = e.get("nginx_version") or e.get("nginx")
-        os_type = e.get("os_type") or e.get("os") or e.get("libc")
-        arch = e.get("arch")
+        version, os_type, arch = _matrix_entry_identity(e)
         return (version, os_type, arch, e.get("support_tier", ""))
 
     current_set = { _entry_key(e) for e in current_auto }
     desired_set = { _entry_key(e) for e in desired_auto }
 
     # Version-level summary for PR titles
-    current_versions = { (e.get("nginx_version") or e.get("nginx")) for e in current_auto }
-    desired_versions = { (e.get("nginx_version") or e.get("nginx")) for e in desired_auto }
+    current_versions = {_matrix_entry_identity(e)[0] for e in current_auto}
+    desired_versions = {_matrix_entry_identity(e)[0] for e in desired_auto}
 
     added = sorted(desired_versions - current_versions, key=version_tuple)
     removed = sorted(current_versions - desired_versions, key=version_tuple)
@@ -727,9 +770,10 @@ def update_doc_table(doc_path: Path, matrix_entries: list[dict]) -> str:
         "|---------------|---------|--------------|--------------|",
     ]
     for entry in sorted_entries:
+        version, os_type, arch = _matrix_entry_identity(entry)
         tier = entry["support_tier"].replace("_", " ").title()
         lines.append(
-            f"| {entry['nginx']} | {entry['os_type']} | {entry['arch']} | {tier} |"
+            f"| {version} | {os_type} | {arch} | {tier} |"
         )
     lines.append(DOC_MARKER_END)
 
@@ -954,15 +998,19 @@ def _canonical_dynamic_entry(
     legacy_entry: dict, existing: dict | None = None
 ) -> dict:
     """Project one generated install row into the canonical entry schema."""
-    version = legacy_entry["nginx"]
-    libc = legacy_entry["os_type"]
-    arch = {"x86_64": "amd64", "aarch64": "arm64"}[legacy_entry["arch"]]
+    version, libc, normalized_arch = _matrix_entry_identity(legacy_entry)
+    arch = {"x86_64": "amd64", "aarch64": "arm64"}.get(normalized_arch)
+    if arch is None:
+        raise ValueError(f"unsupported matrix architecture: {normalized_arch}")
     if existing is not None:
         entry = dict(existing)
         entry["nginx_version"] = version
         entry["nginx_channel"] = classify_version(version)
         entry["libc"] = libc
-        entry["arch"] = arch
+        if "target" in existing and "arch" not in existing:
+            entry["target"] = arch
+        else:
+            entry["arch"] = arch
         entry["support_tier"] = "supported"
         return entry
 
@@ -990,26 +1038,26 @@ def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
     if not isinstance(entries, list):
         _matrix_error("Canonical release matrix is missing an entries list")
 
-    existing_by_key = {
-        (entry.get("nginx_version"), entry.get("libc"), entry.get("arch")): entry
+    existing_dynamic = [
+        entry
         for entry in entries
-        if isinstance(entry, dict) and entry.get("artifact_type") == "dynamic-module"
+        if isinstance(entry, dict)
+        and entry.get("artifact_type") == "dynamic-module"
+    ]
+    _assert_unique_identities(existing_dynamic, "existing dynamic")
+    _assert_unique_identities(merged, "generated dynamic")
+    existing_by_key = {
+        _matrix_entry_identity(entry): entry for entry in existing_dynamic
     }
     dynamic_entries = [
         _canonical_dynamic_entry(
             legacy_entry,
-            existing_by_key.get(
-                (
-                    legacy_entry["nginx"],
-                    legacy_entry["os_type"],
-                    {"x86_64": "amd64", "aarch64": "arm64"}[legacy_entry["arch"]],
-                )
-            ),
+            existing_by_key.get(_matrix_entry_identity(legacy_entry)),
         )
         for legacy_entry in merged
     ]
     generated_keys = {
-        (entry["nginx_version"], entry["libc"], entry["arch"])
+        _matrix_entry_identity(entry)
         for entry in dynamic_entries
     }
     other_entries = [
@@ -1017,14 +1065,13 @@ def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
         for entry in entries
         if not isinstance(entry, dict)
         or entry.get("artifact_type") != "dynamic-module"
-        or (entry.get("nginx_version"), entry.get("libc"), entry.get("arch"))
-        not in generated_keys
+        or _matrix_entry_identity(entry) not in generated_keys
     ]
     dynamic_entries.sort(
         key=lambda entry: (
-            version_tuple(entry["nginx_version"]),
-            entry["libc"],
-            entry["arch"],
+            version_tuple(_matrix_entry_identity(entry)[0]),
+            _matrix_entry_identity(entry)[1],
+            _matrix_entry_identity(entry)[2],
         )
     )
     data["entries"] = dynamic_entries + other_entries

@@ -73,6 +73,31 @@ def test_release_binaries_workflow_dispatch_can_publish_tag_assets() -> None:
     )
 
 
+def test_release_binaries_publishes_signed_checksum_chain() -> None:
+    """Binary releases must bind every archive to a signed checksum file."""
+    workflow = _workflow_data("release-binaries.yml")
+    jobs = workflow["jobs"]
+    checksum_job = jobs["integrity-checksums"]
+    signing_job = jobs["integrity-signing"]
+    publish = jobs["publish-release"]
+    workflow_text = _workflow_text("release-binaries.yml")
+
+    assert checksum_job["needs"] == "completeness-check"
+    checksum_step = _step_by_name(
+        checksum_job["steps"], "Generate and verify SHA256SUMS"
+    )
+    assert "generate-checksums.sh -d artifacts/" in checksum_step["run"]
+    assert "sha256sum --check SHA256SUMS" in checksum_step["run"]
+    assert signing_job["needs"] == "integrity-checksums"
+    assert "github.event_name == 'release'" in signing_job["if"]
+    assert "release-signing" == signing_job["environment"]
+    assert "gpg-sign-checksums.sh" in workflow_text
+    assert "binary-checksums-signature" in workflow_text
+    assert "SHA256SUMS.asc" in workflow_text
+    assert "needs.integrity-checksums.result == 'success'" in publish["if"]
+    assert "needs.integrity-signing.result == 'success'" in publish["if"]
+
+
 def test_update_matrix_pr_creation_is_non_blocking_when_repo_disallows_actions_prs() -> None:
     """Scheduled matrix refreshes should succeed even if PR creation is policy-blocked.
 

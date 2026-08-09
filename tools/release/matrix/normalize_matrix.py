@@ -153,6 +153,16 @@ def _fold_entry_keys(entry: Dict[str, Any]) -> Dict[str, Any]:
     return canonical
 
 
+def normalize_entry_aliases(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Fold legacy entry aliases without imposing the full release schema.
+
+    Transitional matrix tools need a stable identity before they add or
+    preserve tool-specific fields.  They must still use the same fail-closed
+    alias conflict rules as the canonical validator.
+    """
+    return _fold_entry_keys(entry)
+
+
 def load_and_normalize(path: str) -> Dict[str, Any]:
     """Load a matrix file and normalize it; exits 1 on fail-closed errors."""
     validated = validate_read_path(path, purpose="release-matrix normalization")
