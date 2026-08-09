@@ -957,8 +957,11 @@ impl StreamingConverter {
         // content).
         self.process_implied_closures()?;
 
+        let generated_markdown = matches!(&decision, SanitizeDecision::PassGenerated(_));
         let sanitized_event = match decision {
-            SanitizeDecision::Pass(ev) | SanitizeDecision::PassModified(ev) => ev,
+            SanitizeDecision::Pass(ev)
+            | SanitizeDecision::PassModified(ev)
+            | SanitizeDecision::PassGenerated(ev) => ev,
             SanitizeDecision::Skip => return Ok(()),
             SanitizeDecision::DepthExceeded => {
                 return Err(self.wrap_error(ConversionError::MemoryLimit(
@@ -979,9 +982,21 @@ impl StreamingConverter {
         }
 
         // Emitter
-        self.emitter
-            .process_action(&action, &mut self.state_machine)
-            .map_err(|e| self.wrap_error(e))?;
+        if generated_markdown {
+            if let StateMachineAction::Text(text) = &action {
+                self.emitter
+                    .process_trusted_text(text)
+                    .map_err(|e| self.wrap_error(e))?;
+            } else {
+                self.emitter
+                    .process_action(&action, &mut self.state_machine)
+                    .map_err(|e| self.wrap_error(e))?;
+            }
+        } else {
+            self.emitter
+                .process_action(&action, &mut self.state_machine)
+                .map_err(|e| self.wrap_error(e))?;
+        }
 
         // Track peak working set after emitter processes the event,
         // when the pending buffer is at its largest.
@@ -1967,6 +1982,14 @@ mod tests {
         assert!(
             result.is_ok(),
             "Iframe should be handled by stripping, not fallback"
+        );
+        let final_result = conv.finalize().expect("iframe conversion should finalize");
+        let mut output = result.unwrap().markdown;
+        output.extend_from_slice(&final_result.final_markdown);
+        let output = String::from_utf8(output).expect("streaming output should be UTF-8");
+        assert!(
+            output.contains("[iframe](https://example.com)"),
+            "sanitizer-generated safe link should remain active: {output}"
         );
     }
 

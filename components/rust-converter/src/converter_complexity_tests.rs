@@ -1,5 +1,6 @@
 use super::MarkdownConverter;
 use crate::parser::parse_html;
+use crate::security::escape_markdown_text;
 use proptest::prelude::*;
 
 fn convert_html_for_test(html: &str) -> String {
@@ -43,8 +44,9 @@ proptest! {
         }
 
         let markdown = convert_html_for_test(&format!("<p>{}</p>", encoded));
+        let expected_markdown = escape_markdown_text(&expected);
         prop_assert!(
-            markdown.contains(&expected),
+            markdown.contains(&expected_markdown),
             "Decoded entities should preserve source text.\nInput: {:?}\nMarkdown: {:?}",
             encoded,
             markdown

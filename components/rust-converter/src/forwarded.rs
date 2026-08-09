@@ -843,10 +843,6 @@ fn decide_from_xforwarded(input: &BaseUrlInput, trusted: &[Cidr]) -> BaseUrlDeci
     };
 
     let addrs = split_forwarded_list(xff);
-    if addrs.is_empty() {
-        /* Empty address list discards the forwarded set. */
-        return discard_forwarded_set(input, BaseUrlReason::XForwardedMismatch);
-    }
 
     let protos = input.x_forwarded_proto.map(split_forwarded_list);
     let hosts = input.x_forwarded_host.map(split_forwarded_list);
@@ -1555,6 +1551,16 @@ mod tests {
         input.x_forwarded_host = Some("api.example.com");
         input.x_forwarded_proto = Some("https");
         input.x_forwarded_port = Some("443");
+        let d = decide_base_url(&input, &t);
+        assert_eq!(d.reason, BaseUrlReason::ForwardedInvalidValue);
+        assert_eq!(d.source, BaseUrlSource::Host);
+    }
+
+    #[test]
+    fn decide_empty_xff_discards_as_invalid_value() {
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.x_forwarded_for = Some("");
         let d = decide_base_url(&input, &t);
         assert_eq!(d.reason, BaseUrlReason::ForwardedInvalidValue);
         assert_eq!(d.source, BaseUrlSource::Host);

@@ -813,8 +813,8 @@ pub fn parse_forwarded_headers(
 /// Escape a string for safe use as a Markdown link label.
 ///
 /// Per CommonMark §4.7, link labels may contain backslash escapes.
-/// Escape: `[`, `]`, `\`. Newlines are replaced with spaces to prevent
-/// injection via line breaks within link labels.
+/// Escape: `[`, `]`, `\`, `<`, and `>`. Newlines are replaced with spaces to
+/// prevent injection via line breaks within link labels.
 ///
 /// This is the single canonical label-escaping implementation; the streaming
 /// emitter and the full-buffer traversal both delegate here so the escaping
@@ -823,7 +823,7 @@ pub fn escape_link_label(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
     for ch in s.chars() {
         match ch {
-            '[' | ']' | '\\' => {
+            '[' | ']' | '\\' | '<' | '>' => {
                 out.push('\\');
                 out.push(ch);
             }
@@ -831,6 +831,52 @@ pub fn escape_link_label(s: &str) -> String {
             _ => out.push(ch),
         }
     }
+    out
+}
+
+/// Escape untrusted text before emitting it as ordinary Markdown content.
+///
+/// Ordinary text is not a Markdown label, so it can contain syntax that
+/// changes the document structure or introduces raw HTML. Escape inline
+/// delimiters and link/HTML brackets unconditionally. Block markers are
+/// escaped only at the beginning of a line so prose such as `a-b` remains
+/// readable while `- item`, `# heading`, and `1. item` stay text.
+pub fn escape_markdown_text(s: &str) -> String {
+    let mut out = String::with_capacity(s.len().saturating_add(8));
+    let mut line_prefix = true;
+    let mut indent = 0usize;
+    let mut ordered_digits = false;
+
+    for ch in s.chars() {
+        let block_marker = line_prefix
+            && indent <= 3
+            && (matches!(ch, '#' | '>' | '+' | '-' | '!') || (ch == '.' && ordered_digits));
+        let inline_delimiter = matches!(ch, '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '~');
+
+        if block_marker || inline_delimiter {
+            out.push('\\');
+        }
+        out.push(ch);
+
+        if ch == '\n' {
+            line_prefix = true;
+            indent = 0;
+            ordered_digits = false;
+        } else if line_prefix && ch == ' ' && indent < 4 {
+            indent += 1;
+        } else if line_prefix && ch.is_ascii_digit() {
+            ordered_digits = true;
+            // Keep the prefix state while consuming the marker digits so the
+            // following period is escaped as part of an ordered-list marker.
+        } else if line_prefix && ordered_digits && ch == '.' {
+            line_prefix = false;
+            ordered_digits = false;
+        } else {
+            line_prefix = false;
+            ordered_digits = false;
+        }
+    }
+
     out
 }
 
@@ -1019,7 +1065,21 @@ mod url_validation_tests {
     #[test]
     fn test_escape_link_label() {
         assert_eq!(escape_link_label("foo [bar] baz"), r"foo \[bar\] baz");
+        assert_eq!(escape_link_label("<tag>"), r"\<tag\>");
         assert_eq!(escape_link_label("a\nb"), "a b");
         assert_eq!(escape_link_label("a\rb"), "a b");
+    }
+
+    #[test]
+    fn test_escape_markdown_text_blocks_active_syntax() {
+        assert_eq!(
+            escape_markdown_text(r"[link](javascript:alert(1)) <tag> *em* `code`"),
+            r"\[link\](javascript:alert(1)) \<tag\> \*em\* \`code\`"
+        );
+        assert_eq!(
+            escape_markdown_text("- item\n# heading\n1. item"),
+            "\\- item\n\\# heading\n1\\. item"
+        );
+        assert_eq!(escape_markdown_text("a-b"), "a-b");
     }
 }

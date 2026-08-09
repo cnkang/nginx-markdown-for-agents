@@ -251,7 +251,13 @@ pub struct ConversionContext {
     /// reallocations during DOM traversal. Callers that know the input size
     /// (e.g., the FFI layer) should set this via [`set_input_size_hint`].
     input_size_hint: usize,
+    /// Maximum generated Markdown size for the full-buffer path.
+    output_budget: usize,
 }
+
+/// Default full-buffer output cap used when the FFI caller leaves the
+/// conversion-memory budget unset.
+const DEFAULT_FULL_BUFFER_OUTPUT_BUDGET: usize = 64 * 1024 * 1024;
 
 impl ConversionContext {
     /// Create a new conversion context with the specified timeout
@@ -279,6 +285,7 @@ impl ConversionContext {
             node_count: 0,
             is_fast_path: false,
             input_size_hint: 0,
+            output_budget: DEFAULT_FULL_BUFFER_OUTPUT_BUDGET,
         }
     }
 
@@ -294,6 +301,30 @@ impl ConversionContext {
     /// * `size` - Input HTML size in bytes (0 means unknown)
     pub(crate) fn set_input_size_hint(&mut self, size: usize) {
         self.input_size_hint = size;
+    }
+
+    /// Set the maximum generated Markdown size for this conversion.
+    ///
+    /// A zero FFI budget selects the same 64 MiB default used by the NGINX
+    /// conversion-memory limit. Values that do not fit in `usize` saturate
+    /// at the platform maximum.
+    pub(crate) fn set_output_budget(&mut self, budget: u64) {
+        self.output_budget = if budget == 0 {
+            DEFAULT_FULL_BUFFER_OUTPUT_BUDGET
+        } else {
+            usize::try_from(budget).unwrap_or(usize::MAX)
+        };
+    }
+
+    /// Reject generated output that exceeds the configured full-buffer cap.
+    pub(crate) fn check_output_budget(&self, output_len: usize) -> Result<(), ConversionError> {
+        if output_len > self.output_budget {
+            return Err(ConversionError::MemoryLimit(format!(
+                "generated Markdown output {} bytes exceeds budget {} bytes",
+                output_len, self.output_budget
+            )));
+        }
+        Ok(())
     }
 
     /// Check if timeout has been exceeded
@@ -588,6 +619,7 @@ impl MarkdownConverter {
             self.maybe_write_front_matter_from_dom(dom, &mut output, ctx)?;
             // Check timeout after metadata extraction
             ctx.check_timeout()?;
+            ctx.check_output_budget(output.len())?;
         }
 
         // Start traversal from document root
@@ -613,6 +645,8 @@ impl MarkdownConverter {
         } else {
             self.normalize_output(output)
         };
+
+        ctx.check_output_budget(markdown.len())?;
 
         // Final timeout check after normalization
         ctx.check_timeout()?;
@@ -1633,11 +1667,24 @@ mod tests {
         let converter = MarkdownConverter::new();
         let result = converter.convert(&dom).expect("Conversion failed");
 
-        // Should preserve special characters (they're in plain text context)
-        assert!(result.contains("*"));
-        assert!(result.contains("_"));
-        assert!(result.contains("["));
-        assert!(result.contains("]"));
+        // Preserve the characters as text without allowing them to become
+        // emphasis or link syntax in a downstream Markdown renderer.
+        assert!(result.contains(r"\*"));
+        assert!(result.contains(r"\_"));
+        assert!(result.contains(r"\["));
+        assert!(result.contains(r"\]"));
+    }
+
+    #[test]
+    fn test_plain_text_markdown_injection_is_escaped() {
+        let html = b"<p>[click](javascript:alert(1)) &lt;img src=x onerror=1&gt;</p>";
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(!result.contains("[click](javascript:"));
+        assert!(result.contains(r"\[click\]"));
+        assert!(result.contains(r"\<img src=x onerror=1\>"));
     }
 
     /// Test normalization with mixed line endings
@@ -2307,6 +2354,28 @@ mod tests {
         assert!(result.contains("    - L3"));
     }
 
+    #[test]
+    fn test_deeply_nested_list_is_rejected_before_stack_exhaustion() {
+        let html = b"<ul><li>outer<ul><li>inner<ul><li>bounded</li></ul></li></ul></li></ul>";
+        let dom = parse_html(html).expect("Parse failed");
+        let mut converter = MarkdownConverter::new();
+        converter.security_validator = crate::security::SecurityValidator::with_max_depth(1);
+        let result = converter.convert(&dom);
+
+        assert!(matches!(result, Err(ConversionError::InvalidInput(_))));
+    }
+
+    #[test]
+    fn test_full_buffer_output_budget_is_enforced() {
+        let dom = parse_html(b"<p>generated output</p>").expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let mut ctx = ConversionContext::new(std::time::Duration::ZERO);
+        ctx.set_output_budget(8);
+
+        let result = converter.convert_with_context(&dom, &mut ctx);
+        assert!(matches!(result, Err(ConversionError::MemoryLimit(_))));
+    }
+
     // Tests for combined elements
     #[test]
     fn test_link_in_list() {
@@ -2933,7 +3002,7 @@ mod tests {
 
         // html5ever decodes entities automatically
         assert!(
-            result.contains("& < > \" '"),
+            result.contains("& \\< \\> \" '"),
             "Common named entities should be decoded"
         );
     }
@@ -3017,7 +3086,7 @@ mod tests {
         let result = converter.convert(&dom).expect("Conversion failed");
 
         assert!(
-            result.contains("# <Title> & Subtitle"),
+            result.contains("# \\<Title\\> & Subtitle"),
             "Entities in h1 should be decoded"
         );
         assert!(
@@ -3040,7 +3109,7 @@ mod tests {
 
         // Entities in link text should be decoded
         assert!(
-            result.contains("Link <text>"),
+            result.contains("Link \\<text\\>"),
             "Entities in link text should be decoded"
         );
         // Entities in href should also be decoded by html5ever
@@ -3095,7 +3164,7 @@ mod tests {
 
         // All entity types should be decoded
         assert!(
-            result.contains("Named: & < >"),
+            result.contains("Named: & \\< \\>"),
             "Named entities should be decoded"
         );
         assert!(
@@ -3125,7 +3194,7 @@ mod tests {
         let result = converter.convert(&dom).expect("Conversion failed");
 
         assert!(
-            result.contains("- <item> one"),
+            result.contains("- \\<item\\> one"),
             "Entities in list items should be decoded"
         );
         assert!(

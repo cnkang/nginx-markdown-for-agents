@@ -179,6 +179,7 @@ pub(crate) fn convert_inner(
 
     let mut ctx = ConversionContext::new(traversal_budget);
     ctx.set_input_size_hint(input_size);
+    ctx.set_output_budget(decoded.memory_budget);
     // Check once before conversion so a near-expired deadline can fail early
     // without spending cycles traversing a large DOM.
     ctx.check_timeout()?;
