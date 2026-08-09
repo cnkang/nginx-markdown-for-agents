@@ -73,10 +73,9 @@ pub(crate) struct DecodedOptions<'a> {
     pub(crate) prune_selectors: Option<&'a str>,
     #[allow(dead_code)]
     pub(crate) prune_protection_selectors: Option<&'a str>,
-    /// Unified memory budget (bytes).  Currently enforced only by the
-    /// streaming and incremental paths.  The full-buffer path relies
-    /// on the NGINX-side `markdown_limits memory=<size>` limit instead;
-    /// see the FFI header contract for details.
+    /// Unified memory budget (bytes). The full-buffer path applies it to
+    /// generated Markdown output, and streaming/incremental paths apply it
+    /// to their working-set budgets.
     #[allow(dead_code)]
     pub(crate) memory_budget: u64,
     /// Raw chars-per-token from FFI options (before normalization).

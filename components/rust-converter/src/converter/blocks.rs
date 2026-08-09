@@ -147,7 +147,7 @@ impl MarkdownConverter {
         level: usize,
         output: &mut String,
         depth: usize,
-        ctx: Option<&mut ConversionContext>,
+        mut ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
         if !output.is_empty() && !output.ends_with("\n\n") {
             if output.ends_with('\n') {
@@ -163,7 +163,6 @@ impl MarkdownConverter {
         output.push(' ');
 
         let start_len = output.len();
-        let mut ctx = ctx;
         for child in node.children.borrow().iter() {
             self.traverse_node_optional(child, output, depth + 1, ctx.as_deref_mut())?;
         }
@@ -183,7 +182,7 @@ impl MarkdownConverter {
         node: &Handle,
         output: &mut String,
         depth: usize,
-        ctx: Option<&mut ConversionContext>,
+        mut ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
         if !output.is_empty() && !output.ends_with("\n\n") {
             if output.ends_with('\n') {
@@ -194,7 +193,6 @@ impl MarkdownConverter {
         }
 
         let start_len = output.len();
-        let mut ctx = ctx;
         for child in node.children.borrow().iter() {
             self.traverse_node_optional(child, output, depth + 1, ctx.as_deref_mut())?;
         }
@@ -215,6 +213,15 @@ impl MarkdownConverter {
         ordered: bool,
         ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
+        self.security_validator
+            .validate_depth(depth)
+            .map_err(ConversionError::InvalidInput)?;
+
+        let mut ctx = ctx;
+        if let Some(context) = ctx.as_deref_mut() {
+            context.increment_and_check()?;
+        }
+
         if !output.is_empty() && !output.ends_with("\n\n") {
             if output.ends_with('\n') {
                 output.push('\n');
@@ -223,7 +230,6 @@ impl MarkdownConverter {
             }
         }
 
-        let mut ctx = ctx;
         for child in node.children.borrow().iter() {
             if let NodeData::Element { ref name, .. } = child.data
                 && name.local.as_ref() == "li"
@@ -235,11 +241,18 @@ impl MarkdownConverter {
                     ordered,
                     ctx.as_deref_mut(),
                 )?;
+                if let Some(context) = ctx.as_deref_mut() {
+                    context.check_output_budget(output.len())?;
+                }
             }
         }
 
         if !output.ends_with("\n\n") {
             output.push('\n');
+        }
+
+        if let Some(context) = ctx.as_deref_mut() {
+            context.check_output_budget(output.len())?;
         }
 
         Ok(())
@@ -311,9 +324,17 @@ impl MarkdownConverter {
                     )?;
                 }
             }
+
+            if let Some(context) = ctx.as_deref_mut() {
+                context.check_output_budget(item_output.len())?;
+            }
         }
 
         self.format_list_item_lines(output, &item_output, depth, ordered);
+
+        if let Some(context) = ctx.as_deref_mut() {
+            context.check_output_budget(output.len())?;
+        }
 
         Ok(())
     }

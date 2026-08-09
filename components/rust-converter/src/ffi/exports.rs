@@ -2049,6 +2049,22 @@ mod tests {
     }
 
     #[test]
+    fn decide_base_url_invalid_utf8_optional_field_fails_closed() {
+        let invalid_forwarded = [0xff];
+        let mut input = empty_base_url_input();
+        input.forwarded = invalid_forwarded.as_ptr();
+        input.forwarded_len = invalid_forwarded.len();
+
+        let mut buf = [0u8; 64];
+        let mut decision = empty_decision();
+        let rc =
+            unsafe { markdown_decide_base_url(&input, buf.as_mut_ptr(), buf.len(), &mut decision) };
+
+        assert_eq!(rc, DECIDE_BASE_URL_INVALID);
+        assert_safe_base_url_default(&decision);
+    }
+
+    #[test]
     fn decide_base_url_trusted_uses_forwarded() {
         let handle = markdown_trusted_proxies_new();
         assert_eq!(push_cidr(handle, "10.0.0.0/8"), TRUSTED_PROXIES_PUSH_OK);

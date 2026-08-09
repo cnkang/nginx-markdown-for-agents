@@ -62,7 +62,7 @@ impl MarkdownConverter {
             output.push(' ');
         }
 
-        output.push_str(&normalized);
+        output.push_str(&crate::security::escape_markdown_text(&normalized));
 
         if text.ends_with(char::is_whitespace) {
             output.push(' ');
@@ -98,7 +98,10 @@ impl MarkdownConverter {
         // Dispatch traversal through the timeout-aware path only when context
         // is present, keeping the no-timeout path allocation-free.
         match ctx {
-            Some(ctx) => self.traverse_node_with_context(node, output, depth, ctx),
+            Some(ctx) => {
+                self.traverse_node_with_context(node, output, depth, ctx)?;
+                ctx.check_output_budget(output.len())
+            }
             None => self.traverse_node(node, output, depth),
         }
     }
@@ -123,7 +126,7 @@ impl MarkdownConverter {
                 {
                     let trimmed = value.trim();
                     if !trimmed.is_empty() {
-                        output.push_str(trimmed);
+                        output.push_str(&crate::security::escape_markdown_text(trimmed));
                         output.push(' ');
                     }
                 }
@@ -148,7 +151,7 @@ impl MarkdownConverter {
             if let Some(text) = text {
                 let trimmed = text.trim();
                 if !trimmed.is_empty() {
-                    output.push_str(trimmed);
+                    output.push_str(&crate::security::escape_markdown_text(trimmed));
                     output.push(' ');
                 }
             }
@@ -339,7 +342,7 @@ impl MarkdownConverter {
             | NodeData::ProcessingInstruction { .. } => {}
         }
 
-        Ok(())
+        ctx.check_output_budget(output.len())
     }
 
     /// Handle an HTML element and convert it to Markdown.
