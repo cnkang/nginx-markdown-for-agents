@@ -736,6 +736,8 @@ jobs:
           TARGET_ARCH: ${{ matrix.target.arch }}
           TARGET_VARIANT: ${{ matrix.target.variant }}
           EXPECTED_INSTALL_SUCCESS: ${{ matrix.target.expected_install_success && 'true' || 'false' }}
+          SUMMARY_REF: ${{ github.event.inputs.ref || github.ref }}
+          SUMMARY_VERSION: ${{ github.event.inputs.version || 'latest' }}
         run: |
           RESULTS_DIR="${{ runner.temp }}/install-verify"
           mkdir -p "${RESULTS_DIR}"
@@ -756,8 +758,8 @@ jobs:
             echo "Target arch:        ${TARGET_ARCH}"
             echo "Runner:             ${{ matrix.target.runner }}"
             echo "Container:          ${{ matrix.target.container || 'none' }}"
-            echo "Ref:                ${{ github.event.inputs.ref || github.ref }}"
-            echo "Module version:     ${{ github.event.inputs.version || 'latest' }}"
+            echo "Ref:                ${SUMMARY_REF}"
+            echo "Module version:     ${SUMMARY_VERSION}"
             echo "Date:               $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
             echo "----------------------------------------"
             echo "Expected success:         ${EXPECTED_INSTALL_SUCCESS}"
