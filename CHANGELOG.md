@@ -14,39 +14,40 @@ ABI drift gate for release integrity.
 
 ### Breaking Changes
 
-0.9.2 is the breaking release before 1.0. The configuration surface is
-reduced from 63 directives to 25; configurations using any removed
-directive fail `nginx -t` with `unknown directive` until migrated. See
+0.9.2 is the breaking release before 1.0. The release reduces the
+configuration surface from 63 directives to 25. Configurations that use a
+removed directive fail `nginx -t` with `unknown directive` until migrated. See
 [docs/guides/0.9.2-breaking-changes.md](docs/guides/0.9.2-breaking-changes.md)
-for the complete reference and
+for the complete reference. See
 [docs/guides/MIGRATION-0.9.2.md](docs/guides/MIGRATION-0.9.2.md) for
 before/after examples.
 
-- **Directive removals (38 total):** 19 reject-only migration stubs are
-  deleted (the migration-hint error is replaced by NGINX's standard
-  `unknown directive` error); 14 active directives are removed
-  (`markdown_profile`, `markdown_metrics_format`,
-  `markdown_metrics_per_path`, `markdown_metrics_per_path_cardinality`,
-  `markdown_buffer_chunked`, `markdown_streaming_shadow`,
-  `markdown_streaming_zero_copy`, `markdown_llm_provider`,
-  `markdown_chars_per_token`, `markdown_stream_types`,
-  `markdown_stream_threshold`, `markdown_diagnostics_allow`,
-  `markdown_otel`, `markdown_otel_endpoint`); 5 standalone limit
-  directives (`markdown_stream_precommit_buffer`, `markdown_stream_flush_min`,
-  `markdown_parse_timeout`, `markdown_parser_budget`,
-  `markdown_decompress_max_size`) are unified into `markdown_limits`
-  (`markdown_stream_flush_min` has no replacement; use downstream buffering or
-  the remaining `markdown_limits` keys as appropriate).
-  key=value syntax (`streaming_buffer=`, `parser_timeout=`, `parser_memory=`,
-  `decompressed_size=`).
-- **Profile presets removed.** `balanced` / `strict_cache` / `streaming_first`
-  no longer exist; limits are expressed through explicit directives.
+- **Directive removals (38 total):** The release deletes 19 reject-only
+  migration stubs. NGINX now reports the standard `unknown directive` error
+  instead of a migration hint. The release removes 14 active directives:
+  `markdown_profile`, `markdown_metrics_format`, `markdown_metrics_per_path`,
+  `markdown_metrics_per_path_cardinality`, `markdown_buffer_chunked`,
+  `markdown_streaming_shadow`, `markdown_streaming_zero_copy`,
+  `markdown_llm_provider`, `markdown_chars_per_token`,
+  `markdown_stream_types`, `markdown_stream_threshold`,
+  `markdown_diagnostics_allow`, `markdown_otel`, and
+  `markdown_otel_endpoint`.
+
+  The release folds 5 standalone limit directives into `markdown_limits`:
+  `markdown_stream_precommit_buffer`, `markdown_stream_flush_min`,
+  `markdown_parse_timeout`, `markdown_parser_budget`, and
+  `markdown_decompress_max_size`. `markdown_stream_flush_min` has no
+  replacement. Use downstream buffering or the remaining `markdown_limits`
+  keys as appropriate. Use key=value syntax for `streaming_buffer=`,
+  `parser_timeout=`, `parser_memory=`, and `decompressed_size=`.
+- **Profile presets removed.** The release removes `balanced`, `strict_cache`,
+  and `streaming_first`. Use explicit directives to configure limits.
 - **OTel subsystem removed.** The experimental `markdown_otel` /
   `markdown_otel_endpoint` surface and OTel metrics/spans/export paths are
-  gone; use NGINX's native OTel module.
+  gone. Use NGINX's native OTel module.
 - **`REJECT_STATUS` action rename (internal).**
-  `NGX_HTTP_MD_ACTION_REJECT_502` was renamed to
-  `NGX_HTTP_MD_ACTION_REJECT_STATUS`; no configuration impact.
+  The code now calls `NGX_HTTP_MD_ACTION_REJECT_STATUS` instead of
+  `NGX_HTTP_MD_ACTION_REJECT_502`. This change has no configuration impact.
 - After 0.9.2, all 1.x releases maintain backward compatibility for a
   minimum of 24 months.
 
@@ -61,23 +62,24 @@ before/after examples.
   instead of silently advancing state.
 - Prometheus `nginx_markdown_streaming_events_total{transition="fallback"}`
   now reports `reason="precommit_html_error"` (matching the logged reason at
-  the fallback decision) instead of the incorrect `reason="bypass_no_transform"`.
-  Dashboards keyed on the previous label value must be updated.
+  the fallback decision) instead of the incorrect
+  `reason="bypass_no_transform"`. Operators must update dashboards that use
+  the previous label value.
 
 ### Added
 
 - OTel ownership is now explicit: spans and export subrequests are
-  request-pool scoped, and no worker-owned queue, thread, timer, or file
-  descriptor is created or flushed at worker exit.
+  request-pool scoped. The implementation creates or flushes no worker-owned
+  queue, thread, timer, or file descriptor at worker exit.
 - Dynconf diagnostics is read-only. Operators restore a prior valid dynconf
-  file atomically; the watcher validates it and promotes it through the normal
+  file atomically. The watcher validates it and promotes it through the normal
   reload path. The internal last-known-good snapshot remains available for
   failed-reload protection and diagnostics reporting.
 - Public surface inventory and source metadata/ABI drift detection gate
-  validates that FFI exports, configuration directive metadata, dynconf key
-  schemas, metric declarations, and reason codes have not drifted from the
-  declared inventory. The gate reads source metadata; runtime behavior is
-  verified by the unit, integration, and E2E test suites.
+  checks FFI exports, configuration directive metadata, dynconf key schemas,
+  metric declarations, and reason codes against the declared inventory. The
+  gate reads source metadata. Unit, integration, and E2E suites verify runtime
+  behavior.
 - Release gates 0.9.2 (`make release-gates-check-092`), additive on 0.9.1
   gates with the public surface source metadata/ABI drift gate and blocking
   performance evidence against baseline 0.9.2.
@@ -1494,7 +1496,13 @@ This release introduces incremental processing for large responses, a matrix-dri
 
 ### Changed
 - Event handler attribute sanitization in `security.rs` now uses `on*` prefix matching instead of a static allowlist, following the OWASP/DOMPurify convention. This approach covers new event handler attributes added to the HTML spec. It also closes the gap where newer handlers (`onpointerdown`, `ontouchstart`, and similar) could bypass the previous static list.
-- Form-related elements (`form`, `button`, `select`, `textarea`, `fieldset`, `label`, `option`, and similar) now use a strip-tag-keep-content approach instead of full removal. HTML tags are stripped but child text is preserved in Markdown output so AI agents retain meaningful content (labels, button captions, option lists). Void form controls (`input`) have descriptive text extracted from `aria-label`, `placeholder`, or `value` attributes; hidden inputs are suppressed.
+- Form-related elements (`form`, `button`, `select`, `textarea`, `fieldset`,
+  `label`, `option`, and similar) now use a strip-tag-keep-content approach
+  instead of full removal. The converter strips HTML tags and preserves child
+  text in Markdown output. AI agents retain labels, button captions, and
+  option lists. For void `input` controls, the converter extracts descriptive
+  text from `aria-label`, `placeholder`, or `value`. It suppresses hidden
+  inputs.
 - Embedded content elements (`iframe`, `object`, `embed`) now use strip-tag-keep-content instead of full removal. The `src`/`data` URL is extracted as a Markdown link (with `title` as label when available), and fallback child text is preserved. Dangerous URL schemes (`javascript:`, `data:`, and similar) are still suppressed.
 - Image conversion now preserves the `title` attribute in Markdown syntax (`![alt](src "title")`). When the image URL is missing or blocked by URL sanitization, the `alt` text is emitted as plain text so AI agents do not lose the description.
 - Media elements (`video`, `audio`) now have their `src` URL extracted as a Markdown link before traversing fallback children. Video `poster` thumbnails are extracted as Markdown images. Child `<source>` elements have their `src` extracted with `type` as label; `<track>` elements have their `src` extracted with `label` as link text.

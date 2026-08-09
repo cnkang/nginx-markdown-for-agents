@@ -78,3 +78,26 @@ def test_no_stale_symbols_gate_reports_tail_of_stdout_and_stderr(
     assert result["message"] == "\n".join(
         ["finding-4", "finding-5", "finding-6", "finding-7", "read-error"]
     )
+
+
+def test_inflight_guard_accepts_effective_error_status(tmp_path):
+    """The 0.9.2 runtime policy must satisfy the legacy regression gate."""
+    inflight = (
+        tmp_path
+        / "components/nginx-module/src/ngx_http_markdown_inflight_impl.h"
+    )
+    request_impl = (
+        tmp_path
+        / "components/nginx-module/src/ngx_http_markdown_request_impl.h"
+    )
+    inflight.parent.mkdir(parents=True)
+    request_impl.parent.mkdir(parents=True, exist_ok=True)
+    inflight.write_text("/* inflight guard */\n")
+    request_impl.write_text(
+        "return ngx_http_markdown_effective_error_status("
+        "ctx->effective_conf, conf);\n"
+    )
+
+    result = validator.check_inflight_guard(tmp_path)
+
+    assert result == {"name": "inflight_guard", "status": "pass"}
