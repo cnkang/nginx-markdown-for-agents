@@ -297,6 +297,42 @@ def _check_removed_directives(content: str, removed: list) -> list:
     return missing
 
 
+def _expand_directive_macros(content: str, names: str) -> str:
+    """Expand canonical directive names before inspecting the command table."""
+    definitions = dict(
+        re.findall(
+            r"^#define\s+(NGX_HTTP_MARKDOWN_DIRECTIVE_[A-Z0-9_]+)\s+"
+            r"\\\s*\"([^\"]+)\"",
+            names,
+            flags=re.MULTILINE,
+        )
+    )
+    return re.sub(
+        r"ngx_string\((NGX_HTTP_MARKDOWN_DIRECTIVE_[A-Z0-9_]+)\)",
+        lambda match: (
+            f'ngx_string("{definitions[match.group(1)]}")'
+            if match.group(1) in definitions
+            else match.group(0)
+        ),
+        content,
+    )
+
+
+def _read_directive_registry(repo: Path) -> str | None:
+    """Read the live command registry with canonical names expanded."""
+    directives = repo / (
+        "components/nginx-module/src/ngx_http_markdown_config_directives_impl.h"
+    )
+    names = repo / (
+        "components/nginx-module/src/ngx_http_markdown_directive_names.h"
+    )
+    if not directives.exists() or not names.exists():
+        return None
+    return _expand_directive_macros(
+        directives.read_text(), names.read_text()
+    )
+
+
 def _check_migration_guide(migration: Path) -> list:
     """Verify the migration guide documents the memory-budget rename.
 
@@ -323,7 +359,10 @@ def check_config_v2_removed_directives(repo: Path) -> dict:
     if not directives.exists():
         return {"name": "config_v2_removed_directives", "status": "fail",
                 "message": "config_directives_impl.h not found"}
-    content = directives.read_text()
+    content = _read_directive_registry(repo)
+    if content is None:
+        return {"name": "config_v2_removed_directives", "status": "fail",
+                "message": "directive command registry or names header missing"}
     removed = [
         "markdown_max_size",
         "markdown_memory_budget",
@@ -529,11 +568,13 @@ def check_profile_explicit_inheritance(repo: Path) -> dict:
         repo
         / "components/nginx-module/src/ngx_http_markdown_config_directives_impl.h"
     )
-    if directives.exists():
-        directive_text = directives.read_text()
-        if 'ngx_string("markdown_profile")' not in directive_text:
-            return {"name": "profile_explicit_inheritance", "status": "pass",
-                    "message": "profile surface removed; no inheritance contract"}
+    directive_text = _read_directive_registry(repo)
+    if directive_text is None:
+        return {"name": "profile_explicit_inheritance", "status": "fail",
+                "message": "directive command registry or names header missing"}
+    if 'ngx_string("markdown_profile")' not in directive_text:
+        return {"name": "profile_explicit_inheritance", "status": "pass",
+                "message": "profile surface removed; no inheritance contract"}
     if not merge_impl.exists() or not test_file.exists():
         return {"name": "profile_explicit_inheritance", "status": "fail",
                 "message": "merge implementation or profile test missing"}

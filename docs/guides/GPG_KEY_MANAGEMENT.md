@@ -3,7 +3,7 @@
 ## Overview
 
 This document describes the GPG key lifecycle for signing NGINX Markdown Filter
-Module packages (DEB/RPM) and repository metadata. It covers key generation,
+Module packages (DEB/RPM), prebuilt dynamic-module archives, and repository metadata. It covers key generation,
 distribution, import instructions for end users, key rotation, CI/CD
 integration, and security considerations.
 

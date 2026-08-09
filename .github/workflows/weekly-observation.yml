@@ -133,6 +133,8 @@ jobs:
           python3 tools/harness/normalize_cbindgen_header.py
           cp components/rust-converter/include/markdown_converter.h \
             components/nginx-module/src/markdown_converter.h
+          make check-headers
+          git diff --exit-code -- components/rust-converter/include/markdown_converter.h
 
           tarball="${buildroot}/nginx-${nginx_version}.tar.gz"
           curl --proto '=https' --tlsv1.2 -fsSL \

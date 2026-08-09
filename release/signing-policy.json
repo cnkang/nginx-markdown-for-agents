@@ -17,6 +17,17 @@
       ],
       "release_pipeline": "packaging/scripts/generate-checksums.sh (producer) -> packaging/scripts/gpg-sign-checksums.sh (signer) -> integrity-signing job in .github/workflows/release-packages.yml"
     },
+    "dynamic_module": {
+      "signing_mechanism": "GPG detached signature over the archive checksum file (SHA256SUMS.asc), using the repository release-signing key",
+      "identity_issuer": "Repository GPG signing key (release-signing environment secret GPG_KEY_ID); identity published in docs/guides/GPG_KEY_MANAGEMENT.md",
+      "attachment_name": "SHA256SUMS.asc (detached ASCII-armored signature over SHA256SUMS)",
+      "digest_binding": "SHA256SUMS lists every published dynamic-module archive and its sha256 digest; the detached signature covers the exact checksum file bytes",
+      "verification_commands": [
+        "gpg --verify SHA256SUMS.asc SHA256SUMS",
+        "sha256sum --check SHA256SUMS"
+      ],
+      "release_pipeline": "packaging/scripts/generate-checksums.sh (producer) -> packaging/scripts/gpg-sign-checksums.sh (signer) -> integrity-signing job in .github/workflows/release-binaries.yml"
+    },
     "deb": {
       "signing_mechanism": "GPG (dpkg-sig builder signature) using the repository signing key",
       "identity_issuer": "Repository GPG signing key (GPG_KEY_ID)",
