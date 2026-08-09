@@ -31,7 +31,6 @@ import json
 import os
 import pathlib
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -47,6 +46,9 @@ from lib.path_validation import (  # noqa: E402
     validate_filename_strict,
     validate_read_path,
     validate_write_path_within_root,
+)
+from lib.executable_validation import (  # noqa: E402
+    resolve_approved_executable,
 )
 DEFAULT_MANIFEST = (
     REPO_ROOT / "artifacts" / "release" / "0.9.2" / "short-soak-scenario-manifest.json"
@@ -414,7 +416,7 @@ def run_ab_chunk(url: str, concurrency: int, seconds: int, output_dir: pathlib.P
     validated_output_dir = validate_write_path_within_root(
         output_dir, REPO_ROOT, purpose="soak raw logs"
     )
-    ab_path = shutil.which("ab")
+    ab_path = resolve_approved_executable("ab")
     if not ab_path:
         return {
             "p50_ms": 0.0,

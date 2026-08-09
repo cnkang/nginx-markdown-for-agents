@@ -6,10 +6,11 @@ import os
 import shutil
 from pathlib import Path
 
-_APPROVED_EXECUTABLES = frozenset({"brotli", "git"})
+_APPROVED_EXECUTABLES = frozenset({"ab", "brotli", "git"})
 _APPROVED_EXECUTABLE_DIRS = (
     Path("/bin"),
     Path("/usr/bin"),
+    Path("/usr/sbin"),
     Path("/usr/local/bin"),
     Path("/opt/homebrew/bin"),
     Path("/opt/homebrew/Cellar"),
