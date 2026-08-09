@@ -353,14 +353,23 @@ def _check_precedence_header_contract(contract: dict) -> list[str]:
     except (OSError, ValueError) as exc:
         return [f"dynconf precedence header unreadable: {exc}"]
 
-    matches = [
-        (tier, description.rstrip())
-        for tier, description in re.findall(
-            r"^[ \t]*\*[ \t]+([1-9]\d*)\.[ \t]+([^\r\n]+)$",
-            content,
-            flags=re.MULTILINE,
-        )
-    ]
+    matches = []
+    for line in content.splitlines():
+        marker = line.lstrip(" \t")
+        if not marker.startswith("*"):
+            continue
+        remainder = marker[1:].lstrip(" \t")
+        tier_text, separator, description = remainder.partition(".")
+        if (
+            not separator
+            or not tier_text
+            or tier_text[0] not in "123456789"
+            or not all(char in "0123456789" for char in tier_text)
+        ):
+            continue
+        description = description.lstrip(" \t").rstrip()
+        if description:
+            matches.append((tier_text, description))
     expected = contract.get("five_tier_precedence_hierarchy", [])
     actual = [(int(tier), description) for tier, description in matches]
     expected_pairs = [
