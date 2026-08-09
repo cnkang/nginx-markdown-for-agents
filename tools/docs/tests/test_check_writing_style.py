@@ -294,6 +294,29 @@ def test_makefile_defaults_style_base_for_local_docs_check():
     assert "STYLE_BASE ?= HEAD" in makefile
 
 
+def test_docs_check_uses_changed_file_style_gate_only():
+    """Routine docs checks must not enforce the repository-wide style budget."""
+    makefile = (cws.ROOT / "Makefile").read_text(encoding="utf-8")
+    docs_target = makefile.split("docs-check: docs-check-base", 1)[1].split(
+        "\n# STE-inspired writing-style gates", 1
+    )[0]
+    assert "docs-style-check-regression" in docs_target
+    assert "docs-style-check-baseline" not in docs_target
+
+
+def test_global_style_baseline_is_reserved_for_full_and_release_gates():
+    """The repository-wide budget belongs to full validation layers."""
+    makefile = (cws.ROOT / "Makefile").read_text(encoding="utf-8")
+    harness_target = makefile.split("harness-check-full:", 1)[1].split(
+        "\n\nregex-security-check:", 1
+    )[0]
+    release_target = makefile.split("release-gates-check-092:", 1)[1].split(
+        "\n\n# release-matrix-check:", 1
+    )[0]
+    assert "docs-style-check-baseline" in harness_target
+    assert "docs-style-check-baseline" in release_target
+
+
 def test_docs_check_fetches_style_base_history():
     workflow = (cws.ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     docs_job = workflow.split("  docs-check:", 1)[1].split(
