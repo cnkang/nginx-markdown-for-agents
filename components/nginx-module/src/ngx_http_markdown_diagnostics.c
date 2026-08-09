@@ -77,7 +77,7 @@ static size_t ngx_http_markdown_diagnostics_json_size(
 static ngx_int_t ngx_http_markdown_diag_json_string(
     u_char **pos, u_char *last, const u_char *value, size_t len);
 static ngx_int_t ngx_http_markdown_diag_json_control(
-    u_char **pos, u_char *last, u_char value);
+    u_char **pos, const u_char *last, u_char value);
 
 
 /*
