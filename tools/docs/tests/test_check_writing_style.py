@@ -271,34 +271,38 @@ def test_resolve_base_matches_only_fixed_git_ref_output(monkeypatch):
 
     def fake_run(command, **kwargs):
         commands.append(command)
-        if command[1] == "for-each-ref":
-            return SimpleNamespace(
-                returncode=0,
-                stdout=(
-                    "refs/heads/main "
-                    + "a" * 40
-                    + " commit\n"
-                ),
-            )
         return SimpleNamespace(returncode=0, stdout="a" * 40 + "\n")
 
     monkeypatch.setattr(cws.subprocess, "run", fake_run)
 
     assert cws._resolve_base("HEAD") == "a" * 40
     assert cws._resolve_base("main") == "a" * 40
+    assert cws._resolve_base("HEAD~1") == "a" * 40
     assert commands == [
         [
             "git",
-            "for-each-ref",
-            "--format=%(refname) %(objectname) %(objecttype) %(*objectname) %(*objecttype)",
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            "--end-of-options",
+            "HEAD^{commit}",
         ],
-        ["git", "rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
         [
             "git",
-            "for-each-ref",
-            "--format=%(refname) %(objectname) %(objecttype) %(*objectname) %(*objecttype)",
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            "--end-of-options",
+            "main^{commit}",
         ],
-        ["git", "rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+        [
+            "git",
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            "--end-of-options",
+            "HEAD~1^{commit}",
+        ],
     ]
 
 
@@ -306,19 +310,23 @@ def test_resolve_base_rejects_non_commit_object(monkeypatch):
     monkeypatch.setattr(
         cws.subprocess,
         "run",
-        lambda command, **kwargs: SimpleNamespace(
-            returncode=0,
-            stdout=(
-                "refs/heads/main "
-                + "a" * 40
-                + " blob\n"
-                if command[1] == "for-each-ref"
-                else "a" * 40 + "\n"
-            ),
-        ),
+        lambda command, **kwargs: SimpleNamespace(returncode=1, stdout=""),
     )
 
     assert cws._resolve_base("main") is None
+
+
+def test_resolve_base_accepts_non_tip_commit_sha(monkeypatch):
+    commit = "b" * 40
+    monkeypatch.setattr(
+        cws.subprocess,
+        "run",
+        lambda command, **kwargs: SimpleNamespace(
+            returncode=0, stdout=commit + "\n"
+        ),
+    )
+
+    assert cws._resolve_base(commit) == commit
 
 
 @pytest.mark.parametrize("base_args", [["--base", "HEAD"], ["--base=HEAD"]])

@@ -49,7 +49,7 @@ Upstream response (HTML, possibly Content-Encoding: gzip/br)
   │
   ▼
 ┌─────────────────────────────────┐
-│ markdown header filter          │  ← runs first (top of chain)
+│ markdown header filter          │  ← first when registered at the top
 │  · eligibility / Accept check   │
 │  · decompression detection       │
 │  · streaming vs full-buffer      │
@@ -58,7 +58,7 @@ Upstream response (HTML, possibly Content-Encoding: gzip/br)
   │ (passes headers downstream)
   ▼
 ┌─────────────────────────────────┐
-│ markdown body filter            │  ← runs first (top of chain)
+│ markdown body filter            │  ← first when registered at the top
 │  · HTML → Markdown conversion    │
 │  · streaming or full-buffer      │
 │  · auto-decompress if needed     │
@@ -128,9 +128,9 @@ verify the effective order for their NGINX build and set
 | gzip compresses | Markdown → gzip bytes |
 | Client receives | `Content-Type: text/markdown; charset=utf-8`, `Content-Encoding: gzip` |
 
-**Key invariant:** The gzip filter compresses the **converted Markdown**,
-not the original HTML.  Because markdown runs first in the chain, gzip
-sees Markdown bytes.
+**Key invariant:** The gzip filter compresses the **converted Markdown** when
+the effective chain places markdown before gzip. Verify that order for the
+target NGINX build. Otherwise, gzip can see the original HTML.
 
 ### 2.2 markdown + gunzip (upstream sends gzip)
 
@@ -185,9 +185,9 @@ decompression is always handled by markdown's `auto_decompress`.
 | Subsequent requests | Cache hit → Markdown served directly (no re-conversion) |
 | Client receives | `Content-Type: text/markdown; charset=utf-8` (cached) |
 
-**Key invariant:** `proxy_cache` caches the **final response** after all
-filters have run.  Because markdown runs before proxy_cache in the chain,
-the cached entity is the converted Markdown, not the original HTML.
+**Key invariant:** `proxy_cache` caches the response according to its
+effective position in the filter chain. When markdown runs before
+`proxy_cache`, the cache stores converted Markdown rather than original HTML.
 Subsequent cache hits serve Markdown directly without re-conversion.
 
 **cache_validation interaction (Requirement 15.3):**
