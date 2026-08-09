@@ -130,6 +130,77 @@ const DANGEROUS_URL_SCHEMES: &[&str] = &[
     "about:",      // Browser internal URLs
 ];
 
+/// Escape untrusted text before emitting it as ordinary Markdown content.
+///
+/// Ordinary text is not a Markdown label, so it can contain syntax that
+/// changes the document structure or introduces raw HTML. Escape inline
+/// delimiters and link/HTML brackets unconditionally. Block markers are
+/// escaped only at the beginning of a line so prose such as `a-b` remains
+/// readable while `- item`, `# heading`, and `1. item` stay text.
+///
+/// Stateful context used while escaping ordinary Markdown text fragments.
+///
+/// Streaming tokenizers can split one logical text node across arbitrary
+/// chunks. Keeping the line-prefix state across those fragments prevents a
+/// punctuation character in the middle of a source line from being treated
+/// as a block marker merely because it arrived in a new chunk.
+#[derive(Clone, Copy)]
+pub(crate) struct MarkdownTextEscapeState {
+    line_prefix: bool,
+    indent: usize,
+    ordered_digits: bool,
+}
+
+impl Default for MarkdownTextEscapeState {
+    fn default() -> Self {
+        Self {
+            line_prefix: true,
+            indent: 0,
+            ordered_digits: false,
+        }
+    }
+}
+
+impl MarkdownTextEscapeState {
+    pub(crate) fn advance(&mut self, ch: char) {
+        if ch == '\n' {
+            self.line_prefix = true;
+            self.indent = 0;
+            self.ordered_digits = false;
+        } else if self.line_prefix && ch == ' ' && self.indent < 4 {
+            self.indent += 1;
+        } else if self.line_prefix && ch.is_ascii_digit() {
+            self.ordered_digits = true;
+        } else {
+            self.line_prefix = false;
+            self.ordered_digits = false;
+        }
+    }
+}
+
+/// Escape ordinary Markdown text while preserving state across fragments.
+pub(crate) fn escape_markdown_text_with_state(
+    s: &str,
+    state: &mut MarkdownTextEscapeState,
+) -> String {
+    let mut out = String::with_capacity(s.len().saturating_add(8));
+
+    for ch in s.chars() {
+        let block_marker = state.line_prefix
+            && state.indent <= 3
+            && (matches!(ch, '#' | '>' | '+' | '-' | '!') || (ch == '.' && state.ordered_digits));
+        let inline_delimiter = matches!(ch, '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '~');
+
+        if block_marker || inline_delimiter {
+            out.push('\\');
+        }
+        out.push(ch);
+        state.advance(ch);
+    }
+
+    out
+}
+
 /// Action to take when sanitizing an element
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SanitizeAction {
@@ -834,50 +905,10 @@ pub fn escape_link_label(s: &str) -> String {
     out
 }
 
-/// Escape untrusted text before emitting it as ordinary Markdown content.
-///
-/// Ordinary text is not a Markdown label, so it can contain syntax that
-/// changes the document structure or introduces raw HTML. Escape inline
-/// delimiters and link/HTML brackets unconditionally. Block markers are
-/// escaped only at the beginning of a line so prose such as `a-b` remains
-/// readable while `- item`, `# heading`, and `1. item` stay text.
+/// Escape ordinary Markdown text using a fresh line-prefix state.
 pub fn escape_markdown_text(s: &str) -> String {
-    let mut out = String::with_capacity(s.len().saturating_add(8));
-    let mut line_prefix = true;
-    let mut indent = 0usize;
-    let mut ordered_digits = false;
-
-    for ch in s.chars() {
-        let block_marker = line_prefix
-            && indent <= 3
-            && (matches!(ch, '#' | '>' | '+' | '-' | '!') || (ch == '.' && ordered_digits));
-        let inline_delimiter = matches!(ch, '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '~');
-
-        if block_marker || inline_delimiter {
-            out.push('\\');
-        }
-        out.push(ch);
-
-        if ch == '\n' {
-            line_prefix = true;
-            indent = 0;
-            ordered_digits = false;
-        } else if line_prefix && ch == ' ' && indent < 4 {
-            indent += 1;
-        } else if line_prefix && ch.is_ascii_digit() {
-            ordered_digits = true;
-            // Keep the prefix state while consuming the marker digits so the
-            // following period is escaped as part of an ordered-list marker.
-        } else if line_prefix && ordered_digits && ch == '.' {
-            line_prefix = false;
-            ordered_digits = false;
-        } else {
-            line_prefix = false;
-            ordered_digits = false;
-        }
-    }
-
-    out
+    let mut state = MarkdownTextEscapeState::default();
+    escape_markdown_text_with_state(s, &mut state)
 }
 
 #[cfg(test)]
