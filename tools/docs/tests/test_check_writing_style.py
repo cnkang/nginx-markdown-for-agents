@@ -266,31 +266,59 @@ def test_resolve_base_rejects_argument_injection(monkeypatch, ref):
     assert cws._resolve_base(ref) is None
 
 
-def test_resolve_base_keeps_ref_out_of_argv(monkeypatch):
-    seen = {}
+def test_resolve_base_matches_only_fixed_git_ref_output(monkeypatch):
+    commands = []
 
     def fake_run(command, **kwargs):
-        seen["command"] = command
-        seen["input"] = kwargs["input"]
-        return SimpleNamespace(returncode=0, stdout="a" * 40 + " commit 1\n")
+        commands.append(command)
+        if command[1] == "for-each-ref":
+            return SimpleNamespace(
+                returncode=0,
+                stdout=(
+                    "refs/heads/main "
+                    + "a" * 40
+                    + " commit\n"
+                ),
+            )
+        return SimpleNamespace(returncode=0, stdout="a" * 40 + "\n")
 
     monkeypatch.setattr(cws.subprocess, "run", fake_run)
 
     assert cws._resolve_base("HEAD") == "a" * 40
-    assert seen["command"] == ["git", "cat-file", "--batch-check"]
-    assert seen["input"] == "HEAD^{commit}\n"
+    assert cws._resolve_base("main") == "a" * 40
+    assert commands == [
+        [
+            "git",
+            "for-each-ref",
+            "--format=%(refname) %(objectname) %(objecttype) %(*objectname) %(*objecttype)",
+        ],
+        ["git", "rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+        [
+            "git",
+            "for-each-ref",
+            "--format=%(refname) %(objectname) %(objecttype) %(*objectname) %(*objecttype)",
+        ],
+        ["git", "rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+    ]
 
 
 def test_resolve_base_rejects_non_commit_object(monkeypatch):
     monkeypatch.setattr(
         cws.subprocess,
         "run",
-        lambda *args, **kwargs: SimpleNamespace(
-            returncode=0, stdout="a" * 40 + " blob 1\n"
+        lambda command, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout=(
+                "refs/heads/main "
+                + "a" * 40
+                + " blob\n"
+                if command[1] == "for-each-ref"
+                else "a" * 40 + "\n"
+            ),
         ),
     )
 
-    assert cws._resolve_base("HEAD") is None
+    assert cws._resolve_base("main") is None
 
 
 @pytest.mark.parametrize("base_args", [["--base", "HEAD"], ["--base=HEAD"]])
