@@ -14,6 +14,9 @@
 
 struct MarkdownOptions;
 
+typedef struct ngx_http_markdown_loc_validation_index_s
+    ngx_http_markdown_loc_validation_index_t;
+
 /*
  * NGINX represents unset size values as (size_t) -1.  Use the public macro
  * when the including translation unit exposes it; standalone unit tests may
@@ -413,18 +416,8 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_BLOCK_LOG_VERBOSITY    (1 << 2)
 #define NGX_HTTP_MARKDOWN_BLOCK_ERROR_POLICY     (1 << 3)
 #define NGX_HTTP_MARKDOWN_BLOCK_STREAMING_BUFFER (1 << 4)
-
-/*
- * Total number of dynconf-mutable fields (block mask width).
- */
 #define NGX_HTTP_MARKDOWN_DYNCONF_FIELD_COUNT    5
 
-/*
- * Field provenance constants (0.9.2 effective_conf).
- *
- * Records the source of each dynconf-mutable field's effective
- * value after five-tier precedence resolution.
- */
 #define NGX_HTTP_MARKDOWN_PROVENANCE_STATIC           0
 #define NGX_HTTP_MARKDOWN_PROVENANCE_DYNCONF          1
 #define NGX_HTTP_MARKDOWN_PROVENANCE_REQUEST_VARIABLE 2
@@ -790,6 +783,24 @@ ngx_http_markdown_effective_body_buffer_limit(
 }
 
 
+static ngx_inline ngx_uint_t
+ngx_http_markdown_effective_error_policy(
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    return eff != NULL ? eff->error_policy : conf->on_error;
+}
+
+
+static ngx_inline ngx_uint_t
+ngx_http_markdown_effective_error_status(
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    return eff != NULL ? eff->error_status : conf->error_status;
+}
+
+
 static ngx_inline void
 ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_conf_t *prev)
@@ -847,6 +858,7 @@ typedef struct {
     ngx_str_t       dynconf_first_path;      /* Path value from the first directive (for diagnostics) */
     /* Merged config that owns the unique dynconf path. */
     ngx_http_markdown_conf_t *dynconf_owner_conf;
+    ngx_http_markdown_loc_validation_index_t *loc_validation_index;
     /*
      * spec 47: http-only trusted-proxy CIDR set for forwarded-header trust.
      * trusted_proxies is a Rust-owned opaque handle (NULL when the directive

@@ -30,6 +30,9 @@
 #ifndef NGX_HTTP_SERVICE_UNAVAILABLE
 #define NGX_HTTP_SERVICE_UNAVAILABLE 503
 #endif
+#ifndef NGX_HTTP_BAD_GATEWAY
+#define NGX_HTTP_BAD_GATEWAY 502
+#endif
 
 #ifndef NGX_LOG_ERR
 #define NGX_LOG_ERR    1
@@ -468,6 +471,39 @@ test_effective_helpers_fall_back_when_eff_null(void)
         "effective_enabled_source falls back to conf");
 
     TEST_PASS("effective_* helpers fall back to conf when eff is NULL");
+}
+
+
+static void
+test_effective_error_policy_and_status_read_from_eff(void)
+{
+    ngx_http_markdown_conf_t          conf;
+    ngx_http_markdown_effective_conf_t eff;
+
+    TEST_SUBSECTION("effective error policy and status helpers");
+
+    ngx_memzero(&conf, sizeof(conf));
+    ngx_memzero(&eff, sizeof(eff));
+
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.error_status = NGX_HTTP_BAD_GATEWAY;
+    eff.error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    eff.error_status = NGX_HTTP_SERVICE_UNAVAILABLE;
+
+    TEST_ASSERT(ngx_http_markdown_effective_error_policy(&eff, &conf)
+                    == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT,
+                "effective error policy must override static policy");
+    TEST_ASSERT(ngx_http_markdown_effective_error_status(&eff, &conf)
+                    == NGX_HTTP_SERVICE_UNAVAILABLE,
+                "effective error status must override static status");
+    TEST_ASSERT(ngx_http_markdown_effective_error_policy(NULL, &conf)
+                    == NGX_HTTP_MARKDOWN_ON_ERROR_PASS,
+                "error policy falls back when effective view is unavailable");
+    TEST_ASSERT(ngx_http_markdown_effective_error_status(NULL, &conf)
+                    == NGX_HTTP_BAD_GATEWAY,
+                "error status falls back when effective view is unavailable");
+
+    TEST_PASS("effective error policy and status helpers");
 }
 
 
@@ -928,6 +964,7 @@ main(void)
     test_build_effective_conf_invalid_snapshot_falls_back();
     test_effective_helpers_read_from_eff_when_present();
     test_effective_helpers_fall_back_when_eff_null();
+    test_effective_error_policy_and_status_read_from_eff();
     test_request_snapshot_consistency_after_conf_change();
     test_request_snapshot_consistency_with_dynconf_apply_snapshot();
     test_build_effective_conf_null_inputs();

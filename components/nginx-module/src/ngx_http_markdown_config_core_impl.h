@@ -1,6 +1,8 @@
 #ifndef NGX_HTTP_MARKDOWN_CONFIG_CORE_IMPL_H
 #define NGX_HTTP_MARKDOWN_CONFIG_CORE_IMPL_H
 
+#include "ngx_http_markdown_dynconf_precedence.h"
+
 /*
  * Configuration-core helpers.
  *
@@ -194,6 +196,14 @@ ngx_http_markdown_create_main_conf(ngx_conf_t *cf)
     conf->dynconf_first_path.data = NULL;
     conf->dynconf_first_path.len = 0;
     conf->dynconf_owner_conf = NULL;
+    conf->loc_validation_index = ngx_pcalloc(
+        cf->pool, sizeof(ngx_http_markdown_loc_validation_index_t));
+    if (conf->loc_validation_index == NULL
+        || ngx_http_markdown_loc_index_init(conf->loc_validation_index,
+                                            cf->pool) != NGX_OK)
+    {
+        return NULL;
+    }
     conf->trusted_proxies = NULL;
     conf->trusted_proxies_configured = 0;
     conf->trusted_proxies_manifest = NULL;
@@ -275,6 +285,56 @@ ngx_http_markdown_check_streaming_cache_conflict(ngx_conf_t *cf,
     }
 
     return NGX_CONF_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_register_loc_validation(
+    ngx_conf_t *cf, const ngx_http_markdown_conf_t *conf)
+{
+    ngx_http_conf_ctx_t          *http_ctx;
+    ngx_http_markdown_main_conf_t *main_conf;
+
+    if (cf == NULL || cf->ctx == NULL) {
+        return NGX_OK;
+    }
+
+    http_ctx = (ngx_http_conf_ctx_t *) cf->ctx;
+    main_conf = http_ctx->main_conf[
+        ngx_http_markdown_filter_module.ctx_index];
+    if (main_conf == NULL) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "markdown: failed to access main configuration for "
+            "dynconf validation index");
+        return NGX_ERROR;
+    }
+
+    if (main_conf->loc_validation_index == NULL) {
+        main_conf->loc_validation_index = ngx_pcalloc(
+            cf->pool, sizeof(ngx_http_markdown_loc_validation_index_t));
+    }
+
+    if (main_conf->loc_validation_index == NULL
+        || (main_conf->loc_validation_index->entries == NULL
+            && ngx_http_markdown_loc_index_init(
+                   main_conf->loc_validation_index, cf->pool) != NGX_OK))
+    {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "markdown: failed to initialize dynconf validation index");
+        return NGX_ERROR;
+    }
+
+    if (ngx_http_markdown_loc_index_add(
+            main_conf->loc_validation_index,
+            conf->limits.conversion_memory,
+            conf->advanced.dynconf_block_mask) != NGX_OK)
+    {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "markdown: dynconf validation index is full");
+        return NGX_ERROR;
+    }
+
+    return NGX_OK;
 }
 
 static void
@@ -813,17 +873,18 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
      * used during dynconf reload to validate streaming_buffer candidates
      * against per-location conversion_memory limits.
      *
-     * The global index (ngx_http_markdown_loc_validation_idx) is
-     * initialized at postconfiguration time.  Each merged location
-     * registers its effective conversion_memory and block mask.
+     * The main configuration owns the bounded index and each merged
+     * location registers its effective conversion_memory and block mask.
      * Locations with streaming_buffer blocked (block bit set) are
      * recorded but marked not-applicable for the constraint check.
      *
-     * Note: The actual index population is wired through a module-global
-     * index variable in the postconfiguration / init phase.  The
-     * ngx_http_markdown_loc_index_add() call uses the finalized
+     * The ngx_http_markdown_loc_index_add() call below uses the finalized
      * conf->limits.conversion_memory and conf->advanced.dynconf_block_mask.
      */
+
+    if (ngx_http_markdown_register_loc_validation(cf, conf) != NGX_OK) {
+        return NGX_CONF_ERROR;
+    }
 
     return NGX_CONF_OK;
 }

@@ -41,16 +41,20 @@
  * the dynconf overlay for that field is blocked — the static
  * server/location value takes precedence.
  */
+#ifndef NGX_HTTP_MARKDOWN_BLOCK_FILTER
 #define NGX_HTTP_MARKDOWN_BLOCK_FILTER           (1 << 0)
 #define NGX_HTTP_MARKDOWN_BLOCK_PRUNE_NOISE      (1 << 1)
 #define NGX_HTTP_MARKDOWN_BLOCK_LOG_VERBOSITY    (1 << 2)
 #define NGX_HTTP_MARKDOWN_BLOCK_ERROR_POLICY     (1 << 3)
 #define NGX_HTTP_MARKDOWN_BLOCK_STREAMING_BUFFER (1 << 4)
+#endif
 
 /*
  * Total number of dynconf-mutable fields (block mask width).
  */
+#ifndef NGX_HTTP_MARKDOWN_DYNCONF_FIELD_COUNT
 #define NGX_HTTP_MARKDOWN_DYNCONF_FIELD_COUNT    5
+#endif
 
 
 /*
@@ -59,13 +63,6 @@
  * Records the source of each dynconf-mutable field's effective
  * value after precedence resolution.
  */
-typedef enum {
-    NGX_HTTP_MARKDOWN_PROVENANCE_STATIC          = 0,
-    NGX_HTTP_MARKDOWN_PROVENANCE_DYNCONF         = 1,
-    NGX_HTTP_MARKDOWN_PROVENANCE_REQUEST_VARIABLE = 2
-} ngx_http_markdown_field_provenance_e;
-
-
 /*
  * Location validation index entry.
  *
@@ -73,7 +70,7 @@ typedef enum {
  * Used at dynconf reload time to validate streaming_buffer candidates
  * against each location's effective static conversion_memory.
  */
-typedef struct {
+typedef struct ngx_http_markdown_loc_validation_index_entry_s {
     size_t        conversion_memory;    /* effective static conversion_memory */
     ngx_uint_t    block_mask;           /* dynconf block mask for this location */
     ngx_flag_t    applicable;           /* 1 if streaming_buffer not blocked */
@@ -91,7 +88,7 @@ typedef struct {
  * built once at configuration time; reload validation is a bounded
  * scan and does not traverse the live NGINX configuration tree.
  */
-typedef struct {
+typedef struct ngx_http_markdown_loc_validation_index_s {
     ngx_http_markdown_loc_validation_entry_t  *entries;
     ngx_uint_t                                 count;
     ngx_uint_t                                 capacity;
@@ -191,10 +188,12 @@ ngx_http_markdown_validate_snapshot_against_index(
     }
 
     if (violated_count > 0) {
-        ngx_log_error(NGX_LOG_WARN, log, 0,
-            "dynconf candidate rejected: streaming_buffer (%uz) "
-            "exceeds conversion_memory in %ui applicable location(s)",
-            streaming_buffer, violated_count);
+        if (log != NULL) {
+            ngx_log_error(NGX_LOG_WARN, log, 0,
+                "dynconf candidate rejected: streaming_buffer (%uz) "
+                "exceeds conversion_memory in %ui applicable location(s)",
+                streaming_buffer, violated_count);
+        }
         return NGX_ERROR;
     }
 

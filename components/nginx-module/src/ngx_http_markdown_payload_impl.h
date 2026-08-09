@@ -122,7 +122,9 @@ ngx_http_markdown_reject_or_fail_open_buffered_response(
 {
     ngx_int_t  rc;
 
-    if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
+    if (ngx_http_markdown_effective_error_policy(
+            ctx->effective_conf, conf)
+        == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
         /*
          * Use ngx_http_filter_finalize_request to send the configured
          * error status (429/503/502).  In the body filter, returning a
@@ -134,7 +136,8 @@ ngx_http_markdown_reject_or_fail_open_buffered_response(
          */
         return ngx_http_filter_finalize_request(r,
             &ngx_http_markdown_filter_module,
-            (ngx_int_t) conf->error_status);
+            (ngx_int_t) ngx_http_markdown_effective_error_status(
+                ctx->effective_conf, conf));
     }
 
     rc = ngx_http_markdown_fail_open_buffered_response(
@@ -210,7 +213,8 @@ ngx_http_markdown_handle_decompression_alloc_error(
         break;
     }
 
-    reason = (conf->on_error
+    reason = (ngx_http_markdown_effective_error_policy(
+                  ctx->effective_conf, conf)
               == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
         ? ngx_http_markdown_reason_failed_closed()
         : ngx_http_markdown_reason_failed_open();
@@ -469,7 +473,8 @@ ngx_http_markdown_emit_failure_decision(ngx_http_request_t *r,
     const ngx_str_t  *reason;
     const ngx_str_t  *fail_category;
 
-    reason = (conf->on_error
+    reason = (ngx_http_markdown_effective_error_policy(
+                  ctx->effective_conf, conf)
               == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
         ? ngx_http_markdown_reason_failed_closed()
         : ngx_http_markdown_reason_failed_open();
@@ -503,7 +508,9 @@ ngx_http_markdown_handle_buffer_init_failure(ngx_http_request_t *r,
 
     ngx_http_markdown_emit_failure_decision(r, ctx, conf);
 
-    if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
+    if (ngx_http_markdown_effective_error_policy(
+            ctx->effective_conf, conf)
+        == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
         return NGX_ERROR;
     }
 
@@ -574,7 +581,9 @@ ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
 
     ngx_http_markdown_emit_failure_decision(r, ctx, conf);
 
-    if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
+    if (ngx_http_markdown_effective_error_policy(
+            ctx->effective_conf, conf)
+        == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
         return NGX_ERROR;
     }
 
@@ -1274,7 +1283,7 @@ ngx_http_markdown_decompress_via_rust(
  *     rather than rejecting the request; the content is forwarded
  *     as-is so the client can still receive a response.
  *   - on_error == REJECT: fail-closed — the function returns the
- *     configured error status (conf->error_status) instead of
+ *     the effective configured error status instead of
  *     forwarding the compressed content.
  *
  * Parameters:

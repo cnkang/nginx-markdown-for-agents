@@ -34,6 +34,8 @@
 #include <stdlib.h>
 #include <sys/types.h>
 
+#include "ngx_http_markdown_dynconf_precedence.h"
+
 #if defined(__APPLE__)
 #define NGX_HTTP_MARKDOWN_STAT_MTIME_NSEC(fi) ((fi).st_mtimespec.tv_nsec)
 #elif defined(__linux__) \
@@ -186,6 +188,8 @@ typedef struct ngx_http_markdown_dynconf_snapshot_s {
     size_t       streaming_budget;
 #endif
     size_t       memory_budget;
+    size_t       conversion_memory;
+    const ngx_http_markdown_loc_validation_index_t *validation_index;
     ngx_uint_t   valid;
 } ngx_http_markdown_dynconf_snapshot_t;
 
@@ -265,6 +269,7 @@ typedef struct {
     ngx_http_markdown_dynconf_snapshot_t         staging_snapshot;
     ngx_http_markdown_dynconf_snapshot_t         last_known_good;
     ngx_http_markdown_conf_t                    *conf;
+    const ngx_http_markdown_loc_validation_index_t *validation_index;
     ngx_http_markdown_dynconf_diagnostic_state_t diagnostic_state;
 } ngx_http_markdown_dynconf_watcher_t;
 
@@ -302,6 +307,7 @@ ngx_http_markdown_dynconf_snapshot_from_conf(
     snapshot->streaming_budget = conf->stream.budget;
 #endif
     snapshot->memory_budget = conf->advanced.memory_budget;
+    snapshot->conversion_memory = conf->limits.conversion_memory;
     snapshot->valid = 1;
 }
 
@@ -993,6 +999,7 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
     /* Initialize active snapshot from current configuration. */
     ngx_http_markdown_dynconf_snapshot_from_conf(&watcher->active_snapshot,
                                                   conf);
+    watcher->active_snapshot.validation_index = watcher->validation_index;
 
     /*
      * Apply the dynconf file immediately at startup so that runtime
@@ -1097,7 +1104,16 @@ ngx_http_markdown_dynconf_apply_streaming_buffer(
         || result->streaming_buffer
             > NGX_HTTP_MARKDOWN_DYNCONF_STREAMING_BUFFER_MAX
         || result->streaming_buffer > NGX_MAX_SIZE_T_VALUE
-        || (snapshot->memory_budget != 0
+        || (snapshot->conversion_memory != 0
+            && snapshot->conversion_memory
+                != NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE
+            && result->streaming_buffer > snapshot->conversion_memory)
+        || ((snapshot->conversion_memory == 0
+             || snapshot->conversion_memory
+                == NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE)
+            && snapshot->memory_budget != 0
+            && snapshot->memory_budget
+                != NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE
             && result->streaming_buffer > snapshot->memory_budget))
     {
         return NGX_ERROR;
@@ -1239,6 +1255,17 @@ ngx_http_markdown_dynconf_apply_ffi_result(
     {
         return NGX_ERROR;
     }
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    if (result->streaming_buffer != DYNCONF_NOT_SET_U64
+        && candidate.validation_index != NULL
+        && ngx_http_markdown_validate_snapshot_against_index(
+               candidate.validation_index,
+               candidate.streaming_budget, NULL) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+#endif
 
     candidate.valid = 1;
     *snapshot = candidate;
@@ -2597,9 +2624,9 @@ ngx_http_markdown_dynconf_reload_normal(
          * makes a plain assignment the correct lifecycle primitive here;
          * do not use atomic builtins on this aggregate snapshot because
          * coverage builds treat large/misaligned atomic struct access as
-         * a compile error.  The only pointer field
-         * (enabled_complex) points into the cycle-level ngx_conf_t
-         * which outlives both snapshots.  If a new pointer field is
+         * a compile error.  The pointer fields (enabled_complex and
+         * validation_index) point into cycle-level configuration storage
+         * that outlives both snapshots.  If a new pointer field is
          * added to ngx_http_markdown_dynconf_snapshot_t that references
          * staging-local memory, this assignment must be reviewed for
          * use-after-free.
@@ -2611,12 +2638,12 @@ ngx_http_markdown_dynconf_reload_normal(
 #ifdef MARKDOWN_STREAMING_ENABLED
         _Static_assert(
             sizeof(ngx_http_markdown_dynconf_snapshot_t)
-                == 10 * sizeof(void *),
+                == 12 * sizeof(void *),
             "dynconf_snapshot_t layout changed, review shallow copy");
 #else
         _Static_assert(
             sizeof(ngx_http_markdown_dynconf_snapshot_t)
-                == 9 * sizeof(void *),
+                == 11 * sizeof(void *),
             "dynconf_snapshot_t layout changed, review shallow copy");
 #endif
 

@@ -10,7 +10,7 @@
  * action via the replay, commit, and post-commit modules.
  *
  * Pre-commit + pass -> replay HTML via chain
- * Pre-commit + fail_closed/status -> finalize with conf->error_status
+ * Pre-commit + fail_closed/status -> finalize with the effective error status
  * Post-commit + pass -> safe_finish (abort fallback)
  * Post-commit + fail_closed/status -> abort
  *
@@ -88,7 +88,8 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
         dctx.within_resource_limits = 1;
     }
 
-    dctx.on_error_policy = conf->on_error;
+    dctx.on_error_policy = ngx_http_markdown_effective_error_policy(
+        ctx->effective_conf, conf);
 
     /* 2. Choose event based on committed state and on_error policy */
     if (ctx->stream_sm.headers_committed) {
@@ -98,7 +99,9 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
          * to choose safe_finish vs abort.
          */
         event = NGX_HTTP_MD_EVENT_ERROR;
-    } else if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS) {
+    } else if (ngx_http_markdown_effective_error_policy(
+                   ctx->effective_conf, conf)
+               == NGX_HTTP_MARKDOWN_ON_ERROR_PASS) {
         event = NGX_HTTP_MD_EVENT_ON_ERROR_PASS;
     } else {
         event = NGX_HTTP_MD_EVENT_ON_ERROR_REJECT;
@@ -138,10 +141,12 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                       "markdown stream on_error: "
                       "pre-commit rejection status=%ui",
-                      conf->error_status);
+                      ngx_http_markdown_effective_error_status(
+                          ctx->effective_conf, conf));
         return ngx_http_filter_finalize_request(r,
             &ngx_http_markdown_filter_module,
-            (ngx_int_t) conf->error_status);
+            (ngx_int_t) ngx_http_markdown_effective_error_status(
+                ctx->effective_conf, conf));
 
     case NGX_HTTP_MD_ACTION_SAFE_FINISH:
         /*
