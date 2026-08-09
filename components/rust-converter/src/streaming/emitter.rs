@@ -145,6 +145,12 @@ pub struct IncrementalEmitter {
     last_was_newline: bool,
     /// Escape context for ordinary text split across tokenizer events.
     markdown_escape_state: MarkdownTextEscapeState,
+    /// Whether the previous ordinary-text event ended in whitespace.
+    ///
+    /// Text events may split one logical whitespace run. Remembering the
+    /// boundary prevents each fragment from contributing another leading
+    /// space and changing the Markdown escape context.
+    last_text_ended_whitespace: bool,
     /// Current list nesting depth (for indentation).
     list_depth: usize,
     /// Current blockquote nesting depth.
@@ -202,6 +208,7 @@ impl IncrementalEmitter {
             consecutive_blank_lines: 0,
             last_was_newline: false,
             markdown_escape_state: MarkdownTextEscapeState::default(),
+            last_text_ended_whitespace: false,
             list_depth: 0,
             blockquote_depth: 0,
             needs_block_separator: false,
@@ -700,59 +707,74 @@ impl IncrementalEmitter {
         escape_plain_text: bool,
     ) -> Result<(), ConversionError> {
         if self.in_link {
+            self.last_text_ended_whitespace = false;
             self.append_link_text(text);
             return Ok(());
         }
 
         if self.in_code_block {
-            let backtick_run = longest_backtick_run(text);
-            let leading_run = leading_backtick_run(text);
-            let trailing_run = trailing_backtick_run(text);
-            let bridged_run = self
-                .code_block_trailing_backticks
-                .saturating_add(leading_run);
-            self.code_block_backtick_max = self
-                .code_block_backtick_max
-                .max(backtick_run)
-                .max(bridged_run);
-            if !text.is_empty() {
-                self.code_block_trailing_backticks = if leading_run == text.len() {
-                    bridged_run
-                } else {
-                    trailing_run
-                };
-            }
-            if self.blockquote_depth > 0 {
-                let mut prefixed = Vec::new();
-                for &b in text.as_bytes() {
-                    prefixed.push(b);
-                    if b == b'\n' {
-                        for _ in 0..self.blockquote_depth {
-                            prefixed.extend_from_slice(b"> ");
-                        }
-                    }
-                }
-                /* Budget check: combined pending buffer + code_block_buffer
-                 * + new bytes + fence overhead must stay within budget. */
-                self.check_code_block_budget(prefixed.len())?;
-                self.code_block_buffer.extend_from_slice(&prefixed);
-            } else {
-                self.check_code_block_budget(text.len())?;
-                self.code_block_buffer.extend_from_slice(text.as_bytes());
-            }
-            self.last_was_newline = text.ends_with('\n');
-            return Ok(());
+            return self.handle_code_block_text(text);
         }
 
         if self.in_inline_code {
+            self.last_text_ended_whitespace = false;
             self.write_str(text)?;
             self.last_was_newline = text.ends_with('\n');
             return Ok(());
         }
 
-        // Normalize text: collapse whitespace
-        let normalized = normalize_text(text);
+        self.handle_plain_text(text, escape_plain_text)
+    }
+
+    fn handle_code_block_text(&mut self, text: &str) -> Result<(), ConversionError> {
+        self.last_text_ended_whitespace = false;
+        let backtick_run = longest_backtick_run(text);
+        let leading_run = leading_backtick_run(text);
+        let trailing_run = trailing_backtick_run(text);
+        let bridged_run = self
+            .code_block_trailing_backticks
+            .saturating_add(leading_run);
+        self.code_block_backtick_max = self
+            .code_block_backtick_max
+            .max(backtick_run)
+            .max(bridged_run);
+        if !text.is_empty() {
+            self.code_block_trailing_backticks = if leading_run == text.len() {
+                bridged_run
+            } else {
+                trailing_run
+            };
+        }
+        if self.blockquote_depth > 0 {
+            let mut prefixed = Vec::new();
+            for &b in text.as_bytes() {
+                prefixed.push(b);
+                if b == b'\n' {
+                    for _ in 0..self.blockquote_depth {
+                        prefixed.extend_from_slice(b"> ");
+                    }
+                }
+            }
+            /* Budget check: combined pending buffer + code_block_buffer
+             * + new bytes + fence overhead must stay within budget. */
+            self.check_code_block_budget(prefixed.len())?;
+            self.code_block_buffer.extend_from_slice(&prefixed);
+        } else {
+            self.check_code_block_budget(text.len())?;
+            self.code_block_buffer.extend_from_slice(text.as_bytes());
+        }
+        self.last_was_newline = text.ends_with('\n');
+        Ok(())
+    }
+
+    fn handle_plain_text(
+        &mut self,
+        text: &str,
+        escape_plain_text: bool,
+    ) -> Result<(), ConversionError> {
+        let (normalized, ends_with_whitespace) = self.normalize_text_fragment(text);
         if normalized.is_empty() {
+            self.last_text_ended_whitespace = ends_with_whitespace;
             return Ok(());
         }
 
@@ -763,8 +785,28 @@ impl IncrementalEmitter {
         } else {
             self.write_str(&normalized)?;
         }
+        self.last_text_ended_whitespace = ends_with_whitespace;
         self.last_was_newline = normalized.ends_with('\n');
         Ok(())
+    }
+
+    fn normalize_text_fragment(&self, text: &str) -> (String, bool) {
+        let starts_with_whitespace = text
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_whitespace());
+        let ends_with_whitespace = text
+            .chars()
+            .last()
+            .is_some_and(|character| character.is_whitespace());
+        let mut normalized = normalize_text(text);
+
+        if self.last_text_ended_whitespace && starts_with_whitespace && normalized.starts_with(' ')
+        {
+            normalized.remove(0);
+        }
+
+        (normalized, ends_with_whitespace)
     }
 
     // ── Internal helpers ────────────────────────────────────────────
@@ -927,6 +969,7 @@ impl IncrementalEmitter {
     /// emitter.write_str("line1\r\n\r\n\r\nline2\n")?;
     /// ```
     fn write_str(&mut self, s: &str) -> Result<(), ConversionError> {
+        self.last_text_ended_whitespace = false;
         let bytes = s.as_bytes();
         self.check_buffer_budget(bytes.len())?;
         // Normalize CRLF → LF as we write
@@ -971,6 +1014,7 @@ impl IncrementalEmitter {
 
     /// Write raw bytes without normalization (used for code block fences).
     fn write_raw(&mut self, bytes: &[u8]) -> Result<(), ConversionError> {
+        self.last_text_ended_whitespace = false;
         self.check_buffer_budget(bytes.len())?;
         for &byte in bytes {
             self.buffer.push(byte);

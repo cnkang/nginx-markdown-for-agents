@@ -380,6 +380,77 @@ fn streaming_boundary_conditions() {
     );
 }
 
+#[test]
+fn large_pre_block_preserves_following_tail_marker() {
+    const END_TOKEN: &str = "SMALL_STREAM_END_TOKEN";
+    let mut html = String::from(
+        "<!doctype html><html><head><meta charset=\"UTF-8\"><title>Chunked Small</title></head>\
+         <body><h1>Chunked Small</h1><pre>\n",
+    );
+    let fill = "chunked-stream-data-0123456789abcdef\n";
+    while html.len() < 1024 * 1024 - 64 {
+        html.push_str(fill);
+    }
+    html.push_str("\n</pre><p>");
+    html.push_str(END_TOKEN);
+    html.push_str("</p></body></html>\n");
+
+    let full = convert_full_buffer(
+        html.as_bytes(),
+        Some("text/html; charset=UTF-8"),
+        default_streaming_options(),
+    )
+    .expect("large pre block should convert through the full-buffer path");
+    let escaped_end_token = END_TOKEN.replace('_', r"\_");
+    assert!(
+        full.contains(&escaped_end_token),
+        "full output lost the tail marker: len={}, suffix={:?}",
+        full.len(),
+        &full[full.len().saturating_sub(256)..]
+    );
+
+    let budget = MemoryBudget::for_total(16 * 1024 * 1024);
+    let streamed = convert_streaming_chunked(
+        html.as_bytes(),
+        &[16 * 1024; 64],
+        Some("text/html; charset=UTF-8"),
+        default_streaming_options(),
+        budget,
+        None,
+    )
+    .expect("large pre block should convert through the streaming path");
+    assert!(
+        streamed.markdown.contains(&escaped_end_token),
+        "streaming output lost the tail marker"
+    );
+}
+
+#[test]
+fn streaming_chunk_boundary_preserves_line_prefix_escape() {
+    let html = format!("{}-", "\n".repeat(65));
+    let split_sizes = [1, 1, 1, 10, 10, 10, 10, 10, 13];
+
+    let single = convert_streaming_single(
+        html.as_bytes(),
+        Some("text/html; charset=UTF-8"),
+        default_streaming_options(),
+        default_streaming_budget(),
+        None,
+    )
+    .expect("single-chunk streaming conversion should succeed");
+    let chunked = convert_streaming_chunked(
+        html.as_bytes(),
+        &split_sizes,
+        Some("text/html; charset=UTF-8"),
+        default_streaming_options(),
+        default_streaming_budget(),
+        None,
+    )
+    .expect("chunked streaming conversion should succeed");
+
+    assert_eq!(single.markdown, chunked.markdown);
+}
+
 #[cfg(feature = "incremental")]
 #[test]
 fn boundary_max_size_incremental_guard() {
