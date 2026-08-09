@@ -66,6 +66,11 @@ DEFAULT_BASELINE = 0
 SEMICOLON_WARNING_RE = re.compile(
     r"^(?P<count>\d+) semicolon\(s\) in prose:"
 )
+SAFE_GIT_REF_RE = re.compile(
+    r"^(?:HEAD|[0-9A-Fa-f]{7,40}|"
+    r"(?:refs/(?:heads|tags|remotes)/|origin/)?"
+    r"[A-Za-z0-9][A-Za-z0-9._/-]*)(?:~[0-9]+|\^[0-9]*)?$"
+)
 
 SENT_DESCRIPTIVE_MAX = 25
 SENT_INSTRUCTION_MAX = 20
@@ -466,10 +471,18 @@ def _report_warning(
 
 def _resolve_base(ref: str) -> str | None:
     """Resolve a user-supplied base ref, or return None when it is invalid."""
-    if not ref or ref.startswith("-"):
+    if not ref or SAFE_GIT_REF_RE.fullmatch(ref) is None:
         return None
+    commit_ref = f"{ref}^{{commit}}"
     out = subprocess.run(
-        ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+        [
+            "git",
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            "--end-of-options",
+            commit_ref,
+        ],
         cwd=ROOT,
         capture_output=True,
         text=True,

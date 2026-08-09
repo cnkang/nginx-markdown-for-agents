@@ -77,3 +77,12 @@ def test_ffi_summary_drift_is_reported():
     )
     errors = checker.validate_contract(inventory, contract, readme)
     assert any("FFI: summary export count" in error for error in errors)
+
+
+def test_ffi_heading_values_are_literal_not_regular_expressions():
+    inventory, contract, readme = _inputs()
+    inventory["ffi_abi_version"] = "2.*"
+
+    errors = checker.validate_contract(inventory, contract, readme)
+
+    assert any("FFI: summary export count" in error for error in errors)

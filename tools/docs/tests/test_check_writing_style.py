@@ -9,6 +9,7 @@ Covers the STE-inspired audit rules plus the gate modes:
 from __future__ import annotations
 
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -250,6 +251,39 @@ def test_main_requires_explicit_base_for_changed(monkeypatch):
     with pytest.raises(SystemExit) as exc_info:
         cws.main()
     assert exc_info.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "ref",
+    ["--upload-pack=evil", "HEAD;touch /tmp/pwned", "HEAD^{commit} --upload-pack=evil"],
+)
+def test_resolve_base_rejects_argument_injection(monkeypatch, ref):
+    def unexpected_run(*args, **kwargs):
+        raise AssertionError("unsafe ref reached subprocess")
+
+    monkeypatch.setattr(cws.subprocess, "run", unexpected_run)
+
+    assert cws._resolve_base(ref) is None
+
+
+def test_resolve_base_uses_end_of_options(monkeypatch):
+    seen = {}
+
+    def fake_run(command, **kwargs):
+        seen["command"] = command
+        return SimpleNamespace(returncode=0, stdout="a" * 40 + "\n")
+
+    monkeypatch.setattr(cws.subprocess, "run", fake_run)
+
+    assert cws._resolve_base("HEAD") == "a" * 40
+    assert seen["command"] == [
+        "git",
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        "--end-of-options",
+        "HEAD^{commit}",
+    ]
 
 
 @pytest.mark.parametrize("base_args", [["--base", "HEAD"], ["--base=HEAD"]])
