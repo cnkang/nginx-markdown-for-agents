@@ -72,9 +72,6 @@ DYNCONF_PRECEDENCE_CONTRACT_PATH = (
     SOURCE_ROOT / "schemas" / "dynconf-precedence-v1.json"
 )
 
-PRECEDENCE_TIER_PATTERN = re.compile(
-    r"^[ \t]*\*[ \t]+([1-9]\d*)\.[ \t]+([^\r\n]+)$", re.MULTILINE
-)
 KNOWN_KEYS_PATTERN = re.compile(
     r"(?ms)^\s*(?:pub\s+)?const\s+KNOWN_KEYS\s*:\s*&\[&str\]\s*="
     r"\s*&\[\s*(.*?)\s*\];"
@@ -107,14 +104,33 @@ def _extract_rust_dynconf_keys(content: str) -> set[str]:
     return set(keys)
 
 
+def _extract_precedence_matches(content: str) -> list[tuple[str, str]]:
+    """Extract numbered precedence comments with deterministic parsing."""
+    matches = []
+    for line in content.splitlines():
+        marker = line.lstrip(" \t")
+        if not marker.startswith("*"):
+            continue
+        remainder = marker[1:].lstrip(" \t")
+        tier_text, separator, description = remainder.partition(".")
+        if (
+            not separator
+            or not tier_text
+            or tier_text[0] not in "123456789"
+            or not all(char in "0123456789" for char in tier_text)
+        ):
+            continue
+        description = description.lstrip(" \t").rstrip()
+        if description:
+            matches.append((tier_text, description))
+    return matches
+
+
 def _extract_precedence_hierarchy(
     content: str, expected_hierarchy: list[dict]
 ) -> list[dict]:
     """Extract and validate the precedence hierarchy against its contract."""
-    matches = [
-        (tier, description.rstrip())
-        for tier, description in PRECEDENCE_TIER_PATTERN.findall(content)
-    ]
+    matches = _extract_precedence_matches(content)
     expected_tiers = [entry["tier"] for entry in expected_hierarchy]
     actual_tiers = [int(tier) for tier, _ in matches]
     if actual_tiers != expected_tiers:
