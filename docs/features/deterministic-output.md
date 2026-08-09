@@ -129,13 +129,20 @@ Output: "- Item\n  - Nested"  (leading spaces preserved)
 
 ### 7. Markdown Escaping
 
-**Rule**: The module escapes special Markdown characters consistently according to context.
+**Rule**: The module escapes special Markdown characters consistently according
+to context.
 
 **Rationale**: Ensures that special characters in HTML content are correctly represented in Markdown without breaking formatting.
 
-**Characters**: `*`, `_`, `[`, `]`, `(`, `)`, `#`, `\`, `` ` ``
+**Ordinary text**: `\`, `` ` ``, `*`, `_`, `[`, `]`, `<`, `>`, and `~` are
+escaped before untrusted text is emitted. Line-start block markers (`#`, `>`,
+`+`, `-`, `!`, and ordered-list periods) are escaped when they could change
+the Markdown structure. This keeps ordinary prose such as `a-b` readable.
 
-**Note**: Current implementation preserves these characters in plain text context. Future enhancements may add context-aware escaping.
+**Generated syntax**: Code spans/blocks retain their code content, and link or
+image labels use the dedicated label escaper so generated Markdown remains
+valid while untrusted label text cannot close the label or introduce a new
+destination.
 
 ### 8. DOM Attribute Order
 

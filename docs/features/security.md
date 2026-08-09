@@ -156,11 +156,23 @@ pub fn is_dangerous_url(&self, url: &str) -> bool {
 - `<img src="...">` - Images (when the module blocks the URL, `alt` text stays as plain text. The `title` attribute appears in Markdown image syntax)
 - Embedded/media URL attributes including `<iframe src>`, `<object data>`, `<embed src>`, `<video src/poster>`, `<audio src>`, `<source src>`, `<track src>`, and `<area href>`
 
-### Layer 5: Markdown Label Escaping
+### Layer 5: Markdown Output Escaping
 
-**Location**: `src/converter/traversal.rs` - `MarkdownConverter::escape_link_label()`
+**Locations**: `src/security.rs` - `escape_markdown_text()` and
+`escape_link_label()`
 
-The module escapes user-controlled text that appears inside Markdown link/image label brackets before emission. This prevents HTML text or attributes from breaking out of the label. It stops injection of a new Markdown destination such as `](javascript:...)`.
+The module escapes untrusted ordinary text before emitting it as Markdown.
+The module always escapes inline delimiters, link brackets, and raw-HTML
+brackets. It escapes block markers at the beginning of a line. This
+prevents HTML text such as `[click](javascript:...)`, raw tags, emphasis, or
+headings from becoming active Markdown in the converted document. Code spans
+and code blocks use their own context, so ordinary-text escaping does not
+process them.
+
+User-controlled text that appears inside Markdown link/image label brackets is
+subject to separate escaping before emission. This prevents HTML text or
+attributes from breaking out of the label and stops injection of a new
+Markdown destination such as `](javascript:...)`.
 
 **Applied to**:
 - `<a>` child text before `[text](url)` emission

@@ -98,10 +98,11 @@ Required:
   exceeds X`, never `X exceeds`), keep the agent explicit (`the module
   blocks streaming`, never `streaming blocks`), and never drop a
   requirement or qualifier (must/never/only) during simplification.
-- Verification commands live in the Makefile and run inside `make docs-check`
-  (the `docs-tooling` verification family): `make docs-style-check`
-  (advisory), `make docs-style-check-regression` (changed files, blocking),
-  `make docs-style-check-baseline` (budget, blocking).
+- Verification commands live in the Makefile and run through the
+  `docs-tooling` verification family. Routine `make docs-check` runs
+  `make docs-style-check-regression` for changed files. The advisory scan is
+  `make docs-style-check`. The repository-wide budget runs through full
+  harness or release validation with `make docs-style-check-baseline`.
 - The scan excludes code blocks, fenced blocks, tables, headings, inline
   code, links, and HTML comments. Rule documents, release-gate
   templates, and MUST-specification clauses may retain rule-format long

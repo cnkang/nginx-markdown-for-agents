@@ -69,7 +69,6 @@ SEMICOLON_WARNING_RE = re.compile(
 )
 SAFE_GIT_REF_RE = re.compile(
     r"^(?:HEAD|[0-9A-Fa-f]{7,40}|"
-    r"(?:refs/(?:heads|tags|remotes)/|origin/)?"
     r"[A-Za-z0-9][A-Za-z0-9._/-]*)$"
 )
 
@@ -469,72 +468,43 @@ def _report_warning(
     return 0
 
 
-def _commit_from_ref_fields(fields: list[str]) -> str | None:
-    if len(fields) < 3:
-        return None
-    _, object_name, object_type = fields[:3]
-    if object_type == "commit":
-        return object_name
-    if object_type == "tag" and len(fields) >= 5 and fields[4] == "commit":
-        return fields[3]
-    return None
-
-
-def _collect_commit_refs(output: str) -> dict[str, str]:
-    """Build safe ref aliases from fixed-format git output."""
-    commits: dict[str, str] = {}
-    for line in output.splitlines():
-        fields = line.split()
-        commit = _commit_from_ref_fields(fields)
-        if commit is None:
-            continue
-        ref_name = fields[0]
-        commits[ref_name] = commit
-        if ref_name.startswith("refs/heads/"):
-            commits.setdefault(ref_name.removeprefix("refs/heads/"), commit)
-        elif ref_name.startswith("refs/remotes/"):
-            commits.setdefault(ref_name.removeprefix("refs/remotes/"), commit)
-    return commits
-
-
 def _resolve_base(ref: str) -> str | None:
     """Resolve a user-supplied base ref, or return None when it is invalid."""
-    if not ref or SAFE_GIT_REF_RE.fullmatch(ref) is None:
+    base_ref, separator, suffix = ref.partition("~")
+    if not separator:
+        base_ref, separator, suffix = ref.partition("^")
+    if not base_ref or base_ref.startswith("-"):
         return None
+    if SAFE_GIT_REF_RE.fullmatch(base_ref) is None:
+        return None
+    revision = f"{separator}{suffix}" if separator else ""
+    position = 0
+    while position < len(revision):
+        if revision[position] not in "~^":
+            return None
+        position += 1
+        while position < len(revision) and revision[position].isdigit():
+            position += 1
 
-    # Enumerate refs with a fixed command. The user value is only used as an
-    # in-memory lookup key below and never reaches a subprocess.
-    refs = subprocess.run(
+    resolved = subprocess.run(
         [
             "git",
-            "for-each-ref",
-            "--format=%(refname) %(objectname) %(objecttype) %(*objectname) %(*objecttype)",
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            "--end-of-options",
+            f"{ref}^{{commit}}",
         ],
         cwd=ROOT,
         capture_output=True,
         text=True,
     )
-    if refs.returncode != 0:
+    if resolved.returncode != 0:
         return None
-
-    commits = _collect_commit_refs(refs.stdout)
-
-    head = subprocess.run(
-        ["git", "rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    if head.returncode == 0:
-        commits["HEAD"] = head.stdout.strip()
-
-    commit = commits.get(ref)
-    if commit:
-        return commit
-    if not re.fullmatch(r"[0-9A-Fa-f]{7,40}", ref):
+    commit = resolved.stdout.strip()
+    if not re.fullmatch(r"[0-9A-Fa-f]{40}", commit):
         return None
-    matches = {value for value in commits.values() if value.startswith(ref.lower())}
-    return matches.pop() if len(matches) == 1 else None
+    return commit
 
 
 def _build_parser() -> argparse.ArgumentParser:
