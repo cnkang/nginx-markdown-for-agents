@@ -20,6 +20,7 @@ CONTRACT_PATH = ROOT / "docs/knowledge-base/config-contract.md"
 README_PATH = ROOT / "docs/knowledge-base/README.md"
 LIMIT_REGISTRY_PATH = ROOT / "tools/release/gates/validate_config_directives.py"
 METRIC_KEY_FIELD = "metric key"
+ALLOWED_VALUES_FIELD = "allowed values"
 README_FROZEN_SECTION_RE = re.compile(r"^## Key Numbers\b", re.M)
 README_FROZEN_ROW_RE = re.compile(
     r"^\|\s*(?:Active directives|Removed directives|Dynconf keys|"
@@ -201,7 +202,7 @@ def _validate_dynconf(
     expected_dynconf = {
         item["name"]: {
             "type": _clean(item["type"]),
-            "allowed values": _clean(item["allowed_values"]),
+            ALLOWED_VALUES_FIELD: _clean(item["allowed_values"]),
             "default": _clean(item["default"]),
             "inheritance": _clean(item["inheritance"]),
         }
@@ -210,7 +211,7 @@ def _validate_dynconf(
     actual_dynconf = {
         row["key"].strip("`"): {
             "type": _clean(row["type"]),
-            "allowed values": _clean(row["allowed values"]),
+            ALLOWED_VALUES_FIELD: _clean(row[ALLOWED_VALUES_FIELD]),
             "default": _clean(row["default"]),
             "inheritance": _clean(row["inheritance"]),
         }
@@ -220,16 +221,16 @@ def _validate_dynconf(
         actual = actual_dynconf.get(key)
         if actual is None:
             continue
-        if not expected["allowed values"] and "size" not in actual["allowed values"]:
+        if not expected[ALLOWED_VALUES_FIELD] and "size" not in actual[ALLOWED_VALUES_FIELD]:
             errors.append(f"dynconf {key}: size range is not documented")
-        elif not expected["allowed values"]:
-            expected["allowed values"] = actual["allowed values"]
+        elif not expected[ALLOWED_VALUES_FIELD]:
+            expected[ALLOWED_VALUES_FIELD] = actual[ALLOWED_VALUES_FIELD]
     _compare_maps(
         errors,
         "dynconf",
         expected_dynconf,
         actual_dynconf,
-        ("type", "allowed values", "default", "inheritance"),
+        ("type", ALLOWED_VALUES_FIELD, "default", "inheritance"),
     )
     dynamic_count = sum(1 for item in inventory["dynconf_keys"] if item["dynamic"])
     if len(dynconf_rows) != len(inventory["dynconf_keys"]):

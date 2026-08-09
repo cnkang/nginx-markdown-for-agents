@@ -658,7 +658,7 @@ ngx_http_markdown_diag_json_put_byte(
 
 static ngx_int_t
 ngx_http_markdown_diag_json_control(
-    u_char **pos, u_char *last, u_char value)
+    u_char **pos, const u_char *last, u_char value)
 {
     static const u_char  hex[] = "0123456789abcdef";
     u_char               escaped[6];
