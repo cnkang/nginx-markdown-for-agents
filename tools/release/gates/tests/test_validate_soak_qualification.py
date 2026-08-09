@@ -65,6 +65,16 @@ def test_manifest_contract_valid() -> None:
     }
 
 
+def test_real_soak_requires_module_binary(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Real mode must not run a stock NGINX without the module."""
+    args = type("Args", (), {"allow_skip_soak": False})()
+    manifest = {"candidate_sha": "a" * 40}
+    monkeypatch.setattr(validator, "_validated_nginx_binary", lambda: Path("nginx"))
+    monkeypatch.setattr(validator, "_validated_module", lambda: None)
+
+    assert validator.handle_missing_nginx(args, manifest) == 1
+
+
 def test_manifest_rejects_path_like_scenario_id(tmp_path: Path) -> None:
     """Scenario IDs must remain within the fixed local URL allowlist."""
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))

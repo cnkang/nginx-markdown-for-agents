@@ -7,7 +7,7 @@ This page is an implementation reference for the merged
 ## Configuration shape
 
 The public command registry is frozen at 25 directives. Resource controls are
-one directive with eight independently inherited keys; the old standalone
+one directive with eight independently inherited keys. The old standalone
 budget directives are not part of the live command table.
 
 ```c
@@ -56,7 +56,7 @@ markdown_limits conversion_timeout=30s parser_timeout=10s
     decompressed_size=10m decompression_ratio=100 max_inflight=64;
 ```
 
-Each key is inherited independently across `http`, `server`, and `location`.
+Each key inherits independently across `http`, `server`, and `location`.
 The merge step then binds the effective values to the runtime fields shown in
 the structure above and rejects cross-key violations before mutation:
 
@@ -88,7 +88,7 @@ the order shown in the example.
    incompatible contexts.
 3. `ngx_http_markdown_merge_conf` applies per-key inheritance and defaults,
    validates cross-key limits, then derives internal runtime fields.
-4. Request processing reads the effective merged configuration; dynamic config
+4. Request processing reads the effective merged configuration. Dynamic config
    applies only its five frozen keys (`filter`, `prune_noise`, `log_verbosity`,
    `error_policy`, and `streaming_buffer`).
 

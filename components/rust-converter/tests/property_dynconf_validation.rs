@@ -473,36 +473,11 @@ proptest! {
     ///
     /// **Validates: Requirements 3.5**
     #[test]
-    fn prop_excessive_tokens_rejected(extra_items in 800usize..1200) {
-        // Build a JSON object with many key-value pairs to exceed token budget.
-        // Each key-value pair consumes ~3-4 tokens (key string, colon, value).
-        // With 10,000 budget, ~3000+ entries should exceed it.
-        // But we also need schema_version and the entries to be "unknown" keys.
-        // The parser will reject on UnknownKey first if it sees an unknown key
-        // before hitting the budget. So we use valid-looking deep arrays instead.
-        //
-        // Actually, the parser rejects unknown keys early. Let's test with the
-        // internal parse_json_with_budget using a small budget to verify the property.
-        // For the public API, we verify that the MAX_TOKEN_BUDGET constant is correct.
-
-        // Generate an array with many elements inside a wrapper that triggers depth
-        // We can't easily hit 10k tokens with only known keys. Instead test with
-        // a valid document structure that uses nested arrays in a value position.
-        // Since "filter" expects a string, any attempt to put a large array there
-        // will fail with InvalidType before hitting token budget.
-        //
-        // The most practical test: build a huge nested structure in a value position
-        // that will hit the token budget. Since unknown keys are rejected first,
-        // we embed complexity in a valid key's value.
-        // Actually streaming_buffer expects an integer, filter expects string, etc.
-        // No field accepts arrays/objects.
-        //
-        // The real scenario for token budget is a huge document with many nested
-        // structures in unknown key values — but unknown key rejection happens after
-        // parse. Let's verify via the internal API.
+    fn prop_excessive_tokens_rejected(extra_items in 5_500usize..6_000) {
         use nginx_markdown_converter::dynconf::MAX_TOKEN_BUDGET;
 
-        // Build a long array to test token counting
+        // Each nested array consumes multiple parser tokens, so this input
+        // exceeds the production budget before schema validation can run.
         let mut arr = String::from("[");
         for i in 0..extra_items {
             if i > 0 { arr.push(','); }
@@ -510,17 +485,9 @@ proptest! {
         }
         arr.push(']');
 
-        // Wrap in valid-ish structure (top-level array will be rejected as non-object)
         let result = parse_dynconf(arr.as_bytes());
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        // Should fail with either TokenBudgetExceeded or InvalidJson (non-object top level)
-        assert!(
-            err.kind == DynconfParseErrorKind::TokenBudgetExceeded
-                || err.kind == DynconfParseErrorKind::InvalidJson,
-            "expected token budget or non-object rejection, got {:?}",
-            err.kind
-        );
+        let err = result.expect_err("oversized token stream must be rejected");
+        assert_eq!(err.kind, DynconfParseErrorKind::TokenBudgetExceeded);
 
         // Also verify constant is 10_000
         assert_eq!(MAX_TOKEN_BUDGET, 10_000);

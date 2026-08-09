@@ -2,7 +2,7 @@
 
 This cookbook describes a controlled rollout of the frozen 0.9.2 streaming
 surface. It uses the module's current explicit directives and Prometheus
-families; profiles, threshold directives, and zero-copy switches are not part
+families, profiles, threshold directives, and zero-copy switches are not part
 of the active configuration contract.
 
 ## Before rollout
@@ -42,8 +42,7 @@ http {
 
 Keep `markdown_error_policy pass` during the initial rollout so conversion
 errors preserve the upstream response. Use `markdown_streaming force` only for
-paths whose response size, cache requirements, and compressed encodings have
-been tested.
+paths whose response size, cache requirements, and compressed encodings have completed testing.
 
 ## Staged enablement
 
@@ -55,10 +54,10 @@ been tested.
 
 For each stage, record:
 
-- `nginx_markdown_requests_total` by `outcome`, `stage`, and `reason`;
-- conversion attempts and deliveries by `engine`;
-- streaming transitions by `transition`;
-- decompression events by `encoding`, `outcome`, and `reason`;
+- `nginx_markdown_requests_total` by `outcome`, `stage`, and `reason`,
+- conversion attempts and deliveries by `engine`,
+- streaming transitions by `transition`,
+- decompression events by `encoding`, `outcome`, and `reason`,
 - the diagnostics `configuration.effective` object.
 
 ## Verification requests
@@ -73,27 +72,27 @@ curl -sD - -o /tmp/markdown-gzip.out \
 ```
 
 The expected converted response has `Content-Type: text/markdown` and valid
-Markdown output. Compare body length and terminal delivery metrics; a
+Markdown output. Compare body length and terminal delivery metrics, a
 downstream `NGX_AGAIN` is a suspension, not a successful delivery.
 
 ## Go/no-go signals
 
 Continue when:
 
-- `nginx -t` passes after each change;
-- conversion delivery counts grow only after successful terminal delivery;
-- streaming resume failures and post-commit aborts remain zero or explained;
-- decompression failures are limited to intentionally malformed fixtures;
-- inflight returns to zero after the test traffic drains;
+- `nginx -t` passes after each change,
+- conversion delivery counts grow only after successful terminal delivery,
+- streaming resume failures and post-commit aborts remain zero or explained,
+- decompression failures stay limited to intentionally malformed fixtures,
+- inflight returns to zero after the test traffic drains,
 - the diagnostics effective configuration matches the intended location.
 
 Pause and investigate when:
 
-- `failed_closed`, `aborted`, or `resume_failure` grows unexpectedly;
+- `failed_closed`, `aborted`, or `resume_failure` grows unexpectedly,
 - compressed responses show repeated `truncated_input`, `format_error`, or
-  `io_error` outcomes;
-- conversion attempts exceed the request population;
-- full-buffer and streaming delivery conservation no longer holds;
+  `io_error` outcomes,
+- conversion attempts exceed the request population,
+- full-buffer and streaming delivery conservation no longer holds,
 - a reload changes a request's effective configuration mid-request.
 
 ## Emergency rollback

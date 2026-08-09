@@ -17,7 +17,7 @@ Add `evidence_gate.py` as the formal release gate for 0.9.1.
 - **Blocking mode** (`make release-gates-check-091`): Required for release tags.
 
 ### Performance Thresholds
-The gate fails if the following are exceeded compared to the 0.9.0 baseline:
+The gate fails if the following exceed the 0.9.0 baseline:
 - **p50 latency**: ≤ +10%
 - **p95 latency**: ≤ +15%
 - **TTFB**: ≤ +10%
@@ -38,7 +38,7 @@ The gate fails if the following are exceeded compared to the 0.9.0 baseline:
   `decompression_streaming_total > 0` per codec.  The `gzip-large` scenario
   separately verifies the full-buffer gzip decompression path
   (`decompression_fullbuffer_total > 0`).
-- **Diagnostics**: `tools/perf/doctor_advice.py` provides operator diagnostics when thresholds are breached.
+- **Diagnostics**: `tools/perf/doctor_advice.py` provides operator diagnostics when thresholds get breached.
 
 ## Consequences
 
@@ -47,7 +47,7 @@ The gate fails if the following are exceeded compared to the 0.9.0 baseline:
 - Provides an evidence pack (benchmark tiers, decompression coverage, fallback rate, memory slope) for every release.
 
 ### Negative Consequences
-- Blocking RC/release-tag mode requires a module-enabled `NGINX_BIN`; the
+- Blocking RC/release-tag mode requires a module-enabled `NGINX_BIN`. The
   development-only skip is not release evidence.
 - Increases the time required for the final release check.
 

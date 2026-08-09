@@ -62,13 +62,13 @@ Rollback requires only an NGINX configuration edit and a graceful reload. Specif
 - No recompilation
 - No downtime
 
-The `nginx -s reload` command performs a graceful reload: NGINX re-reads the configuration, spawns new worker processes with the updated config, and drains existing connections on old workers. In-flight requests complete on the old configuration; new requests use the updated configuration immediately.
+The `nginx -s reload` command performs a graceful reload. NGINX re-reads the configuration, spawns new worker processes with the updated config, and drains existing connections on old workers. In-flight requests complete on the old configuration. New requests use the updated configuration immediately.
 
 ---
 
 ## Rollback Methods
 
-Three methods are listed in order of speed. Pick the one that matches your situation.
+Three methods appear in order of speed. Pick the one that matches your situation.
 
 | Method | Speed | Scope | When to Use |
 |--------|-------|-------|-------------|
@@ -340,7 +340,7 @@ nginx -t && nginx -s reload
 
 #### Verify
 
-Follow the [Verification Steps](#verification-steps) section. The key signal is that `failed_closed` entries stop appearing in decision logs and are replaced by `failed_open` entries. Clients receive original HTML instead of 502 errors when conversion fails.
+Follow the [Verification Steps](#verification-steps) section. The key signal is that `failed_closed` entries stop appearing in decision logs and `failed_open` entries replace them. Clients receive original HTML instead of 502 errors when conversion fails.
 
 ---
 
@@ -386,11 +386,11 @@ curl -sD - -o /dev/null \
 # Expected: Content-Type: text/markdown; charset=utf-8
 ```
 
-If the Content-Type is wrong or the response body is unexpected, roll back.
+If the Content-Type is wrong or the response body looks unexpected, roll back.
 
 ### Operator Judgment
 
-Any observation checkpoint result that does not meet the "safe to continue" criteria documented in the [Rollout Cookbook](ROLLOUT_COOKBOOK.md#rollout-stages) is grounds for rollback. Trust your judgment — if something looks wrong, narrow scope first and investigate second.
+Any observation checkpoint result that does not meet the "safe to continue" criteria in the [Rollout Cookbook](ROLLOUT_COOKBOOK.md#rollout-stages) grounds for rollback. Trust your judgment — if something looks wrong, narrow scope first and investigate second.
 
 ---
 
@@ -444,7 +444,7 @@ curl -sD - \
 # Expected: Content-Type: text/html (not text/markdown)
 ```
 
-For Method C, send a request that you know triggers a conversion failure and verify the client receives HTML (not a 502):
+For Method C, send a request that you know triggers a conversion failure. Verify the client receives HTML (not a 502):
 
 ```bash
 curl -sD - -o /dev/null \

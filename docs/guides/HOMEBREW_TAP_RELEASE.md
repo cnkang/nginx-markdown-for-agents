@@ -34,10 +34,10 @@ Set these in this repository before running the workflows:
    - Update only the Formula's class-level `url`, `version`, and `sha256`
      fields, preserving nested resource identities.
    - Run `brew audit --strict` on the exact rendered Formula before the tap
-     credential is introduced.
+     credential enters the flow.
    - Copy formula into your tap repository and push
 
-Manual publication is accepted only when the workflow itself runs from the
+The team accepts manual publication only when the workflow itself runs from the
 repository's default branch. The Formula program, verified source tree,
 archive URL, version, and checksum therefore all derive from one reviewed
 release tag commit.

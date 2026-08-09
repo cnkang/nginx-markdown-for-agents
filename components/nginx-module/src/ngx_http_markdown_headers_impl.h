@@ -475,7 +475,7 @@ ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r)
  *     - ETag header allocation and value copy
  *     - Vary: Accept lookup, dedup, and append allocation
  *     - X-Markdown-Tokens header allocation and value formatting
- *     - Cache-Control auth modification allocation
+ *     - Cache-Control in-place value rewrite (auth) with allocation
  *     A bounded transaction snapshot is taken before the first operation.
  *     Helpers may use inert list slots or legacy in-place auth rewrites
  *     during prepare, but ANY failure restores the snapshot exactly.
@@ -490,8 +490,10 @@ ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r)
  *     - Content-Length numeric field set
  *     - X-Markdown-Tokens entry populated from pre-allocated memory
  *     - Accept-Ranges invalidation (hash=0, pointer clear)
- *     - Cache-Control value pointer swap
  *     - Content-Encoding pointer clear
+ *
+ *   Cache-Control rewrites (value rewrite/append) are applied in-place
+ *   during the PREPARE phase; the commit phase never touches them.
  *
  *   Nothing occurs between commit and ngx_http_send_header.
  *

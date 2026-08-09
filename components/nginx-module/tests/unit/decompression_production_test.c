@@ -524,8 +524,33 @@ test_collect_content_encoding_repeated_fields(void)
     ngx_table_elt_t     headers[2];
     ngx_str_t           combined;
     ngx_int_t           rc;
+    u_char               sentinel[] = "sentinel";
 
     init_request(&r);
+    combined.data = sentinel;
+    combined.len = sizeof(sentinel) - 1;
+    TEST_ASSERT(ngx_http_markdown_collect_content_encoding(NULL, &combined)
+                == NGX_ERROR, "null request must fail collection safely");
+    TEST_ASSERT(combined.data == sentinel
+                && combined.len == sizeof(sentinel) - 1,
+                "null request must preserve output");
+    combined.data = sentinel;
+    combined.len = sizeof(sentinel) - 1;
+    TEST_ASSERT(ngx_http_markdown_collect_content_encoding(&r, NULL)
+                == NGX_ERROR, "null output must fail collection safely");
+    {
+        ngx_pool_t *pool = r.pool;
+
+        combined.data = sentinel;
+        combined.len = sizeof(sentinel) - 1;
+        r.pool = NULL;
+        TEST_ASSERT(ngx_http_markdown_collect_content_encoding(&r, &combined)
+                    == NGX_ERROR, "null request pool must fail safely");
+        TEST_ASSERT(combined.data == sentinel
+                    && combined.len == sizeof(sentinel) - 1,
+                    "null request pool must preserve output");
+        r.pool = pool;
+    }
     memset(headers, 0, sizeof(headers));
     headers[0].value.data = (u_char *) "gzip";
     headers[0].value.len = sizeof("gzip") - 1;

@@ -11,13 +11,13 @@ troubleshooting guidance for version mismatch errors.
 
 Release workflows target selected official nginx.org stable releases for
 prebuilt packages. Availability is tag-specific: a build-matrix entry does not
-guarantee that a package has been published. The module is compiled against the
-exact NGINX source version specified in the build matrix and is not a universal
-shared library.
+guarantee that the project published a package. The build compiles the module
+against the exact NGINX source version specified in the build matrix and is
+not a universal shared library.
 
 Key points:
 
-- Both nginx.org stable and selected mainline releases are supported as shown
+- Both nginx.org stable and selected mainline releases stay supported as shown
   in the build matrix below.
 - Each prebuilt package targets a specific NGINX version and CPU architecture.
 - Users with unsupported NGINX versions must build from source (see below).
@@ -40,9 +40,9 @@ filename.
 ### Binary Compat Signature
 
 NGINX validates every dynamic module at load time using a **Binary
-Compatibility Signature**. This signature is derived from:
+Compatibility Signature**. This signature derives from:
 
-1. The NGINX version number (e.g., `1.26.3`).
+1. The NGINX version number (for example `1.26.3`).
 2. The set of `./configure` options used to build NGINX.
 3. Internal ABI markers that reflect struct layouts and API contracts.
 
@@ -60,14 +60,14 @@ combinations of the **same** NGINX version.
 
 However, `--with-compat` does **not**:
 
-- Guarantee cross-version compatibility (e.g., a module built for 1.26.3
+- Guarantee cross-version compatibility (for example a module built for 1.26.3
   will not load on 1.24.0).
 - Eliminate all signature differences (some options still affect the
   signature even with `--with-compat`).
 - Make modules universally portable across different NGINX builds.
 
 In summary: `--with-compat` reduces configure-option differences but does
-not guarantee universality. The module must still be compiled against the
+not guarantee universality. The module must still compile against the
 exact NGINX version it will run on.
 
 ---
@@ -95,7 +95,7 @@ nginx-module-markdown-for-agents-<VERSION>-nginx1.26.3-1.aarch64.rpm
 
 Always select the package that matches both your NGINX version and CPU
 architecture. Before downloading, verify that the selected GitHub Release
-contains the exact package and `SHA256SUMS`; otherwise build from source.
+contains the exact package and `SHA256SUMS`. Otherwise build from source.
 
 The NGINX version embedded in the artifact name is the version tested by the
 release pipeline. After upgrading NGINX, install the package built for the new
@@ -132,7 +132,7 @@ nginx -V 2>&1 | head -5
   distribution suffix. The `--prefix` is typically `/etc/nginx`.
 - **Distribution-provided**: Version line may include a suffix like
   `(Ubuntu)` or the configure options include distribution-specific paths
-  (e.g., `--conf-path=/etc/nginx/nginx.conf` with non-standard module
+  (for example `--conf-path=/etc/nginx/nginx.conf` with non-standard module
   paths).
 - **OpenResty**: Version line shows `openresty/...` or includes
   `--with-luajit`.
@@ -166,7 +166,7 @@ nginx: [emerg] module "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
    ```
 
    Compare the reported version against the package filename. They must
-   match exactly (e.g., package built for `nginx-1.26.3` requires NGINX
+   match exactly (for example package built for `nginx-1.26.3` requires NGINX
    `1.26.3`).
 
 2. **Check your architecture**:
@@ -185,7 +185,7 @@ nginx: [emerg] module "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
    ```
 
    While `--with-compat` is not strictly required for nginx.org official
-   builds (since the package is compiled against the exact version), its
+   builds (since the package compiles against the exact version), its
    absence on a non-official build is a strong indicator of
    incompatibility.
 

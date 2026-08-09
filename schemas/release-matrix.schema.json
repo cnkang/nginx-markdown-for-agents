@@ -77,10 +77,10 @@
       "description": "A legacy-format matrix row using the sole accepted legacy aliases. Normalization maps nginx->nginx_version, os_type->os, arch->target.",
       "anyOf": [
         {
-          "required": ["nginx_version", "os", "libc", "target", "artifact_type"]
+          "required": ["nginx_version", "os", "libc", "target", "artifact_type", "feature_manifest_digest", "abi_version"]
         },
         {
-          "required": ["nginx", "os_type", "arch", "artifact_type"]
+          "required": ["nginx", "os_type", "libc", "arch", "artifact_type", "feature_manifest_digest", "abi_version"]
         }
       ],
       "additionalProperties": false,
@@ -116,6 +116,13 @@
         "artifact_type": {
           "type": "string",
           "description": "Artifact kind."
+        },
+        "feature_manifest_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "abi_version": {
+          "type": "integer"
         }
       }
     }

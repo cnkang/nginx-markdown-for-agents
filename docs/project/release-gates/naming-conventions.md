@@ -87,7 +87,7 @@ Labels must be low-cardinality.
 
 ## 3. Decision Reason Codes
 
-Reason codes are emitted in both decision-log `reason=` fields and Prometheus
+The module emits reason codes in both decision-log `reason=` fields and Prometheus
 metric label values, and must be consistent across both surfaces. Two tiers:
 
 - **Decision-chain reason codes** — lowercase snake_case. Returned by

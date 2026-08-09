@@ -9,12 +9,12 @@ function pointers, and conditional compilation) to classify each export as:
 - loader/abi: ABI handshake or module lifecycle functions
 - dead: exported but unreferenced in production or lifecycle
 
-This tool extends (not replaces) the existing public-surface/FFI drift tooling
-in detect_public_surface_drift.py. It reuses its FFI_PATHS and header parsing
-infrastructure.
+This tool is complementary to detect_public_surface_drift.py but is an
+independent implementation: it defines its own source/header paths and
+parsing logic rather than importing the drift tooling.
 
-The inventory defines the interface and classification structure. Final
-classification and removal happen after the associated FFI changes settle.
+The inventory defines the interface and classification structure. The
+inventory reports candidates; removal is decided per release review.
 """
 
 from __future__ import annotations

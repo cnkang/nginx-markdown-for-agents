@@ -5,9 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-## [0.9.2] - Unreleased candidate (2026-08-07)
+## [0.9.2] - Unreleased candidate
 
 Maintenance and hardening release. Fixes diagnostics and reason-code mapping
 gaps, documents request-scoped OTel ownership, removes the unsafe worker-local
@@ -37,6 +35,8 @@ before/after examples.
   directives (`markdown_stream_precommit_buffer`, `markdown_stream_flush_min`,
   `markdown_parse_timeout`, `markdown_parser_budget`,
   `markdown_decompress_max_size`) are unified into `markdown_limits`
+  (`markdown_stream_flush_min` has no replacement; use downstream buffering or
+  the remaining `markdown_limits` keys as appropriate).
   key=value syntax (`streaming_buffer=`, `parser_timeout=`, `parser_memory=`,
   `decompressed_size=`).
 - **Profile presets removed.** `balanced` / `strict_cache` / `streaming_first`
@@ -238,7 +238,7 @@ that pre-1.0 consolidation window through v0.9.1.
 ### Breaking Changes
 
 - **Reason code naming**: all reason code strings renamed from
-  UPPERCASE_SNAKE_CASE to lowercase_snake_case (e.g., `PARSE_TIMEOUT` →
+  UPPERCASE_SNAKE_CASE to lowercase_snake_case (for example, `PARSE_TIMEOUT` →
   `timeout`, `FFI_CALL_ERROR` → `ffi_panic`). Affects Prometheus labels,
   structured logs, and diagnostics endpoint.
 - **Directive removals/renames**:
@@ -303,7 +303,7 @@ that pre-1.0 consolidation window through v0.9.1.
 - `markdown_on_error` — use `markdown_error_policy`.
 - `markdown_trust_forwarded_headers` — use `markdown_trusted_proxies`.
 - `markdown_on_wildcard` — use `markdown_accept wildcard`.
-- Per-reason metric counters (e.g., `markdown_skipped_accept_total`) — use
+- Per-reason metric counters (for example, `markdown_skipped_accept_total`) — use
   unified families with `reason` label.
 
 ### Migration
@@ -813,7 +813,7 @@ dynconf dry-run/rollback, and runtime diagnostics.
   - `conditional` module: If-None-Match / If-Modified-Since conditional
     request and ETag handling in Rust. 20 unit tests.
   - `decision` module: pure decision engine with reason codes
-    (CONVERTED, SKIPPED_ACCEPT, SKIPPED_NO_ACCEPT, etc.). 11 unit tests.
+    (CONVERTED, SKIPPED_ACCEPT, SKIPPED_NO_ACCEPT, and similar). 11 unit tests.
   - `header_plan` module: declarative header mutation plan for atomic
     application. 5 unit tests.
   - `security` module extensions: `url_contains_control_chars`,
@@ -838,7 +838,7 @@ dynconf dry-run/rollback, and runtime diagnostics.
   - Public v0.7.0 package installation uses GitHub Release DEB/RPM artifacts
     plus `SHA256SUMS`; public APT/YUM repository publishing remains planned.
   - DEB/RPM packages target glibc-based distributions only. Musl-based targets
-    (Alpine, etc.) are available as static binary tarballs via the separate
+    (Alpine, and similar distributions) are available as static binary tarballs via the separate
     `release-binaries.yml` workflow.
 
 - **Kubernetes Deployment Examples**
@@ -1061,7 +1061,7 @@ risk pack, and introduces the two-phase dynconf snapshot model.
 - **X-Forwarded-Host validation** is now stricter: leading/trailing
   whitespace in the first-hop token is trimmed; non-IPv6 hosts with a
   `:` must be followed by digits only (port); IPv6 bracket literals
-  may include an optional `:<port>` suffix (e.g. `[::1]:8080`).
+  may include an optional `:<port>` suffix (for example, `[::1]:8080`).
   Previously-accepted malformed values may now be rejected with a
   fallback to `r->headers_in.server`.
 - **Request-bound dynconf snapshot**: each request deep-copies the
@@ -1493,9 +1493,9 @@ This release introduces incremental processing for large responses, a matrix-dri
 - Baselines directory (`perf/baselines/`) with bootstrap flow documentation
 
 ### Changed
-- Event handler attribute sanitization in `security.rs` now uses `on*` prefix matching instead of a static allowlist, following the OWASP/DOMPurify convention. This is future-proof against new event handler attributes added to the HTML spec and closes the gap where newer handlers (`onpointerdown`, `ontouchstart`, etc.) could bypass the previous static list.
-- Form-related elements (`form`, `button`, `select`, `textarea`, `fieldset`, `label`, `option`, etc.) now use a strip-tag-keep-content approach instead of full removal. HTML tags are stripped but child text is preserved in Markdown output so AI agents retain meaningful content (labels, button captions, option lists). Void form controls (`input`) have descriptive text extracted from `aria-label`, `placeholder`, or `value` attributes; hidden inputs are suppressed.
-- Embedded content elements (`iframe`, `object`, `embed`) now use strip-tag-keep-content instead of full removal. The `src`/`data` URL is extracted as a Markdown link (with `title` as label when available), and fallback child text is preserved. Dangerous URL schemes (`javascript:`, `data:`, etc.) are still suppressed.
+- Event handler attribute sanitization in `security.rs` now uses `on*` prefix matching instead of a static allowlist, following the OWASP/DOMPurify convention. This approach covers new event handler attributes added to the HTML spec. It also closes the gap where newer handlers (`onpointerdown`, `ontouchstart`, and similar) could bypass the previous static list.
+- Form-related elements (`form`, `button`, `select`, `textarea`, `fieldset`, `label`, `option`, and similar) now use a strip-tag-keep-content approach instead of full removal. HTML tags are stripped but child text is preserved in Markdown output so AI agents retain meaningful content (labels, button captions, option lists). Void form controls (`input`) have descriptive text extracted from `aria-label`, `placeholder`, or `value` attributes; hidden inputs are suppressed.
+- Embedded content elements (`iframe`, `object`, `embed`) now use strip-tag-keep-content instead of full removal. The `src`/`data` URL is extracted as a Markdown link (with `title` as label when available), and fallback child text is preserved. Dangerous URL schemes (`javascript:`, `data:`, and similar) are still suppressed.
 - Image conversion now preserves the `title` attribute in Markdown syntax (`![alt](src "title")`). When the image URL is missing or blocked by URL sanitization, the `alt` text is emitted as plain text so AI agents do not lose the description.
 - Media elements (`video`, `audio`) now have their `src` URL extracted as a Markdown link before traversing fallback children. Video `poster` thumbnails are extracted as Markdown images. Child `<source>` elements have their `src` extracted with `type` as label; `<track>` elements have their `src` extracted with `label` as link text.
 - Image map `<area>` elements now have their `href` extracted as Markdown links with `alt` (or `title`) as link text.

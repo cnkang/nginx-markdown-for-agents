@@ -2,7 +2,7 @@
 
 Requirements references: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6
 
-This is the final checkpoint before the 0.4.0 release. The Go/No-Go review verifies that all P0 sub-specs have passed their DoD evaluation, all release gates are satisfied, and any exceptions are documented with risk assessment and mitigation.
+This is the final checkpoint before the 0.4.0 release. The Go/No-Go review verifies that all P0 sub-specs have passed their DoD evaluation. It also verifies that all release gates pass and any exceptions appear with risk assessment and mitigation.
 
 ## Decision Record
 
@@ -24,7 +24,7 @@ All P0 sub-specs must pass their DoD evaluation before a Go decision can be made
 
 ## P1 Sub-Spec Status
 
-The P1 sub-spec may be excluded without blocking the release (Req 7.5).
+The team may exclude the P1 sub-spec without blocking the release (Req 7.5).
 
 | Sub-Spec | DoD Status | Decision |
 |----------|-----------|----------|
@@ -41,7 +41,7 @@ The P1 sub-spec may be excluded without blocking the release (Req 7.5).
 
 ## Exceptions
 
-Unresolved failures with documented exceptions must be recorded here with risk assessment and mitigation (Req 7.6).
+The reviewer must record unresolved failures with documented exceptions here with risk assessment and mitigation (Req 7.6).
 
 | # | Gate Item | Exception Rationale | Risk Assessment | Mitigation |
 |---|----------|-------------------|-----------------|------------|
@@ -50,8 +50,8 @@ Unresolved failures with documented exceptions must be recorded here with risk a
 ## Rules
 
 1. All P0 sub-specs must pass their DoD evaluation before a Go decision.
-2. The P1 sub-spec (parser-path-optimization) may be excluded without blocking the release (Req 7.5).
-3. Any unresolved failure with a documented exception must be recorded in this decision record with risk assessment and mitigation (Req 7.6).
+2. The team may exclude the P1 sub-spec (parser-path-optimization) without blocking the release (Req 7.5).
+3. The reviewer must record any unresolved failure with a documented exception here. Include risk assessment and mitigation (Req 7.6).
 
 ## Document Updates
 

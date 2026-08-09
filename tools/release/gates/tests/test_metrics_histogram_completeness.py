@@ -6,7 +6,7 @@ For each histogram family, verify _bucket lines for all defined boundaries
 
 Uses hypothesis to generate arbitrary snapshot counter values for the
 conversion_duration_seconds histogram (the only histogram family in the
-frozen 12-family registry), then validates the rendered Prometheus text
+canonical registry), then validates the rendered Prometheus text
 output has correct structural completeness.
 
 Each property runs at least 100 iterations.
@@ -14,6 +14,7 @@ Each property runs at least 100 iterations.
 **Validates: Requirements 5.2**
 """
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -26,18 +27,28 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parent.parent.parent.parent)
 )
 
-# --- Constants from the frozen metrics registry ---
+# --- Constants from the canonical metrics registry ---
 
-HISTOGRAM_FAMILY = "nginx_markdown_conversion_duration_seconds"
+REPO_ROOT = Path(__file__).resolve().parents[4]
+METRICS_CONTRACT = json.loads(
+    (REPO_ROOT / "schemas" / "metrics-v1.registry.json").read_text(
+        encoding="utf-8"
+    )
+)
+HISTOGRAM = next(
+    family
+    for family in METRICS_CONTRACT["families"]
+    if family["type"] == "histogram"
+)
+HISTOGRAM_FAMILY = HISTOGRAM["name"]
 HISTOGRAM_ENGINE = "full_buffer"
 
-# Exactly 10 bucket boundaries defined in metrics-registry.json
+# The JSON spelling is the Prometheus spelling used by the C renderer.
 BUCKET_BOUNDARIES = [
-    "0.001", "0.005", "0.01", "0.025", "0.05",
-    "0.1", "0.25", "0.5", "1.0", "5.0",
+    json.dumps(boundary) for boundary in HISTOGRAM["bucket_boundaries"]
 ]
 
-BUCKET_COUNT = 10
+BUCKET_COUNT = HISTOGRAM["bucket_count"]
 
 
 # --- Strategies ---
@@ -379,19 +390,16 @@ def test_histogram_cumulative_buckets_non_decreasing(buckets, sum_us):
 
 def test_registry_histogram_has_correct_boundaries():
     """
-    Validate the metrics-registry.json artifact defines exactly
-    10 bucket boundaries for the conversion_duration_seconds histogram.
+    Validate the metrics-registry.json artifact defines the canonical
+    bucket boundaries for the conversion_duration_seconds histogram.
     """
-    import json
-
-    repo_root = Path(__file__).resolve().parent.parent.parent.parent.parent
+    repo_root = REPO_ROOT
     registry_path = (
         repo_root / "artifacts" / "release" / "0.9.2"
         / "metrics-registry.json"
     )
     if not registry_path.exists():
-        # Skip if artifact not yet produced
-        return
+        raise AssertionError(f"metrics registry artifact missing: {registry_path}")
 
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
     families = registry.get("families", [])
@@ -404,25 +412,21 @@ def test_registry_histogram_has_correct_boundaries():
     hist = histograms[0]
     assert hist["name"] == HISTOGRAM_FAMILY
     assert hist["bucket_count"] == BUCKET_COUNT
-    assert hist["bucket_boundaries"] == [
-        0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 5.0
-    ]
+    assert hist["bucket_boundaries"] == HISTOGRAM["bucket_boundaries"]
 
 
 def test_registry_histogram_is_only_histogram():
     """
-    Validate that conversion_duration_seconds is the ONLY histogram
-    family in the frozen 12-family registry.
+    Validate that conversion_duration_seconds is the only histogram family
+    in the canonical registry.
     """
-    import json
-
-    repo_root = Path(__file__).resolve().parent.parent.parent.parent.parent
+    repo_root = REPO_ROOT
     registry_path = (
         repo_root / "artifacts" / "release" / "0.9.2"
         / "metrics-registry.json"
     )
     if not registry_path.exists():
-        return
+        raise AssertionError(f"metrics registry artifact missing: {registry_path}")
 
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
     families = registry.get("families", [])
@@ -430,7 +434,12 @@ def test_registry_histogram_is_only_histogram():
     histogram_names = [
         f["name"] for f in families if f.get("type") == "histogram"
     ]
-    assert histogram_names == [HISTOGRAM_FAMILY], (
-        f"Expected only {HISTOGRAM_FAMILY} as histogram, "
+    expected_histogram_names = [
+        family["name"]
+        for family in METRICS_CONTRACT["families"]
+        if family["type"] == "histogram"
+    ]
+    assert histogram_names == expected_histogram_names, (
+        f"Expected only {expected_histogram_names} as histogram, "
         f"got {histogram_names}"
     )

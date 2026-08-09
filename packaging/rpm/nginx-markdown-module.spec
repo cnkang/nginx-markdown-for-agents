@@ -1,5 +1,7 @@
+# Legacy copy; CI uses packaging/rpm/SPECS/nginx-module-markdown.spec with
+# parameterized %{version}. This file is retained for historical reference only.
 Name:           nginx-module-markdown-for-agents
-Version:        0.8.0
+Version:        0.9.2
 Release:        1%{?dist}
 Summary:        NGINX module for HTML-to-Markdown conversion
 
@@ -20,7 +22,7 @@ Requires:       nginx >= 1:1.26.0
 
 %description
 NGINX filter module that converts HTML responses to Markdown
-for AI agent consumption. Supports streaming, GFM/MDX flavors,
+for AI agent consumption. Supports streaming, CommonMark/GFM flavors,
 noise pruning, token estimation, and conditional requests.
 
 %prep

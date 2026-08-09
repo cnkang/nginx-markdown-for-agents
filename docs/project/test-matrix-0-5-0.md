@@ -32,7 +32,7 @@ Each sub-spec fills in the following template to identify its covered cells:
 
 ## Gap Record Format
 
-If a cell cannot be covered due to infrastructure or resource constraints, the gap and rationale must be recorded:
+If infrastructure or resource constraints block a cell, the sub-spec must record the gap and rationale:
 
 | Dimension | Uncovered Value | Rationale | Risk Assessment |
 |-----------|----------------|-----------|-----------------|
@@ -40,7 +40,7 @@ If a cell cannot be covered due to infrastructure or resource constraints, the g
 
 ## Aggregate Coverage Status
 
-Before release, aggregate all sub-spec coverage mappings to ensure each value in each dimension is covered by at least one sub-spec:
+Before release, aggregate all sub-spec coverage mappings. Ensure at least one sub-spec covers each value in each dimension:
 
 | Dimension | Value | Covering Sub-Spec | Status |
 |-----------|-------|-------------------|--------|

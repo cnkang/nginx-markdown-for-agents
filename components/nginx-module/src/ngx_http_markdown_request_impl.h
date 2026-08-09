@@ -890,7 +890,8 @@ ngx_http_markdown_handle_header_compression(
         }
 
         if (classification != ENCODING_CHAIN_VALID) {
-            /* FFI contract failure: treat as malformed (fail closed). */
+            /* FFI contract failure: route like MALFORMED
+             * (decision governed by on_error policy). */
             *rc = ngx_http_markdown_handle_encoding_header_invalid(
                 r, ctx, conf);
             return 1;

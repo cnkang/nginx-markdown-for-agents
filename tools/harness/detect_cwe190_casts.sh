@@ -312,7 +312,7 @@ while IFS= read -r match; do
     if echo "$context_block" | grep -qiE '< 0|>= 0|!= NGX_ERROR|== NGX_ERROR|NGX_OK'; then
         has_guard=1
     fi
-    if echo "$context_block" | grep -qiE '> NGX_MAX_SIZE_T_VALUE|> max_size_t|> SIZE_MAX|> UINT_MAX|> [A-Z_]+_MAX|> [A-Z_]+_LIMIT|\(size_t\)[[:space:]]*\w+[[:space:]]*>[[:space:]]*max'; then
+    if echo "$context_block" | grep -qiE '> NGX_MAX_SIZE_T_VALUE|> max_size_t|> SIZE_MAX|> UINT_MAX|> [A-Z_]+_MAX|> [A-Z_]+_LIMIT|\(size_t\)[[:space:]]*[[:alnum:]_]+[[:space:]]*>[[:space:]]*max'; then
         has_guard=1
     fi
     if echo "$context_block" | grep -qiE '/\* CWE-190:guarded \*/'; then

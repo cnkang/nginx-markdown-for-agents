@@ -250,7 +250,7 @@ echo "PORT=${PORT}" >&2
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf -t
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf
 
-# ponytail: poll for pid file — nginx master writes it asynchronously,
+# poll for pid file — nginx master writes it asynchronously,
 # so an immediate -s check races on slow/busy hosts.
 for _i in $(seq 1 50); do
     [[ -s "${RUNTIME}/logs/nginx.pid" ]] && break

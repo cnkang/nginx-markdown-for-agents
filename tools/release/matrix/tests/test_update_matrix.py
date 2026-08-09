@@ -645,6 +645,46 @@ def test_property11_pin_entry_preservation(auto_versions, manual_entries):
         ), f"Support tier changed for manual entry {key}"
 
 
+def test_replace_canonical_dynamic_entries_preserves_unmanaged_dynamic_rows():
+    """Generated rows must not delete unsupported or candidate dynamic rows."""
+    data = {
+        "entries": [
+            {
+                "nginx_version": "1.26.3",
+                "libc": "glibc",
+                "arch": "amd64",
+                "artifact_type": "dynamic-module",
+                "support_tier": "supported",
+            },
+            {
+                "nginx_version": "1.24.0",
+                "libc": "glibc",
+                "arch": "amd64",
+                "artifact_type": "dynamic-module",
+                "support_tier": "candidate",
+            },
+            {"artifact_type": "source-archive", "name": "source"},
+        ]
+    }
+    merged = [
+        {
+            "nginx": "1.26.3",
+            "os_type": "glibc",
+            "arch": "x86_64",
+        }
+    ]
+
+    um._replace_canonical_dynamic_entries(data, merged)
+
+    keys = {
+        (entry.get("nginx_version"), entry.get("libc"), entry.get("arch"))
+        for entry in data["entries"]
+        if entry.get("artifact_type") == "dynamic-module"
+    }
+    assert ("1.26.3", "glibc", "amd64") in keys
+    assert ("1.24.0", "glibc", "amd64") in keys
+
+
 # ---------------------------------------------------------------------------
 # Property 12 — Key Uniqueness After Merge
 # ---------------------------------------------------------------------------

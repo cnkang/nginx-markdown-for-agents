@@ -4,17 +4,17 @@ This document is the repository-owned inventory used to decide which current
 surfaces become compatibility commitments at 1.0. It records source metadata
 and ABI declarations, cross-referenced with production-path evidence. The
 drift gate (`make public-surface-drift-check`) validates source metadata and
-ABI drift against this inventory; runtime behavior is verified by the
-unit, integration, and E2E test suites, not by the drift gate alone.
+ABI drift against this inventory. The unit, integration, and E2E test suites
+verify runtime behavior, not the drift gate alone.
 
-The extraction and drift-check decision is recorded in
+The extraction and drift-check decision appears in
 [ADR-0025](ADR/0025-public-surface-inventory-drift-gate.md).
 
 The evidence order for this inventory is:
 
-1. the NGINX command table and production request path;
-2. production-path unit and end-to-end tests;
-3. generated Rust/C FFI headers and their in-repository callers;
+1. the NGINX command table and production request path,
+2. production-path unit and end-to-end tests,
+3. generated Rust/C FFI headers and their in-repository callers,
 4. operator documentation.
 
 When those sources disagree, the production path is the current behavior and
@@ -63,18 +63,19 @@ value overrides it. `markdown_limits` inherits each key independently.
 | Dynamic configuration | `markdown_dynamic_config`, `markdown_dynamic_config_path`, `markdown_dynconf_dry_run` | H | off; no path; off. One watcher per worker; requests bind one snapshot for their lifetime. | dynconf reload, snapshot, and effective-config tests |
 | Diagnostics | `markdown_diagnostics` | L | off; native NGINX access-phase directives control access. | diagnostics production/access/output tests |
 
-The streaming threshold is an internal 1 MiB heuristic. Zero-copy delivery is
-selected automatically from ownership and backpressure state; neither
-zero-copy nor shadow comparison is a public directive. Dynamic configuration
+The streaming threshold is an internal 1 MiB heuristic. The module selects
+zero-copy delivery automatically from ownership and backpressure state.
+Neither zero-copy nor shadow comparison is a public directive. Dynamic
+configuration
 is stable and uses atomic staged promotion, request snapshot binding, and
 bounded diagnostics state.
 
 ### Removed OTel surface
 
-The OTel directives and implementation are removed from the 0.9.2 production
-surface. There is no experimental or reject-only OTel command-table entry;
+The 0.9.2 production surface no longer includes the OTel directives and
+implementation. There is no experimental or reject-only OTel command-table entry.
 NGINX's standard unknown-directive error is the expected migration behavior.
-ADR-0023 records the conditions required for a future 1.x reintroduction.
+ADR-0027 records the conditions required for a future 1.x reintroduction.
 
 ### Reject-only migration directives
 
@@ -86,7 +87,7 @@ unknown-directive error at `nginx -t` time.
 |----------------|------------------------------------|
 | Legacy size/time/error/cache/trusted-proxy directives | Use the corresponding `markdown_limits`, `markdown_error_policy`, `markdown_cache_validation`, or `markdown_trusted_proxies` contract. |
 | `markdown_streaming_engine` | Use `markdown_streaming off|auto|force`; the old directive is absent. |
-| OTel directives | No 0.9.2 replacement; follow ADR-0023 before any future 1.x design. |
+| OTel directives | No 0.9.2 replacement; follow ADR-0027 before any future 1.x design. |
 
 ## Diagnostics JSON Contract
 
@@ -94,7 +95,7 @@ The stable operator endpoint is the JSON produced by
 `ngx_http_markdown_diagnostics_build_json` in
 `components/nginx-module/src/ngx_http_markdown_diagnostics.c`. There is no
 parallel Rust diagnostics specimen or schema export. The handler is strictly
-read-only: only `GET` and `HEAD` are accepted; there is no mutation endpoint or
+read-only: it accepts only `GET` and `HEAD`. There is no mutation endpoint or
 rollback response schema.
 
 | Top-level field | Current shape | Class |
@@ -104,20 +105,20 @@ rollback response schema.
 | `worker` | `{pid, scope}` with `scope="worker-local"` | `STABLE_FOR_1_0` |
 | `build` | `{source_sha, nginx_version, rust_version, features}` | `STABLE_FOR_1_0` |
 | `configuration` | `{static_digest, dynconf, effective, effective_sources}`; strict additional-properties-free schema | `STABLE_FOR_1_0` |
-| `runtime` | `{inflight, pending_output}` worker-local non-negative counters | `STABLE_FOR_1_0` |
+| `runtime` | `{inflight, pending_output, module_metrics}` worker-local non-negative counters | `STABLE_FOR_1_0` |
 | `recent_decisions` | bounded array of `{timestamp, outcome, stage, reason, error_origin, duration_ms}` | `STABLE_FOR_1_0` |
 
-The full JSON Schema is `schemas/diagnostics.schema.json` and the effective
-field/source contract artifact is checked in alongside the schema.
+The full JSON Schema is `schemas/diagnostics.schema.json`. The effective
+field/source contract artifact ships alongside the schema.
 Legacy `config_snapshot`, profile, streaming, and duplicated metrics fields are
-not part of the v1 wire schema. Only GET and HEAD are accepted; HEAD computes
+not part of the v1 wire schema. The endpoint accepts only GET and HEAD. HEAD computes
 the complete body length but sends no body.
 
 ## Metrics and Reason-Code Contract
 
-The production wire schema is emitted by the v1 Prometheus renderer. The
-endpoint is Prometheus-only; `markdown_metrics_format` and the legacy JSON/text
-selection surfaces are removed.
+The v1 Prometheus renderer emits the production wire schema. The
+endpoint is Prometheus-only. `markdown_metrics_format` and the legacy JSON/text
+selection surfaces no longer exist.
 
 ### Prometheus families currently emitted
 
@@ -138,17 +139,19 @@ nginx_markdown_dynconf_reloads_total
 nginx_markdown_build_info
 ```
 
-The checked-in metrics registry is authoritative; the renderer
-must emit exactly these families in Prometheus 0.0.4 format. Labels are closed
-and bounded: outcomes/stages/reasons use the frozen taxonomy, engine is
-`full_buffer|streaming`, transition is the six-value lifecycle allowlist, and
-encoding/outcome/reason use the registry allowlists. Path, URI, profile, and
-per-path dimensions are absent.
+`schemas/metrics-v1.registry.json` is authoritative. The versioned
+`artifacts/release/<version>/metrics-registry.json` file is only its generated
+projection. The renderer must emit exactly these families in Prometheus 0.0.4
+format. The label sets
+stay closed and bounded: outcomes/stages/reasons use the frozen taxonomy,
+engine is `full_buffer|streaming`, transition is the six-value lifecycle
+allowlist, and encoding/outcome/reason use the registry allowlists. Path, URI,
+profile, and per-path dimensions are absent.
 
 ### Reason labels
 
 The numeric discriminants and strings below are `STABLE_FOR_1_0`. Their source
-is `components/rust-converter/src/decision/reason_code.rs`; C accesses the
+is `components/rust-converter/src/decision/reason_code.rs`. C accesses the
 registry through FFI.
 
 ```text
@@ -188,7 +191,7 @@ and the metrics endpoint E2E scenario. The declarative source is
 
 ## OTel Contract
 
-OTel is removed from the 0.9.2 production surface. ADR-0023 records the
+The 0.9.2 production surface no longer includes OTel. ADR-0027 records the
 worker-owned lifecycle, bounded queue, retry/backoff, timeout, shutdown-flush,
 and collector-backed E2E conditions required before a future 1.x reintroduction.
 
@@ -206,18 +209,18 @@ The stable dynconf file schema is version `1` with these runtime keys:
 | `streaming_buffer` | runtime streaming buffer size in bytes |
 
 Unknown keys or invalid values reject the entire staged update. Successful
-reloads atomically promote a snapshot; failed reloads preserve the active and
+reloads atomically promote a snapshot. Failed reloads preserve the active and
 last-known-good snapshots. Every request binds one effective snapshot at the
 header filter and keeps it for the request lifetime.
 
 ## Rust/C FFI Boundary
 
 Every generated C symbol below is `INTERNAL_ONLY`. The Rust static library and
-NGINX module are released as one product; this project does not publish the
+NGINX module ship as one product. This project does not publish the
 generated header as a third-party SDK or promise ABI compatibility to external
 callers. Rust/C struct layouts, function signatures, and numeric constants may
-change between any two versions without notice. Exports may be added, removed,
-renamed, or have their signatures changed in any release. No long-term
+change between any two versions without notice. The project may add, remove,
+rename, or change the signatures of exports in any release. No long-term
 append-only promise applies to the FFI export set.
 
 | Group | Entrypoints |
@@ -234,30 +237,32 @@ append-only promise applies to the FFI export set.
 | Incremental conversion | `markdown_incremental_new_with_code`, `markdown_incremental_feed`, `markdown_incremental_finalize`, `markdown_incremental_free` |
 | Streaming conversion | `markdown_streaming_new_with_code`, `markdown_streaming_feed`, `markdown_streaming_finalize`, `markdown_streaming_abort`, `markdown_streaming_safe_finish`, `markdown_streaming_output_free` |
 | Reason registry | `markdown_reason_code_str`, `markdown_reason_code_metric_key`, `markdown_reason_code_count` |
+| Encoding chain and hash helpers | `markdown_chain_decode_free`, `markdown_chain_decode_result_init`, `markdown_decode_encoding_chain`, `markdown_parse_encoding_chain`, `markdown_sha256_hex` |
 
 Internal status does not weaken the safety contract. Struct layout, ownership,
 panic containment, result initialization, and generated-header drift remain
-blocking build/test concerns. It only means those symbols may be pruned or
-changed in lockstep across Rust, generated headers, and C before or after 1.0
-without creating an external compatibility promise.
+blocking build/test concerns. It only means the project may prune or change
+those symbols in lockstep across Rust, generated headers, and C before or after
+1.0 without creating an external compatibility promise. The safety properties
+stay binding regardless.
 
 ## Freeze Checklist
 
 The public surface is ready to freeze only when all of the following are true:
 
-- every active directive is either stable or explicitly experimental;
+- every active directive is either stable or explicitly experimental,
 - removed directives are absent from the command table and use the standard
-  NGINX unknown-directive migration behavior;
-- the diagnostics endpoint and its documentation describe the same wire JSON;
-- diagnostics mutation methods are rejected and no undocumented rollback API
-  or response schema exists;
-- the diagnostics schema contains exactly the seven frozen top-level fields;
+  NGINX unknown-directive migration behavior,
+- the diagnostics endpoint and its documentation describe the same wire JSON,
+- the module rejects diagnostics mutation methods and no undocumented rollback API
+  or response schema exists. The endpoint exposes read-only state only.
+- the diagnostics schema contains exactly the seven frozen top-level fields,
 - the metrics catalog, reason-family mapping, and label set match the production
-  renderer;
-- OTel is absent from production code and the command table;
+  renderer,
+- OTel is absent from production code and the command table,
 - `markdown_trusted_proxies` has one documented, tested context/inheritance
-  contract;
+  contract,
 - all FFI declarations have an in-repository consumer or a documented reason to
-  remain internal;
+  remain internal,
 - `make docs-check`, `make test-nginx-unit`, `make test-rust`, and the relevant
   production E2E gates pass.

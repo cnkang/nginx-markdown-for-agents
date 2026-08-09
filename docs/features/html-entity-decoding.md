@@ -2,22 +2,22 @@
 
 ## Overview
 
-The NGINX Markdown for Agents converter handles HTML entity decoding automatically through the html5ever parser library. No additional implementation is required in the converter code itself.
+The NGINX Markdown for Agents converter handles HTML entity decoding automatically through the html5ever parser library. The converter code itself needs no additional implementation.
 
 ## How It Works
 
 ### Automatic Decoding by html5ever
 
-The html5ever parser implements the HTML5 specification's entity decoding algorithm. When HTML is parsed, all HTML entities are automatically decoded before the DOM tree is constructed. This means:
+The html5ever parser implements the HTML5 specification's entity decoding algorithm. When the parser processes HTML, it automatically decodes all HTML entities before constructing the DOM tree. This means:
 
-1. **Named Entities**: Common entities like `&amp;`, `&lt;`, `&gt;`, `&quot;`, `&#39;`, `&nbsp;` are decoded to their corresponding characters
-2. **Decimal Numeric Entities**: Entities like `&#65;` (A), `&#48;` (0) are decoded to their Unicode characters
-3. **Hexadecimal Numeric Entities**: Entities like `&#x41;` (A), `&#x20AC;` (€) are decoded to their Unicode characters
-4. **Unicode Entities**: All valid Unicode entities are decoded, including special characters like smart quotes, currency symbols, etc.
+1. **Named Entities**: Common entities like `&amp;`, `&lt;`, `&gt;`, `&quot;`, `&#39;`, `&nbsp;` decode to their corresponding characters
+2. **Decimal Numeric Entities**: Entities like `&#65;` (A), `&#48;` (0) decode to their Unicode characters
+3. **Hexadecimal Numeric Entities**: Entities like `&#x41;` (A), `&#x20AC;` (€) decode to their Unicode characters
+4. **Unicode Entities**: All valid Unicode entities decode, including special characters like smart quotes, currency symbols, and so on
 
 ### Text Extraction
 
-When the converter extracts text from DOM nodes using the `extract_text()` function, it receives text that has already been decoded by html5ever. The text content in `NodeData::Text` nodes contains the actual characters, not the entity representations.
+When the converter extracts text from DOM nodes using the `extract_text()` function, it receives text that html5ever has already decoded. The text content in `NodeData::Text` nodes contains the actual characters, not the entity representations.
 
 ## Supported Entities
 
@@ -41,7 +41,7 @@ When the converter extracts text from DOM nodes using the `extract_text()` funct
 
 ### Unicode Characters
 
-All valid Unicode characters can be represented and decoded:
+The converter can represent and decode all valid Unicode characters. This covers the full Unicode range. The converter handles every valid code point.
 - Currency symbols: `€`, `£`, `¥`, `₹`
 - Smart quotes: `'`, `'`, `"`, `"`
 - Mathematical symbols: `×`, `÷`, `±`, `≠`
@@ -52,7 +52,7 @@ All valid Unicode characters can be represented and decoded:
 
 ### Double-Encoded Entities
 
-If HTML contains double-encoded entities (e.g., `&amp;lt;`), html5ever decodes them only once:
+If HTML contains double-encoded entities (for example `&amp;lt;`), html5ever decodes them only once:
 - `&amp;lt;` → `&lt;` (not `<`)
 - `&amp;amp;` → `&amp;` (not `&`)
 
@@ -60,14 +60,14 @@ This is correct behavior according to the HTML5 specification.
 
 ### Entities in Different Contexts
 
-Entities are decoded consistently across all HTML contexts:
+The parser decodes entities consistently across all HTML contexts:
 - **In text content**: `<p>&lt;tag&gt;</p>` → `<tag>`
 - **In attributes**: `<a href="?a=1&amp;b=2">` → `?a=1&b=2`
 - **In headings**: `<h1>&amp; Title</h1>` → `& Title`
 - **In code blocks**: `<code>&lt;html&gt;</code>` → `<html>`
 - **In lists**: `<li>&amp; item</li>` → `& item`
 
-Note: While entities in code blocks are decoded by html5ever, the Markdown output preserves the decoded characters. If you need to display literal `<` or `>` in code, they should be escaped in the Markdown output (handled by the code block formatter).
+Note: While html5ever decodes entities in code blocks, the Markdown output preserves the decoded characters. If you need to display literal `<` or `>` in code, escape them in the Markdown output. The code block formatter handles this.
 
 ## Testing
 
@@ -98,18 +98,18 @@ The converter does not need any special entity decoding logic because:
 
 ### Performance
 
-Entity decoding is performed once during HTML parsing, not during Markdown conversion. This is efficient because:
+The parser performs entity decoding once during HTML parsing, not during Markdown conversion. This is efficient because:
 - Decoding happens as part of the parsing process
-- No additional passes over the text are needed
+- The text needs no additional passes
 - The converter works with decoded text directly
 
 ### Correctness
 
 Using html5ever's built-in entity decoding ensures:
 - **Specification Compliance**: Follows HTML5 specification exactly
-- **Comprehensive Support**: All valid HTML entities are supported
-- **Edge Case Handling**: Malformed entities, invalid code points, etc. are handled correctly
-- **Security**: No risk of entity-related vulnerabilities (XSS, etc.)
+- **Comprehensive Support**: The converter supports all valid HTML entities
+- **Edge Case Handling**: The converter handles malformed entities, invalid code points, and so on correctly
+- **Security**: No risk of entity-related vulnerabilities (XSS, and so on)
 
 ## Requirements Satisfied
 
@@ -120,8 +120,8 @@ The implementation:
 - ✅ Decodes common named entities (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&#39;`)
 - ✅ Handles numeric entities (decimal and hexadecimal)
 - ✅ Supports all Unicode characters
-- ✅ Works correctly in all HTML contexts (text, attributes, code, etc.)
-- ✅ Is tested comprehensively
+- ✅ Works correctly in all HTML contexts (text, attributes, code, and so on)
+- ✅ Has comprehensive test coverage
 
 ## References
 

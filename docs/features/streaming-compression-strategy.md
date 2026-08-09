@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document describes how the 0.9.1 streaming conversion engine handles
+This document describes how the 0.9.2 streaming conversion engine handles
 compressed upstream responses, including its relationship to bounded
 full-buffer decompression.
 
@@ -10,8 +10,8 @@ full-buffer decompression.
 
 In 0.9.2, gzip, deflate, and Brotli responses are eligible for incremental
 decompression when `markdown_streaming force` or `auto` selects streaming,
-automatic decompression is enabled, and cache validation is not `full`.
-The `auto` route uses an internal bounded size heuristic; it is not an
+automatic decompression turns on, and cache validation is not `full`.
+The `auto` route uses an internal bounded size heuristic. It is not an
 operator-facing threshold directive.
 
 Brotli streaming requires `NGX_HTTP_BROTLI` at compile time (enabled by
@@ -19,7 +19,7 @@ default in official release artifacts via `NGX_MARKDOWN_BROTLI_STREAMING=on`).
 When `NGX_HTTP_BROTLI` is not defined, Brotli falls back to bounded full-buffer
 decompression via the Rust FFI path.
 
-| Encoding | Streaming-eligible conditions | 0.9.1 path |
+| Encoding | Streaming-eligible conditions | 0.9.2 path |
 |----------|-------------------------------|------------|
 | identity | streaming selected | streaming conversion |
 | deflate RFC 1950 | auto decompress on; cache validation not `full` | streaming decompression |
@@ -34,15 +34,15 @@ decompression via the Rust FFI path.
 When the header filter detects a `Content-Encoding` header on an otherwise
 eligible response, the following logic applies:
 
-1. If `markdown_auto_decompress` is **off**, or the encoding is unsupported,
+1. If `markdown_auto_decompress` is **off**, or the module does not support the encoding,
    the response passes through unchanged (no conversion attempted).
-2. If `markdown_auto_decompress` is **on** and streaming is selected with cache
+2. If `markdown_auto_decompress` is **on** and the module selects streaming with cache
    validation not `full`:
-   - **Deflate** (zlib-wrapped RFC 1950 or raw RFC 1951) is decompressed
+   - **Deflate** (zlib-wrapped RFC 1950 or raw RFC 1951) decompresses
      incrementally after a two-byte framing sniff.
-   - **Gzip** is decompressed incrementally with gzip member/trailer validation.
-   - **Brotli** is decompressed incrementally (single-stream, trailing-data
-     rejection, no-progress guard) when `NGX_HTTP_BROTLI` is defined.
+   - **Gzip** decompresses incrementally with gzip member/trailer validation.
+   - **Brotli** decompresses incrementally (single-stream, trailing-data
+     rejection, no-progress guard) when the build defines `NGX_HTTP_BROTLI`.
 3. Full cache validation selects the bounded full-buffer path for all codecs.
 4. Brotli without `NGX_HTTP_BROTLI` defined routes to bounded full-buffer
    decompression via the Rust FFI path.
@@ -76,17 +76,18 @@ Both paths enforce `markdown_limits decompressed_size=<size>` and
 member reset does not reset the budget. A gzip
 `Z_STREAM_END` completes one member, so remaining bytes in the same chunk or a
 later chunk begin another member. Finalization succeeds only at a complete
-member boundary; a truncated final member is rejected.
+member boundary. The module rejects a truncated final member.
 
 **Deflate trailing-data integrity**: deflate (zlib-wrapped RFC 1950 or raw
 RFC 1951) does not support concatenated members. A complete deflate stream
-must consume every byte of the compressed payload. If `Z_STREAM_END` is
-reached with `avail_in > 0`, the remaining bytes are trailing data and the
-response is rejected as `FORMAT_ERROR` rather than silently truncated. The
-same applies to non-empty chunks arriving after the deflate stream has
-already finished: empty chunks remain a safe no-op, but any non-empty
-subsequent input is classified as trailing data and rejected. Gzip is
-exempt from this constraint because it supports concatenated members.
+must consume every byte of the compressed payload. If zlib reaches
+`Z_STREAM_END` with `avail_in > 0`, the remaining bytes are trailing data and
+the module rejects the response as `FORMAT_ERROR` rather than silently
+truncating it. The same applies to non-empty chunks arriving after the
+deflate stream has already finished: empty chunks remain a safe no-op, but
+any non-empty subsequent input classifies as trailing data and the module
+rejects it. Gzip is exempt from this constraint because it supports
+concatenated members.
 
 If decompressed output exceeds the limit, decompression terminates immediately
 and the configured `markdown_error_policy` applies before commit:
@@ -94,15 +95,15 @@ and the configured `markdown_error_policy` applies before commit:
 - **pass** (default): original compressed response served to client unchanged.
 - **fail_closed**: 502 Bad Gateway returned.
 
-After streaming output is committed, the existing post-commit safe-finish or
-abort behavior applies; the module does not attempt impossible original-body
-replay. Downstream `NGX_AGAIN` suspends delivery without changing compressed
-source ownership, so remaining input is retained and consumed exactly once on
-resume.
+After the module commits streaming output, the existing post-commit
+safe-finish or abort behavior applies. The module does not attempt impossible
+original-body replay. Downstream `NGX_AGAIN` suspends delivery without
+changing compressed source ownership, so remaining input stays retained and
+gets consumed exactly once on resume.
 
 ## Rationale
 
-The 0.9.1 boundary is based on validated decoder lifecycles:
+The 0.9.2 boundary rests on validated decoder lifecycles:
 
 - Operates within bounded memory (no full-response buffering).
 - Handles chunk boundaries that may split compressed frames.
@@ -139,7 +140,7 @@ The 0.9.1 boundary is based on validated decoder lifecycles:
   `markdown_streaming force` with `markdown_auto_decompress on`. Brotli streaming is
   active in official release artifacts. Custom builds must have `libbrotlidec`
   available (see Build Compatibility below).
-- **Brotli upstreams, Brotli-disabled build**: Responses are routed to bounded
+- **Brotli upstreams, Brotli-disabled build**: The module routes responses to bounded
   full-buffer decompression via the Rust FFI path. No streaming TTFB benefit.
 - **Budget tuning**: Set `markdown_limits decompressed_size=<size>` and
   `decompression_ratio=<N>` to accommodate legitimate compressed responses
@@ -150,9 +151,9 @@ The 0.9.1 boundary is based on validated decoder lifecycles:
 Brotli streaming requires `libbrotlidec` at build time and runtime. The
 `NGX_MARKDOWN_BROTLI_STREAMING` environment variable controls detection:
 
-- `on` (default in release artifacts): probe and link; fail if missing.
-- `auto`: probe silently; enable if available, fall back to full-buffer if not.
-- `off`: skip probing; Brotli uses bounded full-buffer only.
+- `on` (default in release artifacts): probe and link. Fail if missing.
+- `auto`: probe silently. Enable if available, fall back to full-buffer if not.
+- `off`: skip probing. Brotli uses bounded full-buffer only.
 
 When `markdown_cache_validation full` is set, all codecs (including Brotli)
 route to bounded full-buffer decompression regardless of streaming preference.

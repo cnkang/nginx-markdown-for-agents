@@ -1,8 +1,14 @@
 # Migration Guide: 0.9.0 → 0.9.1
 
+> **Historical guide.** This guide covers the 0.9.0 → 0.9.1 migration
+> only. The 0.9.2 release removed the OTel directives that the migration
+> table below recommends (`markdown_otel`, `markdown_otel_endpoint`). If
+> you upgrade directly to 0.9.2, read
+> [MIGRATION-0.9.2.md](MIGRATION-0.9.2.md) first.
+
 ## Overview
 
-**0.9.0 → 0.9.1 is a breaking release.** The 0.9.0 release was intended as the
+**0.9.0 → 0.9.1 is a breaking release.** The 0.9.0 release intended to be the
 last breaking release before v1.0. The freeze was deliberately extended through
 v0.9.1 because v1.0 had not shipped, adoption remained limited, and the final
 toolchain, dependency, configuration, and ABI audit found cleanup worth
@@ -57,7 +63,7 @@ rustc --version
 
 ### 2. `markdown_streaming_engine` Removed → `markdown_streaming`
 
-The `markdown_streaming_engine` directive is removed from the active contract.
+The active contract removed the `markdown_streaming_engine` directive.
 Use `markdown_streaming off|auto|force` instead.
 
 **Migration mapping:**
@@ -129,7 +135,7 @@ refuses startup if the linked Rust archive and generated C header disagree.
 
 **Impact:** The converter ABI is an internal boundary of the bundled module,
 not a standalone third-party SDK contract. Source builders must rebuild with
-the 0.9.1 Rust archive. Prebuilt module users are unaffected (the bundled
+the 0.9.1 Rust archive. Prebuilt module users stay unaffected (the bundled
 module is already matched).
 
 ---
@@ -248,7 +254,7 @@ freeze:
 - `nginx_markdown_failures_total` now uses truthful bounded categories:
   `conversion_error`, `resource_limit`, and `system_error`.
 - The misleading gauge-like `nginx_markdown_conversion_duration_seconds{le=...}`
-  is replaced by the cumulative counter family
+  the cumulative counter family replaces it
   `nginx_markdown_conversion_latency_bucket_total{le=...}`.
 
 **Dashboard migration:**
@@ -287,4 +293,5 @@ Rust converter and C module must be a matched pair from the same version.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Marked guide historical; OTel directives removed in 0.9.2 |
 | 0.9.1 | 2026-07-29 | Kang | Initial migration guide for 0.9.0 → 0.9.1 |

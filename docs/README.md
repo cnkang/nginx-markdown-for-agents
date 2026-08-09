@@ -4,7 +4,7 @@ This directory contains the maintained documentation for `nginx-markdown-for-age
 
 If you are new to the project, start with [README.md](../README.md). It explains what the module does, why you would use it, and how to verify a first deployment quickly.
 
-Think of this directory as the maintained map behind that landing page: guides for rollout and operations, feature notes for implementation details, and testing references for validation work.
+Think of this directory as the maintained map behind that landing page. It holds guides for rollout and operations, feature notes for implementation details, and testing references for validation work.
 
 ## Choose a Starting Point
 
@@ -91,6 +91,31 @@ Project-level status and maintenance-oriented references.
 - harness rationale, boundaries, and historical context
 
 Index: [project/README.md](project/README.md)
+
+### `releases/`
+
+Per-version release notes and release checklists (one file per release line).
+
+- 0.9.2 release notes and pre-freeze checklist
+- canonical release matrix: [release-matrix.json](releases/release-matrix.json)
+- package/artifact support matrix: [`tools/release-matrix.json`](../tools/release-matrix.json)
+  (schema 1.0. This is separate from the release-contract matrix above)
+
+### `development/`
+
+Implementation plans for in-flight release lines (for example the 0.9.2
+implementation plan). Consumed during development and archived when the
+release ships.
+
+### `evidence/`
+
+Machine-readable evidence artifacts referenced by feature docs (for example
+corpus-diff tables). Treated as read-only reference data.
+
+### `operations/`
+
+Deployment-oriented reference material that is not part of the canonical
+user guide (for example production-configs.md, validated by release gates).
 
 ## Reader Paths
 

@@ -16,7 +16,7 @@
       "provenance_form": "release-manifest.json entry with source URL, source SHA (git commit), and per-file sha256",
       "predicate": "Source archive provenance predicate: repo URL + git commit SHA + archive sha256",
       "producer": "packaging/scripts/generate-release-manifest.py (release-packages.yml integrity-checksums)",
-      "consumer": "verify-release-manifest.py, release gates, downstream evidence consumers",
+      "consumer": "packaging/scripts/validate-release-manifest.py, release gates, downstream evidence consumers",
       "verification_commands": [
         "python3 packaging/scripts/validate-release-manifest.py"
       ]
@@ -47,7 +47,7 @@
       "producer": "OCI release workflow (cosign attest)",
       "consumer": "provenance-index.json consumers, cosign verify-attestation",
       "verification_commands": [
-        "cosign verify-attestation <image>@sha256:<digest>"
+        "cosign verify-attestation --certificate-identity <identity> --certificate-oidc-issuer <issuer> <image>@sha256:<digest>"
       ]
     },
     "homebrew_formula_source": {

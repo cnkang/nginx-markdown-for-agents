@@ -192,7 +192,7 @@ def _extract_evidence_metrics(report: dict) -> dict:
     scenarios = _report_scenarios(report)
 
     if not scenarios:
-        # ponytail: keep empty/legacy tests happy while failing real missing scenarios
+        # keep empty/legacy tests happy while failing real missing scenarios
         return {
             "fallback_rate_abs": 0.0,
             "memory_slope_pct": 0.0,

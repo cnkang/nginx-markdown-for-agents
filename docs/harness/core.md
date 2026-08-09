@@ -85,8 +85,8 @@ Define the checkable outcome before calling work done:
 - refactor: behavior that must remain unchanged
 - review: concrete risks, missing tests, and regressions
 
-Use the narrowest meaningful verification that proves that outcome. If a
-stronger check is skipped, record why.
+Use the narrowest meaningful verification that proves that outcome. If you
+skip a stronger check, record why.
 
 Warnings are not cleanup theater. Do not silence a warning by weakening checks,
 shrinking coverage, or deleting behavior unless the warning itself proves the
@@ -95,11 +95,11 @@ behavior is invalid. Fix the underlying problem or escalate it explicitly.
 ## Status Semantics
 
 - `PASS`: the check ran and matched the contract
-- `FAIL`: the contract is broken and the task is blocked
-- `SKIP_NOT_PRESENT`: optional local-only input was not present or was excluded
+- `FAIL`: contract validation failed. The task cannot proceed.
+- `SKIP_NOT_PRESENT`: optional local-only input was not present or got excluded
   from repository validation by Git ignore rules
-- `WARN_NEEDS_AUTHOR_REVIEW`: the harness found a likely drift that should be
-  reviewed by the author, but it is not a public-repo failure by itself
+- `WARN_NEEDS_AUTHOR_REVIEW`: the harness found a likely drift that the
+  author should review, but it is not a public-repo failure by itself
 
 Harness tools must map malformed or unreadable inputs into these explicit
 statuses whenever possible. Public manifests should fail clearly. Optional local
@@ -180,13 +180,13 @@ Repo-owned docs keep durable truth. The state carrier keeps execution memory.
 - **Minimum**: 80% aggregate line coverage for both the C module and the Rust converter
 - **Target**: 90% aggregate line coverage
 - **Critical paths** (auth, error handling, FFI boundary, conditional requests): 90% line coverage for new code
-- Coverage is collected via `make coverage-c` (C module E2E + gcov/lcov) and `make coverage-rust` (Rust `cargo llvm-cov`)
-- Advisory per-file thresholds are logged by the coverage script but are not CI-blocking gates
+- The project collects coverage via `make coverage-c` (C module E2E + gcov/lcov) and `make coverage-rust` (Rust `cargo llvm-cov`)
+- The coverage script logs advisory per-file thresholds but they are not CI-blocking gates
 - The lcov report is always produced regardless of coverage level, ensuring SonarCloud trends remain visible
 
 ## Spec Template Convention
 
-When a new spec is created for a feature or bugfix that touches C module or Rust converter production code, the spec's tasks document SHALL include a coverage verification checkpoint as a required (non-optional) task. This is enforced by convention in this harness documentation, not by tooling.
+When creating a new spec that touches production code, include a coverage verification checkpoint in the tasks document. The spec SHALL include it. This applies to C and Rust paths. This checkpoint is mandatory, not optional. Convention enforces this in harness documentation, not tooling.
 
 ## Naming and Documentation Standards
 
@@ -201,18 +201,18 @@ these naming and documentation principles:
   language-appropriate format: `/* */` for C (NGINX style), `///` for Rust,
   docstrings for Python, `#` blocks for shell.
 - **Inline comments**: complex or non-obvious logic has comments explaining
-  *why*, not *what*. Invariants, trade-offs, and edge-case reasoning are
+  *why*, not *what*. Invariants, trade-offs, and edge-case reasoning get
   documented at the point of use.
 - **Type documentation**: struct and enum definitions include comments describing
   the purpose of the type and the meaning of each field or variant.
 - **Framework conventions preserved**: NGINX numbered macros (`ngx_log_debug0`
   through `ngx_log_debug8`) are framework conventions where the trailing digit
-  indicates argument count. These must not be renamed.
+  indicates argument count. These must stay unrenamed.
 - **Test divergence documentation**: when a test reimplements production logic
-  (because the production function cannot be linked), the test must document
+  (because the production function cannot link), the test must document
   the divergence risk and the semantic contract it mirrors.
 
-This standard is codified as AGENTS.md Rule 26 and enforced through the
+AGENTS.md Rule 26 codifies this standard and enforces it through the
 pre-output checklist.
 
 ## Document Updates

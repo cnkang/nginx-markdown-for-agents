@@ -31,6 +31,7 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -69,14 +70,14 @@ STAT_ELAPSED_PATTERN = re.compile(r"stat::elapsed_seconds:\s*([\d.]+)")
 DONE_RUNS_PATTERN = re.compile(r"Done\s+(\d+)\s+runs?\s+in\s+([\d.]+)\s+second")
 FAILURE_MARKER_PATTERN = re.compile(
     r"ERROR: libFuzzer|==ERROR: AddressSanitizer|SUMMARY: AddressSanitizer"
-    r"|CRASH|runtime error:")
+    r"|SUMMARY: UndefinedBehaviorSanitizer|runtime error:")
 
 REQUIRED_TARGET_FIELDS = ("name", "seed", "required_minutes",
                           "required_executions", "blocking")
 REQUIRED_SEED_FIELDS = ("target", "seed_path", "digest")
 OBSERVATION_FIELDS = ("elapsed_seconds_total", "executions_total", "crashes",
                       "sanitizer_findings")
-PER_TARGET_IDENTITY_FIELDS = ("target", "seed", "corpus_dir", "raw_log_ref",
+PER_TARGET_IDENTITY_FIELDS = ("target", "seed", "corpus_dir", "seed_path", "raw_log_ref",
                               "status")
 
 # (field, kind, positive, non-empty, expected description)
@@ -276,9 +277,12 @@ def validate_corpus_seeds(data: dict, expected_sha: str,
 
 def _cargo_fuzz_available() -> bool:
     """Return whether the cargo +nightly toolchain can be invoked."""
+    cargo = shutil.which("cargo")
+    if cargo is None:
+        return False
     try:
         result = subprocess.run(
-            ["cargo", "+nightly", "--version"],
+            [cargo, "+nightly", "--version"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             timeout=30, check=False)
     except (OSError, subprocess.SubprocessError):
@@ -288,9 +292,13 @@ def _cargo_fuzz_available() -> bool:
 
 def _invoke_fuzz(target: str, flags: list[str], timeout: int) -> dict:
     """Run one cargo fuzz invocation, returning status and captured output."""
+    cargo = shutil.which("cargo")
+    if cargo is None:
+        return {"returncode": -1, "stdout": "",
+                "stderr": "spawn failed: cargo not found"}
     validated_target = validate_filename_strict(target, purpose=FUZZ_TARGET_LABEL)
     command = [
-        "cargo", "+nightly", "fuzz", "run", validated_target, "--", *flags
+        cargo, "+nightly", "fuzz", "run", validated_target, "--", *flags
     ]
     started = time.monotonic()
     try:
@@ -337,7 +345,8 @@ def _classify_finding(finding: str) -> tuple[int, int]:
     """Return (crashes, sanitizer_findings) counts for a failure finding."""
     if not finding:
         return 0, 0
-    if "AddressSanitizer" in finding:
+    if any(marker in finding for marker in (
+            "AddressSanitizer", "UndefinedBehaviorSanitizer", "runtime error:")):
         return 0, 1
     return 1, 0
 
@@ -392,6 +401,9 @@ def _run_target_soak(target: str, seed: int, required_executions: int,
         total_elapsed += elapsed
         if failure:
             break
+        if (total_executions >= required_executions
+                and total_elapsed >= required_seconds):
+            break
     else:
         failure = (f"threshold not reached within "
                    f"{MAX_FUZZ_INVOCATIONS} invocations")
@@ -411,6 +423,7 @@ def _run_target_soak(target: str, seed: int, required_executions: int,
         "crashes": crashes,
         "sanitizer_findings": sanitizer_findings,
         "corpus_dir": str(CORPUS_ROOT / validated_target),
+        "seed_path": "",
         "raw_log_ref": str(validated_log_path.relative_to(REPO_ROOT)),
         "status": status,
         "failure_reason": failure,
@@ -440,7 +453,7 @@ def _run_target_record(entry: dict, seed_path: str) -> dict:
     log_path = REPO_ROOT / DEFAULT_LOG_DIR / f"{entry['name']}.log"
     record = _run_target_soak(entry["name"], int(entry["seed"]),
                               required_executions, required_seconds, log_path)
-    record["corpus_dir"] = seed_path
+    record["seed_path"] = seed_path
     return record
 
 

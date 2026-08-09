@@ -14,12 +14,12 @@ Required:
 - Treat compiler/test warnings as triage items, not automatic cleanup work:
   classify each warning as either a real defect signal or expected test-harness
   structure before deciding whether to change code.
-- When a warning is reported from one test target, run at least one broader
+- When one test target reports a warning, run at least one broader
   compile-only sweep for the touched area (for example `cargo test --tests
   --no-run`) to detect the full warning surface before applying fixes.
 - Prefer fixing real unused-code warnings by removing stale fields/assignments
-  or consuming values in assertions; use blanket `allow` only for deliberate
+  or consuming values in assertions, use blanket `allow` only for deliberate
   shared test-support modules and keep the scope minimal.
 - In multi-crate repositories, reproduce user-provided commands in the correct
-  crate directory if repository root has no `Cargo.toml`; explicitly record the
+  crate directory if repository root has no `Cargo.toml`, explicitly record the
   effective working directory used for verification.

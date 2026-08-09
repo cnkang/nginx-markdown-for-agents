@@ -8,7 +8,7 @@ operator documentation, and harness reports.
 | Module | The NGINX C filter module. | Use when describing NGINX request, header, body, config, and metrics handling. |
 | Rust converter | The Rust HTML-to-Markdown library and FFI layer. | Use for parser, converter, charset, sanitizer, streaming, and ABI behavior. |
 | Full-buffer path | Conversion path that buffers the complete response before calling Rust. | Do not call this "legacy" unless discussing historical behavior. |
-| Incremental path | Large-response path backed by the Rust incremental API. | Retired in 0.9.0; the `markdown_large_body_threshold` directive is a reject-only stub with no direct Config V2 replacement. |
+| Incremental path | Large-response path backed by the Rust incremental API. | Retired in 0.9.0; the `markdown_large_body_threshold` directive was removed in 0.9.2 — using it now reports an `unknown directive` error at `nginx -t` time. |
 | Streaming path | Chunked conversion path enabled by `MARKDOWN_STREAMING_ENABLED`. | Use for Pre-Commit/Post-Commit, backpressure, and streaming budget behavior. |
 | Fail-open | Error policy that serves original HTML after conversion cannot complete. | Pair with `markdown_error_policy pass`. |
 | Fail-closed | Error policy that returns an error response instead of original HTML. | Pair with `markdown_error_policy fail_closed`. |
@@ -24,7 +24,7 @@ operator documentation, and harness reports.
 - C functions, fields, and local variables use NGINX-style snake_case.
 - Rust public APIs use Rust naming conventions and Rustdoc comments.
 - Reason codes must match emitted log and metric labels exactly. Decision-chain
-  reason codes use lowercase snake_case; streaming engine reason codes use
+  reason codes use lowercase snake_case, streaming engine reason codes use
   uppercase snake_case.
 - Prometheus examples use the full series name and labels, for example
   `nginx_markdown_requests_total{outcome="failed_open"}`.

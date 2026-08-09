@@ -2,8 +2,8 @@
  * Test: streaming_replay_overflow_security
  *
  * Security test validating that the streaming path correctly handles
- * replay buffer overflow when the precommit buffer limit
- * (markdown_stream_precommit_buffer) is exceeded.
+ * replay buffer overflow when the bounded streaming replay buffer
+ * is exceeded.
  *
  * Validates:
  *   - REPLAY_OVERFLOW event fires when buffer capacity is exceeded
@@ -271,7 +271,7 @@ test_overflow_fires_on_exceed_capacity(void)
  *
  * Scenario: A single chunk larger than the entire buffer capacity
  *           is fed. This simulates a large upstream response body
- *           hitting a small precommit_buffer setting.
+ *           hitting a small streaming_buffer setting.
  *
  * Validates: oversized body / replay overflow handling, Rule 38
  * ================================================================ */
@@ -614,17 +614,17 @@ test_incremental_overflow_boundary(void)
  *           the decision engine should still produce REJECT_STATUS.
  *           This verifies fail-closed semantics per fail-open/fail-closed policy preservation.
  *
- * Validates: reject policy produces 502 (fail-closed)
+ * Validates: reject policy produces REJECT_STATUS (fail-closed)
  * ================================================================ */
 
 static void
-test_overflow_reject_policy_produces_502(void)
+test_overflow_reject_policy_produces_reject_status(void)
 {
     ngx_http_markdown_stream_ctx_t  dctx;
     ngx_http_markdown_decision_t    decision;
 
     TEST_SUBSECTION(
-        "Overflow + on_error=reject -> 502 (fail-closed)");
+        "Overflow + reject policy -> REJECT_STATUS (fail-closed)");
 
     memset(&dctx, 0, sizeof(dctx));
     dctx.current_state = NGX_HTTP_MD_STATE_PRE_COMMIT;
@@ -643,7 +643,7 @@ test_overflow_reject_policy_produces_502(void)
         decision.action == NGX_HTTP_MD_ACTION_REJECT_STATUS,
         "reject policy: action is REJECT_STATUS");
 
-    TEST_PASS("Overflow + reject policy = 502 (fail-closed)");
+    TEST_PASS("Overflow + reject policy = REJECT_STATUS (fail-closed)");
 }
 
 
@@ -667,7 +667,7 @@ main(void)
     test_decision_engine_overflow_within_limits();
     test_decision_engine_overflow_exceeded_limits_pass();
     test_decision_engine_overflow_exceeded_limits_reject();
-    test_overflow_reject_policy_produces_502();
+    test_overflow_reject_policy_produces_reject_status();
 
     /* State handling after overflow */
     test_replay_unavailable_can_still_commit();

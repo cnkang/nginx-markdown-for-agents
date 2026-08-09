@@ -11,7 +11,7 @@ Checks performed:
   3.  All 9 troubleshooting SOPs with symptom/root-cause/resolution
   4.  Installation method sections contain tier labels
   5.  Operator Verification describes four module states
-  6.  Compatibility matrix references tools/release-matrix.json
+  6.  Compatibility matrix references release-matrix.json
   7.  Release artifact naming convention and exact version match
   8.  Environment-specific notes cover four environments
   9.  Installation guide references install-verify.yml CI workflow
@@ -195,7 +195,7 @@ def check_compatibility_matrix(text: str) -> list[str]:
     if "release-matrix.json" not in section:
         errors.append(
             "Compatibility Matrix section does not reference "
-            "'tools/release-matrix.json'"
+            "'release-matrix.json'"
         )
     # Check that a markdown table header row exists with NGINX and OS columns.
     # Use substring checks instead of regex to avoid backtracking concerns (S5852).

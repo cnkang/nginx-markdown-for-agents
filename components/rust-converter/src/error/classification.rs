@@ -55,6 +55,10 @@ pub enum ErrorClass {
     /// Rust FFI panic caught by catch_unwind.
     FfiPanic = 3,
     /// Decompression of upstream response failed.
+    ///
+    /// FFI classification maps header decompression error codes 12/13/14 to
+    /// `ConversionError`; this variant is a semantic placeholder retained for
+    /// reason-code mapping.
     DecompressionError = 4,
     /// Worker inflight limit exceeded (detected by spec 52).
     Overload = 5,

@@ -35,10 +35,10 @@ Each sub-spec fills in the following table upon completion, recorded as part of 
 ## Usage
 
 1. Each sub-spec self-assesses against the six checkpoints after implementation is complete
-2. Assessment results are recorded in the sub-spec's completion artifacts
+2. The sub-spec's completion artifacts record assessment results
 3. Streaming-related sub-specs must additionally include streaming-to-full-buffer rollback verification in the "Rollbackable" checkpoint
-4. All checkpoints must pass before a sub-spec can be declared complete
-5. DoD assessments are reviewed during the Go/No-Go review
+4. All checkpoints must pass before the team declares a sub-spec complete
+5. The Go/No-Go review reviews DoD assessments
 
 ## Document Updates
 

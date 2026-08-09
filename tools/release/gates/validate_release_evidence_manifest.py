@@ -127,13 +127,16 @@ def validate_record(record: dict, expected_sha: str | None = None) -> list[str]:
     return reasons
 
 
-def _check_entry(entry: dict, index: int, seen_ids: set, reasons: list) -> None:
-    """Validate one evidence manifest entry."""
+def _check_required_entry_fields(entry: dict, index: int, reasons: list) -> None:
+    """Record missing required fields for one evidence entry."""
     for field in REQUIRED_ENTRY_FIELDS:
         if field not in entry:
             reasons.append(
                 f"missing-observation: entries[{index}] missing {field}")
 
+
+def _check_entry_identity(entry: dict, seen_ids: set, reasons: list) -> None:
+    """Record duplicate evidence entry identifiers."""
     entry_id = entry.get("id")
     if entry_id is not None:
         if entry_id in seen_ids:
@@ -141,28 +144,49 @@ def _check_entry(entry: dict, index: int, seen_ids: set, reasons: list) -> None:
                 f"malformed: duplicate entry id {entry_id!r}")
         seen_ids.add(entry_id)
 
+
+def _check_entry_status(entry: dict, index: int, reasons: list) -> None:
+    """Record invalid evidence status values."""
     status = entry.get("status")
     if status is not None and status not in VALID_STATUSES:
         reasons.append(
             f"malformed: entries[{index}] status {status!r} not in "
             f"{VALID_STATUSES}")
 
+
+def _check_entry_blocking(entry: dict, index: int, reasons: list) -> None:
+    """Record invalid blocking flags and failed blocking entries."""
     blocking = entry.get("blocking")
+    status = entry.get("status")
     if blocking is not None and not isinstance(blocking, bool):
         reasons.append(
             f"malformed: entries[{index}] blocking must be a boolean")
 
-    if entry.get("blocking") is True:
-        if status == "pending":
-            reasons.append(
-                f"blocking-pending: entries[{index}] "
-                f"(category={entry.get('category')!r}) is blocking with "
-                f"status=pending")
-        elif status == "fail":
-            reasons.append(
-                f"blocking-pending: entries[{index}] "
-                f"(category={entry.get('category')!r}) is blocking with "
-                f"status=fail")
+    if entry.get("blocking") is True and status != "pass":
+        reasons.append(
+            f"blocking-pending: entries[{index}] "
+            f"(category={entry.get('category')!r}) is blocking with "
+            f"status={status!r}; blocking entries must pass")
+
+
+def _check_entry_skip_requirements(entry: dict, index: int, reasons: list) -> None:
+    """Record missing justification fields for skipped entries."""
+    status = entry.get("status")
+    if status == "skip":
+        for field in ("justification", "policy_reference"):
+            if not isinstance(entry.get(field), str) or not entry[field].strip():
+                reasons.append(
+                    f"malformed: entries[{index}] status=skip requires "
+                    f"non-empty {field}")
+
+
+def _check_entry(entry: dict, index: int, seen_ids: set, reasons: list) -> None:
+    """Validate one evidence manifest entry."""
+    _check_required_entry_fields(entry, index, reasons)
+    _check_entry_identity(entry, seen_ids, reasons)
+    _check_entry_status(entry, index, reasons)
+    _check_entry_blocking(entry, index, reasons)
+    _check_entry_skip_requirements(entry, index, reasons)
 
 
 def run_fixture_gate(args) -> int:

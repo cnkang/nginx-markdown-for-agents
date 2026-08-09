@@ -28,7 +28,7 @@ File: `components/rust-converter/src/converter.rs`
 }
 ```
 
-The implementation uses pattern matching in the `handle_element` method to identify these tags and skip them entirely, including all their child nodes.
+The implementation uses pattern matching in the `handle_element` method. It identifies these tags and skips them entirely, including all their child nodes.
 
 ## Security Rationale
 
@@ -44,18 +44,18 @@ The implementation includes comprehensive unit tests:
 
 ### Basic Removal Tests
 
-1. **`test_script_removal`**: Verifies `<script>` tags and their content are removed
-2. **`test_style_removal`**: Verifies `<style>` tags and their content are removed
-3. **`test_noscript_removal`**: Verifies `<noscript>` tags and their content are removed
+1. **`test_script_removal`**: Verifies that the module removes `<script>` tags and their content
+2. **`test_style_removal`**: Verifies that the module removes `<style>` tags and their content
+3. **`test_noscript_removal`**: Verifies that the module removes `<noscript>` tags and their content
 
 ### Advanced Scenarios
 
 4. **`test_multiple_non_content_removal`**: Tests removal of multiple non-content elements in one document
 5. **`test_nested_non_content_removal`**: Tests removal of non-content elements nested within other elements
-6. **`test_script_with_attributes_removal`**: Tests removal of script tags with attributes (type, src, etc.)
+6. **`test_script_with_attributes_removal`**: Tests removal of script tags with attributes (type, src, and so on)
 7. **`test_style_in_head_removal`**: Tests removal of style tags in the `<head>` section
 8. **`test_inline_script_removal`**: Tests removal of inline JavaScript event handlers in script tags
-9. **`test_content_preservation_around_non_content`**: Verifies that content before and after non-content elements is preserved correctly
+9. **`test_content_preservation_around_non_content`**: Verifies that content before and after non-content elements stays preserved correctly
 
 ### Test Results
 
@@ -134,15 +134,15 @@ The current implementation focuses on the three core non-content elements. Futur
 
 ## Related: Form Element Content Preservation
 
-Form-related elements (`<form>`, `<button>`, `<select>`, `<textarea>`, `<fieldset>`, `<label>`, `<option>`, etc.) are handled separately from non-content elements. Instead of being removed entirely, their HTML tags are stripped while child text content is preserved in the Markdown output. This ensures AI agents retain meaningful information such as labels, button captions, and option lists. See `docs/features/security.md` Layer 2 for details.
+Form-related elements (`<form>`, `<button>`, `<select>`, `<textarea>`, `<fieldset>`, `<label>`, `<option>`, and so on) get separate handling from non-content elements. Instead of removing them entirely, the module strips their HTML tags while preserving child text content in the Markdown output. This ensures AI agents retain meaningful information such as labels, button captions, and option lists. See `docs/features/security.md` Layer 2 for details.
 
 ## Related: Embedded Content Element Handling
 
-Embedded content elements (`<iframe>`, `<object>`, `<embed>`) are also handled with a strip-tag-keep-content approach. The `src`/`data` URL is extracted as a Markdown link (using the `title` attribute as label when available), and any fallback child text is preserved. Dangerous URL schemes (`javascript:`, `data:`, etc.) are suppressed. See `docs/features/security.md` Layer 2 for details.
+Embedded content elements (`<iframe>`, `<object>`, `<embed>`) also use a strip-tag-keep-content approach. The module extracts the `src`/`data` URL as a Markdown link (using the `title` attribute as label when available). Any fallback child text stays preserved. It suppresses dangerous URL schemes (`javascript:`, `data:`, and so on). See `docs/features/security.md` Layer 2 for details.
 
 ## Related: Media Element URL Extraction
 
-Media elements (`<video>`, `<audio>`) have their `src` URL extracted as a Markdown link before traversing fallback children. Video `poster` thumbnails are extracted as Markdown images. Child `<source>` elements have their `src` extracted with `type` as label; `<track>` elements use `label` as link text. Image map `<area>` elements have their `href` extracted as links with `alt`/`title` as text. This ensures AI agents see all referenced resource URLs without losing information.
+Media elements (`<video>`, `<audio>`) have their `src` URL extracted as a Markdown link before traversing fallback children. Video `poster` thumbnails become Markdown images. Child `<source>` elements have their `src` extracted with `type` as label. `<track>` elements use `label` as link text. Image map `<area>` elements have their `href` extracted as links with `alt`/`title` as text. This ensures AI agents see all referenced resource URLs without losing information.
 
 ## Verification
 
@@ -150,7 +150,7 @@ To verify the implementation:
 
 1. Run unit tests: `cargo test removal`
 2. Run the example: `cargo run --example basic_conversion`
-3. Check that all script, style, and noscript content is removed from output
+3. Check that all script, style, and noscript content comes out removed from the output
 
 ## Status
 

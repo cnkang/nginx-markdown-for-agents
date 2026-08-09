@@ -26,13 +26,13 @@ Copy the table below into your sub-spec test plan and fill in the cells your tes
 
 ## Gap Documentation
 
-If a test matrix cell cannot be covered due to infrastructure or resource constraints, the gap must be documented with justification. Use the following format in your sub-spec test plan:
+If infrastructure or resource constraints block a test matrix cell, the team must document the gap with justification. Use the following format in your sub-spec test plan:
 
 | Dimension | Uncovered Value | Justification |
 |-----------|----------------|---------------|
 | [dimension] | [value] | [reason the cell cannot be covered] |
 
-Gaps are reviewed during the Go/No-Go review. A gap without justification is treated as an unresolved testing gate failure.
+The Go/No-Go review reviews gaps. A gap without justification counts as an unresolved testing gate failure.
 
 ## Document Updates
 
