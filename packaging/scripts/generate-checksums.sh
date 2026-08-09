@@ -5,7 +5,7 @@
 #   generate-checksums.sh [-d DIR] [-o OUTPUT] [-h]
 #
 # Options:
-#   -d DIR      Directory containing .deb and .rpm artifacts (required)
+#   -d DIR      Directory containing release artifacts (required)
 #   -o OUTPUT   Output filename (default: SHA256SUMS)
 #   -h          Show this help message
 #
@@ -76,10 +76,11 @@ fi
 
 cd "$ARTIFACT_DIR"
 
-# Gather .deb, .rpm, and release-manifest.json files; handle cases where
-# one type may be absent.
+# Gather package/archive artifacts and release-manifest.json; handle cases
+# where one type may be absent.
 DEB_FILES=()
 RPM_FILES=()
+TARBALL_FILES=()
 MANIFEST_FILE=""
 
 for f in *.deb; do
@@ -92,17 +93,27 @@ for f in *.rpm; do
     RPM_FILES+=("$f")
 done
 
+for f in *.tar.gz; do
+    [[ -e "$f" ]] || continue
+    TARBALL_FILES+=("$f")
+done
+
 if [[ -e "release-manifest.json" ]]; then
     MANIFEST_FILE="release-manifest.json"
 fi
 
-ALL_FILES=(${DEB_FILES[@]+"${DEB_FILES[@]}"} ${RPM_FILES[@]+"${RPM_FILES[@]}"} ${MANIFEST_FILE:+"${MANIFEST_FILE}"})
+ALL_FILES=(
+    ${DEB_FILES[@]+"${DEB_FILES[@]}"}
+    ${RPM_FILES[@]+"${RPM_FILES[@]}"}
+    ${TARBALL_FILES[@]+"${TARBALL_FILES[@]}"}
+    ${MANIFEST_FILE:+"${MANIFEST_FILE}"}
+)
 
 if [[ ${#ALL_FILES[@]} -eq 0 ]]; then
-    die "No .deb, .rpm, or release-manifest.json files found in '$ARTIFACT_DIR'."
+    die "No release artifacts found in '$ARTIFACT_DIR'."
 fi
 
-info "Found ${#DEB_FILES[@]} .deb, ${#RPM_FILES[@]} .rpm, and manifest=${MANIFEST_FILE:-none}"
+info "Found ${#DEB_FILES[@]} .deb, ${#RPM_FILES[@]} .rpm, ${#TARBALL_FILES[@]} .tar.gz, and manifest=${MANIFEST_FILE:-none}"
 
 ##############################################################################
 # Generate SHA256SUMS

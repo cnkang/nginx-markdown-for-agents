@@ -37,6 +37,13 @@ CONFIG_DIRECTIVES_H = (
     / "src"
     / "ngx_http_markdown_config_directives_impl.h"
 )
+DIRECTIVE_NAMES_H = (
+    PROJECT_ROOT
+    / "components"
+    / "nginx-module"
+    / "src"
+    / "ngx_http_markdown_directive_names.h"
+)
 CONFIG_CORE_H = (
     PROJECT_ROOT
     / "components"
@@ -179,24 +186,50 @@ def read_safe(path: Path) -> str:
 
 
 def check_directive_in_source(
-    directive_name: str, source: str, result: ValidationResult
+    directive_name: str,
+    source: str,
+    directive_macros: dict[str, str],
+    result: ValidationResult,
 ) -> None:
-    """Verify a new directive is registered in the ngx_string command array."""
+    """Verify a directive is registered in the ngx_string command array."""
     check_id = f"source:{directive_name}"
-    pattern = rf'ngx_string\("{re.escape(directive_name)}"\)'
-    if re.search(pattern, source):
+    literal_pattern = rf'ngx_string\("{re.escape(directive_name)}"\)'
+    macro_names = [
+        name for name, value in directive_macros.items() if value == directive_name
+    ]
+    macro_pattern = (
+        rf"ngx_string\(\s*(?:{'|'.join(map(re.escape, macro_names))})\s*\)"
+        if macro_names
+        else None
+    )
+    if re.search(literal_pattern, source) or (
+        macro_pattern is not None and re.search(macro_pattern, source)
+    ):
         result.pass_(check_id, "directive found in command array")
     else:
         result.fail(check_id, "directive NOT found in config_directives_impl.h")
 
 
 def check_directive_not_in_source(
-    directive_name: str, source: str, result: ValidationResult
+    directive_name: str,
+    source: str,
+    directive_macros: dict[str, str],
+    result: ValidationResult,
 ) -> None:
-    """Verify a removed directive is absent from the ngx_string command array."""
+    """Verify a removed directive is absent from the command array and names."""
     check_id = f"removed-source:{directive_name}"
-    pattern = rf'ngx_string\("{re.escape(directive_name)}"\)'
-    if re.search(pattern, source):
+    literal_pattern = rf'ngx_string\("{re.escape(directive_name)}"\)'
+    macro_names = [
+        name for name, value in directive_macros.items() if value == directive_name
+    ]
+    macro_pattern = (
+        rf"ngx_string\(\s*(?:{'|'.join(map(re.escape, macro_names))})\s*\)"
+        if macro_names
+        else None
+    )
+    if re.search(literal_pattern, source) or (
+        macro_pattern is not None and re.search(macro_pattern, source)
+    ):
         result.fail(
             check_id,
             "removed directive still present in config_directives_impl.h",
@@ -352,58 +385,116 @@ def check_conf_field_not_in_source(
         result.pass_(check_id, "removed field pattern absent from all sources")
 
 
-def validate_all(result: ValidationResult) -> None:
-    """Run every directive check and record pass/fail in result."""
-    directives_src = read_safe(CONFIG_DIRECTIVES_H)
-    core_src = read_safe(CONFIG_CORE_H)
-    filter_h = read_safe(FILTER_MODULE_H)
-    docs = read_safe(CONFIGURATION_MD)
-
-    if not directives_src:
-        result.fail(
-            "prereq:config_directives_impl.h",
-            "source file not found \u2014 cannot validate directives",
-        )
-        return
-
-    if not core_src:
-        result.fail(
-            "prereq:config_core_impl.h",
-            "source file not found \u2014 cannot validate merge functions",
-        )
-
-    if not filter_h:
-        result.fail(
-            "prereq:filter_module.h",
-            "source file not found \u2014 cannot validate removed constants",
-        )
-
-    handler_src = read_safe(
+def _read_directive_validation_sources() -> tuple[str, str, str, str, str, str]:
+    """Read the source surfaces used by the directive contract checks."""
+    handler_path = (
         PROJECT_ROOT
         / "components"
         / "nginx-module"
         / "src"
         / "ngx_http_markdown_config_handlers_impl.h"
     )
+    return (
+        read_safe(CONFIG_DIRECTIVES_H),
+        read_safe(DIRECTIVE_NAMES_H),
+        read_safe(CONFIG_CORE_H),
+        read_safe(FILTER_MODULE_H),
+        read_safe(CONFIGURATION_MD),
+        read_safe(handler_path),
+    )
 
-    # The command table is a single 25-entry public surface.
-    # Validate both registration and documentation without reviving the old
-    # one-directive-per-budget assumptions.
+
+def _record_directive_prerequisite_failures(
+    result: ValidationResult,
+    directives_src: str,
+    directive_names_src: str,
+    core_src: str,
+    filter_h: str,
+) -> dict[str, str]:
+    """Record missing source prerequisites and return the directive macros."""
+    if not directives_src:
+        result.fail(
+            "prereq:config_directives_impl.h",
+            "source file not found — cannot validate directives",
+        )
+    directive_macros = {
+        macro: value
+        for macro, value in re.findall(
+            r"#define\s+(NGX_HTTP_MARKDOWN_DIRECTIVE_[A-Z0-9_]+)"
+            r"\s+\\\s*\"([^\"]+)\"",
+            directive_names_src,
+        )
+    }
+    if not directive_names_src or not directive_macros:
+        result.fail(
+            "prereq:directive_names.h",
+            "directive name registry not found — cannot validate macro references",
+        )
+    if not core_src:
+        result.fail(
+            "prereq:config_core_impl.h",
+            "source file not found — cannot validate merge functions",
+        )
+    if not filter_h:
+        result.fail(
+            "prereq:filter_module.h",
+            "source file not found — cannot validate removed constants",
+        )
+    return directive_macros
+
+
+def _check_directive_contract(
+    directives_src: str,
+    directive_macros: dict[str, str],
+    docs: str,
+    handler_src: str,
+    result: ValidationResult,
+) -> None:
+    """Validate active, limit, and removed directive contracts."""
     for name in CURRENT_DIRECTIVES:
-        check_directive_in_source(name, directives_src, result)
+        check_directive_in_source(name, directives_src, directive_macros, result)
         check_directive_in_docs(name, name, docs, result)
-
-    # The public contract freezes the eight nested resource-limit keys.
     for key in CURRENT_LIMIT_KEYS:
         check_limit_key(key, handler_src, docs, result)
-
-    # Removed directives: absent from source + documented as REMOVED
     for directive in REMOVED_DIRECTIVES:
         name = directive["name"]
-        doc_heading = directive["doc_heading"]
+        check_directive_not_in_source(name, directives_src, directive_macros, result)
+        check_removed_directive_in_docs(name, directive["doc_heading"], docs, result)
 
-        check_directive_not_in_source(name, directives_src, result)
-        check_removed_directive_in_docs(name, doc_heading, docs, result)
+
+def _read_c_sources() -> dict[str, str]:
+    """Read C source files used to prove removed fields are gone."""
+    src_dir = PROJECT_ROOT / "components" / "nginx-module" / "src"
+    return {
+        c_path.name: content
+        for c_path in src_dir.rglob("*.[ch]")
+        if (content := read_safe(c_path))
+    }
+
+
+def validate_all(result: ValidationResult) -> None:
+    """Run every directive check and record pass/fail in result."""
+    (
+        directives_src,
+        directive_names_src,
+        core_src,
+        filter_h,
+        docs,
+        handler_src,
+    ) = _read_directive_validation_sources()
+
+    if not directives_src:
+        _record_directive_prerequisite_failures(
+            result, directives_src, directive_names_src, core_src, filter_h
+        )
+        return
+
+    directive_macros = _record_directive_prerequisite_failures(
+        result, directives_src, directive_names_src, core_src, filter_h
+    )
+    _check_directive_contract(
+        directives_src, directive_macros, docs, handler_src, result
+    )
 
     # Removed constants: absent from filter_module.h
     if filter_h:
@@ -411,14 +502,7 @@ def validate_all(result: ValidationResult) -> None:
             check_constant_not_in_source(constant, filter_h, result)
 
     # Removed conf->streaming.* fields: absent from all C sources
-    c_sources: dict[str, str] = {}
-    src_dir = (
-        PROJECT_ROOT / "components" / "nginx-module" / "src"
-    )
-    for c_path in src_dir.rglob("*.[ch]"):
-        content = read_safe(c_path)
-        if content:
-            c_sources[c_path.name] = content
+    c_sources = _read_c_sources()
     for field_pat in REMOVED_CONF_FIELDS:
         check_conf_field_not_in_source(field_pat, c_sources, result)
 

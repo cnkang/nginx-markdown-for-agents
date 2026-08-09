@@ -101,3 +101,26 @@ def test_inflight_guard_accepts_effective_error_status(tmp_path):
     result = validator.check_inflight_guard(tmp_path)
 
     assert result == {"name": "inflight_guard", "status": "pass"}
+
+
+def test_removed_directive_gate_expands_canonical_name_macros(tmp_path):
+    """Removed-directive checks must inspect macro-backed command entries."""
+    directives = tmp_path / "components/nginx-module/src"
+    directives.mkdir(parents=True)
+    (directives / "ngx_http_markdown_config_directives_impl.h").write_text(
+        "static ngx_command_t ngx_http_markdown_filter_commands[] = {\n"
+        "    ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_REMOVED),\n"
+        "};\n"
+    )
+    (directives / "ngx_http_markdown_directive_names.h").write_text(
+        '#define NGX_HTTP_MARKDOWN_DIRECTIVE_REMOVED \\\n'
+        '    "markdown_max_size"\n'
+    )
+    migration = tmp_path / "docs/guides/MIGRATION-0.9.md"
+    migration.parent.mkdir(parents=True)
+    migration.write_text("markdown_memory_budget\n")
+
+    result = validator.check_config_v2_removed_directives(tmp_path)
+
+    assert result["status"] == "fail"
+    assert "markdown_max_size" in result["message"]

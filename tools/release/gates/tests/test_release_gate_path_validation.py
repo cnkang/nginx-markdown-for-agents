@@ -97,3 +97,20 @@ def test_read_safe_rejects_project_prefix_sibling(
     monkeypatch.setattr(gate, "PROJECT_ROOT", repo_root)
 
     assert gate.read_safe(candidate) == ""
+
+
+def test_config_directive_checks_expand_name_macros():
+    """Directive registration checks must understand the canonical name header."""
+    result = config_gate.ValidationResult()
+    source = "ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_CURRENT),\n"
+    macros = {"NGX_HTTP_MARKDOWN_DIRECTIVE_CURRENT": "markdown_filter"}
+
+    config_gate.check_directive_in_source(
+        "markdown_filter", source, macros, result
+    )
+    config_gate.check_directive_not_in_source(
+        "markdown_filter", source, macros, result
+    )
+
+    assert result.results[0][0] == "PASS"
+    assert result.results[1][0] == "FAIL"

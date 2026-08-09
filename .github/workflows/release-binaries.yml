@@ -12,6 +12,11 @@ on:
 
 permissions: {}
 
+# Release integrity:
+#   - Every dynamic-module archive is listed in SHA256SUMS.
+#   - Published releases additionally carry SHA256SUMS.asc, signed in the
+#     protected release-signing environment.
+
 jobs:
   prepare:
     name: Resolve Build Matrix from release-matrix.json
@@ -161,11 +166,108 @@ jobs:
             --matrix tools/release-matrix.json \
             --artifacts artifact-list.txt
 
-  publish-release:
-    name: Publish Binaries to Release
+  integrity-checksums:
+    name: Generate Binary Checksums
     needs: completeness-check
     runs-on: ubuntu-latest
-    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && startsWith(github.event.inputs.version, 'v'))
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.inputs.version || github.ref }}
+
+      - name: Download all binary artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: ngx_http_markdown_filter_module-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate and verify SHA256SUMS
+        run: |
+          ./packaging/scripts/generate-checksums.sh -d artifacts/
+          (cd artifacts && sha256sum --check SHA256SUMS)
+        shell: bash
+
+      - name: Upload SHA256SUMS
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: binary-checksums
+          path: artifacts/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 5
+
+  integrity-signing:
+    name: Sign Binary Checksums
+    needs: integrity-checksums
+    if: >-
+      github.event_name == 'release'
+      || (github.event_name == 'workflow_dispatch'
+          && startsWith(github.event.inputs.version, 'v'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    environment: release-signing
+    steps:
+      - name: Preflight - validate GPG secrets
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+        run: |
+          MISSING=()
+          [[ -z "${GPG_PRIVATE_KEY}" ]] && MISSING+=("GPG_PRIVATE_KEY")
+          [[ -z "${GPG_PASSPHRASE}" ]] && MISSING+=("GPG_PASSPHRASE")
+          [[ -z "${GPG_KEY_ID}" ]] && MISSING+=("GPG_KEY_ID")
+          if [[ ${#MISSING[@]} -gt 0 ]]; then
+            echo "ERROR: Missing required GPG secrets in 'release-signing' environment:" >&2
+            printf '  - %s\n' "${MISSING[@]}" >&2
+            exit 1
+          fi
+        shell: bash
+
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.inputs.version || github.ref }}
+
+      - name: Download SHA256SUMS
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: binary-checksums
+          path: artifacts
+
+      - name: Sign SHA256SUMS
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+        run: |
+          ./packaging/scripts/gpg-sign-checksums.sh artifacts/SHA256SUMS "${GPG_KEY_ID}"
+        shell: bash
+
+      - name: Upload SHA256SUMS.asc
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: binary-checksums-signature
+          path: artifacts/SHA256SUMS.asc
+          if-no-files-found: error
+          retention-days: 5
+
+  publish-release:
+    name: Publish Binaries to Release
+    needs: [completeness-check, integrity-checksums, integrity-signing]
+    runs-on: ubuntu-latest
+    if: >-
+      always()
+      && needs.completeness-check.result == 'success'
+      && needs.integrity-checksums.result == 'success'
+      && needs.integrity-signing.result == 'success'
+      && (github.event_name == 'release'
+          || (github.event_name == 'workflow_dispatch'
+              && startsWith(github.event.inputs.version, 'v')))
     permissions:
       contents: write
     steps:
@@ -173,6 +275,22 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: artifacts
+
+      - name: Download SHA256SUMS
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: binary-checksums
+          path: release-assets
+
+      - name: Download SHA256SUMS.asc
+        if: >-
+          github.event_name == 'release'
+          || (github.event_name == 'workflow_dispatch'
+              && startsWith(github.event.inputs.version, 'v'))
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: binary-checksums-signature
+          path: release-assets
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -263,3 +381,5 @@ jobs:
             artifacts/**/*.tar.gz
             artifacts/nginx-version-groups.json
             artifacts/nginx-version-groups.md
+            release-assets/SHA256SUMS
+            release-assets/SHA256SUMS.asc

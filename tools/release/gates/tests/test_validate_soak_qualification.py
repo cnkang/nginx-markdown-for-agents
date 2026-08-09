@@ -92,6 +92,45 @@ def test_local_url_rejects_traversal() -> None:
         validator._validated_local_url("http://127.0.0.1:19200/../etc/passwd")
 
 
+def test_worker_child_skips_malformed_pid() -> None:
+    """A malformed process-table row must not abort worker discovery."""
+    output = "not-a-pid 42 nginx\n1234 42 nginx: worker process\n"
+    assert validator._find_worker_child(output, 42) == 1234
+
+
+def test_worker_child_returns_not_found_for_only_malformed_rows() -> None:
+    """Malformed matching rows are not valid worker PIDs."""
+    assert validator._find_worker_child("not-a-pid 42 nginx\n", 42) == -1
+
+
+def test_worker_child_ignores_unrelated_child_processes() -> None:
+    """A same-parent helper process must not become RSS evidence."""
+    assert validator._find_worker_child("1234 42 helper\n", 42) == -1
+
+
+def test_rss_evidence_requires_samples_and_nonnegative_values() -> None:
+    """A pass record cannot omit or sentinel-fill worker RSS evidence."""
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    record = json.loads(
+        (FIXTURE_DIR / "soak-qualification-valid.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    record["rss_time_series"] = []
+    with pytest.raises(SystemExit, match="insufficient-data"):
+        validator.validate_soak_outcome(record, manifest)
+
+    record["rss_time_series"] = [[0.0, 100], [1.0, 101], [2.0, -1]]
+    with pytest.raises(SystemExit, match="insufficient-data"):
+        validator.validate_soak_outcome(record, manifest)
+
+    record["rss_time_series"] = [[0.0, 100], [1.0, 101], [2.0, 102]]
+    record["worker_rss_drain_samples"] = []
+    with pytest.raises(SystemExit, match="insufficient-data"):
+        validator.validate_soak_outcome(record, manifest)
+
+
 def test_peak_memory_metric_parser_requires_positive_gauge() -> None:
     body = (
         "# TYPE nginx_markdown_streaming_peak_memory_bytes gauge\n"
@@ -188,7 +227,11 @@ def test_real_mode_records_insufficient_peak_as_failure(
             [], {}
         ),
     )
-    monkeypatch.setattr(validator, "measure_drain", lambda worker_pid: (0, False))
+    monkeypatch.setattr(
+        validator,
+        "measure_drain",
+        lambda worker_pid: (0, False, [100, 100, 100]),
+    )
     monkeypatch.setattr(validator, "read_module_peak_memory", lambda base_url: None)
 
     args = type(
@@ -206,3 +249,65 @@ def test_real_mode_records_insufficient_peak_as_failure(
     saved = json.loads(record_path.read_text(encoding="utf-8"))
     assert saved["status"] == "fail"
     assert any("insufficient-data" in error for error in saved["errors"])
+
+
+def test_real_mode_cannot_pass_with_missing_worker_rss_evidence(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A valid module peak cannot mask a missing worker RSS observation."""
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    record_path = (
+        tmp_path / "artifacts" / "release" / "0.9.2" / "soak-record.json"
+    )
+    runtime_dir = tmp_path / "runtime"
+
+    class FakeNginx:
+        def terminate(self) -> None:
+            pass
+
+        def wait(self, timeout: int) -> None:
+            pass
+
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "load_manifest", lambda path: manifest)
+    monkeypatch.setattr(validator, "handle_missing_nginx", lambda args, data: None)
+    monkeypatch.setattr(
+        validator,
+        "prepare_runtime",
+        lambda base_url, data, module_so: (
+            runtime_dir,
+            {"small": "small.html"},
+            FakeNginx(),
+        ),
+    )
+    monkeypatch.setattr(validator, "wait_for_ready", lambda url: True)
+    monkeypatch.setattr(validator, "find_worker_pid", lambda path: -1)
+    monkeypatch.setattr(
+        validator,
+        "run_load_loop",
+        lambda corpus, worker_pid, duration, started, concurrency, runtime: (
+            [], {}
+        ),
+    )
+    monkeypatch.setattr(
+        validator,
+        "measure_drain",
+        lambda worker_pid: (None, False, []),
+    )
+    monkeypatch.setattr(validator, "read_module_peak_memory", lambda base_url: 65536)
+
+    args = type(
+        "Args",
+        (),
+        {
+            "manifest": str(MANIFEST),
+            "record": "artifacts/release/0.9.2/soak-record.json",
+            "output": None,
+            "allow_skip_soak": False,
+        },
+    )()
+
+    assert validator.real_main(args) == 1
+    saved = json.loads(record_path.read_text(encoding="utf-8"))
+    assert saved["status"] == "fail"
+    assert any("worker RSS" in error for error in saved["errors"])

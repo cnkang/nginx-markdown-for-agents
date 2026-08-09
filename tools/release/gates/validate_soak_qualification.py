@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import pathlib
 import re
@@ -68,6 +69,7 @@ SOAK_SCENARIO_FILES = {
 SOAK_METRICS_PATH = "/markdown-metrics"
 METRICS_RESPONSE_MAX_BYTES = 64 * 1024
 FLOAT_EPSILON = 1e-9
+MIN_RSS_SAMPLES = 3
 PEAK_MEMORY_MISSING_ERROR = (
     "insufficient-data: module-managed per-request peak memory was not observed"
 )
@@ -83,6 +85,7 @@ REQUIRED_RECORD_FIELDS = (
     "per_scenario",
     "rss_time_series",
     "worker_rss_drain_delta_kb",
+    "worker_rss_drain_samples",
     "monotonic_growth_after_drain",
     "module_managed_peak_observed",
     "per_request_peak_bytes",
@@ -99,7 +102,7 @@ REQUIRED_SCENARIO_FIELDS = (
     "rps",
 )
 
-SHA256_RE = re.compile(r"^[0-9a-f]{40}$")
+CANDIDATE_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 AB_PCT_LINE_RE = re.compile(r"^\s*(?P<pct>\d+)%\s+(?P<ms>[0-9.]+)\s*(?:ms)?$")
 PEAK_MEMORY_METRIC_RE = re.compile(
     r"^nginx_markdown_streaming_peak_memory_bytes\s+(?P<bytes>\d+)$",
@@ -128,7 +131,7 @@ def load_manifest(manifest_path: str) -> dict:
     missing = required - set(manifest)
     if missing:
         raise SystemExit(f"ERROR: soak manifest missing fields: {sorted(missing)}")
-    if not SHA256_RE.match(manifest["candidate_sha"]):
+    if not CANDIDATE_SHA_RE.match(manifest["candidate_sha"]):
         raise SystemExit("ERROR: soak manifest candidate_sha must be 40 hex")
     if not isinstance(manifest["duration_minutes"], (int, float)) or manifest["duration_minutes"] <= 0:
         raise SystemExit("ERROR: soak manifest duration_minutes must be positive")
@@ -196,6 +199,52 @@ def validate_record_structure(record: dict) -> None:
     for point in record["rss_time_series"]:
         if not isinstance(point, list) or len(point) != 2:
             raise SystemExit("ERROR: malformed: rss_time_series points need [t, rss_kb]")
+    if not isinstance(record["worker_rss_drain_samples"], list):
+        raise SystemExit(
+            "ERROR: missing-observation: worker_rss_drain_samples must be an array"
+        )
+
+
+def _valid_rss_value(value: object) -> bool:
+    """Return whether a recorded RSS value is finite and non-negative."""
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+        and value >= 0
+    )
+
+
+def _rss_evidence_issue(record: dict) -> str | None:
+    """Return a fail-closed error when worker RSS evidence is incomplete."""
+    series = record.get("rss_time_series")
+    if not isinstance(series, list) or len(series) < MIN_RSS_SAMPLES:
+        return (
+            "insufficient-data: worker RSS time series needs at least "
+            f"{MIN_RSS_SAMPLES} samples"
+        )
+    for point in series:
+        if (
+            not isinstance(point, list)
+            or len(point) != 2
+            or not _valid_rss_value(point[0])
+            or not _valid_rss_value(point[1])
+        ):
+            return "insufficient-data: worker RSS time series contains invalid data"
+
+    drain = record.get("worker_rss_drain_samples")
+    if not isinstance(drain, list) or len(drain) < MIN_RSS_SAMPLES:
+        return (
+            "insufficient-data: worker RSS drain needs at least "
+            f"{MIN_RSS_SAMPLES} samples"
+        )
+    if not all(_valid_rss_value(sample) for sample in drain):
+        return "insufficient-data: worker RSS drain contains invalid data"
+
+    delta = record.get("worker_rss_drain_delta_kb")
+    if not _valid_rss_value(delta):
+        return "insufficient-data: worker RSS drain delta is invalid"
+    return None
 
 
 def validate_against_manifest(record: dict, manifest: dict) -> None:
@@ -264,6 +313,9 @@ def _peak_memory_issue(record: dict, manifest: dict) -> str | None:
 
 def validate_soak_outcome(record: dict, manifest: dict) -> None:
     _check_scenario_rows(record, manifest)
+    rss_issue = _rss_evidence_issue(record)
+    if rss_issue:
+        raise SystemExit(f"ERROR: {rss_issue}")
     if record.get("monotonic_growth_after_drain") is not False:
         raise SystemExit(
             "ERROR: below-threshold: monotonic worker-RSS growth after drain"
@@ -471,7 +523,7 @@ def read_worker_rss(worker_pid: int) -> int:
             stderr=subprocess.DEVNULL,
         ).strip()
         return int(output.split()[0])
-    except (subprocess.CalledProcessError, ValueError, IndexError):
+    except (OSError, subprocess.CalledProcessError, ValueError, IndexError):
         return -1
 
 
@@ -576,12 +628,20 @@ def _find_worker_child(ps_output: str, master_pid: int) -> int:
     for line in ps_output.splitlines():
         fields = line.split(None, 2)
         if len(fields) == 3 and fields[1] == str(master_pid):
-            return int(fields[0])
+            process_name = fields[2].split(":", 1)[0].strip()
+            if pathlib.Path(process_name).name != "nginx":
+                continue
+            try:
+                return int(fields[0])
+            except ValueError:
+                continue
     return -1
 
 
 def _query_worker_pid(master_pid: int) -> int:
     """Query the process table for a worker of the supplied master PID."""
+    if master_pid <= 0:
+        return -1
     try:
         ps = subprocess.run(
             ["ps", "-axo", "pid=,ppid=,comm="],
@@ -640,19 +700,19 @@ def run_load_loop(
     return rss_series, scenario_metrics
 
 
-def measure_drain(worker_pid: int) -> tuple:
-    """Sample worker RSS after load; return (drain_delta_kb, monotonic)."""
+def measure_drain(worker_pid: int) -> tuple[int | None, bool, list[int]]:
+    """Sample worker RSS after load; return delta, monotonic flag, and samples."""
     time.sleep(30)
     drain = []
     for _ in range(3):
         if worker_pid > 0:
             drain.append(read_worker_rss(worker_pid))
         time.sleep(5)
-    drain_delta = 0
+    drain_delta = None
     if len(drain) >= 2:
         drain_delta = max(drain) - min(drain)
     monotonic = len(drain) >= 3 and drain[-1] > drain[0] + 1024
-    return drain_delta, monotonic
+    return drain_delta, monotonic, drain
 
 
 def _avg(values: list, default: float = 0.0) -> float:
@@ -843,7 +903,7 @@ def real_main(args: argparse.Namespace) -> int:
         rss_series, scenario_metrics = run_load_loop(
             corpus, worker_pid, duration, started,
             manifest["concurrency"], runtime_dir)
-        drain_delta, monotonic = measure_drain(worker_pid)
+        drain_delta, monotonic, drain_samples = measure_drain(worker_pid)
         peak_memory_bytes = read_module_peak_memory(base_url)
     finally:
         nginx.terminate()
@@ -868,6 +928,7 @@ def real_main(args: argparse.Namespace) -> int:
         "per_scenario": per_scenario,
         "rss_time_series": rss_series,
         "worker_rss_drain_delta_kb": drain_delta,
+        "worker_rss_drain_samples": drain_samples,
         "monotonic_growth_after_drain": monotonic,
         "module_managed_peak_observed": peak_memory_bytes is not None,
         "per_request_peak_bytes": peak_memory_bytes,
@@ -881,6 +942,9 @@ def real_main(args: argparse.Namespace) -> int:
         failures.append("error_rate != 0")
     if monotonic:
         failures.append("monotonic RSS growth after drain")
+    rss_issue = _rss_evidence_issue(record)
+    if rss_issue:
+        failures.append(rss_issue)
     peak_issue = _peak_memory_issue(record, manifest)
     if peak_issue:
         failures.append(peak_issue)

@@ -35,23 +35,37 @@ Choose the upgrade method matching your deployment:
 ### 1. Download the 0.9.2 module binary
 
 ```bash
-# Replace <nginx-version> and <os> with your target (e.g., 1.26.3, ubuntu22.04)
-MODULE_FILE="ngx_http_markdown_filter_module-0.9.2-nginx<nginx-version>-<os>-x86_64.so"
-curl --fail --location --remote-name "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v0.9.2/${MODULE_FILE}"
-curl --fail --location --remote-name https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v0.9.2/SHA256SUMS
+# Replace <nginx-version>, <os>, and <arch> with your target (for example,
+# 1.26.3, glibc, and x86_64). The archive contains the module .so.
+MODULE_ARCHIVE="ngx_http_markdown_filter_module-<nginx-version>-<os>-<arch>.tar.gz"
+RELEASE_BASE="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v0.9.2"
+curl --fail --location --remote-name "${RELEASE_BASE}/${MODULE_ARCHIVE}"
+curl --fail --location --remote-name "${RELEASE_BASE}/SHA256SUMS"
+curl --fail --location --remote-name "${RELEASE_BASE}/SHA256SUMS.asc"
 ```
 
 ### 2. Verify checksum
 
 ```bash
-CHECKSUM_LINE="$(awk -v module_file="${MODULE_FILE}" '
-    NF == 2 && $2 == module_file { count++; line = $0 }
-    END { if (count != 1) exit 1; print line }
-' SHA256SUMS)" || {
-    echo "SHA256SUMS must contain exactly one ${MODULE_FILE} record" >&2
-    exit 1
+# Import and verify the trusted project release key before this step; see
+# docs/guides/GPG_KEY_MANAGEMENT.md for the key fingerprint contract.
+gpg --verify SHA256SUMS.asc SHA256SUMS
+
+verify_module_archive_checksum() {
+    local checksum_line
+    checksum_line="$(awk -v module_file="${MODULE_ARCHIVE}" '
+        NF == 2 && $2 == module_file { count++; line = $0 }
+        END { if (count == 1) print line }
+    ' SHA256SUMS)"
+    if [[ -z "${checksum_line}" ]]; then
+        printf 'SHA256SUMS must contain exactly one %s record\n' \
+            "${MODULE_ARCHIVE}" >&2
+        return 1
+    fi
+    printf '%s\n' "${checksum_line}" | sha256sum --check
 }
-printf '%s\n' "${CHECKSUM_LINE}" | sha256sum --check
+
+verify_module_archive_checksum
 ```
 
 ### 3. Back up the current module
@@ -64,7 +78,8 @@ sudo cp /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so \
 ### 4. Replace the module
 
 ```bash
-sudo cp ngx_http_markdown_filter_module-0.9.2-nginx*.so \
+tar -xzf "${MODULE_ARCHIVE}"
+sudo cp ngx_http_markdown_filter_module.so \
     /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
 ```
 

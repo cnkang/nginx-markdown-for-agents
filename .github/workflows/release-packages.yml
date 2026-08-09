@@ -872,7 +872,8 @@ jobs:
           # include user-local Kiro spec directories.
           python3 tools/release/gates/validate_naming.py
           python3 tools/release/gates/validate_release_gates_090.py
-          python3 tools/release/gates/validate_release_gates_080.py
+          python3 tools/release/gates/validate_release_gates_080.py \
+            --active-version "${RELEASE_GATE_EXPECTED_CARGO_VERSION}"
           python3 tools/release/gates/validate_config_directives.py
           python3 tools/release/gates/validate_release_gates_070.py --mode strict
           python3 tools/release/gates/validate_metrics.py
