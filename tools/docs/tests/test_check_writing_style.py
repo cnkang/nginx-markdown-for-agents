@@ -268,10 +268,12 @@ def test_resolve_base_rejects_argument_injection(monkeypatch, ref):
 
 def test_resolve_base_matches_only_fixed_git_ref_output(monkeypatch):
     commands = []
+    inputs = []
 
     def fake_run(command, **kwargs):
         commands.append(command)
-        return SimpleNamespace(returncode=0, stdout="a" * 40 + "\n")
+        inputs.append(kwargs["input"])
+        return SimpleNamespace(returncode=0, stdout=f"{'a' * 40} commit 42\n")
 
     monkeypatch.setattr(cws.subprocess, "run", fake_run)
 
@@ -279,38 +281,20 @@ def test_resolve_base_matches_only_fixed_git_ref_output(monkeypatch):
     assert cws._resolve_base("main") == "a" * 40
     assert cws._resolve_base("HEAD~1") == "a" * 40
     assert commands == [
-        [
-            "git",
-            "rev-parse",
-            "--verify",
-            "--quiet",
-            "--end-of-options",
-            "HEAD^{commit}",
-        ],
-        [
-            "git",
-            "rev-parse",
-            "--verify",
-            "--quiet",
-            "--end-of-options",
-            "main^{commit}",
-        ],
-        [
-            "git",
-            "rev-parse",
-            "--verify",
-            "--quiet",
-            "--end-of-options",
-            "HEAD~1^{commit}",
-        ],
+        ["git", "cat-file", "--batch-check"],
+        ["git", "cat-file", "--batch-check"],
+        ["git", "cat-file", "--batch-check"],
     ]
+    assert inputs == ["HEAD^{commit}\n", "main^{commit}\n", "HEAD~1^{commit}\n"]
 
 
 def test_resolve_base_rejects_non_commit_object(monkeypatch):
     monkeypatch.setattr(
         cws.subprocess,
         "run",
-        lambda command, **kwargs: SimpleNamespace(returncode=1, stdout=""),
+        lambda command, **kwargs: SimpleNamespace(
+            returncode=0, stdout=f"{'c' * 40} tree 42\n"
+        ),
     )
 
     assert cws._resolve_base("main") is None
@@ -322,7 +306,7 @@ def test_resolve_base_accepts_non_tip_commit_sha(monkeypatch):
         cws.subprocess,
         "run",
         lambda command, **kwargs: SimpleNamespace(
-            returncode=0, stdout=commit + "\n"
+            returncode=0, stdout=f"{commit} commit 42\n"
         ),
     )
 

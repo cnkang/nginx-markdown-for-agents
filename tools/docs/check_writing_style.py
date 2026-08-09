@@ -486,22 +486,22 @@ def _resolve_base(ref: str) -> str | None:
         while position < len(revision) and revision[position].isdigit():
             position += 1
 
+    validated_ref = f"{base_ref}{revision}"
+    # Keep the validated revision out of argv. The subprocess command remains
+    # fixed, and Git receives the revision only through its standard input.
     resolved = subprocess.run(
-        [
-            "git",
-            "rev-parse",
-            "--verify",
-            "--quiet",
-            "--end-of-options",
-            f"{ref}^{{commit}}",
-        ],
+        ["git", "cat-file", "--batch-check"],
         cwd=ROOT,
         capture_output=True,
+        input=f"{validated_ref}^{{commit}}\n",
         text=True,
     )
     if resolved.returncode != 0:
         return None
-    commit = resolved.stdout.strip()
+    fields = resolved.stdout.strip().split()
+    if len(fields) < 2 or fields[1] != "commit":
+        return None
+    commit = fields[0]
     if not re.fullmatch(r"[0-9A-Fa-f]{40}", commit):
         return None
     return commit
