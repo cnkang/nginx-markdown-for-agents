@@ -19,6 +19,7 @@ INVENTORY_PATH = ROOT / "docs/harness/public-surface-inventory.json"
 CONTRACT_PATH = ROOT / "docs/knowledge-base/config-contract.md"
 README_PATH = ROOT / "docs/knowledge-base/README.md"
 LIMIT_REGISTRY_PATH = ROOT / "tools/release/gates/validate_config_directives.py"
+METRIC_KEY_FIELD = "metric key"
 README_FROZEN_SECTION_RE = re.compile(r"^## Key Numbers\b", re.M)
 README_FROZEN_ROW_RE = re.compile(
     r"^\|\s*(?:Active directives|Removed directives|Dynconf keys|"
@@ -236,10 +237,11 @@ def _validate_dynconf(
             f"dynconf: table has {len(dynconf_rows)} rows, inventory has "
             f"{len(inventory['dynconf_keys'])}"
         )
-    if not re.search(
-        rf"## Dynconf Keys \({dynamic_count} runtime-mutable \+ schema_version metadata\)",
-        contract_text,
-    ):
+    heading = (
+        f"## Dynconf Keys ({dynamic_count} runtime-mutable + "
+        "schema_version metadata)"
+    )
+    if heading not in contract_text:
         errors.append("dynconf: heading must distinguish runtime-mutable keys from schema metadata")
     if not re.search(
         r"five runtime-mutable keys .*?required `schema_version` metadata",
@@ -298,14 +300,14 @@ def _validate_reasons_and_limits(
     expected_reasons = {
         str(item["discriminant"]): {
             "string": _clean(item["string"]),
-            "metric key": _clean(item["metric_key"]),
+            METRIC_KEY_FIELD: _clean(item["metric_key"]),
         }
         for item in inventory["reason_codes"]
     }
     actual_reasons = {
         row["#"]: {
             "string": _clean(row["string"]),
-            "metric key": _clean(row["metric key"]),
+            METRIC_KEY_FIELD: _clean(row[METRIC_KEY_FIELD]),
         }
         for row in reason_rows
     }
@@ -314,16 +316,12 @@ def _validate_reasons_and_limits(
         "reason codes",
         expected_reasons,
         actual_reasons,
-        ("string", "metric key"),
+        ("string", METRIC_KEY_FIELD),
     )
 
     expected_limits = {key: {} for key in _current_limit_keys()}
     actual_limits = {row["key"].strip("`"): {} for row in limit_rows}
     _compare_maps(errors, "markdown_limits", expected_limits, actual_limits, ())
-
-
-def _validate_ffi(errors: list[str], inventory: dict, contract_text: str) -> None:
-    _validate_ffi(errors, inventory, contract_text)
 
 
 def validate_contract(
@@ -351,10 +349,11 @@ def validate_contract(
     _validate_reasons_and_limits(errors, inventory, reason_rows, limit_rows)
 
     ffi_count = len(inventory["ffi_exports"])
-    if not re.search(
-        rf"## FFI Surface Summary \({ffi_count} exports, ABI v{inventory['ffi_abi_version']}\)",
-        contract_text,
-    ):
+    ffi_heading = (
+        f"## FFI Surface Summary ({ffi_count} exports, "
+        f"ABI v{inventory['ffi_abi_version']})"
+    )
+    if ffi_heading not in contract_text:
         errors.append("FFI: summary export count or ABI heading does not match inventory")
     if f"**Classification:** all `{inventory['ffi_classification']}`" not in contract_text:
         errors.append("FFI: classification does not match inventory")
