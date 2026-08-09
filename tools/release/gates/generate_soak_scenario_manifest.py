@@ -21,6 +21,7 @@ VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 if str(REPO_ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "tools"))
 from lib.path_validation import (  # noqa: E402
+    validate_filename_strict,
     validate_read_path,
     validate_write_path_within_root,
 )
@@ -76,19 +77,23 @@ def build_manifest(scope: dict, candidate_sha: str, scope_path: Path) -> dict:
 
 
 def _output_path(version: str, raw_output: str | None) -> Path:
-    if not VERSION_RE.fullmatch(version):
+    safe_version = validate_filename_strict(version, purpose="release version")
+    if not VERSION_RE.fullmatch(safe_version):
         raise ValueError(f"invalid release version: {version!r}")
-    expected_dir = (REPO_ROOT / "artifacts" / "release" / version).resolve()
-    output = (
-        expected_dir / MANIFEST_NAME
-        if raw_output is None
-        else (REPO_ROOT / raw_output).resolve()
-    )
-    if output.parent != expected_dir or output.name != MANIFEST_NAME:
-        raise ValueError(
-            f"output must be artifacts/release/{version}/{MANIFEST_NAME}"
+    expected_output = (
+        REPO_ROOT / "artifacts" / "release" / safe_version / MANIFEST_NAME
+    ).resolve()
+    if raw_output is not None:
+        requested_output = validate_write_path_within_root(
+            REPO_ROOT / raw_output,
+            REPO_ROOT,
+            purpose="short-soak manifest request",
         )
-    return output
+        if requested_output != expected_output:
+            raise ValueError(
+                f"output must be artifacts/release/{safe_version}/{MANIFEST_NAME}"
+            )
+    return expected_output
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -115,7 +120,11 @@ def main(argv: list[str] | None = None) -> int:
             _load_json(scope_path), args.candidate_sha, scope_path
         )
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        # NOSONAR suppression for pythonsecurity:S2083: _output_path accepts
+        # only the validated release version and exact canonical filename.
+        output.write_text(  # NOSONAR
+            json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+        )
     except (OSError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
