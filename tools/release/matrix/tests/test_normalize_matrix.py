@@ -16,7 +16,8 @@ TOOLS = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TOOLS))
 
 import normalize_matrix  # noqa: E402
-from normalize_matrix import MatrixNormalizationError  # noqa: E402
+
+MatrixNormalizationError = normalize_matrix.MatrixNormalizationError
 
 
 def canonical_entry(**overrides):
