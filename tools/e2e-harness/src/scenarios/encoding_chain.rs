@@ -347,7 +347,7 @@ fn append_converted_assertions(
         assertions,
         &format!("{prefix}_body_complete"),
         response.body.contains(heading)
-            && response.body.contains(end_token)
+            && common::markdown_token_present(&response.body, end_token)
             && response.body.len() >= minimum_size,
         format!("heading, end token, and at least {minimum_size} bytes"),
         format!("body_bytes={}", response.body.len()),
