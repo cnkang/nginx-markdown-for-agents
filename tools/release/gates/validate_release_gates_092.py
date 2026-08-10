@@ -324,8 +324,8 @@ def _load_reason_registry_files(repo):
     if not inventory_file.exists():
         return None, None, "public-surface-inventory.json not found"
     try:
-        source_content = rc_file.read_text()
-        inventory = json.loads(inventory_file.read_text())
+        source_content = rc_file.read_text(encoding="utf-8")
+        inventory = json.loads(inventory_file.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         return None, None, f"unable to read canonical reason registry: {exc}"
     return source_content, inventory, None
@@ -351,7 +351,7 @@ def _validate_c_reason_registry(repo, canonical):
     if not c_file.exists():
         return "ngx_http_markdown_reason.c not found"
     try:
-        c_content = c_file.read_text()
+        c_content = c_file.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as exc:
         return f"unable to read C reason registry: {exc}"
     c_accessors = set(re.findall(
