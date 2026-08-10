@@ -277,7 +277,15 @@ fn apply_mask(octets: &mut [u8], prefix_len: u8) {
 /// A non-parseable or empty address never matches.  The `X-Forwarded-For`
 /// header is intentionally **not** consulted here (spoofing avoidance).
 pub fn is_trusted_source(source_ip: &str, trusted: &[Cidr]) -> bool {
-    let ip: IpAddr = match source_ip.trim().parse() {
+    let trimmed = source_ip.trim();
+    /* validate_forwarded_addr returns bracketed IPv6 literals (e.g.
+     * "[2001:db8::1]") as-is.  IpAddr::parse rejects the bracketed form,
+     * so strip a single matching pair of brackets before parsing. */
+    let normalized = trimmed
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+        .unwrap_or(trimmed);
+    let ip: IpAddr = match normalized.parse() {
         Ok(ip) => ip,
         Err(_) => return false,
     };
@@ -1118,6 +1126,26 @@ mod tests {
         assert!(is_trusted_source("::1", &t));
         assert!(!is_trusted_source("2001:dead::1", &t));
         assert!(!is_trusted_source("fe80::1", &t));
+    }
+
+    #[test]
+    fn bracketed_ipv6_trusted_hop_matches() {
+        /* validate_forwarded_addr returns bracketed IPv6 literals as-is;
+         * is_trusted_source must strip the brackets before parsing so
+         * bracketed trusted hops are recognized in the trust chain. */
+        let t = cidrs(&["2001:db8::/32", "::1/128"]);
+        assert!(is_trusted_source("[2001:db8::1]", &t));
+        assert!(is_trusted_source("[::1]", &t));
+        assert!(!is_trusted_source("[2001:dead::1]", &t));
+        assert!(!is_trusted_source("[fe80::1]", &t));
+    }
+
+    #[test]
+    fn mismatched_brackets_not_trusted() {
+        let t = cidrs(&["0.0.0.0/0", "::/0"]);
+        assert!(!is_trusted_source("[2001:db8::1", &t));
+        assert!(!is_trusted_source("2001:db8::1]", &t));
+        assert!(!is_trusted_source("[]", &t));
     }
 
     #[test]
