@@ -96,7 +96,20 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 SOURCE_SHA="$(cd "${WORKSPACE_ROOT}" && git rev-parse HEAD 2>/dev/null || echo "unknown")"
-MODULE_SHA="$(shasum -a 256 "${NGINX_MODULE_SO}" 2>/dev/null | awk '{print $1}' || echo "unknown")"
+
+sha256_file() {
+  local path="$1"
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "${path}" 2>/dev/null | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "${path}" 2>/dev/null | awk '{print $1}'
+  else
+    echo "unknown"
+  fi
+  return 0
+}
+
+MODULE_SHA="$(sha256_file "${NGINX_MODULE_SO}")"
 
 # ── Run a single access-policy case ───────────────────────────────
 run_case() {
@@ -155,7 +168,7 @@ EOF
   fi
 
   local config_digest
-  config_digest="$(shasum -a 256 "${prefix}/conf/nginx.conf" | awk '{print $1}')"
+  config_digest="$(sha256_file "${prefix}/conf/nginx.conf")"
 
   # Start nginx
   "${NGINX_BIN}" -p "${prefix}" -c conf/nginx.conf -g 'daemon off;' > "${prefix}/runtime.log" 2>&1 &
@@ -228,19 +241,23 @@ EOF
       printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
         "${policy}" "${handler}" "${method}" "authorized" "${expected_auth}" "${auth_status}" "${config_digest}" >> "${RESULT_TSV}"
 
-      # Unauthorized request (for allow_deny: there's no easy way to fake a different source IP in curl without --interface)
+      # Unauthorized request.  127.0.0.2 stays on loopback but is outside the
+      # allowlist, so the deny branch is exercised without external network
+      # dependencies.
       # For auth_basic: omit credentials
       # For satisfy_any: omit credentials (deny all applies but satisfy any means auth can override)
       local unauth_status
       case "${policy}" in
         allow_deny)
-          # Cannot easily test deny from 127.0.0.1 when allow 127.0.0.1 is set
-          # Instead verify a request without the allowed IP cannot reach the endpoint
-          # Since we're always from 127.0.0.1 and allow 127.0.0.1 is set, authorized = 200
-          # This is inherently limited on localhost; record the positive case only
-          unauth_status="${expected_auth}"
+          unauth_status="$(curl -sS --interface 127.0.0.2 ${method_flag} \
+            -o /dev/null -w '%{http_code}' \
+            "http://127.0.0.1:${PORT}/${handler}")"
+          if [[ "${unauth_status}" != "${expected_unauth}" ]]; then
+            echo "FAIL: ${policy}/${handler}/${method}/unauthorized: expected=${expected_unauth} actual=${unauth_status}" >&2
+            fail_count=$((fail_count + 1))
+          fi
           printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-            "${policy}" "${handler}" "${method}" "unauthorized_note" "${expected_unauth}" "localhost_limited" "${config_digest}" >> "${RESULT_TSV}"
+            "${policy}" "${handler}" "${method}" "unauthorized" "${expected_unauth}" "${unauth_status}" "${config_digest}" >> "${RESULT_TSV}"
           ;;
         auth_basic)
           unauth_status="$(curl -sS ${method_flag} -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/${handler}")"

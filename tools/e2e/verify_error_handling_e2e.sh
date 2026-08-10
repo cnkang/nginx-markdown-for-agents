@@ -427,7 +427,7 @@ echo "  PASS: Small response converts with 64k conversion_memory" >&2
 echo "==> Case 8: Small conversion_memory (64k) fail-opens for larger response" >&2
 oversize_bytes="$(curl -sS --max-time 30 \
   "http://127.0.0.1:${UPSTREAM_PORT}/large" | wc -c | tr -d ' ')"
-if [[ "${oversize_bytes}" -le 1024 ]]; then
+if [[ "${oversize_bytes}" -le 65536 ]]; then
   echo "FAIL: Case 8 - /md-small/large fixture must be >64KiB, got ${oversize_bytes}" >&2
   exit 1
 fi

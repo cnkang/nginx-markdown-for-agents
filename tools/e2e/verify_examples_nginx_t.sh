@@ -117,6 +117,11 @@ sed_in_place() {
   return 0
 }
 
+escape_sed_replacement() {
+  printf '%s' "$1" | sed 's/[\\&|]/\\&/g'
+  return 0
+}
+
 # --- Runtime prefix ---
 RUNTIME_DIR="$(mktemp -d "${TMPDIR:-/tmp}/nginx-markdown-config-test.XXXXXX")"
 mkdir -p "${RUNTIME_DIR}/logs"
@@ -189,7 +194,9 @@ sandbox_conf() {
     -e '/^[[:space:]]*ssl_session_timeout[[:space:]]/s/^/#/' \
     "${src}" > "${dst}"
   if [[ -n "${MODULE_SO}" ]]; then
-    sed_in_place "s|^([[:space:]]*)load_module[[:space:]]+[^;]*;|\1load_module ${MODULE_SO};|" "${dst}"
+    local escaped_module_so
+    escaped_module_so="$(escape_sed_replacement "${MODULE_SO}")"
+    sed_in_place "s|^([[:space:]]*)load_module[[:space:]]+[^;]*;|\1load_module ${escaped_module_so};|" "${dst}"
   else
     sed_in_place '/^[[:space:]]*load_module[[:space:]]/s/^/#/' "${dst}"
   fi
@@ -341,8 +348,19 @@ if [[ -f "${CONFIGMAP_YAML}" ]]; then
   CM_HTTP="${RUNTIME_DIR}/configmap_http.conf"
   : > "${CM_MAIN}"
   : > "${CM_HTTP}"
-  # Extract the 4-space-indented `data` content lines of both block scalars.
-  awk '/^    / { print substr($0, 5) }' "${CONFIGMAP_YAML}" \
+  # Extract only the 4-space-indented content of block scalars below `data`.
+  awk '
+    /^data:[[:space:]]*$/ { in_data = 1; next }
+    in_data && /^[^[:space:]]/ { in_data = 0; in_block = 0 }
+    in_data && /^  [^[:space:]][^:]*:[[:space:]]*\|[[:space:]]*$/ {
+      in_block = 1
+      next
+    }
+    in_data && in_block && /^  [^[:space:]][^:]*:/ {
+      in_block = 0
+    }
+    in_data && in_block && /^    / { print substr($0, 5) }
+  ' "${CONFIGMAP_YAML}" \
     | while IFS= read -r line; do
         case "$line" in
           load_module*)
@@ -370,7 +388,8 @@ if [[ -f "${CONFIGMAP_YAML}" ]]; then
     echo "}"
   } > "${PREPARED_CONF}"
   if [[ -n "${MODULE_SO}" ]]; then
-    sed_in_place "s|^([[:space:]]*)load_module[[:space:]]+[^;]*;|\1load_module ${MODULE_SO};|" \
+    escaped_module_so="$(escape_sed_replacement "${MODULE_SO}")"
+    sed_in_place "s|^([[:space:]]*)load_module[[:space:]]+[^;]*;|\1load_module ${escaped_module_so};|" \
       "${PREPARED_CONF}"
     if has_load_module "${PREPARED_CONF}"; then
       PREPARED_HANDLE=1
