@@ -46,6 +46,7 @@ from tools.perf.benchmark_validation import (
     parse_hey_result,
     merge_diagnostics_metrics,
     parse_prometheus_metrics,
+    _decompression_path_metrics,
     validate_response_probe,
 )
 
@@ -92,6 +93,22 @@ nginx_markdown_decompression_events_total{encoding="brotli",outcome="failure",re
     assert metrics["perf"]["decompression_events_total"] == 5
     assert metrics["perf"]["decompression_budget_exceeded_total"] == 1
     assert "zero_copy_output_total" not in metrics["perf"]
+
+
+def test_nonfinite_prometheus_samples_are_ignored():
+    metrics = parse_prometheus_metrics(
+        "nginx_markdown_conversion_attempts_total{engine=\"streaming\"} NaN\n"
+        "nginx_markdown_conversion_attempts_total{engine=\"full_buffer\"} +Inf\n"
+    )
+
+    assert metrics["streaming_path_hits"] == 0
+    assert metrics["fullbuffer_path_hits"] == 0
+
+
+def test_aggregate_decompression_events_are_not_misattributed():
+    assert _decompression_path_metrics(
+        "gzip", {"decompression_events_total": 7}, 1, 1
+    ) == (None, None)
 
 
 def test_merge_diagnostics_metrics_preserves_exact_counter_sources():

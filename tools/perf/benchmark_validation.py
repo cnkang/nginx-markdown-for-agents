@@ -161,7 +161,9 @@ def _parse_prometheus_sample(
         value = float(match.group("value"))
     except ValueError:
         return None
-    if math.isfinite(value) and value.is_integer():
+    if not math.isfinite(value):
+        return None
+    if value.is_integer():
         return match.group("name"), labels, int(value)
     return match.group("name"), labels, value
 
@@ -588,11 +590,19 @@ def _decompression_path_metrics(
     compression: str,
     perf: Mapping[str, Any],
     streaming_hits: float,
-) -> tuple[float, float]:
+    fullbuffer_hits: float,
+) -> tuple[float | None, float | None]:
     """Map decompression events to the benchmark's path fields."""
     events = perf.get("decompression_events_total", 0)
     if compression != "none" and events:
-        return (0, events) if streaming_hits == 0 else (events, 0)
+        if streaming_hits == 0:
+            return 0, events
+        if fullbuffer_hits == 0:
+            return events, 0
+        # The aggregate counter cannot be attributed safely when both paths
+        # ran. Preserve the ambiguity as missing evidence instead of assigning
+        # every event to one path.
+        return None, None
     return (
         perf.get("decompression_streaming_total", 0),
         perf.get("decompression_fullbuffer_total", 0),
@@ -609,7 +619,7 @@ def _scenario_metrics(
     (perf, streaming, streaming_hits, fullbuffer_hits, streaming_ratio,
      fullbuffer_ratio), requests_total, _, fallback_rate, _ = path
     decomp_streaming, decomp_fullbuffer = _decompression_path_metrics(
-        data.compression, perf, streaming_hits
+        data.compression, perf, streaming_hits, fullbuffer_hits
     )
     result = {
         "rps": rps,

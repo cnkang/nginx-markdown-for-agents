@@ -36,3 +36,14 @@ def test_write_mode_generates_then_validates_manifest(
 
     assert validator.main(["--write"]) == 0
     assert json.loads(manifest_path.read_text(encoding="utf-8")) == validator.EXPECTED
+
+
+def test_cargo_default_features_cannot_add_unmanifested_feature() -> None:
+    failures: list[str] = []
+    validator.check_cargo_features(
+        '[features]\ndefault = ["incremental", "streaming", '
+        '"prune_noise_regions", "unreviewed"]\n',
+        failures,
+    )
+
+    assert any("unreviewed" in failure for failure in failures)

@@ -75,6 +75,28 @@ def test_real_soak_requires_module_binary(monkeypatch: pytest.MonkeyPatch) -> No
     assert validator.handle_missing_nginx(args, manifest) == 1
 
 
+def test_allowed_soak_skip_writes_a_structurally_valid_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = {"candidate_sha": "a" * 40, "concurrency": 4}
+    args = type("Args", (), {
+        "allow_skip_soak": True,
+        "output": None,
+        "record": "artifacts/release/0.9.2/soak-record.json",
+    })()
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "_validated_nginx_binary", lambda: None)
+    monkeypatch.setattr(validator, "_validated_module", lambda: None)
+
+    assert validator.handle_missing_nginx(args, manifest) == 0
+    record = json.loads(
+        (tmp_path / "artifacts" / "release" / "0.9.2" /
+         "soak-record.json").read_text(encoding="utf-8")
+    )
+    validator.validate_record_structure(record)
+    assert record["status"] == "skip"
+
+
 def test_manifest_rejects_path_like_scenario_id(tmp_path: Path) -> None:
     """Scenario IDs must remain within the fixed local URL allowlist."""
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))

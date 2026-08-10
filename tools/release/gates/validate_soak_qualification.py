@@ -32,6 +32,7 @@ import math
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -170,18 +171,7 @@ def _validate_scalar(record: dict, name: str, expected: object) -> None:
         )
 
 
-def validate_record_structure(record: dict) -> None:
-    missing = set(REQUIRED_RECORD_FIELDS) - set(record)
-    if missing:
-        raise SystemExit(
-            "ERROR: missing-observation: soak record missing fields: "
-            f"{sorted(missing)}"
-        )
-    if record["schema_version"] != RECORD_SCHEMA_VERSION:
-        raise SystemExit(
-            "ERROR: malformed: unexpected soak record schema_version "
-            f"{record['schema_version']!r}"
-        )
+def _validate_record_scenarios(record: dict) -> None:
     scenarios = record["per_scenario"]
     if not isinstance(scenarios, list) or not scenarios:
         raise SystemExit("ERROR: missing-observation: per_scenario must be non-empty")
@@ -194,15 +184,42 @@ def validate_record_structure(record: dict) -> None:
                 "ERROR: missing-observation: scenario missing fields: "
                 f"{sorted(scenario_missing)}"
             )
+
+
+def _validate_record_rss_series(record: dict) -> None:
     if not isinstance(record["rss_time_series"], list):
         raise SystemExit("ERROR: missing-observation: rss_time_series must be an array")
     for point in record["rss_time_series"]:
         if not isinstance(point, list) or len(point) != 2:
             raise SystemExit("ERROR: malformed: rss_time_series points need [t, rss_kb]")
+
+
+def _validate_record_drain_samples(record: dict) -> None:
     if not isinstance(record["worker_rss_drain_samples"], list):
         raise SystemExit(
             "ERROR: missing-observation: worker_rss_drain_samples must be an array"
         )
+
+
+def validate_record_structure(record: dict) -> None:
+    missing = set(REQUIRED_RECORD_FIELDS) - set(record)
+    if missing:
+        raise SystemExit(
+            "ERROR: missing-observation: soak record missing fields: "
+            f"{sorted(missing)}"
+        )
+    if record["schema_version"] != RECORD_SCHEMA_VERSION:
+        raise SystemExit(
+            "ERROR: malformed: unexpected soak record schema_version "
+            f"{record['schema_version']!r}"
+        )
+    if record.get("status") == "skip":
+        if not isinstance(record.get("skip_reason"), str) or not record["skip_reason"]:
+            raise SystemExit("ERROR: malformed: skip record needs skip_reason")
+        return
+    _validate_record_scenarios(record)
+    _validate_record_rss_series(record)
+    _validate_record_drain_samples(record)
 
 
 def _valid_rss_value(value: object) -> bool:
@@ -516,9 +533,12 @@ def run_ab_chunk(url: str, concurrency: int, seconds: int, output_dir: pathlib.P
 
 
 def read_worker_rss(worker_pid: int) -> int:
+    ps_path = resolve_approved_executable("ps")
+    if not ps_path:
+        return -1
     try:
         output = subprocess.check_output(
-            ["ps", "-o", "rss=", "-p", str(worker_pid)],
+            [ps_path, "-o", "rss=", "-p", str(worker_pid)],
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
@@ -642,9 +662,12 @@ def _query_worker_pid(master_pid: int) -> int:
     """Query the process table for a worker of the supplied master PID."""
     if master_pid <= 0:
         return -1
+    ps_path = resolve_approved_executable("ps")
+    if not ps_path:
+        return -1
     try:
         ps = subprocess.run(
-            ["ps", "-axo", "pid=,ppid=,comm="],
+            [ps_path, "-axo", "pid=,ppid=,comm="],
             capture_output=True,
             text=True,
             check=False,
@@ -706,7 +729,9 @@ def measure_drain(worker_pid: int) -> tuple[int | None, bool, list[int]]:
     drain = []
     for _ in range(3):
         if worker_pid > 0:
-            drain.append(read_worker_rss(worker_pid))
+            sample = read_worker_rss(worker_pid)
+            if sample >= 0:
+                drain.append(sample)
         time.sleep(5)
     drain_delta = None
     if len(drain) >= 2:
@@ -849,6 +874,15 @@ def handle_missing_nginx(args: argparse.Namespace, manifest: dict) -> int | None
             "schema_version": RECORD_SCHEMA_VERSION,
             "candidate_sha": manifest["candidate_sha"],
             "run_id": f"soak-{int(time.time())}",
+            "duration_seconds": 0,
+            "concurrency": manifest["concurrency"],
+            "per_scenario": [],
+            "rss_time_series": [],
+            "worker_rss_drain_delta_kb": None,
+            "worker_rss_drain_samples": [],
+            "monotonic_growth_after_drain": False,
+            "module_managed_peak_observed": False,
+            "per_request_peak_bytes": None,
             "status": "skip",
             "skip_reason": f"{missing_text} not set or unavailable",
             "policy_reference": "release short-soak qualification thresholds",
@@ -881,43 +915,70 @@ def prepare_runtime(base_url: str, manifest: dict, module_so: str) -> tuple:
     return runtime_dir, corpus, nginx
 
 
-def real_main(args: argparse.Namespace) -> int:
-    manifest = load_manifest(args.manifest)
-    skip_result = handle_missing_nginx(args, manifest)
-    if skip_result is not None:
-        return skip_result
+def _stop_nginx(nginx: subprocess.Popen) -> None:
+    nginx.terminate()
+    try:
+        nginx.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        nginx.kill()
 
-    module_so = os.environ.get("MODULE_SO", "")
-    port = SOAK_PORT
-    base_url = f"http://127.0.0.1:{port}"
+
+def _cleanup_runtime_directory(runtime_dir: pathlib.Path) -> None:
+    if (
+        runtime_dir.name.startswith("markdown-soak-")
+        and runtime_dir.parent == SOAK_RUNTIME_ROOT
+    ):
+        shutil.rmtree(runtime_dir, ignore_errors=True)
+
+
+def _run_soak_session(
+    base_url: str, manifest: dict, module_so: str
+) -> dict:
     runtime_dir, corpus, nginx = prepare_runtime(base_url, manifest, module_so)
+    started = time.time()
+    rss_series = []
+    scenario_metrics = {sid: [] for sid in corpus}
+    drain_delta = None
+    monotonic = False
+    drain_samples = []
+    peak_memory_bytes = None
+    ready_error = None
     try:
         ready_fixture = next(iter(corpus.values()), None)
         if not ready_fixture or not wait_for_ready(
                 f"{base_url}/{ready_fixture}"):
-            print("ERROR: nginx did not become ready", file=sys.stderr)
-            return 1
-        worker_pid = find_worker_pid(runtime_dir)
-        started = time.time()
-        duration = int(manifest["duration_minutes"] * 60)
-        rss_series, scenario_metrics = run_load_loop(
-            corpus, worker_pid, duration, started,
-            manifest["concurrency"], runtime_dir)
-        drain_delta, monotonic, drain_samples = measure_drain(worker_pid)
-        peak_memory_bytes = read_module_peak_memory(base_url)
+            ready_error = "nginx did not become ready"
+        else:
+            worker_pid = find_worker_pid(runtime_dir)
+            duration = int(manifest["duration_minutes"] * 60)
+            rss_series, scenario_metrics = run_load_loop(
+                corpus, worker_pid, duration, started,
+                manifest["concurrency"], runtime_dir)
+            drain_delta, monotonic, drain_samples = measure_drain(worker_pid)
+            peak_memory_bytes = read_module_peak_memory(base_url)
     finally:
-        nginx.terminate()
-        try:
-            nginx.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            nginx.kill()
+        _stop_nginx(nginx)
+        _cleanup_runtime_directory(runtime_dir)
 
-    per_scenario = build_scenario_metrics(scenario_metrics)
+    return {
+        "started": started,
+        "rss_series": rss_series,
+        "scenario_metrics": scenario_metrics,
+        "drain_delta": drain_delta,
+        "monotonic": monotonic,
+        "drain_samples": drain_samples,
+        "peak_memory_bytes": peak_memory_bytes,
+        "ready_error": ready_error,
+    }
 
-    elapsed = time.time() - started
-    any_error = any(
-        s.get("error_rate", 0.0) > 0.0 for s in per_scenario)
-    record = {
+
+def _build_soak_record(
+    manifest: dict,
+    elapsed: float,
+    per_scenario: list,
+    session: dict,
+) -> dict:
+    return {
         "schema_version": RECORD_SCHEMA_VERSION,
         "candidate_sha": manifest["candidate_sha"],
         "run_id": f"soak-{int(time.time())}",
@@ -926,21 +987,28 @@ def real_main(args: argparse.Namespace) -> int:
         "duration_seconds": round(elapsed, 1),
         "concurrency": manifest["concurrency"],
         "per_scenario": per_scenario,
-        "rss_time_series": rss_series,
-        "worker_rss_drain_delta_kb": drain_delta,
-        "worker_rss_drain_samples": drain_samples,
-        "monotonic_growth_after_drain": monotonic,
-        "module_managed_peak_observed": peak_memory_bytes is not None,
-        "per_request_peak_bytes": peak_memory_bytes,
+        "rss_time_series": session["rss_series"],
+        "worker_rss_drain_delta_kb": session["drain_delta"],
+        "worker_rss_drain_samples": session["drain_samples"],
+        "monotonic_growth_after_drain": session["monotonic"],
+        "module_managed_peak_observed": session["peak_memory_bytes"] is not None,
+        "per_request_peak_bytes": session["peak_memory_bytes"],
         "errors": [],
         "status": "pass",
     }
+
+
+def _soak_failures(
+    record: dict, manifest: dict, elapsed: float, ready_error: str | None
+) -> list[str]:
     failures = []
+    if ready_error:
+        failures.append(ready_error)
     if elapsed < manifest["duration_minutes"] * 60 * 0.95:
         failures.append(f"duration {elapsed}s below floor")
-    if any_error:
+    if any(s.get("error_rate", 0.0) > 0.0 for s in record["per_scenario"]):
         failures.append("error_rate != 0")
-    if monotonic:
+    if record["monotonic_growth_after_drain"]:
         failures.append("monotonic RSS growth after drain")
     rss_issue = _rss_evidence_issue(record)
     if rss_issue:
@@ -948,6 +1016,23 @@ def real_main(args: argparse.Namespace) -> int:
     peak_issue = _peak_memory_issue(record, manifest)
     if peak_issue:
         failures.append(peak_issue)
+    return failures
+
+
+def real_main(args: argparse.Namespace) -> int:
+    manifest = load_manifest(args.manifest)
+    skip_result = handle_missing_nginx(args, manifest)
+    if skip_result is not None:
+        return skip_result
+
+    module_so = os.environ.get("MODULE_SO", "")
+    base_url = f"http://127.0.0.1:{SOAK_PORT}"
+    session = _run_soak_session(base_url, manifest, module_so)
+
+    per_scenario = build_scenario_metrics(session["scenario_metrics"])
+    elapsed = time.time() - session["started"]
+    record = _build_soak_record(manifest, elapsed, per_scenario, session)
+    failures = _soak_failures(record, manifest, elapsed, session["ready_error"])
     if failures:
         record["status"] = "fail"
         record["errors"] = failures
