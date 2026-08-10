@@ -69,27 +69,37 @@ pub unsafe extern "C" fn markdown_sha256_hex(
         return DYNCONF_ERR_INVALID_TYPE;
     }
 
-    unsafe {
-        ptr::write_bytes(output, b'0', 64);
-    }
+    // All unsafe writes and the digest computation are inside catch_unwind
+    // so that no panic can unwind across the FFI boundary (Rule 15).
+    // On panic we return DYNCONF_ERR_INTERNAL; the output buffer contents
+    // are undefined (the caller must not rely on them on error return).
+    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        // SAFETY: output was validated non-NULL and >= 64 bytes above.
+        unsafe {
+            ptr::write_bytes(output, b'0', 64);
+        }
 
-    let digest = panic::catch_unwind(|| {
         let bytes = if data_len == 0 {
             &[][..]
         } else {
+            // SAFETY: data was validated non-NULL when data_len > 0 above.
             unsafe { std::slice::from_raw_parts(data, data_len) }
         };
-        super::digest::compute_source_digest(bytes)
-    });
+        let hex = super::digest::compute_source_digest(bytes);
 
-    match digest {
-        Ok(hex) if hex.len() == 64 => {
+        if hex.len() == 64 {
+            // SAFETY: output has at least 64 writable bytes; hex is exactly 64.
             unsafe {
                 ptr::copy_nonoverlapping(hex.as_ptr(), output, 64);
             }
             DYNCONF_OK
+        } else {
+            DYNCONF_ERR_INTERNAL
         }
-        Ok(_) => DYNCONF_ERR_INTERNAL,
+    }));
+
+    match result {
+        Ok(code) => code,
         Err(_) => DYNCONF_ERR_INTERNAL,
     }
 }
@@ -220,47 +230,59 @@ pub unsafe extern "C" fn markdown_dynconf_parse(
         return;
     }
 
-    // Initialize to safe defaults before any work
+    // Initialize to safe defaults before any work.  If a panic occurs
+    // during parsing or result writing, the result struct retains this
+    // safe state (all pointers NULL, error_code = DYNCONF_ERR_INTERNAL).
     unsafe {
         markdown_dynconf_result_init(result);
     }
 
-    let outcome = panic::catch_unwind(|| {
+    // The entire parse + result-writing path is inside catch_unwind so
+    // that no panic can unwind across the FFI boundary (Rule 15).
+    // write_success and write_error use a transactional pattern: all
+    // heap allocations (to_vec + into_boxed_slice) happen first; only
+    // after all allocations succeed are the raw pointers committed to
+    // the result struct.  This guarantees that a panic during allocation
+    // leaves result in the safe init state with no dangling pointers.
+    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
         // Validate input
         if data.is_null() && data_len > 0 {
-            return Err(make_error(
-                DYNCONF_ERR_INVALID_JSON,
-                "NULL data pointer with non-zero length".to_string(),
-            ));
+            // SAFETY: result was validated non-NULL above.
+            unsafe {
+                write_error(
+                    result,
+                    DYNCONF_ERR_INVALID_JSON,
+                    "NULL data pointer with non-zero length",
+                );
+            }
+            return;
         }
 
         let raw_bytes = if data_len == 0 {
             &[]
         } else {
+            // SAFETY: data was validated non-NULL when data_len > 0.
             unsafe { std::slice::from_raw_parts(data, data_len) }
         };
 
         match parse_dynconf(raw_bytes) {
-            Ok(dynconf_result) => Ok(dynconf_result),
-            Err(e) => Err(make_error(map_error_kind(&e.kind), e.message)),
+            Ok(dynconf_result) => {
+                // SAFETY: result was validated non-NULL above.
+                unsafe { write_success(result, &dynconf_result) };
+            }
+            Err(e) => {
+                // SAFETY: result was validated non-NULL above.
+                unsafe {
+                    write_error(result, map_error_kind(&e.kind), &e.message);
+                }
+            }
         }
-    });
+    }));
 
-    match outcome {
-        Ok(Ok(dynconf_result)) => unsafe {
-            write_success(result, &dynconf_result);
-        },
-        Ok(Err((code, msg))) => unsafe {
-            write_error(result, code, &msg);
-        },
-        Err(_panic) => unsafe {
-            write_error(
-                result,
-                DYNCONF_ERR_INTERNAL,
-                "internal panic during dynconf parsing",
-            );
-        },
-    }
+    // On panic, result retains its safe init state (error_code =
+    // DYNCONF_ERR_INTERNAL, all pointers NULL).  Do NOT call write_error
+    // here -- it allocates and could panic again, causing a double unwind.
+    let _ = outcome;
 }
 
 /// Free heap memory owned by an FFIDynconfResult.
@@ -280,7 +302,8 @@ pub unsafe extern "C" fn markdown_dynconf_result_free(result: *mut FFIDynconfRes
         return;
     }
 
-    let _ = panic::catch_unwind(|| {
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        // SAFETY: result was validated non-NULL above.
         let r = unsafe { &*result };
 
         // Free error message
@@ -314,6 +337,7 @@ pub unsafe extern "C" fn markdown_dynconf_result_free(result: *mut FFIDynconfRes
         }
 
         // Clear all pointers
+        // SAFETY: result was validated non-NULL above.
         let r_mut = unsafe { &mut *result };
         r_mut.error_message = ptr::null();
         r_mut.error_message_len = 0;
@@ -321,11 +345,7 @@ pub unsafe extern "C" fn markdown_dynconf_result_free(result: *mut FFIDynconfRes
         r_mut.source_digest_len = 0;
         r_mut.active_digest = ptr::null();
         r_mut.active_digest_len = 0;
-    });
-}
-
-fn make_error(code: u32, message: String) -> (u32, String) {
-    (code, message)
+    }));
 }
 
 fn map_error_kind(kind: &super::parser::DynconfParseErrorKind) -> u32 {
@@ -345,16 +365,31 @@ fn map_error_kind(kind: &super::parser::DynconfParseErrorKind) -> u32 {
     }
 }
 
+/// Write a successful parse result into the FFI result struct.
+///
+/// Uses a transactional pattern: all heap allocations are performed first
+/// into local `Box<[u8]>` variables.  Only after all allocations succeed
+/// are the raw pointers committed to the result struct.  This ensures
+/// that a panic during allocation leaves the result in the safe init
+/// state (all pointers NULL) with no dangling or leaked allocations.
+///
+/// # Safety
+///
+/// `result` must point to a valid, initialized `FFIDynconfResult`.
 unsafe fn write_success(result: *mut FFIDynconfResult, dynconf: &DynconfResult) {
+    // Phase 1: Allocate all heap-owned data into local Boxes.
+    // If any of these panic (OOM), result retains its safe init state.
+    let source_bytes = dynconf.source_digest.as_bytes().to_vec().into_boxed_slice();
+    let active_bytes = dynconf.active_digest.as_bytes().to_vec().into_boxed_slice();
+
+    // Phase 2: Commit -- transfer ownership and write all fields.
+    // Box::into_raw and pointer writes do not allocate and cannot panic.
+    // SAFETY: result was validated non-NULL by the caller.
     let r = unsafe { &mut *result };
 
-    // Allocate and write source digest
-    let source_bytes = dynconf.source_digest.as_bytes().to_vec().into_boxed_slice();
     r.source_digest_len = source_bytes.len();
     r.source_digest = Box::into_raw(source_bytes) as *const u8;
 
-    // Allocate and write active digest
-    let active_bytes = dynconf.active_digest.as_bytes().to_vec().into_boxed_slice();
     r.active_digest_len = active_bytes.len();
     r.active_digest = Box::into_raw(active_bytes) as *const u8;
 
@@ -395,19 +430,30 @@ unsafe fn write_success(result: *mut FFIDynconfResult, dynconf: &DynconfResult) 
     r.error_message_len = 0;
 }
 
+/// Write an error result into the FFI result struct.
+///
+/// Uses the same transactional pattern as `write_success`: the error
+/// message is allocated first, and only after the allocation succeeds
+/// are the fields committed to the result struct.
+///
+/// # Safety
+///
+/// `result` must point to a valid, initialized `FFIDynconfResult`.
 unsafe fn write_error(result: *mut FFIDynconfResult, code: u32, message: &str) {
-    let r = unsafe { &mut *result };
-
-    r.error_code = code;
-
-    // Truncate message to 512 bytes (bounded error messages per spec)
+    // Phase 1: Allocate the error message into a local Box.
+    // If this panics (OOM), result retains its safe init state.
     let truncated = if message.len() > 512 {
         &message[..message.floor_char_boundary(512)]
     } else {
         message
     };
-
     let msg_bytes = truncated.as_bytes().to_vec().into_boxed_slice();
+
+    // Phase 2: Commit -- transfer ownership and write all fields.
+    // SAFETY: result was validated non-NULL by the caller.
+    let r = unsafe { &mut *result };
+
+    r.error_code = code;
     r.error_message_len = msg_bytes.len();
     r.error_message = Box::into_raw(msg_bytes) as *const u8;
 
