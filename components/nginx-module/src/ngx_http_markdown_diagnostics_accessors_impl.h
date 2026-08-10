@@ -16,6 +16,7 @@
 
 #include "ngx_http_markdown_diagnostics.h"
 
+#define NGX_HTTP_MARKDOWN_DIAGNOSTICS_MANIFEST_BUF_SIZE  65536
 
 /*
  * Collect key metrics counters for the diagnostics endpoint.
@@ -999,12 +1000,12 @@ ngx_http_markdown_manifest_digest(
         return NGX_ERROR;
     }
 
-    manifest = ngx_palloc(pool, 65536);
+    manifest = ngx_palloc(pool, NGX_HTTP_MARKDOWN_DIAGNOSTICS_MANIFEST_BUF_SIZE);
     if (manifest == NULL) {
         return NGX_ERROR;
     }
     builder.pos = manifest;
-    builder.last = manifest + 65536;
+    builder.last = manifest + NGX_HTTP_MARKDOWN_DIAGNOSTICS_MANIFEST_BUF_SIZE;
     if (ngx_http_markdown_manifest_literal(&builder,
         "{\"schema_version\":\"static_config_manifest_v1\"") != NGX_OK)
     {

@@ -1147,7 +1147,7 @@ ngx_http_markdown_decompress_via_rust(
 
         ratio = conf->limits.decompression_ratio;
         if (ratio == NGX_CONF_UNSET_UINT) {
-            ratio = 100;
+            ratio = NGX_HTTP_MARKDOWN_LIMITS_DECOMPRESSION_RATIO_DEFAULT;
         }
 
         markdown_chain_decode_result_init(&chain_result);
