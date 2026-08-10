@@ -3021,6 +3021,8 @@ ngx_http_markdown_dynconf_reload(
     if (!watcher->digest_state.lkg_valid) {
         ngx_memcpy(watcher->digest_state.lkg_digest, watcher->digest_state.active_digest,
                    sizeof(watcher->digest_state.lkg_digest));
+        watcher->digest_state.lkg_mtime = watcher->file_state.applied_mtime;
+        watcher->digest_state.lkg_valid = 1;
     }
     markdown_dynconf_result_free(&result);
     return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED;
