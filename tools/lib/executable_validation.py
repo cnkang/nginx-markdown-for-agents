@@ -6,7 +6,7 @@ import os
 import shutil
 from pathlib import Path
 
-_APPROVED_EXECUTABLES = frozenset({"ab", "brotli", "git"})
+_APPROVED_EXECUTABLES = frozenset({"ab", "brotli", "cargo", "git", "ps"})
 _APPROVED_EXECUTABLE_DIRS = (
     Path("/bin"),
     Path("/usr/bin"),
@@ -18,6 +18,14 @@ _APPROVED_EXECUTABLE_DIRS = (
     Path("/opt/local/libexec"),
     Path("/usr/local/Cellar"),
 )
+
+
+def _trusted_roots(name: str) -> tuple[Path, ...]:
+    """Return system roots plus the user toolchain root for Cargo."""
+    roots = _APPROVED_EXECUTABLE_DIRS
+    if name == "cargo":
+        roots += (Path.home() / ".cargo" / "bin", Path.home() / ".rustup")
+    return tuple(root.resolve() for root in roots)
 
 
 def resolve_approved_executable(name: str) -> str | None:
@@ -36,20 +44,25 @@ def resolve_approved_executable(name: str) -> str | None:
         return None
 
     try:
-        resolved = Path(discovered).resolve(strict=True)
-        trusted_roots = tuple(root.resolve() for root in _APPROVED_EXECUTABLE_DIRS)
+        candidate = Path(discovered)
+        resolved = candidate.resolve(strict=True)
+        trusted_roots = _trusted_roots(name)
     except OSError:
         return None
 
     if (
-        resolved.name != name
+        candidate.name != name
         or not resolved.is_file()
         or not os.access(resolved, os.X_OK)
     ):
         return None
 
     if not any(
-        resolved == root or root in resolved.parents for root in trusted_roots
+        candidate == root or root in candidate.parents
+        or resolved == root or root in resolved.parents
+        for root in trusted_roots
     ):
         return None
-    return str(resolved)
+    # Preserve a Cargo rustup shim so ``cargo +nightly`` continues to select
+    # the requested toolchain; system tools return their canonical path.
+    return str(candidate if name == "cargo" else resolved)

@@ -410,7 +410,7 @@ def main() -> int:
 
     try:
         inventory = run_audit()
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         print("ERROR: {}".format(exc), file=sys.stderr)
         return 1
 
