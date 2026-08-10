@@ -63,7 +63,7 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
     }
 
     /* 1. Populate decision context from request state */
-    dctx.log = (r->connection != NULL) ? r->connection->log : NULL;
+    dctx.log = r->connection->log;
     dctx.current_state = ctx->stream_sm.state;
     dctx.replay_available =
         ngx_http_markdown_stream_replay_available(ctx);
