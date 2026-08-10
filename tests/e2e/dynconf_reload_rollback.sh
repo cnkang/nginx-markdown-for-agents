@@ -488,14 +488,8 @@ diagnostics_field() {
     local match=""
 
     case "$field" in
-        generation)
-            match=$(printf '%s' "$json" | grep -E -o '"generation"[[:space:]]*:[[:space:]]*("[^"]*"|[0-9]+|true|false|null)' | head -1 || true)
-            ;;
-        last_success)
-            match=$(printf '%s' "$json" | grep -E -o '"last_success"[[:space:]]*:[[:space:]]*("[^"]*"|[0-9]+|true|false|null)' | head -1 || true)
-            ;;
-        filter)
-            match=$(printf '%s' "$json" | grep -E -o '"filter"[[:space:]]*:[[:space:]]*("[^"]*"|[0-9]+|true|false|null)' | head -1 || true)
+        generation|last_success|filter|config_version|active_mtime)
+            match=$(printf '%s' "$json" | grep -E -o "\"${field}\"[[:space:]]*:[[:space:]]*(\"[^\"]*\"|[0-9]+|true|false|null)" | head -1 || true)
             ;;
         *)
             return 1
@@ -575,6 +569,20 @@ write_dynconf_atomically() {
         TMP_WRITE_PATH=""
         return 1
     fi
+    if [[ "$ORIGINAL_FILE_EXISTED" -eq 1 ]]; then
+        if ! chmod "$ORIGINAL_FILE_MODE" "$TMP_WRITE_PATH"; then
+            echo "Error: failed to preserve dynconf file mode" >&2
+            rm -f -- "$TMP_WRITE_PATH" || true
+            TMP_WRITE_PATH=""
+            return 1
+        fi
+        if ! chown "$ORIGINAL_FILE_UID:$ORIGINAL_FILE_GID" "$TMP_WRITE_PATH"; then
+            echo "Error: failed to preserve dynconf file ownership" >&2
+            rm -f -- "$TMP_WRITE_PATH" || true
+            TMP_WRITE_PATH=""
+            return 1
+        fi
+    fi
     if ! mv -f -- "$TMP_WRITE_PATH" "$DYNCONF_FILE"; then
         echo "Error: failed to replace dynconf file $DYNCONF_FILE" >&2
         rm -f -- "$TMP_WRITE_PATH" || true
@@ -608,7 +616,10 @@ trap 'cleanup 130' INT
 trap 'cleanup 143' TERM
 
 REQUESTED_DYNCONF_FILE="$(requested_dynconf_path)"
-prepare_dynconf_ownership "$REQUESTED_DYNCONF_FILE"
+if ! prepare_dynconf_ownership "$REQUESTED_DYNCONF_FILE"; then
+    echo "Error: unable to prepare dynconf ownership" >&2
+    exit 1
+fi
 
 # --- Step 0: Check prerequisites ---
 
