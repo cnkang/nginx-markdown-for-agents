@@ -194,6 +194,12 @@ fn free_on_init_only_result_is_safe() {
         streaming_buffer: DYNCONF_NOT_SET_U64,
     };
     free_and_verify(&mut result);
+    assert!(result.error_message.is_null());
+    assert_eq!(result.error_message_len, 0);
+    assert!(result.source_digest.is_null());
+    assert_eq!(result.source_digest_len, 0);
+    assert!(result.active_digest.is_null());
+    assert_eq!(result.active_digest_len, 0);
 }
 
 #[test]
@@ -206,6 +212,12 @@ fn double_free_after_successful_parse_is_safe() {
     unsafe {
         markdown_dynconf_result_free(&mut result);
     }
+    assert!(result.error_message.is_null());
+    assert_eq!(result.error_message_len, 0);
+    assert!(result.source_digest.is_null());
+    assert_eq!(result.source_digest_len, 0);
+    assert!(result.active_digest.is_null());
+    assert_eq!(result.active_digest_len, 0);
 }
 
 // ─── markdown_sha256_hex ───────────────────────────────────────────────────
