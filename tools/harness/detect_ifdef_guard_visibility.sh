@@ -76,10 +76,13 @@ fi
 
 # Step 1: Extract function names declared inside #ifdef GUARD_NAME blocks in the header
 # These are prototype-style declarations (end with ;)
-guarded_funcs=$(python3 -c "
+guarded_funcs=$(python3 - "${HEADER_FILE}" "${GUARD_NAME}" <<'PY'
 import re
+import sys
 
-with open('$HEADER_FILE') as f:
+header_path, guard_name = sys.argv[1:3]
+
+with open(header_path, encoding='utf-8') as f:
     lines = f.readlines()
 
 funcs = set()
@@ -87,14 +90,29 @@ stack = []
 
 # MARKDOWN_STREAMING_SHADOW_DEBUG is only defined for a streaming build, so
 # code guarded by it also has the visibility of MARKDOWN_STREAMING_ENABLED.
-implied_guards = {'MARKDOWN_STREAMING_SHADOW_DEBUG': '$GUARD_NAME'}
+implied_guards = {'MARKDOWN_STREAMING_SHADOW_DEBUG': guard_name}
 
 def guard_enabled():
-    return any(name == '$GUARD_NAME' and active for name, active in stack)
+    return any(name == guard_name and active for name, active, _ in stack)
+
+def guard_expression(expression):
+    positive = re.search(
+        r'defined\s*\(\s*' + re.escape(guard_name) + r'\s*\)',
+        expression,
+    )
+    negative = re.search(
+        r'!\s*defined\s*\(\s*' + re.escape(guard_name) + r'\s*\)',
+        expression,
+    )
+    if positive and not negative:
+        return True
+    if negative and not positive:
+        return False
+    return None
 
 for line in lines:
     stripped = line.strip()
-    directive = re.match(r'#\\s*(ifdef|ifndef|if|else|elif|endif)\\b(.*)', stripped)
+    directive = re.match(r'#\s*(ifdef|ifndef|if|else|elif|endif)\b(.*)', stripped)
     if directive:
         kind, expression = directive.groups()
         if kind == 'endif':
@@ -104,28 +122,39 @@ for line in lines:
             name = expression.strip()
             if name in implied_guards:
                 name = implied_guards[name]
-            stack.append((name, kind == 'ifdef'))
+            active = name == guard_name and kind == 'ifdef'
+            stack.append((name, active, active))
         elif kind == 'if':
-            positive = re.search(r'defined\\s*\\(\\s*$GUARD_NAME\\s*\\)', expression)
-            negative = re.search(r'!\\s*defined\\s*\\(\\s*$GUARD_NAME\\s*\\)', expression)
-            stack.append(('$GUARD_NAME' if positive or negative else None,
-                          bool(positive) and not negative if positive else False
-                          if negative else None))
-        elif kind in ('else', 'elif') and stack:
-            name, active = stack[-1]
-            if name == '$GUARD_NAME' and active is not None:
-                stack[-1] = (name, not active if kind == 'else' else False)
+            active = guard_expression(expression)
+            stack.append((guard_name if active is not None else None,
+                          active, active is True))
+        elif kind == 'elif' and stack:
+            name, active, branch_taken = stack[-1]
+            candidate = guard_expression(expression)
+            if candidate is not None:
+                next_active = not branch_taken and candidate
+                stack[-1] = (guard_name, next_active,
+                             branch_taken or next_active)
+            elif name == guard_name and active is not None:
+                next_active = False
+                stack[-1] = (name, next_active, branch_taken or next_active)
+        elif kind == 'else' and stack:
+            name, active, branch_taken = stack[-1]
+            if name == guard_name and active is not None:
+                next_active = not branch_taken
+                stack[-1] = (name, next_active, branch_taken or next_active)
         continue
 
     if guard_enabled():
         # Find function declarations: return_type name(args);
-        m = re.search(r'\\b(ngx_http_markdown_\\w+)\\s*\\(', stripped)
+        m = re.search(r'\b(ngx_http_markdown_\w+)\s*\(', stripped)
         if m and ';' in line:
             funcs.add(m.group(1))
 
 for f in sorted(funcs):
     print(f)
-" 2>/dev/null)
+PY
+ 2>/dev/null)
 
 if [[ -z "$guarded_funcs" ]]; then
     echo "OK: no functions found inside #ifdef ${GUARD_NAME} blocks"
@@ -145,24 +174,39 @@ for func in $guarded_funcs; do
         # Keep conditional nesting intact: an inner #ifdef must not make the
         # outer streaming guard appear closed.  Shadow debug is a streaming
         # sub-feature and therefore implies the requested guard.
-        result=$(python3 -c "
+        result=$(python3 - "${file}" "${func}" "${GUARD_NAME}" "${HEADER_FILE}" <<'PY'
 import re
+import sys
 
-func_name = '$func'
-guard_name = '$GUARD_NAME'
+source_path, func_name, guard_name, header_path = sys.argv[1:5]
 
-with open('$file') as f:
+with open(source_path, encoding='utf-8') as f:
     lines = f.readlines()
 
 stack = []
 implied_guards = {'MARKDOWN_STREAMING_SHADOW_DEBUG': guard_name}
 
 def guard_enabled():
-    return any(name == guard_name and active for name, active in stack)
+    return any(name == guard_name and active for name, active, _ in stack)
+
+def guard_expression(expression):
+    positive = re.search(
+        r'defined\s*\(\s*' + re.escape(guard_name) + r'\s*\)',
+        expression,
+    )
+    negative = re.search(
+        r'!\s*defined\s*\(\s*' + re.escape(guard_name) + r'\s*\)',
+        expression,
+    )
+    if positive and not negative:
+        return True
+    if negative and not positive:
+        return False
+    return None
 
 for i, line in enumerate(lines, 1):
     stripped = line.strip()
-    directive = re.match(r'#\\s*(ifdef|ifndef|if|else|elif|endif)\\b(.*)', stripped)
+    directive = re.match(r'#\s*(ifdef|ifndef|if|else|elif|endif)\b(.*)', stripped)
     if directive:
         kind, expression = directive.groups()
         if kind == 'endif':
@@ -172,17 +216,27 @@ for i, line in enumerate(lines, 1):
             name = expression.strip()
             if name in implied_guards:
                 name = implied_guards[name]
-            stack.append((name, kind == 'ifdef'))
+            active = name == guard_name and kind == 'ifdef'
+            stack.append((name, active, active))
         elif kind == 'if':
-            positive = re.search(r'defined\\s*\\(\\s*' + re.escape(guard_name) + r'\\s*\\)', expression)
-            negative = re.search(r'!\\s*defined\\s*\\(\\s*' + re.escape(guard_name) + r'\\s*\\)', expression)
-            stack.append((guard_name if positive or negative else None,
-                          bool(positive) and not negative if positive else False
-                          if negative else None))
-        elif kind in ('else', 'elif') and stack:
-            name, active = stack[-1]
+            active = guard_expression(expression)
+            stack.append((guard_name if active is not None else None,
+                          active, active is True))
+        elif kind == 'elif' and stack:
+            name, active, branch_taken = stack[-1]
+            candidate = guard_expression(expression)
+            if candidate is not None:
+                next_active = not branch_taken and candidate
+                stack[-1] = (guard_name, next_active,
+                             branch_taken or next_active)
+            elif name == guard_name and active is not None:
+                next_active = False
+                stack[-1] = (name, next_active, branch_taken or next_active)
+        elif kind == 'else' and stack:
+            name, active, branch_taken = stack[-1]
             if name == guard_name and active is not None:
-                stack[-1] = (name, not active if kind == 'else' else False)
+                next_active = not branch_taken
+                stack[-1] = (name, next_active, branch_taken or next_active)
         continue
 
     if not guard_enabled():
@@ -195,18 +249,19 @@ for i, line in enumerate(lines, 1):
         # ``const ngx_str_t *r = func()``).  Only skip an actual definition;
         # calls must remain visible to the guard check.
         definition_pattern = (
-            r'^\\s*(?:static\\s+)?(?:inline\\s+)?(?:const\\s+)?'
-            r'[\\w\\s*]+\\b' + re.escape(func_name)
-            + r'\\s*\\([^;]*\\)\\s*\\{'
+            r'^\s*(?:static\s+)?(?:inline\s+)?(?:const\s+)?'
+            r'[\w\s*]+\b' + re.escape(func_name)
+            + r'\s*\([^;]*\)\s*\{'
         )
         if re.match(definition_pattern, line):
             continue
         if func_name + '(' in line:
             # Skip a prototype in the owning header only.
-            if '$HEADER_FILE' == '$file' and ';' in line:
+            if header_path == source_path and ';' in line:
                 continue
             print(f'{i}:{line.strip()[:80]}')
-" 2>/dev/null)
+PY
+ 2>/dev/null)
 
         if [[ -n "$result" ]]; then
             while IFS= read -r match_line; do

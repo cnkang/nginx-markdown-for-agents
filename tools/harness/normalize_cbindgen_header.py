@@ -10,8 +10,12 @@ HEADER_PATH = REPO_ROOT / "components" / "rust-converter" / "include" / "markdow
 BOUNDARY_RE = re.compile(r"(} FFIEffectiveConfig;)\n{2,}(?=/\*\*)")
 
 
-def normalize_header(path: Path = HEADER_PATH) -> None:
+def normalize_header() -> None:
     """Collapse cbindgen's repeated boundary blank lines to one blank line."""
+    path = HEADER_PATH.resolve(strict=True)
+    repo_root = REPO_ROOT.resolve(strict=True)
+    if repo_root not in path.parents:
+        raise RuntimeError("generated header escaped the repository root")
     content = path.read_text(encoding="utf-8")
     normalized, count = BOUNDARY_RE.subn(r"\1\n\n", content, count=1)
     if count != 1:
