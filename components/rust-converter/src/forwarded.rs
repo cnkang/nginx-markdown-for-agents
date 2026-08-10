@@ -280,11 +280,20 @@ pub fn is_trusted_source(source_ip: &str, trusted: &[Cidr]) -> bool {
     let trimmed = source_ip.trim();
     /* validate_forwarded_addr returns bracketed IPv6 literals (e.g.
      * "[2001:db8::1]") as-is.  IpAddr::parse rejects the bracketed form,
-     * so strip a single matching pair of brackets before parsing. */
-    let normalized = trimmed
-        .strip_prefix('[')
-        .and_then(|rest| rest.strip_suffix(']'))
-        .unwrap_or(trimmed);
+     * so strip a single matching pair of brackets before parsing.
+     * Only strip when the inner content is a valid IPv6 address; a
+     * bracketed IPv4 literal (e.g. "[1.2.3.4]") is not a valid forwarded
+     * address form and must not be trusted. */
+    let normalized: &str =
+        if trimmed.len() >= 2 && trimmed.starts_with('[') && trimmed.ends_with(']') {
+            let inner = &trimmed[1..trimmed.len() - 1];
+            if inner.parse::<Ipv6Addr>().is_err() {
+                return false;
+            }
+            inner
+        } else {
+            trimmed
+        };
     let ip: IpAddr = match normalized.parse() {
         Ok(ip) => ip,
         Err(_) => return false,
@@ -1146,6 +1155,24 @@ mod tests {
         assert!(!is_trusted_source("[2001:db8::1", &t));
         assert!(!is_trusted_source("2001:db8::1]", &t));
         assert!(!is_trusted_source("[]", &t));
+    }
+
+    #[test]
+    fn bracketed_ipv4_not_trusted() {
+        /* A bracketed IPv4 literal is not a valid forwarded address form;
+         * it must not be trusted even against 0.0.0.0/0. */
+        let t = cidrs(&["0.0.0.0/0"]);
+        assert!(!is_trusted_source("[1.2.3.4]", &t));
+    }
+
+    #[test]
+    fn bracketed_ipv4_mapped_ipv6_trusted() {
+        /* [::ffff:10.0.0.1] is a valid bracketed IPv6 literal (IPv4-mapped);
+         * it should match the IPv4 CIDR, consistent with the unbracketed
+         * ipv4_mapped_ipv6_matches_ipv4_cidr test. */
+        let t = cidrs(&["10.0.0.0/8"]);
+        assert!(is_trusted_source("[::ffff:10.0.0.1]", &t));
+        assert!(!is_trusted_source("[::ffff:11.0.0.1]", &t));
     }
 
     #[test]
