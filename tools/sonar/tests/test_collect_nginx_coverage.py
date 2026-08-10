@@ -24,11 +24,11 @@ def _conflicting_location_blocks(script: str) -> list[str]:
     ]
 
 
-def test_coverage_runtime_uses_canonical_otel_switch() -> None:
-    """Coverage NGINX config must not enable a reject-only directive."""
+def test_coverage_runtime_omits_removed_otel_directives() -> None:
+    """Coverage NGINX config must not include removed OTel directives."""
     script = COVERAGE_SCRIPT.read_text(encoding="utf-8")
 
-    assert "markdown_otel on;" in script
+    assert "markdown_otel on;" not in script
     assert "markdown_otel_tracing on;" not in script
 
 
