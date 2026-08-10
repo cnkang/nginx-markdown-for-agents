@@ -148,6 +148,14 @@ def test_record_output_path_stays_within_repository(tmp_path: Path) -> None:
         validator._write_record({}, args)
 
 
+def test_skipped_target_record_keeps_seed_path_field() -> None:
+    entry = {"name": "convert_html", "seed": 7}
+
+    record = validator._skipped_record(entry, "not blocking")
+
+    assert "seed_path" in record
+
+
 def test_real_mode_rejects_malformed_manifest(tmp_path: Path, monkeypatch,
                                               capsys) -> None:
     """Real mode must fail closed on a malformed target manifest."""

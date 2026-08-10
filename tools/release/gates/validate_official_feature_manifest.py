@@ -61,6 +61,11 @@ def check_cargo_features(cargo_toml: str, failures: list) -> None:
             failures.append(
                 f"Cargo default features do not include manifest feature {feature!r}"
             )
+    unexpected = sorted(set(defaults) - set(EXPECTED))
+    for feature in unexpected:
+        failures.append(
+            f"Cargo default feature {feature!r} is not declared by the manifest"
+        )
     for name in FORBIDDEN_FEATURE_NAMES:
         if name in features:
             failures.append(f"forbidden Cargo feature name {name!r} is used")

@@ -187,6 +187,8 @@ required_commands=(
   mkdir
   mktemp
   rm
+  curl
+  python3
   sleep
   tr
   wc
@@ -204,10 +206,6 @@ if ! command -v ps >/dev/null 2>&1 \
     || ! ps -o rss= -p "$$" >/dev/null 2>&1; then
   RSS_SUPPORTED=0
   log "RSS sampling unavailable; memory evidence will fail closed"
-fi
-
-if ! command -v python3 >/dev/null 2>&1; then
-  die "python3 is required for the upstream mock server"
 fi
 
 if [[ -z "$SCENARIO" || "$SCENARIO" == "brotli-streaming-first" ]]; then
@@ -1053,7 +1051,8 @@ def read_metrics_file(path):
     try:
         content = Path(path).read_text(encoding="utf-8")
         try:
-            return json.loads(content)
+            value = json.loads(content)
+            return value if isinstance(value, dict) else {}
         except json.JSONDecodeError:
             return parse_prometheus_metrics(content)
     except OSError:
@@ -1194,6 +1193,14 @@ for scenario in scenarios:
         scenario["response_correctness"]["verdict"] = "fail"
         scenario["response_correctness"]["failure_reason"] = reason
 
+
+def aggregate_metric(rows, metric):
+    values = [row.get("metrics", {}).get(metric) for row in rows]
+    if not all(isinstance(value, (int, float)) and not isinstance(value, bool)
+               for value in values):
+        return None
+    return sum(values)
+
 report = {
     "module_benchmark": {
         "version": "1.0.0",
@@ -1209,8 +1216,12 @@ report = {
         # evidence as "perfect 0 slope" and must never be written.
     },
     "decompression_coverage": {
-        "decompression_streaming_total": sum(s.get("metrics", {}).get("decompression_streaming_total", 0) for s in scenarios),
-        "decompression_fullbuffer_total": sum(s.get("metrics", {}).get("decompression_fullbuffer_total", 0) for s in scenarios),
+        "decompression_streaming_total": aggregate_metric(
+            scenarios, "decompression_streaming_total"
+        ),
+        "decompression_fullbuffer_total": aggregate_metric(
+            scenarios, "decompression_fullbuffer_total"
+        ),
     }
 }
 

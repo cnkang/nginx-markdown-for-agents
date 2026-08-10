@@ -31,7 +31,6 @@ import json
 import math
 import os
 import re
-import shutil
 import subprocess
 import sys
 import time
@@ -46,6 +45,7 @@ from lib.path_validation import (  # noqa: E402
     validate_read_path,
     validate_write_path_within_root,
 )
+from lib.executable_validation import resolve_approved_executable  # noqa: E402
 
 SCHEMA_VERSION = "release.fuzz-qualification.v1"
 DEFAULT_MANIFEST = "artifacts/release/0.9.2/blocking-fuzz-target-manifest.json"
@@ -277,7 +277,7 @@ def validate_corpus_seeds(data: dict, expected_sha: str,
 
 def _cargo_fuzz_available() -> bool:
     """Return whether the cargo +nightly toolchain can be invoked."""
-    cargo = shutil.which("cargo")
+    cargo = resolve_approved_executable("cargo")
     if cargo is None:
         return False
     try:
@@ -292,7 +292,7 @@ def _cargo_fuzz_available() -> bool:
 
 def _invoke_fuzz(target: str, flags: list[str], timeout: int) -> dict:
     """Run one cargo fuzz invocation, returning status and captured output."""
-    cargo = shutil.which("cargo")
+    cargo = resolve_approved_executable("cargo")
     if cargo is None:
         return {"returncode": -1, "stdout": "",
                 "stderr": "spawn failed: cargo not found"}
@@ -440,6 +440,7 @@ def _skipped_record(entry: dict, reason: str) -> dict:
         "crashes": 0,
         "sanitizer_findings": 0,
         "corpus_dir": str(CORPUS_ROOT / entry["name"]),
+        "seed_path": "",
         "raw_log_ref": "",
         "status": "skipped",
         "skip_reason": reason,

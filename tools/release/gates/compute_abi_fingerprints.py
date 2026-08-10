@@ -41,12 +41,23 @@ HEADER_HASH_DEFINE = re.compile(
 )
 
 
+def _repo_file(path: pathlib.Path) -> pathlib.Path:
+    """Resolve a checked-in source file without permitting symlink escape."""
+    root = REPO_ROOT.resolve(strict=True)
+    resolved = path.resolve(strict=True)
+    if resolved == root or root not in resolved.parents:
+        raise ValueError(f"source path escapes repository root: {path}")
+    if not resolved.is_file():
+        raise ValueError(f"source path is not a regular file: {path}")
+    return resolved
+
+
 def truncate8(digest: bytes) -> int:
     return int.from_bytes(digest[:8], "big")
 
 
 def header_hash() -> int:
-    raw = HEADER_PATH.read_bytes()
+    raw = _repo_file(HEADER_PATH).read_bytes()
     # The digest cannot include its own numeric value: replacing it with a
     # fixed spelling makes the header fingerprint reproducible and gives the
     # generated constant a stable value.
@@ -65,7 +76,7 @@ def symbol_export_names() -> set[str]:
         REPO_ROOT / "components" / "rust-converter" / "src" / "ffi" / "incremental.rs",
         DYNCONF_FFI_PATH,
     ):
-        text = path.read_text(encoding="utf-8")
+        text = _repo_file(path).read_text(encoding="utf-8")
         for match in FFI_EXPORT_RE.finditer(text):
             names.add(match.group(1))
     return names
@@ -95,7 +106,7 @@ def layout_fingerprint() -> int:
         / "src"
         / "ngx_http_markdown_ffi_layout_check.h"
     )
-    text = layout_check.read_text(encoding="utf-8")
+    text = _repo_file(layout_check).read_text(encoding="utf-8")
     for match in re.finditer(
         r'_Static_assert\(sizeof\((\w+)\)\s*==\s*(\d+),',
         text,
