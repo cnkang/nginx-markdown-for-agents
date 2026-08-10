@@ -203,7 +203,7 @@ fn append_converted_assertions(
         assertions,
         &format!("{prefix}_body_complete"),
         response.body.contains(heading)
-            && markdown_token_present(&response.body, end_token)
+            && common::markdown_token_present(&response.body, end_token)
             && response.body.len() >= minimum_size,
         format!("heading, end token, and at least {minimum_size} bytes"),
         format!("body_bytes={}", response.body.len()),
@@ -268,7 +268,7 @@ fn append_fault_assertions(base_url: &str, assertions: &mut Vec<AssertionResult>
     push_assertion(
         assertions,
         "worker_survives_faults",
-        health.status == 200 && markdown_token_present(&health.body, SMALL_END),
+        health.status == 200 && common::markdown_token_present(&health.body, SMALL_END),
         "subsequent conversion succeeds",
         format!("status={} bytes={}", health.status, health.body.len()),
     );
@@ -286,7 +286,7 @@ fn append_backpressure_assertions(
     push_assertion(
         assertions,
         "slow_reader_body_complete",
-        markdown_token_bytes_present(&raw, PRESSURE_END),
+        common::markdown_token_bytes_present(&raw, PRESSURE_END),
         "complete response contains the pressure end token",
         format!("wire_bytes={}", raw.len()),
     );
@@ -395,72 +395,4 @@ fn push_assertion(
         actual: actual.into(),
         message: (!passed).then(|| format!("[FAIL] assertion={name}")),
     });
-}
-
-/// Check a converted Markdown body for a fixture token.
-///
-/// The converter escapes underscores in ordinary text to prevent accidental
-/// Markdown emphasis.  Keep accepting the raw form as well so this assertion
-/// remains compatible with fixtures that emit a token in a non-Markdown body.
-fn markdown_token_present(body: &str, token: &str) -> bool {
-    if body.contains(token) {
-        return true;
-    }
-
-    let escaped_token = token.replace('_', r"\_");
-    body.contains(&escaped_token)
-}
-
-/// Check a wire response for a fixture token in raw or Markdown-escaped form.
-fn markdown_token_bytes_present(body: &[u8], token: &str) -> bool {
-    let raw_token = token.as_bytes();
-    if body
-        .windows(raw_token.len())
-        .any(|window| window == raw_token)
-    {
-        return true;
-    }
-
-    let escaped_token = token.replace('_', r"\_");
-    body.windows(escaped_token.len())
-        .any(|window| window == escaped_token.as_bytes())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{markdown_token_bytes_present, markdown_token_present};
-
-    const TOKEN: &str = "BROTLI_SMALL_STREAM_END";
-
-    #[test]
-    fn markdown_token_present_accepts_raw_and_escaped_forms() {
-        assert!(markdown_token_present(
-            "prefix BROTLI_SMALL_STREAM_END",
-            TOKEN
-        ));
-        assert!(markdown_token_present(
-            r"prefix BROTLI\_SMALL\_STREAM\_END",
-            TOKEN
-        ));
-        assert!(!markdown_token_present(
-            "prefix BROTLI-SMALL-STREAM-END",
-            TOKEN
-        ));
-    }
-
-    #[test]
-    fn markdown_token_bytes_present_accepts_raw_and_escaped_forms() {
-        assert!(markdown_token_bytes_present(
-            b"chunk BROTLI_SMALL_STREAM_END chunk",
-            TOKEN
-        ));
-        assert!(markdown_token_bytes_present(
-            br"chunk BROTLI\_SMALL\_STREAM\_END chunk",
-            TOKEN
-        ));
-        assert!(!markdown_token_bytes_present(
-            b"chunk without marker",
-            TOKEN
-        ));
-    }
 }

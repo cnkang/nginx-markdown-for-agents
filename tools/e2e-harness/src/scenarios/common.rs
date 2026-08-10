@@ -122,3 +122,71 @@ pub fn header_value(headers: &reqwest::header::HeaderMap, name: &str) -> String 
         .unwrap_or("")
         .to_string()
 }
+
+/// Check a converted Markdown body for a fixture token.
+///
+/// The converter escapes underscores in ordinary text to prevent accidental
+/// Markdown emphasis.  Keep accepting the raw form as well so this assertion
+/// remains compatible with fixtures that emit a token in a non-Markdown body.
+pub fn markdown_token_present(body: &str, token: &str) -> bool {
+    if body.contains(token) {
+        return true;
+    }
+
+    let escaped_token = token.replace('_', r"\_");
+    body.contains(&escaped_token)
+}
+
+/// Check a wire response for a fixture token in raw or Markdown-escaped form.
+pub fn markdown_token_bytes_present(body: &[u8], token: &str) -> bool {
+    let raw_token = token.as_bytes();
+    if body
+        .windows(raw_token.len())
+        .any(|window| window == raw_token)
+    {
+        return true;
+    }
+
+    let escaped_token = token.replace('_', r"\_");
+    body.windows(escaped_token.len())
+        .any(|window| window == escaped_token.as_bytes())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{markdown_token_bytes_present, markdown_token_present};
+
+    const TOKEN: &str = "BROTLI_SMALL_STREAM_END";
+
+    #[test]
+    fn markdown_token_present_accepts_raw_and_escaped_forms() {
+        assert!(markdown_token_present(
+            "prefix BROTLI_SMALL_STREAM_END",
+            TOKEN
+        ));
+        assert!(markdown_token_present(
+            r"prefix BROTLI\_SMALL\_STREAM\_END",
+            TOKEN
+        ));
+        assert!(!markdown_token_present(
+            "prefix BROTLI-SMALL-STREAM-END",
+            TOKEN
+        ));
+    }
+
+    #[test]
+    fn markdown_token_bytes_present_accepts_raw_and_escaped_forms() {
+        assert!(markdown_token_bytes_present(
+            b"chunk BROTLI_SMALL_STREAM_END chunk",
+            TOKEN
+        ));
+        assert!(markdown_token_bytes_present(
+            br"chunk BROTLI\_SMALL\_STREAM\_END chunk",
+            TOKEN
+        ));
+        assert!(!markdown_token_bytes_present(
+            b"chunk without marker",
+            TOKEN
+        ));
+    }
+}
