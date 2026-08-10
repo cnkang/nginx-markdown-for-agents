@@ -134,6 +134,9 @@ ngx_http_markdown_copy_content_encoding(ngx_http_request_t *r, u_char *data)
          part = part->next)
     {
         const ngx_table_elt_t *headers = part->elts;
+        if (headers == NULL && part->nelts != 0) {
+            return;
+        }
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
             if (headers[i].hash == 0) {
                 continue;
