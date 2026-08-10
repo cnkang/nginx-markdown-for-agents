@@ -24,7 +24,7 @@
 #   1 - build failure, missing fixtures, or a byte mismatch.
 #
 
-set -e
+set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CONVERTER_DIR="$ROOT/tools/corpus/test-corpus-conversion"
