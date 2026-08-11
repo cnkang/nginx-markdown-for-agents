@@ -291,6 +291,10 @@ http {{\n\
             markdown_error_policy pass;\n\
             proxy_pass http://fixture_backend/;\n\
         }}\n\
+        location /chain-raw/ {{\n\
+            markdown_filter off;\n\
+            proxy_pass http://fixture_backend/;\n\
+        }}\n\
         location /chain-stream/ {{\n\
             markdown_filter on;\n\
             markdown_accept wildcard;\n\
