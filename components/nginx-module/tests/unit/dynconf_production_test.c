@@ -7,6 +7,10 @@
  * file and FFI failure accounting cannot regress unnoticed.
  */
 
+#if defined(__linux__) && !defined(_DEFAULT_SOURCE)
+#define _DEFAULT_SOURCE
+#endif
+
 #include "../include/test_common.h"
 
 #include <fcntl.h>
