@@ -163,24 +163,19 @@ fn invalid_type_for_field() -> impl Strategy<Value = String> {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(200))]
 
-    /// Property: random bytes (not valid JSON) are always rejected.
+    /// Property: arbitrary bytes never panic and successful parses are stable.
     ///
     /// **Validates: Requirements 3.1**
     #[test]
-    fn prop_invalid_json_random_bytes(input in arbitrary_bytes()) {
-        // Random bytes are extremely unlikely to be valid RFC 8259 JSON objects
-        // with schema_version=1 and only known keys. The parser should reject them.
-        let result = parse_dynconf(&input);
-        // Either rejected outright, or if it happens to parse, still must fail
-        // schema validation. In practice, random bytes will fail UTF-8 or JSON parsing.
-        if result.is_ok() {
-            // This would be extraordinarily improbable — a random 1-256 byte sequence
-            // that is valid UTF-8, valid JSON object, has schema_version=1, and only known keys.
-            // If it somehow happens, the test still passes since it IS valid input.
-            let r = result.unwrap();
-            // Verify the result has consistent digests
-            assert!(!r.source_digest.is_empty());
-            assert!(!r.active_digest.is_empty());
+    fn prop_random_bytes_never_panic_and_stay_consistent(input in arbitrary_bytes()) {
+        let first = parse_dynconf(&input);
+        if let Ok(first_result) = first {
+            assert!(!first_result.source_digest.is_empty());
+            assert!(!first_result.active_digest.is_empty());
+
+            let second = parse_dynconf(&input).expect("same valid input must parse");
+            assert_eq!(first_result.source_digest, second.source_digest);
+            assert_eq!(first_result.active_digest, second.active_digest);
         }
     }
 

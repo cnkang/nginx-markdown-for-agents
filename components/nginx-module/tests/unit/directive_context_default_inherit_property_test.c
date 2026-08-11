@@ -559,8 +559,16 @@ ngx_http_conf_get_module_main_conf(ngx_conf_t *cf, ngx_module_t module)
 
 #include "../../src/ngx_http_markdown_config_handlers_impl.h"
 #include "../../src/ngx_http_markdown_config_directives_impl.h"
+#include "../../src/ngx_http_markdown_config_merge_impl.h"
 
 static ngx_pool_t g_pool;
+
+static void
+run_merge(ngx_http_markdown_conf_t *child,
+    const ngx_http_markdown_conf_t *parent)
+{
+    (void) ngx_http_markdown_merge_inherited_values(child, parent);
+}
 
 /* ================================================================
  * Helper: find a directive by name in the command table
@@ -755,103 +763,6 @@ create_unset_conf(void)
     return conf;
 }
 
-/*
- * Run the merge path for default resolution.
- * We replicate the merge logic inline since the production merge functions
- * are static in config_core_impl.h which has additional dependencies.
- */
-static void
-run_merge(ngx_http_markdown_conf_t *child,
-    const ngx_http_markdown_conf_t *parent)
-{
-    /* merge enabled */
-    if (child->enabled_source == NGX_HTTP_MARKDOWN_ENABLED_UNSET) {
-        if (parent->enabled_source == NGX_HTTP_MARKDOWN_ENABLED_UNSET) {
-            child->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
-            child->enabled = 0;
-            child->enabled_complex = NULL;
-        } else {
-            child->enabled_source = parent->enabled_source;
-            child->enabled = parent->enabled;
-            child->enabled_complex = parent->enabled_complex;
-        }
-    } else if (child->enabled_source == NGX_HTTP_MARKDOWN_ENABLED_STATIC) {
-        child->enabled_complex = NULL;
-    }
-
-    /* core scalar merges */
-    ngx_conf_merge_uint_value(child->on_error, parent->on_error,
-        NGX_HTTP_MARKDOWN_ON_ERROR_PASS);
-    ngx_conf_merge_uint_value(child->flavor, parent->flavor, 0);
-    ngx_conf_merge_value(child->token_estimate, parent->token_estimate, 0);
-    ngx_conf_merge_value(child->front_matter, parent->front_matter, 0);
-    ngx_conf_merge_uint_value(child->accept_policy, parent->accept_policy,
-        NGX_HTTP_MARKDOWN_ACCEPT_STRICT);
-    ngx_conf_merge_uint_value(child->policy.auth_policy,
-        parent->policy.auth_policy, 0);
-    ngx_conf_merge_uint_value(child->policy.conditional_requests,
-        parent->policy.conditional_requests,
-        NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED);
-    ngx_conf_merge_uint_value(child->policy.log_verbosity,
-        parent->policy.log_verbosity, NGX_HTTP_MARKDOWN_LOG_INFO);
-    ngx_conf_merge_value(child->decompress.auto_decompress,
-        parent->decompress.auto_decompress, 1);
-    ngx_conf_merge_ptr_value(child->policy.auth_cookies,
-        parent->policy.auth_cookies, NULL);
-    ngx_conf_merge_ptr_value(child->routing.content_types,
-        parent->routing.content_types, NULL);
-
-    /* ops merge */
-    ngx_conf_merge_value(child->ops.diagnostics_enabled,
-        parent->ops.diagnostics_enabled, 0);
-
-    /* stream merge */
-    ngx_http_markdown_merge_stream_values(child, parent);
-
-    /* advanced merge */
-    ngx_conf_merge_value(child->advanced.prune_noise,
-        parent->advanced.prune_noise, 1);
-    ngx_conf_merge_ptr_value(child->advanced.prune_selectors,
-        parent->advanced.prune_selectors, NULL);
-    ngx_conf_merge_ptr_value(child->advanced.prune_protection_selectors,
-        parent->advanced.prune_protection_selectors, NULL);
-    ngx_conf_merge_value(child->advanced.dynconf_enabled,
-        parent->advanced.dynconf_enabled, 0);
-    if (child->advanced.dynconf_path.len == 0
-        && parent->advanced.dynconf_path.len > 0)
-    {
-        child->advanced.dynconf_path = parent->advanced.dynconf_path;
-    }
-    ngx_conf_merge_value(child->advanced.dynconf_dry_run,
-        parent->advanced.dynconf_dry_run, 0);
-
-    /* Unified limits merge (per-key inheritance) */
-    ngx_conf_merge_msec_value(child->limits.conversion_timeout,
-        parent->limits.conversion_timeout,
-        NGX_HTTP_MARKDOWN_LIMITS_CONVERSION_TIMEOUT_DEFAULT);
-    ngx_conf_merge_msec_value(child->limits.parser_timeout,
-        parent->limits.parser_timeout,
-        NGX_HTTP_MARKDOWN_LIMITS_PARSER_TIMEOUT_DEFAULT);
-    ngx_conf_merge_size_value(child->limits.conversion_memory,
-        parent->limits.conversion_memory,
-        NGX_HTTP_MARKDOWN_LIMITS_CONVERSION_MEMORY_DEFAULT);
-    ngx_conf_merge_size_value(child->limits.parser_memory,
-        parent->limits.parser_memory,
-        NGX_HTTP_MARKDOWN_LIMITS_PARSER_MEMORY_DEFAULT);
-    ngx_conf_merge_size_value(child->limits.streaming_buffer,
-        parent->limits.streaming_buffer,
-        NGX_HTTP_MARKDOWN_LIMITS_STREAMING_BUFFER_DEFAULT);
-    ngx_conf_merge_size_value(child->limits.decompressed_size,
-        parent->limits.decompressed_size,
-        NGX_HTTP_MARKDOWN_LIMITS_DECOMPRESSED_SIZE_DEFAULT);
-    ngx_conf_merge_uint_value(child->limits.decompression_ratio,
-        parent->limits.decompression_ratio,
-        NGX_HTTP_MARKDOWN_LIMITS_DECOMPRESSION_RATIO_DEFAULT);
-    ngx_conf_merge_uint_value(child->limits.max_inflight,
-        parent->limits.max_inflight,
-        NGX_HTTP_MARKDOWN_LIMITS_MAX_INFLIGHT_DEFAULT);
-}
-
 static void
 test_default_values_property(void)
 {
@@ -899,7 +810,7 @@ test_default_values_property(void)
 
     /* markdown_cache_validation: default ims_only (via conditional) */
     TEST_ASSERT(child->policy.conditional_requests
-        == NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED,
+        == NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE,
         "markdown_cache_validation default resolves via conditional");
 
     /* markdown_auth_policy: default allow (0) */

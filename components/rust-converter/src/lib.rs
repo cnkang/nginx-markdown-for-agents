@@ -40,7 +40,6 @@
 // Module declarations
 pub mod charset;
 pub mod conditional;
-pub mod config;
 pub mod converter;
 pub mod decision;
 pub mod decompress;

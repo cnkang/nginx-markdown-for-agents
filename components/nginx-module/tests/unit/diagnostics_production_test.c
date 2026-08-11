@@ -407,14 +407,16 @@ void
 ngx_http_markdown_diagnostics_get_dynconf_state(
     ngx_http_markdown_diag_dynconf_t *out)
 {
+    static const char digest[] =
+        "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
     memset(out, 0, sizeof(*out));
     out->state = NGX_HTTP_MARKDOWN_DIAG_DYNCONF_ACTIVE;
-    strcpy((char *) out->source_digest,
-           "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
-    strcpy((char *) out->active_digest,
-           "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
-    strcpy((char *) out->lkg_digest,
-           "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    snprintf((char *) out->source_digest, sizeof(out->source_digest), "%s",
+             digest);
+    snprintf((char *) out->active_digest, sizeof(out->active_digest), "%s",
+             digest);
+    snprintf((char *) out->lkg_digest, sizeof(out->lkg_digest), "%s", digest);
     out->generation = 1;
     out->has_last_success = 1;
     out->last_success = 1700000000;
@@ -1038,6 +1040,18 @@ test_handler_get_head_and_denials(void)
                 "non-loopback access should be rejected");
     TEST_ASSERT(r.headers_out.status == NGX_HTTP_FORBIDDEN,
                 "diagnostics must deny non-loopback peers");
+
+    reset_test_state();
+    init_request(&r, &c, &conf, &addr);
+    addr.sin_addr.s_addr = htonl(0x0a000001);
+    r.method = NGX_HTTP_POST;
+    rc = ngx_http_markdown_diagnostics_handler(&r);
+    TEST_ASSERT(rc == NGX_HTTP_FORBIDDEN,
+                "access denial must precede method validation");
+    TEST_ASSERT(r.headers_out.status == NGX_HTTP_FORBIDDEN,
+                "denied mutation requests must not disclose 405");
+    TEST_ASSERT(g_allow_header.hash == 0,
+                "denied mutation requests must not receive Allow");
 
     TEST_PASS("Handler paths covered");
 }

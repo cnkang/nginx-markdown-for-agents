@@ -2,6 +2,7 @@
 #define NGX_HTTP_MARKDOWN_CONFIG_CORE_IMPL_H
 
 #include "ngx_http_markdown_dynconf_precedence.h"
+#include "ngx_http_markdown_config_merge_impl.h"
 
 /*
  * Configuration-core helpers.
@@ -25,13 +26,6 @@ void ngx_conf_log_error(ngx_uint_t level, ngx_conf_t *cf,
 /* Helper declared early because merge logic uses it before its definition. */
 static void ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
     const ngx_http_markdown_conf_t *conf);
-
-/* ponytail: forward-declare — effective-config builder calls this before its
- * static definition at line ~1017; without this, C99 -Wimplicit-function-declaration
- * fails the e2e native NGINX compile. */
-static ngx_inline uint8_t
-ngx_http_markdown_on_error_to_ffi(ngx_uint_t on_error,
-    ngx_uint_t error_status);
 
 /*
  * Per-path RB-tree helpers removed from production in 0.9.2.
@@ -207,6 +201,11 @@ ngx_http_markdown_create_main_conf(ngx_conf_t *cf)
     conf->trusted_proxies = NULL;
     conf->trusted_proxies_configured = 0;
     conf->trusted_proxies_manifest = NULL;
+#ifdef NGX_HTTP_BROTLI
+    conf->brotli_workspace_bytes = 0;
+    conf->brotli_workspace_limit =
+        NGX_HTTP_MARKDOWN_BROTLI_WORKSPACE_LIMIT;
+#endif
 
     return conf;
 }
@@ -521,186 +520,6 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     return conf;
 }
 
-/*
- * Merge the enabled/source/complex triple from parent into child.
- *
- * Priority: child explicit > parent inherited > default off.
- */
-static void
-ngx_http_markdown_merge_enabled(ngx_http_markdown_conf_t *conf,
-    const ngx_http_markdown_conf_t *prev)
-{
-    if (conf->enabled_source == NGX_HTTP_MARKDOWN_ENABLED_UNSET) {
-        if (prev->enabled_source == NGX_HTTP_MARKDOWN_ENABLED_UNSET) {
-            conf->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
-            conf->enabled = 0;
-            conf->enabled_complex = NULL;
-        } else {
-            conf->enabled_source = prev->enabled_source;
-            conf->enabled = prev->enabled;
-            conf->enabled_complex = prev->enabled_complex;
-        }
-        return;
-    }
-
-    if (conf->enabled_source == NGX_HTTP_MARKDOWN_ENABLED_STATIC) {
-        conf->enabled_complex = NULL;
-    }
-}
-
-/*
- * Merge an ngx_str_t field from parent into child when child is empty.
- *
- * If the child string has zero length and the parent string is non-empty,
- * copies the parent value into the child.
- */
-static void
-ngx_http_markdown_merge_str_if_unset(ngx_str_t *child, const ngx_str_t *parent)
-{
-    if (child->len == 0 && parent->len > 0) {
-        *child = *parent;
-    }
-}
-
-/*
- * Apply the unified memory_budget → max_size override.
- *
- * If memory_budget is set and max_size was not explicitly configured
- * at this or any parent level, max_size takes the memory_budget value.
- */
-static void
-ngx_http_markdown_apply_memory_budget_override(ngx_http_markdown_conf_t *conf,
-    const ngx_http_markdown_conf_t *prev, ngx_flag_t max_size_set)
-{
-    conf->decompress.max_size_explicit = max_size_set || prev->decompress.max_size_explicit;
-
-    if (conf->advanced.memory_budget != NGX_CONF_UNSET_SIZE
-        && !conf->decompress.max_size_explicit)
-    {
-        conf->max_size = conf->advanced.memory_budget;
-    }
-}
-
-/*
- * Merge base scalar configuration fields.
- *
- * Profile selection was removed in 0.9.2; all fields use standard
- * ngx_conf_merge_*_value inheritance from parent to child.
- */
-static void
-ngx_http_markdown_merge_core_base_values(ngx_http_markdown_conf_t *conf,
-    const ngx_http_markdown_conf_t *prev)
-{
-    ngx_conf_merge_size_value(conf->max_size, prev->max_size,
-                              10 * 1024 * 1024);
-    ngx_conf_merge_msec_value(conf->timeout, prev->timeout, 5000);
-    ngx_conf_merge_uint_value(conf->on_error, prev->on_error,
-                              NGX_HTTP_MARKDOWN_ON_ERROR_PASS);
-    ngx_conf_merge_uint_value(conf->error_status, prev->error_status,
-                              NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT);
-    ngx_conf_merge_uint_value(conf->flavor, prev->flavor, 0);
-    ngx_conf_merge_value(conf->token_estimate, prev->token_estimate, 0);
-    ngx_conf_merge_value(conf->front_matter, prev->front_matter, 0);
-    ngx_conf_merge_uint_value(conf->accept_policy, prev->accept_policy,
-                              NGX_HTTP_MARKDOWN_ACCEPT_STRICT);
-    ngx_conf_merge_uint_value(conf->policy.auth_policy, prev->policy.auth_policy,
-                              0);
-    ngx_conf_merge_value(conf->policy.generate_etag,
-                         prev->policy.generate_etag, 0);
-    ngx_conf_merge_uint_value(conf->policy.conditional_requests,
-                         prev->policy.conditional_requests,
-                         NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED);
-    ngx_conf_merge_uint_value(conf->policy.log_verbosity,
-                              prev->policy.log_verbosity,
-                              NGX_HTTP_MARKDOWN_LOG_INFO);
-    ngx_conf_merge_value(conf->decompress.auto_decompress,
-                         prev->decompress.auto_decompress, 1);
-    /*
-     * Merge decompress.max_size: inherit from parent if not explicitly set.
-     * After merge, if still NGX_CONF_UNSET_SIZE, resolve to max_size at
-     * post-merge time (ngx_http_markdown_apply_decompress_max_size_default)
-     * so the default tracks max_size even when max_size comes from
-     * memory_budget override.
-     */
-    ngx_conf_merge_size_value(conf->decompress.max_size,
-                              prev->decompress.max_size,
-                              NGX_CONF_UNSET_SIZE);
-    ngx_conf_merge_msec_value(conf->decompress.parse_timeout,
-                              prev->decompress.parse_timeout, 30000);
-    ngx_conf_merge_size_value(conf->decompress.parser_budget,
-                              prev->decompress.parser_budget,
-                              64 * 1024 * 1024);
-}
-
-/*
- * Merge operational telemetry/metrics values.
- */
-static void
-ngx_http_markdown_merge_core_ops_values(ngx_http_markdown_conf_t *conf,
-    const ngx_http_markdown_conf_t *prev)
-{
-    ngx_conf_merge_value(conf->ops.diagnostics_enabled,
-                         prev->ops.diagnostics_enabled, 0);
-    ngx_conf_merge_value(conf->ops.metrics_enabled,
-                         prev->ops.metrics_enabled, 0);
-}
-
-static void
-ngx_http_markdown_merge_core_ptr_values(ngx_http_markdown_conf_t *conf,
-    const ngx_http_markdown_conf_t *prev)
-{
-    ngx_conf_merge_size_value(conf->routing.large_body_threshold,
-                              prev->routing.large_body_threshold,
-                              NGX_HTTP_MARKDOWN_THRESHOLD_OFF);
-    ngx_conf_merge_uint_value(conf->routing.max_inflight, prev->routing.max_inflight,
-                              NGX_HTTP_MARKDOWN_MAX_INFLIGHT_DEFAULT);
-    ngx_conf_merge_ptr_value(conf->policy.auth_cookies, prev->policy.auth_cookies, NULL);
-    ngx_conf_merge_ptr_value(conf->routing.content_types, prev->routing.content_types, NULL);
-}
-
-/*
- * Merge base conversion/runtime options and operational flags.
- */
-static void
-ngx_http_markdown_merge_core_values(ngx_http_markdown_conf_t *conf,
-    const ngx_http_markdown_conf_t *prev)
-{
-    ngx_http_markdown_merge_core_base_values(conf, prev);
-    ngx_http_markdown_merge_core_ops_values(conf, prev);
-    ngx_http_markdown_merge_core_ptr_values(conf, prev);
-}
-/*
- * Merge advanced/pruning/dynconf configuration values.
- */
-static void
-ngx_http_markdown_merge_advanced_values(ngx_http_markdown_conf_t *conf,
-    const ngx_http_markdown_conf_t *prev)
-{
-    ngx_conf_merge_value(conf->advanced.prune_noise, prev->advanced.prune_noise, 1);
-    ngx_conf_merge_ptr_value(conf->advanced.prune_selectors, prev->advanced.prune_selectors, NULL);
-    ngx_conf_merge_ptr_value(conf->advanced.prune_protection_selectors,
-                             prev->advanced.prune_protection_selectors, NULL);
-    ngx_conf_merge_size_value(conf->advanced.memory_budget,
-                              prev->advanced.memory_budget,
-                              NGX_CONF_UNSET_SIZE);
-    ngx_conf_merge_value(conf->advanced.dynconf_enabled, prev->advanced.dynconf_enabled, 0);
-    ngx_http_markdown_merge_str_if_unset(&conf->advanced.dynconf_path, &prev->advanced.dynconf_path);
-    ngx_conf_merge_value(conf->advanced.dynconf_dry_run, prev->advanced.dynconf_dry_run, 0);
-}
-
-/*
- * Map the C-side conditional_requests constant to the FFI cache_validation
- * discriminant used by the legacy compatibility path.
- *
- * C enum:  FULL_SUPPORT=0  IF_MODIFIED_SINCE=1  DISABLED=2
- * FFI u8:  Off=0           ImsOnly=1            Full=2
- *
- * Parameters:
- *   conditional_requests - NGX_HTTP_MARKDOWN_CONDITIONAL_* value
- *
- * Returns:
- *   FFI cache_validation discriminant (0=off, 1=ims_only, 2=full)
- */
 /**
  * Merge per-location markdown filter configuration with inheritance from parent.
  *
@@ -722,77 +541,9 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_http_markdown_mark_static_explicit_fields(conf, prev);
     ngx_http_markdown_mark_dynconf_block_fields(conf, prev);
 
-    ngx_http_markdown_merge_enabled(conf, prev);
+    ngx_flag_t  max_size_set;
 
-    /*
-     * Save whether max_size and streaming_budget were explicitly set at
-     * this configuration level BEFORE ngx_conf_merge_size_value replaces
-     * NGX_CONF_UNSET_SIZE with the inherited/default value.  This is
-     * needed for the unified memory_budget priority chain below.
-     */
-    ngx_flag_t  max_size_set = (conf->max_size != NGX_CONF_UNSET_SIZE);
-#ifdef MARKDOWN_STREAMING_ENABLED
-    ngx_flag_t  stream_budget_set =
-        (conf->limits.streaming_buffer != NGX_CONF_UNSET_SIZE);
-#endif
-
-    ngx_http_markdown_merge_core_values(conf, prev);
-
-    ngx_http_markdown_merge_stream_values(conf, prev);
-
-#ifdef MARKDOWN_STREAMING_ENABLED
-    if (stream_budget_set) {
-        conf->stream.budget_explicit = 1;
-    }
-#endif
-
-    ngx_http_markdown_merge_advanced_values(conf, prev);
-
-    conf->decompress.max_size_explicit =
-        max_size_set || prev->decompress.max_size_explicit;
-
-    /* Merge unified limits (per-key inheritance) */
-    ngx_conf_merge_msec_value(conf->limits.conversion_timeout,
-        prev->limits.conversion_timeout,
-        NGX_HTTP_MARKDOWN_LIMITS_CONVERSION_TIMEOUT_DEFAULT);
-    ngx_conf_merge_msec_value(conf->limits.parser_timeout,
-        prev->limits.parser_timeout,
-        NGX_HTTP_MARKDOWN_LIMITS_PARSER_TIMEOUT_DEFAULT);
-    ngx_conf_merge_size_value(conf->limits.conversion_memory,
-        prev->limits.conversion_memory,
-        NGX_HTTP_MARKDOWN_LIMITS_CONVERSION_MEMORY_DEFAULT);
-    ngx_conf_merge_size_value(conf->limits.parser_memory,
-        prev->limits.parser_memory,
-        NGX_HTTP_MARKDOWN_LIMITS_PARSER_MEMORY_DEFAULT);
-    ngx_conf_merge_size_value(conf->limits.streaming_buffer,
-        prev->limits.streaming_buffer,
-        NGX_HTTP_MARKDOWN_LIMITS_STREAMING_BUFFER_DEFAULT);
-    ngx_conf_merge_size_value(conf->limits.decompressed_size,
-        prev->limits.decompressed_size,
-        NGX_HTTP_MARKDOWN_LIMITS_DECOMPRESSED_SIZE_DEFAULT);
-    ngx_conf_merge_uint_value(conf->limits.decompression_ratio,
-        prev->limits.decompression_ratio,
-        NGX_HTTP_MARKDOWN_LIMITS_DECOMPRESSION_RATIO_DEFAULT);
-    ngx_conf_merge_uint_value(conf->limits.max_inflight,
-        prev->limits.max_inflight,
-        NGX_HTTP_MARKDOWN_LIMITS_MAX_INFLIGHT_DEFAULT);
-
-    /*
-     * Bridge: populate legacy fields from the unified limits struct.
-     * Runtime consumers still read from conf->decompress.*, conf->timeout,
-     * conf->max_size, conf->routing.max_inflight, and conf->stream.budget.
-     * The unified limits struct is the source of truth; these fields are
-     * derived for backward compatibility during the 0.9.2 transition.
-     */
-    conf->timeout = conf->limits.conversion_timeout;
-    conf->decompress.parse_timeout = conf->limits.parser_timeout;
-    if (!conf->decompress.max_size_explicit) {
-        conf->max_size = conf->limits.conversion_memory;
-    }
-    conf->decompress.parser_budget = conf->limits.parser_memory;
-    conf->stream.budget = conf->limits.streaming_buffer;
-    conf->decompress.max_size = conf->limits.decompressed_size;
-    conf->routing.max_inflight = conf->limits.max_inflight;
+    max_size_set = ngx_http_markdown_merge_inherited_values(conf, prev);
 
     /*
      * Cross-key constraint validation (0.9.2 frozen contract).
@@ -941,45 +692,6 @@ ngx_http_markdown_on_error_name(ngx_uint_t value)
         default:
             return &unknown;
     }
-}
-
-
-/*
- * Translate C on_error + error_status to FFI error_policy kind.
- *
- * The C model uses a two-field encoding:
- *   on_error = PASS(0) or REJECT(1)
- *   error_status = actual HTTP code (429/502/503)
- *
- * FFIExplicitConfig.error_policy uses a three-value encoding:
- *   0 = pass, 1 = status, 2 = fail_closed
- *
- * Translation:
- *   PASS(0)                             → 0 (pass)
- *   REJECT(1) + error_status != 502     → 1 (status)
- *   REJECT(1) + error_status == 502     → 2 (fail_closed)
- *
- * Parameters:
- *   on_error     - NGX_HTTP_MARKDOWN_ON_ERROR_PASS or _REJECT
- *   error_status - HTTP status code (default: 502)
- *
- * Returns:
- *   FFIExplicitConfig.error_policy value (0, 1, or 2)
- */
-static ngx_inline uint8_t
-ngx_http_markdown_on_error_to_ffi(ngx_uint_t on_error,
-    ngx_uint_t error_status)
-{
-    if (on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS) {
-        return 0;  /* pass */
-    }
-
-    /* REJECT mode: distinguish status vs fail_closed */
-    if (error_status != NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT) {
-        return 1;  /* status */
-    }
-
-    return 2;  /* fail_closed */
 }
 
 /*

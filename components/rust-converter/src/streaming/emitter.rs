@@ -139,6 +139,12 @@ pub struct IncrementalEmitter {
     in_code_block: bool,
     /// Whether ordinary text should be emitted as inline-code content.
     in_inline_code: bool,
+    /// Inline-code content buffered until its delimiter can be sized safely.
+    inline_code_buffer: String,
+    /// Longest backtick run in the current inline-code content.
+    inline_code_backtick_max: usize,
+    /// Trailing backtick run from the previous inline-code text event.
+    inline_code_trailing_backticks: usize,
     /// Count of consecutive blank lines emitted (for compression).
     consecutive_blank_lines: u32,
     /// Whether the last byte written was a newline.
@@ -205,6 +211,9 @@ impl IncrementalEmitter {
             flush_threshold: 0,
             in_code_block: false,
             in_inline_code: false,
+            inline_code_buffer: String::new(),
+            inline_code_backtick_max: 0,
+            inline_code_trailing_backticks: 0,
             consecutive_blank_lines: 0,
             last_was_newline: false,
             markdown_escape_state: MarkdownTextEscapeState::default(),
@@ -290,6 +299,9 @@ impl IncrementalEmitter {
         self.buffer.clear();
         self.flushed.clear();
         self.code_block_buffer.clear();
+        self.inline_code_buffer.clear();
+        self.inline_code_backtick_max = 0;
+        self.inline_code_trailing_backticks = 0;
         self.link_text.clear();
         self.link_text_overflow = false;
     }
@@ -387,6 +399,9 @@ impl IncrementalEmitter {
     /// }
     /// ```
     pub fn finalize(&mut self) -> Result<Vec<u8>, ConversionError> {
+        if self.in_inline_code {
+            self.emit_inline_code()?;
+        }
         if self.in_code_block {
             let fence_len = (3usize).max(self.code_block_backtick_max + 1);
             let fence_str = "`".repeat(fence_len);
@@ -492,11 +507,9 @@ impl IncrementalEmitter {
             }
             StructuralContext::InlineCode => {
                 self.in_inline_code = true;
-                if self.in_link {
-                    self.append_link_text("`");
-                } else {
-                    self.write_str("`")?;
-                }
+                self.inline_code_buffer.clear();
+                self.inline_code_backtick_max = 0;
+                self.inline_code_trailing_backticks = 0;
             }
             StructuralContext::Blockquote => {
                 self.emit_block_separator()?;
@@ -584,6 +597,28 @@ impl IncrementalEmitter {
         Ok(())
     }
 
+    /// Emit a buffered inline-code span with a delimiter longer than its
+    /// longest literal backtick run.
+    fn emit_inline_code(&mut self) -> Result<(), ConversionError> {
+        let content = std::mem::take(&mut self.inline_code_buffer);
+        let fence_len = self.inline_code_backtick_max.saturating_add(1);
+        let fence = "`".repeat(fence_len.max(1));
+
+        if self.in_link {
+            self.append_link_text(&fence);
+            self.append_link_text(&content);
+            self.append_link_text(&fence);
+        } else {
+            self.write_str(&fence)?;
+            self.write_str(&content)?;
+            self.write_str(&fence)?;
+        }
+        self.inline_code_backtick_max = 0;
+        self.inline_code_trailing_backticks = 0;
+        self.in_inline_code = false;
+        Ok(())
+    }
+
     /// Handle closing a structural context by emitting the appropriate Markdown closing
     /// syntax, updating internal formatting state, and triggering flushes at block
     /// boundaries when required.
@@ -628,14 +663,7 @@ impl IncrementalEmitter {
                 self.last_was_newline = true;
             }
             StructuralContext::CodeBlock(lang) => self.handle_code_block_exit(lang)?,
-            StructuralContext::InlineCode => {
-                if self.in_link {
-                    self.append_link_text("`");
-                } else {
-                    self.write_str("`")?;
-                }
-                self.in_inline_code = false;
-            }
+            StructuralContext::InlineCode => self.emit_inline_code()?,
             StructuralContext::Blockquote => {
                 self.blockquote_depth = sm.blockquote_depth;
                 self.needs_block_separator = true;
@@ -706,7 +734,7 @@ impl IncrementalEmitter {
         text: &str,
         escape_plain_text: bool,
     ) -> Result<(), ConversionError> {
-        if self.in_link {
+        if self.in_link && !self.in_inline_code {
             self.last_text_ended_whitespace = false;
             self.append_link_text(text);
             return Ok(());
@@ -718,7 +746,25 @@ impl IncrementalEmitter {
 
         if self.in_inline_code {
             self.last_text_ended_whitespace = false;
-            self.write_str(text)?;
+            let backtick_run = longest_backtick_run(text);
+            let leading_run = leading_backtick_run(text);
+            let trailing_run = trailing_backtick_run(text);
+            let bridged_run = self
+                .inline_code_trailing_backticks
+                .saturating_add(leading_run);
+            self.inline_code_backtick_max = self
+                .inline_code_backtick_max
+                .max(backtick_run)
+                .max(bridged_run);
+            if !text.is_empty() {
+                self.inline_code_trailing_backticks = if leading_run == text.len() {
+                    bridged_run
+                } else {
+                    trailing_run
+                };
+            }
+            self.check_inline_code_budget(text.len())?;
+            self.inline_code_buffer.push_str(text);
             self.last_was_newline = text.ends_with('\n');
             return Ok(());
         }
@@ -1093,6 +1139,21 @@ impl IncrementalEmitter {
             .len()
             .saturating_add(self.code_block_buffer.len())
             .saturating_add(FENCE_OVERHEAD);
+        self.budget
+            .check_output_buffer(effective_current, additional)
+    }
+
+    /// Check the bounded buffer needed while waiting to size an inline-code
+    /// delimiter.  A delimiter longer than every content backtick run keeps
+    /// literal backticks from closing the code span early.
+    fn check_inline_code_budget(&self, additional: usize) -> Result<(), ConversionError> {
+        let fence_len = self.inline_code_backtick_max.saturating_add(1).max(1);
+        let fence_overhead = fence_len.saturating_mul(2);
+        let effective_current = self
+            .buffer
+            .len()
+            .saturating_add(self.inline_code_buffer.len())
+            .saturating_add(fence_overhead);
         self.budget
             .check_output_buffer(effective_current, additional)
     }
@@ -2056,6 +2117,37 @@ mod tests {
         assert!(
             output.contains("`<div class=\"container\">`"),
             "got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_inline_code_widens_fence_for_backtick_injection_payload() {
+        let output = emit_html(&[
+            start_tag("p"),
+            start_tag("code"),
+            text("x`[click](javascript:alert(1))"),
+            end_tag("code"),
+            end_tag("p"),
+        ]);
+
+        assert_eq!(output, "``x`[click](javascript:alert(1))``\n");
+    }
+
+    #[test]
+    fn test_inline_code_widens_fence_across_text_events() {
+        let output = emit_html(&[
+            start_tag("p"),
+            start_tag("code"),
+            text("x`"),
+            text("`[click](javascript:alert(1))"),
+            end_tag("code"),
+            end_tag("p"),
+        ]);
+
+        assert!(
+            output.contains("```x``[click](javascript:alert(1))```"),
+            "delimiter sizing must include backtick runs split across events: {}",
             output
         );
     }

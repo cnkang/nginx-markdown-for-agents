@@ -456,6 +456,13 @@ ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
     ngx_buf_t    *b;
     ngx_chain_t   out;
 
+    /* Access control check (default deny) */
+    rc = ngx_http_markdown_diagnostics_check_access(r);
+    if (rc != NGX_OK) {
+        r->headers_out.status = (ngx_uint_t) rc;
+        return rc;
+    }
+
     /* Only allow read-only GET and HEAD requests. */
     if (!(r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD))) {
         ngx_table_elt_t  *allow_hdr;
@@ -473,13 +480,6 @@ ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
         }
 
         return ngx_http_markdown_diagnostics_method_not_allowed(r);
-    }
-
-    /* Access control check (default deny) */
-    rc = ngx_http_markdown_diagnostics_check_access(r);
-    if (rc != NGX_OK) {
-        r->headers_out.status = (ngx_uint_t) rc;
-        return rc;
     }
 
     /* Discard request body */
@@ -925,81 +925,69 @@ ngx_http_markdown_diag_masked_keys(
 }
 
 
+typedef struct {
+    const char *outcome;
+    const char *stage;
+    const char *error_origin;
+} ngx_http_markdown_diag_reason_meta_t;
+
+static const ngx_http_markdown_diag_reason_meta_t
+    ngx_http_markdown_diag_reason_meta[REASON_CODE_COUNT] = {
+    [0] = { "converted", "eligibility", "invariant" },
+    [1] = { "skipped", "eligibility", "invariant" },
+    [2] = { "skipped", "eligibility", "invariant" },
+    [3] = { "skipped", "eligibility", "invariant" },
+    [4] = { "failed_closed", "decompression", "format" },
+    [5] = { "failed_closed", "decompression", "invariant" },
+    [6] = { "failed_closed", "decompression", "format" },
+    [7] = { "failed_closed", "decompression", "truncated" },
+    [8] = { "failed_closed", "decompression", "invariant" },
+    [9] = { "failed_closed", "parsing", "timeout" },
+    [10] = { "failed_closed", "parsing", "memory_budget" },
+    [11] = { "failed_closed", "precommit", "internal" },
+    [12] = { "skipped", "eligibility", "invariant" },
+    [13] = { "failed_closed", "conversion", "internal" },
+    [14] = { "skipped", "eligibility", "invariant" },
+    [15] = { "skipped", "eligibility", "invariant" },
+    [16] = { "failed_open", "delivery", "downstream" },
+    [17] = { "failed_closed", "delivery", "downstream" },
+    [18] = { "failed_closed", "conversion", "internal" },
+    [19] = { "failed_closed", "conversion", "memory_budget" },
+    [20] = { "skipped", "eligibility", "invariant" },
+    [21] = { "failed_closed", "dynconf", "internal" },
+    [22] = { "failed_closed", "dynconf", "internal" },
+    [23] = { "failed_closed", "precommit", "internal" },
+    [24] = { "aborted", "delivery", "downstream" },
+    [25] = { "skipped", "eligibility", "invariant" },
+    [26] = { "failed_closed", "decompression", "format" }
+};
+
+static const ngx_http_markdown_diag_reason_meta_t *
+ngx_http_markdown_diag_reason_meta_for(ngx_int_t code)
+{
+    if (code < 0 || code >= REASON_CODE_COUNT) {
+        return &ngx_http_markdown_diag_reason_meta[0];
+    }
+
+    return &ngx_http_markdown_diag_reason_meta[code];
+}
+
 static const char *
 ngx_http_markdown_diag_outcome(ngx_int_t code)
 {
-    if (code == 0) {
-        return "converted";
-    }
-    if (code == 16) {
-        return "failed_open";
-    }
-    if (code == 17) {
-        return "failed_closed";
-    }
-    if (code == 24) {
-        return "aborted";
-    }
-    if ((code >= 1 && code <= 3) || code == 12 || code == 14
-        || code == 15 || code == 20 || code == 25)
-    {
-        return "skipped";
-    }
-    return "failed_closed";
+    return ngx_http_markdown_diag_reason_meta_for(code)->outcome;
 }
-
 
 static const char *
 ngx_http_markdown_diag_decision_stage(ngx_int_t code)
 {
-    if (code == 4 || code == 5 || code == 6 || code == 7 || code == 8
-        || code == 26)
-    {
-        return "decompression";
-    }
-    if (code == 9 || code == 10) {
-        return "parsing";
-    }
-    if (code == 11 || code == 23) {
-        return "precommit";
-    }
-    if (code == 16 || code == 17 || code == 24) {
-        return "delivery";
-    }
-    if (code == 13 || code == 18 || code == 19) {
-        return "conversion";
-    }
-    if (code == 21 || code == 22) {
-        return "dynconf";
-    }
-    return "eligibility";
+    return ngx_http_markdown_diag_reason_meta_for(code)->stage;
 }
-
 
 static const char *
 ngx_http_markdown_diag_error_origin(ngx_int_t code)
 {
-    if (code == 9) {
-        return "timeout";
-    }
-    if (code == 10 || code == 19) {
-        return "memory_budget";
-    }
-    if (code == 4 || code == 6 || code == 26) {
-        return "format";
-    }
-    if (code == 7) {
-        return "truncated";
-    }
-    if (code == 16 || code == 17 || code == 24) {
-        return "downstream";
-    }
-    if (code == 11 || code == 13 || code == 18 || code == 21
-        || code == 22 || code == 23)
-    {
-        return "internal";
-    }
-    return "invariant";
+    return ngx_http_markdown_diag_reason_meta_for(code)->error_origin;
 }
 
 

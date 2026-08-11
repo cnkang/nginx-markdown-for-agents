@@ -9,12 +9,12 @@
 //! # Accuracy (quantified error margin)
 //!
 //! - English prose at the 4.0 default: ±20% typical, up to ±30% worst case
-//! - Code-heavy content (~1.5–2 chars/token): often overestimated by up to ~2×
+//! - Code-heavy content (~1.5–2 chars/token): often underestimated by up to ~2×
 //! - CJK text (~1.5–2 chars/token): often underestimated by up to ~2×
 //! - Mixed-language documents: within ±50% in practice
 //!
 //! These bounds are heuristic estimates, not guarantees; use the value when
-//! a quick conservative estimate is useful (e.g., progress logging), never as
+//! a quick approximate estimate is useful (e.g., progress logging), never as
 //! a guaranteed budget upper bound or an exact tokenizer-equivalent count.
 //!
 //! # Determinism

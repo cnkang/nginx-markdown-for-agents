@@ -112,6 +112,20 @@ impl DynconfWatcher {
         }
     }
 
+    fn adopt_lkg(&mut self, raw_bytes: &[u8], generation: u64) {
+        let result =
+            parse_dynconf(raw_bytes).expect("ValidFile event must contain parseable bytes");
+        self.state = DynconfState::Active;
+        self.generation = Some(generation);
+        self.source_digest = Some(result.source_digest.clone());
+        self.active_digest = Some(result.active_digest.clone());
+        self.lkg_digest = Some(result.active_digest.clone());
+        self.last_error = None;
+        self.lkg_raw_bytes = Some(raw_bytes.to_vec());
+        self.lkg_result = Some(result);
+        self.assert_lkg_consistent();
+    }
+
     /// Process a file event through the state machine.
     /// Returns the new state after the transition.
     fn process_event(&mut self, event: &FileEvent) -> DynconfState {
@@ -124,22 +138,16 @@ impl DynconfWatcher {
 
             // ── NoFile + valid file → Active (generation=1) ──
             (DynconfState::NoFile, FileEvent::ValidFile(raw_bytes)) => {
-                let result =
-                    parse_dynconf(raw_bytes).expect("ValidFile event must contain parseable bytes");
-                self.state = DynconfState::Active;
-                self.generation = Some(1);
-                self.source_digest = Some(result.source_digest.clone());
-                self.active_digest = Some(result.active_digest.clone());
-                self.lkg_digest = Some(result.active_digest.clone());
-                self.last_error = None;
-                self.lkg_raw_bytes = Some(raw_bytes.clone());
-                self.lkg_result = Some(result);
-                self.assert_lkg_consistent();
+                self.adopt_lkg(raw_bytes, 1);
                 DynconfState::Active
             }
 
             // ── NoFile + invalid file → InvalidWithoutLkg ──
-            (DynconfState::NoFile, FileEvent::InvalidFile(_)) => {
+            (DynconfState::NoFile, FileEvent::InvalidFile(raw_bytes)) => {
+                assert!(
+                    parse_dynconf(raw_bytes).is_err(),
+                    "InvalidFile event must contain rejected bytes"
+                );
                 self.state = DynconfState::InvalidWithoutLkg;
                 // No LKG exists; generation and all snapshot digests remain null
                 self.last_error = Some("validation_failure".to_string());
@@ -151,22 +159,16 @@ impl DynconfWatcher {
 
             // ── InvalidWithoutLkg + valid → Active (generation=1) ──
             (DynconfState::InvalidWithoutLkg, FileEvent::ValidFile(raw_bytes)) => {
-                let result =
-                    parse_dynconf(raw_bytes).expect("ValidFile event must contain parseable bytes");
-                self.state = DynconfState::Active;
-                self.generation = Some(1);
-                self.source_digest = Some(result.source_digest.clone());
-                self.active_digest = Some(result.active_digest.clone());
-                self.lkg_digest = Some(result.active_digest.clone());
-                self.last_error = None;
-                self.lkg_raw_bytes = Some(raw_bytes.clone());
-                self.lkg_result = Some(result);
-                self.assert_lkg_consistent();
+                self.adopt_lkg(raw_bytes, 1);
                 DynconfState::Active
             }
 
             // ── InvalidWithoutLkg + invalid → stays InvalidWithoutLkg ──
-            (DynconfState::InvalidWithoutLkg, FileEvent::InvalidFile(_)) => {
+            (DynconfState::InvalidWithoutLkg, FileEvent::InvalidFile(raw_bytes)) => {
+                assert!(
+                    parse_dynconf(raw_bytes).is_err(),
+                    "InvalidFile event must contain rejected bytes"
+                );
                 // Stays in invalid_without_lkg
                 self.last_error = Some("validation_failure".to_string());
                 DynconfState::InvalidWithoutLkg
@@ -181,22 +183,17 @@ impl DynconfWatcher {
 
             // ── Active + valid → Active (generation++) ──
             (DynconfState::Active, FileEvent::ValidFile(raw_bytes)) => {
-                let result =
-                    parse_dynconf(raw_bytes).expect("ValidFile event must contain parseable bytes");
                 let current = self.generation.unwrap();
-                self.generation = Some(current + 1);
-                self.source_digest = Some(result.source_digest.clone());
-                self.active_digest = Some(result.active_digest.clone());
-                self.lkg_digest = Some(result.active_digest.clone());
-                self.last_error = None;
-                self.lkg_raw_bytes = Some(raw_bytes.clone());
-                self.lkg_result = Some(result);
-                self.assert_lkg_consistent();
+                self.adopt_lkg(raw_bytes, current + 1);
                 DynconfState::Active
             }
 
             // ── Active + invalid → LkgPreserved ──
-            (DynconfState::Active, FileEvent::InvalidFile(_)) => {
+            (DynconfState::Active, FileEvent::InvalidFile(raw_bytes)) => {
+                assert!(
+                    parse_dynconf(raw_bytes).is_err(),
+                    "InvalidFile event must contain rejected bytes"
+                );
                 self.state = DynconfState::LkgPreserved;
                 // generation, source_digest, active_digest, lkg_digest unchanged
                 self.last_error = Some("validation_failure".to_string());
@@ -213,23 +210,17 @@ impl DynconfWatcher {
 
             // ── LkgPreserved + valid → Active (generation++) ──
             (DynconfState::LkgPreserved, FileEvent::ValidFile(raw_bytes)) => {
-                let result =
-                    parse_dynconf(raw_bytes).expect("ValidFile event must contain parseable bytes");
                 let current = self.generation.unwrap();
-                self.state = DynconfState::Active;
-                self.generation = Some(current + 1);
-                self.source_digest = Some(result.source_digest.clone());
-                self.active_digest = Some(result.active_digest.clone());
-                self.lkg_digest = Some(result.active_digest.clone());
-                self.last_error = None;
-                self.lkg_raw_bytes = Some(raw_bytes.clone());
-                self.lkg_result = Some(result);
-                self.assert_lkg_consistent();
+                self.adopt_lkg(raw_bytes, current + 1);
                 DynconfState::Active
             }
 
             // ── LkgPreserved + invalid → stays LkgPreserved ──
-            (DynconfState::LkgPreserved, FileEvent::InvalidFile(_)) => {
+            (DynconfState::LkgPreserved, FileEvent::InvalidFile(raw_bytes)) => {
+                assert!(
+                    parse_dynconf(raw_bytes).is_err(),
+                    "InvalidFile event must contain rejected bytes"
+                );
                 // LKG still preserved, generation unchanged
                 self.last_error = Some("validation_failure".to_string());
                 DynconfState::LkgPreserved

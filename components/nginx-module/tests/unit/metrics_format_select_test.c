@@ -15,31 +15,26 @@ typedef uintptr_t ngx_uint_t;
 
 #define OUTPUT_PROMETHEUS NGX_HTTP_MARKDOWN_METRICS_OUTPUT_PROMETHEUS
 
+struct ngx_http_request_s {
+    unsigned char  unused;
+};
+
 static void
-test_all_accept_values_select_prometheus(void)
+test_request_shapes_select_prometheus(void)
 {
-    const char *accept_values[] = {
-        NULL,
-        "",
-        "*/*",
-        "text/plain",
-        "text/plain; version=0.0.4",
-        "application/openmetrics-text",
-        "application/json",
-        "application/xml",
-    };
-    size_t  i;
+    struct ngx_http_request_s request;
 
-    TEST_SUBSECTION("all Accept values select Prometheus v1");
+    TEST_SUBSECTION("all request shapes select Prometheus v1");
 
-    for (i = 0; i < sizeof(accept_values) / sizeof(accept_values[0]); i++) {
-        (void) accept_values[i];
-        TEST_ASSERT(ngx_http_markdown_metrics_select_format(NULL)
-                    == OUTPUT_PROMETHEUS,
-                    "metrics endpoint must remain Prometheus-only");
-    }
+    memset(&request, 0, sizeof(request));
+    TEST_ASSERT(ngx_http_markdown_metrics_select_format(NULL)
+                == OUTPUT_PROMETHEUS,
+                "metrics endpoint must remain Prometheus-only");
+    TEST_ASSERT(ngx_http_markdown_metrics_select_format(&request)
+                == OUTPUT_PROMETHEUS,
+                "metrics endpoint must remain Prometheus-only");
 
-    TEST_PASS("all Accept values select Prometheus v1");
+    TEST_PASS("all request shapes select Prometheus v1");
 }
 
 int
@@ -49,7 +44,7 @@ main(void)
     printf("metrics_format_select Tests\n");
     printf("========================================\n");
 
-    test_all_accept_values_select_prometheus();
+    test_request_shapes_select_prometheus();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

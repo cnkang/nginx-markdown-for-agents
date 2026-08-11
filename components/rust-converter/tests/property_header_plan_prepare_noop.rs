@@ -91,6 +91,14 @@ enum PreparedAction {
         /// Indices of all matching headers to invalidate.
         match_indices: Vec<usize>,
     },
+    ReplaceAll {
+        /// Indices of all matching headers to invalidate.
+        match_indices: Vec<usize>,
+        /// Index of the newly pushed (inert) replacement slot.
+        slot_idx: usize,
+        new_key: String,
+        new_value: String,
+    },
 }
 
 /// Simulated prepare failure reason.
@@ -123,7 +131,19 @@ fn prepare_one(
 
 fn prepare_set(headers: &mut SimHeadersOut, name: &str, value: &str) -> PreparedAction {
     if name.eq_ignore_ascii_case("Content-Type") {
-        return prepare_delete_all(headers, name);
+        let match_indices = matching_header_indices(headers, name);
+        let slot_idx = headers.headers.len();
+        headers.headers.push(SimHeader {
+            name: String::new(),
+            value: String::new(),
+            active: false,
+        });
+        return PreparedAction::ReplaceAll {
+            match_indices,
+            slot_idx,
+            new_key: name.to_string(),
+            new_value: value.to_string(),
+        };
     }
 
     if let Some(idx) = headers.find_active(name) {
@@ -199,6 +219,19 @@ fn commit_all(headers: &mut SimHeadersOut, prepared: &[PreparedAction]) {
                 for &idx in match_indices {
                     headers.headers[idx].active = false;
                 }
+            }
+            PreparedAction::ReplaceAll {
+                match_indices,
+                slot_idx,
+                new_key,
+                new_value,
+            } => {
+                for &idx in match_indices {
+                    headers.headers[idx].active = false;
+                }
+                headers.headers[*slot_idx].name = new_key.clone();
+                headers.headers[*slot_idx].value = new_value.clone();
+                headers.headers[*slot_idx].active = true;
             }
         }
     }
@@ -493,4 +526,34 @@ fn targeted_set_new_pushed_slot_stays_inert_on_failure() {
     // Verify the existing header is still active
     assert_eq!(headers.count_active("Existing"), 1);
     assert_eq!(headers.count_active("X-New-Header"), 0);
+}
+
+#[test]
+fn targeted_content_type_set_replaces_all_existing_values() {
+    let mut headers = SimHeadersOut::new(vec![
+        SimHeader {
+            name: "Content-Type".to_string(),
+            value: "text/html".to_string(),
+            active: true,
+        },
+        SimHeader {
+            name: "content-type".to_string(),
+            value: "text/html; charset=utf-8".to_string(),
+            active: true,
+        },
+    ]);
+    let plan = HeaderPlan {
+        ops: vec![HeaderOp::Set {
+            name: "Content-Type".to_string(),
+            value: "text/markdown".to_string(),
+        }],
+    };
+
+    apply_plan_with_failure(&mut headers, &plan, None).expect("plan succeeds");
+
+    assert_eq!(headers.count_active("Content-Type"), 1);
+    assert_eq!(
+        headers.observable_state(),
+        vec![("Content-Type", "text/markdown")]
+    );
 }

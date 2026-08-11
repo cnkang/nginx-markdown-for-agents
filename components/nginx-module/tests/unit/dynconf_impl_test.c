@@ -2239,6 +2239,7 @@ test_apply_ffi_streaming_budget_bounds(void)
 
     {
         ngx_http_markdown_loc_validation_index_t index;
+        ngx_uint_t                              i;
 
         memset(&index, 0, sizeof(index));
         TEST_ASSERT(ngx_http_markdown_loc_index_init(&index, &g_pool)
@@ -2247,6 +2248,16 @@ test_apply_ffi_streaming_budget_bounds(void)
         TEST_ASSERT(ngx_http_markdown_loc_index_add(
                         &index, 128 * 1024, 0) == NGX_OK,
                     "location validation entry is recorded");
+        for (i = index.count; i < index.capacity; i++) {
+            TEST_ASSERT(ngx_http_markdown_loc_index_add(
+                            &index, 128 * 1024, 0) == NGX_OK,
+                        "location validation index accepts capacity boundary");
+        }
+        TEST_ASSERT(index.count == NGX_HTTP_MARKDOWN_LOC_INDEX_MAX,
+                    "location validation index reaches its 4096-entry limit");
+        TEST_ASSERT(ngx_http_markdown_loc_index_add(
+                        &index, 128 * 1024, 0) == NGX_ERROR,
+                    "location validation index rejects the 4097th entry");
 
         snapshot.conversion_memory = 64 * 1024;
         snapshot.validation_index = &index;

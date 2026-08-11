@@ -30,8 +30,7 @@
 //! base URL decision (`markdown_decide_base_url`), bounded decompression
 //! (`markdown_decompress_bounded`, `markdown_decompress_free`,
 //! `markdown_decomp_result_init`), conflict detection/release
-//! (`markdown_detect_conflicts`, `markdown_free_conflicts`), option/result
-//! init helpers (`markdown_options_init`), and
+//! option/result init helpers (`markdown_options_init`), and
 //! error classification (`markdown_classify_error_code`).  Incremental
 //! and streaming FFI exports live in `ffi/incremental.rs` and
 //! `ffi/streaming.rs`.  The table below lists the primary entry points;
@@ -71,10 +70,6 @@ use super::abi::{
     MarkdownOptions, MarkdownResult, NEGOTIATE_REASON_CONVERT, NEGOTIATE_REASON_EXPLICIT_REJECT,
     NEGOTIATE_REASON_LOWER_Q, NEGOTIATE_REASON_MALFORMED, NEGOTIATE_REASON_NO_ACCEPT,
 };
-use super::abi::{
-    FFI_CONFIG_NOT_SET_U8, FFI_CONFIG_NOT_SET_U32, FFI_CONFIG_NOT_SET_U64, FFIConflict,
-    FFIConflictLevel, FFIConflictList, FFIEffectiveConfig, FFIExplicitConfig,
-};
 use super::abi::{FFIConditionalDecision, FFIConditionalInput};
 use super::convert::convert_inner;
 use super::memory::{free_buffer, reset_result, set_error_result, set_success_result};
@@ -83,15 +78,12 @@ use crate::decision::conditional::{
     CacheValidation, ConditionalInput, ConditionalOutcome, decide_conditional,
 };
 use crate::decision::eligibility::{Eligibility, EligibilityInput, decide_eligibility};
-use crate::decision::streaming::StreamingPolicy;
 use crate::forwarded::{BaseUrlInput, BaseUrlReason, BaseUrlSource, decide_base_url, parse_cidr};
 
 #[cfg(test)]
 thread_local! {
     static TEST_PANIC_TAG: std::cell::Cell<Option<&'static str>> =
         const { std::cell::Cell::new(None) };
-    static TEST_CONFLICT_MESSAGES_LIVE: std::cell::Cell<usize> =
-        const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -111,39 +103,10 @@ fn test_should_panic(tag: &'static str) -> bool {
     })
 }
 
-#[cfg(test)]
-fn test_conflict_message_created() {
-    TEST_CONFLICT_MESSAGES_LIVE.with(|live| live.set(live.get() + 1));
-}
-
-#[cfg(test)]
-fn test_conflict_message_dropped() {
-    TEST_CONFLICT_MESSAGES_LIVE.with(|live| live.set(live.get() - 1));
-}
-
-#[cfg(test)]
-fn test_conflict_messages_live() -> usize {
-    TEST_CONFLICT_MESSAGES_LIVE.with(std::cell::Cell::get)
-}
-
 struct HeaderPlanOwned {
     entries: Vec<FFIHeaderEntry>,
     key_storage: Vec<Box<[u8]>>,
     value_storage: Vec<Box<[u8]>>,
-}
-
-struct PendingConflictMessage {
-    level: FFIConflictLevel,
-    bytes: Option<Box<[u8]>>,
-}
-
-impl Drop for PendingConflictMessage {
-    fn drop(&mut self) {
-        #[cfg(test)]
-        if self.bytes.is_some() {
-            test_conflict_message_dropped();
-        }
-    }
 }
 
 /// Return the bundled Rust/C boundary version.
@@ -1516,264 +1479,6 @@ pub unsafe extern "C" fn markdown_chain_decode_free(result: *mut FFIChainDecodeR
     }));
 }
 
-// ─── Profile conflict detection FFI (spec 50, 0.9.0) ─────────────────────────
-
-/// Detect configuration conflicts between a profile, explicit directives, and
-/// the effective configuration.
-///
-/// This is the primary FFI entry point for `nginx -t` validation. The C side
-/// calls this after computing the effective config via its own merge logic,
-/// passing the profile selector, the explicitly-set directive flags, and the
-/// fully-resolved effective config.
-///
-/// Returns an [`FFIConflictList`] that the caller must free with
-/// [`markdown_free_conflicts`]. If no conflicts are detected, the returned
-/// list has `count == 0` and `conflicts == NULL` (Rule 53).
-///
-/// On NULL input pointers or on a caught panic, returns an empty conflict list
-/// (the safe fail-open outcome: no spurious errors reported).
-///
-/// # Safety
-///
-/// The caller must ensure that:
-/// - `profile` is a valid `FFIProfile` discriminant (0–3)
-/// - `explicit` is NULL or points to a readable `FFIExplicitConfig`
-/// - `effective` is NULL or points to a readable `FFIEffectiveConfig`
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn markdown_detect_conflicts(
-    profile: u8,
-    explicit: *const FFIExplicitConfig,
-    effective: *const FFIEffectiveConfig,
-) -> FFIConflictList {
-    let empty_list = || FFIConflictList {
-        conflicts: ptr::null_mut(),
-        count: 0,
-    };
-
-    // NULL input validation (Rule 46)
-    if explicit.is_null() || effective.is_null() {
-        return empty_list();
-    }
-
-    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        // Convert FFIProfile discriminant to Option<Profile>
-        let rust_profile = match profile {
-            1 => Some(crate::config::profile::Profile::StrictCache),
-            2 => Some(crate::config::profile::Profile::Balanced),
-            3 => Some(crate::config::profile::Profile::StreamingFirst),
-            _ => None, // 0 (None) or unknown
-        };
-
-        // SAFETY: validated non-NULL above.
-        let ffi_explicit = unsafe { &*explicit };
-        let ffi_effective = unsafe { &*effective };
-
-        // Convert FFIExplicitConfig → ExplicitConfig
-        use crate::config::merge::ExplicitConfig;
-        use crate::config::profile::{AcceptMode, ErrorPolicy};
-
-        let rust_explicit = ExplicitConfig {
-            accept: if ffi_explicit.accept == FFI_CONFIG_NOT_SET_U8 {
-                None
-            } else {
-                Some(AcceptMode::from_u8(ffi_explicit.accept))
-            },
-            cache_validation: if ffi_explicit.cache_validation == FFI_CONFIG_NOT_SET_U8 {
-                None
-            } else {
-                Some(CacheValidation::from_u8(ffi_explicit.cache_validation))
-            },
-            streaming: if ffi_explicit.streaming == FFI_CONFIG_NOT_SET_U8 {
-                None
-            } else {
-                Some(StreamingPolicy::from_u8(ffi_explicit.streaming))
-            },
-            limits_memory_bytes: if ffi_explicit.limits_memory_bytes == FFI_CONFIG_NOT_SET_U64 {
-                None
-            } else {
-                Some(ffi_explicit.limits_memory_bytes)
-            },
-            limits_timeout_ms: if ffi_explicit.limits_timeout_ms == FFI_CONFIG_NOT_SET_U64 {
-                None
-            } else {
-                Some(ffi_explicit.limits_timeout_ms)
-            },
-            limits_streaming_buffer_bytes: if ffi_explicit.limits_streaming_buffer_bytes
-                == FFI_CONFIG_NOT_SET_U64
-            {
-                None
-            } else {
-                Some(ffi_explicit.limits_streaming_buffer_bytes)
-            },
-            limits_max_inflight: if ffi_explicit.limits_max_inflight == FFI_CONFIG_NOT_SET_U32 {
-                None
-            } else {
-                Some(ffi_explicit.limits_max_inflight)
-            },
-            error_policy: if ffi_explicit.error_policy == FFI_CONFIG_NOT_SET_U8 {
-                None
-            } else {
-                Some(ErrorPolicy::from_u8(ffi_explicit.error_policy))
-            },
-            diagnostics: if ffi_explicit.diagnostics == FFI_CONFIG_NOT_SET_U8 {
-                None
-            } else {
-                Some(ffi_explicit.diagnostics != 0)
-            },
-        };
-
-        // Convert FFIEffectiveConfig → EffectiveConfig
-        use crate::config::merge::EffectiveConfig;
-
-        let rust_effective = EffectiveConfig {
-            accept: AcceptMode::from_u8(ffi_effective.accept),
-            cache_validation: CacheValidation::from_u8(ffi_effective.cache_validation),
-            streaming: StreamingPolicy::from_u8(ffi_effective.streaming),
-            limits_memory_bytes: ffi_effective.limits_memory_bytes,
-            limits_timeout_ms: ffi_effective.limits_timeout_ms,
-            limits_streaming_buffer_bytes: ffi_effective.limits_streaming_buffer_bytes,
-            limits_max_inflight: ffi_effective.limits_max_inflight,
-            error_policy: ErrorPolicy::from_u8(ffi_effective.error_policy),
-            diagnostics: ffi_effective.diagnostics != 0,
-        };
-
-        // Run conflict detection
-        let conflicts = crate::config::conflict::detect_conflicts(
-            rust_profile,
-            &rust_explicit,
-            &rust_effective,
-        );
-
-        if conflicts.is_empty() {
-            return empty_list();
-        }
-
-        // Convert Vec<Conflict> → FFIConflictList
-        let count = conflicts.len();
-
-        // Keep every message under Rust ownership until the message array and
-        // FFI array are both complete. A panic during either allocation phase
-        // therefore drops all pending boxes instead of leaking buffers.
-        let mut pending = Vec::with_capacity(count);
-        for conflict in &conflicts {
-            let level = match conflict.level {
-                crate::config::conflict::ConflictLevel::Error => FFIConflictLevel::Error,
-                crate::config::conflict::ConflictLevel::Warning => FFIConflictLevel::Warning,
-            };
-            pending.push(PendingConflictMessage {
-                level,
-                bytes: Some(conflict.message.as_bytes().to_vec().into_boxed_slice()),
-            });
-            #[cfg(test)]
-            test_conflict_message_created();
-            #[cfg(test)]
-            if test_should_panic("detect_conflicts_after_message") {
-                panic!("test-injected panic while conflict messages remain guarded");
-            }
-        }
-
-        let ffi_conflicts = pending
-            .iter()
-            .map(|message| {
-                let bytes = message.bytes.as_deref().unwrap_or_default();
-                FFIConflict {
-                    level: message.level,
-                    message: if bytes.is_empty() {
-                        ptr::null()
-                    } else {
-                        bytes.as_ptr()
-                    },
-                    message_len: bytes.len(),
-                }
-            })
-            .collect::<Vec<_>>();
-        let mut boxed_conflicts = ffi_conflicts.into_boxed_slice();
-        let conflicts_ptr = boxed_conflicts.as_mut_ptr();
-
-        // No allocation or fallible conversion remains beyond this point.
-        // Transfer the message backing stores and then the FFI array together.
-        for message in &mut pending {
-            if let Some(bytes) = message.bytes.take() {
-                if bytes.is_empty() {
-                    drop(bytes);
-                    #[cfg(test)]
-                    test_conflict_message_dropped();
-                } else {
-                    std::mem::forget(bytes);
-                }
-            }
-        }
-        std::mem::forget(boxed_conflicts);
-
-        FFIConflictList {
-            conflicts: conflicts_ptr,
-            count,
-        }
-    }));
-
-    outcome.unwrap_or_else(|_| empty_list())
-}
-
-/// Free a conflict list returned by `markdown_detect_conflicts`.
-///
-/// Releases all heap-allocated message buffers and the conflict array itself.
-/// Calling with a zeroed/empty list (`count == 0`, `conflicts == NULL`) is a
-/// safe no-op.
-///
-/// # Safety
-///
-/// The caller must ensure that `list` points to a valid `FFIConflictList`
-/// previously returned by `markdown_detect_conflicts`, or is a zeroed struct.
-/// The list must not be used after this call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn markdown_free_conflicts(list: *mut FFIConflictList) {
-    if list.is_null() {
-        return;
-    }
-
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        // SAFETY: validated non-NULL above.
-        let list_ref = unsafe { &mut *list };
-
-        if list_ref.conflicts.is_null() || list_ref.count == 0 {
-            list_ref.conflicts = ptr::null_mut();
-            list_ref.count = 0;
-            return;
-        }
-
-        // Free each message buffer
-        let conflicts_slice =
-            unsafe { std::slice::from_raw_parts_mut(list_ref.conflicts, list_ref.count) };
-        for conflict in conflicts_slice.iter() {
-            if !conflict.message.is_null() && conflict.message_len > 0 {
-                // Reconstruct the Box<[u8]> from the raw parts and drop it
-                let msg_slice = unsafe {
-                    std::slice::from_raw_parts_mut(
-                        conflict.message as *mut u8,
-                        conflict.message_len,
-                    )
-                };
-                unsafe { drop(Box::from_raw(msg_slice)) };
-                #[cfg(test)]
-                test_conflict_message_dropped();
-            }
-        }
-
-        // Free the conflicts array itself
-        let boxed = unsafe {
-            Box::from_raw(std::ptr::slice_from_raw_parts_mut(
-                list_ref.conflicts,
-                list_ref.count,
-            ))
-        };
-        drop(boxed);
-
-        // Reset to safe state
-        list_ref.conflicts = ptr::null_mut();
-        list_ref.count = 0;
-    }));
-}
-
 // ─── Error Classification FFI (spec 51) ──────────────────────────────────────
 
 use crate::error::classification::classify_error_code;
@@ -2201,44 +1906,6 @@ mod tests {
 
         assert_eq!(rc, DECIDE_BASE_URL_INVALID);
         assert_safe_base_url_default(&decision);
-    }
-
-    #[test]
-    fn detect_conflicts_panic_releases_pending_messages() {
-        let explicit = FFIExplicitConfig {
-            accept: FFI_CONFIG_NOT_SET_U8,
-            cache_validation: 2,
-            streaming: 0,
-            limits_memory_bytes: FFI_CONFIG_NOT_SET_U64,
-            limits_timeout_ms: FFI_CONFIG_NOT_SET_U64,
-            limits_streaming_buffer_bytes: FFI_CONFIG_NOT_SET_U64,
-            limits_max_inflight: FFI_CONFIG_NOT_SET_U32,
-            error_policy: FFI_CONFIG_NOT_SET_U8,
-            diagnostics: FFI_CONFIG_NOT_SET_U8,
-        };
-        let effective = FFIEffectiveConfig {
-            accept: 0,
-            cache_validation: 2,
-            streaming: 0,
-            limits_memory_bytes: 0,
-            limits_timeout_ms: 0,
-            limits_streaming_buffer_bytes: 0,
-            limits_max_inflight: 0,
-            error_policy: 0,
-            diagnostics: 0,
-        };
-
-        assert_eq!(test_conflict_messages_live(), 0);
-        set_test_panic(Some("detect_conflicts_after_message"));
-        let list = unsafe { markdown_detect_conflicts(3, &explicit, &effective) };
-
-        assert!(list.conflicts.is_null());
-        assert_eq!(list.count, 0);
-        assert_eq!(
-            test_conflict_messages_live(),
-            0,
-            "message ownership must remain guarded until the full list is ready"
-        );
     }
 
     #[test]

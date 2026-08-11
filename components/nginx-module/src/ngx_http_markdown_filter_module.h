@@ -28,6 +28,15 @@ typedef struct ngx_http_markdown_loc_validation_index_s
 #define NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE ((size_t) -1)
 #endif
 
+/*
+ * Brotli's decoder owns auxiliary allocations outside the output buffer.
+ * Keep their aggregate bounded per worker so concurrent streaming requests
+ * cannot bypass the module's decompression budgets through library state.
+ */
+#ifndef NGX_HTTP_MARKDOWN_BROTLI_WORKSPACE_LIMIT
+#define NGX_HTTP_MARKDOWN_BROTLI_WORKSPACE_LIMIT (32 * 1024 * 1024)
+#endif
+
 /* C-side reload classification for file-system failures. */
 #define NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO 254
 
@@ -426,11 +435,8 @@ typedef struct {
  *   conf->on_error  = PASS (0) or REJECT (1)
  *   conf->error_status = actual HTTP status code (429/503; 502 is fail_closed default)
  *
- * FFIExplicitConfig.error_policy uses a three-value encoding:
+ * The unified C error-policy path uses the same three-value semantic model:
  *   0 = pass, 1 = status, 2 = fail_closed.
- *
- * ngx_http_markdown_on_error_to_ffi() translates the C model when building
- * the Rust configuration snapshot. See ngx_http_markdown_config_core_impl.h.
  */
 #define NGX_HTTP_MARKDOWN_ON_ERROR_PASS    0  /* fail-open: return original HTML */
 #define NGX_HTTP_MARKDOWN_ON_ERROR_REJECT  1  /* fail-closed: return error status */
@@ -862,6 +868,10 @@ typedef struct {
     struct MarkdownTrustedProxies *trusted_proxies;
     ngx_flag_t      trusted_proxies_configured;
     ngx_array_t    *trusted_proxies_manifest;
+#ifdef NGX_HTTP_BROTLI
+    ngx_atomic_uint_t brotli_workspace_bytes;
+    ngx_atomic_uint_t brotli_workspace_limit;
+#endif
 } ngx_http_markdown_main_conf_t;
 
 /* Return the merged config selected to own the per-worker dynconf watcher. */

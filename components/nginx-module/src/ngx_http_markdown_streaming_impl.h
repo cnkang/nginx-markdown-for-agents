@@ -3538,17 +3538,38 @@ ngx_http_markdown_streaming_init_buffers(
     ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf)
 {
-    ngx_int_t  rc;
+    ngx_int_t             rc;
+    ngx_atomic_uint_t    *brotli_workspace_bytes;
+    size_t                brotli_workspace_limit;
 
     if (ctx->decompression.needed) {
         ngx_http_markdown_decomp_failure_origin_e  create_origin;
         uint32_t                                   create_error;
 
+        brotli_workspace_bytes = NULL;
+        brotli_workspace_limit = 0;
+#ifdef NGX_HTTP_BROTLI
+        {
+            ngx_http_markdown_main_conf_t  *main_conf;
+
+            main_conf = ngx_http_get_module_main_conf(
+                r, ngx_http_markdown_filter_module);
+            if (main_conf != NULL) {
+                brotli_workspace_bytes =
+                    &main_conf->brotli_workspace_bytes;
+                brotli_workspace_limit =
+                    (size_t) main_conf->brotli_workspace_limit;
+            }
+        }
+#endif
+
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.attempted);
         ctx->streaming.decompressor =
             ngx_http_markdown_streaming_decomp_create_with_origin(
                 r->pool, ctx->decompression.type,
-                conf->decompress.max_size, &create_origin);
+                conf->decompress.max_size, brotli_workspace_bytes,
+                brotli_workspace_limit, r->connection->log,
+                &create_origin);
         if (ctx->streaming.decompressor == NULL) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                 "markdown: failed to create decompressor");

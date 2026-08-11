@@ -113,7 +113,7 @@ static char ngx_conf_error_val_[] = "ERROR";
 #define NGX_HTTP_MAIN_CONF_OFFSET 0
 #endif
 #ifndef NGX_HTTP_LOC_CONF_OFFSET
-#define NGX_HTTP_LOC_CONF_OFFSET 0
+#define NGX_HTTP_LOC_CONF_OFFSET 1
 #endif
 #ifndef ngx_null_string
 #define ngx_null_string { 0, NULL }

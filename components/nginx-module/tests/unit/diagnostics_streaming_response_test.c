@@ -423,6 +423,8 @@ test_streaming_config_field_names(void)
         "threshold field absent (internalized)");
     TEST_ASSERT(!json_contains(buf, "\"flush_min\":"),
         "flush_min field absent (internalized)");
+    TEST_ASSERT(!json_contains(buf, "\"precommit_buffer\":"),
+        "precommit_buffer field absent (internalized)");
     TEST_ASSERT(!json_contains(buf, "\"threshold_explicit\":"),
         "threshold_explicit field absent (internalized)");
 

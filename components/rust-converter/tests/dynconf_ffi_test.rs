@@ -101,7 +101,7 @@ fn parse_valid_json_error_policy_is_not_set() {
 // ─── markdown_dynconf_parse: error paths ───────────────────────────────────
 
 #[test]
-fn parse_null_data_nonzero_len_returns_invalid_json() {
+fn parse_null_data_nonzero_len_returns_invalid_type() {
     let mut result = FFIDynconfResult {
         error_code: u32::MAX,
         error_message: ptr::null(),
@@ -120,7 +120,7 @@ fn parse_null_data_nonzero_len_returns_invalid_json() {
         markdown_dynconf_result_init(&mut result);
         markdown_dynconf_parse(ptr::null(), 10, &mut result);
     }
-    assert_eq!(result.error_code, DYNCONF_ERR_INVALID_JSON);
+    assert_eq!(result.error_code, DYNCONF_ERR_INVALID_TYPE);
     assert!(!result.error_message.is_null());
     assert!(result.error_message_len > 0);
     assert!(result.source_digest.is_null());
