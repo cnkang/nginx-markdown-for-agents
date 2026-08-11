@@ -1420,6 +1420,9 @@ ngx_http_markdown_streaming_record_postcommit_failure(
 
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_streaming_fail_postcommit());
+        ngx_http_markdown_log_streaming_terminal_decision(
+            r, ctx, conf, NGX_HTTP_MARKDOWN_CONV_FAILED,
+            "streaming_mid_flight_error", "postcommit");
     }
 }
 
@@ -1477,6 +1480,9 @@ ngx_http_markdown_streaming_send_deferred_lastbuf(
 
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_streaming_convert());
+        ngx_http_markdown_log_streaming_terminal_decision(
+            r, ctx, conf, NGX_HTTP_MARKDOWN_CONV_SUCCESS,
+            "converted", "postcommit");
 
         ngx_http_markdown_record_per_path_metrics(r, conf, 0);
 
@@ -1574,6 +1580,9 @@ ngx_http_markdown_streaming_record_pending_terminal_success(
 
     ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
         ngx_http_markdown_reason_streaming_convert());
+    ngx_http_markdown_log_streaming_terminal_decision(
+        r, ctx, conf, NGX_HTTP_MARKDOWN_CONV_SUCCESS,
+        "converted", "postcommit");
 
     ngx_http_markdown_record_per_path_metrics(r, conf, 0);
 
@@ -2143,6 +2152,21 @@ ngx_http_markdown_streaming_precommit_error(
     mapped_reason = ngx_http_markdown_streaming_precommit_reason(
         ctx, error_code);
 
+    if (error_code == ERROR_MEMORY_LIMIT
+        || error_code == ERROR_BUDGET_EXCEEDED
+        || error_code == ERROR_DECOMPRESSION_BUDGET_EXCEEDED
+        || error_code == ERROR_PARSE_TIMEOUT
+        || error_code == ERROR_PARSE_BUDGET_EXCEEDED)
+    {
+        ctx->error.last_category =
+            NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT;
+    } else if (error_code == ERROR_INTERNAL) {
+        ctx->error.last_category = NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
+    } else {
+        ctx->error.last_category = NGX_HTTP_MARKDOWN_ERROR_CONVERSION;
+    }
+    ctx->error.has_category = 1;
+
     /*
      * Track budget exceeded as auxiliary classification.
      * Covers both Rust FFI budget exceeded (ERROR_BUDGET_EXCEEDED = 6,
@@ -2215,6 +2239,9 @@ ngx_http_markdown_streaming_precommit_error(
             streaming.streaming_fallback_precommit_reject);
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_streaming_precommit_reject());
+        ngx_http_markdown_log_streaming_terminal_decision(
+            r, ctx, conf, NGX_HTTP_MARKDOWN_CONV_FAILED,
+            "failed_closed", "precommit");
         ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
             "markdown: streaming fallback: "
             "engine=rejected phase=precommit "
@@ -2258,6 +2285,9 @@ ngx_http_markdown_streaming_precommit_error(
         streaming.streaming_fallback_precommit_pass);
     ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
         ngx_http_markdown_reason_streaming_precommit_failopen());
+    ngx_http_markdown_log_streaming_terminal_decision(
+        r, ctx, conf, NGX_HTTP_MARKDOWN_CONV_FAILED,
+        "failed_open", "precommit");
     ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
         "markdown: streaming fallback: "
         "engine=passthrough phase=precommit "
@@ -3422,6 +3452,9 @@ ngx_http_markdown_streaming_finish_terminal(
         NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count);
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_streaming_convert());
+        ngx_http_markdown_log_streaming_terminal_decision(
+            r, ctx, conf, NGX_HTTP_MARKDOWN_CONV_SUCCESS,
+            "converted", "postcommit");
         ngx_http_markdown_record_per_path_metrics(r, conf, 0);
     } else if (rc == NGX_AGAIN) {
         ctx->streaming.completion.pending_terminal_metrics = 1;
@@ -3871,13 +3904,15 @@ ngx_http_markdown_streaming_failopen_passthrough(
     ngx_chain_t  **tail;
     ngx_chain_t  *cl;
     ngx_buf_t    *b;
+    ngx_int_t     rc;
 
     ctx->streaming.completion.failopen_active = 1;
 
-    if (!ctx->headers_forwarded
-        && ngx_http_markdown_forward_headers(r, ctx) != NGX_OK)
-    {
-        return NGX_ERROR;
+    if (!ctx->headers_forwarded) {
+        rc = ngx_http_markdown_forward_headers(r, ctx);
+        if (rc != NGX_OK) {
+            return rc;
+        }
     }
 
     if (!ctx->streaming.failopen_replay_initialized
@@ -4052,7 +4087,7 @@ ngx_http_markdown_streaming_passthrough(
         rc = ngx_http_markdown_forward_headers(
             r, ctx);
         if (rc != NGX_OK) {
-            return NGX_ERROR;
+            return rc;
         }
     }
     return ngx_http_next_body_filter(r, in);
@@ -4320,6 +4355,9 @@ ngx_http_markdown_streaming_abort_failopen_after_pending(
     (void) error_code;
     ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
         ngx_http_markdown_reason_streaming_fail_postcommit());
+    ngx_http_markdown_log_streaming_terminal_decision(
+        r, ctx, conf, NGX_HTTP_MARKDOWN_CONV_FAILED,
+        "streaming_mid_flight_error", "postcommit");
 
     ngx_http_markdown_streaming_sync_buffered(r, ctx);
     return NGX_ERROR;

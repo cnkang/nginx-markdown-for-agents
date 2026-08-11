@@ -650,6 +650,7 @@ test_decision_path_records_once_with_explicit_duration(void)
     path.conditional_result = "PROCEED";
     path.conversion_status = "SUCCESS";
     path.reason_code = "converted";
+    path.stage = "postcommit";
     path.duration_ms = 37;
     ngx_http_markdown_log_decision_path(&r, &conf, NULL, &path);
 
@@ -659,6 +660,9 @@ test_decision_path_records_once_with_explicit_duration(void)
                 "path reason should map without C-string overread");
     TEST_ASSERT(ngx_http_markdown_g_diag_state.ring.entries[0].duration_ms == 37,
                 "path duration must be preserved");
+    TEST_ASSERT(strcmp(ngx_http_markdown_g_diag_state.ring.entries[0].stage,
+                       "postcommit") == 0,
+                "path stage must use explicit production provenance");
 
     TEST_PASS("Decision path ring ownership covered");
 }

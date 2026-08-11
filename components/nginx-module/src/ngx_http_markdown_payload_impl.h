@@ -97,6 +97,8 @@ ngx_http_markdown_fail_open_buffered_response(ngx_http_request_t *r,
                                               ngx_http_markdown_ctx_t *ctx,
                                               const char *debug_message)
 {
+    ngx_int_t  rc;
+
     if (debug_message != NULL) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, debug_message);
     }
@@ -104,8 +106,9 @@ ngx_http_markdown_fail_open_buffered_response(ngx_http_request_t *r,
     ngx_http_markdown_reclassify_fail_open_path(ctx);
     ctx->eligible = 0;
 
-    if (ngx_http_markdown_forward_headers(r, ctx) != NGX_OK) {
-        return NGX_ERROR;
+    rc = ngx_http_markdown_forward_headers(r, ctx);
+    if (rc != NGX_OK) {
+        return rc;
     }
 
     r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
@@ -519,8 +522,9 @@ ngx_http_markdown_handle_buffer_init_failure(ngx_http_request_t *r,
     ngx_http_markdown_reclassify_fail_open_path(ctx);
     ctx->eligible = 0;
     r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
-    if (ngx_http_markdown_forward_headers(r, ctx) != NGX_OK) {
-        return NGX_ERROR;
+    rc = ngx_http_markdown_forward_headers(r, ctx);
+    if (rc != NGX_OK) {
+        return rc;
     }
 
     rc = ngx_http_next_body_filter(r, in);
@@ -592,8 +596,9 @@ ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
                   "markdown: fail-open strategy - returning original HTML");
     ctx->eligible = 0;
     r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
-    if (ngx_http_markdown_forward_headers(r, ctx) != NGX_OK) {
-        return NGX_ERROR;
+    rc = ngx_http_markdown_forward_headers(r, ctx);
+    if (rc != NGX_OK) {
+        return rc;
     }
 
     rc = ngx_http_markdown_fail_open_with_buffered_prefix(r, ctx, cl);

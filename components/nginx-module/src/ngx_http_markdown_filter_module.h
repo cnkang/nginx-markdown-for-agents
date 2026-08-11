@@ -1021,6 +1021,7 @@ typedef struct {
     struct {
         ngx_http_markdown_error_category_t    last_category;
         ngx_flag_t                           has_category;
+        ngx_flag_t                           terminal_decision_recorded;
     } error;
 
     /*

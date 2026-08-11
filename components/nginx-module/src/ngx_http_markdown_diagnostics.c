@@ -231,6 +231,20 @@ ngx_http_markdown_diagnostics_record_reason(
     const char *error_category,
     ngx_msec_t duration_ms)
 {
+    ngx_http_markdown_diagnostics_record_reason_at_stage(
+        state, reason, reason_len, NULL, error_category, duration_ms);
+}
+
+
+void
+ngx_http_markdown_diagnostics_record_reason_at_stage(
+    ngx_http_markdown_diag_state_t *state,
+    const u_char *reason,
+    size_t reason_len,
+    const char *stage,
+    const char *error_category,
+    ngx_msec_t duration_ms)
+{
     ngx_int_t    reason_code;
     const char  *outcome;
     const char  *error_origin;
@@ -247,7 +261,8 @@ ngx_http_markdown_diagnostics_record_reason(
     ngx_http_markdown_diagnostics_record_classified(
         state,
         outcome,
-        ngx_http_markdown_diag_decision_stage(reason_code),
+        stage != NULL ? stage
+                      : ngx_http_markdown_diag_decision_stage(reason_code),
         reason_code,
         error_origin,
         duration_ms);
@@ -660,7 +675,7 @@ ngx_http_markdown_diagnostics_check_access(ngx_http_request_t *r)
  *   NGX_OK on success, NGX_ERROR on failure
  */
 /*
- * Diagnostics v1 is deliberately rendered in one bounded pass.  The
+ * Diagnostics v2 is deliberately rendered in one bounded pass.  The
  * endpoint is a strict machine-readable contract: no compatibility fields
  * are emitted and every string is either a closed enum or copied through the
  * bounded dynconf error buffer.
@@ -1203,7 +1218,7 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     p = ngx_slprintf(p, last, "]}\n");
     if (p >= last) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-            "markdown: diagnostics v1 JSON truncated");
+            "markdown: diagnostics v2 JSON truncated");
         return NGX_ERROR;
     }
 
@@ -1356,11 +1371,12 @@ ngx_http_markdown_log_decision_path(ngx_http_request_t *r,
      * not just the ones that were logged.
      */
     if (ngx_http_markdown_diagnostics_recording_active()) {
-        ngx_http_markdown_diagnostics_record_reason(
+        ngx_http_markdown_diagnostics_record_reason_at_stage(
             ngx_http_markdown_diagnostics_get_state(),
             (const u_char *) path->reason_code,
             path->reason_code != NULL
                 ? strlen(path->reason_code) : 0,
+            path->stage,
             path->error_category,
             path->duration_ms);
     }

@@ -179,19 +179,27 @@ void ngx_http_markdown_diagnostics_record_reason(
     const char *error_category,
     ngx_msec_t duration_ms);
 
+/* Record a length-bounded reason with explicit stage and error provenance. */
+void ngx_http_markdown_diagnostics_record_reason_at_stage(
+    ngx_http_markdown_diag_state_t *state,
+    const u_char *reason,
+    size_t reason_len,
+    const char *stage,
+    const char *error_category,
+    ngx_msec_t duration_ms);
+
 
 /*
  * HTTP content handler for the diagnostics endpoint.
  *
- * Responds with the Diagnostics Schema v1 JSON document containing the
+ * Responds with the Diagnostics Schema v2 JSON document containing the
  * worker-local worker/runtime state, build identity, configuration snapshot,
  * and recent decision ring buffer.
  *
- * Access control: the diagnostics content handler runs in the NGINX content
- * phase, which executes AFTER the access phase.  Use native NGINX
- * allow/deny/auth_basic/satisfy directives in the location block to restrict
- * access.  Requests with no/unknown peer address are
- * denied.  Only GET and HEAD are accepted.
+ * Access control: the handler enforces a loopback-only peer boundary before
+ * rendering. Native NGINX allow/deny/auth_basic/satisfy directives in the
+ * location block may restrict that boundary further. Requests with
+ * no/unknown peer address are denied. Only GET and HEAD are accepted.
  *
  * Parameters:
  *   r - HTTP request
@@ -443,6 +451,7 @@ typedef struct {
     const char   *conditional_result; /* NOT_MODIFIED/PROCEED/SKIPPED */
     const char   *conversion_status;  /* SUCCESS/FAILED/SKIPPED */
     const char   *reason_code;        /* Final reason code string */
+    const char   *stage;              /* Explicit terminal decision stage */
     const char   *error_category;     /* Explicit conversion/resource/system */
     ngx_msec_t    duration_ms;        /* Processing duration in ms */
 } ngx_http_markdown_decision_path_t;
