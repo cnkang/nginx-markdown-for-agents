@@ -29,7 +29,7 @@ def test_diagnostics_schema_gate_rejects_docs_only_contract(tmp_path):
     )
     docs.parent.mkdir(parents=True)
     renderer.parent.mkdir(parents=True)
-    docs.write_text("`schema_version` is the integer `1`.\n")
+    docs.write_text("`schema_version`: integer constant `1`.\n")
     renderer.write_text(
         r'p = ngx_slprintf(p, last, "  \"schema_version\": 2,\n");'
         "\n"
@@ -51,7 +51,7 @@ def test_diagnostics_schema_gate_finds_schema_key_after_other_json_keys(tmp_path
     )
     docs.parent.mkdir(parents=True)
     renderer.parent.mkdir(parents=True)
-    docs.write_text("`schema_version` is the integer `1`.\n")
+    docs.write_text("`schema_version`: integer constant `1`.\n")
     renderer.write_text(
         r'p = ngx_slprintf(p, last, "{\"product_version\":\"0.9.2\",'
         r'\"schema_version\":1}");' + "\n"
@@ -74,7 +74,10 @@ def test_diagnostics_schema_gate_accepts_active_v2_contract(tmp_path):
     )
     docs.parent.mkdir(parents=True)
     renderer.parent.mkdir(parents=True)
-    docs.write_text("`schema_version`: integer constant `2`.\n")
+    docs.write_text(
+        "The 0.9.0 contract documented `schema_version 1`.\n"
+        "`schema_version`: integer constant `2`.\n"
+    )
     renderer.write_text(
         r'p = ngx_slprintf(p, last, "{\"schema_version\":2,\"product_version\":\"0.9.2\"}");'
         "\n"

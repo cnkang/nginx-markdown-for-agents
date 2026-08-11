@@ -107,7 +107,10 @@ def check_diagnostics_schema_version(repo: Path) -> dict:
                 "message": "observability-schema-v2.md not found"}
     documentation = schema_file.read_text(encoding="utf-8")
     documentation_match = re.search(
-        r"schema_version[^\n]*\b([12])\b", documentation
+        r"^\s*(?:-\s*)?`schema_version`\s*:\s*"
+        r"integer\s+constant\s*`([12])`\s*\.?\s*$",
+        documentation,
+        flags=re.MULTILINE,
     )
     if documentation_match is None:
         return {"name": gate_name, "status": "fail",
