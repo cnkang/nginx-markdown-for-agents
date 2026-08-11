@@ -78,42 +78,61 @@ cd "$ARTIFACT_DIR"
 
 # Gather package/archive artifacts and release-manifest.json; handle cases
 # where one type may be absent.
-DEB_FILES=()
-RPM_FILES=()
-TARBALL_FILES=()
+DEB_COUNT=0
+RPM_COUNT=0
+TARBALL_COUNT=0
 MANIFEST_FILE=""
+ALL_FILES=()
 
-for f in *.deb; do
-    [[ -f "$f" ]] || continue
-    DEB_FILES+=("$f")
-done
+# Keep traversal NUL-safe and sort explicitly without relying on GNU sort -z.
+# The artifact directory is flat by contract; nested files are ignored.
+append_sorted_file() {
+    local value="$1"
+    local index=${#ALL_FILES[@]}
 
-for f in *.rpm; do
-    [[ -f "$f" ]] || continue
-    RPM_FILES+=("$f")
-done
+    while (( index > 0 )); do
+        if [[ "${ALL_FILES[index - 1]}" < "$value" ]]; then
+            break
+        fi
+        ALL_FILES[index]="${ALL_FILES[index - 1]}"
+        index=$((index - 1))
+    done
+    ALL_FILES[index]="$value"
+}
 
-for f in *.tar.gz; do
-    [[ -f "$f" ]] || continue
-    TARBALL_FILES+=("$f")
-done
-
-if [[ -f "release-manifest.json" ]]; then
-    MANIFEST_FILE="release-manifest.json"
-fi
-
-ALL_FILES=(
-    ${DEB_FILES[@]+"${DEB_FILES[@]}"}
-    ${RPM_FILES[@]+"${RPM_FILES[@]}"}
-    ${TARBALL_FILES[@]+"${TARBALL_FILES[@]}"}
-    ${MANIFEST_FILE:+"${MANIFEST_FILE}"}
-)
+while IFS= read -r -d '' f; do
+    name="${f#./}"
+    case "$name" in
+        */*)
+            continue
+            ;;
+        *.deb)
+            DEB_COUNT=$((DEB_COUNT + 1))
+            ;;
+        *.rpm)
+            RPM_COUNT=$((RPM_COUNT + 1))
+            ;;
+        *.tar.gz)
+            TARBALL_COUNT=$((TARBALL_COUNT + 1))
+            ;;
+        release-manifest.json)
+            MANIFEST_FILE="$name"
+            ;;
+        *)
+            continue
+            ;;
+    esac
+    append_sorted_file "$name"
+done < <(find . -type f \( \
+    -name '*.deb' -o -name '*.rpm' -o -name '*.tar.gz' \
+    -o -name 'release-manifest.json' \
+    \) -print0)
 
 if [[ ${#ALL_FILES[@]} -eq 0 ]]; then
     die "No release artifacts found in '$ARTIFACT_DIR'."
 fi
 
-info "Found ${#DEB_FILES[@]} .deb, ${#RPM_FILES[@]} .rpm, ${#TARBALL_FILES[@]} .tar.gz, and manifest=${MANIFEST_FILE:-none}"
+info "Found ${DEB_COUNT} .deb, ${RPM_COUNT} .rpm, ${TARBALL_COUNT} .tar.gz, and manifest=${MANIFEST_FILE:-none}"
 
 ##############################################################################
 # Generate SHA256SUMS

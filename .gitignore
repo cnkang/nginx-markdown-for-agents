@@ -178,3 +178,10 @@ KIRO.md
 .trae
 
 artifacts/*
+!artifacts/release/
+artifacts/release/*
+!artifacts/release/0.9.2/
+artifacts/release/0.9.2/*
+!artifacts/release/0.9.2/reason-registry-report.json
+!artifacts/release/0.9.2/generated-reason-artifacts.json
+!artifacts/release/0.9.2/official-build-feature-manifest.json

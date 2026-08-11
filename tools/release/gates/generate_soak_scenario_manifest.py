@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from datetime import datetime, timezone
@@ -45,9 +46,12 @@ def _validate_scope(scope: dict) -> None:
     if (
         isinstance(duration, bool)
         or not isinstance(duration, (int, float))
+        or not math.isfinite(duration)
         or duration <= 0
     ):
-        raise ValueError("short-soak scope duration_minutes must be positive")
+        raise ValueError(
+            "short-soak scope duration_minutes must be a positive finite number"
+        )
     concurrency = scope.get("concurrency")
     if isinstance(concurrency, bool) or not isinstance(concurrency, int) or concurrency <= 0:
         raise ValueError("short-soak scope concurrency must be positive")
