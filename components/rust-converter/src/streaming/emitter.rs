@@ -782,6 +782,7 @@ impl IncrementalEmitter {
             let mut escape_state = self.markdown_escape_state;
             let escaped = escape_markdown_text_with_state(&normalized, &mut escape_state);
             self.write_str(&escaped)?;
+            self.markdown_escape_state = escape_state;
         } else {
             self.write_str(&normalized)?;
         }

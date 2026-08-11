@@ -74,13 +74,17 @@ struct ngx_cycle_s;
 /*
  * Single decision record stored in the ring buffer.
  *
- * Captures the outcome of one request's conversion decision
- * for diagnostic introspection.
+ * Captures the classified outcome of one request's conversion decision
+ * for diagnostic introspection. Classification is stored at record time so
+ * JSON rendering does not reconstruct it from the reason code.
  */
 typedef struct {
     /* Decision time (wall-clock seconds, cast to ngx_msec_t). */
     ngx_msec_t    timestamp;
+    const char   *outcome;         /* converted/skipped/failed/aborted */
+    const char   *stage;           /* decision stage */
     ngx_int_t     reason_code;     /* Reason code enum value */
+    const char   *error_origin;    /* bounded taxonomy value or NULL */
     ngx_msec_t    duration_ms;     /* Processing duration in ms */
 } ngx_http_markdown_diag_decision_t;
 
@@ -149,6 +153,15 @@ ngx_int_t ngx_http_markdown_diagnostics_init(
 void ngx_http_markdown_diagnostics_record(
     ngx_http_markdown_diag_state_t *state,
     ngx_int_t reason_code,
+    ngx_msec_t duration_ms);
+
+/* Record a decision with its already-classified diagnostic dimensions. */
+void ngx_http_markdown_diagnostics_record_classified(
+    ngx_http_markdown_diag_state_t *state,
+    const char *outcome,
+    const char *stage,
+    ngx_int_t reason_code,
+    const char *error_origin,
     ngx_msec_t duration_ms);
 
 

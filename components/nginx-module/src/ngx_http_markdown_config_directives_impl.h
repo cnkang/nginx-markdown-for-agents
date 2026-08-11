@@ -53,7 +53,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * Enables or disables Markdown conversion for this context.
      * Also supports per-request toggle via nginx variables/complex values.
      * Default: off
-     * Context: http
+     * Context: http, server, location
      *
      * Example:
      *   location /api {
@@ -82,7 +82,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * Any subset of keys may be given; unspecified keys inherit
      * (per-key inheritance).
      * Public default: (per-key inheritance)
-     * Context: http
+     * Context: http, server, location
      *
      * Example:
      *   markdown_limits conversion_timeout=30s conversion_memory=64m;
@@ -107,7 +107,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   fail_closed - return 502 on pre-commit error
      *   status <c>  - return status code c (429 or 503)
      * Default: pass
-     * Context: http
+     * Context: http, server, location
      *
      * Example:
      *   markdown_error_policy status 503;
@@ -193,7 +193,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *              "markdown_on_wildcard on")
      *   force    - convert regardless of the Accept header (dangerous)
      * Public default: strict
-     * Context: http, server, location
+     * Context: http
      *
      * Example:
      *   markdown_accept wildcard;
@@ -216,7 +216,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * - allow: Convert authenticated requests (default)
      * - deny: Skip conversion for authenticated requests
      * Default: allow
-     * Context: http, server, location
+     * Context: http
      *
      * Example:
      *   markdown_auth_policy deny;
@@ -237,7 +237,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * Supports exact match, prefix match (pattern*), and wildcards.
      * Public default: none
      * Default: none (only Authorization header detection)
-     * Context: http, server, location
+     * Context: http
      *
      * Example:
      *   markdown_auth_cookies session* auth_token PHPSESSID;
@@ -550,7 +550,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * changes and atomically swaps the active configuration.
      *
      * Default: off
-     * Context: http, server, location
+     * Context: http
      *
      * Example:
      *   markdown_dynamic_config on;
@@ -560,7 +560,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_DYNAMIC_CONFIG),
         NGX_HTTP_MAIN_CONF|NGX_CONF_FLAG,
         ngx_http_markdown_dynconf_flag,
-        NGX_HTTP_MAIN_CONF_OFFSET,
+        NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_markdown_conf_t, advanced.dynconf_enabled),
         NULL
     },
@@ -572,7 +572,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * Only effective when markdown_dynamic_config is on.
      *
      * Default: (none)
-     * Context: http, server, location
+     * Context: http
      *
      * Example:
      *   markdown_dynamic_config_path /etc/nginx/markdown_dynamic.conf;
@@ -581,7 +581,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_DYNAMIC_CONFIG_PATH),
         NGX_HTTP_MAIN_CONF|NGX_CONF_TAKE1,
         ngx_http_markdown_set_dynconf_path,
-        NGX_HTTP_MAIN_CONF_OFFSET,
+        NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_markdown_conf_t, advanced.dynconf_path),
         NULL
     },
@@ -595,7 +595,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * verify a new dynconf file without affecting live traffic.
      *
      * Default: off
-     * Context: http, server, location
+     * Context: http
      *
      * Example:
      *   markdown_dynconf_dry_run on;
@@ -604,7 +604,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_DYNCONF_DRY_RUN),
         NGX_HTTP_MAIN_CONF|NGX_CONF_FLAG,
         ngx_http_markdown_dynconf_flag,
-        NGX_HTTP_MAIN_CONF_OFFSET,
+        NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_markdown_conf_t, advanced.dynconf_dry_run),
         NULL
     },

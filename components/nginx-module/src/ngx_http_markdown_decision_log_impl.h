@@ -333,6 +333,7 @@ ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
 {
     ngx_uint_t       log_level;
     ngx_int_t        is_failure;
+    ngx_int_t        reason_code_value;
     ngx_uint_t       effective_verbosity;
     ngx_str_t        method_name;
     ngx_str_t        content_type;
@@ -356,6 +357,14 @@ ngx_http_markdown_log_decision_with_category(ngx_http_request_t *r,
     }
 
     NGX_HTTP_MARKDOWN_METRIC_INC(results.decision_count);
+
+    if (ngx_http_markdown_diagnostics_recording_active()) {
+        reason_code_value = ngx_http_markdown_diagnostics_reason_to_code(
+            (const char *) reason_code->data);
+        ngx_http_markdown_diagnostics_record(
+            ngx_http_markdown_diagnostics_get_state(),
+            reason_code_value, 0);
+    }
 
     if (effective_verbosity <= NGX_HTTP_MARKDOWN_LOG_WARN
         && !is_failure)

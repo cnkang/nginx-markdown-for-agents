@@ -830,7 +830,7 @@ fn build_forwarded_decision(element: &ForwardedElement, input: &BaseUrlInput) ->
     host_fallback(
         input.host,
         input.direct_scheme,
-        BaseUrlReason::ForwardedHeaderTrusted,
+        BaseUrlReason::FallbackToHost,
     )
 }
 

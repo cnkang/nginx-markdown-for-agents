@@ -303,7 +303,6 @@ ngx_http_markdown_handle_encoding_collection_failure(
      * header and would double-count conversions_attempted (Rule 38).
      */
     ctx->eligible = 0;
-    ctx->headers_forwarded = 1;
     ctx->error.last_category = NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
     ctx->error.has_category = 1;
 
@@ -339,6 +338,7 @@ ngx_http_markdown_handle_encoding_collection_failure(
             NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
     rc = ngx_http_next_header_filter(r);
     if (rc == NGX_OK || rc == NGX_DONE) {
+        ctx->headers_forwarded = 1;
         ngx_http_markdown_metric_inc_failopen(eff, conf);
     }
     return rc;
@@ -587,7 +587,6 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
 
         /* fail-open: pass through original response */
         ctx->eligible = 0;
-        ctx->headers_forwarded = 1;
 
         ngx_log_error(NGX_LOG_WARN,
             r->connection->log, 0,
@@ -600,6 +599,7 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
         rc = ngx_http_next_header_filter(r);
         /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
         if (rc == NGX_OK || rc == NGX_DONE) {
+            ctx->headers_forwarded = 1;
             ngx_http_markdown_metric_inc_failopen(
                 ctx->effective_conf, conf);
         }
@@ -623,13 +623,13 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
         }
 
         ctx->eligible = 0;
-        ctx->headers_forwarded = 1;
         ngx_http_markdown_log_decision(
             r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_failed_open());
         rc = ngx_http_next_header_filter(r);
         /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
         if (rc == NGX_OK || rc == NGX_DONE) {
+            ctx->headers_forwarded = 1;
             ngx_http_markdown_metric_inc_failopen(
                 ctx->effective_conf, conf);
         }
@@ -810,10 +810,10 @@ ngx_http_markdown_handle_encoding_header_invalid(
     ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                   "markdown: malformed Content-Encoding "
                   "chain, returning original encoded content");
-    ctx->headers_forwarded = 1;
     rc = ngx_http_next_header_filter(r);
     /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
     if (rc == NGX_OK || rc == NGX_DONE) {
+        ctx->headers_forwarded = 1;
         ngx_http_markdown_metric_inc_failopen(
             ctx->effective_conf, conf);
     }
@@ -841,11 +841,13 @@ ngx_http_markdown_handle_encoding_passthrough(
                   "(passthrough)");
 
     ctx->eligible = 0;
-    ctx->headers_forwarded = 1;
     NGX_HTTP_MARKDOWN_METRIC_INC(skips.compression_passthrough);
     ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
         ngx_http_markdown_reason_bypass_no_transform());
     *rc = ngx_http_next_header_filter(r);
+    if (*rc == NGX_OK || *rc == NGX_DONE) {
+        ctx->headers_forwarded = 1;
+    }
     return 1;
 }
 
@@ -932,11 +934,13 @@ encoding_policy:
                      "passing through original content",
                      ctx->decompression.type);
         ctx->eligible = 0;
-        ctx->headers_forwarded = 1;
         NGX_HTTP_MARKDOWN_METRIC_INC(skips.compression_passthrough);
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_streaming_skip_compressed());
         *rc = ngx_http_next_header_filter(r);
+        if (*rc == NGX_OK || *rc == NGX_DONE) {
+            ctx->headers_forwarded = 1;
+        }
         return 1;
     }
 

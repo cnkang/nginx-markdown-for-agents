@@ -330,7 +330,7 @@ test_v070_defaults_both_unset(void)
         "decompress_max_size should default to max_size (10MB)");
 
     /*
-     * parse_timeout: 30000ms (30 seconds).
+     * parse_timeout: 10000ms (10 seconds).
      * Generous enough for large documents, strict enough to prevent
      * worker stalls from pathological inputs.
      */
@@ -338,7 +338,7 @@ test_v070_defaults_both_unset(void)
         "parse_timeout should default to 10000ms (10s)");
 
     /*
-     * parser_budget: 64MB (64 * 1024 * 1024).
+     * parser_budget: 32MB (32 * 1024 * 1024).
      * Allows parsing of large documents while preventing OOM from
      * adversarial inputs with deep nesting or excessive node counts.
      */

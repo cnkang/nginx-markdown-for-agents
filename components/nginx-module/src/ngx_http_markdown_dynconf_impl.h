@@ -2753,9 +2753,97 @@ ngx_http_markdown_dynconf_reload(
 
 #else /* NGX_HTTP_MARKDOWN_DYNCONF_LEGACY_TEST */
 
+static void
+ngx_http_markdown_dynconf_record_static_error(
+    ngx_http_markdown_dynconf_watcher_t *watcher, ngx_uint_t error_code)
+{
+    static const u_char file_error[] =
+        "dynamic configuration file could not be read";
+    static const u_char too_large[] =
+        "dynamic configuration file exceeds the size limit";
+    static const u_char invalid_json[] =
+        "dynamic configuration document is invalid JSON";
+    static const u_char token_budget[] =
+        "dynamic configuration document exceeds the parser token budget";
+    static const u_char nesting_depth[] =
+        "dynamic configuration document exceeds the parser nesting limit";
+    static const u_char duplicate_key[] =
+        "dynamic configuration contains a duplicate key";
+    static const u_char missing_schema[] =
+        "dynamic configuration is missing schema_version";
+    static const u_char invalid_schema[] =
+        "dynamic configuration has an invalid schema_version";
+    static const u_char unknown_key[] =
+        "dynamic configuration contains an unknown key";
+    static const u_char invalid_type[] =
+        "dynamic configuration contains a value of invalid type";
+    static const u_char out_of_range[] =
+        "dynamic configuration contains a value out of range";
+    static const u_char invalid_utf8[] =
+        "dynamic configuration is not valid UTF-8";
+    static const u_char internal[] =
+        "dynamic configuration parser failed internally";
+    const u_char  *message;
+    size_t         length;
+
+    if (watcher == NULL) {
+        return;
+    }
+
+    switch (error_code) {
+    case NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO:
+        message = file_error;
+        break;
+    case DYNCONF_ERR_TOO_LARGE:
+        message = too_large;
+        break;
+    case DYNCONF_ERR_INVALID_JSON:
+        message = invalid_json;
+        break;
+    case DYNCONF_ERR_TOKEN_BUDGET:
+        message = token_budget;
+        break;
+    case DYNCONF_ERR_NESTING_DEPTH:
+        message = nesting_depth;
+        break;
+    case DYNCONF_ERR_DUPLICATE_KEY:
+        message = duplicate_key;
+        break;
+    case DYNCONF_ERR_MISSING_SCHEMA_VERSION:
+        message = missing_schema;
+        break;
+    case DYNCONF_ERR_INVALID_SCHEMA_VERSION:
+        message = invalid_schema;
+        break;
+    case DYNCONF_ERR_UNKNOWN_KEY:
+        message = unknown_key;
+        break;
+    case DYNCONF_ERR_INVALID_TYPE:
+        message = invalid_type;
+        break;
+    case DYNCONF_ERR_VALUE_OUT_OF_RANGE:
+        message = out_of_range;
+        break;
+    case DYNCONF_ERR_INVALID_UTF8:
+        message = invalid_utf8;
+        break;
+    default:
+        message = internal;
+        break;
+    }
+
+    length = ngx_strlen(message);
+    if (length > sizeof(watcher->diagnostic_state.last_error) - 1) {
+        length = sizeof(watcher->diagnostic_state.last_error) - 1;
+    }
+    ngx_memcpy(watcher->diagnostic_state.last_error, message, length);
+    watcher->diagnostic_state.last_error[length] = '\0';
+    watcher->diagnostic_state.last_error_len = length;
+}
+
 static ngx_int_t
 ngx_http_markdown_dynconf_read_file(
-    const ngx_http_markdown_dynconf_watcher_t *watcher, ngx_log_t *log,
+    ngx_http_markdown_dynconf_watcher_t *watcher, ngx_log_t *log,
     u_char **data, size_t *file_size)
 {
     u_char             path_buf[NGX_MAX_PATH + 1];
@@ -2768,6 +2856,10 @@ ngx_http_markdown_dynconf_read_file(
     if (watcher == NULL || log == NULL || data == NULL || file_size == NULL
         || watcher->path.data == NULL || watcher->path.len > NGX_MAX_PATH)
     {
+        ngx_http_markdown_record_dynconf_reload(
+            NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO);
+        ngx_http_markdown_dynconf_record_static_error(
+            watcher, NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO);
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
     }
 
@@ -2778,6 +2870,8 @@ ngx_http_markdown_dynconf_read_file(
     if (fd == NGX_INVALID_FILE) {
         ngx_http_markdown_record_dynconf_reload(
             NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO);
+        ngx_http_markdown_dynconf_record_static_error(
+            watcher, NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO);
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
     }
 
@@ -2786,6 +2880,8 @@ ngx_http_markdown_dynconf_read_file(
         ngx_close_file(fd);
         ngx_http_markdown_record_dynconf_reload(
             NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO);
+        ngx_http_markdown_dynconf_record_static_error(
+            watcher, NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO);
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
     }
     if (file_info.st_size < 0
@@ -2794,6 +2890,8 @@ ngx_http_markdown_dynconf_read_file(
     {
         ngx_close_file(fd);
         ngx_http_markdown_record_dynconf_reload(DYNCONF_ERR_TOO_LARGE);
+        ngx_http_markdown_dynconf_record_static_error(
+            watcher, DYNCONF_ERR_TOO_LARGE);
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
     }
 
@@ -2803,6 +2901,8 @@ ngx_http_markdown_dynconf_read_file(
         ngx_close_file(fd);
         ngx_http_markdown_record_dynconf_reload(
             NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO);
+        ngx_http_markdown_dynconf_record_static_error(
+            watcher, NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO);
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
     }
 
@@ -2817,6 +2917,8 @@ ngx_http_markdown_dynconf_read_file(
             *data = NULL;
             ngx_http_markdown_record_dynconf_reload(
                 NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO);
+            ngx_http_markdown_dynconf_record_static_error(
+                watcher, NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO);
             return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
         }
         bytes_read = (size_t) nread; /* CWE-190:guarded */
@@ -2861,6 +2963,8 @@ ngx_http_markdown_dynconf_record_error(
     watcher->diagnostic_state.last_error_len = 0;
     watcher->diagnostic_state.last_error[0] = '\0';
     if (result->error_message == NULL || result->error_message_len == 0) {
+        ngx_http_markdown_dynconf_record_static_error(
+            watcher, result->error_code);
         return;
     }
 
@@ -2877,26 +2981,11 @@ static void
 ngx_http_markdown_dynconf_record_candidate_error(
     ngx_http_markdown_dynconf_watcher_t *watcher, ngx_uint_t error_code)
 {
-    static const u_char invalid_type[] =
-        "dynamic configuration candidate has an invalid value";
-    static const u_char out_of_range[] =
-        "dynamic configuration candidate is out of range";
-    const u_char  *message;
-    size_t         length;
-
     if (watcher == NULL) {
         return;
     }
 
-    message = error_code == DYNCONF_ERR_VALUE_OUT_OF_RANGE
-        ? out_of_range : invalid_type;
-    length = ngx_strlen(message);
-    if (length > sizeof(watcher->diagnostic_state.last_error) - 1) {
-        length = sizeof(watcher->diagnostic_state.last_error) - 1;
-    }
-    ngx_memcpy(watcher->diagnostic_state.last_error, message, length);
-    watcher->diagnostic_state.last_error[length] = '\0';
-    watcher->diagnostic_state.last_error_len = length;
+    ngx_http_markdown_dynconf_record_static_error(watcher, error_code);
 }
 
 /* Reload the bounded file, validate its JSON result, and publish it atomically.
@@ -2927,8 +3016,6 @@ ngx_http_markdown_dynconf_reload(
     /* Read and parse into a disposable FFI result before touching snapshots. */
     rc = ngx_http_markdown_dynconf_read_file(watcher, log, &data, &file_size);
     if (rc != NGX_OK) {
-        ngx_http_markdown_record_dynconf_reload(
-            NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO);
         watcher->diagnostic_state.last_result = rc;
         return rc;
     }
