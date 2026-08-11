@@ -24,8 +24,11 @@ the long-lived compatibility contract begins.
 ## v0.9.2 Release Objective
 
 The release delivers harness consolidation, documentation corrections, and
-release-gate hardening on top of the v0.9.1 stable baseline. No breaking
-changes to public configuration, ABI, or runtime behavior.
+release-gate hardening on top of the v0.9.1 baseline. It also completes the
+final pre-v1 public-surface reset: the release removes retired directives and
+unused profile/conflict FFI snapshots, and advances the bundled internal ABI to
+version 2. These are intentional pre-v1 compatibility changes, not a claim of
+ABI or configuration stability across 0.9.1 and 0.9.2.
 
 ### Scope
 

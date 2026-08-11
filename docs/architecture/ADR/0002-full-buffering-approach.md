@@ -147,12 +147,11 @@ Consider streaming conversion if:
 
 ### Potential Streaming Design
 
-If streaming becomes necessary in the future:
-- Use incremental HTML parser (html5ever supports this)
-- Maintain parser state across chunks
-- Output Markdown incrementally
-- Handle errors gracefully (may need to abort mid-stream)
-- Document limitations (no Content-Length, no ETag, and so on)
+This section preserves pre-v0.8 historical context. Streaming is already
+implemented through [ADR-0004](0004-streaming-bounded-memory-conversion.md),
+[ADR-0011](0011-true-streaming-contract.md), and
+[ADR-0013](0013-streaming-default-policy.md). Those ADRs supersede the design
+bullets that were originally listed here.
 
 ## Metrics to Monitor
 

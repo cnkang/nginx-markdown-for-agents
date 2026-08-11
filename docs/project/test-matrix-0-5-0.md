@@ -40,7 +40,9 @@ If infrastructure or resource constraints block a cell, the sub-spec must record
 
 ## Aggregate Coverage Status
 
-Before release, aggregate all sub-spec coverage mappings. Ensure at least one sub-spec covers each value in each dimension:
+Before release, aggregate all sub-spec coverage mappings. Ensure every
+required combination of values across the matrix has at least one covering
+sub-spec. Covering each value independently is not sufficient:
 
 | Dimension | Value | Covering Sub-Spec | Status |
 |-----------|-------|-------------------|--------|

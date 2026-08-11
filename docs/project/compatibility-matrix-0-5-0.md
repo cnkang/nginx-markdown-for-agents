@@ -60,7 +60,7 @@ depend on a satisfied prerequisite:
 - **Response-header ETag** (row 10): The ETag is a hash of the complete Markdown
   output. In streaming mode, response headers (including `Content-Type` and `Vary`)
   are sent at the Commit Boundary — the moment the first Markdown chunk is ready.
-  At that point the ETag has not computed yet. Including a partial or
+  At that point the module has not computed the ETag yet. Including a partial or
   placeholder ETag would violate HTTP semantics.
 
 - **`full_support` conditional requests** (row 13): Markdown-variant `If-None-Match`
@@ -102,8 +102,9 @@ directive — it always executes regardless of the operator's failure policy set
 
 ## Change Tracking
 
-Any classification change must record in this section and update in all
-affected documents.
+Record any classification change in this section and propagate it to
+all affected documents, following the documentation synchronization
+requirement.
 
 | Date | Capability | Previous State | New State | Reason | Affected Documents |
 |------|-----------|----------------|-----------|--------|--------------------|

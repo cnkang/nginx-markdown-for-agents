@@ -129,40 +129,24 @@ These apply regardless of whether a profile is active:
 | Duplicate `markdown_profile` in same context | error | Only one profile per block |
 | Unknown profile name | error | Directive parse failure |
 
-### Conflict Detection Timing
+### Conflict Detection Timing (historical)
 
-- **`nginx -t`**: the test detects all conflicts at configuration test time.
-- **Dynconf dry-run**: conflict detection also runs during dynamic
-  configuration validation.
+When this profile design was active, profile expansion and conflict detection
+occurred during configuration parsing for normal startup and reload. `nginx -t`
+was one invocation of that same parser, not a separate production-only phase.
 
 ---
 
-## FFI Boundary Design
+## Former FFI Boundary Design (historical)
 
-Profile logic lives entirely in Rust. The C module handles only:
-1. Parsing the `markdown_profile` directive (enum value storage).
-2. Calling the Rust merge/conflict FFI during config merge.
-3. Applying the resulting effective values to the C config struct.
+The profile merge/conflict FFI described in earlier revisions was never a
+production NGINX consumer. The project removed it before the 0.9.2 pre-v1 freeze
+along
+with the `markdown_profile` directive. The active generated header therefore
+contains no `FFIProfile`, conflict-list, or profile snapshot types/functions.
 
-### FFI Types
-
-```text
-FFIProfile          — enum: None, StrictCache, Balanced, StreamingFirst
-FFIProfileDefaults  — struct: all profile-relevant field values
-FFIConflict         — struct: level (error/warning) + message
-FFIConflictLevel    — enum: Error, Warning
-```
-
-### FFI Functions
-
-```text
-markdown_profile_get_defaults(profile) → FFIProfileDefaults
-markdown_detect_conflicts(profile, explicit_flags, effective) → FFIConflict[]
-```
-
-Profile expansion happens at config parse time. There is no runtime overhead —
-the module computes the effective config once during `nginx -t` and caches it in the
-merged `ngx_http_markdown_conf_t` struct.
+The profile tables and merge rules above remain as historical design context.
+They are not an implementation or compatibility promise.
 
 ---
 
@@ -182,7 +166,8 @@ merged `ngx_http_markdown_conf_t` struct.
 ### Adding New Profiles (post-1.0)
 
 The project can add new profiles following these rules:
-1. Add a variant to `Profile` enum (Rust) and `FFIProfile` (C header).
+1. Reopen the archived design and add a new, explicitly reviewed production
+   contract. The former FFI types are not an extension point.
 2. Implement `defaults()` for the new profile.
 3. Declare any forced fields.
 4. Update documentation.
@@ -207,5 +192,5 @@ default argument" pattern.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-08-06 | Kang | Archived: profile system (including the markdown_profile directive) removed in 0.9.2; document retained as historical record |
+| 0.9.2 | 2026-08-06 | Kang | Archived: the profile system (including the markdown_profile directive) was removed in 0.9.2. The document remains a historical record |
 | 0.9.0 | 2026-06-28 | Kang | Initial creation |

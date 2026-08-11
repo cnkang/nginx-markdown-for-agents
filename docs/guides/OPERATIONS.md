@@ -372,7 +372,7 @@ grep "conversion failed" /var/log/nginx/error.log | \
 
 **Diagnostic Steps:**
 
-1. **Check average conversion time:**
+1. **Check p95 conversion time:**
 ```bash
 curl -H "Accept: text/plain; version=0.0.4" "${METRICS_URL:-http://localhost/markdown-metrics}"
 # Use the histogram's rate/quantile functions; do not parse removed JSON fields.

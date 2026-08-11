@@ -2,8 +2,8 @@
 
 **Status**: 0.9.2 production contract
 
-The frozen Prometheus and diagnostics contracts represent the 0.9.2 streaming lifecycle
-Diagnostics contracts. The former 0.8/0.9 streaming-specific metric families
+The frozen Prometheus and diagnostics contracts represent the 0.9.2 streaming
+lifecycle. The former 0.8/0.9 streaming-specific metric families
 and diagnostics sections are not emitted.
 
 ## Metrics
@@ -15,7 +15,7 @@ observability comes through:
 
 | Family | Labels | Meaning |
 |---|---|---|
-| `nginx_markdown_streaming_events_total` | `transition`, `reason` | Closed streaming lifecycle transitions. |
+| `nginx_markdown_streaming_events_total` | `transition`, `reason` | Streaming lifecycle events, including start, completion, resume, and failure transitions. |
 | `nginx_markdown_conversion_attempts_total` | `engine` | At-most-once conversion attempts. |
 | `nginx_markdown_conversion_deliveries_total` | `engine` | Successful downstream delivery only. |
 | `nginx_markdown_output_bytes_total` | none | Converted bytes accepted downstream. |

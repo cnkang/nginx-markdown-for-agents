@@ -3,7 +3,7 @@
 This document lists which module features are available in each conversion engine
 mode. Use it to understand behavioral differences before enabling streaming.
 
-> **Status**: Streaming has supported since v0.8.0. Behavior may change in future
+> **Status**: The project has supported streaming since v0.8.0. Behavior may change in future
 > releases.
 
 ## Compatibility Matrix
@@ -44,9 +44,12 @@ conditional request handling are not possible.
 
 ### Fail-open behavior
 
-In full-buffer mode, any conversion error triggers fail-open and the module
-returns the original HTML. In streaming mode, errors that occur before the
-module commits the response to the client (pre-commit) handle the same way.
+With `markdown_error_policy pass`, full-buffer conversion errors return the
+original HTML. In streaming mode, errors that occur before the module commits
+the response to the client (pre-commit) handle the same way. With
+`markdown_error_policy fail_closed`, pre-commit errors return the configured
+error status and do not pass through the original body. `status N` uses that
+explicit status policy.
 Errors that occur after headers have already been sent (post-commit) cannot
 roll back — the client receives a truncated Markdown response.
 

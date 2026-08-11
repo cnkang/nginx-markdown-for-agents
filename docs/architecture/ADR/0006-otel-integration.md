@@ -4,6 +4,11 @@
 **Date**: 2026-04-28
 **Context**: v0.6.0 Production Readiness Release
 
+> Historical proposal only. The 0.9.2 production contract includes no OTel
+> subsystem, current implementation, or OTLP field contract. Its design
+> statements below describe the superseded
+> pre-freeze proposal.
+
 ## Context
 
 v0.6.0 requires distributed tracing capability. The existing Prometheus-compatible metrics endpoint provides aggregated counters and gauges, but cannot trace per-request latency distribution across the conversion pipeline. Operators need to correlate conversion latency with upstream response time and downstream delivery to identify bottlenecks.
@@ -12,20 +17,26 @@ v0.6.0 requires distributed tracing capability. The existing Prometheus-compatib
 
 Self-implement minimal OTLP HTTP/JSON span encoder within the NGINX C module. Do not introduce third-party OpenTelemetry SDK dependencies.
 
-The current implementation uses OTLP HTTP/JSON encoding. OTLP HTTP/protobuf is a future consideration that would reduce payload size and improve encoding efficiency. The team defers it until a protobuf schema maintenance burden proves justified by production scale.
+The proposal selected OTLP HTTP/JSON encoding. OTLP HTTP/protobuf was a future
+consideration, but the current module shipped neither transport.
 
 ## Rationale
 
 1. NGINX module C code operates under strict dependency constraints. Large third-party libraries (for example opentelemetry-c) add build complexity, version coupling, and ABI stability risk.
-2. The OTLP HTTP/JSON protocol is simple enough for manual span encoding. A span requires: trace_id, span_id, parent_id, name, kind, start/end timestamps, and attributes — all fixed-format JSON fields. JSON encoding avoids the complexity of protobuf wire format while remaining compatible with OTLP HTTP collectors.
+2. The proposed OTLP HTTP/JSON protocol was simple enough for manual span
+   encoding. A proposed span would have required trace_id, span_id, parent_id,
+   name, kind, start/end timestamps, and attributes. The project never adopted
+   these details as a live compatibility contract.
 3. Introducing an OTel SDK on the Rust side would add FFI boundary calls for span creation/export. This increases cross-language overhead and complexity.
 4. The project's installation experience is zero-runtime-dependency. Adding an OTel SDK would break this.
 
 ## Consequences
 
-- **Positive**: No new external dependencies. Build remains self-contained. Span export latency is controllable (async HTTP POST via NGINX event-driven model).
-- **Negative**: Only OTLP HTTP transport works (not gRPC). JSON encoding produces larger payloads than protobuf. No automatic semantic convention validation.
-- **Mitigation**: JSON message structure for ResourceSpans/ScopeSpans/Span stays fixed and small. The team can add protobuf encoding later without breaking the JSON HTTP path. It can add gRPC support later without breaking the HTTP path.
+- **Positive (historical)**: The proposal avoided new external dependencies.
+- **Negative (superseded)**: No transport, span export, or semantic convention
+  validation shipped.
+- **Mitigation**: No mitigation is active. Any future implementation must satisfy
+  ADR-0027 instead of extending this proposal.
 
 ## Implementation Sketch
 

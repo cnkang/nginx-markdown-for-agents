@@ -25,7 +25,7 @@ It also captures the active dynamic-configuration snapshot once and builds the
 request's effective view. Later timer reloads cannot change that request's
 policy midway through processing.
 
-The effective view includes `markdown_filter`, `prune_noise`,
+The effective view includes `filter`, `prune_noise`,
 `log_verbosity`, `error_policy`, and `streaming_buffer` as runtime-overridable
 fields. Static-only limits and structural directives remain owned by the
 NGINX configuration lifecycle.
@@ -62,7 +62,10 @@ member is a failure.
 
 The module commits headers before the first converted body buffer. A pre-commit
 failure can use the configured fail-open policy and replay the original
-buffered response. After commit, the module cannot replay the original body.
+buffered response only when the replay buffer contains every upstream byte
+read so far. If any upstream bytes have escaped that buffer, the module must
+fail closed or take the configured non-replay fallback. After commit, the
+module cannot replay the original body.
 It enters safe-finish or abort handling.
 
 Downstream return codes have strict meanings:

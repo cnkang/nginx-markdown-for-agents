@@ -11,7 +11,8 @@ It focuses on converter behavior and output shape. For NGINX directive syntax an
 - **FR-15.3**: Extract metadata from HTML (title, description, URL, image, author, published date)
 - **FR-15.4**: Generate YAML front matter block with extracted metadata
 - **FR-15.5**: Include resolved absolute URLs for images in front matter
-- **FR-15.6**: Feature toggle independence (can enable/disable independently)
+- **FR-15.6**: Metadata extraction and front-matter emission have distinct
+  roles. Front matter appears only when both conversion options permit it
 - **FR-15.7**: Configurable via `include_front_matter` option
 - **FR-15.8**: When disabled, the module includes no front matter
 
@@ -53,12 +54,15 @@ published: "2024-01-15"
 
 ### Configuration
 
-Enable YAML front matter by setting both flags:
+Enable YAML front matter by setting `include_front_matter`. The converter
+automatically enables metadata extraction for this path. The `extract_metadata`
+option also supports metadata/ETag work without emitting front matter when
+enabled alone:
 
 ```rust
 let options = ConversionOptions {
     include_front_matter: true,  // Enable front matter output
-    extract_metadata: true,       // Enable metadata extraction
+    extract_metadata: false,      // Raised internally for front matter
     base_url: Some("https://example.com/page".to_string()),
     resolve_relative_urls: true,  // Resolve relative URLs to absolute
     ..Default::default()
@@ -89,7 +93,7 @@ Colons and other YAML special characters are safe within double-quoted strings.
 4. `test_yaml_front_matter_whitespace_escaping` - Newlines and tabs
 5. `test_yaml_front_matter_image_url_resolution` - Absolute URL resolution
 6. `test_yaml_front_matter_disabled_by_default` - Default behavior
-7. `test_yaml_front_matter_requires_both_flags` - Flag independence
+7. `test_yaml_front_matter_requires_output_flag` - Metadata without output
 8. `test_yaml_front_matter_minimal` - Minimal metadata
 9. `test_yaml_front_matter_empty_metadata` - Empty metadata handling
 10. `test_yaml_front_matter_format` - YAML structure validation

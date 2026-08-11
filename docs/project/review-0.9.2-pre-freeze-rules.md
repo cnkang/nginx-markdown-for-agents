@@ -127,7 +127,7 @@ Verification (fresh runs, all green):
 - `make schema-drift-check` — 4/4 schema gates PASSED
 - `python3 -m pytest tools/release/gates/tests -q` — 406 passed
 - `make harness-check` / `make harness-security-checks` — PASS
-- `grep -rn '\s\|\d\|\w' tools/harness/detect_*.sh` (grep/sed/awk patterns) — 0 hits
+- `grep -rnE '\\[sdw]' tools/harness/detect_*.sh` (literal-token pattern) — 0 hits
 
 ---
 

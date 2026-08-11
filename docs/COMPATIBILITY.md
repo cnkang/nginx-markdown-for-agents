@@ -9,11 +9,11 @@ troubleshooting guidance for version mismatch errors.
 
 ## Supported Scope
 
-Release workflows target selected official nginx.org stable releases for
-prebuilt packages. Availability is tag-specific: a build-matrix entry does not
-guarantee that the project published a package. The build compiles the module
-against the exact NGINX source version specified in the build matrix and is
-not a universal shared library.
+Release workflows target selected official nginx.org stable releases and
+selected mainline releases for prebuilt packages. Availability is tag-specific:
+a build-matrix entry does not guarantee that the project published a package.
+The build compiles the module against the exact NGINX source version specified
+in the build matrix and is not a universal shared library.
 
 Key points:
 
@@ -131,9 +131,9 @@ nginx -V 2>&1 | head -5
 - **nginx.org official**: Version line shows `nginx/1.26.x` with no
   distribution suffix. The `--prefix` is typically `/etc/nginx`.
 - **Distribution-provided**: Version line may include a suffix like
-  `(Ubuntu)` or the configure options include distribution-specific paths
-  (for example `--conf-path=/etc/nginx/nginx.conf` with non-standard module
-  paths).
+  `(Ubuntu)`, package provenance identifies a distribution build, or an
+  explicitly documented configure marker identifies distribution-specific
+  paths. `--conf-path` alone is not a reliable discriminator.
 - **OpenResty**: Version line shows `openresty/...` or includes
   `--with-luajit`.
 - **Tengine**: Version line shows `Tengine/...`.
@@ -186,8 +186,9 @@ nginx: [emerg] module "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
 
    While `--with-compat` is not strictly required for nginx.org official
    builds (since the package compiles against the exact version), its
-   absence on a non-official build is a strong indicator of
-   incompatibility.
+   absence on a non-official build is a warning signal, not proof of
+   incompatibility: a custom build may still match the required source and
+   version.
 
 4. **Verify NGINX source**:
 

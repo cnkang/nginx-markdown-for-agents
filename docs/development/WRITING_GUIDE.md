@@ -100,7 +100,7 @@ README:
 Run the advisory style checker (warning-only, never edits files):
 
 ```bash
-python3 tools/docs/check_writing_style.py [--strict|--changed|--baseline [N]] [--limit N]
+python3 tools/docs/check_writing_style.py [--strict|--changed --base REF|--baseline [N]] [--limit N]
 ```
 
 - Default: reports warnings, exits 0 — safe for CI and local use.

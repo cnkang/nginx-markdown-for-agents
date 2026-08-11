@@ -32,7 +32,7 @@ bash tools/doctor/nginx-markdown-doctor.sh [OPTIONS]
 | 1 | At least one check failed |
 | 2 | Usage error |
 
-## Checks (0.9.0 through 0.9.2)
+## Checks by release line (core and extended checks cover 0.9.2)
 
 ### Core Checks (0.9.0)
 
@@ -285,7 +285,7 @@ appropriate release artifact. The recommendation appears in:
 - JSON output: as a `recommendation` object with `artifact`, `os`, `arch`,
   and optional `libc`/`libc_version` fields
 
-## Environment Compatibility (0.9.1)
+## Environment Compatibility (0.9.2)
 
 The tool works correctly on:
 

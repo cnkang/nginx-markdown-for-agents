@@ -32,7 +32,10 @@ rebuild, no NGINX restart, and no downtime.
 
 ### Key Principle
 
-Operators can disable every optimization without a binary rebuild. They all keep a runtime toggle:
+Operators can disable the optimizations that expose a runtime toggle without
+a binary rebuild. Zero-copy output and streaming decompression have runtime
+controls. Full-buffer copy reduction is an internal implementation detail and
+does not have an operator toggle:
 
 - **Zero-copy output**: disabled via `markdown_streaming_zero_copy off` + HUP
 - **Streaming decompression**: disabled via profile switch or

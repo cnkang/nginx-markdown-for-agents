@@ -39,7 +39,7 @@ tutorial.
 
 ## Dynconf Keys (5 runtime-mutable + schema_version metadata)
 
-The file contains five runtime-mutable keys for `markdown_dynamic_config` plus
+The file contains 5 runtime-mutable keys for `markdown_dynamic_config` plus
 required `schema_version` metadata. Unknown/duplicate keys, invalid types, and
 out-of-range values reject the whole file. `schema_version` must be present and
 equal `1`.
@@ -108,7 +108,7 @@ Frozen v1 registry. `bounded` = labeled with bounded-cardinality values.
 | 25 | `bypass_no_transform` | `nginx_markdown_requests_total` |
 | 26 | `encoding_header_invalid` | `nginx_markdown_requests_total` |
 
-## FFI Surface Summary (47 exports, ABI v2)
+## FFI Surface Summary (45 exports, ABI v2)
 
 - **ABI version:** 2 (frozen for 0.9.2)
 - **Classification:** all `INTERNAL_ONLY`
@@ -146,4 +146,5 @@ authoritative names and migration guidance.
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 0.9.2 | 2026-08-12 | Synchronize dynconf metadata wording and the FFI export count with the frozen inventory. |
 | 0.9.2 | 2026-08-07 | Pilot: generate contract tables from public-surface-inventory.json ground truth (directives, dynconf, metrics, reason codes, FFI, limits). |

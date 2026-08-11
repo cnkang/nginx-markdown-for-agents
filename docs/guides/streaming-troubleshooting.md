@@ -86,7 +86,8 @@ curl -s -H 'Accept: text/plain; version=0.0.4' \
 ```
 
 For Brotli, confirm that the build contains the Brotli streaming feature. A
-a feature-disabled build uses bounded full-buffer decompression. It does not fail the request solely because streaming is unavailable.
+feature-disabled build uses bounded full-buffer decompression. It does not fail
+the request solely because streaming is unavailable.
 
 ## Pre-commit fallback
 
@@ -139,9 +140,9 @@ markdown_limits decompressed_size=20m decompression_ratio=100
 
 `decompressed_size` and `decompression_ratio` are cumulative across a gzip
 response's members. A truncated final member, invalid framing, I/O error, or
-the module records a budget violation in
-`nginx_markdown_decompression_events_total` and follows the configured
-`markdown_error_policy` before commit.
+The module first fails decompression on a budget violation. It then records
+the event in `nginx_markdown_decompression_events_total` and follows the
+configured `markdown_error_policy` before commit.
 
 ## Rollback checklist
 

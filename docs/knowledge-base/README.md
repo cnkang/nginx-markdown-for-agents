@@ -68,7 +68,7 @@ you need a machine-readable value or count.
 | Breaking changes & migration | `docs/guides/0.9.2-breaking-changes.md`, `docs/guides/MIGRATION-0.9.2.md` |
 | Rollback | `docs/guides/ROLLBACK-0.9.2.md` |
 | Architecture / ADRs | `docs/architecture/ADR/` (0025 drift gate, 0026 dynconf restore, 0027 OTel removal) |
-| Release notes & checklist | `docs/releases/0.9.2-release-notes.md`, `0.9.2-release-checklist.md` |
+| Release notes & checklist | `docs/releases/0.9.2-release-notes.md`, `docs/releases/0.9.2-release-checklist.md` |
 | History of changes | `CHANGELOG.md` (L3 — never copied here) |
 | Metrics & diagnostics schema | `docs/architecture/observability-schema-v2.md` |
 | Dynconf semantics | `docs/architecture/ADR/0026-dynconf-file-restore-contract.md` |
@@ -90,5 +90,6 @@ you need a machine-readable value or count.
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 0.9.2 | 2026-08-12 | Synchronize the knowledge-base contract with the current dynconf and FFI inventory. |
 | 0.9.2 | 2026-08-11 | Align streaming transition sources and diagnostics Schema v2 alias with the production renderer. |
 | 0.9.2 | 2026-08-07 | Pilot: create decision-layer KB skeleton (L1 index + L2 config contract) from inventory ground truth. |

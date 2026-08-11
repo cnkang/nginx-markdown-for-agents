@@ -31,8 +31,8 @@ The heuristic's accuracy depends on content type. As a rule of thumb with the
 | Content | Typical error |
 |---------|---------------|
 | English prose | ±20% (worst case ±30%) |
-| Code-heavy content | overestimated by up to ~2× (~1.5–2 chars/token) |
-| CJK text | underestimated by up to ~2× (~1.5–2 chars/char) |
+| Code-heavy content | underestimated by up to ~2× (~1.5–2 chars/token) |
+| CJK text | underestimated by up to ~2× (~1.5–2 chars/token) |
 | Mixed-language documents | within ±50% in practice |
 
 Use the estimate when a quick budget upper bound suffices (context-window
@@ -139,7 +139,7 @@ All tests pass successfully.
    - Consider this when estimating emoji-heavy content
 
 3. **Code Blocks**: Different tokenization patterns
-   - Code tokenizes at ~1.5–2 chars/token, so the default overestimates
+   - Code tokenizes at ~1.5–2 chars/token, so the default underestimates
    - Estimate is still reasonable for mixed content
 
 ### Recommendations

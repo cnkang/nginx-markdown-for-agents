@@ -41,7 +41,7 @@ responses).
 The threshold increase from 32K (0.6.0 ADR-0007) to 1m (0.8.0 RFC 0008)
 reflects the goal of reducing regression risk from the new true streaming code
 path: only responses large enough to materially benefit from bounded-memory
-the 0.8.0 release targets conversion for the streaming path.
+conversion enter the streaming path targeted by the 0.8.0 release.
 
 ## Consequences
 

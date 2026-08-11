@@ -7,9 +7,12 @@
 > [ADR-0027](../../architecture/ADR/0027-otel-removal-reintroduction-conditions.md)
 > for the reintroduction conditions.
 
-## Triggers
+## Historical scope
 
-Changes to `ngx_http_markdown_otel*`, OTel configuration directives, OTLP export logic, or span attribute definitions.
+There are no active triggers or source paths for this pack. The entries below
+describe the risks behind subsystem removal. They are not
+requirements of the 0.9.2 production contract. A future implementation must
+first satisfy ADR-0027 and create a new routing entry as part of its review.
 
 ## Risks
 
@@ -24,16 +27,12 @@ Changes to `ngx_http_markdown_otel*`, OTel configuration directives, OTLP export
 - `observability-metrics` when OTel changes affect metrics export surface
 - `nginx-protocol-safety` when OTel interacts with filter chain lifecycle
 
-## Sync Points
+## Historical sync points
 
-- C header `ngx_http_markdown_otel.h` must define all span attribute constants
-- `docs/features/otel-tracing.md` must document all configuration directives
-- ADR or operator examples must stay aligned with the actual directive names
-  and internal URI/subrequest contract.
-- W3C trace-context extraction must traverse all NGINX header list parts and
-  handle absent/malformed values without affecting conversion behavior.
-- AGENTS.md Rule 23 (observability contract) applies to all new OTel metrics
-- SHM zone layout version must bump when OTel state struct changes
+The former C header, tracing feature document, directive names, and
+Superseded ADRs and migration material retain the former trace-context
+behavior. Do not cite those materials as current source or configuration
+contracts.
 
 ## Minimum Verification
 

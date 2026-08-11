@@ -146,7 +146,8 @@ If pruning removes all content:
 
 1. The module returns the unpruned conversion result (no data loss)
 2. It logs the `PRUNE_EMPTY_FALLBACK` reason code
-3. It increments the `prune_empty_fallback_total` metric
+3. Historical 0.8-era builds incremented `prune_empty_fallback_total`. This
+   metric is not part of the frozen 0.9.2 metrics contract.
 
 ## Deprecation and Removal Notices
 

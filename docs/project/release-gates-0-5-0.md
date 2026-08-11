@@ -47,12 +47,13 @@ The 0.5.0 release contains the following P0 sub-specs:
 1. All P0 sub-specs must pass DoD assessment before Go/No-Go review
 2. All 7 sub-specs are P0. The team cannot exclude any
 3. Sub-specs share a single release milestone and version number (0.5.0)
-4. This document defines cross-spec conventions (naming, reason codes, test matrix) and all sub-specs inherit thempecs
+4. This document defines cross-spec conventions (naming, reason codes, test matrix) and all sub-specs inherit them
 5. Go/No-Go must base on Streaming Evidence, not merely on implementation completeness
 
 ## Release Gate Categories
 
-The release gates organize into five categories, each containing verifiable gate items:
+The document organizes the release gates into five categories, each containing
+verifiable gate items:
 
 | Gate Category | Verification Scope | Verification Method |
 |---------------|-------------------|---------------------|

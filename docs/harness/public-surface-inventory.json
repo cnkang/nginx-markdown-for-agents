@@ -737,16 +737,6 @@
       "abi_version": 2,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
-      "name": "markdown_detect_conflicts",
-      "params": "profile: u8, explicit: *const FFIExplicitConfig, effective: *const FFIEffectiveConfig",
-      "return_type": "FFIConflictList",
-      "safety": "unsafe",
-      "signature": "markdown_detect_conflicts(profile: u8, explicit: *const FFIExplicitConfig, effective: *const FFIEffectiveConfig) -> FFIConflictList"
-    },
-    {
-      "abi_version": 2,
-      "classification": "INTERNAL_ONLY",
-      "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_dynconf_parse",
       "params": "data: *const u8, data_len: usize, result: *mut FFIDynconfResult",
       "return_type": "()",
@@ -772,16 +762,6 @@
       "return_type": "()",
       "safety": "unsafe",
       "signature": "markdown_dynconf_result_init(result: *mut FFIDynconfResult) -> ()"
-    },
-    {
-      "abi_version": 2,
-      "classification": "INTERNAL_ONLY",
-      "generated_header": "components/rust-converter/include/markdown_converter.h",
-      "name": "markdown_free_conflicts",
-      "params": "list: *mut FFIConflictList",
-      "return_type": "()",
-      "safety": "unsafe",
-      "signature": "markdown_free_conflicts(list: *mut FFIConflictList) -> ()"
     },
     {
       "abi_version": 2,

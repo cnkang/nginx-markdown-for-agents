@@ -85,7 +85,7 @@ mismatch. Do not write a digest without verifying the file.
   validator compares the entire finalized report with `baseline_policy`
   removed against the raw report.
 - **`conservative_normalized`**: RPS may only round downward or lower.
-  Latency, TTFB, and TTLB may only round upward or raise. Truth evidence
+  Latency, TTFB, and TTLB may only round upward or increase. Truth evidence
   (path, fallback, output, memory, environment, scenario status, metadata,
   metric keys, and `decompression_coverage`) must remain identical to the raw
   report. The policy adjustment ledger must exactly describe every changed

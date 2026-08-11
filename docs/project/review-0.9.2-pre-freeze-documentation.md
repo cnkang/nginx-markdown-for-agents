@@ -7,7 +7,7 @@
 
 ## Summary
 
-- docs/ findings: 32 (High 13 / Medium 13 / Low 6)
+- docs/ findings: 34 (High 13 / Medium 15 / Low 6)
 - root-level findings: 28 (High 4 / Medium 10 / Low 14)
 - Verified-clean: 25-directive table, limits keys, 12-family metrics table, reason codes, ABI=2, MSRV, release matrix entries, relative links.
 
@@ -150,7 +150,8 @@ All findings remediated on `dev/wip-0.9.2-harness`:
 | R-H1 | **fixed** — THIRD-PARTY-NOTICES serde_json → 1.0.151 (matches Cargo.lock) |
 | R-H2/R-H3 | **fixed** — nginx-module README threshold section rewritten for 0.9.2 |
 | R-H4 | **fixed** — all matrix consumers now normalize the canonical `entries` view through one alias boundary; compatibility metadata (`updated_at`, `support_tiers`, `tier_mapping`) is preserved, and legacy aliases remain input-only. |
-| R-M1..R-M12, R-L1..R-L8 | **fixed** (R-L5 debian changelog date intentionally deferred to release time) |
+| R-M1..R-M12, R-L1..R-L4, R-L6..R-L8 | **fixed** |
+| R-L5 | **deferred** — Debian changelog date is set at release time |
 
 Verification (fresh runs, all green):
 - `make docs-check` — PASS

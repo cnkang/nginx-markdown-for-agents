@@ -306,6 +306,7 @@ NGINX 模块负责请求是否可转换、响应缓冲和头部管理。对于�
 - C 负责直接接入 NGINX 模块 API、过滤链、缓冲区和请求生命周期。
 - Rust 负责解析不可信 HTML、规范化输出并随时间安全演进。
 - FFI 边界保持得很小，这样 NGINX 侧的 HTTP 逻辑和转换逻辑可以相对独立演进。
+- 项目将 FFI 边界标记为仅供内部使用（`INTERNAL_ONLY`）。结构体布局、函数签名和常量可能在任意两个版本之间变更，且不另行通知；四元组 ABI 握手会阻止不匹配的 C/Rust 二进制启动。
 
 如果你想看完整的设计理由，而不只是这里的简版说明，可以继续读 [docs/architecture/SYSTEM_ARCHITECTURE.md](docs/architecture/SYSTEM_ARCHITECTURE.md)、[docs/architecture/ADR/0001-use-rust-for-conversion.md](docs/architecture/ADR/0001-use-rust-for-conversion.md) 与 [docs/architecture/ADR/0009-rust-first-e2e-test-architecture.md](docs/architecture/ADR/0009-rust-first-e2e-test-architecture.md)。
 

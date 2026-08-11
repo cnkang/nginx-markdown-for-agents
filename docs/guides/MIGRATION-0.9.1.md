@@ -26,7 +26,7 @@ hints.
 - Non-semantic flavors (`mdx`, `org-mode`) removed
 - FFI ABI reset to version 1
 - Incomplete OTel controls now reject-only
-- `markdown_trusted_proxies` now main-only
+- `markdown_trusted_proxies` now http-context only
 
 **Upgrade path:** read this guide top-to-bottom, update your configuration,
 run `nginx -t`, fix any errors using the mapping tables below, then reload.

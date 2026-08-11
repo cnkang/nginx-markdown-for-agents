@@ -4,14 +4,15 @@
 
 This document records the ownership boundaries for the frozen observability
 surfaces. It is not an external Rust SDK or an additional wire-schema source.
-The 0.9.0 compatibility contract documented `schema_version 1`. The 0.9.2
+The 0.9.0 compatibility contract documented `schema_version 1` in
+[observability-schema-v1.md](observability-schema-v1.md). The 0.9.2
 diagnostics endpoint below intentionally emits schema_version: 2 and the
 breaking-release migration guide defines the consumer transition.
 
 The authoritative production surfaces are:
 
 - Diagnostics JSON: `components/nginx-module/src/ngx_http_markdown_diagnostics.c`,
-  validated by `schemas/diagnostics.schema.json`.
+  validated by the canonical machine validator `schemas/diagnostics.schema.json`.
 - Prometheus text: `components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h`,
   documented by [Prometheus Metrics](../guides/prometheus-metrics.md).
 - Reason taxonomy: `components/rust-converter/reason_registry.toml`, with

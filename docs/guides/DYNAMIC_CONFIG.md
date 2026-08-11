@@ -97,6 +97,10 @@ but does not block a runtime override. When a candidate contains a blocked
 key, the watcher logs a warning. Diagnostics exposes the key in
 `configuration.dynconf.masked_keys`. The static value remains effective.
 
+The configuration-cycle validation index reserves space for at most 4096
+merged locations. A configuration that would register a 4097th location
+fails during `nginx -t` rather than growing the index without a bound.
+
 ### Migrating legacy line-format files
 
 Older releases used line-format keys. Convert them before relying on the JSON
@@ -128,7 +132,7 @@ first byte is not `{`, the watcher logs
 
 ## Reload Semantics
 
-The dynconf timer performs a two-phase staged commit:
+The dynconf timer performs a three-phase staged commit:
 
 1. **Parse phase:** The module parses the entire file into a staging snapshot.
 2. **Validate phase:** The module validates every key and value.

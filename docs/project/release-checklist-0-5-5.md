@@ -4,7 +4,7 @@
 
 This checklist aggregates all release gate verification steps for the `0.5.5`
 stabilization and correctness release. Each gate has a verification command,
-expected output format, and pass/fail criterion. Gates organize by phase:
+expected output format, and pass/fail criterion. Gates follow phases:
 cheap blockers first, focused semantic checks second, umbrella checks third.
 
 This checklist covers verification families touched by the stabilization
@@ -21,7 +21,6 @@ These gates catch obvious failures fast and must pass before deeper checks.
 | CB-01 | `harness-sync` | `make harness-check` | All checks PASS | Exit code 0, all items PASS |
 | CB-02 | `docs-tooling` | `make docs-check` | All checks PASS | Exit code 0, no failures in operator-facing docs |
 | CB-03 | naming-consistency | `make release-gates-check` (naming) | All names conform | Exit code 0, PASS message |
-| CB-04 | 0.5.5-gates | _(removed — 0.5.5 validator deleted, see commit history)_ | N/A | Historical reference |
 
 ## Phase 2: Focused Semantic Checks
 
@@ -79,7 +78,7 @@ waived before the release proceeds.
 
 | Criterion | Gate(s) | Threshold | Blocking |
 |-----------|---------|-----------|----------|
-| Cheap blockers pass | CB-01, CB-02, CB-03, CB-04 | All PASS | Yes |
+| Cheap blockers pass | CB-01, CB-02, CB-03 | All PASS | Yes |
 | Focused semantic checks pass | FS-01 through FS-14 | All PASS for touched surfaces | Yes |
 | Runtime evidence exists | UB-02, UB-03 | At least one runtime target per runtime-sensitive workstream | Yes |
 | C module coverage | UB-04 | ≥ 80% aggregate | Yes |

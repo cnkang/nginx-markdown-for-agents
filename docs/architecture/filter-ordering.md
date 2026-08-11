@@ -32,7 +32,7 @@ register runs **first** when a response flows through the chain.
 
 | Phase | Modules (in registration order) |
 |-------|--------------------------------|
-| Standard (compiled-in) | `proxy` → `proxy_cache` → `gunzip` → `gzip` → `brotli` (ngx_brotli) |
+| Standard (compiled-in) | `proxy` → `ngx_http_proxy_module` → `gunzip` → `gzip` → `brotli` (ngx_brotli) |
 | Dynamic (load_module) | `markdown_filter` (this module) |
 
 The runtime initialises the loaded module according to the effective NGINX
@@ -206,7 +206,7 @@ Subsequent cache hits serve Markdown directly without re-conversion.
 | gunzip | markdown_auto_decompress | Upstream gzip | Upstream br | Behaviour |
 |--------|--------------------------|---------------|-------------|-----------|
 | off    | on (default)             | markdown decompresses | markdown decompresses | Recommended: single decompressor |
-| on     | off                      | gunzip decompresses only if it runs before markdown | markdown decompresses | External gzip path, markdown for br |
+| on     | off                      | gunzip decompresses only if it runs before markdown | no module decompression; an earlier Brotli decoder is required | External gzip path; verify the Brotli path |
 | on     | on (default)             | **double-decompress risk if gunzip runs before markdown** | markdown decompresses | Avoid: set auto_decompress off for that chain |
 | off    | off                      | passthrough (gzip to client) | passthrough (br to client) | No decompression; client handles |
 

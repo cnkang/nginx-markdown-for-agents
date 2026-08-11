@@ -168,9 +168,10 @@ the actual timeout overshoot depends on input size:
 | 5-10 MB | 500 ms - 1 s | Moderate |
 | > 64 MiB | Blocked by `markdown_limits conversion_memory=` | N/A |
 
-The `markdown_limits conversion_memory=<size>` directive (default 64 MiB) ensures that the
-uninterruptible parse phase stays bounded to approximately 1 second on
-modern hardware.
+The `markdown_limits conversion_memory=<size>` directive (default 64 MiB)
+bounds the input and associated full-buffer work. It does not promise a
+fixed wall-clock parse duration. Hardware, parser behavior, and the configured
+`conversion_timeout` determine the observed time.
 
 ### 2.4 Depth Limit (Implicit via State Stack Budget)
 
@@ -246,8 +247,14 @@ When multiple limits are hit simultaneously, the first detected wins:
 
 When any limit is hit:
 
-- The module passes the original HTML content through to the client unchanged
-- The appropriate reason code is set (`PARSE_TIMEOUT` or `PARSE_BUDGET_EXCEEDED`)
+- With `markdown_error_policy pass`, the module passes the original HTML
+  content through to the client unchanged.
+- With `markdown_error_policy fail_closed`, the module returns the configured
+  error status instead of the original content. `status N` follows the
+  configured status policy.
+- The internal converter constants are uppercase (`PARSE_TIMEOUT` and
+  `PARSE_BUDGET_EXCEEDED`). The public request reason labels are lowercase
+  `timeout` and `budget_exceeded`.
 - The module records the decision and error classification through the active
   request and diagnostics observability surfaces. There are no standalone v1
   Prometheus families for parser timeout or parser budget.

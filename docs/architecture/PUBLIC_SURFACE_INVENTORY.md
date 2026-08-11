@@ -233,7 +233,7 @@ change. No external append-only promise applies to the FFI export set.
 | Trusted proxy ownership | `markdown_trusted_proxies_new`, `markdown_trusted_proxies_push`, `markdown_trusted_proxies_free` |
 | Initialization helpers | `markdown_options_init`, `markdown_result_init`, `markdown_header_plan_init`, `markdown_decomp_result_init` |
 | Bounded decompression | `markdown_decompress_bounded`, `markdown_decompress_free` |
-| Conflict/error policy | `markdown_detect_conflicts`, `markdown_free_conflicts`, `markdown_classify_error_code` |
+| Error classification | `markdown_classify_error_code` |
 | Dynamic configuration | `markdown_dynconf_parse`, `markdown_dynconf_result_init`, `markdown_dynconf_result_free` |
 | Incremental conversion | `markdown_incremental_new_with_code`, `markdown_incremental_feed`, `markdown_incremental_finalize`, `markdown_incremental_free` |
 | Streaming conversion | `markdown_streaming_new_with_code`, `markdown_streaming_feed`, `markdown_streaming_finalize`, `markdown_streaming_abort`, `markdown_streaming_safe_finish`, `markdown_streaming_output_free` |

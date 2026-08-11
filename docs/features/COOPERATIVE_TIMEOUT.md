@@ -127,7 +127,10 @@ let markdown = converter.convert(&dom)?;
 
 ### FFI Integration
 
-The FFI layer automatically creates a `ConversionContext` from the timeout_ms option:
+The FFI layer automatically creates a `ConversionContext` from the overall
+`timeout_ms` option. The parser may use the separate parser-timeout deadline
+when configuration sets `markdown_limits parser_timeout=`. Parser checkpoints are
+not a second independent conversion timer.
 
 ```c
 markdown_options_t options = {
@@ -142,7 +145,10 @@ If `timeout_ms = 0`, the converter enforces no timeout.
 
 ## Public Configuration Surface
 
-At the NGINX layer, this mechanism exercises through `markdown_limits conversion_timeout=<time>`. The converter receives that value through the FFI boundary as `timeout_ms`.
+At the NGINX layer, `markdown_limits conversion_timeout=<time>` supplies the
+overall FFI `timeout_ms`. `markdown_limits parser_timeout=<time>` supplies a
+tighter parse-phase deadline where supported. The parser deadline cannot
+extend the overall conversion deadline.
 
 Keep directive syntax, examples, and rollout choices in:
 
