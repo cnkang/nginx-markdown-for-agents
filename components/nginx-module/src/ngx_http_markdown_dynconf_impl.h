@@ -3241,6 +3241,12 @@ ngx_http_markdown_dynconf_publish_candidate(
                    watcher->digest_state.active_digest,
                    sizeof(watcher->digest_state.lkg_digest));
         watcher->digest_state.lkg_mtime = watcher->file_state.applied_mtime;
+    } else if (!watcher->digest_state.lkg_valid
+               && watcher->active_snapshot.valid)
+    {
+        /* Preserve the static configuration as the bootstrap LKG. */
+        watcher->last_known_good = watcher->active_snapshot;
+        watcher->digest_state.lkg_valid = 1;
     }
     ngx_memcpy(watcher->digest_state.source_digest, source_digest,
                sizeof(watcher->digest_state.source_digest));
