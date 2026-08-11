@@ -64,7 +64,8 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         test test-rust test-rust-doc test-nginx-unit test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
         test-nginx-integration test-e2e test-e2e-rust test-all test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
-        test-corpus-determinism reason-codegen-check \
+        test-corpus-determinism reason-codegen-generate reason-codegen-check \
+        official-feature-manifest-generate \
         harness-check harness-check-full harness-security-checks test-harness regex-security-check e2e-streaming-config-check sonar-encoding-check release-supply-chain-check public-surface-drift-check schema-drift-check kb-contract-check \
         security-static security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny \
         supply-chain supply-chain-trivy supply-chain-sbom \
@@ -321,10 +322,20 @@ e2e-streaming-config-check:
 	bash tools/harness/tests/test_detect_e2e_streaming_config.sh
 	@echo "  E2E Streaming Config Check: PASSED"
 
+reason-codegen-generate:
+	@echo "=== Generate Reason Registry Artifacts ==="
+	python3 tools/reason-codegen/generate.py
+	@echo "  Reason Registry Artifact Generation: PASSED"
+
 reason-codegen-check:
 	@echo "=== Reason Registry Code Generation Drift Check ==="
 	python3 tools/reason-codegen/generate.py --check
 	@echo "  Reason Code Generation Drift Check: PASSED"
+
+official-feature-manifest-generate:
+	@echo "=== Generate Official Build Feature Manifest ==="
+	PYTHONPATH=. python3 tools/release/gates/validate_official_feature_manifest.py --write
+	@echo "  Official Build Feature Manifest Generation: PASSED"
 
 harness-security-checks:
 	bash tools/harness/detect_cwe190_casts.sh
@@ -954,10 +965,13 @@ release-gates-check-092: release-gates-check-091
 	@echo "  [3/13] Version consistency (0.9.2)"
 	bash tools/harness/detect_version_consistency.sh
 	@echo "  [4/13] Reason code registry completeness"
+	$(MAKE) reason-codegen-generate
+	$(MAKE) reason-codegen-check
 	PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
 	@echo "  [5/13] Streaming lifecycle unit test"
 	$(MAKE) -C $(NGINX_TEST_DIR) unit-streaming_impl
 	@echo "  [6/13] Official build feature manifest"
+	$(MAKE) official-feature-manifest-generate
 	python3 tools/release/gates/validate_official_feature_manifest.py
 	@echo "  [7/13] Canonical release matrix"
 	PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
@@ -984,6 +998,7 @@ release-gates-check-092: release-gates-check-091
 # Classification: BLOCKING
 release-matrix-check:
 	@echo "=== Canonical Release Matrix Check ==="
+	$(MAKE) official-feature-manifest-generate
 	python3 tools/release/gates/validate_official_feature_manifest.py
 	PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
 	PYTHONPATH=. python3 -m pytest tools/release/matrix/tests/test_validate_release_matrix.py -q --tb=short
