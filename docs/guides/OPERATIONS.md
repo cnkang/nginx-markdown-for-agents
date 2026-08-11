@@ -955,13 +955,13 @@ You can determine the count of requests in each state using the metrics endpoint
 **From the metrics endpoint** (`curl -s -H "Accept: text/plain; version=0.0.4" http://localhost/markdown-metrics`):
 
 ```text
-NOT_ENABLED = sum(requests_total{outcome="skipped",reason="disabled"})
+NOT_ENABLED = sum(nginx_markdown_requests_total{outcome="skipped",reason="disabled"})
 
-CONVERTED   = sum(requests_total{outcome="converted"})
+CONVERTED   = sum(nginx_markdown_requests_total{outcome="converted"})
 
-SKIPPED     = sum(requests_total{outcome="skipped",reason=~"not_eligible|skipped_accept|skipped_no_accept|skipped_conditional|skipped_accept_reject|bypass_no_transform"})
+SKIPPED     = sum(nginx_markdown_requests_total{outcome="skipped",reason=~"not_eligible|skipped_.*|bypass_no_transform"})
 
-FAILED      = sum(requests_total{outcome=~"failed_.*"})
+FAILED      = sum(nginx_markdown_requests_total{outcome=~"failed_.*"})
 ```
 
 > **Note:** The outcome, stage, and reason labels are the authoritative request-level classification. They stay bounded and do not include a path or URI dimension.
