@@ -3098,6 +3098,7 @@ ngx_http_markdown_dynconf_reload(
     FFIDynconfResult    result;
     ngx_uint_t           failure_code;
     ngx_uint_t           masked_fields;
+    size_t               first_non_ows;
 
     if (watcher == NULL || conf == NULL || log == NULL)
     {
@@ -3112,7 +3113,17 @@ ngx_http_markdown_dynconf_reload(
     }
 
     markdown_dynconf_result_init(&result);
-    if (file_size > 0 && data[0] != '{'
+    first_non_ows = 0;
+    while (data != NULL && first_non_ows < file_size
+           && (data[first_non_ows] == ' '
+               || data[first_non_ows] == '\t'
+               || data[first_non_ows] == '\r'
+               || data[first_non_ows] == '\n'))
+    {
+        first_non_ows++;
+    }
+    if (data != NULL && first_non_ows < file_size
+        && data[first_non_ows] != '{'
         && !watcher->legacy_format_warning_logged)
     {
         ngx_log_error(NGX_LOG_WARN, log, 0,

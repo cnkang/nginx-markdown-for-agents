@@ -407,6 +407,15 @@ test_ffi_paths(const char *path)
                 "successful reload should publish the snapshot");
 
     reset_state();
+    write_file(path, " \n\t{\"schema_version\":1}");
+    init_watcher(&watcher, &conf, path);
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
+                "JSON with leading OWS should apply successfully");
+    TEST_ASSERT(watcher.legacy_format_warning_logged == 0,
+                "JSON leading OWS must not trigger the legacy warning");
+
+    reset_state();
     g_invalid_digest = 1;
     init_watcher(&watcher, &conf, path);
     rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &log);
