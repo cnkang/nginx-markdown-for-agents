@@ -41,14 +41,18 @@ class TestCanonicalDocument:
         assert normalized["schema_version"] == 1
         assert len(normalized["entries"]) == 1
 
-    def test_updated_at_dropped(self):
+    def test_compatibility_metadata_is_preserved(self):
         doc = {
             "schema_version": 1,
             "updated_at": "2026-08-05T00:00:00Z",
+            "support_tiers": {"supported": "published artifact"},
+            "tier_mapping": {"full": "supported"},
             "entries": [canonical_entry()],
         }
         normalized = normalize_matrix.normalize_document(doc)
-        assert "updated_at" not in normalized
+        assert normalized["updated_at"] == doc["updated_at"]
+        assert normalized["support_tiers"] == doc["support_tiers"]
+        assert normalized["tier_mapping"] == doc["tier_mapping"]
 
     def test_legacy_metadata_keys_dropped(self):
         doc = {"schema_version": 1, "entries": [canonical_entry(nginx_channel="stable")]}

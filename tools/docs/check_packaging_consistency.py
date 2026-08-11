@@ -48,6 +48,14 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="ignore")
 
 
+def _target_arch(target: str) -> str:
+    """Return the package architecture represented by a matrix target."""
+    aliases = {"amd64": "x86_64", "arm64": "aarch64"}
+    if target in aliases:
+        return aliases[target]
+    return target.split("-", 1)[0]
+
+
 def _extract_quick_start(text: str) -> str:
     """Return the text between ``## Quick Start`` and the next ``## ``."""
     lines = text.splitlines(True)
@@ -327,9 +335,7 @@ def check_matrix_consistency() -> list[str]:
             continue
         nginx = entry["nginx_version"]
         os_type = entry["libc"]
-        arch = {"amd64": "x86_64", "arm64": "aarch64"}.get(
-            entry["target"], entry["target"]
-        )
+        arch = _target_arch(entry["target"])
         matching = [
             r for r in table_rows
             if r[0] == nginx and r[1] == os_type and r[2] == arch

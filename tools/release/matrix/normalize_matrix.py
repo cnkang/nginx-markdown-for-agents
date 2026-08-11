@@ -105,7 +105,14 @@ def normalize_document(doc: Dict[str, Any]) -> Dict[str, Any]:
 
     unknown = (
         set(doc.keys())
-        - {"schema_version", "entries", LEGACY_TOP_LEVEL_ALIAS, "updated_at"}
+        - {
+            "schema_version",
+            "entries",
+            LEGACY_TOP_LEVEL_ALIAS,
+            "updated_at",
+            "support_tiers",
+            "tier_mapping",
+        }
     )
     if unknown:
         raise MatrixNormalizationError(
@@ -128,7 +135,14 @@ def normalize_document(doc: Dict[str, Any]) -> Dict[str, Any]:
 
     entries = [normalize_entry(entry) for entry in raw_entries]
 
-    return {"schema_version": 1, "entries": entries}
+    normalized = {
+        "schema_version": doc.get("schema_version", 1),
+        "entries": entries,
+    }
+    for metadata_key in ("updated_at", "support_tiers", "tier_mapping"):
+        if metadata_key in doc:
+            normalized[metadata_key] = doc[metadata_key]
+    return normalized
 
 
 def normalize_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
@@ -293,10 +307,14 @@ def normalize_compatibility_document(doc: Dict[str, Any]) -> Dict[str, Any]:
     if raw_entries is None:
         raise MatrixNormalizationError("compatibility matrix has no entries")
 
-    return {
+    normalized = {
         "schema_version": doc.get("schema_version", 1),
         "entries": normalize_compatibility_entries(raw_entries),
     }
+    for metadata_key in ("updated_at", "support_tiers", "tier_mapping"):
+        if metadata_key in doc:
+            normalized[metadata_key] = doc[metadata_key]
+    return normalized
 
 
 def load_and_normalize(path: str) -> Dict[str, Any]:

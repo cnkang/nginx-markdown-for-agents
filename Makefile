@@ -965,6 +965,8 @@ release-gates-check-092: release-gates-check-091
 	@echo "  [3/13] Version consistency (0.9.2)"
 	bash tools/harness/detect_version_consistency.sh
 	@echo "  [4/13] Reason code registry completeness"
+	$(MAKE) reason-codegen-check
+	python3 tools/release/gates/validate_official_feature_manifest.py
 	$(MAKE) reason-codegen-generate
 	$(MAKE) reason-codegen-check
 	PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
@@ -973,6 +975,11 @@ release-gates-check-092: release-gates-check-091
 	@echo "  [6/13] Official build feature manifest"
 	$(MAKE) official-feature-manifest-generate
 	python3 tools/release/gates/validate_official_feature_manifest.py
+	git diff --exit-code -- \
+		components/rust-converter/src/decision/reason_code.rs \
+		artifacts/release/0.9.2/reason-registry-report.json \
+		artifacts/release/0.9.2/generated-reason-artifacts.json \
+		artifacts/release/0.9.2/official-build-feature-manifest.json
 	@echo "  [7/13] Canonical release matrix"
 	PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
 	@echo "  [8/13] Release candidate evidence bound to HEAD"
@@ -998,8 +1005,10 @@ release-gates-check-092: release-gates-check-091
 # Classification: BLOCKING
 release-matrix-check:
 	@echo "=== Canonical Release Matrix Check ==="
+	python3 tools/release/gates/validate_official_feature_manifest.py
 	$(MAKE) official-feature-manifest-generate
 	python3 tools/release/gates/validate_official_feature_manifest.py
+	git diff --exit-code -- artifacts/release/0.9.2/official-build-feature-manifest.json
 	PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
 	PYTHONPATH=. python3 -m pytest tools/release/matrix/tests/test_validate_release_matrix.py -q --tb=short
 	@echo "  Canonical Release Matrix Check: PASSED"
