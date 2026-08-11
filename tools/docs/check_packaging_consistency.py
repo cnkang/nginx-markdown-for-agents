@@ -28,6 +28,12 @@ from _packaging_constants import (
 
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools" / "release" / "matrix"))
+from normalize_matrix import (  # noqa: E402
+    MatrixNormalizationError,
+    normalize_compatibility_document,
+)
+
 README = ROOT / "README.md"
 INSTALL_GUIDE = ROOT / "docs" / "guides" / "INSTALLATION.md"
 RELEASE_MATRIX = ROOT / "tools" / "release-matrix.json"
@@ -295,8 +301,10 @@ def check_matrix_consistency() -> list[str]:
     row in the installation guide compatibility matrix table."""
     errors: list[str] = []
     try:
-        matrix_data = json.loads(_read(RELEASE_MATRIX))
-    except json.JSONDecodeError:
+        matrix_data = normalize_compatibility_document(
+            json.loads(_read(RELEASE_MATRIX))
+        )
+    except (json.JSONDecodeError, MatrixNormalizationError):
         return [f"{RELEASE_MATRIX.relative_to(ROOT)} is invalid JSON"]
     install_text = _read(INSTALL_GUIDE)
 
@@ -320,7 +328,7 @@ def check_matrix_consistency() -> list[str]:
         nginx = entry["nginx_version"]
         os_type = entry["libc"]
         arch = {"amd64": "x86_64", "arm64": "aarch64"}.get(
-            entry["arch"], entry["arch"]
+            entry["target"], entry["target"]
         )
         matching = [
             r for r in table_rows

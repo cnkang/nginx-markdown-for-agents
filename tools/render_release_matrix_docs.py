@@ -43,6 +43,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 # Direct script execution bootstraps this module root; Pylint cannot infer it.
 from path_validation import validate_read_path  # noqa: E402  # pylint: disable=import-error
 from path_validation import validate_write_path_within_root  # noqa: E402  # pylint: disable=import-error
+sys.path.insert(0, str(Path(__file__).resolve().parent / "release" / "matrix"))
+from normalize_matrix import (  # noqa: E402
+    MatrixNormalizationError,
+    normalize_compatibility_entry,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -107,29 +112,29 @@ def normalize_entry(raw: dict[str, Any]) -> dict[str, Any]:
     alias mapping, arch normalization) so the generator works with both old
     and new formats.
     """
-    entry = dict(raw)
+    try:
+        entry = normalize_compatibility_entry(raw, require_fields=False)
+    except MatrixNormalizationError as exc:
+        raise ValueError(f"invalid release-matrix entry: {exc}") from exc
 
-    # Normalize nginx version field
-    if "nginx_version" not in entry and "nginx" in entry:
-        entry["nginx_version"] = entry["nginx"]
-
-    # Normalize libc field
+    # macOS is a presentation exception: its libc display is Darwin even if
+    # an old row carried a Linux os_type alias.
     if entry.get("os") == "macos":
         entry["libc"] = "darwin"
-    elif "libc" not in entry and "os_type" in entry:
-        entry["libc"] = entry["os_type"]
 
-    # Normalize arch (x86_64->amd64, aarch64->arm64)
-    arch = entry.get("arch", "")
-    if arch == "x86_64":
-        entry["arch"] = "amd64"
-    elif arch == "aarch64":
-        entry["arch"] = "arm64"
-
-    # Normalize support tier via aliases
-    tier = entry.get("support_tier", "")
-    if tier in TIER_ALIASES:
-        entry["support_tier"] = TIER_ALIASES[tier]
+    target = entry.get("target", "")
+    if isinstance(target, str):
+        if target.startswith("x86_64-"):
+            target = "x86_64"
+        elif target.startswith("aarch64-"):
+            target = "aarch64"
+    entry["arch"] = {"x86_64": "amd64", "aarch64": "arm64"}.get(
+        target, target
+    )
+    # ``target`` is the shared internal compatibility identity.  The
+    # compatibility renderer's public schema remains the legacy presentation
+    # shape and accepts ``arch`` instead.
+    entry.pop("target", None)
 
     return entry
 

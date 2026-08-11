@@ -538,18 +538,25 @@ def _validate_module_enabled_render(
             f"{_truncate_output(rendered.stdout.strip())}",
         )
         return
+    limits_lines = [
+        line.strip()
+        for line in rendered.stdout.splitlines()
+        if line.strip().startswith("markdown_limits ")
+    ]
     if (
         f"load_module {HELM_MODULE_LOAD_PATH};" in rendered.stdout
         and "markdown_filter on;" in rendered.stdout
+        and len(limits_lines) == 1
     ):
         result.pass_(
             _CHECK_HELM_RENDER_MODULE_ENABLED,
-            "module-enabled Helm render includes load_module and markdown directives",
+            "module-enabled Helm render includes load_module and one markdown_limits directive",
         )
     else:
         result.fail(
             _CHECK_HELM_RENDER_MODULE_ENABLED,
-            "module-enabled Helm render missing load_module or markdown directives",
+            "module-enabled Helm render must include load_module, markdown directives, "
+            f"and exactly one markdown_limits directive (found {len(limits_lines)})",
         )
 
 

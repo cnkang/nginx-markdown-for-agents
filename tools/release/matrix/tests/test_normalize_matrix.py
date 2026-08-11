@@ -141,3 +141,42 @@ class TestSchemaContract:
         assert len(schema["oneOf"]) == 2
         assert schema["oneOf"][0]["required"] == ["entries"]
         assert schema["oneOf"][1]["required"] == ["matrix"]
+
+
+class TestCompatibilityDocument:
+    def test_compatibility_aliases_share_target_and_tier(self):
+        doc = {
+            "schema_version": "1.0",
+            "entries": [
+                {
+                    "nginx": "1.26.3",
+                    "os": "linux",
+                    "os_type": "glibc",
+                    "arch": "amd64",
+                    "artifact_type": "dynamic-module",
+                    "support_tier": "full",
+                }
+            ],
+        }
+
+        normalized = normalize_matrix.normalize_compatibility_document(doc)
+        entry = normalized["entries"][0]
+        assert entry["nginx_version"] == "1.26.3"
+        assert entry["libc"] == "glibc"
+        assert entry["target"] == "amd64"
+        assert entry["support_tier"] == "supported"
+
+    def test_compatibility_alias_disagreement_fails_closed(self):
+        doc = {
+            "entries": [
+                {
+                    "nginx_version": "1.26.3",
+                    "nginx": "1.28.0",
+                    "libc": "glibc",
+                    "target": "amd64",
+                    "support_tier": "supported",
+                }
+            ]
+        }
+        with pytest.raises(MatrixNormalizationError):
+            normalize_matrix.normalize_compatibility_document(doc)

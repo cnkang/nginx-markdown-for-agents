@@ -82,13 +82,13 @@ def test_release_binaries_publishes_signed_checksum_chain() -> None:
     publish = jobs["publish-release"]
     workflow_text = _workflow_text("release-binaries.yml")
 
-    assert checksum_job["needs"] == "completeness-check"
+    assert set(checksum_job["needs"]) == {"prepare", "completeness-check"}
     checksum_step = _step_by_name(
         checksum_job["steps"], "Generate and verify SHA256SUMS"
     )
     assert "generate-checksums.sh -d artifacts/" in checksum_step["run"]
     assert "sha256sum --check SHA256SUMS" in checksum_step["run"]
-    assert signing_job["needs"] == "integrity-checksums"
+    assert set(signing_job["needs"]) == {"prepare", "integrity-checksums"}
     assert "github.event_name == 'release'" in signing_job["if"]
     assert signing_job["environment"] == "release-signing"
     assert "gpg-sign-checksums.sh" in workflow_text

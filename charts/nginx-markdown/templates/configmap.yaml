@@ -31,7 +31,7 @@ data:
         listen 8080;
         {{- if .Values.markdown.enabled }}
         markdown_filter on;
-        markdown_limits conversion_memory={{ .Values.markdown.maxSize }} conversion_timeout={{ .Values.markdown.timeout }};
+        markdown_limits conversion_memory={{ .Values.markdown.maxSize }} conversion_timeout={{ .Values.markdown.timeout }}{{- if .Values.markdown.streaming }} streaming_buffer={{ .Values.markdown.streaming.budget }}{{- end }};
         markdown_error_policy {{ .Values.markdown.onError }};
         markdown_flavor {{ .Values.markdown.flavor }};
         {{- if .Values.markdown.tokenEstimate }}
@@ -46,7 +46,6 @@ data:
         markdown_log_verbosity {{ .Values.markdown.logVerbosity }};
         {{- if .Values.markdown.streaming }}
         markdown_streaming {{ .Values.markdown.streaming.mode }};
-        markdown_limits streaming_buffer={{ .Values.markdown.streaming.budget }};
         {{- end }}
         {{- if .Values.markdown.prune }}
         markdown_prune_noise {{ ternary "on" "off" .Values.markdown.prune.noise }};

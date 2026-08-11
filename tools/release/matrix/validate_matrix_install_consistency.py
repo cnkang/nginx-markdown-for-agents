@@ -13,13 +13,18 @@ Usage:
     python3 tools/release/matrix/validate_matrix_install_consistency.py
 """
 
-import json
 import re
 import sys
+import json
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from lib.path_validation import validate_read_path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from normalize_matrix import (  # noqa: E402
+    MatrixNormalizationError,
+    normalize_compatibility_document,
+)
 
 # Paths relative to the repository root
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -54,24 +59,13 @@ def load_matrix(path: Path) -> list[dict]:
         missing, the ``entries`` value is not a list, or any item is not a dict.
     """
     validated = validate_read_path(path, purpose="install matrix")
-    with open(validated, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    if not isinstance(data, dict):
-        raise ValueError(
-            f"Invalid matrix file {path}: expected a JSON object, "
-            f"got {type(data).__name__}"
-        )
-
-    if "entries" not in data:
-        raise ValueError(f"Invalid matrix file {path}: missing 'entries' key")
+    try:
+        with open(validated, "r", encoding="utf-8") as f:
+            data = normalize_compatibility_document(json.load(f))
+    except (OSError, json.JSONDecodeError, MatrixNormalizationError) as exc:
+        raise ValueError(f"Invalid matrix file {path}: {exc}") from exc
 
     entries = data["entries"]
-    if not isinstance(entries, list):
-        raise ValueError(
-            f"Invalid matrix file {path}: 'entries' must be a list, "
-            f"got {type(entries).__name__}"
-        )
 
     matrix = []
     for i, entry in enumerate(entries):
@@ -80,13 +74,11 @@ def load_matrix(path: Path) -> list[dict]:
                 f"Invalid matrix entry at index {i} in {path}: "
                 f"expected dict, got {type(entry).__name__}"
             )
-        if (
-            entry.get("artifact_type") == "dynamic-module"
-            and entry.get("support_tier") == "supported"
-            and entry.get("libc") in INSTALL_DETECTABLE_OS_TYPES
-        ):
+        if entry.get("artifact_type") == "dynamic-module" and entry.get(
+            "support_tier"
+        ) == "supported" and entry.get("libc") in INSTALL_DETECTABLE_OS_TYPES:
             arch = {"amd64": "x86_64", "arm64": "aarch64"}.get(
-                entry.get("arch"), entry.get("arch")
+                entry.get("target"), entry.get("target")
             )
             matrix.append(
                 {

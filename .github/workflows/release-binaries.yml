@@ -92,15 +92,10 @@ jobs:
           PY
 
       - id: checkout_ref
-        env:
-          VERSION_INPUT: ${{ github.event.inputs.version || '' }}
-          DEFAULT_REF: ${{ github.ref }}
         run: |
-          ref="${DEFAULT_REF}"
-          if [ -n "${VERSION_INPUT}" ]; then
-            ref="${VERSION_INPUT}"
-          fi
-          echo "checkout_ref=${ref}" >> "$GITHUB_OUTPUT"
+          # The prepare checkout resolves the requested tag/branch once; all
+          # downstream jobs consume the resulting immutable commit SHA.
+          echo "checkout_ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   build-binaries:
     name: Build - NGINX ${{ matrix.nginx }} - ${{ matrix.os_type }} - ${{ matrix.arch }}
@@ -168,7 +163,7 @@ jobs:
 
   integrity-checksums:
     name: Generate Binary Checksums
-    needs: completeness-check
+    needs: [prepare, completeness-check]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -176,7 +171,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.inputs.version || github.ref }}
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
 
       - name: Download all binary artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -201,7 +196,7 @@ jobs:
 
   integrity-signing:
     name: Sign Binary Checksums
-    needs: integrity-checksums
+    needs: [prepare, integrity-checksums]
     if: >-
       github.event_name == 'release'
       || (github.event_name == 'workflow_dispatch'
@@ -231,7 +226,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.inputs.version || github.ref }}
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
 
       - name: Download SHA256SUMS
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
