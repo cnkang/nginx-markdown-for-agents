@@ -120,7 +120,7 @@ pub fn fixture_spec(listen_port: u16) -> FixtureSpec {
                 "/unknown-token-baseline",
                 small.clone(),
                 vec![EncodingLayer::Gzip],
-                EncodingFault::None,
+                EncodingFault::UnknownToken,
             ),
             chain_route(
                 "/depth-overflow",
