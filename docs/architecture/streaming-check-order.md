@@ -127,24 +127,29 @@ the request passes through without ever reaching the streaming path selector.
 - **Location**: `ngx_http_markdown_eligibility.c`, inside
   `ngx_http_markdown_check_eligibility()`.
 - **Code**: `ngx_http_markdown_check_size_limit(r, conf)` -- checks
-  Content-Length against `markdown_limits memory=<size>`.
+  Content-Length against the configured conversion-memory limit.
 - **Ordering**: Executes at step 4, inside eligibility check.
-- **Note**: When Content-Length is absent (chunked), the check passes and size
-  the module defers enforcement to the body filter (budget tracking during streaming
-  feed calls -- covered by the streaming input contract.
+- **Note**: When Content-Length is absent (chunked), the check passes and the
+  module defers enforcement to the body filter. The streaming input contract
+  covers budget tracking during feed calls.
 - **Verdict**: CONFIRMED -- static limit checked before streaming, dynamic
   budget enforced during streaming (separate concern).
 
 ### Compression handling (Requirement 3) -- PASS
 
-- **Location**: `ngx_http_markdown_request_impl.h`, header_filter, step 8
-  (after Accept negotiation, before streaming candidate).
-- **Code**: `ngx_http_markdown_detect_compression(r)` -- detects Content-Encoding.
-  If UNKNOWN format -> fail-open passthrough immediately (never reaches
-  streaming). If supported -> sets `decompression.needed` flag for body filter.
-- **Ordering**: Executes at step 8, before streaming candidate (step 9).
-- **Verdict**: CONFIRMED -- unsupported compression rejected before streaming,
-  supported compression flagged for controlled decompression in body filter.
+- **Location**: `ngx_http_markdown_request_impl.h`, header-filter precommit
+  routing, after Accept negotiation and before the streaming candidate.
+- **Code**: `ngx_http_markdown_collect_content_encoding()` combines all
+  `Content-Encoding` fields, then
+  `ngx_http_markdown_parse_encoding_chain_ffi()` validates the complete chain.
+  Malformed, unknown-token, and depth-exceeded results enter the configured
+  error-policy handler without starting a decoder. Valid single-layer chains
+  can use controlled streaming decode; the module routes valid multi-layer
+  chains to bounded full-buffer decoding.
+- **Ordering**: Collection and chain parsing execute before
+  `ngx_http_markdown_select_processing_path()`.
+- **Verdict**: CONFIRMED -- the streaming path cannot bypass encoding policy
+  or decoder selection.
 
 ---
 

@@ -32,11 +32,11 @@ The six series currently map to the following snapshot counters:
 
 | Transition | Fixed reason | Snapshot source | Contract note |
 |---|---|---|---|
-| `commit` | `converted` | `streaming.succeeded_total` | Shares its value with `resume_success`. |
+| `commit` | `converted` | `streaming.commit_total` | Counts committed streaming responses. |
 | `fallback` | `precommit_html_error` | `streaming.fallback_total` | Counts pre-commit fallback decisions. |
 | `safe_finish_start` | `converted` | `streaming_failure_postcommit_safe_finish` | Counts entry into safe-finish handling, not converted deliveries. |
 | `abort_start` | `streaming_mid_flight_error` | `streaming_failure_postcommit_abort` | Counts protocol-safe abort attempts. |
-| `resume_success` | `converted` | `streaming.succeeded_total` | Shares its value with `commit`. |
+| `resume_success` | `converted` | `perf.backpressure_resume_total` | Counts successful downstream resumes after backpressure. |
 | `resume_failure` | `streaming_mid_flight_error` | `streaming.failed_total` | Independent from `abort_start`; it is not an abort counter. |
 
 Raw paths, URIs, hosts, users, and profile names are never emitted.
@@ -54,7 +54,7 @@ The counters follow these conservation rules:
 ## Diagnostics
 
 The diagnostics handler returns the strict Schema v2 response documented in
-[Observability Contract v2](../architecture/observability-schema-v1.md). It has
+[Observability Contract v2](../architecture/observability-schema-v2.md). It has
 no streaming-only top-level section. The frozen families provide runtime visibility via
 worker-local `runtime` counters, bounded `recent_decisions` entries, and the
 optional `runtime.module_metrics` evidence counters. Those counters are read

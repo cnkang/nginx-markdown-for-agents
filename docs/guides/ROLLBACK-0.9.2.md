@@ -136,7 +136,7 @@ tmp="${path}.tmp.$$"
 umask 077
 cat > "$tmp" <<'EOF'
 {
-  "schema_version": 2,
+  "schema_version": 1,
   "filter": "off",
   "error_policy": "pass",
   "streaming_buffer": 1048576

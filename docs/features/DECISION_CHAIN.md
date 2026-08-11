@@ -9,7 +9,7 @@ Reason codes are the canonical, machine-readable outcome identifiers. The module
 - Decision log entries: `markdown: reason=<code> ...` (see `components/nginx-module/src/ngx_http_markdown_decision_log_impl.h`)
 - Prometheus metrics labels (`reason="<code>"`, see `components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h`)
 
-The single source of truth for the reason code list is `components/rust-converter/src/decision/reason_code.rs`, mirrored in [Observability Schema v1](../architecture/observability-schema-v1.md). This document describes the check order, what each check evaluates, and how the module determines outcomes. Rollout procedures are in the [Rollout Cookbook](../guides/ROLLOUT_COOKBOOK.md). Rollback procedures are in the [Rollback Guide](../guides/ROLLBACK_GUIDE.md).
+The single source of truth for the reason code list is `components/rust-converter/src/decision/reason_code.rs`, mirrored in [Observability Schema v2](../architecture/observability-schema-v2.md). This document describes the check order, what each check evaluates, and how the module determines outcomes. Rollout procedures are in the [Rollout Cookbook](../guides/ROLLOUT_COOKBOOK.md). Rollback procedures are in the [Rollback Guide](../guides/ROLLBACK_GUIDE.md).
 
 ## Decision Chain Flowchart
 
@@ -146,7 +146,7 @@ Operators can determine request state counts from metrics and logs:
 
 ## Reason Code Reference
 
-The complete set of 27 reason codes lives in `components/rust-converter/src/decision/reason_code.rs`. It mirrors into [Observability Schema v1](../architecture/observability-schema-v1.md). All `as_str()` values are lowercase snake_case. The table below maps the high-level decision outcomes described in this document to their reason codes. The full registry (including decompression, dynconf, and streaming sub-codes) lives in the schema document.
+The complete set of 27 reason codes lives in `components/rust-converter/src/decision/reason_code.rs`. It mirrors into [Observability Schema v2](../architecture/observability-schema-v2.md). All `as_str()` values are lowercase snake_case. The table below maps the high-level decision outcomes described in this document to their reason codes. The full registry (including decompression, dynconf, and streaming sub-codes) lives in the schema document.
 
 | Decision Outcome | Reason Code | Request State | Description |
 |---|---|---|---|
@@ -196,7 +196,7 @@ The check order matches the eligibility evaluation in `components/nginx-module/s
 - The module evaluates auth policy (check 7) as part of eligibility.
 - The module evaluates Accept negotiation (check 8) after the core eligibility checks pass.
 
-The Rust `ReasonCode::as_str()` registry produces the reason code strings. The `markdown_reason_code_str()` FFI accessor surfaces them to C. C-side code never hard-codes reason code literals. It converts the `ReasonCode` discriminant into the canonical lowercase string. See [Observability Schema v1](../architecture/observability-schema-v1.md) for the full registry and FFI accessor list.
+The Rust `ReasonCode::as_str()` registry produces the reason code strings. The `markdown_reason_code_str()` FFI accessor surfaces them to C. C-side code never hard-codes reason code literals. It converts the `ReasonCode` discriminant into the canonical lowercase string. See [Observability Schema v2](../architecture/observability-schema-v2.md) for the full registry and FFI accessor list.
 
 ## Related Documentation
 
@@ -204,7 +204,7 @@ The Rust `ReasonCode::as_str()` registry produces the reason code strings. The `
 - [Rollback Guide](../guides/ROLLBACK_GUIDE.md) — how to disable or narrow conversion scope
 - [Configuration Guide](../guides/CONFIGURATION.md) — directive reference and configuration examples
 - [Content Negotiation](CONTENT_NEGOTIATION.md) — Accept header parsing and wildcard behavior
-- [Observability Schema v1](../architecture/observability-schema-v1.md) — authoritative reason code registry, metric families, label whitelist
+- [Observability Schema v2](../architecture/observability-schema-v2.md) — authoritative reason code registry, metric families, label whitelist
 - [Operations Guide](../guides/OPERATIONS.md) — monitoring and troubleshooting
 
 ## Document Updates

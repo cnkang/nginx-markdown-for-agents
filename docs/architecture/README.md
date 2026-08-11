@@ -31,7 +31,7 @@ Use it when you need more than deployment guidance but less than source-level im
 | Filter chain ordering | [filter-ordering.md](filter-ordering.md) |
 | Header mutation inventory | [header-mutation-inventory.md](header-mutation-inventory.md) |
 | Inflight guard | [inflight-guard.md](inflight-guard.md) |
-| Observability schema v1 | [observability-schema-v1.md](observability-schema-v1.md) |
+| Observability schema v2 | [observability-schema-v2.md](observability-schema-v2.md) |
 | FFI ABI compatibility | [FFI_ABI_COMPATIBILITY.md](FFI_ABI_COMPATIBILITY.md) |
 | FFI migration contract | [FFI_MIGRATION_CONTRACT.md](FFI_MIGRATION_CONTRACT.md) |
 | FFI zero-initialization strategy | [FFI_ZERO_INIT_STRATEGY.md](FFI_ZERO_INIT_STRATEGY.md) |
