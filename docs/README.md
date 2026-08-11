@@ -4,7 +4,7 @@ This directory contains the maintained documentation for `nginx-markdown-for-age
 
 If you are new to the project, start with [README.md](../README.md). It explains what the module does, why you would use it, and how to verify a first deployment quickly.
 
-Think of this directory as the maintained map behind that landing page. It holds guides for rollout and operations, feature notes for implementation details, and testing references for validation work.
+This directory contains the maintained documentation supporting that landing page. It holds guides for rollout and operations, feature notes for implementation details, and testing references for validation work.
 
 ## Choose a Starting Point
 

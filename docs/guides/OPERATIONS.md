@@ -383,13 +383,8 @@ histogram_quantile(0.95,
   sum by (le) (rate(nginx_markdown_conversion_duration_seconds_bucket[5m])))
 ```
 
-**Diagnostic Steps:**
-
-1. **Check average conversion time:**
+2. **Monitor logs:**
 ```bash
-curl -H "Accept: text/plain; version=0.0.4" "${METRICS_URL:-http://localhost/markdown-metrics}"
-
-# Monitor logs
 tail -f /var/log/nginx/error.log | grep markdown
 ```
 
@@ -960,9 +955,11 @@ You can determine the count of requests in each state using the metrics endpoint
 **From the metrics endpoint** (`curl -s -H "Accept: text/plain; version=0.0.4" http://localhost/markdown-metrics`):
 
 ```text
+NOT_ENABLED = sum(requests_total{outcome="skipped",reason="disabled"})
+
 CONVERTED   = sum(requests_total{outcome="converted"})
 
-SKIPPED     = sum(requests_total{outcome="skipped"})
+SKIPPED     = sum(requests_total{outcome="skipped",reason=~"not_eligible|skipped_.*|bypass_no_transform"})
 
 FAILED      = sum(requests_total{outcome=~"failed_.*"})
 ```
@@ -993,7 +990,7 @@ curl -s -H "Accept: text/plain; version=0.0.4" http://localhost/markdown-metrics
 # Count NOT_ENABLED from logs
 grep "markdown decision:" /var/log/nginx/error.log | grep -c "reason=disabled"
 
-# Count SKIPPED from logs (all not_eligible except disabled)
+# Count SKIPPED from logs (excluding the disabled/NOT_ENABLED state)
 grep "markdown decision:" /var/log/nginx/error.log | \
   grep "reason=not_eligible" | grep -vc "reason=disabled"
 

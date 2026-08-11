@@ -100,6 +100,7 @@ Safety/engineering invariants always win, user-task controls scope and approach.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-11 | Kang | Recorded v090-gates, v091-gates, v092-gates, public-surface-drift, schema-drift, reason-codegen, and observation families |
 | 0.9.2 | 2026-08-06 | Kang | Added release-candidate-evidence, artifact-registry, release-evidence-manifest, fuzz-qualification, and soak-qualification verification families (five generic pre-freeze release gates) |
 | 0.9.2 | 2026-08-05 | Kang | Added release-matrix verification family (release-matrix-check gate) |
 | 0.8.3 | 2026-06-26 | Kang | Added release-manifest and version-consistency verification families |

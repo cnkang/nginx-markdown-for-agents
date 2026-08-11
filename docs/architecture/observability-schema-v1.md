@@ -37,9 +37,21 @@ endpoint. The response has exactly these seven top-level fields:
 
 The schema rejects unknown fields and malformed types. The handler is
 read-only: the endpoint accepts GET and HEAD, HEAD computes the complete body length
-without sending a body, and other methods return 405. Native NGINX
-allow/deny/auth directives can further restrict access. They cannot broaden
-the handler's built-in internal access boundary.
+without sending a body, and other methods return 405. `markdown_diagnostics on`
+does not establish an IP or authentication boundary. Configure native NGINX
+access controls on the diagnostics location, for example:
+
+```nginx
+location = /nginx-markdown/diagnostics {
+    markdown_diagnostics on;
+    allow 127.0.0.1;
+    allow ::1;
+    deny all;
+}
+```
+
+Native NGINX access/auth directives can further restrict access, but they
+cannot broaden a handler configuration when the handler is off.
 
 Legacy `config_snapshot`, profile, streaming, duplicated metrics, and
 rollback-mutation fields are not part of v1.

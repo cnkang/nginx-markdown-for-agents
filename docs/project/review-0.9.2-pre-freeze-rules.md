@@ -63,7 +63,8 @@
 - **Fix**: Mark legacy in header, no wiring in pre-freeze.
 
 ### F14 (Low) — `.github/workflows/nightly-observation.yml` / `weekly-observation.yml` not registered in AGENTS.md/routing-manifest.
-- **Fix**: Add an observation family entry (informational).
+- **Fix**: Add an observation family entry (informational) to the routing
+  manifest and the AGENTS.md verification index.
 
 ### F15 (Low) — `observability-metrics.md:39` public-surface prose unnamed; fold into F3.
 

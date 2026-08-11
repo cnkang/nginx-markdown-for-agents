@@ -21,7 +21,7 @@ models, and pointers.
 
 | Layer | Nature | Where it lives |
 |---|---|---|
-| L1 contract facts | Frozen for 0.9.2 (directive names, defaults, counts) | `config-contract.md` + `public-surface-inventory.json` |
+| L1 contract facts | Frozen for 0.9.2 (directive names, defaults, counts) | `config-contract.md` + `docs/harness/public-surface-inventory.json` |
 | L2 architectural decisions | Stable design rationale (ADRs) | `docs/architecture/ADR/` |
 | L3 living documents | Change frequently (changelog, release notes, plans) | `CHANGELOG.md`, `docs/releases/`, `docs/development/` |
 
@@ -81,7 +81,8 @@ machine-readable value or count.
 2. **Keep L1 facts in sync with `public-surface-inventory.json`.** If the
    drift gate or `make harness-check` reports a change, update
    `config-contract.md` in the same batch.
-3. When a directive/metric/reason-code changes, update `config-contract.md`
+3. When a directive, dynconf key, limit, metric, reason code, or FFI surface
+   changes, update `config-contract.md`
    AND the Document Updates table of this file in one commit (descending
    order, newest on top).
 

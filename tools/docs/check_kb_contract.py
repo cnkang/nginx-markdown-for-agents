@@ -19,7 +19,7 @@ INVENTORY_PATH = ROOT / "docs/harness/public-surface-inventory.json"
 CONTRACT_PATH = ROOT / "docs/knowledge-base/config-contract.md"
 README_PATH = ROOT / "docs/knowledge-base/README.md"
 LIMIT_REGISTRY_PATH = ROOT / "tools/release/gates/validate_config_directives.py"
-METRIC_KEY_FIELD = "metric key"
+METRIC_KEY_FIELD = "metric family"
 ALLOWED_VALUES_FIELD = "allowed values"
 README_FROZEN_SECTION_RE = re.compile(r"^## Key Numbers\b", re.M)
 README_FROZEN_ROW_RE = re.compile(
@@ -301,7 +301,7 @@ def _validate_reasons_and_limits(
     expected_reasons = {
         str(item["discriminant"]): {
             "string": _clean(item["string"]),
-            METRIC_KEY_FIELD: _clean(item["metric_key"]),
+            METRIC_KEY_FIELD: _clean(item["metric_family"]),
         }
         for item in inventory["reason_codes"]
     }

@@ -356,13 +356,12 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   standalone defaults, but they must not fail a newer release gate solely
   because `Cargo.toml`, package metadata, or chart metadata has advanced to the
   newer release version [13]
-- Workflows, release gates, and documentation renderers that consume
-  `tools/release-matrix.json` must use the repository's current checked-in
-  schema. If the matrix schema changes, update all active consumers in the same
-  change set, release workflows must not keep reading stale aliases such as
-  `matrix`, `nginx`, `os_type`, or `support_tier: full` after the source of
-  truth has moved to `entries`, `nginx_version`, `libc`, and
-  `support_tier: supported` [13]
+- Compatibility-matrix consumers use `tools/release-matrix.json`; release
+  evidence consumers use `docs/releases/release-matrix.json`. Each must use
+  its source file's current checked-in schema. If either schema changes,
+  update all active consumers in the same change set, and do not leave stale
+  aliases such as `matrix`, `nginx`, `os_type`, or `support_tier: full` in
+  consumers of the canonical `entries`/`nginx_version`/`libc` contract [13]
 - Release package build environments must not require a newer glibc than any
   supported smoke-test/runtime distro for the same artifact family, build Linux
   module artifacts on the oldest supported glibc baseline or split artifacts by
@@ -461,7 +460,10 @@ Follow evidence-first verification (no completion claim without fresh command ou
 - Public-surface changes: `make public-surface-drift-check` (FFI/exported-symbol inventory drift vs checked-in public-surface-inventory.json)
 - Schema changes: `make schema-drift-check` (projects the canonical `schemas/metrics-v1.registry.json` and `schemas/dynconf-precedence-v1.json` contracts plus the diagnostics schema into versioned artifacts, then validates them against the renderer and dynconf implementations; override the artifact line with `SCHEMA_RELEASE_VERSION=MAJOR.MINOR.PATCH`, wired into release-gates-check-092 and CI release-092-contract-gates)
 - Reason-code changes: `make reason-codegen-check` (reason registry vs generated code, error classification coverage)
-- Release matrix changes: `make release-matrix-check` (canonical docs/release/release-matrix.json vs the checked-in schema. ABI/feature digest binding, fail-closed on aliases)
+- Release matrix changes: `make release-matrix-check` (canonical docs/releases/release-matrix.json vs the checked-in schema; ABI/feature digest binding, fail-closed on aliases)
+- Observation workflows: `.github/workflows/nightly-observation.yml` and
+  `.github/workflows/weekly-observation.yml` (report-oriented, pinned SHAs,
+  minimal secrets)
 - Candidate freeze / release evidence changes: `make release-candidate-evidence-check`, `make artifact-registry-check`, `make release-evidence-manifest-check` (generic pre-freeze gates; FIXTURE=... runs checked-in positive/negative fixtures and is gate regression coverage only, never candidate evidence)
 - Fuzz/soak qualification gates: `make test-rust-fuzz-qualification` (15 min or 100k executions per blocking target, whichever is later), `make test-e2e-rust-soak` (30 min at concurrency 16 with RSS/memory/latency recording). FIXTURE mode as above
 - Performance evidence check: `make perf-evidence-check` (non-blocking, module benchmark harness, report-only)

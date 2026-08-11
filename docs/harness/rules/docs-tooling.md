@@ -22,15 +22,14 @@ Required:
 - Metric names documented in tables/examples must match emitted JSON keys and
   Prometheus series names exactly (no synthetic prefixes or renamed aliases).
 - Operator-facing docs (cookbooks, rollout guides) that reference metrics must
-  use the exact retrievable key path or series name.  For JSON, use the nested
-  object path (for example `streaming.postcommit_error_total`).  For
-  Prometheus, use the full series name with labels (for example
-  `nginx_markdown_streaming_total{result="postcommit_error"}`).  Do not invent
-  flat metric names that do not exist in any output format.
+  use the exact retrievable key path or series name. For Prometheus, use the
+  full series name with labels (for example
+  `nginx_markdown_streaming_events_total{transition="fallback"}`). Do not
+  invent flat metric names that do not exist in the production output.
 - When docs reference derived rates (for example `decompression_failure_rate`),
   include the computation formula using real metric names so operators can
   reproduce the calculation (for example
-  `sum(rate(nginx_markdown_decompression_events_total{outcome="failed"}[5m])) / sum(rate(nginx_markdown_decompression_events_total[5m]))`).
+  `sum(rate(nginx_markdown_decompression_events_total{outcome="failure"}[5m])) / sum(rate(nginx_markdown_decompression_events_total[5m]))`).
   Verify
   that the denominator scopes to the same population as the numerator —
   using a global request count as denominator for a streaming-only failure

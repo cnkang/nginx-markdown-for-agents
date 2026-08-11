@@ -77,36 +77,36 @@ Frozen v1 registry. `bounded` = labeled with bounded-cardinality values.
 
 ## Reason Codes (27)
 
-| # | string | metric key |
+| # | string | metric family |
 |---|---|---|
 
-| 0 | `converted` | `markdown_conversions_total` |
-| 1 | `skipped_accept` | `markdown_skipped_total` |
-| 2 | `skipped_no_accept` | `markdown_skipped_total` |
-| 3 | `skipped_conditional` | `markdown_skipped_total` |
-| 4 | `decompression_error` | `markdown_errors_total` |
-| 5 | `decompression_budget_exceeded` | `markdown_errors_total` |
-| 6 | `decompression_format_error` | `markdown_errors_total` |
-| 7 | `decompression_truncated_input` | `markdown_errors_total` |
-| 8 | `decompression_io_error` | `markdown_errors_total` |
-| 9 | `timeout` | `markdown_errors_total` |
-| 10 | `budget_exceeded` | `markdown_errors_total` |
-| 11 | `replay_error` | `markdown_errors_total` |
-| 12 | `skipped_accept_reject` | `markdown_skipped_total` |
-| 13 | `ffi_panic` | `markdown_errors_total` |
-| 14 | `not_eligible` | `markdown_skipped_total` |
-| 15 | `disabled` | `markdown_skipped_total` |
-| 16 | `failed_open` | `markdown_failed_open_total` |
-| 17 | `failed_closed` | `markdown_failed_closed_total` |
-| 18 | `conversion_error` | `markdown_errors_total` |
-| 19 | `memory_budget_exceeded` | `markdown_errors_total` |
-| 20 | `overload` | `markdown_errors_total` |
-| 21 | `invalid_dynconf` | `markdown_errors_total` |
-| 22 | `degraded_snapshot` | `markdown_errors_total` |
-| 23 | `header_plan_apply_error` | `markdown_errors_total` |
-| 24 | `streaming_mid_flight_error` | `markdown_errors_total` |
-| 25 | `bypass_no_transform` | `markdown_skipped_total` |
-| 26 | `encoding_header_invalid` | `markdown_errors_total` |
+| 0 | `converted` | `nginx_markdown_requests_total` |
+| 1 | `skipped_accept` | `nginx_markdown_requests_total` |
+| 2 | `skipped_no_accept` | `nginx_markdown_requests_total` |
+| 3 | `skipped_conditional` | `nginx_markdown_requests_total` |
+| 4 | `decompression_error` | `nginx_markdown_requests_total` |
+| 5 | `decompression_budget_exceeded` | `nginx_markdown_requests_total` |
+| 6 | `decompression_format_error` | `nginx_markdown_requests_total` |
+| 7 | `decompression_truncated_input` | `nginx_markdown_requests_total` |
+| 8 | `decompression_io_error` | `nginx_markdown_requests_total` |
+| 9 | `timeout` | `nginx_markdown_requests_total` |
+| 10 | `budget_exceeded` | `nginx_markdown_requests_total` |
+| 11 | `replay_error` | `nginx_markdown_requests_total` |
+| 12 | `skipped_accept_reject` | `nginx_markdown_requests_total` |
+| 13 | `ffi_panic` | `nginx_markdown_requests_total` |
+| 14 | `not_eligible` | `nginx_markdown_requests_total` |
+| 15 | `disabled` | `nginx_markdown_requests_total` |
+| 16 | `failed_open` | `nginx_markdown_requests_total` |
+| 17 | `failed_closed` | `nginx_markdown_requests_total` |
+| 18 | `conversion_error` | `nginx_markdown_requests_total` |
+| 19 | `memory_budget_exceeded` | `nginx_markdown_requests_total` |
+| 20 | `overload` | `nginx_markdown_requests_total` |
+| 21 | `invalid_dynconf` | `nginx_markdown_requests_total` |
+| 22 | `degraded_snapshot` | `nginx_markdown_requests_total` |
+| 23 | `header_plan_apply_error` | `nginx_markdown_requests_total` |
+| 24 | `streaming_mid_flight_error` | `nginx_markdown_requests_total` |
+| 25 | `bypass_no_transform` | `nginx_markdown_requests_total` |
+| 26 | `encoding_header_invalid` | `nginx_markdown_requests_total` |
 
 ## FFI Surface Summary (47 exports, ABI v2)
 

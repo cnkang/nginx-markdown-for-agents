@@ -84,7 +84,7 @@ It should not yet be understood as a true streaming or peak-memory-reduction pat
 > [!WARNING]
 > **Architecture Warning: Do not increase the 64 MiB limit**
 > 
-> A 64 MiB HTML document currently translates to roughly 2.5GB-3GB of peak RAM consumption during Rust DOM tree construction. That is an empirical ~40x memory bloat factor. 
+> A 64 MiB HTML document currently translates to roughly 2.5GB-3GB of peak RAM consumption during Rust DOM tree construction. That is an empirical ~40x memory bloat factor.
 > 
 > Because NGINX uses a multi-worker concurrency model, increasing this limit
 > (for example to 1 GB) exposes the server to extreme OOM (Out Of Memory) risks.

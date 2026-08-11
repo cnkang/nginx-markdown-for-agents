@@ -32,7 +32,7 @@ python3 tools/docs/check_docs.py
 
 ## Archive Rule
 
-`docs/archive/` is not source-of-truth for active behavior and should not serve as current guidance.
+`docs/archive/` is not source-of-truth for active behavior and must not serve as current guidance.
 
 
 ## Document Updates
