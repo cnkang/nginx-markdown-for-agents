@@ -169,7 +169,8 @@ pub fn parse_json_with_budget(
         )
     })?;
 
-    let mut state = ParseState::new(raw_bytes.to_vec(), max_depth, token_budget);
+    let bounded_depth = max_depth.min(super::MAX_NESTING_DEPTH);
+    let mut state = ParseState::new(raw_bytes.to_vec(), bounded_depth, token_budget);
 
     state.skip_whitespace();
     let value = parse_value(&mut state, 0)?;

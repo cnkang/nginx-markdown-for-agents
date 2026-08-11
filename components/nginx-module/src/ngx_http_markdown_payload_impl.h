@@ -1573,7 +1573,7 @@ ngx_http_markdown_forward_headers(ngx_http_request_t *r, ngx_http_markdown_ctx_t
     }
 
     rc = ngx_http_next_header_filter(r);
-    if (rc == NGX_ERROR || rc > NGX_OK) {
+    if (rc == NGX_AGAIN || rc == NGX_ERROR || rc > NGX_OK) {
         return rc;
     }
 

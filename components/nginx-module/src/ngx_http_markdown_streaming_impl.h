@@ -2299,7 +2299,7 @@ ngx_http_markdown_streaming_commit(
     }
 
     rc = ngx_http_next_header_filter(r);
-    if (rc == NGX_ERROR || rc > NGX_OK) {
+    if (rc == NGX_AGAIN || rc == NGX_ERROR || rc > NGX_OK) {
         return rc;
     }
 

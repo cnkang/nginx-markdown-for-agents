@@ -327,6 +327,18 @@ fn test_token_budget_exceeded() {
 }
 
 #[test]
+fn test_parser_clamps_caller_depth_to_document_limit() {
+    let mut document = String::from("{\"schema_version\":1,\"value\":");
+    document.push_str(&"[".repeat(MAX_NESTING_DEPTH + 1));
+    document.push('0');
+    document.push_str(&"]".repeat(MAX_NESTING_DEPTH + 1));
+    document.push('}');
+
+    let err = parse_json_with_budget(document.as_bytes(), usize::MAX, 1000).unwrap_err();
+    assert_eq!(err.kind, DynconfParseErrorKind::NestingDepthExceeded);
+}
+
+#[test]
 fn test_empty_input() {
     let input = b"";
     let err = parse_dynconf(input).unwrap_err();

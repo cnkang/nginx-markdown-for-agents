@@ -78,6 +78,9 @@ static ngx_int_t ngx_http_markdown_diag_json_string(
     u_char **pos, const u_char *last, const u_char *value, size_t len);
 static ngx_int_t ngx_http_markdown_diag_json_control(
     u_char **pos, const u_char *last, u_char value);
+static const char *ngx_http_markdown_diag_outcome(ngx_int_t code);
+static const char *ngx_http_markdown_diag_decision_stage(ngx_int_t code);
+static const char *ngx_http_markdown_diag_error_origin(ngx_int_t code);
 
 
 /*
@@ -204,6 +207,27 @@ void
 ngx_http_markdown_diagnostics_record(ngx_http_markdown_diag_state_t *state,
     ngx_int_t reason_code, ngx_msec_t duration_ms)
 {
+    const char *outcome;
+    const char *error_origin;
+
+    outcome = ngx_http_markdown_diag_outcome(reason_code);
+    error_origin = (outcome[0] == 'f' || outcome[0] == 'a')
+        ? ngx_http_markdown_diag_error_origin(reason_code) : NULL;
+    ngx_http_markdown_diagnostics_record_classified(
+        state, outcome, ngx_http_markdown_diag_decision_stage(reason_code),
+        reason_code, error_origin, duration_ms);
+}
+
+
+void
+ngx_http_markdown_diagnostics_record_classified(
+    ngx_http_markdown_diag_state_t *state,
+    const char *outcome,
+    const char *stage,
+    ngx_int_t reason_code,
+    const char *error_origin,
+    ngx_msec_t duration_ms)
+{
     ngx_http_markdown_diag_decision_t  *entry;
 
     if (state == NULL || state->ring.entries == NULL || !state->enabled) {
@@ -213,7 +237,10 @@ ngx_http_markdown_diagnostics_record(ngx_http_markdown_diag_state_t *state,
     entry = &state->ring.entries[state->ring.head];
     /* Store wall-clock seconds so the v1 endpoint can emit RFC 3339 time. */
     entry->timestamp = (ngx_msec_t) ngx_time();
+    entry->outcome = outcome != NULL ? outcome : "failed_closed";
+    entry->stage = stage != NULL ? stage : "delivery";
     entry->reason_code = reason_code;
+    entry->error_origin = error_origin;
     entry->duration_ms = duration_ms;
 
     state->ring.head = (state->ring.head + 1) % state->ring.capacity;
@@ -332,8 +359,46 @@ ngx_http_markdown_diagnostics_recording_active(void)
  *
  * Returns:
  *   NGX_OK on success, NGX_HTTP_FORBIDDEN on access denial,
- *   NGX_HTTP_INTERNAL_SERVER_ERROR on build failure
+ *   NGX_HTTP_INTERNAL_SERVER_ERROR on build failure.  Method errors return
+ *   NGX_OK after sending a short 405 response body.
  */
+static ngx_int_t
+ngx_http_markdown_diagnostics_method_not_allowed(ngx_http_request_t *r)
+{
+    static u_char body[] =
+        "Method Not Allowed. Use GET or HEAD; rollback is available through "
+        "the dynamic-config file watcher.\n";
+    ngx_buf_t    *b;
+    ngx_chain_t   out;
+    ngx_int_t     rc;
+
+    b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
+    if (b == NULL) {
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+
+    b->pos = body;
+    b->last = body + sizeof(body) - 1;
+    b->memory = 1;
+    b->last_in_chain = 1;
+    b->last_buf = (r == r->main) ? 1 : 0;
+
+    r->headers_out.status = NGX_HTTP_NOT_ALLOWED;
+    r->headers_out.content_type_len = sizeof("text/plain") - 1;
+    ngx_str_set(&r->headers_out.content_type, "text/plain");
+    r->headers_out.content_type_lowcase = NULL;
+    r->headers_out.content_length_n = b->last - b->pos;
+
+    rc = ngx_http_send_header(r);
+    if (rc == NGX_ERROR || rc > NGX_OK) {
+        return rc;
+    }
+
+    out.buf = b;
+    out.next = NULL;
+    return ngx_http_output_filter(r, &out);
+}
+
 ngx_int_t
 ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
 {
@@ -357,7 +422,7 @@ ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
             ngx_str_set(&allow_hdr->value, "GET, HEAD");
         }
 
-        return NGX_HTTP_NOT_ALLOWED;
+        return ngx_http_markdown_diagnostics_method_not_allowed(r);
     }
 
     /* Access control check (default deny) */
@@ -623,8 +688,7 @@ ngx_http_markdown_diag_time(u_char *p, u_char *last, ngx_msec_t stamp)
 
     value = (time_t) stamp;
     if (gmtime_r(&value, &tm_value) == NULL) {
-        value = 0;
-        (void) gmtime_r(&value, &tm_value);
+        ngx_memzero(&tm_value, sizeof(tm_value));
     }
 
     return ngx_slprintf(p, last,
@@ -734,6 +798,30 @@ ngx_http_markdown_diag_json_string(
 
 
 static const char *
+ngx_http_markdown_diag_outcome(ngx_int_t code)
+{
+    if (code == 0) {
+        return "converted";
+    }
+    if (code == 16) {
+        return "failed_open";
+    }
+    if (code == 17) {
+        return "failed_closed";
+    }
+    if (code == 24) {
+        return "aborted";
+    }
+    if ((code >= 1 && code <= 3) || code == 12 || code == 14
+        || code == 15 || code == 20 || code == 25)
+    {
+        return "skipped";
+    }
+    return "failed_closed";
+}
+
+
+static const char *
 ngx_http_markdown_diag_decision_stage(ngx_int_t code)
 {
     if (code == 4 || code == 5 || code == 6 || code == 7 || code == 8
@@ -800,6 +888,7 @@ ngx_http_markdown_diagnostics_fmt_decisions(
         ngx_int_t   code;
         ngx_str_t   reason;
         const char *outcome;
+        const char *stage;
         const char *error_origin;
 
         if (state->ring.head >= i + 1) {
@@ -815,24 +904,11 @@ ngx_http_markdown_diagnostics_fmt_decisions(
             ngx_str_set(&reason, "internal");
         }
 
-        if (code == 0) {
-            outcome = "converted";
-        } else if (code == 16) {
-            outcome = "failed_open";
-        } else if (code == 17) {
-            outcome = "failed_closed";
-        } else if (code == 24) {
-            outcome = "aborted";
-        } else if ((code >= 1 && code <= 3) || code == 12 || code == 14
-                   || code == 15 || code == 20 || code == 25)
-        {
-            outcome = "skipped";
-        } else {
-            outcome = "failed_closed";
-        }
-
-        error_origin = (outcome[0] == 'f' || outcome[0] == 'a')
-            ? ngx_http_markdown_diag_error_origin(code) : NULL;
+        outcome = state->ring.entries[idx].outcome != NULL
+            ? state->ring.entries[idx].outcome : "failed_closed";
+        stage = state->ring.entries[idx].stage != NULL
+            ? state->ring.entries[idx].stage : "delivery";
+        error_origin = state->ring.entries[idx].error_origin;
 
         if (i != 0) {
             *pos = ngx_slprintf(*pos, last, ",");
@@ -844,7 +920,7 @@ ngx_http_markdown_diagnostics_fmt_decisions(
         *pos = ngx_slprintf(*pos, last,
             "\",\"outcome\":\"%s\",\"stage\":\"%s\","
             "\"reason\":\"%*s\",\"error_origin\":",
-            outcome, ngx_http_markdown_diag_decision_stage(code),
+            outcome, stage,
             reason.len, reason.data);
         if (error_origin == NULL) {
             *pos = ngx_slprintf(*pos, last, "null");

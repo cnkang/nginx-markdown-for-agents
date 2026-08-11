@@ -249,11 +249,7 @@ pub unsafe extern "C" fn markdown_dynconf_parse(
         if data.is_null() && data_len > 0 {
             // SAFETY: result was validated non-NULL above.
             unsafe {
-                write_error(
-                    result,
-                    DYNCONF_ERR_INVALID_JSON,
-                    "NULL data pointer with non-zero length",
-                );
+                write_error(result, DYNCONF_ERR_INVALID_JSON);
             }
             return;
         }
@@ -273,7 +269,7 @@ pub unsafe extern "C" fn markdown_dynconf_parse(
             Err(e) => {
                 // SAFETY: result was validated non-NULL above.
                 unsafe {
-                    write_error(result, map_error_kind(&e.kind), &e.message);
+                    write_error(result, map_error_kind(&e.kind));
                 }
             }
         }
@@ -439,15 +435,13 @@ unsafe fn write_success(result: *mut FFIDynconfResult, dynconf: &DynconfResult) 
 /// # Safety
 ///
 /// `result` must point to a valid, initialized `FFIDynconfResult`.
-unsafe fn write_error(result: *mut FFIDynconfResult, code: u32, message: &str) {
+unsafe fn write_error(result: *mut FFIDynconfResult, code: u32) {
     // Phase 1: Allocate the error message into a local Box.
     // If this panics (OOM), result retains its safe init state.
-    let truncated = if message.len() > 512 {
-        &message[..message.floor_char_boundary(512)]
-    } else {
-        message
-    };
-    let msg_bytes = truncated.as_bytes().to_vec().into_boxed_slice();
+    let msg_bytes = error_message_for_code(code)
+        .as_bytes()
+        .to_vec()
+        .into_boxed_slice();
 
     // Phase 2: Commit -- transfer ownership and write all fields.
     // SAFETY: result was validated non-NULL by the caller.
@@ -467,4 +461,25 @@ unsafe fn write_error(result: *mut FFIDynconfResult, code: u32, message: &str) {
     r.log_verbosity = DYNCONF_NOT_SET_U8;
     r.error_policy = DYNCONF_NOT_SET_U8;
     r.streaming_buffer = DYNCONF_NOT_SET_U64;
+}
+
+fn error_message_for_code(code: u32) -> &'static str {
+    match code {
+        DYNCONF_ERR_TOO_LARGE => "dynamic configuration document is too large",
+        DYNCONF_ERR_INVALID_JSON => "dynamic configuration document is invalid JSON",
+        DYNCONF_ERR_TOKEN_BUDGET => {
+            "dynamic configuration document exceeds the parser token budget"
+        }
+        DYNCONF_ERR_NESTING_DEPTH => {
+            "dynamic configuration document exceeds the parser nesting limit"
+        }
+        DYNCONF_ERR_DUPLICATE_KEY => "dynamic configuration contains a duplicate key",
+        DYNCONF_ERR_MISSING_SCHEMA_VERSION => "dynamic configuration is missing schema_version",
+        DYNCONF_ERR_INVALID_SCHEMA_VERSION => "dynamic configuration has an invalid schema_version",
+        DYNCONF_ERR_UNKNOWN_KEY => "dynamic configuration contains an unknown key",
+        DYNCONF_ERR_INVALID_TYPE => "dynamic configuration contains a value of invalid type",
+        DYNCONF_ERR_VALUE_OUT_OF_RANGE => "dynamic configuration contains a value out of range",
+        DYNCONF_ERR_INVALID_UTF8 => "dynamic configuration is not valid UTF-8",
+        _ => "dynamic configuration parser failed internally",
+    }
 }

@@ -230,7 +230,7 @@ fn negative_1_untrusted_peer() {
     assert_eq!(d.base_url, "http://origin.example.com");
 }
 
-/* Negative 2: malformed Forwarded with X-Forwarded fallback. */
+/* Negative 2: malformed Forwarded falls back to the direct Host. */
 #[test]
 fn negative_2_malformed_forwarded_no_xff_fallback() {
     let t = cidrs(&["10.0.0.0/8"]);

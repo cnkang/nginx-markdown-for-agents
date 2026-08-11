@@ -61,6 +61,7 @@
 #define ngx_time() ((time_t) 1700000000)
 
 #define ngx_memcpy(dst, src, n)      memcpy(dst, src, n)
+#define ngx_memzero(dst, n)          memset((dst), 0, (n))
 #define ngx_strcmp(s1, s2)           strcmp((const char *) (s1), (const char *) (s2))
 
 #define ngx_str_set(str, text)                                                \
@@ -208,6 +209,7 @@ static int g_send_header_calls;
 static ngx_int_t g_send_header_rc;
 static int g_output_filter_calls;
 static ngx_chain_t *g_last_output_chain;
+static ngx_table_elt_t g_allow_header;
 static int g_discard_rc;
 static int g_alloc_fail_after = -1;
 static size_t g_effective_streaming_buffer = 2 * 1024 * 1024;
@@ -242,10 +244,8 @@ void *
 ngx_list_push(ngx_list_t *list)
 {
     UNUSED(list);
-    /* Return a static element for the Allow header stub */
-    static ngx_table_elt_t stub_elt;
-    memset(&stub_elt, 0, sizeof(stub_elt));
-    return &stub_elt;
+    memset(&g_allow_header, 0, sizeof(g_allow_header));
+    return &g_allow_header;
 }
 
 void *
@@ -478,6 +478,7 @@ reset_test_state(void)
     g_send_header_rc = NGX_OK;
     g_output_filter_calls = 0;
     g_last_output_chain = NULL;
+    memset(&g_allow_header, 0, sizeof(g_allow_header));
     g_discard_rc = NGX_OK;
     g_alloc_fail_after = -1;
     ngx_current_msec = 1000;
@@ -543,6 +544,12 @@ test_lifecycle_and_ring_wrap(void)
     TEST_ASSERT(state.ring.head == 1, "ring head should wrap");
     TEST_ASSERT(state.ring.entries[0].reason_code == 3,
                 "newest wrapped entry should be present");
+    TEST_ASSERT(strcmp(state.ring.entries[0].outcome, "skipped") == 0,
+                "ring stores the classified outcome");
+    TEST_ASSERT(strcmp(state.ring.entries[0].stage, "eligibility") == 0,
+                "ring stores the classified stage");
+    TEST_ASSERT(state.ring.entries[0].error_origin == NULL,
+                "skip decisions have no error origin");
 
     ngx_http_markdown_diagnostics_cleanup(&state);
     TEST_ASSERT(state.ring.count == 0, "cleanup should reset count");
@@ -953,8 +960,29 @@ test_handler_get_head_and_denials(void)
     init_request(&r, &c, &conf, &addr);
     r.method = 0;
     rc = ngx_http_markdown_diagnostics_handler(&r);
-    TEST_ASSERT(rc == NGX_HTTP_NOT_ALLOWED,
-                "non-GET/HEAD should be denied");
+    TEST_ASSERT(rc == NGX_OK,
+                "non-GET/HEAD should return a rendered error response");
+    TEST_ASSERT(r.headers_out.status == NGX_HTTP_NOT_ALLOWED,
+                "non-GET/HEAD should set 405 status");
+    TEST_ASSERT(g_allow_header.hash == 1,
+                "405 response should include an active Allow header");
+    TEST_ASSERT(g_allow_header.key.len == sizeof("Allow") - 1
+                && memcmp(g_allow_header.key.data, "Allow",
+                          sizeof("Allow") - 1) == 0,
+                "405 response should name the Allow header");
+    TEST_ASSERT(g_allow_header.value.len == sizeof("GET, HEAD") - 1
+                && memcmp(g_allow_header.value.data, "GET, HEAD",
+                          sizeof("GET, HEAD") - 1) == 0,
+                "405 Allow header should advertise GET and HEAD");
+    TEST_ASSERT(g_output_filter_calls == 1
+                && g_last_output_chain != NULL
+                && g_last_output_chain->buf != NULL,
+                "405 response should send a body");
+    TEST_ASSERT(g_last_output_chain->buf->last - g_last_output_chain->buf->pos
+                == (off_t) (sizeof("Method Not Allowed. Use GET or HEAD; "
+                                  "rollback is available through the "
+                                  "dynamic-config file watcher.\n") - 1),
+                "405 body should have the expected length");
 
     reset_test_state();
     init_request(&r, &c, &conf, &addr);
@@ -990,12 +1018,14 @@ test_handler_post_not_allowed(void)
     r.args.len = sizeof(rollback_args) - 1;
 
     rc = ngx_http_markdown_diagnostics_handler(&r);
-    TEST_ASSERT(rc == NGX_HTTP_NOT_ALLOWED,
-                "POST rollback action must be rejected");
-    TEST_ASSERT(g_send_header_calls == 0,
-                "rejected POST must not send headers");
-    TEST_ASSERT(g_output_filter_calls == 0,
-                "rejected POST must not send a body");
+    TEST_ASSERT(rc == NGX_OK,
+                "POST rollback action must return a rendered 405 response");
+    TEST_ASSERT(r.headers_out.status == NGX_HTTP_NOT_ALLOWED,
+                "POST rollback action must set 405 status");
+    TEST_ASSERT(g_send_header_calls == 1,
+                "rejected POST must send headers");
+    TEST_ASSERT(g_output_filter_calls == 1,
+                "rejected POST must send a body");
 
     TEST_PASS("diagnostics endpoint is read-only");
 }

@@ -155,8 +155,13 @@ fn parse_missing_schema_version_returns_error() {
 
 #[test]
 fn parse_unknown_key_returns_error() {
-    let mut result = parse_dynconf_ffi(br#"{"schema_version": 1, "unknown_key": 42}"#);
+    let mut result = parse_dynconf_ffi(br#"{"schema_version": 1, "unknown_key": "secret-value"}"#);
     assert_eq!(result.error_code, DYNCONF_ERR_UNKNOWN_KEY);
+    let message = digest_bytes(result.error_message, result.error_message_len);
+    let message = std::str::from_utf8(&message).unwrap();
+    assert!(message.contains("unknown key"));
+    assert!(!message.contains("secret-value"));
+    assert!(message.len() <= 512);
     free_and_verify(&mut result);
 }
 
