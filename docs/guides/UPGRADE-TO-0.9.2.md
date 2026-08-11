@@ -212,7 +212,9 @@ curl -s http://localhost/nginx-markdown/diagnostics | python3 -m json.tool
 ### 4. Metrics endpoint
 
 ```bash
-curl --fail --silent --show-error http://localhost/markdown-metrics
+curl --fail --silent --show-error \
+    -H 'Accept: text/plain; version=0.0.4' \
+    http://localhost/markdown-metrics
 # Verify metric families are present and emitting
 ```
 

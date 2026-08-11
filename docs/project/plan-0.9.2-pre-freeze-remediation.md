@@ -6,8 +6,13 @@
 
 ## Scope decisions (pre-freeze)
 
-- Comment/doc/rule-only changes. No behavior changes to production C/Rust paths.
-- The review documents dead-code paths rather than removing them (pre-freeze risk control). Nothing gets deleted.
+- Comment/doc/rule-only changes. This historical pre-freeze plan covers no
+  behavior changes to production C/Rust paths.
+- The review documents dead-code paths rather than removing them (pre-freeze
+  risk control). Production dead-code paths remain untouched, except for the
+  documented directory moves/removals in the companion report. The companion
+  report consolidated `decisions/` into `docs/architecture/ADR/` and
+  `docs/release/` into `docs/releases/`.
 - `tools/release-matrix.json` legacy `matrix` array removal requires migrating two consumers (`validate_matrix_install_consistency.py`, `check_packaging_consistency.py`) to canonical `entries` in the same change.
 - THIRD-PARTY-NOTICES serde_json 1.0.150 → 1.0.151 (Rule 49).
 - No CI workflow additions in pre-freeze (F4 relabeled instead of wired).
@@ -16,11 +21,11 @@
 
 | # | Task | Items | Verification |
 |---|------|-------|--------------|
-| 1 | C comment fixes | C-H1..C-H2, C-M1..C-M14, C-L1..C-L11 | make test-nginx-unit |
-| 2 | Rust comment fixes + FFI header regen | R-H1..R-H3 (doc-only), R-M*, R-L* | cargo check, make check-headers |
+| 1 | C comment fixes | comment-consistency report: C-H1..C-H2, C-M1..C-M14, C-L1..C-L11 | make test-nginx-unit |
+| 2 | Rust comment fixes + FFI header regen | comment-consistency report: R-H1..R-H3 (doc-only), R-M*, R-L* | cargo check, make check-headers |
 | 3 | Python/Shell comment fixes | P-H1..P-H3, P-M*, P-L* | pytest tools/harness/tests |
 | 4 | docs/ fixes | D-H1..D-H13, D-M1..D-M15, D-L1..D-L6 | make docs-check |
-| 5 | Root docs / packaging / matrix | R-H1..R-H4, R-M1..R-M12, R-L1..R-L8 | check_third_party_notices.py, release-matrix-check |
+| 5 | Root docs / packaging / matrix | documentation report: R-H1..R-H4, R-M1..R-M12, R-L1..R-L8 | check_third_party_notices.py, release-matrix-check |
 | 6 | Rules & harness | F1..F15 | make harness-check, Rule 41 grep |
 | 7 | Full verification | all of the above | see below |
 | 8 | Commits & push | logical batches | — |

@@ -156,10 +156,10 @@ rpm -qa gpg-pubkey* --qf '%{NAME}-%{VERSION}-%{RELEASE}\t%{SUMMARY}\n' \
   | grep -i markdown
 ```
 
-Expected fingerprint:
-```
-<FINGERPRINT>
-```
+The current GitHub Release artifact channel does not publish a repository
+fingerprint in this document. Operators must compare the fingerprint of the
+release-provided public key with an independently authenticated project value
+before trusting a signature.
 
 ---
 

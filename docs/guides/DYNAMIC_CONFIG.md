@@ -173,8 +173,8 @@ production environments where a bad dynconf file could affect traffic.
 - Monitor `configuration.dynconf.generation` and
   `configuration.dynconf.last_success` via the diagnostics endpoint to
   confirm successful reloads.
-- Configure dynconf at the `http` or `server` level — only one global
-  watcher per worker process gets supported.
+- Configure all dynconf directives at the `http` level. The watcher is
+  process-wide, with one active file watcher per worker process.
 - Unknown dynconf keys cause atomic rejection of the entire file
   (not silent skip).
 

@@ -133,7 +133,7 @@ There is no single fixed overhead number that applies to every deployment. Perfo
 - enabled features such as token estimation or YAML front matter
 - system resources, cache behavior, and concurrency
 
-The current design buffers the full eligible response before conversion. Large HTML bodies are the main driver of latency and memory use. Use your own workload to establish baselines, then tune limits and rollout scope accordingly.
+The full-buffer path buffers the eligible response before conversion. Large HTML bodies are the main driver of latency and memory use. Use your own workload to establish baselines, then tune limits and rollout scope accordingly.
 
 ### How can I improve performance?
 

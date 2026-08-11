@@ -379,7 +379,7 @@
     {
       "args": "flag",
       "classification": "active",
-      "conf_offset": "NGX_HTTP_MAIN_CONF_OFFSET",
+      "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
       "context": [
         "http"
       ],
@@ -396,7 +396,7 @@
     {
       "args": "1",
       "classification": "active",
-      "conf_offset": "NGX_HTTP_MAIN_CONF_OFFSET",
+      "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
       "context": [
         "http"
       ],
@@ -413,7 +413,7 @@
     {
       "args": "flag",
       "classification": "active",
-      "conf_offset": "NGX_HTTP_MAIN_CONF_OFFSET",
+      "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
       "context": [
         "http"
       ],
@@ -1143,6 +1143,7 @@
     {
       "c_accessor": "reason_str_converted",
       "discriminant": 0,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_conversions_total",
       "name": "Converted",
       "string": "converted"
@@ -1150,6 +1151,7 @@
     {
       "c_accessor": "reason_str_skipped_accept",
       "discriminant": 1,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_skipped_total",
       "name": "SkippedAccept",
       "string": "skipped_accept"
@@ -1157,6 +1159,7 @@
     {
       "c_accessor": "reason_str_skipped_no_accept",
       "discriminant": 2,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_skipped_total",
       "name": "SkippedNoAccept",
       "string": "skipped_no_accept"
@@ -1164,6 +1167,7 @@
     {
       "c_accessor": "reason_str_skipped_conditional",
       "discriminant": 3,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_skipped_total",
       "name": "SkippedConditional",
       "string": "skipped_conditional"
@@ -1171,6 +1175,7 @@
     {
       "c_accessor": "reason_str_decompression_error",
       "discriminant": 4,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_errors_total",
       "name": "DecompressionError",
       "string": "decompression_error"
@@ -1178,6 +1183,7 @@
     {
       "c_accessor": "reason_str_decompression_budget_exceeded",
       "discriminant": 5,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_errors_total",
       "name": "DecompressionBudgetExceeded",
       "string": "decompression_budget_exceeded"
@@ -1185,6 +1191,7 @@
     {
       "c_accessor": "reason_str_decompression_format_error",
       "discriminant": 6,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_errors_total",
       "name": "DecompressionFormatError",
       "string": "decompression_format_error"
@@ -1192,6 +1199,7 @@
     {
       "c_accessor": "reason_str_decompression_truncated_input",
       "discriminant": 7,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_errors_total",
       "name": "DecompressionTruncatedInput",
       "string": "decompression_truncated_input"
@@ -1199,6 +1207,7 @@
     {
       "c_accessor": "reason_str_decompression_io_error",
       "discriminant": 8,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_errors_total",
       "name": "DecompressionIoError",
       "string": "decompression_io_error"
@@ -1206,6 +1215,7 @@
     {
       "c_accessor": "reason_str_timeout",
       "discriminant": 9,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_errors_total",
       "name": "Timeout",
       "string": "timeout"
@@ -1213,6 +1223,7 @@
     {
       "c_accessor": "reason_str_budget_exceeded",
       "discriminant": 10,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_errors_total",
       "name": "BudgetExceeded",
       "string": "budget_exceeded"
@@ -1220,6 +1231,7 @@
     {
       "c_accessor": "reason_str_replay_error",
       "discriminant": 11,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_errors_total",
       "name": "ReplayError",
       "string": "replay_error"
@@ -1227,6 +1239,7 @@
     {
       "c_accessor": "reason_str_skipped_accept_reject",
       "discriminant": 12,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_skipped_total",
       "name": "SkippedAcceptReject",
       "string": "skipped_accept_reject"
@@ -1234,6 +1247,7 @@
     {
       "c_accessor": "reason_str_ffi_panic",
       "discriminant": 13,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_errors_total",
       "name": "FfiPanic",
       "string": "ffi_panic"
@@ -1241,6 +1255,7 @@
     {
       "c_accessor": "reason_str_not_eligible",
       "discriminant": 14,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_skipped_total",
       "name": "NotEligible",
       "string": "not_eligible"
@@ -1248,6 +1263,7 @@
     {
       "c_accessor": "reason_str_disabled",
       "discriminant": 15,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_skipped_total",
       "name": "Disabled",
       "string": "disabled"
@@ -1255,6 +1271,7 @@
     {
       "c_accessor": "reason_str_failed_open",
       "discriminant": 16,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_failed_open_total",
       "name": "FailedOpen",
       "string": "failed_open"
@@ -1262,6 +1279,7 @@
     {
       "c_accessor": "reason_str_failed_closed",
       "discriminant": 17,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_failed_closed_total",
       "name": "FailedClosed",
       "string": "failed_closed"
@@ -1269,6 +1287,7 @@
     {
       "c_accessor": "reason_str_conversion_error",
       "discriminant": 18,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_errors_total",
       "name": "ConversionError",
       "string": "conversion_error"
@@ -1276,6 +1295,7 @@
     {
       "c_accessor": "reason_str_memory_budget_exceeded",
       "discriminant": 19,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_errors_total",
       "name": "MemoryBudgetExceeded",
       "string": "memory_budget_exceeded"
@@ -1283,6 +1303,7 @@
     {
       "c_accessor": "reason_str_overload",
       "discriminant": 20,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_errors_total",
       "name": "Overload",
       "string": "overload"
@@ -1290,6 +1311,7 @@
     {
       "c_accessor": "reason_str_invalid_dynconf",
       "discriminant": 21,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_errors_total",
       "name": "InvalidDynconf",
       "string": "invalid_dynconf"
@@ -1297,6 +1319,7 @@
     {
       "c_accessor": "reason_str_degraded_snapshot",
       "discriminant": 22,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_errors_total",
       "name": "DegradedSnapshot",
       "string": "degraded_snapshot"
@@ -1304,6 +1327,7 @@
     {
       "c_accessor": "reason_str_header_plan_apply_err",
       "discriminant": 23,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_errors_total",
       "name": "HeaderPlanApplyError",
       "string": "header_plan_apply_error"
@@ -1311,6 +1335,7 @@
     {
       "c_accessor": "reason_str_streaming_mid_flight_err",
       "discriminant": 24,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_errors_total",
       "name": "StreamingMidFlightError",
       "string": "streaming_mid_flight_error"
@@ -1318,6 +1343,7 @@
     {
       "c_accessor": "reason_str_bypass_no_transform",
       "discriminant": 25,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_skipped_total",
       "name": "BypassNoTransform",
       "string": "bypass_no_transform"
@@ -1325,6 +1351,7 @@
     {
       "c_accessor": "reason_str_encoding_header_invalid",
       "discriminant": 26,
+      "metric_family": "nginx_markdown_requests_total",
       "metric_key": "markdown_errors_total",
       "name": "EncodingHeaderInvalid",
       "string": "encoding_header_invalid"

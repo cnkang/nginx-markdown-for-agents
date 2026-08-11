@@ -136,15 +136,10 @@ gpg --verify SHA256SUMS.asc SHA256SUMS
 
 Expected output includes `Good signature from ...` and the key fingerprint.
 
-**Public key fingerprint:**
-
-```
-[FINGERPRINT TO BE ADDED WHEN GPG SIGNING IS ENABLED]
-```
-
-The project publishes the signing key to its GitHub Releases page and
-the repository wiki once GPG signing activates. Until then, only SHA256SUMS
-checksum verification is available.
+No public signing-key fingerprint is published in this repository yet. Until
+the release includes the public key and `SHA256SUMS.asc`, only `SHA256SUMS`
+checksum verification is available; do not treat an unverifiable signature as
+project provenance.
 
 ### Generating Checksums (CI / Maintainers)
 

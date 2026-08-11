@@ -149,7 +149,7 @@ All findings remediated on `dev/wip-0.9.2-harness`:
 | D-H1..D-H13, D-M1..D-M15, D-L1..D-L6 | **fixed** — 16 docs/ files updated; ADR-0023 (OTel) renamed to ADR-0027 with references updated in PROJECT_STATUS.md + PUBLIC_SURFACE_INVENTORY.md |
 | R-H1 | **fixed** — THIRD-PARTY-NOTICES serde_json → 1.0.151 (matches Cargo.lock) |
 | R-H2/R-H3 | **fixed** — nginx-module README threshold section rewritten for 0.9.2 |
-| R-H4 | **fixed** — `tools/release-matrix.schema.json` now declares the legacy `matrix` view and `updated_at` (consumed by update_matrix.py / validate_matrix_install_consistency.py / check_packaging_consistency.py); file is schema-VALID; canonical `docs/release/release-matrix.json` untouched |
+| R-H4 | **fixed** — `tools/release-matrix.schema.json` now declares the legacy `matrix` view and `updated_at` (consumed by update_matrix.py / validate_matrix_install_consistency.py / check_packaging_consistency.py); file is schema-VALID; canonical `docs/releases/release-matrix.json` untouched |
 | R-M1..R-M12, R-L1..R-L8 | **fixed** (R-L5 debian changelog date intentionally deferred to release time) |
 
 Verification (fresh runs, all green):

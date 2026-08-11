@@ -37,8 +37,9 @@ before/after examples.
   `markdown_stream_precommit_buffer`, `markdown_stream_flush_min`,
   `markdown_parse_timeout`, `markdown_parser_budget`, and
   `markdown_decompress_max_size`. `markdown_stream_flush_min` has no
-  replacement. Use downstream buffering or the remaining `markdown_limits`
-  keys as appropriate. Use key=value syntax for `streaming_buffer=`,
+  replacement. Four directives map to `markdown_limits`. Use downstream
+  buffering for the removed flush directive. Use key=value syntax for
+  `streaming_buffer=`,
   `parser_timeout=`, `parser_memory=`, and `decompressed_size=`.
 - **Profile presets removed.** The release removes `balanced`, `strict_cache`,
   and `streaming_first`. Use explicit directives to configure limits.
@@ -840,7 +841,7 @@ dynconf dry-run/rollback, and runtime diagnostics.
   - Public v0.7.0 package installation uses GitHub Release DEB/RPM artifacts
     plus `SHA256SUMS`; public APT/YUM repository publishing remains planned.
   - DEB/RPM packages target glibc-based distributions only. Musl-based targets
-    (Alpine, and similar distributions) are available as static binary tarballs via the separate
+    (Alpine and similar distributions) are available as static binary tarballs via the separate
     `release-binaries.yml` workflow.
 
 - **Kubernetes Deployment Examples**

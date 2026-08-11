@@ -203,7 +203,7 @@ E2E harness.
 
 A test belongs in C when it validates **NGINX C module behavior** — that is,
 behavior that uses NGINX C APIs, NGINX data structures, or
-C-language semantics that have no equivalent in the Rust harness. 
+C-language semantics that have no equivalent in the Rust harness.
 
 Ask: does the test require any of the following?
 

@@ -206,7 +206,7 @@ Follow the Conventional Commits specification:
 - `feat`: New feature
 - `fix`: Bug fix
 - `docs`: Documentation changes
-- `style`: Code style changes (formatting, and similar adjustments)
+- `style`: Code style changes (formatting and similar adjustments)
 - `refactor`: Code refactoring
 - `test`: Adding or updating tests
 - `chore`: Maintenance tasks
