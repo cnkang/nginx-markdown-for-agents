@@ -18,12 +18,26 @@ Additionally verifies:
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional
+from pathlib import Path
 
 from hypothesis import given, settings, assume, HealthCheck
 from hypothesis import strategies as st
+
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+PRECEDENCE_CONTRACT = json.loads(
+    (REPO_ROOT / "schemas" / "dynconf-precedence-v1.json").read_text(
+        encoding="utf-8"
+    )
+)
+PRECEDENCE_SOURCES = tuple(
+    entry["source"]
+    for entry in PRECEDENCE_CONTRACT["five_tier_precedence_hierarchy"]
+)
 
 
 # --- Model types ---
@@ -161,14 +175,15 @@ def resolve_effective(
     # Step 1: Compute block mask
     mask = compute_block_mask(http_conf, server_conf, location_conf)
 
-    # Step 2: Determine the static value and its base provenance
-    if location_conf.get(field_name) is not None:
+    # Step 2: Determine the static value and its base provenance.  The tier
+    # order is loaded from the canonical contract above, not re-declared here.
+    if PRECEDENCE_SOURCES[1] == "static" and location_conf.get(field_name) is not None:
         value = location_conf.get(field_name)
         provenance = Provenance.STATIC
-    elif server_conf.get(field_name) is not None:
+    elif PRECEDENCE_SOURCES[1] == "static" and server_conf.get(field_name) is not None:
         value = server_conf.get(field_name)
         provenance = Provenance.STATIC
-    elif http_conf.get(field_name) is not None:
+    elif PRECEDENCE_SOURCES[3] == "http_baseline" and http_conf.get(field_name) is not None:
         value = http_conf.get(field_name)
         provenance = Provenance.HTTP_BASELINE
     else:
@@ -176,14 +191,18 @@ def resolve_effective(
         provenance = Provenance.BUILTIN_DEFAULT
 
     # Step 3: Apply dynconf overlay (only where block bit NOT set and key present)
-    if not mask.is_blocked(field_name) and dynconf is not None:
+    if PRECEDENCE_SOURCES[2] == "dynconf" and not mask.is_blocked(field_name) and dynconf is not None:
         dynconf_value = dynconf.get(field_name)
         if dynconf_value is not None:
             value = dynconf_value
             provenance = Provenance.DYNCONF
 
     # Step 5: Apply request variable evaluation (only filter supports this)
-    if field_name == "filter" and request_vars.filter is not None:
+    if (
+        PRECEDENCE_SOURCES[0] == "request_variable"
+        and field_name == "filter"
+        and request_vars.filter is not None
+    ):
         value = request_vars.filter
         provenance = Provenance.REQUEST_VARIABLE
 
@@ -263,11 +282,15 @@ def test_precedence_ladder_correct(
         mask = compute_block_mask(http_conf, server_conf, location_conf)
 
         # Verify the precedence ladder manually
-        if f == "filter" and request_vars.filter is not None:
+        if (
+            PRECEDENCE_SOURCES[0] == "request_variable"
+            and f == "filter"
+            and request_vars.filter is not None
+        ):
             # Level 1: request variable always wins (only filter)
             assert result.value == request_vars.filter
             assert result.provenance == Provenance.REQUEST_VARIABLE
-        elif mask.is_blocked(f):
+        elif PRECEDENCE_SOURCES[1] == "static" and mask.is_blocked(f):
             # Level 2: server/location explicit (block bit set)
             # Value comes from the most-specific explicit static config
             if location_conf.get(f) is not None:
@@ -275,11 +298,15 @@ def test_precedence_ladder_correct(
             else:
                 assert result.value == server_conf.get(f)
             assert result.provenance == Provenance.STATIC
-        elif dynconf is not None and dynconf.get(f) is not None:
+        elif (
+            PRECEDENCE_SOURCES[2] == "dynconf"
+            and dynconf is not None
+            and dynconf.get(f) is not None
+        ):
             # Level 3: dynconf overlay (block bit NOT set, key present)
             assert result.value == dynconf.get(f)
             assert result.provenance == Provenance.DYNCONF
-        elif http_conf.get(f) is not None:
+        elif PRECEDENCE_SOURCES[3] == "http_baseline" and http_conf.get(f) is not None:
             # Level 4: http baseline
             assert result.value == http_conf.get(f)
             assert result.provenance == Provenance.HTTP_BASELINE

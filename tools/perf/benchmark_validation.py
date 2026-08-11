@@ -527,6 +527,8 @@ class ScenarioResultInput:
     input_bytes: int
     ttfb: Mapping[str, Any]
     nginx_metrics: Mapping[str, Any]
+    metrics_exit_code: int = 0
+    diagnostics_exit_code: int = 0
 
 
 def _load_result(data: ScenarioResultInput) -> tuple[dict, float, float, float, float]:
@@ -659,9 +661,16 @@ def _scenario_metrics(
 
 
 def build_scenario_result(data: ScenarioResultInput) -> dict:
-    """Build a scenario report gated by strict load-integrity evidence."""
+    """Build a scenario report gated by load and endpoint integrity evidence."""
     load, rps, p50, p95, p99 = _load_result(data)
     path = _path_metrics(data.nginx_metrics)
+    endpoint_failures = []
+    if data.metrics_exit_code != 0:
+        endpoint_failures.append(f"metrics_curl_exit: {data.metrics_exit_code}")
+    if data.diagnostics_exit_code != 0:
+        endpoint_failures.append(
+            f"diagnostics_curl_exit: {data.diagnostics_exit_code}"
+        )
 
     result = {
         "name": data.name,
@@ -669,10 +678,27 @@ def build_scenario_result(data: ScenarioResultInput) -> dict:
         "compression": data.compression,
         "transfer_encoding": data.transfer_encoding,
         "concurrency": data.concurrency,
-        "status": "completed" if load.get("verdict") == "pass" else "failed",
+        "status": (
+            "completed"
+            if load.get("verdict") == "pass" and not endpoint_failures
+            else "failed"
+        ),
         "load_integrity": load,
+        "endpoint_integrity": {
+            "metrics_curl_exit_code": data.metrics_exit_code,
+            "diagnostics_curl_exit_code": data.diagnostics_exit_code,
+            "verdict": "pass" if not endpoint_failures else "fail",
+            "failure_reason": "; ".join(endpoint_failures),
+        },
         "metrics": _scenario_metrics(data, (rps, p50, p95, p99), path),
     }
     if result["status"] == "failed":
-        result["reason"] = f"load_integrity_failed: {load['failure_reason']}"
+        reasons = []
+        if load.get("verdict") != "pass":
+            reasons.append(f"load_integrity_failed: {load['failure_reason']}")
+        reasons.extend(
+            f"endpoint_integrity_failed: {failure}"
+            for failure in endpoint_failures
+        )
+        result["reason"] = "; ".join(reasons)
     return result

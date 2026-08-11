@@ -1051,13 +1051,16 @@ def _canonical_dynamic_entry(
         raise ValueError(f"unsupported matrix architecture: {normalized_arch}")
     if existing is not None:
         entry = dict(existing)
+        # The compatibility matrix writes canonical presentation keys.  Do
+        # not carry legacy updater aliases or the internal target identity
+        # into the persisted row.
+        entry.pop("nginx", None)
+        entry.pop("os_type", None)
+        entry.pop("target", None)
         entry["nginx_version"] = version
         entry["nginx_channel"] = classify_version(version)
         entry["libc"] = libc
-        if "target" in existing and "arch" not in existing:
-            entry["target"] = arch
-        else:
-            entry["arch"] = arch
+        entry["arch"] = arch
         entry["support_tier"] = "supported"
         return entry
 

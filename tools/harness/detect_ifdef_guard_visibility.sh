@@ -79,6 +79,7 @@ fi
 guarded_funcs=$(python3 - "${HEADER_FILE}" "${GUARD_NAME}" <<'PY'
 import re
 import sys
+import os
 
 header_path, guard_name = sys.argv[1:3]
 
@@ -174,11 +175,15 @@ for func in $guarded_funcs; do
         # Keep conditional nesting intact: an inner #ifdef must not make the
         # outer streaming guard appear closed.  Shadow debug is a streaming
         # sub-feature and therefore implies the requested guard.
-        result=$(python3 - "${file}" "${func}" "${GUARD_NAME}" "${HEADER_FILE}" <<'PY'
+result=$(python3 - "${file}" "${func}" "${GUARD_NAME}" "${HEADER_FILE}" <<'PY'
 import re
 import sys
+import os
 
 source_path, func_name, guard_name, header_path = sys.argv[1:5]
+
+def same_file(left, right):
+    return os.path.realpath(left) == os.path.realpath(right)
 
 with open(source_path, encoding='utf-8') as f:
     lines = f.readlines()
@@ -257,7 +262,7 @@ for i, line in enumerate(lines, 1):
             continue
         if func_name + '(' in line:
             # Skip a prototype in the owning header only.
-            if header_path == source_path and ';' in line:
+            if same_file(header_path, source_path) and ';' in line:
                 continue
             print(f'{i}:{line.strip()[:80]}')
 PY

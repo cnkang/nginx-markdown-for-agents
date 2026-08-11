@@ -946,9 +946,10 @@ run_scenario() {
   # Fetch real NGINX metrics from metrics endpoint
   log "  Fetching real NGINX metrics..."
   local metrics_json
-  metrics_json="$(curl -sS --connect-timeout 10 --max-time 60 \
+  local metrics_exit=0
+  metrics_json="$(curl -fsS --connect-timeout 10 --max-time 60 \
     -H 'Accept: text/plain; version=0.0.4' \
-    "http://127.0.0.1:${NGINX_PORT}/markdown-metrics" || echo '')"
+    "http://127.0.0.1:${NGINX_PORT}/markdown-metrics")" || metrics_exit=$?
   local metrics_file="$NGINX_WORKDIR/${SC_NAME}_metrics.json"
   printf '%s\n' "$metrics_json" > "$metrics_file"
 
@@ -956,8 +957,10 @@ run_scenario() {
   # of the frozen Prometheus v1 surface.
   log "  Fetching structured NGINX diagnostics..."
   local diagnostics_json
-  diagnostics_json="$(curl -sS --connect-timeout 10 --max-time 60 \
-    "http://127.0.0.1:${NGINX_PORT}/nginx-markdown/diagnostics" || echo '')"
+  local diagnostics_exit=0
+  diagnostics_json="$(curl -fsS --connect-timeout 10 --max-time 60 \
+    "http://127.0.0.1:${NGINX_PORT}/nginx-markdown/diagnostics")" \
+    || diagnostics_exit=$?
   local diagnostics_file="$NGINX_WORKDIR/${SC_NAME}_diagnostics.json"
   printf '%s\n' "$diagnostics_json" > "$diagnostics_file"
 
@@ -972,7 +975,8 @@ run_scenario() {
   scenario_json="$(parse_load_gen_results "$raw_output" "$SC_NAME" "$SC_PROFILE" \
     "$SC_COMPRESSION" "$SC_TRANSFER" "$SC_CONCURRENCY" "$rss_after" \
     "$ttfb_file" "$metrics_file" "$diagnostics_file" "$fixture_bytes" \
-    "$rss_baseline" "$rss_peak" "$ITERATIONS" "$load_gen_exit")"
+    "$rss_baseline" "$rss_peak" "$ITERATIONS" "$load_gen_exit" \
+    "$metrics_exit" "$diagnostics_exit")"
 
   scenario_json="$(python3 - "$scenario_json" "$probe_json" \
     "$REPO_ROOT" <<'MERGE_PYEOF'
@@ -1015,6 +1019,10 @@ MERGE_PYEOF
 #   $11 - actual input fixture size in bytes
 #   $12 - baseline worker RSS in KB (before load)
 #   $13 - peak worker RSS in KB (during load, sampled in background)
+#   $14 - configured request iterations
+#   $15 - load-generator exit code
+#   $16 - metrics curl exit code
+#   $17 - diagnostics curl exit code
 parse_load_gen_results() {
   local raw_file="$1"
   local name="$2"
@@ -1031,16 +1039,19 @@ parse_load_gen_results() {
   local rss_peak_kb="${13:-0}"
   local iterations="${14:-0}"
   local load_gen_exit="${15:-1}"
+  local metrics_exit="${16:-1}"
+  local diagnostics_exit="${17:-1}"
 
   python3 - "$raw_file" "$name" "$profile" "$compression" "$transfer" \
     "$concurrency" "$rss_kb" "$LOAD_GEN" "$ttfb_file" "$metrics_file" \
     "$diagnostics_file" "$input_bytes" "$rss_baseline_kb" "$rss_peak_kb" \
-    "$iterations" "$load_gen_exit" "$REPO_ROOT" <<'PYEOF'
+    "$iterations" "$load_gen_exit" "$metrics_exit" "$diagnostics_exit" \
+    "$REPO_ROOT" <<'PYEOF'
 import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, sys.argv[17])
+sys.path.insert(0, sys.argv[19])
 
 from tools.perf.benchmark_validation import (
     ScenarioResultInput,
@@ -1091,6 +1102,8 @@ result = build_scenario_result(ScenarioResultInput(
     peak_rss_kb=int(sys.argv[14]),
     iterations=int(sys.argv[15]),
     load_exit_code=int(sys.argv[16]),
+    metrics_exit_code=int(sys.argv[17]),
+    diagnostics_exit_code=int(sys.argv[18]),
 ))
 print(json.dumps(result))
 PYEOF

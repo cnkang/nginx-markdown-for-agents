@@ -142,17 +142,13 @@ class MetricsSnapshot:
     decompression_events_total: int = 0
     dynconf_reloads_total: int = 0
 
-    def process_request(self, req: RequestEvent) -> None:
-        """
-        Process a single request through the metrics model.
-
-        This simulates the exact increment points defined in the
-        metrics registry.
-        """
-        # Inflight incremented when conversion begins
+    def enter_request(self, req: RequestEvent) -> None:
+        """Record the decision-chain entry and any conversion admission."""
         if req.attempts_conversion:
             self.inflight_requests += 1
 
+    def terminate_request(self, req: RequestEvent) -> None:
+        """Record the terminal outcome and reconcile request-local state."""
         # requests_total: exactly one increment per request at terminal
         self.requests_total += 1
 
@@ -180,6 +176,11 @@ class MetricsSnapshot:
         if req.scenario == RequestScenario.DECOMPRESS_FAIL:
             # Decompression event for the failed decompression
             self.decompression_events_total += 1
+
+    def process_request(self, req: RequestEvent) -> None:
+        """Run one request from entry through its terminal outcome."""
+        self.enter_request(req)
+        self.terminate_request(req)
 
 
 def process_request_sequence(requests: List[RequestEvent]) -> MetricsSnapshot:
@@ -355,11 +356,33 @@ def test_inflight_zero_after_quiescence(requests):
 
     **Validates: Requirements 5.6**
     """
-    snapshot = process_request_sequence(requests)
+    snapshot = MetricsSnapshot()
+    saw_admitted_request = False
+    for req in requests:
+        snapshot.enter_request(req)
+        if req.attempts_conversion:
+            saw_admitted_request = True
+            assert snapshot.inflight_requests > 0, (
+                "inflight_requests must be observable after admission"
+            )
+        snapshot.terminate_request(req)
+        assert snapshot.inflight_requests == 0, (
+            "inflight_requests must be reconciled at request termination"
+        )
+
     assert snapshot.inflight_requests == 0, (
         f"inflight_requests ({snapshot.inflight_requests}) != 0 "
         f"after processing {len(requests)} requests"
     )
+    # Keep the phase assertion meaningful even when Hypothesis generates a
+    # sequence containing only skipped requests.
+    if not saw_admitted_request:
+        probe = MetricsSnapshot()
+        admitted = RequestEvent(RequestScenario.NORMAL_CONVERT)
+        probe.enter_request(admitted)
+        assert probe.inflight_requests == 1
+        probe.terminate_request(admitted)
+        assert probe.inflight_requests == 0
 
 
 @settings(max_examples=200)

@@ -290,6 +290,7 @@ def run_real_gate(args) -> int:
         reasons.append(
             f"stale-digest: candidate_sha {manifest.get('candidate_sha')} "
             f"!= frozen candidate {expected_sha}")
+    reasons.extend(validate_record(manifest, expected_sha=expected_sha))
     if not _require_jsonschema():
         return 1
     _validate_evidence_schema(manifest, reasons)

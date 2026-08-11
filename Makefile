@@ -495,6 +495,7 @@ supply-chain-sbom:
 release-gates-check:
 	python3 tools/release/gates/validate_release_gates.py
 	python3 tools/release/gates/validate_naming.py
+	python3 packaging/scripts/test_generate_checksums.py
 
 # release-gates-check-070: comprehensive v0.7.0 release readiness gate.
 #

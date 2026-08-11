@@ -652,11 +652,14 @@ fi
 
 # --- Step 2: Write valid dynconf and reload ---
 
-write_dynconf_atomically '{
+if ! write_dynconf_atomically '{
   "schema_version": 1,
   "filter": "on",
   "streaming_buffer": 10485760
-}'
+}'; then
+    fail "failed to write valid dynconf"
+    exit 1
+fi
 echo "Wrote valid dynconf to $DYNCONF_FILE" >&2
 
 # Trigger reload when a harness-owned or explicitly supplied master PID is
@@ -685,10 +688,13 @@ fi
 
 # --- Step 4: Write invalid dynconf and reload ---
 
-write_dynconf_atomically '{
+if ! write_dynconf_atomically '{
   "schema_version": 1,
   "unknown_key_that_does_not_exist": "should_fail"
-}'
+}'; then
+    fail "failed to write invalid dynconf fixture"
+    exit 1
+fi
 echo "Wrote invalid dynconf to $DYNCONF_FILE" >&2
 
 if [[ -n "${NGINX_PID:-}" || -n "${HARNESS_NGINX_PID:-}" \
@@ -707,11 +713,14 @@ fi
 
 # --- Step 6: Restore a previous valid file atomically ---
 
-write_dynconf_atomically '{
+if ! write_dynconf_atomically '{
   "schema_version": 1,
   "filter": "off",
   "streaming_buffer": 1048576
-}'
+}'; then
+    fail "failed to restore valid dynconf"
+    exit 1
+fi
 echo "Atomically restored valid dynconf at $DYNCONF_FILE" >&2
 
 if [[ -n "${NGINX_PID:-}" || -n "${HARNESS_NGINX_PID:-}" \

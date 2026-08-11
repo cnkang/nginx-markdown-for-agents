@@ -122,7 +122,12 @@ def normalize_entry(raw: dict[str, Any]) -> dict[str, Any]:
     if entry.get("os") == "macos":
         entry["libc"] = "darwin"
 
-    target = entry.get("target", "")
+    target = entry.get("target")
+    if target is None:
+        # A compatibility presentation row may already carry its arch while
+        # an older normalizer omitted target. Preserve that value instead of
+        # replacing it with an empty architecture.
+        target = entry.get("arch", "")
     if isinstance(target, str):
         if target.startswith("x86_64-"):
             target = "x86_64"

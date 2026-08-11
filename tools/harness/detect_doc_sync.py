@@ -197,7 +197,8 @@ def _expand_directive_macros(content: str) -> str:
     """Expand canonical directive-name macros before table inspection."""
     definitions = dict(
         re.findall(
-            r"^#define\s+(NGX_HTTP_MARKDOWN_DIRECTIVE_[A-Z0-9_]+)\s+\\\s*\"([^\"]+)\"",
+            r"^#define\s+(NGX_HTTP_MARKDOWN_DIRECTIVE_[A-Z0-9_]+)"
+            r"\s+(?:\\\s*)?\"([^\"]+)\"",
             content,
             flags=re.MULTILINE,
         )

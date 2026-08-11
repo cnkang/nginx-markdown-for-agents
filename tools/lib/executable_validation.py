@@ -52,7 +52,14 @@ def _is_rustup_tool_shim(candidate: Path, resolved: Path, name: str) -> bool:
         toolchain_root = rustup_toolchains.resolve(strict=True)
         for toolchain in toolchain_root.iterdir():
             tool = toolchain / "bin" / name
-            tool_resolved = tool.resolve(strict=True)
+            try:
+                tool_resolved = tool.resolve(strict=True)
+            except FileNotFoundError:
+                # A partial toolchain is normal; keep looking for a usable one.
+                continue
+            except OSError:
+                # An unreadable entry must not hide other toolchains.
+                continue
             if (
                 tool_resolved.name == name
                 and toolchain_root in tool_resolved.parents

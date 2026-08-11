@@ -723,7 +723,12 @@ def test_replace_canonical_dynamic_entries_normalizes_alias_rows():
         if entry.get("artifact_type") == "dynamic-module"
     ]
     assert len(dynamic) == 1
-    assert dynamic[0]["target"] == "amd64"
+    assert dynamic[0]["nginx_version"] == "1.26.3"
+    assert dynamic[0]["libc"] == "glibc"
+    assert dynamic[0]["arch"] == "amd64"
+    assert "nginx" not in dynamic[0]
+    assert "os_type" not in dynamic[0]
+    assert "target" not in dynamic[0]
 
 
 def test_replace_canonical_dynamic_entries_rejects_duplicate_identities():

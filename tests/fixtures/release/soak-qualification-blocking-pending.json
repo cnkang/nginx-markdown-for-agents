@@ -20,7 +20,7 @@
     {
       "id": "medium",
       "completed_requests": 40000,
-      "failed_requests": 0,
+      "failed_requests": 20000,
       "error_rate": 0.5,
       "p50_ms": 8.5,
       "p99_ms": 22.0,
@@ -865,7 +865,11 @@
     ]
   ],
   "worker_rss_drain_delta_kb": 512,
-  "worker_rss_drain_samples": [119000, 119050, 119000],
+  "worker_rss_drain_samples": [
+    119000,
+    119050,
+    119000
+  ],
   "monotonic_growth_after_drain": false,
   "module_managed_peak_observed": true,
   "per_request_peak_bytes": 16777216,

@@ -53,12 +53,42 @@ readonly ALLOWED_FILES=(
     "ngx_http_markdown_config_core_impl.h"
     "ngx_http_markdown_config_handlers_impl.h"
     "ngx_http_markdown_config_impl.h"
+    "ngx_http_markdown_config_merge_impl.h"
     "ngx_http_markdown_exports.h"
     "ngx_http_markdown_filter_module.c"
 )
 
 errors=0
 warnings=0
+
+function_contains_line() {
+    local file="$1" target_line="$2" name_pattern="$3"
+    local start end depth
+
+    start="$(grep -nE "^[[:space:]]*(static[[:space:]]+)?[^;]*${name_pattern}[[:space:]]*\\(" "${file}" \
+        2>/dev/null | awk -F: -v target="${target_line}" '$1 <= target { line = $1 } END { if (line != "") print line }' || true)"
+    if [[ -z "${start}" ]]; then
+        return 1
+    fi
+
+    end="$(awk -v start="${start}" '
+        NR < start { next }
+        {
+            opens += gsub(/\{/, "{")
+            closes += gsub(/\}/, "}")
+            if (NR > start && opens > 0 && opens == closes) {
+                print NR
+                exit
+            }
+        }
+    ' "${file}")"
+    if [[ -z "${end}" ]]; then
+        return 1
+    fi
+
+    [[ "${target_line}" -ge "${start}" && "${target_line}" -le "${end}" ]]
+    return $?
+}
 
 echo "=== Effective-Config Live Conf Read Detection ===" >&2
 echo "Scanning: ${SRC_DIR}" >&2
@@ -138,9 +168,19 @@ while IFS= read -r match; do
     # function below the complexity gate.  These helpers are still part of
     # the static_config_manifest_v1 call chain and must not be mistaken for
     # request conversion code.
-    if echo "$context_lines" | grep -qE \
+    if function_contains_line "$file" "$line" \
         'ngx_http_markdown_manifest_append_(policy|runtime|limit|prune|trusted_proxies)_fields|ngx_http_markdown_manifest_append_trusted_proxies'; then
         echo "  OK      ${file}:${line} — static_config_manifest_v1 helper reads compiled static conf: ${content}" >&2
+        hits=$((hits + 1))
+        continue
+    fi
+
+    # Value-formatting helpers called only by static_config_manifest_v1 also
+    # serialize compiled static configuration.  They are not request-path
+    # conversion reads and must remain independent of the effective snapshot.
+    if function_contains_line "$file" "$line" \
+        'ngx_http_markdown_manifest_(error_value|dynamic_value|filter_value|flavor_value)'; then
+        echo "  OK      ${file}:${line} — static_config_manifest_v1 value helper reads compiled static conf: ${content}" >&2
         hits=$((hits + 1))
         continue
     fi

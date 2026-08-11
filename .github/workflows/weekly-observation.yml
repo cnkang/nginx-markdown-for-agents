@@ -14,6 +14,8 @@ jobs:
     timeout-minutes: 180
     permissions:
       contents: read
+    env:
+      CARGO_FUZZ_VERSION: 0.13.1
     strategy:
       fail-fast: false
       matrix:
@@ -37,7 +39,7 @@ jobs:
           cache-bin: false
 
       - name: Install cargo-fuzz
-        run: cargo +nightly install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz --version "${CARGO_FUZZ_VERSION}" --locked
 
       - name: Run weekly fuzz target
         env:

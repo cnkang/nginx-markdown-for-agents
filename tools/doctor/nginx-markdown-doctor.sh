@@ -543,8 +543,45 @@ check_rust_toolchain() {
         fi
     fi
 
-    local doctor_root
-    doctor_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd 2>/dev/null || printf '')
+    # Resolve symlinked installations before looking for repository metadata.
+    # A packaged or copied doctor script must not accidentally inspect the
+    # caller's current directory and report a repository toolchain as active.
+    local doctor_source="${BASH_SOURCE[0]}"
+    local doctor_dir doctor_link
+    while [[ -n "$doctor_source" && -L "$doctor_source" ]]; do
+        doctor_dir=$(cd -P "$(dirname "$doctor_source")" \
+            && pwd 2>/dev/null || printf '')
+        doctor_link=$(readlink "$doctor_source" 2>/dev/null || printf '')
+        if [[ -z "$doctor_dir" || -z "$doctor_link" ]]; then
+            doctor_source=""
+            break
+        fi
+        if [[ "$doctor_link" == /* ]]; then
+            doctor_source="$doctor_link"
+        else
+            doctor_source="$doctor_dir/$doctor_link"
+        fi
+    done
+
+    local doctor_root=""
+    if [[ -n "$doctor_source" ]]; then
+        doctor_root=$(cd -P "$(dirname "$doctor_source")/../.." \
+            && pwd 2>/dev/null || printf '')
+    fi
+
+    local checkout_root=""
+    if [[ -n "$doctor_root" ]] && command -v git >/dev/null 2>&1; then
+        checkout_root=$(git -C "$doctor_root" rev-parse --show-toplevel \
+            2>/dev/null || printf '')
+    fi
+
+    if [[ -z "$doctor_root" || "$checkout_root" != "$doctor_root" ]]; then
+        emit_check "rust_toolchain" "skip" \
+            "repository checkout unavailable; skipped pinned toolchain check" \
+            '{"repository_checkout":false}'
+        return 0
+    fi
+
     local toolchain_file=""
     local toolchain_file_exists="false"
     if [[ -n "$doctor_root" && -f "$doctor_root/rust-toolchain.toml" ]]; then

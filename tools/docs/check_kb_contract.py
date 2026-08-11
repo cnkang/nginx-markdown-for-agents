@@ -244,12 +244,15 @@ def _validate_dynconf(
     )
     if heading not in contract_text:
         errors.append("dynconf: heading must distinguish runtime-mutable keys from schema metadata")
-    if not re.search(
-        r"five runtime-mutable keys .*?required `schema_version` metadata",
-        contract_text,
-        re.I | re.S,
-    ):
-        errors.append("dynconf: contract must describe five runtime-mutable keys plus schema metadata")
+    expected_heading = (
+        rf"{dynamic_count} runtime-mutable keys .*?"
+        r"required `schema_version` metadata"
+    )
+    if not re.search(expected_heading, contract_text, re.I | re.S):
+        errors.append(
+            "dynconf: contract must describe the dynamic runtime-mutable "
+            "count plus schema metadata"
+        )
 
 
 def _validate_readme(errors: list[str], readme_text: str) -> None:

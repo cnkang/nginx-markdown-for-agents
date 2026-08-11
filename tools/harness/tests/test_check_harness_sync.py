@@ -30,6 +30,65 @@ def test_collect_results_skips_missing_kiro(tmp_path, monkeypatch):
     assert adapter.status == sync.SKIP_NOT_PRESENT
 
 
+def test_manifest_command_reachability_accepts_repo_and_external_commands(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "Makefile").write_text("harness-check:\n\t@true\n", encoding="utf-8")
+    for relative in (
+        "tools/check.py",
+        ".github/workflows/check.yml",
+    ):
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# fixture\n", encoding="utf-8")
+    (tmp_path / "tools/perf/tests").mkdir(parents=True)
+    (tmp_path / "charts/nginx-markdown").mkdir(parents=True)
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+
+    manifest = {
+        "verification_families": {
+            "fixture": {
+                "commands": [
+                    "make harness-check",
+                    "python3 tools/check.py",
+                    "PYTHONPATH=. pytest -q tools/perf/tests",
+                    ".github/workflows/check.yml",
+                    "helm lint charts/nginx-markdown",
+                    "dpkg-deb --info dist/generated.deb",
+                ]
+            }
+        }
+    }
+
+    result = sync._check_manifest_command_reachability(manifest)
+
+    assert result.status == sync.PASS
+
+
+def test_manifest_command_reachability_rejects_missing_surface(tmp_path, monkeypatch):
+    (tmp_path / "Makefile").write_text("harness-check:\n\t@true\n", encoding="utf-8")
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+
+    manifest = {
+        "verification_families": {
+            "fixture": {
+                "commands": [
+                    "make missing-target",
+                    "python3 tools/missing.py",
+                    ".github/workflows/missing.yml",
+                ]
+            }
+        }
+    }
+
+    result = sync._check_manifest_command_reachability(manifest)
+
+    assert result.status == sync.FAIL
+    assert "missing-target" in result.detail
+    assert "tools/missing.py" in result.detail
+    assert ".github/workflows/missing.yml" in result.detail
+
+
 def test_collect_results_warns_for_local_kiro_drift(tmp_path, monkeypatch):
     repo = tmp_path
     _write_repo_fixture(repo, with_kiro=True, kiro_has_links=False)
@@ -525,6 +584,7 @@ def _write_repo_fixture(repo: Path, *, with_kiro: bool, kiro_has_links: bool = T
         encoding="utf-8",
     )
     (repo / "Makefile").write_text(
+        "harness-check:\n\t@true\n"
         "--skip-dirs .codeartsdoer --skip-dirs .kiro --skip-dirs build\n",
         encoding="utf-8",
     )

@@ -187,6 +187,8 @@ jobs:
               - 'tools/e2e/**'
               - 'tools/e2e-harness/**'
               - 'tests/corpus/**'
+              - 'components/nginx-module/**'
+              - 'components/rust-converter/**'
               - 'docs/harness/**'
               - 'tools/complexity/baseline.json'
               - '.github/workflows/**'
@@ -260,6 +262,12 @@ jobs:
 
       - name: Run Python complexity detector
         run: PYTHONPATH=. python3 tools/harness/detect_python_complexity.py
+
+      - name: Run repository harness checks
+        run: make harness-check
+
+      - name: Run repository harness security checks
+        run: make harness-security-checks
 
   header-sync:
     name: FFI Header Generation Smoke

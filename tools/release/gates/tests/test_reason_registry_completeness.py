@@ -1,5 +1,5 @@
 """
-Property 11: Reason registry dimension completeness — property-based tests.
+Property 11: Reason registry dimension completeness — exhaustive tests.
 
 For each reason code in reason_registry.toml, verify:
 - Valid default Stage (one of 8 values)
@@ -21,8 +21,6 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from hypothesis import given, settings
-from hypothesis import strategies as st
 
 # Ensure the tools package is importable
 sys.path.insert(
@@ -77,23 +75,22 @@ def load_registry() -> list[dict]:
 REASONS = load_registry()
 
 
-# --- Strategies ---
+# Stable ids make every registry entry independently visible in pytest output.
+REASON_IDS = [
+    entry.get("key", f"index-{index}")
+    for index, entry in enumerate(REASONS)
+]
 
-# Strategy that draws a valid index into the REASONS list
-reason_index_strategy = st.integers(min_value=0, max_value=len(REASONS) - 1)
 
+# --- Exhaustive per-entry tests ---
 
-# --- Property tests ---
-
-@settings(max_examples=max(200, len(REASONS) * 5))
-@given(idx=reason_index_strategy)
-def test_discriminant_is_valid_u8(idx):
+@pytest.mark.parametrize("entry", REASONS, ids=REASON_IDS)
+def test_discriminant_is_valid_u8(entry):
     """
     Property 11a: Each discriminant is a valid u8 value (0-255).
 
     **Validates: Requirements 6.1, 6.2**
     """
-    entry = REASONS[idx]
     disc = entry.get("discriminant")
     assert disc is not None, f"Entry missing discriminant: {entry}"
     assert isinstance(disc, int), (
@@ -104,15 +101,13 @@ def test_discriminant_is_valid_u8(idx):
     )
 
 
-@settings(max_examples=max(200, len(REASONS) * 5))
-@given(idx=reason_index_strategy)
-def test_key_matches_snake_case_pattern(idx):
+@pytest.mark.parametrize("entry", REASONS, ids=REASON_IDS)
+def test_key_matches_snake_case_pattern(entry):
     """
     Property 11b: Each key matches ^[a-z][a-z0-9_]*$ (lowercase_snake_case).
 
     **Validates: Requirements 6.4**
     """
-    entry = REASONS[idx]
     key = entry.get("key")
     assert key is not None, f"Entry missing key: {entry}"
     assert isinstance(key, str), (
@@ -123,15 +118,13 @@ def test_key_matches_snake_case_pattern(idx):
     )
 
 
-@settings(max_examples=max(200, len(REASONS) * 5))
-@given(idx=reason_index_strategy)
-def test_default_stage_is_valid(idx):
+@pytest.mark.parametrize("entry", REASONS, ids=REASON_IDS)
+def test_default_stage_is_valid(entry):
     """
     Property 11c: Each default_stage is one of the 8 canonical stages.
 
     **Validates: Requirements 6.1**
     """
-    entry = REASONS[idx]
     stage = entry.get("default_stage")
     assert stage is not None, f"Entry missing default_stage: {entry}"
     assert isinstance(stage, str), (
@@ -143,15 +136,13 @@ def test_default_stage_is_valid(idx):
     )
 
 
-@settings(max_examples=max(200, len(REASONS) * 5))
-@given(idx=reason_index_strategy)
-def test_allowed_origins_are_valid(idx):
+@pytest.mark.parametrize("entry", REASONS, ids=REASON_IDS)
+def test_allowed_origins_are_valid(entry):
     """
     Property 11d: Each allowed_origins entry is from the canonical ErrorOrigin set.
 
     **Validates: Requirements 6.1**
     """
-    entry = REASONS[idx]
     origins = entry.get("allowed_origins")
     assert origins is not None, f"Entry missing allowed_origins: {entry}"
     assert isinstance(origins, list), (
@@ -167,15 +158,13 @@ def test_allowed_origins_are_valid(idx):
         )
 
 
-@settings(max_examples=max(200, len(REASONS) * 5))
-@given(idx=reason_index_strategy)
-def test_operator_visible_is_boolean(idx):
+@pytest.mark.parametrize("entry", REASONS, ids=REASON_IDS)
+def test_operator_visible_is_boolean(entry):
     """
     Property 11e: Each operator_visible is a boolean.
 
     **Validates: Requirements 6.2**
     """
-    entry = REASONS[idx]
     visible = entry.get("operator_visible")
     assert visible is not None, f"Entry missing operator_visible: {entry}"
     assert isinstance(visible, bool), (

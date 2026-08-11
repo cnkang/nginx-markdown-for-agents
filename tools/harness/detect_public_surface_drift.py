@@ -723,13 +723,23 @@ def extract_reason_codes_from_rust():
 
 def _reason_strings(text):
     """Extract the string representation used by the Rust reason registry."""
-    as_str_body = text.split("pub fn as_str", 1)[1].split("pub fn metric_key", 1)[0]
+    as_str_marker = "pub fn as_str"
+    metric_marker = "pub fn metric_key"
+    if as_str_marker not in text or metric_marker not in text:
+        raise ValueError("Rust reason registry is missing as_str/metric_key markers")
+    as_str_body = text.split(as_str_marker, 1)[1].split(metric_marker, 1)[0]
     return dict(re.findall(r"ReasonCode::(\w+)\s*=>\s*\"([^\"]+)\"", as_str_body))
 
 
 def _reason_metrics(text):
     """Extract metric keys while handling grouped Rust match arms."""
-    metric_body = text.split("pub fn metric_key", 1)[1].split("pub fn log_callsite", 1)[0]
+    metric_marker = "pub fn metric_key"
+    callsite_marker = "pub fn log_callsite"
+    if metric_marker not in text or callsite_marker not in text:
+        raise ValueError(
+            "Rust reason registry is missing metric_key/log_callsite markers"
+        )
+    metric_body = text.split(metric_marker, 1)[1].split(callsite_marker, 1)[0]
     metrics = {}
     pending_variants = []
     for line in metric_body.splitlines():

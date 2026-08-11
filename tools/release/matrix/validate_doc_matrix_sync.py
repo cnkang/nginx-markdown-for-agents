@@ -59,7 +59,8 @@ def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
     try:
         with open(validated, "r", encoding="utf-8") as f:
             data = normalize_compatibility_document(json.load(f))
-    except (OSError, json.JSONDecodeError, MatrixNormalizationError):
+    except (OSError, json.JSONDecodeError, MatrixNormalizationError) as exc:
+        print(f"ERROR: unable to load matrix {path}: {exc}", file=sys.stderr)
         return []
 
     entries = []

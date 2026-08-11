@@ -420,7 +420,7 @@ def _record_directive_prerequisite_failures(
     directive_macros = dict(
         re.findall(
             r"#define\s+(NGX_HTTP_MARKDOWN_DIRECTIVE_[A-Z0-9_]+)"
-            r"\s+\\\s*\"([^\"]+)\"",
+            r"[ \t]+(?:\\[ \t]*\r?\n[ \t]*)?\"([^\"]+)\"",
             directive_names_src,
         )
     )
@@ -465,7 +465,7 @@ def _read_c_sources() -> dict[str, str]:
     """Read C source files used to prove removed fields are gone."""
     src_dir = PROJECT_ROOT / "components" / "nginx-module" / "src"
     return {
-        c_path.name: content
+        c_path.relative_to(PROJECT_ROOT).as_posix(): content
         for c_path in src_dir.rglob("*.[ch]")
         if (content := read_safe(c_path))
     }

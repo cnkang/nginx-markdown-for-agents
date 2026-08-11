@@ -9,6 +9,10 @@
 #   - gzip, gunzip, brotli, proxy_cache modules available
 #   - curl available
 #   - NGINX_URL environment variable set (default: http://localhost:8080)
+#   - the gunzip fixture exposes the upstream encoding as
+#     X-Upstream-Content-Encoding (override with UPSTREAM_ENCODING_HEADER)
+#   - the proxy-cache fixture exposes MISS/HIT as X-Cache-Status (override
+#     with CACHE_STATUS_HEADER)
 #
 # Test Scenarios:
 #   1. markdown + gzip: client requests gzip, gets gzip-compressed Markdown
@@ -29,6 +33,8 @@ set -e
 
 NGINX_URL="${NGINX_URL:-http://localhost:8080}"
 TEST_PATH="${TEST_PATH:-/}"
+UPSTREAM_ENCODING_HEADER="${UPSTREAM_ENCODING_HEADER-X-Upstream-Content-Encoding}"
+CACHE_STATUS_HEADER="${CACHE_STATUS_HEADER-X-Cache-Status}"
 PASS_COUNT=0
 FAIL_COUNT=0
 SKIP_COUNT=0
@@ -113,12 +119,13 @@ test_markdown_gunzip() {
     # With gunzip on or markdown_auto_decompress on, the client should receive
     # uncompressed Markdown.
     local response headers content_type content_encoding status
-    response="$(curl -sS -D - -o /dev/null -H "Accept: text/markdown" "${NGINX_URL}${TEST_PATH}" 2>&1)" || true
+    response="$(curl -sS -D - -o /dev/null -H "Accept: text/markdown" -H "Accept-Encoding: gzip" "${NGINX_URL}${TEST_PATH}" 2>&1)" || true
     headers="$response"
 
     status="$(echo "$headers" | head -1 | awk '{print $2}')"
     content_type="$(get_header "$headers" "Content-Type")"
     content_encoding="$(get_header "$headers" "Content-Encoding")"
+    upstream_encoding="$(get_header "$headers" "$UPSTREAM_ENCODING_HEADER")"
 
     if [[ "$status" != "200" ]]; then
         fail "Expected status 200, got $status"
@@ -136,6 +143,14 @@ test_markdown_gunzip() {
         fail "Client received Content-Encoding: gzip (expected decompressed Markdown)"
     else
         pass "No Content-Encoding: gzip on client response (decompressed upstream)"
+    fi
+
+    if [[ -z "$UPSTREAM_ENCODING_HEADER" ]]; then
+        skip "Upstream gzip assertion disabled explicitly"
+    elif echo "$upstream_encoding" | grep -iq "gzip"; then
+        pass "Fixture exposed upstream Content-Encoding: gzip"
+    else
+        fail "Expected ${UPSTREAM_ENCODING_HEADER}: gzip to prove the upstream was compressed; got: ${upstream_encoding:-<missing>}"
     fi
 }
 
@@ -178,11 +193,12 @@ test_markdown_proxy_cache() {
     echo "--- Test 4: markdown + proxy_cache ---" >&2
 
     # First request: should convert and cache
-    local response1 headers1 content_type1 status1
+    local response1 headers1 content_type1 cache_status1 status1
     response1="$(curl -sS -D - -o /dev/null -H "Accept: text/markdown" "${NGINX_URL}${TEST_PATH}" 2>&1)" || true
     headers1="$response1"
     status1="$(echo "$headers1" | head -1 | awk '{print $2}')"
     content_type1="$(get_header "$headers1" "Content-Type")"
+    cache_status1="$(get_header "$headers1" "$CACHE_STATUS_HEADER")"
 
     if [[ "$status1" != "200" ]]; then
         fail "First request: expected status 200, got $status1"
@@ -196,11 +212,12 @@ test_markdown_proxy_cache() {
     fi
 
     # Second request: should serve from cache with same Content-Type
-    local response2 headers2 content_type2 status2
+    local response2 headers2 content_type2 cache_status2 status2
     response2="$(curl -sS -D - -o /dev/null -H "Accept: text/markdown" "${NGINX_URL}${TEST_PATH}" 2>&1)" || true
     headers2="$response2"
     status2="$(echo "$headers2" | head -1 | awk '{print $2}')"
     content_type2="$(get_header "$headers2" "Content-Type")"
+    cache_status2="$(get_header "$headers2" "$CACHE_STATUS_HEADER")"
 
     if [[ "$status2" != "200" ]]; then
         fail "Second request: expected status 200, got $status2"
@@ -218,6 +235,14 @@ test_markdown_proxy_cache() {
         pass "Cached response Content-Type matches first response"
     else
         fail "Content-Type mismatch: first=$content_type1, cached=$content_type2"
+    fi
+
+    if [[ -z "$CACHE_STATUS_HEADER" ]]; then
+        skip "Proxy-cache status assertion disabled explicitly"
+    elif [[ "$cache_status1" == "MISS" && "$cache_status2" == "HIT" ]]; then
+        pass "Proxy-cache status changed from MISS to HIT"
+    else
+        fail "Expected ${CACHE_STATUS_HEADER}: MISS then HIT, got: ${cache_status1:-<missing>} then ${cache_status2:-<missing>}"
     fi
 }
 

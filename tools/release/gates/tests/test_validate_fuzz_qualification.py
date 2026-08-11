@@ -134,7 +134,11 @@ def test_non_finite_or_non_integer_observations_fail(
 
     captured = capsys.readouterr()
     assert rc == 1
-    assert "must be" in captured.err or "not" in captured.err
+    assert field in captured.err
+    if field == "elapsed_seconds_total":
+        assert "finite numeric" in captured.err
+    else:
+        assert "must be an integer" in captured.err
 
 
 def test_fixture_mode_requires_record_input(tmp_path: Path, monkeypatch,

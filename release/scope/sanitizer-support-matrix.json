@@ -46,6 +46,8 @@
       "workflow": ".github/workflows/nightly-observation.yml",
       "job": "sanitizer",
       "matrix_key": "row_id",
+      "ci": null,
+      "command": null,
       "skip_reason": "MSan requires a fully instrumented dependency stack (libc, NGINX, and all libraries compiled with -fsanitize=memory); research/best-effort only, not a release blocker.",
       "policy_reference": "Requirement 14 criterion 5: MSan SHALL be best-effort research only and SHALL NOT block a release"
     },
@@ -58,6 +60,8 @@
       "workflow": ".github/workflows/nightly-observation.yml",
       "job": "sanitizer",
       "matrix_key": "row_id",
+      "ci": null,
+      "command": null,
       "skip_reason": "macOS smoke runs are non-canonical development environments; the canonical sanitizer matrix runs on the Linux CI runner.",
       "policy_reference": "Requirement 14 criterion 5 / canonical-performance-environment"
     }

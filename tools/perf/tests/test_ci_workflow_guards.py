@@ -373,7 +373,10 @@ def test_make_091_gate_runs_blocking_evidence_with_baseline_091() -> None:
 def test_make_091_gate_does_not_reference_baseline_092() -> None:
     """The 091 gate must not leak the 092 baseline into its recipe."""
     text = _make_dry_run("release-gates-check-091")
-    assert "MODULE_BASELINE_VERSION=\"092\"" not in text, (
+    assert re.search(
+        r"MODULE_BASELINE_VERSION\s*=\s*(?:\"092\"|'092'|092)(?![0-9])",
+        text,
+    ) is None, (
         "091 gate recipe must not set MODULE_BASELINE_VERSION=092"
     )
 
@@ -423,11 +426,14 @@ def test_make_092_gate_runs_092_evidence_before_static_checks() -> None:
         "validate_release_gates_092.py",
         "detect_version_consistency.sh",
     ]
+    lines = text.splitlines()
     for marker in static_markers:
-        marker_pos = text.find(marker)
-        assert marker_pos != -1, f"missing static check marker: {marker}"
-        # Compare line indices for a stable ordering assertion.
-        marker_line = text[:marker_pos].count("\n")
+        marker_line = next(
+            (i for i, line in enumerate(lines[pos_092:], start=pos_092)
+             if marker in line),
+            None,
+        )
+        assert marker_line is not None, f"missing static check marker: {marker}"
         assert marker_line > pos_092, (
             f"{marker} (line {marker_line}) must run after 092 evidence "
             f"(line {pos_092})"

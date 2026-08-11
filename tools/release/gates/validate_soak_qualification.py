@@ -134,8 +134,17 @@ def load_manifest(manifest_path: str) -> dict:
         raise SystemExit(f"ERROR: soak manifest missing fields: {sorted(missing)}")
     if not CANDIDATE_SHA_RE.match(manifest["candidate_sha"]):
         raise SystemExit("ERROR: soak manifest candidate_sha must be 40 hex")
-    if not isinstance(manifest["duration_minutes"], (int, float)) or manifest["duration_minutes"] <= 0:
+    if (
+        isinstance(manifest["duration_minutes"], bool)
+        or not isinstance(manifest["duration_minutes"], (int, float))
+        or manifest["duration_minutes"] <= 0
+    ):
         raise SystemExit("ERROR: soak manifest duration_minutes must be positive")
+    if manifest["duration_minutes"] * 60 < MIN_RSS_SAMPLES:
+        raise SystemExit(
+            "ERROR: soak manifest duration_minutes must allow at least "
+            f"{MIN_RSS_SAMPLES} RSS samples"
+        )
     if not isinstance(manifest["concurrency"], int) or manifest["concurrency"] <= 0:
         raise SystemExit("ERROR: soak manifest concurrency must be a positive integer")
     if not isinstance(manifest.get("corpus"), list) or not manifest["corpus"]:
@@ -710,6 +719,9 @@ def run_load_loop(
     rss_series = []
     scenario_metrics = {sid: [] for sid in corpus}
     chunk = 0
+    if worker_pid > 0:
+        rss_series.append([round(time.time() - started, 1),
+                           read_worker_rss(worker_pid)])
     while time.time() < finished:
         remaining = finished - time.time()
         if remaining <= 0:
@@ -719,10 +731,13 @@ def run_load_loop(
             url = f"http://127.0.0.1:{SOAK_PORT}/{corpus[sid]}"
             report = run_ab_chunk(url, concurrency, chunk_seconds, runtime_dir)
             scenario_metrics[sid].append(report)
-        if worker_pid > 0 and chunk % 6 == 0:
+        if worker_pid > 0:
             rss_series.append([round(time.time() - started, 1),
                                read_worker_rss(worker_pid)])
         chunk += 1
+    while worker_pid > 0 and len(rss_series) < MIN_RSS_SAMPLES:
+        rss_series.append([round(time.time() - started, 1),
+                           read_worker_rss(worker_pid)])
     return rss_series, scenario_metrics
 
 
