@@ -1448,6 +1448,7 @@ typedef struct {
         ngx_atomic_t  requests_total;          /* Entered streaming path */
         ngx_atomic_t  fallback_total;          /* Pre-Commit fallbacks */
         ngx_atomic_t  succeeded_total;         /* Streaming successes */
+        ngx_atomic_t  commit_total;            /* Successful header commits */
         ngx_atomic_t  failed_total;            /* Streaming failures */
         ngx_atomic_t  postcommit_error_total;  /* Post-Commit errors */
         ngx_atomic_t  precommit_failopen_total;  /* Pre-Commit fail-open */
@@ -1520,6 +1521,7 @@ typedef struct {
     struct {
         ngx_atomic_t  failopen_count;
         ngx_atomic_t  delivery_count;
+        ngx_atomic_t  full_buffer_delivery_count;
         ngx_atomic_t  decision_count;
         ngx_atomic_t  estimated_token_savings;
         ngx_atomic_t  replay_buffer_errors_total;
@@ -1735,6 +1737,7 @@ const ngx_str_t *ngx_http_markdown_reason_skip_conditional(void);
 /* Return the BYPASS_NO_TRANSFORM reason code (RFC 9111 §5.2.2.6) */
 const ngx_str_t *ngx_http_markdown_reason_bypass_no_transform(void);
 const ngx_str_t *ngx_http_markdown_reason_encoding_header_invalid(void);
+const ngx_str_t *ngx_http_markdown_reason_decompression_format_error(void);
 
 /* Return the compressed-response passthrough reason in every build mode. */
 const ngx_str_t *ngx_http_markdown_reason_streaming_skip_compressed(void);

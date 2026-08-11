@@ -422,6 +422,8 @@ ngx_http_markdown_diagnostics_get_dynconf_state(
     out->config_version = 3;
     out->last_known_good_mtime = 90;
     out->lkg_valid = 1;
+    out->masked_fields = NGX_HTTP_MARKDOWN_DIAG_MASK_FILTER
+                        | NGX_HTTP_MARKDOWN_DIAG_MASK_ERROR_POLICY;
 }
 
 void
@@ -624,6 +626,43 @@ test_recording_request_resets_between_config_cycles(void)
     TEST_PASS("Recording request resets between config cycles");
 }
 
+static void
+test_decision_path_records_once_with_explicit_duration(void)
+{
+    ngx_http_request_t r;
+    ngx_connection_t c;
+    ngx_http_markdown_conf_t conf;
+    struct sockaddr_in addr;
+    ngx_http_markdown_decision_path_t path;
+    ngx_int_t rc;
+
+    TEST_SUBSECTION("decision path records one explicit diagnostics entry");
+
+    reset_test_state();
+    init_request(&r, &c, &conf, &addr);
+    rc = ngx_http_markdown_diagnostics_init(
+        &ngx_http_markdown_g_diag_state, r.pool, 4);
+    TEST_ASSERT(rc == NGX_OK, "global init should succeed");
+    ngx_http_markdown_g_diag_state.enabled = 1;
+
+    memset(&path, 0, sizeof(path));
+    path.accept_result = "CONVERT";
+    path.conditional_result = "PROCEED";
+    path.conversion_status = "SUCCESS";
+    path.reason_code = "converted";
+    path.duration_ms = 37;
+    ngx_http_markdown_log_decision_path(&r, &conf, NULL, &path);
+
+    TEST_ASSERT(ngx_http_markdown_g_diag_state.ring.count == 1,
+                "one terminal path must create exactly one ring entry");
+    TEST_ASSERT(ngx_http_markdown_g_diag_state.ring.entries[0].reason_code == 0,
+                "path reason should map without C-string overread");
+    TEST_ASSERT(ngx_http_markdown_g_diag_state.ring.entries[0].duration_ms == 37,
+                "path duration must be preserved");
+
+    TEST_PASS("Decision path ring ownership covered");
+}
+
 
 static void
 test_access_and_json_builder(void)
@@ -666,12 +705,15 @@ test_access_and_json_builder(void)
                 "JSON buffer should account for recorded decisions");
 
     json = (const char *) b.pos;
-    TEST_ASSERT(strstr(json, "\"schema_version\":1") != NULL,
-                "JSON should expose diagnostics schema v1");
+    TEST_ASSERT(strstr(json, "\"schema_version\":2") != NULL,
+                "JSON should expose diagnostics schema v2");
     TEST_ASSERT(strstr(json, "\"worker\":{\"pid\":1234") != NULL,
                 "JSON should expose worker identity");
     TEST_ASSERT(strstr(json, "\"configuration\":") != NULL,
                 "JSON should include configuration");
+    TEST_ASSERT(strstr(json, "\"masked_keys\":[\"filter\",\"error_policy\"]")
+                != NULL,
+                "JSON should report dynconf keys masked by static config");
     TEST_ASSERT(strstr(json, "\"static_digest\":\"sha256:") != NULL,
                 "JSON should include a static configuration digest");
     TEST_ASSERT(strstr(json, "\"recent_decisions\"") != NULL,
@@ -988,9 +1030,10 @@ test_handler_get_head_and_denials(void)
     init_request(&r, &c, &conf, &addr);
     addr.sin_addr.s_addr = htonl(0x0a000001);
     rc = ngx_http_markdown_diagnostics_handler(&r);
-    TEST_ASSERT(rc == NGX_OK,
-                "non-loopback with valid sockaddr should be allowed "
-                "(access control delegated to NGINX access phase)");
+    TEST_ASSERT(rc == NGX_HTTP_FORBIDDEN,
+                "non-loopback access should be rejected");
+    TEST_ASSERT(r.headers_out.status == NGX_HTTP_FORBIDDEN,
+                "diagnostics must deny non-loopback peers");
 
     TEST_PASS("Handler paths covered");
 }
@@ -1078,6 +1121,7 @@ main(void)
     test_lifecycle_and_ring_wrap();
     test_lifecycle_failure_branches();
     test_recording_request_resets_between_config_cycles();
+    test_decision_path_records_once_with_explicit_duration();
     test_access_and_json_builder();
     test_json_preserves_unified_error_policy();
     test_json_preserves_effective_streaming_buffer();

@@ -20,7 +20,8 @@
 #define NGX_ERROR    -1
 #define NGX_DECLINED -5
 
-ngx_int_t ngx_http_markdown_diagnostics_reason_to_code(const char *reason);
+ngx_int_t ngx_http_markdown_diagnostics_reason_to_code(
+    const u_char *reason, size_t reason_len);
 
 /*
  * Stub implementations of the Rust FFI functions.
@@ -198,12 +199,14 @@ test_bypass_no_transform_reverse_mapping(void)
     TEST_SUBSECTION("bypass_no_transform reverse mapping");
 
     code = ngx_http_markdown_diagnostics_reason_to_code(
-        "bypass_no_transform");
+        (const u_char *) "bypass_no_transform",
+        sizeof("bypass_no_transform") - 1);
     TEST_ASSERT(code == 25,
                 "bypass_no_transform should map to code 25");
 
     code = ngx_http_markdown_diagnostics_reason_to_code(
-        "BYPASS_NO_TRANSFORM");
+        (const u_char *) "BYPASS_NO_TRANSFORM",
+        sizeof("BYPASS_NO_TRANSFORM") - 1);
     TEST_ASSERT(code == 25,
                 "BYPASS_NO_TRANSFORM alias should map to code 25");
 
@@ -220,9 +223,25 @@ test_encoding_header_invalid_reverse_mapping(void)
     TEST_SUBSECTION("encoding_header_invalid reverse mapping");
 
     code = ngx_http_markdown_diagnostics_reason_to_code(
-        "encoding_header_invalid");
+        (const u_char *) "encoding_header_invalid",
+        sizeof("encoding_header_invalid") - 1);
     TEST_ASSERT(code == 26,
                 "encoding_header_invalid should map to code 26");
+
+    {
+        const u_char non_terminated[] = {
+            'c', 'o', 'n', 'v', 'e', 'r', 't', 'e', 'd', 'X'
+        };
+
+        code = ngx_http_markdown_diagnostics_reason_to_code(
+            non_terminated, sizeof(non_terminated) - 1);
+        TEST_ASSERT(code == 0,
+                    "length-bounded mapper accepts non-NUL converted");
+        code = ngx_http_markdown_diagnostics_reason_to_code(
+            non_terminated, sizeof(non_terminated));
+        TEST_ASSERT(code == -1,
+                    "length-bounded mapper rejects trailing bytes");
+    }
 
     TEST_PASS("encoding_header_invalid reverse mapping is correct");
 }

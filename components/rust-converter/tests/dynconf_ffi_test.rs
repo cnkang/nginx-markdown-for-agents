@@ -29,6 +29,7 @@ fn parse_dynconf_ffi(data: &[u8]) -> FFIDynconfResult {
         streaming_buffer: 0,
     };
     unsafe {
+        markdown_dynconf_result_init(&mut result);
         markdown_dynconf_parse(data.as_ptr(), data.len(), &mut result);
     }
     result
@@ -116,6 +117,7 @@ fn parse_null_data_nonzero_len_returns_invalid_json() {
         streaming_buffer: 0,
     };
     unsafe {
+        markdown_dynconf_result_init(&mut result);
         markdown_dynconf_parse(ptr::null(), 10, &mut result);
     }
     assert_eq!(result.error_code, DYNCONF_ERR_INVALID_JSON);
@@ -223,6 +225,27 @@ fn double_free_after_successful_parse_is_safe() {
     assert_eq!(result.source_digest_len, 0);
     assert!(result.active_digest.is_null());
     assert_eq!(result.active_digest_len, 0);
+}
+
+#[test]
+fn parse_reuses_result_without_leaking_or_retaining_optional_values() {
+    let mut result = parse_dynconf_ffi(VALID_DOC);
+    assert_eq!(result.error_code, DYNCONF_OK);
+    assert_eq!(result.filter, DYNCONF_FILTER_ON);
+
+    unsafe {
+        markdown_dynconf_parse(
+            br#"{"schema_version": 1, "unknown_key": "secret-value"}"#.as_ptr(),
+            br#"{"schema_version": 1, "unknown_key": "secret-value"}"#.len(),
+            &mut result,
+        );
+    }
+
+    assert_eq!(result.error_code, DYNCONF_ERR_UNKNOWN_KEY);
+    assert!(result.source_digest.is_null());
+    assert!(result.active_digest.is_null());
+    assert_eq!(result.filter, DYNCONF_NOT_SET_U8);
+    free_and_verify(&mut result);
 }
 
 // ─── markdown_sha256_hex ───────────────────────────────────────────────────

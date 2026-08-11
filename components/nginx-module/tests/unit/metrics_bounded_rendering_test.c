@@ -200,6 +200,7 @@ typedef struct {
     struct {
         ngx_atomic_t  failopen_count;
         ngx_atomic_t  delivery_count;
+        ngx_atomic_t  full_buffer_delivery_count;
         ngx_atomic_t  decision_count;
         ngx_atomic_t  estimated_token_savings;
         ngx_atomic_t  replay_buffer_errors_total;
@@ -223,6 +224,7 @@ typedef struct {
         ngx_atomic_t  requests_total;
         ngx_atomic_t  fallback_total;
         ngx_atomic_t  succeeded_total;
+        ngx_atomic_t  commit_total;
         ngx_atomic_t  failed_total;
         ngx_atomic_t  postcommit_error_total;
         ngx_atomic_t  precommit_failopen_total;
@@ -784,6 +786,34 @@ test_v1_output_bytes_include_streaming_delivery(void)
     TEST_ASSERT(v1.output_bytes == 350,
                 "v1 output bytes must include full-buffer and streaming bytes");
     TEST_PASS("v1 output bytes include streaming delivery");
+}
+
+static void
+test_v1_engine_delivery_and_event_sources(void)
+{
+    ngx_http_markdown_metrics_snapshot_t  snapshot;
+    ngx_http_markdown_metrics_v1_snapshot_t  v1;
+
+    TEST_SUBSECTION("v1 engine delivery and event sources");
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.results.delivery_count = 99;
+    snapshot.results.full_buffer_delivery_count = 4;
+    snapshot.streaming.succeeded_total = 7;
+    snapshot.streaming.commit_total = 2;
+    snapshot.perf.backpressure_resume_total = 3;
+
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+
+    TEST_ASSERT(v1.deliveries.full_buffer == 4,
+                "full-buffer deliveries must use their direct counter");
+    TEST_ASSERT(v1.deliveries.streaming == 7,
+                "streaming deliveries must use streaming success counter");
+    TEST_ASSERT(v1.streaming_events.commit == 2,
+                "commit events must use successful header commits");
+    TEST_ASSERT(v1.streaming_events.resume_success == 3,
+                "resume successes must use downstream resume counter");
+    TEST_PASS("v1 engine delivery and event sources");
 }
 
 static void
@@ -1696,6 +1726,7 @@ main(void)
     test_malformed_path_outer_renderers_return_null();
     test_metrics_handler_uses_frozen_v1_surface();
     test_v1_output_bytes_include_streaming_delivery();
+    test_v1_engine_delivery_and_event_sources();
     test_json_single_path_fits();
     test_json_zero_paths();
     test_json_overflow_produces_other();

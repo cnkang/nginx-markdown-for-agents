@@ -467,6 +467,21 @@ ngx_http_markdown_metrics_v1_render_families_10_to_11(
     u_char *end,
     const ngx_http_markdown_metrics_v1_snapshot_t *snapshot)
 {
+    const u_char *version;
+    const u_char *nginx_version;
+    const u_char *features;
+
+    if (snapshot == NULL) {
+        return NULL;
+    }
+
+    version = snapshot->build_info.version != NULL
+        ? snapshot->build_info.version : (const u_char *) "unknown";
+    nginx_version = snapshot->build_info.nginx_version_text != NULL
+        ? snapshot->build_info.nginx_version_text : (const u_char *) "unknown";
+    features = snapshot->build_info.features != NULL
+        ? snapshot->build_info.features : (const u_char *) "unknown";
+
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_dynconf_reloads_total "
         "Dynconf reload attempts by outcome.\n"
@@ -511,9 +526,9 @@ ngx_http_markdown_metrics_v1_render_families_10_to_11(
         "{version=\"%s\",nginx_version=\"%s\","
         "features=\"%s\"} 1\n"
         "\n",
-        snapshot->build_info.version,
-        snapshot->build_info.nginx_version_text,
-        snapshot->build_info.features);
+        version,
+        nginx_version,
+        features);
     if (p >= end) {
         return NULL;
     }

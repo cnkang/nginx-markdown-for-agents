@@ -107,6 +107,7 @@ const ngx_str_t *ngx_http_markdown_reason_converted(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_skip_compressed(void);
 const ngx_str_t *ngx_http_markdown_reason_bypass_no_transform(void);
 const ngx_str_t *ngx_http_markdown_reason_encoding_header_invalid(void);
+const ngx_str_t *ngx_http_markdown_reason_decompression_format_error(void);
 const ngx_str_t *ngx_http_markdown_reason_overload(void);
 const ngx_str_t *ngx_http_markdown_reason_invalid_dynconf(void);
 const ngx_str_t *ngx_http_markdown_reason_degraded_snapshot(void);
@@ -254,8 +255,7 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
             r, conf, eff,
             ngx_http_markdown_reason_failed_closed(),
             ngx_http_markdown_reason_from_error_category(
-                NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
-                r->connection->log));
+                NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
         return (ngx_int_t) ngx_http_markdown_effective_error_status(
             eff, conf);
     }
@@ -268,8 +268,7 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
         r, conf, eff,
         ngx_http_markdown_reason_failed_open(),
         ngx_http_markdown_reason_from_error_category(
-            NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
-            r->connection->log));
+            NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
     rc = ngx_http_next_header_filter(r);
     /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
     if (rc == NGX_OK || rc == NGX_DONE) {
@@ -405,6 +404,7 @@ ngx_http_markdown_log_accept_skip(ngx_http_request_t *r,
 
     dp.conditional_result = NGX_HTTP_MARKDOWN_COND_SKIPPED;
     dp.conversion_status = NGX_HTTP_MARKDOWN_CONV_SKIPPED;
+    dp.error_category = NULL;
     dp.duration_ms = 0;
 
     switch (accept_reason) {
@@ -727,6 +727,9 @@ ngx_http_markdown_log_buffered_decision_path(
     dp.conditional_result = conditional_result;
     dp.conversion_status = conversion_status;
     dp.reason_code = reason_code;
+    dp.error_category = ctx->error.has_category
+        ? (const char *) ngx_http_markdown_error_category_string(
+              ctx->error.last_category)->data : NULL;
     dp.duration_ms = duration_ms;
     ngx_http_markdown_log_decision_path(
         r, conf, ctx->effective_conf, &dp);
@@ -780,7 +783,8 @@ static ngx_int_t
 ngx_http_markdown_handle_encoding_header_invalid(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    const ngx_http_markdown_conf_t *conf)
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_str_t *reason)
 {
     ngx_int_t  rc;
 
@@ -792,8 +796,10 @@ ngx_http_markdown_handle_encoding_header_invalid(
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
     NGX_HTTP_MARKDOWN_METRIC_INC(failures_conversion);
 
-    ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
-        ngx_http_markdown_reason_encoding_header_invalid());
+    if (reason == NULL) {
+        reason = ngx_http_markdown_reason_encoding_header_invalid();
+    }
+    ngx_http_markdown_log_decision(r, conf, ctx->effective_conf, reason);
 
     if (ngx_http_markdown_effective_error_policy(
             ctx->effective_conf, conf)
@@ -821,47 +827,15 @@ ngx_http_markdown_handle_encoding_header_invalid(
 }
 
 /*
- * Handle a capability bypass of the Content-Encoding chain.
- *
- * Applies to syntactically valid unknown tokens and to chains with more
- * than three non-identity layers: the entire conversion is bypassed during
- * precommit, the original response passes through unchanged, and no
- * error-policy dispatch occurs (Requirement 12.3/12.7).
- */
-static ngx_int_t
-ngx_http_markdown_handle_encoding_passthrough(
-    ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx,
-    const ngx_http_markdown_conf_t *conf,
-    ngx_int_t *rc)
-{
-    ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
-                  "markdown: Content-Encoding chain not "
-                  "supported, bypassing conversion "
-                  "(passthrough)");
-
-    ctx->eligible = 0;
-    NGX_HTTP_MARKDOWN_METRIC_INC(skips.compression_passthrough);
-    ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
-        ngx_http_markdown_reason_bypass_no_transform());
-    *rc = ngx_http_next_header_filter(r);
-    if (*rc == NGX_OK || *rc == NGX_DONE) {
-        ctx->headers_forwarded = 1;
-    }
-    return 1;
-}
-
-/*
  * Handle Content-Encoding before path selection.  Returns non-zero when the
  * caller must return *rc to the next header filter or an unsupported-format
  * policy result; known formats remain on the normal path with decompression
  * marked as required.
  *
  * The chain grammar is parsed via the Rust FFI chain parser.  Malformed
- * grammar routes through ENCODING_HEADER_INVALID with no decoder; unknown
- * tokens and depth-overflow chains bypass the entire conversion with no
- * error-policy dispatch; valid chains proceed to streaming (single layer)
- * or bounded full-buffer (multi-layer) decoding.
+ * grammar routes through the configured error policy with no decoder; valid
+ * chains proceed to streaming (single layer) or bounded full-buffer
+ * (multi-layer) decoding.
  */
 static ngx_flag_t
 ngx_http_markdown_handle_header_compression(
@@ -899,22 +873,24 @@ ngx_http_markdown_handle_header_compression(
 
         if (classification == ENCODING_CHAIN_MALFORMED) {
             *rc = ngx_http_markdown_handle_encoding_header_invalid(
-                r, ctx, conf);
+                r, ctx, conf, ngx_http_markdown_reason_encoding_header_invalid());
             return 1;
         }
 
         if (classification == ENCODING_CHAIN_UNKNOWN_TOKEN
             || classification == ENCODING_CHAIN_DEPTH_EXCEEDED)
         {
-            return ngx_http_markdown_handle_encoding_passthrough(
-                r, ctx, conf, rc);
+            *rc = ngx_http_markdown_handle_encoding_header_invalid(
+                r, ctx, conf,
+                ngx_http_markdown_reason_decompression_format_error());
+            return 1;
         }
 
         if (classification != ENCODING_CHAIN_VALID) {
             /* FFI contract failure: route like MALFORMED
              * (decision governed by on_error policy). */
             *rc = ngx_http_markdown_handle_encoding_header_invalid(
-                r, ctx, conf);
+                r, ctx, conf, ngx_http_markdown_reason_encoding_header_invalid());
             return 1;
         }
 
@@ -1197,8 +1173,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     /* Set context for this request */
     r->ctx[ngx_http_markdown_filter_module.ctx_index] = ctx;
 
-    /* Detect Content-Encoding before selecting a streaming candidate. */
-    ctx->decompression.type = ngx_http_markdown_detect_compression(r);
+    /* Collect and parse the complete Content-Encoding chain before path selection. */
     if (ngx_http_markdown_handle_header_compression(
             r, ctx, conf, &precheck_rc))
     {

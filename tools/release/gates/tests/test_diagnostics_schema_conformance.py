@@ -63,6 +63,14 @@ _error_msg = st.text(
     min_size=1,
     max_size=100,
 )
+_masked_keys = st.lists(
+    st.sampled_from([
+        "filter", "prune_noise", "log_verbosity", "error_policy",
+        "streaming_buffer",
+    ]),
+    unique=True,
+    max_size=5,
+)
 
 
 # --- Dynconf state strategies ---
@@ -77,6 +85,7 @@ def _dynconf_disabled():
         "lkg_digest": None,
         "last_success": None,
         "last_error": None,
+        "masked_keys": [],
     })
 
 
@@ -90,6 +99,7 @@ def _dynconf_no_file():
         "lkg_digest": None,
         "last_success": None,
         "last_error": None,
+        "masked_keys": [],
     })
 
 
@@ -104,6 +114,7 @@ def _dynconf_invalid_without_lkg(draw):
         "lkg_digest": None,
         "last_success": None,
         "last_error": draw(_error_msg),
+        "masked_keys": draw(_masked_keys),
     }
 
 
@@ -118,6 +129,7 @@ def _dynconf_active(draw):
         "lkg_digest": draw(_sha256_digest),
         "last_success": draw(_iso_datetime),
         "last_error": None,
+        "masked_keys": draw(_masked_keys),
     }
 
 
@@ -132,6 +144,7 @@ def _dynconf_lkg_preserved(draw):
         "lkg_digest": draw(_sha256_digest),
         "last_success": draw(_iso_datetime),
         "last_error": draw(_error_msg),
+        "masked_keys": draw(_masked_keys),
     }
 
 
@@ -186,7 +199,7 @@ def _effective_sources(draw):
 def _valid_diagnostics(draw):
     """Generate a complete valid diagnostics document."""
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "product_version": draw(
             st.from_regex(r"[0-9]+\.[0-9]+\.[0-9]+", fullmatch=True)
         ),
@@ -606,7 +619,7 @@ def _static_sources():
 def _make_doc_with_dynconf(dynconf):
     """Build a minimal valid document with the given dynconf state."""
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "product_version": "0.9.2",
         "worker": {"pid": 1234, "scope": "worker-local"},
         "build": {
@@ -629,7 +642,7 @@ def _make_doc_with_dynconf(dynconf):
 def _make_doc_with_config(effective, sources):
     """Build a minimal valid document with the given effective/sources."""
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "product_version": "0.9.2",
         "worker": {"pid": 1234, "scope": "worker-local"},
         "build": {
@@ -648,6 +661,7 @@ def _make_doc_with_config(effective, sources):
                 "lkg_digest": None,
                 "last_success": None,
                 "last_error": None,
+                "masked_keys": [],
             },
             "effective": effective,
             "effective_sources": sources,

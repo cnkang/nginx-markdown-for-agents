@@ -482,8 +482,7 @@ ngx_http_markdown_emit_failure_decision(ngx_http_request_t *r,
 
     fail_category = ctx->error.has_category
         ? ngx_http_markdown_reason_from_error_category(
-              ctx->error.last_category,
-              r->connection->log)
+              ctx->error.last_category, r->connection->log)
         : NULL;
 
     ngx_http_markdown_log_decision_with_category(

@@ -2306,6 +2306,7 @@ ngx_http_markdown_streaming_commit(
     ctx->streaming.commit_state =
         NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx->headers_forwarded = 1;
+    NGX_HTTP_MARKDOWN_METRIC_INC(streaming.commit_total);
 
     /*
      * stream_sm.state and headers_committed were already set by

@@ -382,6 +382,14 @@ test_ffi_paths(const char *path)
                 "invalid FFI result should record one parse error");
     TEST_ASSERT(watcher.diagnostic_state.last_error_len > 0,
                 "invalid FFI result should set last_error");
+    TEST_ASSERT(watcher.legacy_format_warning_logged == 1,
+                "legacy input should emit the migration warning once");
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE,
+                "repeated legacy input should remain invalid");
+    TEST_ASSERT(watcher.legacy_format_warning_logged == 1,
+                "legacy migration warning must remain one-time per watcher");
 
     reset_state();
     write_file(path, "{\"schema_version\":1}");

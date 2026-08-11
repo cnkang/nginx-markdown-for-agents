@@ -67,8 +67,15 @@ struct ngx_cycle_s;
  * must be updated.  Truncation is detected at runtime by build_json and
  * returns NGX_ERROR (500) rather than serving incomplete JSON.
  */
-#define NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE    34608
+#define NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE    34736
 #define NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE 192
+
+/* Dynconf fields reported when a candidate key is masked by static config. */
+#define NGX_HTTP_MARKDOWN_DIAG_MASK_FILTER            (1U << 0)
+#define NGX_HTTP_MARKDOWN_DIAG_MASK_PRUNE_NOISE       (1U << 1)
+#define NGX_HTTP_MARKDOWN_DIAG_MASK_LOG_VERBOSITY     (1U << 2)
+#define NGX_HTTP_MARKDOWN_DIAG_MASK_ERROR_POLICY      (1U << 3)
+#define NGX_HTTP_MARKDOWN_DIAG_MASK_STREAMING_BUFFER  (1U << 4)
 
 
 /*
@@ -164,6 +171,14 @@ void ngx_http_markdown_diagnostics_record_classified(
     const char *error_origin,
     ngx_msec_t duration_ms);
 
+/* Record a length-bounded reason with explicit error provenance. */
+void ngx_http_markdown_diagnostics_record_reason(
+    ngx_http_markdown_diag_state_t *state,
+    const u_char *reason,
+    size_t reason_len,
+    const char *error_category,
+    ngx_msec_t duration_ms);
+
 
 /*
  * HTTP content handler for the diagnostics endpoint.
@@ -236,12 +251,14 @@ ngx_int_t ngx_http_markdown_diagnostics_recording_active(void);
  * ReasonCode discriminant (decision/reason_code.rs is the source of truth).
  *
  * Parameters:
- *   reason - NUL-terminated reason code string (may be NULL)
+ *   reason - reason code bytes (may be NULL when reason_len is zero)
+ *   reason_len - exact byte length; the input need not be NUL-terminated
  *
  * Returns:
  *   Canonical discriminant (0..26), or -1 for NULL/unknown strings.
  */
-ngx_int_t ngx_http_markdown_diagnostics_reason_to_code(const char *reason);
+ngx_int_t ngx_http_markdown_diagnostics_reason_to_code(
+    const u_char *reason, size_t reason_len);
 
 
 /*
@@ -338,6 +355,7 @@ typedef struct {
     ngx_uint_t  config_version;
     time_t      last_known_good_mtime;
     ngx_flag_t  lkg_valid;
+    ngx_uint_t  masked_fields;
 } ngx_http_markdown_diag_dynconf_t;
 
 #define NGX_HTTP_MARKDOWN_DIAG_DYNCONF_DISABLED          0
@@ -425,6 +443,7 @@ typedef struct {
     const char   *conditional_result; /* NOT_MODIFIED/PROCEED/SKIPPED */
     const char   *conversion_status;  /* SUCCESS/FAILED/SKIPPED */
     const char   *reason_code;        /* Final reason code string */
+    const char   *error_category;     /* Explicit conversion/resource/system */
     ngx_msec_t    duration_ms;        /* Processing duration in ms */
 } ngx_http_markdown_decision_path_t;
 

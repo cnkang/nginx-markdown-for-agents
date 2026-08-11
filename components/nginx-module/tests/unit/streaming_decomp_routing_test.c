@@ -66,7 +66,8 @@ typedef enum {
 typedef enum {
     NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING    = 0,
     NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER   = 1,
-    NGX_HTTP_MARKDOWN_DECOMP_ROUTE_BYPASS       = 2
+    NGX_HTTP_MARKDOWN_DECOMP_ROUTE_BYPASS       = 2,
+    NGX_HTTP_MARKDOWN_DECOMP_ROUTE_ERROR_POLICY = 3
 } ngx_http_markdown_decomp_route_t;
 
 /* ----------------------------------------------------------------
@@ -141,9 +142,11 @@ ngx_http_markdown_decomp_routing_decision(
     ngx_http_markdown_cache_validation_e cache_validation,
     ngx_http_markdown_compression_type_e encoding)
 {
-    /* Unknown or no encoding -> bypass */
-    if (encoding == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN
-        || encoding == NGX_HTTP_MARKDOWN_COMPRESSION_NONE) {
+    /* Unknown encoding follows on_error; no encoding is a no-op. */
+    if (encoding == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN) {
+        return NGX_HTTP_MARKDOWN_DECOMP_ROUTE_ERROR_POLICY;
+    }
+    if (encoding == NGX_HTTP_MARKDOWN_COMPRESSION_NONE) {
         return NGX_HTTP_MARKDOWN_DECOMP_ROUTE_BYPASS;
     }
 
@@ -441,21 +444,20 @@ test_routing_brotli_not_supported(void)
 }
 
 static void
-test_routing_unknown_encoding_bypass(void)
+test_routing_unknown_encoding_uses_error_policy(void)
 {
     ngx_http_markdown_decomp_route_t result;
 
     TEST_SUBSECTION(
-        "unknown encoding → BYPASS");
+        "unknown encoding → ERROR_POLICY");
 
     result = ngx_http_markdown_decomp_routing_decision(
         1, 1, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
         NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN);
     TEST_ASSERT(
-        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_BYPASS,
-        "unknown encoding bypasses decompression "
-        "entirely");
-    TEST_PASS("unknown encoding bypasses");
+        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_ERROR_POLICY,
+        "unknown encoding must use the configured error policy");
+    TEST_PASS("unknown encoding uses error policy");
 }
 
 static void
@@ -1341,7 +1343,7 @@ main(void)
     test_routing_streaming_engine_not_selected();
     test_routing_cache_validation_full();
     test_routing_brotli_not_supported();
-    test_routing_unknown_encoding_bypass();
+    test_routing_unknown_encoding_uses_error_policy();
     test_routing_no_encoding_bypass();
     test_routing_multiple_conditions_off();
 

@@ -257,6 +257,7 @@ typedef struct {
     time_t        last_success;
     u_char        last_error[513];
     size_t        last_error_len;
+    ngx_uint_t    last_masked_fields;
 } ngx_http_markdown_dynconf_diagnostic_state_t;
 
 typedef struct {
@@ -271,6 +272,7 @@ typedef struct {
     ngx_http_markdown_conf_t                    *conf;
     const ngx_http_markdown_loc_validation_index_t *validation_index;
     ngx_http_markdown_dynconf_diagnostic_state_t diagnostic_state;
+    ngx_flag_t    legacy_format_warning_logged;
 } ngx_http_markdown_dynconf_watcher_t;
 
 static ngx_int_t ngx_http_markdown_dynconf_reload(
@@ -2988,6 +2990,94 @@ ngx_http_markdown_dynconf_record_candidate_error(
     ngx_http_markdown_dynconf_record_static_error(watcher, error_code);
 }
 
+
+static ngx_uint_t
+ngx_http_markdown_dynconf_blocked_fields(
+    const ngx_http_markdown_dynconf_watcher_t *watcher)
+{
+    const ngx_http_markdown_loc_validation_index_t *index;
+    ngx_uint_t mask;
+
+    if (watcher == NULL) {
+        return 0;
+    }
+
+    mask = watcher->conf != NULL
+        ? watcher->conf->advanced.dynconf_block_mask : 0;
+    index = watcher->validation_index;
+    if (index == NULL || index->entries == NULL) {
+        return mask;
+    }
+
+    for (ngx_uint_t i = 0; i < index->count; i++) {
+        mask |= index->entries[i].block_mask;
+    }
+
+    return mask;
+}
+
+
+static ngx_uint_t
+ngx_http_markdown_dynconf_masked_fields(
+    const ngx_http_markdown_dynconf_watcher_t *watcher,
+    const FFIDynconfResult *result)
+{
+    ngx_uint_t mask;
+
+    if (watcher == NULL || result == NULL) {
+        return 0;
+    }
+
+    mask = ngx_http_markdown_dynconf_blocked_fields(watcher);
+    if (result->filter == DYNCONF_NOT_SET_U8) {
+        mask &= ~NGX_HTTP_MARKDOWN_BLOCK_FILTER;
+    }
+    if (result->prune_noise == DYNCONF_NOT_SET_U8) {
+        mask &= ~NGX_HTTP_MARKDOWN_BLOCK_PRUNE_NOISE;
+    }
+    if (result->log_verbosity == DYNCONF_NOT_SET_U8) {
+        mask &= ~NGX_HTTP_MARKDOWN_BLOCK_LOG_VERBOSITY;
+    }
+    if (result->error_policy == DYNCONF_NOT_SET_U8) {
+        mask &= ~NGX_HTTP_MARKDOWN_BLOCK_ERROR_POLICY;
+    }
+    if (result->streaming_buffer == DYNCONF_NOT_SET_U64) {
+        mask &= ~NGX_HTTP_MARKDOWN_BLOCK_STREAMING_BUFFER;
+    }
+
+    return mask;
+}
+
+
+static void
+ngx_http_markdown_dynconf_log_masked_fields(ngx_log_t *log, ngx_uint_t mask)
+{
+    static const struct {
+        ngx_uint_t bit;
+        const char *name;
+    } fields[] = {
+        { NGX_HTTP_MARKDOWN_BLOCK_FILTER, "filter" },
+        { NGX_HTTP_MARKDOWN_BLOCK_PRUNE_NOISE, "prune_noise" },
+        { NGX_HTTP_MARKDOWN_BLOCK_LOG_VERBOSITY, "log_verbosity" },
+        { NGX_HTTP_MARKDOWN_BLOCK_ERROR_POLICY, "error_policy" },
+        { NGX_HTTP_MARKDOWN_BLOCK_STREAMING_BUFFER, "streaming_buffer" }
+    };
+
+    if (log == NULL) {
+        return;
+    }
+
+    for (ngx_uint_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++) {
+        if ((mask & fields[i].bit) != 0) {
+            ngx_log_error(NGX_LOG_WARN, log, 0,
+                          "markdown: dynconf key \"%s\" is masked by "
+                          "static server/location configuration; static "
+                          "value remains effective",
+                          fields[i].name);
+        }
+    }
+}
+
 /* Reload the bounded file, validate its JSON result, and publish it atomically.
  * The staged snapshot and digest copies are request-independent, so all
  * validation completes before active state or last-known-good state changes.
@@ -3007,6 +3097,7 @@ ngx_http_markdown_dynconf_reload(
         NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_LEN];
     FFIDynconfResult    result;
     ngx_uint_t           failure_code;
+    ngx_uint_t           masked_fields;
 
     if (watcher == NULL || conf == NULL || log == NULL)
     {
@@ -3021,6 +3112,13 @@ ngx_http_markdown_dynconf_reload(
     }
 
     markdown_dynconf_result_init(&result);
+    if (file_size > 0 && data[0] != '{'
+        && !watcher->legacy_format_warning_logged)
+    {
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+            "markdown: legacy line format detected - migrate to JSON v1");
+        watcher->legacy_format_warning_logged = 1;
+    }
     markdown_dynconf_parse(data, file_size, &result);
     ngx_free(data);
 
@@ -3059,6 +3157,10 @@ ngx_http_markdown_dynconf_reload(
         return watcher->diagnostic_state.last_result;
     }
 
+    masked_fields = ngx_http_markdown_dynconf_masked_fields(watcher, &result);
+    watcher->diagnostic_state.last_masked_fields = masked_fields;
+    ngx_http_markdown_dynconf_log_masked_fields(log, masked_fields);
+
     if (ngx_http_markdown_dynconf_copy_digest(
             next_source_digest, sizeof(next_source_digest),
             result.source_digest, result.source_digest_len) != NGX_OK
@@ -3068,6 +3170,8 @@ ngx_http_markdown_dynconf_reload(
     {
         /* Digest truncation is a validation failure, not a partial reload. */
         ngx_http_markdown_record_dynconf_reload(DYNCONF_ERR_INTERNAL);
+        ngx_http_markdown_dynconf_record_candidate_error(
+            watcher, DYNCONF_ERR_INTERNAL);
         watcher->diagnostic_state.last_result = NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
         markdown_dynconf_result_free(&result);
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;

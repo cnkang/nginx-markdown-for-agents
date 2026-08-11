@@ -1558,6 +1558,8 @@ void markdown_dynconf_result_init(struct FFIDynconfResult *result);
  *   if `data_len` is 0.
  * - `result` must point to a valid, writable `FFIDynconfResult` that has
  *   been initialized via `markdown_dynconf_result_init`.
+ * - An initialized result may be reused for another parse; the previous
+ *   owned strings are released before the new result is written.
  * - After a successful call, `result` contains heap-allocated strings that
  *   must be freed via `markdown_dynconf_result_free`.
  */
@@ -1568,7 +1570,8 @@ void markdown_dynconf_parse(const uint8_t *data,
 /**
  * Free heap memory owned by an FFIDynconfResult.
  *
- * After calling this function, all pointer fields in `result` become invalid.
+ * After calling this function, all pointer fields and scalar result fields in
+ * `result` are reset to safe defaults.
  * It is safe to call this on a result that was initialized but never
  * populated (e.g., after a NULL pointer early-return).
  *
@@ -1576,7 +1579,8 @@ void markdown_dynconf_parse(const uint8_t *data,
  *
  * - `result` must point to a valid `FFIDynconfResult` that was populated
  *   by `markdown_dynconf_parse` or initialized via `markdown_dynconf_result_init`.
- * - Must be called exactly once per successful `markdown_dynconf_parse` call.
+ * - Call this after the final parse using the result. It is also safe to call
+ *   it on an initialized, already-reset result.
  */
 void markdown_dynconf_result_free(struct FFIDynconfResult *result);
 

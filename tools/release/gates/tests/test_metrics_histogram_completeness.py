@@ -82,6 +82,16 @@ def test_renderer_emits_complete_histogram_families() -> None:
     assert '"streaming"' in body
 
 
+def test_v1_mapping_does_not_put_gt_1000ms_in_finite_5s_bucket() -> None:
+    """The fifth-second bucket is finite; >1000ms belongs only in +Inf."""
+    source = (REPO_ROOT / "components/nginx-module/src/ngx_http_markdown_metrics_impl.h").read_text(
+        encoding="utf-8"
+    )
+    mapping = source[source.index("ngx_http_markdown_metrics_to_v1"):]
+    assert "duration_full_buffer.buckets[9]" not in mapping
+    assert "duration_streaming.buckets[9]" not in mapping
+
+
 def test_registry_histogram_has_correct_boundaries() -> None:
     registry_path = REPO_ROOT / "artifacts/release/0.9.2/metrics-registry.json"
     assert registry_path.is_file(), f"metrics registry artifact missing: {registry_path}"
