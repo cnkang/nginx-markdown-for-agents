@@ -53,8 +53,8 @@ The counters follow these conservation rules:
 
 ## Diagnostics
 
-The diagnostics handler returns the strict Schema v1 response documented in
-[Observability Contract v1](../architecture/observability-schema-v1.md). It has
+The diagnostics handler returns the strict Schema v2 response documented in
+[Observability Contract v2](../architecture/observability-schema-v1.md). It has
 no streaming-only top-level section. The frozen families provide runtime visibility via
 worker-local `runtime` counters, bounded `recent_decisions` entries, and the
 optional `runtime.module_metrics` evidence counters. Those counters are read
@@ -63,7 +63,7 @@ directly by the benchmark harness. They are not inferred from engine labels.
 The endpoint accepts only GET and HEAD. HEAD computes the complete response length but
 sends no body. Other methods return 405. Native NGINX allow/deny/auth
 directives can narrow access further but cannot broaden the handler's built-in
-internal boundary.
+loopback-only boundary.
 
 ## Decision reasons and troubleshooting
 

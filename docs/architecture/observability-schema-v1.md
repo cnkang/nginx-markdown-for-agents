@@ -1,4 +1,4 @@
-# Observability Contract v1 (Internal)
+# Observability Contract v2 (Internal)
 
 **Status**: repository-internal model for 0.9.2
 
@@ -20,12 +20,12 @@ Changes to these surfaces and their tests/documentation must remain
 synchronized. Internal Rust helpers must not add undocumented operator fields,
 metric families, labels, or configuration directives.
 
-## Diagnostics Schema v1
+## Diagnostics Schema v2
 
 The NGINX C renderer is the single implementation of the live diagnostics
 endpoint. The response has exactly these seven top-level fields:
 
-- `schema_version`: integer constant `1`
+- `schema_version`: integer constant `2`
 - `product_version`
 - `worker`: `pid` and `scope="worker-local"`
 - `build`: source SHA, NGINX/Rust versions, and feature list
@@ -37,9 +37,10 @@ endpoint. The response has exactly these seven top-level fields:
 
 The schema rejects unknown fields and malformed types. The handler is
 read-only: the endpoint accepts GET and HEAD, HEAD computes the complete body length
-without sending a body, and other methods return 405. `markdown_diagnostics on`
-does not establish an IP or authentication boundary. Configure native NGINX
-access controls on the diagnostics location, for example:
+without sending a body, and other methods return 405. The handler itself accepts
+only loopback peers (`127.0.0.1` and `::1`) and denies missing or unknown peer
+addresses before rendering. Configure native NGINX access controls on the
+diagnostics location to narrow that boundary further, for example:
 
 ```nginx
 location = /nginx-markdown/diagnostics {
@@ -51,10 +52,10 @@ location = /nginx-markdown/diagnostics {
 ```
 
 Native NGINX access/auth directives can further restrict access, but they
-cannot broaden a handler configuration when the handler is off.
+cannot broaden the built-in loopback boundary.
 
 Legacy `config_snapshot`, profile, streaming, duplicated metrics, and
-rollback-mutation fields are not part of v1.
+rollback-mutation fields are not part of v2.
 
 The optional `runtime.module_metrics` object is a structured evidence bridge,
 not a second public metrics surface. When present, it carries exact integer

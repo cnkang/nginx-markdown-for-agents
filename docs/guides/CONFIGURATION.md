@@ -102,6 +102,9 @@ decoder rejects a truncated final member. A decompression failure follows
 `markdown_error_policy` before commit and cannot replay the original body
 after streaming headers have been sent.
 
+The 0.9.2 default for `streaming_buffer` is 2 MiB, up from 256 KiB in 0.9.1.
+Set `markdown_limits streaming_buffer=256k` to retain the previous default.
+
 ## Streaming policy
 
 The requested policy is `markdown_streaming off | auto | force`.
@@ -139,7 +142,14 @@ Built-in streaming exclusions include event-stream and newline-delimited JSON
 media types.
 
 `markdown_trusted_proxies` is an explicit CIDR allowlist for forwarded URL
-headers. The module ignores forwarded headers from an untrusted peer.
+headers. The module ignores forwarded headers from an untrusted peer. For a
+trusted request, the module processes aligned `Forwarded` or `X-Forwarded-*`
+chains from right to left. It strips trusted proxy hops and uses the first
+untrusted hop for the client-facing value. If every hop matches a trusted
+proxy, the module discards the chain. Bracketed IPv6 literals such as
+`[2001:db8::1]` can match a trusted CIDR. Bracketed IPv4 literals such as
+`[192.0.2.1]` never match. The module discards malformed or mismatched
+forwarded lists as a whole.
 
 ## Markdown output and pruning
 
@@ -250,11 +260,11 @@ versioned documents. Do not copy those examples into a 0.9.2 configuration.
 `markdown_parser_budget` — REMOVED. Use the
 `markdown_limits parser_memory=` key instead.
 
-`markdown_stream_threshold` — REMOVED. Use the
-`markdown_limits streaming_buffer=` key instead.
+`markdown_stream_threshold` — REMOVED. No replacement. The threshold is an
+internal 1 MiB routing rule.
 
 `markdown_stream_precommit_buffer` — REMOVED. Use the
 `markdown_limits streaming_buffer=` key instead.
 
-`markdown_stream_flush_min` — REMOVED. Use the
-`markdown_limits streaming_buffer=` key instead.
+`markdown_stream_flush_min` — REMOVED. No replacement. Flushing uses an
+internal heuristic.

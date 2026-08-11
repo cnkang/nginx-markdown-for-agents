@@ -10,7 +10,7 @@ integrity verification via SHA256SUMS, and GPG signature verification.
 
 | Channel | Format | Status | Signing |
 |---------|--------|--------|---------|
-| GitHub Releases | .deb + .rpm | Active for v0.7.0+ release artifacts; tag-specific; verify assets before downloading | SHA256SUMS / GPG when published |
+| GitHub Releases | .deb + .rpm | Active for published release artifacts; tag-specific; verify assets before downloading | SHA256SUMS; `SHA256SUMS.asc` for published releases |
 | Self-hosted APT | .deb | Planned; no public repository URL yet | GPG |
 | Self-hosted YUM | .rpm | Planned; no public repository URL yet | GPG |
 
@@ -25,6 +25,12 @@ package command, verify that the target GitHub Release lists both the exact
 package and its `SHA256SUMS` file. Release candidates do not make package
 assets available. If the release publishes no matching asset, use the
 [Manual Source Build](./INSTALLATION.md#6-secondary-manual-source-build).
+
+For repository and release-build checksum verification, use the authoritative
+[`packaging/checksums.sha256`](../../packaging/checksums.sha256) file with
+[`packaging/scripts/verify-checksum.sh`](../../packaging/scripts/verify-checksum.sh).
+`packaging/nginx-checksums.yaml` is legacy compatibility data only. Active
+workflows do not consume it. Do not add new release versions there.
 
 <!-- BEGIN:release-matrix:distribution-matrix -->
 
@@ -198,16 +204,22 @@ curl -fsSL -H "Accept: application/json" -o release-manifest.json \
 
 ## GPG Signature Verification
 
-When the project enables GPG signing for a release, it publishes a detached
-ASCII-armored signature file (`SHA256SUMS.asc`) alongside `SHA256SUMS`. This
-lets users verify that the project maintainers produced the checksums.
+For a published GitHub Release, the `release-binaries` workflow publishes a
+detached ASCII-armored signature file (`SHA256SUMS.asc`) alongside
+`SHA256SUMS`. The signing job checks out the exact commit resolved by the
+workflow's prepare job, so the signing script and release metadata come from
+the same immutable source revision. Manual runs only publish the signature
+when the requested ref is a version tag (`v...`).
+The `release-signing` environment secrets are therefore mandatory for a
+published release. The workflow fails closed rather than publishing an
+unsigned release asset.
 
 ### Importing the Project Public Key
 
 Before verifying signatures, import the project signing public key:
 
 ```bash
-# Import from a keyserver (replace KEY_ID with the actual project key ID)
+# Import from a keyserver (replace KEY_ID with the published project key ID)
 gpg --keyserver hkps://keys.openpgp.org --recv-keys <KEY_ID>
 
 # Or import from a local file if provided

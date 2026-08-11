@@ -372,6 +372,8 @@ make supply-chain
 - [Operations Guide](docs/guides/OPERATIONS.md) — Monitoring, log tuning, and runtime troubleshooting.
 - [Migration Guides](docs/guides/MIGRATION-0.9.2.md) — 0.9.2 breaking-change migration. See also:
   - [0.9.1+ → 0.9.2 Migration](docs/guides/MIGRATION-0.9.2.md)
+  - [Upgrade to 0.9.2](docs/guides/UPGRADE-TO-0.9.2.md)
+  - [Rollback from 0.9.2](docs/guides/ROLLBACK-0.9.2.md)
   - [0.9.x → 0.9.1 Migration](docs/guides/MIGRATION-0.9.1.md)
   - [0.8.x → 0.9.x Migration](docs/guides/MIGRATION-0.9.md)
   - [0.7.x → 0.8.x Migration](docs/guides/MIGRATION-0.8.md)

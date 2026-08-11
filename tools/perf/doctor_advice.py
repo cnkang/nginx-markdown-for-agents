@@ -485,8 +485,9 @@ def _evaluate_d05(metrics: Dict[str, Any]) -> RuleResult:
                     f"Decompression budget exceeded {int(exceeded)} time(s)"
                 ),
                 advice=(
-                    "Responses are exceeding markdown_decompress_max_size. "
-                    "Increase the budget or investigate upstream response sizes."
+                    "Responses are exceeding the decompression limit. "
+                    "Increase markdown_limits decompressed_size=<size> or "
+                    "investigate upstream response sizes."
                 ),
                 metrics_used={"decompression_budget_exceeded_total": exceeded},
             ),

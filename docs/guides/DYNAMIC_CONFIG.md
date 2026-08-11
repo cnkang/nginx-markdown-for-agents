@@ -5,10 +5,11 @@
 1. [Overview](#overview)
 2. [Enabling Dynamic Configuration](#enabling-dynamic-configuration)
 3. [Supported Runtime Keys](#supported-runtime-keys)
-4. [Reload Semantics](#reload-semantics)
-5. [Last-Known-Good and Rollback](#last-known-good-and-rollback)
-6. [Dry-Run Validation](#dry-run-validation)
-7. [Operational Recommendations](#operational-recommendations)
+4. [Precedence and Masked Keys](#precedence-and-masked-keys)
+5. [Reload Semantics](#reload-semantics)
+6. [Last-Known-Good and Rollback](#last-known-good-and-rollback)
+7. [Dry-Run Validation](#dry-run-validation)
+8. [Operational Recommendations](#operational-recommendations)
 
 ---
 
@@ -57,6 +58,10 @@ contain only these runtime keys:
 | `error_policy` | `pass`, `fail_closed`, `status 429`, `status 503` |
 | `streaming_buffer` | integer bytes from 64 KiB through 1 GiB |
 
+The 0.9.2 default for `streaming_buffer` is 2 MiB. Pin
+`streaming_buffer=262144` in `markdown_limits` when operators need the 0.9.1
+256 KiB behavior.
+
 Example:
 
 ```json
@@ -74,6 +79,50 @@ Missing or unknown schema versions, unknown keys, duplicate keys, invalid
 types, and out-of-range values reject the entire file. Structural directives
 (`markdown_content_types`, `markdown_stream_excluded_types`, auth policy, and
 conditional requests) require `nginx -s reload`.
+
+## Precedence and Masked Keys
+
+Dynconf values participate in a five-tier precedence order, from highest to
+lowest:
+
+1. Request-variable evaluation of `markdown_filter`.
+2. Explicit static server/location configuration.
+3. A dynconf runtime value when the field is not blocked.
+4. An inherited `http {}` baseline.
+5. The built-in default.
+
+An explicit server or location value sets that field's block bit and remains
+effective after a dynconf reload. An `http {}` baseline supplies the fallback
+but does not block a runtime override. When a candidate contains a blocked
+key, the watcher logs a warning. Diagnostics exposes the key in
+`configuration.dynconf.masked_keys`. The static value remains effective.
+
+### Migrating legacy line-format files
+
+Older releases used line-format keys. Convert them before relying on the JSON
+v1 contract:
+
+```text
+schema_version=0.9
+markdown_filter=on
+streaming_budget=16m
+memory_budget=64m
+```
+
+becomes:
+
+```json
+{
+  "schema_version": 1,
+  "filter": "on",
+  "streaming_buffer": 16777216
+}
+```
+
+`memory_budget` is no longer a runtime key. Use static
+`markdown_limits conversion_memory=<size>` as its replacement. When a watched file's
+first byte is not `{`, the watcher logs
+`legacy line format detected - migrate to JSON v1` once per worker.
 
 ---
 
@@ -96,6 +145,9 @@ The diagnostics endpoint reports the dynconf `generation` and
 reload advances the generation and records `last_success`. A failed
 validation leaves the active snapshot and generation unchanged, enabling a
 retry on the next poll cycle.
+
+The diagnostics `configuration.dynconf.masked_keys` array lists runtime keys
+that static configuration blocked in the last validated candidate.
 
 ---
 

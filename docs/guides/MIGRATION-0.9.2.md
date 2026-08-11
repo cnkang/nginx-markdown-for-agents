@@ -16,6 +16,48 @@ After 0.9.2, all 1.x releases maintain backward compatibility for a minimum of
 **Upgrade path:** update your nginx.conf to remove/replace removed directives
 (see tables below), replace the module binary, then run `nginx -t` to validate.
 
+## Dynamic Configuration JSON Migration
+
+0.9.2 accepts the JSON v1 dynconf contract. Convert legacy line-format files
+before upgrading. The old `markdown_filter` key becomes `filter`, and
+`streaming_budget` becomes `streaming_buffer`. 0.9.2 removes `memory_budget`
+from runtime configuration. Set the static `markdown_limits
+conversion_memory=<size>` directive instead.
+
+```text
+# BEFORE (legacy line format)
+schema_version=0.9
+markdown_filter=on
+streaming_budget=16m
+memory_budget=64m
+```
+
+```json
+{
+  "schema_version": 1,
+  "filter": "on",
+  "streaming_buffer": 16777216
+}
+```
+
+The watcher emits `legacy line format detected - migrate to JSON v1` once
+per worker when the first byte of the watched file is not `{`. Do not treat a
+legacy file as a successful JSON reload. Migrate it and verify the next reload
+through the diagnostics endpoint.
+
+The JSON contract is fail-closed: unknown keys, duplicate keys, unsupported
+schema versions, invalid types, and out-of-range values reject the entire
+candidate. The active or last-known-good snapshot remains unchanged. Before
+deployment, validate the JSON shape and supported keys, then check
+`configuration.dynconf` plus
+`nginx_markdown_dynconf_reloads_total{reason=...}` after the first poll.
+
+### Content-Encoding policy
+
+Malformed, unknown, and excessively deep `Content-Encoding` chains follow the
+configured `markdown_error_policy`. Only `pass` forwards the original
+response. `fail_closed` and status policies reject it.
+
 ---
 
 ## Breaking Changes Summary
@@ -99,9 +141,9 @@ markdown_metrics_per_path_cardinality 200;
 
 ### `markdown_diagnostics_allow` → removed
 
-The diagnostics location used a module-level CIDR allow-list. Access control
-now uses NGINX's standard `allow`/`deny` directives inside the
-`markdown_diagnostics` location.
+The diagnostics location no longer accepts a module-level CIDR allow-list.
+The handler is loopback-only by default. Standard NGINX `allow`/`deny`
+directives can narrow that boundary but cannot broaden it.
 
 ```nginx
 # BEFORE (0.9.1)
@@ -110,7 +152,8 @@ markdown_diagnostics_allow 10.0.0.0/8;
 # AFTER (0.9.2)
 location /nginx-markdown/diagnostics {
     markdown_diagnostics on;
-    allow 10.0.0.0/8;
+    allow 127.0.0.1;
+    allow ::1;
     deny all;
 }
 ```
@@ -265,6 +308,19 @@ produces its standard "unknown directive" error.
 
 ---
 
+## Trusted forwarded-hop behavior
+
+`markdown_trusted_proxies` applies only to HTTP forwarded URL headers. For a
+request from a trusted peer, the module processes aligned `Forwarded` or
+`X-Forwarded-*` chains from right to left. It strips trusted proxy hops and
+uses the first untrusted hop for the client-facing value. If every hop matches
+a trusted proxy, the module discards the forwarded set. Bracketed IPv6
+literals such as `[2001:db8::1]` can match a trusted CIDR. Bracketed IPv4
+literals such as `[192.0.2.1]` never match. The module discards malformed or
+mismatched lists as a whole.
+
+---
+
 ## `markdown_limits` Unified Syntax
 
 All resource limits are now managed through the single `markdown_limits`
@@ -294,6 +350,8 @@ markdown_limits conversion_timeout=30s
 
 Cross-key constraints: `parser_timeout <= conversion_timeout`,
 `parser_memory <= conversion_memory`, `streaming_buffer <= conversion_memory`.
+The 0.9.2 default for `streaming_buffer` is 2 MiB, up from 256 KiB in 0.9.1.
+Pin `markdown_limits streaming_buffer=256k` to preserve the older default.
 
 ---
 
@@ -324,9 +382,9 @@ After 0.9.2, these 25 directives constitute the frozen public surface:
 | 19 | `markdown_log_verbosity` | http, server, location |
 | 20 | `markdown_metrics` | location |
 | 21 | `markdown_metrics_shm_size` | http |
-| 22 | `markdown_dynamic_config` | http |
-| 23 | `markdown_dynamic_config_path` | http |
-| 24 | `markdown_dynconf_dry_run` | http |
+| 22 | `markdown_dynamic_config` | http only — move it to the `http {}` block |
+| 23 | `markdown_dynamic_config_path` | http only — move it to the `http {}` block |
+| 24 | `markdown_dynconf_dry_run` | http only — move it to the `http {}` block |
 | 25 | `markdown_diagnostics` | location |
 
 ---
