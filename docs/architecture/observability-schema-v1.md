@@ -4,6 +4,9 @@
 
 This document records the ownership boundaries for the frozen observability
 surfaces. It is not an external Rust SDK or an additional wire-schema source.
+The 0.9.0 compatibility contract documented `schema_version 1`. The 0.9.2
+diagnostics endpoint below intentionally emits schema_version: 2 and the
+breaking-release migration guide defines the consumer transition.
 
 The authoritative production surfaces are:
 

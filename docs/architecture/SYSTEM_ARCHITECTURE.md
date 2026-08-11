@@ -300,15 +300,19 @@ parser_memory=` (default 32m) keys limit parsing time and memory. Error codes
 
 ### Diagnostics Endpoint (`ngx_http_markdown_diagnostics.c`)
 A dedicated HTTP handler exposes runtime state at
-`/nginx-markdown/diagnostics` when you configure `markdown_diagnostics on`. It returns JSON containing the current config snapshot, recent
-decision summaries (reason codes, durations), and a metrics snapshot.
-The `allow` CIDR configuration restricts access. The module denies external
-access by default.
+`/nginx-markdown/diagnostics` when you configure `markdown_diagnostics on`. It
+returns JSON containing a bounded configuration identity/effective state,
+recent decision summaries (reason codes, durations), and runtime module
+metrics.
+The handler is loopback-only by default and denies external peers before
+rendering. Standard NGINX `allow`/`deny` directives may add restrictions but
+cannot broaden that boundary.
 
 ### Dynconf Dry-run and Last-Known-Good (`ngx_http_markdown_dynconf_snapshot.c`)
-`markdown_dynconf_dry_run on` validates a new configuration file on HUP
-without replacing the active snapshot. Validation results include line
-numbers, field names, and error reasons. On successful reload, the
+`markdown_dynconf_dry_run on` validates a new configuration file during the
+dynconf reload cycle
+without replacing the active snapshot. Validation results use bounded
+categorical error reasons. On successful reload, the
 module preserves the previous active snapshot as last-known-good (LKG) for diagnostics
 and failed-reload protection. There is no worker-local runtime restore API.
 Operators restore a prior valid file atomically and let the normal watcher

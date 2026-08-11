@@ -52,6 +52,24 @@ deployment, validate the JSON shape and supported keys, then check
 `configuration.dynconf` plus
 `nginx_markdown_dynconf_reloads_total{reason=...}` after the first poll.
 
+### Diagnostics JSON schema v2
+
+The diagnostics endpoint now returns `schema_version: 2`. Migrate consumers
+that read the 0.9.1 directive/profile-oriented response as follows:
+
+| 0.9.1 field | 0.9.2 field or action |
+|-------------|------------------------|
+| `config_snapshot` | `configuration.static_digest`, plus `configuration.effective` and `configuration.effective_sources` for effective dynconf fields |
+| `metrics_snapshot` | `runtime.module_metrics` for the bounded module counters |
+| `dynconf_state` | `configuration.dynconf` |
+| `streaming_config` / old `effective_config` | `configuration.effective` and `configuration.effective_sources` |
+| `profile`, `overridden_fields`, `forced_fields` | Removed; profile presets no longer exist |
+
+The v2 dynconf object also exposes `masked_keys` and bounded categorical
+`last_error` values. Validate `schema_version` before accessing fields. Do not
+parse removed v1 sections as if they were still present. The authoritative
+schema is [`schemas/diagnostics.schema.json`](../../schemas/diagnostics.schema.json).
+
 ### Content-Encoding policy
 
 Malformed, unknown, and excessively deep `Content-Encoding` chains follow the

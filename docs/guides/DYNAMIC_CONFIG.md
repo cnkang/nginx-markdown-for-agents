@@ -132,7 +132,7 @@ The dynconf timer performs a two-phase staged commit:
 
 1. **Parse phase:** The module parses the entire file into a staging snapshot.
 2. **Validate phase:** The module validates every key and value.
-3. **Promote phase:** If all lines pass, the staging snapshot atomically
+3. **Promote phase:** If all fields pass, the staging snapshot atomically
    replaces the active snapshot.
 
 On any parse or validation error, the module discards the staging snapshot.
@@ -183,10 +183,10 @@ a new active snapshot.
 
 ```
 Time 0: Active=v1, LKG=none
-Time 1: Reload v2 succeeds → Active=v2, LKG=v1, applied_mtime updated
-Time 2: Reload v3 fails   → Active=v2, LKG=v1, applied_mtime unchanged
+Time 1: Reload v2 succeeds → Active=v2, LKG=v1, generation/last_success updated
+Time 2: Reload v3 fails   → Active=v2, LKG=v1, generation/last_success unchanged
 Time 3: Restore v1 file
-Time 4: Reload v1 succeeds → Active=v1, LKG=v2, applied_mtime updated
+Time 4: Reload v1 succeeds → Active=v1, LKG=v2, generation/last_success updated
 ```
 
 ---
@@ -201,8 +201,9 @@ configuration file but does not promote the staging snapshot to active.
 markdown_dynconf_dry_run on;
 ```
 
-The module logs validation results at `info` level, including line numbers and
-field-level error details for any failures.
+The module logs a bounded categorical validation result at `info` level for
+the dry-run candidate. It does not include raw file paths, secrets, or raw
+configuration content in the result.
 
 ### Dry-Run Workflow
 

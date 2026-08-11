@@ -68,6 +68,12 @@ before/after examples.
 - **Content-Encoding policy.** Malformed, unknown, and excessively deep
   encoding chains follow `markdown_error_policy`. Only `pass` forwards the
   original response.
+- **Diagnostics JSON schema v2.** The endpoint now declares
+  `schema_version: 2`. Migrate consumers from the old `config_snapshot`,
+  `metrics_snapshot`, `dynconf_state`, `streaming_config`, and profile-oriented
+  sections to `configuration`, `runtime`, and `configuration.dynconf` as
+  described in the 0.9.2 migration guide. `masked_keys` is part of the v2
+  dynconf object.
 
 ### Fixed
 
@@ -230,10 +236,6 @@ completing before the long-lived contract begins.
 - Configuration: profile merge preserves explicit parent directives;
   `max_inflight=0` accepted as unlimited per documented contract;
   error-policy reject paths return configured `error_status`.
-- Diagnostics: removed legacy directive-shaped snapshot keys, aligned the
-  streaming selector fields with `policy`/`policy_source`, and removed the
-  unexposed manual-rollback helper while retaining atomic file-based reloads
-  and last-known-good state reporting.
 - Complexity debt: split the remaining C and Rust production/test renderers,
   streaming handlers, sanitizers, and traversal helpers; removed all 27
   historical complexity baseline entries. `make complexity-check` now passes
