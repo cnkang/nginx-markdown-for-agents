@@ -28,6 +28,10 @@ except ModuleNotFoundError:
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 REGISTRY_PATH = REPO_ROOT / "components" / "rust-converter" / "reason_registry.toml"
 
+if str(REPO_ROOT / "tools") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "tools"))
+from lib.executable_validation import resolve_approved_executable  # noqa: E402
+
 # Output paths
 RUST_OUTPUT = (
     REPO_ROOT / "components" / "rust-converter" / "src" / "decision" / "reason_code.rs"
@@ -725,8 +729,13 @@ def build_full_rust(reasons, hash_hex: str) -> str:
 
 def format_rust_source(content: str) -> str:
     """Canonicalize generated Rust with the repository toolchain formatter."""
+    rustfmt = resolve_approved_executable("rustfmt")
+    if rustfmt is None:
+        raise RuntimeError(
+            "rustfmt is unavailable or is not under an approved executable root"
+        )
     result = subprocess.run(
-        ["rustfmt", "--emit", "stdout"],
+        [rustfmt, "--emit", "stdout"],
         input=content,
         capture_output=True,
         text=True,

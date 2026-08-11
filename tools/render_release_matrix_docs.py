@@ -1170,9 +1170,8 @@ def check_file(
 ) -> list[str]:
     """Check a single file for marker consistency.
 
-    Returns list of errors (mismatch = error). Missing files and missing
-    markers are treated as warnings (printed to stderr) and do not cause
-    a non-zero exit, since markers may not have been added yet.
+    Returns list of errors. Missing files and missing markers are failures,
+    because a checked section without a source document cannot be verified.
     """
     errors: list[str] = []
     try:
@@ -1182,10 +1181,7 @@ def check_file(
         return errors
 
     if not file_path.exists():
-        print(
-            f"WARNING: {rel_path}: target file not found",
-            file=sys.stderr,
-        )
+        errors.append(f"{rel_path}: target file not found")
         return errors
 
     content = file_path.read_text(encoding="utf-8")
@@ -1197,11 +1193,7 @@ def check_file(
         return errors
 
     if not sections:
-        print(
-            f"WARNING: {rel_path}: no release-matrix markers "
-            f"(will be added in a later update)",
-            file=sys.stderr,
-        )
+        errors.append(f"{rel_path}: no release-matrix markers")
         return errors
 
     # Warn about unknown sections

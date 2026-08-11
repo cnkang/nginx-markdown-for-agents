@@ -306,7 +306,14 @@ def _invoke_fuzz(target: str, flags: list[str], timeout: int) -> dict:
             command, cwd=FUZZ_CRATE_DIR, capture_output=True, text=True,
             timeout=timeout, check=False)
     except subprocess.TimeoutExpired as exc:
-        return {"returncode": -1, "stdout": "", "stderr": f"timed out: {exc}"}
+        stdout = exc.stdout or ""
+        stderr = exc.stderr or ""
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode("utf-8", errors="replace")
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", errors="replace")
+        return {"returncode": -1, "stdout": stdout,
+                "stderr": f"timed out: {exc}\n{stderr}"}
     except OSError as exc:
         return {"returncode": -1, "stdout": "", "stderr": f"spawn failed: {exc}"}
     return {"returncode": result.returncode,
@@ -478,21 +485,16 @@ def _compose_record(candidate_sha: str, blocking_names: set[str],
 
 
 def _write_record(record: dict, args) -> Path:
-    """Persist a record below the fixed generated release-output directory."""
-    raw_output = Path(args.output if args.output else args.record)
-    raw_name = raw_output.name
-    output_parts = raw_output.parts
-    if raw_name in {"", ".", ".."}:
-        raise ValueError(f"Invalid output filename for {RECORD_OUTPUT_LABEL}")
-    if not (len(output_parts) == 1
-            or (len(output_parts) == 4
-                and output_parts[:3] == RECORD_OUTPUT_ROOT.parts)):
+    """Persist the qualification record at its one canonical artifact path."""
+    requested_output = Path(args.output if args.output else args.record)
+    expected_output = Path(DEFAULT_RECORD)
+    if requested_output != expected_output:
         raise ValueError(
-            "Output path must be '<filename>' or "
-            "'artifacts/release/0.9.2/<filename>'"
+            "Output path is fixed to "
+            f"'{DEFAULT_RECORD}' for {RECORD_OUTPUT_LABEL}"
         )
     safe_name = validate_filename_strict(
-        raw_name, purpose=RECORD_OUTPUT_LABEL
+        expected_output.name, purpose=RECORD_OUTPUT_LABEL
     )
     candidate_output = REPO_ROOT / RECORD_OUTPUT_ROOT / safe_name
     resolved_candidate = candidate_output.resolve(strict=False)
@@ -611,14 +613,18 @@ def _blocking_entry_reasons(spec: dict, entry: dict | None) -> list[str]:
     if entry.get("status") != "pass":
         return [f"blocking-pending: blocking target {name} status is "
                 f"{entry.get('status')!r}"]
-    if any((entry.get("crashes", 0), entry.get("sanitizer_findings", 0))):
-        return [f"blocking-pending: blocking target {name} reports crashes "
-                f"or sanitizer findings"]
+    for field in ("crashes", "sanitizer_findings"):
+        value = entry.get(field)
+        if type(value) is not int:
+            return [f"malformed: {name} {field} must be an integer"]
+        if value != 0:
+            return [f"blocking-pending: blocking target {name} reports "
+                    f"{field}={value}"]
     elapsed = entry.get("elapsed_seconds_total")
     executions = entry.get("executions_total")
-    if type(elapsed) not in (int, float):
+    if type(elapsed) not in (int, float) or not math.isfinite(elapsed):
         return [f"missing-observation: {name} elapsed_seconds_total "
-                f"not numeric"]
+                f"must be finite numeric"]
     if type(executions) is not int:
         return [f"missing-observation: {name} executions_total "
                 f"not an integer"]

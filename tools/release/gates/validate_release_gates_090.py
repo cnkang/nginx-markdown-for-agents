@@ -22,8 +22,10 @@ if str(REPO_ROOT) not in sys.path:
 
 try:
     from tools.release.gates.check_stale_symbols import run_stale_symbol_check
+    from tools.release.gates._directive_macros import expand_directive_macros
 except ModuleNotFoundError:
     from check_stale_symbols import run_stale_symbol_check
+    from _directive_macros import expand_directive_macros
 
 
 def find_repo_root() -> Path:
@@ -114,7 +116,7 @@ def check_diagnostics_schema_version(repo: Path) -> dict:
     )
     emission = re.compile(
         r'ngx_slprintf\s*\(\s*p\s*,\s*last\s*,\s*'
-        r'"[^"\n]*\\"schema_version\\"\s*:\s*1\s*[,}]'
+        r'"(?:\\.|[^"\\])*\\"schema_version\\"\s*:\s*1\s*[,}]'
     )
     if not emission.search(renderer_without_comments):
         return {"name": "diagnostics_schema_v1", "status": "fail",
@@ -297,27 +299,6 @@ def _check_removed_directives(content: str, removed: list) -> list:
     return missing
 
 
-def _expand_directive_macros(content: str, names: str) -> str:
-    """Expand canonical directive names before inspecting the command table."""
-    definitions = dict(
-        re.findall(
-            r"^#define\s+(NGX_HTTP_MARKDOWN_DIRECTIVE_[A-Z0-9_]+)\s+"
-            r"\\\s*\"([^\"]+)\"",
-            names,
-            flags=re.MULTILINE,
-        )
-    )
-    return re.sub(
-        r"ngx_string\((NGX_HTTP_MARKDOWN_DIRECTIVE_[A-Z0-9_]+)\)",
-        lambda match: (
-            f'ngx_string("{definitions[match.group(1)]}")'
-            if match.group(1) in definitions
-            else match.group(0)
-        ),
-        content,
-    )
-
-
 def _read_directive_registry(repo: Path) -> str | None:
     """Read the live command registry with canonical names expanded."""
     directives = repo / (
@@ -328,7 +309,7 @@ def _read_directive_registry(repo: Path) -> str | None:
     )
     if not directives.exists() or not names.exists():
         return None
-    return _expand_directive_macros(
+    return expand_directive_macros(
         directives.read_text(), names.read_text()
     )
 

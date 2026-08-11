@@ -129,6 +129,9 @@ pub fn header_value(headers: &reqwest::header::HeaderMap, name: &str) -> String 
 /// Markdown emphasis.  Keep accepting the raw form as well so this assertion
 /// remains compatible with fixtures that emit a token in a non-Markdown body.
 pub fn markdown_token_present(body: &str, token: &str) -> bool {
+    if token.is_empty() {
+        return false;
+    }
     if body.contains(token) {
         return true;
     }
@@ -139,6 +142,9 @@ pub fn markdown_token_present(body: &str, token: &str) -> bool {
 
 /// Check a wire response for a fixture token in raw or Markdown-escaped form.
 pub fn markdown_token_bytes_present(body: &[u8], token: &str) -> bool {
+    if token.is_empty() {
+        return false;
+    }
     let raw_token = token.as_bytes();
     if body
         .windows(raw_token.len())

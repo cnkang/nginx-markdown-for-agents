@@ -31,6 +31,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # noqa: E402
 from lib.path_validation import validate_read_path  # noqa: E402
+from release.gates._directive_macros import (  # noqa: E402
+    expand_directive_macros,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 MAKEFILE = PROJECT_ROOT / "Makefile"
@@ -171,27 +174,6 @@ def check_release_package_workflow_version(
         )
 
 
-def _expand_directive_macros(content: str, names: str) -> str:
-    """Expand canonical directive names before inspecting the command table."""
-    definitions = dict(
-        re.findall(
-            r"^#define\s+(NGX_HTTP_MARKDOWN_DIRECTIVE_[A-Z0-9_]+)\s+"
-            r"\\\s*\"([^\"]+)\"",
-            names,
-            flags=re.MULTILINE,
-        )
-    )
-    return re.sub(
-        r"ngx_string\((NGX_HTTP_MARKDOWN_DIRECTIVE_[A-Z0-9_]+)\)",
-        lambda match: (
-            f'ngx_string("{definitions[match.group(1)]}")'
-            if match.group(1) in definitions
-            else match.group(0)
-        ),
-        content,
-    )
-
-
 def _read_directive_source(result: ValidationResult) -> str | None:
     """Read and expand the live directive command table."""
     src = read(CONFIG_DIRECTIVES_H)
@@ -202,7 +184,7 @@ def _read_directive_source(result: ValidationResult) -> str | None:
     if not names:
         result.fail("prereq:directive_names", "directive_names.h not found")
         return None
-    return _expand_directive_macros(src, names)
+    return expand_directive_macros(src, names)
 
 
 def check_removed_directive(result: ValidationResult) -> None:
@@ -277,6 +259,18 @@ def check_removed_conf_fields(result: ValidationResult) -> None:
             result.pass_(f"removed:field:{field_pat}", "absent from all sources")
 
 
+def _is_release_09_or_newer(active_version: str | None) -> bool:
+    """Return whether an active version is the 0.9 release line or newer."""
+    match = re.match(
+        r"^v?(\d+)\.(\d+)(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?$",
+        active_version or "",
+    )
+    if match is None:
+        return False
+    major, minor = (int(value) for value in match.groups())
+    return major > 0 or (major == 0 and minor >= 9)
+
+
 def check_new_directives(
     result: ValidationResult, active_version: str | None = None
 ) -> None:
@@ -291,14 +285,7 @@ def check_new_directives(
         ("markdown_stream_flush_min", True),
         ("markdown_stream_excluded_types", False),
     ]
-    match = re.match(r"^(\d+)\.(\d+)", active_version or "")
-    current_is_09_or_newer = bool(
-        match
-        and (
-            int(match.group(1)) > 0
-            or (int(match.group(1)) == 0 and int(match.group(2)) >= 9)
-        )
-    )
+    current_is_09_or_newer = _is_release_09_or_newer(active_version)
     for directive, retired_after_08 in all_new_directives:
         if current_is_09_or_newer and retired_after_08:
             result.skip(

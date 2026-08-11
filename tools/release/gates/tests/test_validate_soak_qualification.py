@@ -200,6 +200,28 @@ def test_negative_error_rate_is_not_treated_as_zero() -> None:
         validator.validate_soak_outcome(record, manifest)
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), "0"])
+def test_non_finite_error_rate_is_rejected(value) -> None:
+    """NaN, infinity, and non-numeric error rates cannot qualify."""
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    record = json.loads(
+        (FIXTURE_DIR / "soak-qualification-valid.json").read_text(
+            encoding="utf-8"))
+    record["per_scenario"][0]["error_rate"] = value
+
+    with pytest.raises(SystemExit, match="error_rate"):
+        validator.validate_soak_outcome(record, manifest)
+
+
+def test_parse_ab_report_uses_requests_per_second() -> None:
+    """rps must come from ab's request-rate line, not transfer rate."""
+    report = validator.parse_ab_report(
+        "Transfer rate: 9000.00 [Kbytes/sec] received\n"
+        "Requests per second:    42.50 [#/sec] (mean)\n")
+
+    assert report["rps"] == 42.5
+
+
 def test_missing_per_request_peak_is_insufficient_data() -> None:
     """A pass record must include an observed module-managed peak."""
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))

@@ -54,6 +54,11 @@ C_SRC="components/nginx-module/src"
 RUST_SRC="components/rust-converter/src"
 PY_SRC="tools"
 
+# Keep the final summary safe when a source tree is absent.
+c_count=0
+rust_count=0
+py_lizard_count=0
+
 # ── Shell scripts ───────────────────────────────────────────────────
 # Discover tracked shell scripts (same scope as security-shellcheck)
 SHELL_FILES="$(mktemp)"
@@ -101,16 +106,24 @@ C_WARNINGS="$OUTDIR/c-lizard-warnings.txt"
 C_REPORT="$OUTDIR/c-lizard-report.txt"
 echo "--- C (lizard) ---"
 if [[ -d "$C_SRC" ]]; then
+    set +e
     python3 -m lizard "$C_SRC" -l cpp \
         --CCN "$C_CCN_THRESHOLD" \
         --length "$C_LENGTH_THRESHOLD" \
         --arguments "$C_PARAMS_THRESHOLD" \
-        > "$C_REPORT" 2>/dev/null || true
+        > "$C_REPORT" 2>&1
+    c_lizard_rc=$?
     python3 -m lizard "$C_SRC" -l cpp \
         --CCN "$C_CCN_THRESHOLD" \
         --length "$C_LENGTH_THRESHOLD" \
         --arguments "$C_PARAMS_THRESHOLD" \
-        -w 2>&1 | grep "warning:" > "$C_WARNINGS" || true
+        -w 2>&1 | grep "warning:" > "$C_WARNINGS"
+    c_lizard_warn_rc=${PIPESTATUS[0]}
+    set -e
+    if [[ $c_lizard_rc -ne 0 || $c_lizard_warn_rc -ne 0 ]]; then
+        echo "ERROR: lizard failed for C sources" >&2
+        exit 1
+    fi
     c_count=$(wc -l < "$C_WARNINGS" | tr -d ' ')
     echo "  C violations: $c_count (thresholds: CCN=$C_CCN_THRESHOLD length=$C_LENGTH_THRESHOLD params=$C_PARAMS_THRESHOLD)"
     echo "  Report: $C_REPORT"
@@ -125,16 +138,24 @@ RUST_WARNINGS="$OUTDIR/rust-lizard-warnings.txt"
 RUST_REPORT="$OUTDIR/rust-lizard-report.txt"
 echo "--- Rust (lizard) ---"
 if [[ -d "$RUST_SRC" ]]; then
+    set +e
     python3 -m lizard "$RUST_SRC" -l rust \
         --CCN "$RUST_CCN_THRESHOLD" \
         --length "$RUST_LENGTH_THRESHOLD" \
         --arguments "$RUST_PARAMS_THRESHOLD" \
-        > "$RUST_REPORT" 2>/dev/null || true
+        > "$RUST_REPORT" 2>&1
+    rust_lizard_rc=$?
     python3 -m lizard "$RUST_SRC" -l rust \
         --CCN "$RUST_CCN_THRESHOLD" \
         --length "$RUST_LENGTH_THRESHOLD" \
         --arguments "$RUST_PARAMS_THRESHOLD" \
-        -w 2>&1 | grep "warning:" > "$RUST_WARNINGS" || true
+        -w 2>&1 | grep "warning:" > "$RUST_WARNINGS"
+    rust_lizard_warn_rc=${PIPESTATUS[0]}
+    set -e
+    if [[ $rust_lizard_rc -ne 0 || $rust_lizard_warn_rc -ne 0 ]]; then
+        echo "ERROR: lizard failed for Rust sources" >&2
+        exit 1
+    fi
     rust_count=$(wc -l < "$RUST_WARNINGS" | tr -d ' ')
     echo "  Rust violations: $rust_count (thresholds: CCN=$RUST_CCN_THRESHOLD length=$RUST_LENGTH_THRESHOLD params=$RUST_PARAMS_THRESHOLD)"
     echo "  Report: $RUST_REPORT"
@@ -149,16 +170,24 @@ PY_LIZARD_WARNINGS="$OUTDIR/py-lizard-warnings.txt"
 PY_LIZARD_REPORT="$OUTDIR/py-lizard-report.txt"
 echo "--- Python (lizard) ---"
 if [[ -d "$PY_SRC" ]]; then
+    set +e
     python3 -m lizard "$PY_SRC" -l python \
         --CCN "$PY_CCN_THRESHOLD" \
         --length "$PY_LENGTH_THRESHOLD" \
         --arguments "$PY_PARAMS_THRESHOLD" \
-        > "$PY_LIZARD_REPORT" 2>/dev/null || true
+        > "$PY_LIZARD_REPORT" 2>&1
+    py_lizard_rc=$?
     python3 -m lizard "$PY_SRC" -l python \
         --CCN "$PY_CCN_THRESHOLD" \
         --length "$PY_LENGTH_THRESHOLD" \
         --arguments "$PY_PARAMS_THRESHOLD" \
-        -w 2>&1 | grep "warning:" > "$PY_LIZARD_WARNINGS" || true
+        -w 2>&1 | grep "warning:" > "$PY_LIZARD_WARNINGS"
+    py_lizard_warn_rc=${PIPESTATUS[0]}
+    set -e
+    if [[ $py_lizard_rc -ne 0 || $py_lizard_warn_rc -ne 0 ]]; then
+        echo "ERROR: lizard failed for Python sources" >&2
+        exit 1
+    fi
     py_lizard_count=$(wc -l < "$PY_LIZARD_WARNINGS" | tr -d ' ')
     echo "  Python lizard violations: $py_lizard_count (thresholds: CCN=$PY_CCN_THRESHOLD length=$PY_LENGTH_THRESHOLD params=$PY_PARAMS_THRESHOLD)"
     echo "  Report: $PY_LIZARD_REPORT"
@@ -220,22 +249,22 @@ ls -la "$OUTDIR/" 2>/dev/null || true
 
 if [[ $c_count -ne 0 || $rust_count -ne 0 || $py_lizard_count -ne 0 ]]; then
     echo ""
-    echo "FAIL: complexity check found lizard violations"
-    echo "  Review: $C_WARNINGS $RUST_WARNINGS $PY_LIZARD_WARNINGS"
+    echo "FAIL: complexity check found lizard violations" >&2
+    echo "  Review: $C_WARNINGS $RUST_WARNINGS $PY_LIZARD_WARNINGS" >&2
     exit 1
 fi
 
 if [[ ${complexipy_rc:-0} -ne 0 ]]; then
     echo ""
-    echo "FAIL: complexipy found cognitive-complexity violations"
-    echo "  Review: $PY_COMPLEXIPY_OUT"
+    echo "FAIL: complexipy failed or found cognitive-complexity violations" >&2
+    echo "  Review: $PY_COMPLEXIPY_OUT" >&2
     exit 1
 fi
 
 if [[ ${shellcheck_rc:-0} -ne 0 ]]; then
     echo ""
-    echo "FAIL: shellcheck found errors"
-    echo "  Review: $SHELLCHECK_OUT"
+    echo "FAIL: shellcheck found errors" >&2
+    echo "  Review: $SHELLCHECK_OUT" >&2
     exit 1
 fi
 

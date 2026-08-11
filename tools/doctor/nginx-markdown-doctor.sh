@@ -546,7 +546,9 @@ check_rust_toolchain() {
     local doctor_root
     doctor_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd 2>/dev/null || printf '')
     local toolchain_file=""
+    local toolchain_file_exists="false"
     if [[ -n "$doctor_root" && -f "$doctor_root/rust-toolchain.toml" ]]; then
+        toolchain_file_exists="true"
         toolchain_file=$(grep -E '^channel[[:space:]]*=' "$doctor_root/rust-toolchain.toml" \
             | head -1 | sed 's/^channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/' || true)
     fi
@@ -562,10 +564,16 @@ check_rust_toolchain() {
     escaped_toolchain_file=$(json_escape "$toolchain_file")
 
     if [[ "$msrv_ok" == "true" ]]; then
-        if [[ -z "$toolchain_file" ]]; then
-            emit_check "rust_toolchain" "pass" \
-                "rustc ${rustc_version} meets MSRV ${expected_msrv}" \
-                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_expected_msrv"'"}'
+        if [[ "$toolchain_file_exists" != "true" ]]; then
+            emit_check "rust_toolchain" "warn" \
+                "rustc ${rustc_version} meets MSRV but rust-toolchain.toml is missing" \
+                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_expected_msrv"'","toolchain_file_present":false}' \
+                "Add rust-toolchain.toml with channel = \"${expected_msrv}\" for reproducible release builds"
+        elif [[ -z "$toolchain_file" ]]; then
+            emit_check "rust_toolchain" "warn" \
+                "rustc ${rustc_version} meets MSRV but rust-toolchain.toml has no channel" \
+                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_expected_msrv"'","toolchain_file_present":true}' \
+                "Set channel = \"${expected_msrv}\" in rust-toolchain.toml"
         elif [[ "$pinned_ok" == "true" ]]; then
             emit_check "rust_toolchain" "pass" \
                 "rustc ${rustc_version} meets MSRV; repository pins exact toolchain ${toolchain_file}" \

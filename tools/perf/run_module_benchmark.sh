@@ -946,7 +946,9 @@ run_scenario() {
   # Fetch real NGINX metrics from metrics endpoint
   log "  Fetching real NGINX metrics..."
   local metrics_json
-  metrics_json="$(curl -s -H 'Accept: text/plain; version=0.0.4' "http://127.0.0.1:${NGINX_PORT}/markdown-metrics" || echo '')"
+  metrics_json="$(curl -sS --connect-timeout 10 --max-time 60 \
+    -H 'Accept: text/plain; version=0.0.4' \
+    "http://127.0.0.1:${NGINX_PORT}/markdown-metrics" || echo '')"
   local metrics_file="$NGINX_WORKDIR/${SC_NAME}_metrics.json"
   printf '%s\n' "$metrics_json" > "$metrics_file"
 
@@ -954,7 +956,8 @@ run_scenario() {
   # of the frozen Prometheus v1 surface.
   log "  Fetching structured NGINX diagnostics..."
   local diagnostics_json
-  diagnostics_json="$(curl -s "http://127.0.0.1:${NGINX_PORT}/nginx-markdown/diagnostics" || echo '')"
+  diagnostics_json="$(curl -sS --connect-timeout 10 --max-time 60 \
+    "http://127.0.0.1:${NGINX_PORT}/nginx-markdown/diagnostics" || echo '')"
   local diagnostics_file="$NGINX_WORKDIR/${SC_NAME}_diagnostics.json"
   printf '%s\n' "$diagnostics_json" > "$diagnostics_file"
 
@@ -1196,6 +1199,8 @@ for scenario in scenarios:
 
 def aggregate_metric(rows, metric):
     values = [row.get("metrics", {}).get(metric) for row in rows]
+    if not values:
+        return None
     if not all(isinstance(value, (int, float)) and not isinstance(value, bool)
                for value in values):
         return None

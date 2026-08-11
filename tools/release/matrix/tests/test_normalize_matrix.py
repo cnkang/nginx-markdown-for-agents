@@ -137,3 +137,7 @@ class TestSchemaContract:
         for key in normalize_matrix.CANONICAL_ENTRY_KEYS:
             assert key in entry_props, f"canonical key {key!r} missing from schema"
         assert "matrix" in schema["properties"]
+        assert schema["required"] == ["schema_version"]
+        assert len(schema["oneOf"]) == 2
+        assert schema["oneOf"][0]["required"] == ["entries"]
+        assert schema["oneOf"][1]["required"] == ["matrix"]

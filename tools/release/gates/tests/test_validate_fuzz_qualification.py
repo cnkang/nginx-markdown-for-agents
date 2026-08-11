@@ -114,6 +114,29 @@ def test_missing_observation_fixture_fails(tmp_path: Path, monkeypatch,
     assert "executions_total" in captured.err
 
 
+@pytest.mark.parametrize("field", ["elapsed_seconds_total", "crashes",
+                                    "sanitizer_findings"])
+def test_non_finite_or_non_integer_observations_fail(
+        field: str, tmp_path: Path, monkeypatch, capsys) -> None:
+    """Non-finite measurements and non-integer zero counters fail closed."""
+    manifest = _write_staged(tmp_path, MANIFEST_FIXTURE)
+    record = json.loads(
+        _fixture_path("fuzz-qualification-valid.json").read_text(
+            encoding="utf-8"))
+    record["per_target"][0][field] = (
+        float("nan") if field == "elapsed_seconds_total" else "0")
+    record_path = tmp_path / "record.json"
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    rc = _run(monkeypatch, capsys,
+              "validate_fuzz_qualification.py", "--mode", "fixture",
+              "--manifest", str(manifest), "--record-input", str(record_path))
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "must be" in captured.err or "not" in captured.err
+
+
 def test_fixture_mode_requires_record_input(tmp_path: Path, monkeypatch,
                                             capsys) -> None:
     """Fixture mode must fail closed when no record input is provided."""
@@ -140,11 +163,19 @@ def test_target_manifest_rejects_path_like_target_name() -> None:
 
 
 def test_record_output_path_stays_within_repository(tmp_path: Path) -> None:
-    """Alternate real-mode output must not write outside the repository."""
+    """Real-mode output cannot be redirected by a caller."""
     args = type("Args", (), {"output": str(tmp_path / "record.json"),
                               "record": "unused.json"})()
 
     with pytest.raises(ValueError, match="Output path"):
+        validator._write_record({}, args)
+
+
+def test_record_output_path_cannot_change_artifact_name() -> None:
+    """Even a repository-local alternate filename is rejected."""
+    args = type("Args", (), {"output": None, "record": "alternate.json"})()
+
+    with pytest.raises(ValueError, match="fixed"):
         validator._write_record({}, args)
 
 
