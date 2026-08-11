@@ -645,8 +645,8 @@ def test_property11_pin_entry_preservation(auto_versions, manual_entries):
         ), f"Support tier changed for manual entry {key}"
 
 
-def test_replace_canonical_dynamic_entries_preserves_unmanaged_dynamic_rows():
-    """Generated rows must not delete unsupported or candidate dynamic rows."""
+def test_replace_canonical_dynamic_entries_prunes_stale_generated_rows():
+    """Keep explicit non-generated rows while replacing generated rows."""
     data = {
         "entries": [
             {
@@ -662,6 +662,13 @@ def test_replace_canonical_dynamic_entries_preserves_unmanaged_dynamic_rows():
                 "arch": "amd64",
                 "artifact_type": "dynamic-module",
                 "support_tier": "candidate",
+            },
+            {
+                "nginx_version": "1.22.1",
+                "libc": "glibc",
+                "arch": "amd64",
+                "artifact_type": "dynamic-module",
+                "support_tier": "supported",
             },
             {"artifact_type": "source-archive", "name": "source"},
         ]
@@ -683,6 +690,7 @@ def test_replace_canonical_dynamic_entries_preserves_unmanaged_dynamic_rows():
     }
     assert ("1.26.3", "glibc", "amd64") in keys
     assert ("1.24.0", "glibc", "amd64") in keys
+    assert ("1.22.1", "glibc", "amd64") not in keys
 
 
 def test_replace_canonical_dynamic_entries_normalizes_alias_rows():

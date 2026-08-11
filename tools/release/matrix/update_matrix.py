@@ -1060,12 +1060,24 @@ def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
         _matrix_entry_identity(entry)
         for entry in dynamic_entries
     }
+    non_generated_dynamic_tiers = {
+        "candidate",
+        "experimental",
+        "best-effort",
+        "unsupported",
+    }
     other_entries = [
         entry
         for entry in entries
         if not isinstance(entry, dict)
         or entry.get("artifact_type") != "dynamic-module"
-        or _matrix_entry_identity(entry) not in generated_keys
+        or (
+            _matrix_entry_identity(entry) not in generated_keys
+            and (
+                entry.get("managed_by") == "manual"
+                or entry.get("support_tier") in non_generated_dynamic_tiers
+            )
+        )
     ]
     dynamic_entries.sort(
         key=lambda entry: (

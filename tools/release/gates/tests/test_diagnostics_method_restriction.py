@@ -8,7 +8,7 @@ Since this is a structural unit test without a running NGINX instance, we
 validate:
 1. The C source contains the correct method bitmask check
 2. The Allow header is set to exactly "GET, HEAD"
-3. The return code is NGX_HTTP_NOT_ALLOWED (405)
+3. The response status is NGX_HTTP_NOT_ALLOWED (405)
 4. GET and HEAD are explicitly allowed through the guard
 
 Uses hypothesis to generate arbitrary HTTP method strings and verify the
@@ -58,21 +58,21 @@ REJECTED_STANDARD_METHODS = [
 
 # --- Source code loading and parsing (cached at module level) ---
 
-def _load_handler_body() -> str:
-    """Load and extract the diagnostics handler function body (cached)."""
+def _load_function_body(function_name: str) -> str:
+    """Load and extract one request-handler function body (cached)."""
     assert DIAGNOSTICS_SOURCE.exists(), (
         f"Diagnostics source not found: {DIAGNOSTICS_SOURCE}"
     )
     source = DIAGNOSTICS_SOURCE.read_text(encoding="utf-8")
 
-    # Find the handler function definition
     pattern = re.compile(
-        r"ngx_http_markdown_diagnostics_handler\(ngx_http_request_t\s+\*r\)"
+        re.escape(function_name)
+        + r"\(ngx_http_request_t\s+\*r\)"
         r"\s*\{",
         re.DOTALL,
     )
     match = pattern.search(source)
-    assert match is not None, "Handler function not found in source"
+    assert match is not None, f"Function {function_name} not found in source"
 
     # Extract from the opening brace using brace counting
     start = match.start()
@@ -89,7 +89,10 @@ def _load_handler_body() -> str:
 
 
 # Cache the handler body at module load time
-_HANDLER_BODY = _load_handler_body()
+_HANDLER_BODY = _load_function_body("ngx_http_markdown_diagnostics_handler")
+_METHOD_NOT_ALLOWED_BODY = _load_function_body(
+    "ngx_http_markdown_diagnostics_method_not_allowed"
+)
 
 
 # --- Structural validation helpers ---
@@ -120,13 +123,27 @@ def has_allow_header_set(handler_body: str) -> bool:
     return bool(pattern.search(handler_body))
 
 
-def has_405_return(handler_body: str) -> bool:
+def has_405_response(handler_body: str) -> bool:
     """
-    Verify the handler returns NGX_HTTP_NOT_ALLOWED in the method-check
-    branch.
+    Verify the method rejection path emits an NGX_HTTP_NOT_ALLOWED response.
+
+    A content handler may return NGX_HTTP_NOT_ALLOWED directly, or set the
+    response status before sending a short body through the output filter.
+    The latter is the required path for the diagnostics endpoint.
     """
-    pattern = re.compile(r"return\s+NGX_HTTP_NOT_ALLOWED\s*;")
-    return bool(pattern.search(handler_body))
+    direct_pattern = re.compile(r"return\s+NGX_HTTP_NOT_ALLOWED\s*;")
+    if direct_pattern.search(handler_body):
+        return True
+
+    delegated_pattern = re.compile(
+        r"return\s+ngx_http_markdown_diagnostics_method_not_allowed"
+        r"\s*\(\s*r\s*\)\s*;"
+    )
+    return bool(
+        delegated_pattern.search(handler_body)
+        and "r->headers_out.status = NGX_HTTP_NOT_ALLOWED;"
+        in _METHOD_NOT_ALLOWED_BODY
+    )
 
 
 def has_head_method_handling(handler_body: str) -> bool:
@@ -174,12 +191,12 @@ arbitrary_method_strategy = st.one_of(
 def test_non_get_head_methods_would_receive_405(method):
     """
     Property 8a: For any HTTP method other than GET or HEAD, the
-    diagnostics handler implementation contains logic that returns 405.
+    diagnostics handler implementation contains logic that emits 405.
 
     This validates structurally that the method check in the C source
     correctly rejects arbitrary non-GET/HEAD methods by confirming:
     1. The bitmask check uses (NGX_HTTP_GET | NGX_HTTP_HEAD)
-    2. NGX_HTTP_NOT_ALLOWED is returned for methods not matching
+    2. NGX_HTTP_NOT_ALLOWED is emitted for methods not matching
     3. The generated method is NOT in the allowed set
 
     Since NGINX dispatches methods via bitmask flags, any method that
@@ -196,8 +213,8 @@ def test_non_get_head_methods_would_receive_405(method):
         "Handler must check r->method against "
         "(NGX_HTTP_GET | NGX_HTTP_HEAD) bitmask"
     )
-    assert has_405_return(_HANDLER_BODY), (
-        "Handler must return NGX_HTTP_NOT_ALLOWED for rejected methods"
+    assert has_405_response(_HANDLER_BODY), (
+        "Handler must emit NGX_HTTP_NOT_ALLOWED for rejected methods"
     )
 
 
