@@ -339,6 +339,9 @@ static ngx_uint_t g_abort_calls = 0;
 static ngx_uint_t g_output_free_calls = 0;
 static ngx_uint_t g_safe_finish_calls = 0;
 static ngx_uint_t g_log_decision_calls = 0;
+static ngx_uint_t g_terminal_decision_calls = 0;
+static const char *g_last_terminal_reason = NULL;
+static const char *g_last_terminal_stage = NULL;
 static ngx_uint_t g_palloc_fail_once = 0;
 static ngx_uint_t g_pcalloc_fail_once = 0;
 static ngx_uint_t g_alloc_chain_fail_once = 0;
@@ -1314,6 +1317,31 @@ ngx_http_markdown_log_decision(ngx_http_request_t *r,
     g_log_decision_calls++;
 }
 
+/* Stub for the request-layer terminal diagnostics owner. */
+static void
+ngx_http_markdown_log_streaming_terminal_decision(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    const char *conversion_status,
+    const char *reason_code,
+    const char *stage)
+{
+    UNUSED(r);
+    UNUSED(ctx);
+    UNUSED(conf);
+    UNUSED(conversion_status);
+    g_terminal_decision_calls++;
+    g_last_terminal_reason = reason_code;
+    g_last_terminal_stage = stage;
+}
+
+#ifndef NGX_HTTP_MARKDOWN_CONV_SUCCESS
+#define NGX_HTTP_MARKDOWN_CONV_SUCCESS "SUCCESS"
+#define NGX_HTTP_MARKDOWN_CONV_FAILED  "FAILED"
+#define NGX_HTTP_MARKDOWN_CONV_SKIPPED "SKIPPED"
+#endif
+
 #ifndef NGX_CONF_UNSET_SIZE
 #define NGX_CONF_UNSET_SIZE ((size_t) -1)
 #endif
@@ -1446,6 +1474,9 @@ reset_globals(void)
     g_output_free_calls = 0;
     g_safe_finish_calls = 0;
     g_log_decision_calls = 0;
+    g_terminal_decision_calls = 0;
+    g_last_terminal_reason = NULL;
+    g_last_terminal_stage = NULL;
     g_palloc_fail_once = 0;
     g_pcalloc_fail_once = 0;
     g_alloc_chain_fail_once = 0;
@@ -2163,6 +2194,11 @@ test_postcommit_and_precommit_error_paths(void)
         "memory-limit postcommit should classify budget exceeded");
     TEST_ASSERT(g_log_decision_calls == 2,
         "postcommit budget failure should log classification and terminal reason");
+    TEST_ASSERT(g_terminal_decision_calls == 1
+        && strcmp(g_last_terminal_reason,
+                  "streaming_mid_flight_error") == 0
+        && strcmp(g_last_terminal_stage, "postcommit") == 0,
+        "postcommit failure should publish one terminal diagnostics path");
 
     ngx_http_markdown_streaming_record_postcommit_failure(
         &r, &ctx, &conf);
@@ -2170,6 +2206,8 @@ test_postcommit_and_precommit_error_paths(void)
         "repeated postcommit recording must not increment metrics");
     TEST_ASSERT(g_log_decision_calls == 2,
         "repeated postcommit recording must not duplicate terminal reason");
+    TEST_ASSERT(g_terminal_decision_calls == 1,
+        "repeated postcommit recording must not duplicate diagnostics path");
 
     ctx.streaming.completion.failure_recorded = 0;
     ctx.streaming.handle = (struct StreamingConverterHandle *) (uintptr_t) 0x4;
@@ -2259,6 +2297,13 @@ test_abort_passthrough_and_reentry_helpers(void)
     rc = ngx_http_markdown_streaming_passthrough(&r, &ctx, &in);
     TEST_ASSERT(rc == NGX_ERROR,
         "passthrough should fail when forwarding headers fails");
+    g_forward_headers_rc = NGX_OK;
+
+    ctx.headers_forwarded = 0;
+    g_forward_headers_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_passthrough(&r, &ctx, &in);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "passthrough should preserve downstream header backpressure");
     g_forward_headers_rc = NGX_OK;
 
     ctx.headers_forwarded = 1;
@@ -2770,6 +2815,16 @@ test_commit_feed_and_finalize_core_paths(void)
     TEST_ASSERT(rc == NGX_DECLINED,
         "header update failure triggers full-buffer fallback");
     g_stream_commit_headers_rc = NGX_OK;
+
+    g_next_header_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "commit should propagate downstream backpressure");
+    TEST_ASSERT(ctx.streaming.commit_state
+        == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE
+        && ctx.headers_forwarded == 0
+        && metrics.streaming.commit_total == 0,
+        "NGX_AGAIN commit must not publish a partial transition");
 
     g_next_header_filter_rc = NGX_ERROR;
     rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);

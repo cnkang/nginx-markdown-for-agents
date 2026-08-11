@@ -94,6 +94,21 @@ static void ngx_http_markdown_log_decision(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_effective_conf_t *eff,
     const ngx_str_t *reason_code);
+static void ngx_http_markdown_log_terminal_decision_path(
+    ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_decision_path_t *path);
+#ifdef MARKDOWN_STREAMING_ENABLED
+static void ngx_http_markdown_log_streaming_terminal_decision(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    const char *conversion_status,
+    const char *reason_code,
+    const char *stage);
+#endif
 static void ngx_http_markdown_metric_inc_failopen(
     const ngx_http_markdown_effective_conf_t *eff,
     const ngx_http_markdown_conf_t *conf);
@@ -374,6 +389,7 @@ ngx_http_markdown_init_ctx(ngx_http_request_t *r,
     ctx->error.last_category =
         NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
     ctx->error.has_category = 0;
+    ctx->error.terminal_decision_recorded = 0;
 
     /*
      * Initialize decompression state.
@@ -404,6 +420,7 @@ ngx_http_markdown_log_accept_skip(ngx_http_request_t *r,
 
     dp.conditional_result = NGX_HTTP_MARKDOWN_COND_SKIPPED;
     dp.conversion_status = NGX_HTTP_MARKDOWN_CONV_SKIPPED;
+    dp.stage = "eligibility";
     dp.error_category = NULL;
     dp.duration_ms = 0;
 
@@ -432,10 +449,80 @@ ngx_http_markdown_log_accept_skip(ngx_http_request_t *r,
         break;
     }
 
-    ngx_http_markdown_log_decision_path(r, conf, eff, &dp);
+    ngx_http_markdown_log_terminal_decision_path(
+        r, conf, eff, NULL, &dp);
+}
+
+
+static void
+ngx_http_markdown_log_terminal_decision_path(
+    ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_decision_path_t *path)
+{
+    if (ctx != NULL) {
+        if (ctx->error.terminal_decision_recorded) {
+            return;
+        }
+        ctx->error.terminal_decision_recorded = 1;
+    }
+
+    ngx_http_markdown_log_decision_path(r, conf, eff, path);
+}
+
+
+static void
+ngx_http_markdown_log_header_terminal_decision(
+    ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    const char *reason_code)
+{
+    ngx_http_markdown_decision_path_t  path;
+
+    path.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_SKIP;
+    path.conditional_result = NGX_HTTP_MARKDOWN_COND_SKIPPED;
+    path.conversion_status = NGX_HTTP_MARKDOWN_CONV_SKIPPED;
+    path.reason_code = reason_code;
+    path.stage = "eligibility";
+    path.error_category = NULL;
+    path.duration_ms = 0;
+    ngx_http_markdown_log_terminal_decision_path(
+        r, conf, eff, NULL, &path);
 }
 
 #ifdef MARKDOWN_STREAMING_ENABLED
+static void
+ngx_http_markdown_log_streaming_terminal_decision(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    const char *conversion_status,
+    const char *reason_code,
+    const char *stage)
+{
+    ngx_http_markdown_decision_path_t  path;
+
+    if (ctx == NULL) {
+        return;
+    }
+
+    path.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_CONVERT;
+    path.conditional_result = NGX_HTTP_MARKDOWN_COND_PROCEED;
+    path.conversion_status = conversion_status;
+    path.reason_code = reason_code;
+    path.stage = stage;
+    path.error_category = ctx->error.has_category
+        ? (const char *) ngx_http_markdown_error_category_string(
+              ctx->error.last_category)->data : NULL;
+    path.duration_ms = 0;
+    ngx_http_markdown_log_terminal_decision_path(
+        r, conf, ctx->effective_conf, ctx, &path);
+}
+
+
 /*
  * Log a streaming path selection decision at debug level.  Keep this as a
  * macro because ngx_log_debugN may compile away its arguments in non-debug
@@ -479,6 +566,8 @@ ngx_http_markdown_header_precheck(ngx_http_request_t *r,
             ngx_http_markdown_reason_from_eligibility(
                 NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG,
                 r->connection->log));
+        ngx_http_markdown_log_header_terminal_decision(
+            r, conf, early_eff, "disabled");
         *rc = ngx_http_next_header_filter(r);
         return 1;
     }
@@ -498,6 +587,8 @@ ngx_http_markdown_header_precheck(ngx_http_request_t *r,
         ngx_http_markdown_log_decision(r, conf, early_eff,
             ngx_http_markdown_reason_from_eligibility(
                 eligibility, r->connection->log));
+        ngx_http_markdown_log_header_terminal_decision(
+            r, conf, early_eff, "not_eligible");
         *rc = ngx_http_next_header_filter(r);
         return 1;
     }
@@ -512,6 +603,8 @@ ngx_http_markdown_header_precheck(ngx_http_request_t *r,
             ngx_http_markdown_reason_from_eligibility(
                 NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH,
                 r->connection->log));
+        ngx_http_markdown_log_header_terminal_decision(
+            r, conf, early_eff, "not_eligible");
         *rc = ngx_http_next_header_filter(r);
         return 1;
     }
@@ -523,6 +616,8 @@ ngx_http_markdown_header_precheck(ngx_http_request_t *r,
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
         ngx_http_markdown_log_decision(r, conf, early_eff,
             ngx_http_markdown_reason_bypass_no_transform());
+        ngx_http_markdown_log_header_terminal_decision(
+            r, conf, early_eff, "bypass_no_transform");
         *rc = ngx_http_next_header_filter(r);
         return 1;
     }
@@ -714,11 +809,12 @@ ngx_http_markdown_route_streaming_compression(
 static void
 ngx_http_markdown_log_buffered_decision_path(
     ngx_http_request_t *r,
-    const ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf,
     const char *conditional_result,
     const char *conversion_status,
     const char *reason_code,
+    const char *stage,
     ngx_msec_t duration_ms)
 {
     ngx_http_markdown_decision_path_t  dp;
@@ -727,12 +823,13 @@ ngx_http_markdown_log_buffered_decision_path(
     dp.conditional_result = conditional_result;
     dp.conversion_status = conversion_status;
     dp.reason_code = reason_code;
+    dp.stage = stage;
     dp.error_category = ctx->error.has_category
         ? (const char *) ngx_http_markdown_error_category_string(
               ctx->error.last_category)->data : NULL;
     dp.duration_ms = duration_ms;
-    ngx_http_markdown_log_decision_path(
-        r, conf, ctx->effective_conf, &dp);
+    ngx_http_markdown_log_terminal_decision_path(
+        r, conf, ctx->effective_conf, ctx, &dp);
 }
 
 #ifdef MARKDOWN_INCREMENTAL_ENABLED
@@ -1266,7 +1363,7 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
         ngx_http_markdown_log_buffered_decision_path(
             r, ctx, conf, NGX_HTTP_MARKDOWN_COND_NOT_MODIFIED,
             NGX_HTTP_MARKDOWN_CONV_SKIPPED,
-            "skipped_conditional", elapsed_ms);
+            "skipped_conditional", "conversion", elapsed_ms);
 
         return NGX_OK;
     }
@@ -1280,7 +1377,7 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
                 ctx->effective_conf, conf)
                 == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT
                 ? "failed_closed" : "failed_open",
-            elapsed_ms);
+            "conversion", elapsed_ms);
         return rc;
     }
 
@@ -1296,7 +1393,7 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
                     ctx->effective_conf, conf)
                     == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT
                     ? "failed_closed" : "failed_open",
-                elapsed_ms);
+                "conversion", elapsed_ms);
             return rc;
         }
     }
@@ -1314,7 +1411,7 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
         ngx_http_markdown_log_buffered_decision_path(
             r, ctx, conf, NGX_HTTP_MARKDOWN_COND_PROCEED,
             NGX_HTTP_MARKDOWN_CONV_SUCCESS,
-            "converted", elapsed_ms);
+            "converted", "conversion", elapsed_ms);
 
     } else {
         /*
@@ -1331,7 +1428,7 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
                 ctx->effective_conf, conf)
                 == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT
                 ? "failed_closed" : "failed_open",
-            elapsed_ms);
+            "delivery", elapsed_ms);
 
     }
 
@@ -1442,8 +1539,9 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
             NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
             ctx->conversion.bypass_counted = 1;
         }
-        if (ngx_http_markdown_forward_headers(r, ctx) != NGX_OK) {
-            return NGX_ERROR;
+        rc = ngx_http_markdown_forward_headers(r, ctx);
+        if (rc != NGX_OK) {
+            return rc;
         }
         return ngx_http_next_body_filter(r, in);
     }
