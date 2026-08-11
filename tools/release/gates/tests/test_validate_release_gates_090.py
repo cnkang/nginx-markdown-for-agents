@@ -22,7 +22,7 @@ def test_production_examples_reject_default_gzip_type_redeclaration(tmp_path):
 
 def test_diagnostics_schema_gate_rejects_docs_only_contract(tmp_path):
     """Documentation cannot substitute for the production C emission."""
-    docs = tmp_path / "docs/architecture/observability-schema-v1.md"
+    docs = tmp_path / "docs/architecture/observability-schema-v2.md"
     renderer = (
         tmp_path
         / "components/nginx-module/src/ngx_http_markdown_diagnostics.c"
@@ -37,14 +37,14 @@ def test_diagnostics_schema_gate_rejects_docs_only_contract(tmp_path):
 
     result = validator.check_diagnostics_schema_version(tmp_path)
 
-    assert result["name"] == "diagnostics_schema_v1"
+    assert result["name"] == "diagnostics_schema_v2"
     assert result["status"] == "fail"
     assert "production C renderer" in result["message"]
 
 
 def test_diagnostics_schema_gate_finds_schema_key_after_other_json_keys(tmp_path):
     """The schema marker may occur anywhere in the emitted JSON object."""
-    docs = tmp_path / "docs/architecture/observability-schema-v1.md"
+    docs = tmp_path / "docs/architecture/observability-schema-v2.md"
     renderer = (
         tmp_path
         / "components/nginx-module/src/ngx_http_markdown_diagnostics.c"
@@ -60,14 +60,14 @@ def test_diagnostics_schema_gate_finds_schema_key_after_other_json_keys(tmp_path
     result = validator.check_diagnostics_schema_version(tmp_path)
 
     assert result == {
-        "name": "diagnostics_schema_v1",
+        "name": "diagnostics_schema_v2",
         "status": "pass",
     }
 
 
 def test_diagnostics_schema_gate_accepts_active_v2_contract(tmp_path):
     """The historical gate must accept the active 0.9.2 schema version."""
-    docs = tmp_path / "docs/architecture/observability-schema-v1.md"
+    docs = tmp_path / "docs/architecture/observability-schema-v2.md"
     renderer = (
         tmp_path
         / "components/nginx-module/src/ngx_http_markdown_diagnostics.c"
@@ -83,7 +83,7 @@ def test_diagnostics_schema_gate_accepts_active_v2_contract(tmp_path):
     result = validator.check_diagnostics_schema_version(tmp_path)
 
     assert result == {
-        "name": "diagnostics_schema_v1",
+        "name": "diagnostics_schema_v2",
         "status": "pass",
     }
 

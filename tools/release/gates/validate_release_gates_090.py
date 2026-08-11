@@ -99,12 +99,12 @@ def check_diagnostics_schema_version(repo: Path) -> dict:
     historical regression gate accepts either supported version but never
     allows the documentation and production renderer to drift apart.
     """
-    gate_name = "diagnostics_schema_v1"
+    gate_name = "diagnostics_schema_v2"
     supported_versions = {1, 2}
-    schema_file = repo / "docs/architecture/observability-schema-v1.md"
+    schema_file = repo / "docs/architecture/observability-schema-v2.md"
     if not schema_file.exists():
         return {"name": gate_name, "status": "fail",
-                "message": "observability-schema-v1.md not found"}
+                "message": "observability-schema-v2.md not found"}
     documentation = schema_file.read_text(encoding="utf-8")
     documentation_match = re.search(
         r"schema_version[^\n]*\b([12])\b", documentation
@@ -643,7 +643,7 @@ def main():
     # Key files
     results.append(check_file_exists(
         repo,
-        "docs/architecture/observability-schema-v1.md",
+        "docs/architecture/observability-schema-v2.md",
         "observability_schema_doc"))
     results.append(check_file_exists(
         repo,

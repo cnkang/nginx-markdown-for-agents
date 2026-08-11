@@ -70,7 +70,7 @@ you need a machine-readable value or count.
 | Architecture / ADRs | `docs/architecture/ADR/` (0025 drift gate, 0026 dynconf restore, 0027 OTel removal) |
 | Release notes & checklist | `docs/releases/0.9.2-release-notes.md`, `0.9.2-release-checklist.md` |
 | History of changes | `CHANGELOG.md` (L3 — never copied here) |
-| Metrics & diagnostics schema | `docs/architecture/observability-schema-v2.md` (canonical validator path: `observability-schema-v1.md`) |
+| Metrics & diagnostics schema | `docs/architecture/observability-schema-v2.md` |
 | Dynconf semantics | `docs/architecture/ADR/0026-dynconf-file-restore-contract.md` |
 | Project status & version planning | `docs/project/PROJECT_STATUS.md`, `docs/project/VERSION_PLANNING.md` |
 
