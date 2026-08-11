@@ -76,7 +76,7 @@ LIFECYCLE_PAIRS = {
 C_PROTOTYPE_RE = re.compile(
     r"^(?:extern\s+)?(?:const\s+)?"
     r"(?:struct\s+\w+\s+\*?|void|u?int(?:8|16|32|64)_t|"
-    r"uint8_t|uintptr_t|bool)\s*\*?\s*"
+    r"uintptr_t|bool)\s*\*?\s*"
     r"(markdown_\w+)\s*\(",
     re.MULTILINE,
 )
@@ -90,7 +90,7 @@ CALLSITE_RE = re.compile(r"\b(markdown_\w+)\s*\(")
 # these return-type spellings.
 DECLARATION_LINE_RE = re.compile(
     r"^\s*(?:(?:static|inline|extern|const|struct\s+\w+|"
-    r"void|u?int(?:8|16|32|64)_t|uint8_t|uintptr_t|bool)\s+)+"
+    r"void|u?int(?:8|16|32|64)_t|uintptr_t|bool)\s+)+"
     r"(?:\w+\s+\*\s*)?markdown_\w+\s*\("
 )
 

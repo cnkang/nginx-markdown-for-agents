@@ -23,6 +23,12 @@ def test_header_fallback_finds_multiline_declarations(tmp_path: Path) -> None:
     assert "markdown_custom_export" in detector.parse_header_exports(header)
 
 
+def test_declaration_pattern_does_not_duplicate_uint8_type_alternative() -> None:
+    """Keep integer type alternatives non-overlapping for safe matching."""
+    assert "uint8_t" not in detector.DECLARATION_LINE_RE.pattern
+    assert "uint8_t" not in detector.C_PROTOTYPE_RE.pattern
+
+
 def test_guard_stack_handles_nested_ifdef_and_endif() -> None:
     """Guard tracking must pop only after the conditional body."""
     guards: list[str] = []
