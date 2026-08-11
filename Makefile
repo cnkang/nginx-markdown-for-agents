@@ -947,22 +947,32 @@ release-gates-check-091: release-gates-check-090
 # Classification: BLOCKING
 release-gates-check-092: release-gates-check-091
 	@echo "=== 0.9.2 Release Gates (blocking) ==="
-	@echo "  [1/8] 0.9.2 performance evidence gate (blocking mode, baseline 092)"
+	@echo "  [1/13] 0.9.2 performance evidence gate (blocking mode, baseline 092)"
 	$(MAKE) release-perf-evidence-blocking BASELINE_VERSION=092
-	@echo "  [2/8] Public surface and dynconf schema drift checks"
+	@echo "  [2/13] Public surface and dynconf schema drift checks"
 	$(MAKE) public-surface-drift-check
 	$(MAKE) schema-drift-check SCHEMA_RELEASE_VERSION=0.9.2
-	@echo "  [3/8] Version consistency (0.9.2)"
+	@echo "  [3/13] Version consistency (0.9.2)"
 	bash tools/harness/detect_version_consistency.sh
-	@echo "  [4/8] Reason code registry completeness"
+	@echo "  [4/13] Reason code registry completeness"
 	PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
-	@echo "  [5/8] Streaming lifecycle unit test"
+	@echo "  [5/13] Streaming lifecycle unit test"
 	$(MAKE) -C $(NGINX_TEST_DIR) unit-streaming_impl
-	@echo "  [6/8] Official build feature manifest"
+	@echo "  [6/13] Official build feature manifest"
 	python3 tools/release/gates/validate_official_feature_manifest.py --write
-	@echo "  [7/8] Canonical release matrix"
+	@echo "  [7/13] Canonical release matrix"
 	PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
-	@echo "  [8/8] Repository docs style baseline"
+	@echo "  [8/13] Release candidate evidence bound to HEAD"
+	$(MAKE) release-candidate-evidence-check
+	@echo "  [9/13] Artifact registry evidence"
+	$(MAKE) artifact-registry-check
+	@echo "  [10/13] Release evidence manifest"
+	$(MAKE) release-evidence-manifest-check
+	@echo "  [11/13] Fuzz qualification evidence"
+	$(MAKE) test-rust-fuzz-qualification
+	@echo "  [12/13] Soak qualification evidence"
+	$(MAKE) test-e2e-rust-soak
+	@echo "  [13/13] Repository docs style baseline"
 	$(MAKE) docs-style-check-baseline
 	@echo "=== 0.9.2 Release Gates: PASS ==="
 
@@ -988,7 +998,7 @@ release-candidate-evidence-check:
 	@if [ -n "$(FIXTURE)" ]; then \
 		python3 tools/release/gates/validate_release_candidate_evidence.py --mode fixture --expected-sha 9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d --record-input "$(FIXTURE)"; \
 	else \
-		python3 tools/release/gates/validate_release_candidate_evidence.py --mode real; \
+		python3 tools/release/gates/validate_release_candidate_evidence.py --mode real --git-head; \
 	fi
 
 # artifact-registry-check: Pre-freeze artifact registry gate.

@@ -295,7 +295,8 @@ def _check_scenario_rows(record: dict, manifest: dict) -> None:
                 f"{scenario.get('id')!r} status {scenario.get('status')!r}"
             )
         error_rate = scenario.get("error_rate", 0.0)
-        if (not isinstance(error_rate, (int, float))
+        if (type(error_rate) not in (int, float)
+                or not math.isfinite(error_rate)
                 or abs(error_rate) > FLOAT_EPSILON):
             raise SystemExit(
                 "ERROR: below-threshold: scenario "
@@ -374,14 +375,16 @@ def _ab_float(line: str, keyword: str, offset: int = 0) -> float:
     """Parse a float value from an ab summary line, or 0.0."""
     if keyword not in line:
         return 0.0
-    parts = line.split()
-    index = len(parts) - 2 - offset
-    if index < 0:
+    numeric_values = []
+    for part in line.split():
+        try:
+            numeric_values.append(float(part))
+        except ValueError:
+            continue
+    index = offset
+    if index >= len(numeric_values):
         return 0.0
-    try:
-        return float(parts[index])
-    except ValueError:
-        return 0.0
+    return numeric_values[index]
 
 
 def _validated_local_url(url: str) -> str:
@@ -459,7 +462,7 @@ def parse_ab_report(output: str) -> dict:
     percentiles = {}
     failed = 0
     completed = 0
-    transfer_rate = 0.0
+    requests_per_second = 0.0
     for line in output.splitlines():
         match = AB_PCT_LINE_RE.match(line)
         if match:
@@ -469,14 +472,14 @@ def parse_ab_report(output: str) -> dict:
             failed = _ab_int(line, "Failed requests")
         elif "Complete requests" in line:
             completed = _ab_int(line, "Complete requests")
-        elif "Transfer rate" in line:
-            transfer_rate = _ab_float(line, "Transfer rate")
+        elif "Requests per second" in line:
+            requests_per_second = _ab_float(line, "Requests per second")
     return {
         "p50_ms": percentiles.get(50, 0.0),
         "p99_ms": percentiles.get(99, 0.0),
         "failed_requests": failed,
         "completed_requests": completed,
-        "rps": transfer_rate,
+        "rps": requests_per_second,
     }
 
 

@@ -38,9 +38,16 @@ if ! command -v cargo >/dev/null 2>&1; then
     exit 1
 fi
 
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "ERROR: python3 is required to write the determinism report" >&2
+    exit 1
+fi
+
+echo "Building test-corpus-conversion binary..."
+(cd "$CONVERTER_DIR" && cargo build --locked --release --quiet)
 if [[ ! -x "$CONVERTER_BIN" ]]; then
-    echo "Building test-corpus-conversion binary..."
-    (cd "$CONVERTER_DIR" && cargo build --locked --release --quiet)
+    echo "ERROR: cargo build did not produce an executable converter" >&2
+    exit 1
 fi
 
 CORPUS_DIR="$ROOT/tests/corpus"
@@ -55,51 +62,60 @@ FIXTURE_COUNT="$(tr -cd '\0' < "$TMP_DIR/fixtures.list" | wc -c | tr -d ' ')"
 echo "Verifying determinism for $FIXTURE_COUNT corpus fixtures..."
 TOTAL=0
 FAILED=0
-FAILED_FILES=""
+: > "$TMP_DIR/failed-files"
+
+record_failed_fixture() {
+    printf '%s\0' "$1" >> "$TMP_DIR/failed-files"
+    return 0
+}
 
 while IFS= read -r -d '' fixture; do
     TOTAL=$((TOTAL + 1))
     rel="${fixture#"$ROOT"/}"
 
     if ! "$CONVERTER_BIN" "$fixture" > "$TMP_DIR/run1.md" 2> "$TMP_DIR/run1.err"; then
-        echo "FAIL: $rel: conversion run 1 failed ($(cat "$TMP_DIR/run1.err"))"
+        echo "FAIL: $rel: conversion run 1 failed ($(cat "$TMP_DIR/run1.err"))" >&2
         FAILED=$((FAILED + 1))
-        FAILED_FILES="$FAILED_FILES $rel"
+        record_failed_fixture "$rel"
         continue
     fi
     if ! "$CONVERTER_BIN" "$fixture" > "$TMP_DIR/run2.md" 2> "$TMP_DIR/run2.err"; then
-        echo "FAIL: $rel: conversion run 2 failed ($(cat "$TMP_DIR/run2.err"))"
+        echo "FAIL: $rel: conversion run 2 failed ($(cat "$TMP_DIR/run2.err"))" >&2
         FAILED=$((FAILED + 1))
-        FAILED_FILES="$FAILED_FILES $rel"
+        record_failed_fixture "$rel"
         continue
     fi
 
     if ! cmp -s "$TMP_DIR/run1.md" "$TMP_DIR/run2.md"; then
-        echo "FAIL: $rel: byte mismatch between repeated runs"
+        echo "FAIL: $rel: byte mismatch between repeated runs" >&2
         FAILED=$((FAILED + 1))
-        FAILED_FILES="$FAILED_FILES $rel"
+        record_failed_fixture "$rel"
         continue
     fi
 done < "$TMP_DIR/fixtures.list"
 
 mkdir -p "$(dirname "$REPORT")"
-python3 - "$REPORT" "$TOTAL" "$FAILED" "$FAILED_FILES" <<'PYEOF'
+python3 - "$REPORT" "$TOTAL" "$FAILED" "$TMP_DIR/failed-files" <<'PYEOF'
 import json
 import sys
 
-report_path, total, failed, failed_files = (
+report_path, total, failed, failed_files_path = (
     sys.argv[1],
     int(sys.argv[2]),
     int(sys.argv[3]),
     sys.argv[4],
 )
+with open(failed_files_path, "rb") as f:
+    failed_files = [
+        item.decode("utf-8") for item in f.read().split(b"\0") if item
+    ]
 
 report = {
     "schema_version": "release.determinism-corpus.v1",
     "total_fixtures": total,
     "failed_fixtures": failed,
     "passed": failed == 0,
-    "failed_files": failed_files.split(),
+    "failed_files": failed_files,
     "method": "two independent converter processes, byte-for-byte cmp",
     "contract": "identical effective inputs produce byte-identical output "
                 "within the same module version and build feature set",
@@ -116,7 +132,7 @@ if [[ "$FAILED" -eq 0 ]]; then
 fi
 
 echo "FAIL: $FAILED of $TOTAL fixtures produced non-identical output:" >&2
-for f in $FAILED_FILES; do
+while IFS= read -r -d '' f; do
     echo "  $f" >&2
-done
+done < "$TMP_DIR/failed-files"
 exit 1

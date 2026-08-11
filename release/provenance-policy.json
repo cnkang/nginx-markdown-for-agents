@@ -42,13 +42,11 @@
       ]
     },
     "oci": {
-      "provenance_form": "Cosign attestation (in-toto predicate) attached to the image + provenance-index.json entry",
-      "predicate": "in-toto/slsa-provenance predicate covering image manifest digest, source commit, builder identity",
-      "producer": "OCI release workflow (cosign attest)",
-      "consumer": "provenance-index.json consumers, cosign verify-attestation",
-      "verification_commands": [
-        "cosign verify-attestation --certificate-identity <identity> --certificate-oidc-issuer <issuer> <image>@sha256:<digest>"
-      ]
+      "provenance_form": "Not enabled for the 0.9.2 artifact channel",
+      "predicate": "No OCI artifact is published by the 0.9.2 release workflow",
+      "producer": "Not applicable",
+      "consumer": "Not applicable",
+      "verification_commands": []
     },
     "homebrew_formula_source": {
       "provenance_form": "Formula sha256 stanza + tag archive verification record",

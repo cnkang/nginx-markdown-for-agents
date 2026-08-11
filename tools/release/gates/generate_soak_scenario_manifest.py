@@ -23,7 +23,6 @@ if str(REPO_ROOT / "tools") not in sys.path:
 from lib.path_validation import (  # noqa: E402
     validate_filename_strict,
     validate_read_path,
-    validate_write_path_within_root,
 )
 
 
@@ -42,15 +41,24 @@ def _validate_scope(scope: dict) -> None:
     if scope.get("schema_version") != "release.scope.short-soak.v1":
         raise ValueError("unexpected short-soak scope schema_version")
     duration = scope.get("duration_minutes")
-    if not isinstance(duration, (int, float)) or duration <= 0:
+    if (
+        isinstance(duration, bool)
+        or not isinstance(duration, (int, float))
+        or duration <= 0
+    ):
         raise ValueError("short-soak scope duration_minutes must be positive")
     concurrency = scope.get("concurrency")
-    if not isinstance(concurrency, int) or concurrency <= 0:
+    if isinstance(concurrency, bool) or not isinstance(concurrency, int) or concurrency <= 0:
         raise ValueError("short-soak scope concurrency must be positive")
     memory = scope.get("scenario_memory_bytes")
     if not isinstance(memory, dict) or set(memory) != set(SCENARIO_IDS):
         raise ValueError("short-soak scope must define all scenario memory limits")
-    if not all(isinstance(memory[key], int) and memory[key] > 0 for key in SCENARIO_IDS):
+    if not all(
+        isinstance(memory[key], int)
+        and not isinstance(memory[key], bool)
+        and memory[key] > 0
+        for key in SCENARIO_IDS
+    ):
         raise ValueError("short-soak scenario memory limits must be positive integers")
 
 
@@ -76,23 +84,13 @@ def build_manifest(scope: dict, candidate_sha: str, scope_path: Path) -> dict:
     }
 
 
-def _output_path(version: str, raw_output: str | None) -> Path:
+def _output_path(version: str) -> Path:
     safe_version = validate_filename_strict(version, purpose="release version")
     if not VERSION_RE.fullmatch(safe_version):
         raise ValueError(f"invalid release version: {version!r}")
     expected_output = (
         REPO_ROOT / "artifacts" / "release" / safe_version / MANIFEST_NAME
     ).resolve()
-    if raw_output is not None:
-        requested_output = validate_write_path_within_root(
-            REPO_ROOT / raw_output,
-            REPO_ROOT,
-            purpose="short-soak manifest request",
-        )
-        if requested_output != expected_output:
-            raise ValueError(
-                f"output must be artifacts/release/{safe_version}/{MANIFEST_NAME}"
-            )
     return expected_output
 
 
@@ -101,7 +99,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scope", default=str(DEFAULT_SCOPE))
     parser.add_argument("--candidate-sha", required=True)
     parser.add_argument("--version", default=DEFAULT_VERSION)
-    parser.add_argument("--output")
     return parser
 
 
@@ -112,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
         if not scope_path.is_relative_to(REPO_ROOT):
             raise ValueError("scope path escapes repository root")
         output = validate_write_path_within_root(
-            _output_path(args.version, args.output),
+            _output_path(args.version),
             REPO_ROOT,
             purpose="short-soak manifest",
         )

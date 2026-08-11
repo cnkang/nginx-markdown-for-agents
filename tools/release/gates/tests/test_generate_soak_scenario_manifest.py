@@ -49,25 +49,23 @@ def test_build_manifest_rejects_missing_scenario_memory() -> None:
 
 
 def test_output_path_is_version_scoped() -> None:
-    output = generator._output_path("0.9.2", None)
+    output = generator._output_path("0.9.2")
     assert output == ROOT / (
         "artifacts/release/0.9.2/short-soak-scenario-manifest.json"
     )
 
-    with pytest.raises(ValueError, match="output must be"):
-        generator._output_path("0.9.2", "artifacts/other/manifest.json")
-
-
 def test_output_path_rejects_untrusted_version_components() -> None:
     with pytest.raises(ValueError, match="Invalid release version"):
-        generator._output_path("0.9.2/../../outside", None)
+        generator._output_path("0.9.2/../../outside")
 
-
-def test_output_path_accepts_only_the_canonical_output() -> None:
-    expected = generator._output_path(
-        "0.9.2", "artifacts/release/0.9.2/short-soak-scenario-manifest.json"
-    )
-
-    assert expected == ROOT / (
+    assert generator._output_path("0.9.2") == ROOT / (
         "artifacts/release/0.9.2/short-soak-scenario-manifest.json"
     )
+
+
+@pytest.mark.parametrize("field", ["duration_minutes", "concurrency"])
+def test_scope_rejects_boolean_numeric_values(field: str) -> None:
+    scope = dict(SCOPE)
+    scope[field] = True
+    with pytest.raises(ValueError):
+        generator.build_manifest(scope, SHA, ROOT / "release/scope/short-soak-scope.json")

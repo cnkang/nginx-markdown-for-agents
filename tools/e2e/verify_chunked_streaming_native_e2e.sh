@@ -158,6 +158,10 @@ markdown_token_count() {
 
   escaped_token="$(markdown_escape_token "${token}")"
   raw_count="$(grep -Fo "${token}" "${body_file}" | wc -l | tr -d '[:space:]' || true)"
+  if [[ "${escaped_token}" == "${token}" ]]; then
+    printf '%s' "${raw_count}"
+    return 0
+  fi
   escaped_count="$(grep -Fo "${escaped_token}" "${body_file}" | wc -l | tr -d '[:space:]' || true)"
   printf '%s' "$((raw_count + escaped_count))"
   return 0
@@ -834,6 +838,7 @@ get_metric_value() {
       ;;
     perf.decompression_streaming_total)
       metric_family="nginx_markdown_decompression_events_total"
+      metric_selector='outcome="success"'
       ;;
     decompression_success_total)
       metric_family="nginx_markdown_decompression_events_total"
@@ -844,6 +849,7 @@ get_metric_value() {
       ;;
     perf.backpressure_total)
       metric_family="nginx_markdown_streaming_events_total"
+      metric_selector='transition="resume_'
       ;;
     perf.backpressure_resume_total)
       metric_family="nginx_markdown_streaming_events_total"
@@ -1218,6 +1224,7 @@ fi
 # Capture the worker PID before the zero-copy request.
 # nginx.pid stores the MASTER PID; the worker is its child (worker_processes 1).
 zc_worker_pid_before="$(get_worker_pid)"
+zc_output_before="$(get_perf_metric 'output_bytes_total')"
 
 zc_line="$(curl -sS -D "${RAW_DIR}/zc.hdr" -o "${RAW_DIR}/zc.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
@@ -1249,8 +1256,9 @@ fi
 # Verify that output_bytes_total > 0 in the metrics endpoint
 # after the zero-copy path was exercised.
 zc_output_total="$(get_perf_metric 'output_bytes_total')"
-if [[ "${zc_output_total}" -le 0 ]]; then
-  echo "FAIL: zero-copy path did not produce zero-copy output (output_bytes_total=${zc_output_total})" >&2
+if [[ "${zc_output_total}" -le "${zc_output_before}" ]]; then
+  echo "FAIL: zero-copy path did not increase output_bytes_total " \
+    "(before=${zc_output_before}, after=${zc_output_total})" >&2
   exit 1
 fi
 echo "  output_bytes_total=${zc_output_total} (verified > 0)"

@@ -84,21 +84,21 @@ TARBALL_FILES=()
 MANIFEST_FILE=""
 
 for f in *.deb; do
-    [[ -e "$f" ]] || continue
+    [[ -f "$f" ]] || continue
     DEB_FILES+=("$f")
 done
 
 for f in *.rpm; do
-    [[ -e "$f" ]] || continue
+    [[ -f "$f" ]] || continue
     RPM_FILES+=("$f")
 done
 
 for f in *.tar.gz; do
-    [[ -e "$f" ]] || continue
+    [[ -f "$f" ]] || continue
     TARBALL_FILES+=("$f")
 done
 
-if [[ -e "release-manifest.json" ]]; then
+if [[ -f "release-manifest.json" ]]; then
     MANIFEST_FILE="release-manifest.json"
 fi
 
