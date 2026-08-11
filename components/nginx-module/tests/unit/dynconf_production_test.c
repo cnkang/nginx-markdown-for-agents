@@ -104,6 +104,7 @@ static int g_open_fail;
 static int g_fd_info_fail;
 static int g_read_fail;
 static int g_alloc_fail;
+static int g_invalid_digest;
 static off_t g_forced_size = -1;
 
 static void
@@ -246,9 +247,9 @@ markdown_dynconf_parse(const uint8_t *data, uintptr_t data_len,
 
     result->error_code = DYNCONF_OK;
     result->source_digest = digest;
-    result->source_digest_len = 64;
+    result->source_digest_len = g_invalid_digest ? 63 : 64;
     result->active_digest = digest;
-    result->active_digest_len = 64;
+    result->active_digest_len = g_invalid_digest ? 63 : 64;
     result->filter = DYNCONF_FILTER_ON;
 }
 
@@ -274,6 +275,7 @@ reset_state(void)
     g_fd_info_fail = 0;
     g_read_fail = 0;
     g_alloc_fail = 0;
+    g_invalid_digest = 0;
     g_forced_size = -1;
 }
 
@@ -403,6 +405,17 @@ test_ffi_paths(const char *path)
                 "successful reload should clear last_error");
     TEST_ASSERT(watcher.active_snapshot.valid == 1,
                 "successful reload should publish the snapshot");
+
+    reset_state();
+    g_invalid_digest = 1;
+    init_watcher(&watcher, &conf, path);
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE,
+                "malformed digest should reject the candidate");
+    TEST_ASSERT(g_reload_counts[DYNCONF_ERR_INTERNAL] == 1,
+                "malformed digest should record one internal error");
+    TEST_ASSERT(watcher.diagnostic_state.last_error_len > 0,
+                "malformed digest should set a bounded last_error");
 
     TEST_PASS("production dynconf FFI paths are covered");
 }

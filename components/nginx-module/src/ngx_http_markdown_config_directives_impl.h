@@ -614,7 +614,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *
      * Enable or disable the runtime diagnostics endpoint
      * (/nginx-markdown/diagnostics).  When enabled, the endpoint
-     * exposes the Diagnostics Schema v1 fields: worker/build identity,
+     * exposes the Diagnostics Schema v2 fields: worker/build identity,
      * configuration, runtime counters, and recent decisions.
      *
      * Access control: the diagnostics content handler runs in the

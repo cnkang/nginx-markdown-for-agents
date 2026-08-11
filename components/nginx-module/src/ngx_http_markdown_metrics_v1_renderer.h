@@ -468,7 +468,7 @@ ngx_http_markdown_metrics_v1_render_families_10_to_11(
     const ngx_http_markdown_metrics_v1_snapshot_t *snapshot)
 {
     const u_char *version;
-    const u_char *nginx_version;
+    const u_char *nginx_version_text;
     const u_char *features;
 
     if (snapshot == NULL) {
@@ -477,7 +477,7 @@ ngx_http_markdown_metrics_v1_render_families_10_to_11(
 
     version = snapshot->build_info.version != NULL
         ? snapshot->build_info.version : (const u_char *) "unknown";
-    nginx_version = snapshot->build_info.nginx_version_text != NULL
+    nginx_version_text = snapshot->build_info.nginx_version_text != NULL
         ? snapshot->build_info.nginx_version_text : (const u_char *) "unknown";
     features = snapshot->build_info.features != NULL
         ? snapshot->build_info.features : (const u_char *) "unknown";
@@ -527,7 +527,7 @@ ngx_http_markdown_metrics_v1_render_families_10_to_11(
         "features=\"%s\"} 1\n"
         "\n",
         version,
-        nginx_version,
+        nginx_version_text,
         features);
     if (p >= end) {
         return NULL;

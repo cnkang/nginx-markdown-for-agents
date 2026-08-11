@@ -113,6 +113,7 @@ typedef struct {
     time_t      last_success;
     u_char      last_error[513];
     size_t      last_error_len;
+    ngx_uint_t  last_masked_fields;
 } ngx_http_markdown_dynconf_diagnostic_state_t;
 
 typedef struct {
@@ -316,6 +317,7 @@ test_get_dynconf_state_active(void)
     ngx_http_markdown_dynconf_watcher.active = 1;
     ngx_http_markdown_dynconf_watcher.file_state.applied_mtime = 1700000000;
     ngx_http_markdown_dynconf_watcher.diagnostic_state.version = 5;
+    ngx_http_markdown_dynconf_watcher.diagnostic_state.last_masked_fields = 0x15;
     /*
      * Regression (CMOD-4): last_mtime is the most recently *observed* file
      * mtime (updated even on a rejected reload); lkg_mtime is the mtime of
@@ -337,6 +339,8 @@ test_get_dynconf_state_active(void)
                 "lkg_mtime should reflect the LKG config mtime, "
                 "not last_mtime");
     TEST_ASSERT(out.lkg_valid == 1, "lkg_valid should be 1");
+    TEST_ASSERT(out.masked_fields == 0x15,
+                "masked_fields should reflect the last applied snapshot");
 
     TEST_PASS("Active watcher state collected correctly");
 }
