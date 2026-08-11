@@ -65,6 +65,29 @@ def test_diagnostics_schema_gate_finds_schema_key_after_other_json_keys(tmp_path
     }
 
 
+def test_diagnostics_schema_gate_accepts_active_v2_contract(tmp_path):
+    """The historical gate must accept the active 0.9.2 schema version."""
+    docs = tmp_path / "docs/architecture/observability-schema-v1.md"
+    renderer = (
+        tmp_path
+        / "components/nginx-module/src/ngx_http_markdown_diagnostics.c"
+    )
+    docs.parent.mkdir(parents=True)
+    renderer.parent.mkdir(parents=True)
+    docs.write_text("`schema_version`: integer constant `2`.\n")
+    renderer.write_text(
+        r'p = ngx_slprintf(p, last, "{\"schema_version\":2,\"product_version\":\"0.9.2\"}");'
+        "\n"
+    )
+
+    result = validator.check_diagnostics_schema_version(tmp_path)
+
+    assert result == {
+        "name": "diagnostics_schema_v1",
+        "status": "pass",
+    }
+
+
 def test_no_stale_symbols_gate_passes_without_diagnostics(monkeypatch, tmp_path):
     """A clean stale-symbol scan should map to a passing gate result."""
     monkeypatch.setattr(

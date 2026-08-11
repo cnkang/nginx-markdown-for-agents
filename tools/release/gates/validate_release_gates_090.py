@@ -92,22 +92,34 @@ def check_reason_code_count(repo: Path) -> dict:
 
 
 def check_diagnostics_schema_version(repo: Path) -> dict:
-    """Verify docs and the production C renderer emit schema_version 1."""
+    """Verify the documented and emitted diagnostics schema agree.
+
+    The 0.9.0 baseline introduced schema version 1.  The active 0.9.2
+    release intentionally evolves that response to version 2, so this
+    historical regression gate accepts either supported version but never
+    allows the documentation and production renderer to drift apart.
+    """
+    gate_name = "diagnostics_schema_v1"
+    supported_versions = {1, 2}
     schema_file = repo / "docs/architecture/observability-schema-v1.md"
     if not schema_file.exists():
-        return {"name": "diagnostics_schema_v1", "status": "fail",
+        return {"name": gate_name, "status": "fail",
                 "message": "observability-schema-v1.md not found"}
     documentation = schema_file.read_text(encoding="utf-8")
-    if not re.search(r"schema_version[^\n]*\b1\b", documentation):
-        return {"name": "diagnostics_schema_v1", "status": "fail",
-                "message": "schema_version 1 not documented"}
+    documentation_match = re.search(
+        r"schema_version[^\n]*\b([12])\b", documentation
+    )
+    if documentation_match is None:
+        return {"name": gate_name, "status": "fail",
+                "message": "supported diagnostics schema version not documented"}
+    documented_version = int(documentation_match.group(1))
 
     renderer_file = (
         repo
         / "components/nginx-module/src/ngx_http_markdown_diagnostics.c"
     )
     if not renderer_file.exists():
-        return {"name": "diagnostics_schema_v1", "status": "fail",
+        return {"name": gate_name, "status": "fail",
                 "message": "production C renderer not found"}
 
     renderer = renderer_file.read_text(encoding="utf-8")
@@ -116,16 +128,28 @@ def check_diagnostics_schema_version(repo: Path) -> dict:
     )
     emission = re.compile(
         r'ngx_slprintf\s*\(\s*p\s*,\s*last\s*,\s*'
-        r'"(?:\\.|[^"\\])*\\"schema_version\\"\s*:\s*1\s*[,}]'
+        r'"(?:\\.|[^"\\])*\\"schema_version\\"\s*:\s*([12])\s*[,}]'
     )
-    if not emission.search(renderer_without_comments):
-        return {"name": "diagnostics_schema_v1", "status": "fail",
+    emission_match = emission.search(renderer_without_comments)
+    if emission_match is None:
+        return {"name": gate_name, "status": "fail",
                 "message": (
-                    "production C renderer does not emit exact "
-                    "schema_version 1"
+                    "production C renderer does not emit supported "
+                    "schema_version 1 or 2"
                 )}
+    emitted_version = int(emission_match.group(1))
+    if documented_version != emitted_version:
+        return {"name": gate_name, "status": "fail",
+                "message": (
+                    "production C renderer emits schema_version "
+                    f"{emitted_version}, documentation declares "
+                    f"schema_version {documented_version}"
+                )}
+    if emitted_version not in supported_versions:
+        return {"name": gate_name, "status": "fail",
+                "message": f"unsupported diagnostics schema version {emitted_version}"}
 
-    return {"name": "diagnostics_schema_v1", "status": "pass"}
+    return {"name": gate_name, "status": "pass"}
 
 
 def check_production_examples(repo: Path) -> dict:
