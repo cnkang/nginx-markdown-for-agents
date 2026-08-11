@@ -96,14 +96,11 @@ def resolve_approved_executable(name: str) -> str | None:
 
     candidate_is_trusted = _is_under(candidate, trusted_roots)
     resolved_is_trusted = _is_under(resolved, trusted_roots)
-    if not (candidate_is_trusted and resolved_is_trusted):
-        if name not in {"cargo", "rustfmt"} or not _is_rustup_tool_shim(
-            candidate, resolved, name
-        ):
-            return None
-    if name in {"cargo", "rustfmt"} and not candidate_is_trusted:
-        if not _is_rustup_tool_shim(candidate, resolved, name):
-            return None
+    if not (candidate_is_trusted and resolved_is_trusted) and (
+        name not in {"cargo", "rustfmt"}
+        or not _is_rustup_tool_shim(candidate, resolved, name)
+    ):
+        return None
     # Preserve Rustup shims so ``cargo +nightly`` and the paired rustfmt
     # resolve through the selected toolchain; system tools return canonical.
     return str(candidate if name in {"cargo", "rustfmt"} else resolved)

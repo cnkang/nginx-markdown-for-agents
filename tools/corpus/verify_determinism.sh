@@ -65,7 +65,8 @@ FAILED=0
 : > "$TMP_DIR/failed-files"
 
 record_failed_fixture() {
-    printf '%s\0' "$1" >> "$TMP_DIR/failed-files"
+    local failed_fixture="$1"
+    printf '%s\0' "$failed_fixture" >> "$TMP_DIR/failed-files"
     return 0
 }
 
