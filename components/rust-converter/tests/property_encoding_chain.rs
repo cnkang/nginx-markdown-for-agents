@@ -10,17 +10,19 @@
 //! - `identity` is a no-op, `br` (not "brotli") is recognized
 //! - malformed grammar produces exactly `ENCODING_HEADER_INVALID` semantics
 //!   (malformed classification) with no decoder/header mutation
-//! - syntactically valid unknown tokens remain passthrough without an
-//!   error-policy event
+//! - syntactically valid unknown tokens are classified for the C precommit
+//!   router; the router applies the configured error policy
 //!
 //! **Property 23: Encoding chain depth, budget, and unknown token
 //! enforcement** (Validates: Requirements 12.3, 12.4, 12.7)
 //!
-//! - chains with more than 3 non-identity layers are a passthrough
+//! - chains with more than 3 non-identity layers are classified for the C
+//!   precommit error policy
 //! - cumulative output exceeding the budget aborts with budget-exceeded
 //! - any layer exceeding the ratio limit aborts
 //! - inputs below the 256-byte ratio activation threshold are exempt
-//! - unknown tokens bypass the entire conversion (no partial decompression)
+//! - unknown tokens bypass decoder work; the C precommit router applies the
+//!   configured error policy rather than silently bypassing the request
 //! - malformed grammar produces the malformed classification with no
 //!   decoder or header mutation
 
@@ -285,9 +287,9 @@ proptest! {
         assert_eq!(out, original);
     }
 
-    /// Unknown tokens anywhere in the chain bypass the entire conversion.
+    /// Unknown tokens are classified without starting decoder work.
     #[test]
-    fn p23_unknown_token_is_passthrough(
+    fn p23_unknown_token_is_classified_before_decode(
         head in prop::collection::vec(arb_token(), 0..3),
     ) {
         let mut tokens: Vec<String> = head.clone();
@@ -350,8 +352,8 @@ fn malformed_grammar_never_returns_layers() {
     }
 }
 
-/// Syntactically valid unknown tokens are a passthrough without an
-/// error-policy event: parse succeeds with UnknownToken, never Malformed.
+/// Syntactically valid unknown tokens are classified as UnknownToken, never
+/// Malformed; the C precommit layer owns the error-policy decision.
 #[test]
 fn unknown_tokens_are_not_malformed() {
     let cases: &[&[u8]] = &[b"zstd", b"gzip, zstd", b"x-gzip", b"gzip, compress"];

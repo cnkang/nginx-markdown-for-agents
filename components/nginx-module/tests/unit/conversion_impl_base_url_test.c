@@ -975,53 +975,6 @@ ngx_http_markdown_send_304(
     return NGX_OK;
 }
 
-static ngx_inline void *
-ngx_http_markdown_otel_span_start(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf)
-{
-    UNUSED(r);
-    UNUSED(conf);
-    return NULL;
-}
-
-static ngx_inline void
-ngx_http_markdown_otel_set_str_attr(void *span,
-    const u_char *key, size_t key_len,
-    const u_char *val, size_t val_len)
-{
-    UNUSED(span);
-    UNUSED(key);
-    UNUSED(key_len);
-    UNUSED(val);
-    UNUSED(val_len);
-}
-
-static ngx_inline void
-ngx_http_markdown_otel_set_int_attr(void *span,
-    const u_char *key, size_t key_len,
-    int64_t val)
-{
-    UNUSED(span);
-    UNUSED(key);
-    UNUSED(key_len);
-    UNUSED(val);
-}
-
-static ngx_inline void
-ngx_http_markdown_otel_span_end(void *span)
-{
-    UNUSED(span);
-}
-
-static ngx_inline void
-ngx_http_markdown_otel_span_export(void *span,
-    ngx_log_t *log, ngx_http_request_t *r)
-{
-    UNUSED(span);
-    UNUSED(log);
-    UNUSED(r);
-}
-
 #include "../../src/ngx_http_markdown_conversion_impl.h" /* SONAR_NOTE: must follow stub definitions */
 
 static ngx_connection_t g_connection = { 0 };

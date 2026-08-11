@@ -2789,6 +2789,8 @@ test_commit_feed_and_finalize_core_paths(void)
         "commit should switch state to post-commit");
     TEST_ASSERT(ctx.headers_forwarded == 1,
         "commit should mark headers as forwarded");
+    TEST_ASSERT(metrics.streaming.commit_total == 1,
+        "successful commit should increment commit_total exactly once");
 
     ctx.processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
     ctx.streaming.handle = (struct StreamingConverterHandle *)

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "diagnostics.schema.json",
-  "title": "nginx-markdown-for-agents Diagnostics Endpoint Schema v1",
-  "description": "JSON Schema for the diagnostics endpoint response body. Defines exactly 7 top-level fields with strict typing, nullability, and bounds, plus bounded module evidence counters.",
+  "title": "nginx-markdown-for-agents Diagnostics Endpoint Schema v2",
+  "description": "JSON Schema for the diagnostics endpoint response body. Defines exactly 7 top-level fields with strict typing, nullability, and bounds, plus bounded module evidence counters and explicit error provenance.",
   "type": "object",
   "required": [
     "schema_version",
@@ -17,8 +17,8 @@
   "properties": {
     "schema_version": {
       "type": "integer",
-      "const": 1,
-      "description": "Schema version identifier. Always 1 for this version."
+      "const": 2,
+      "description": "Schema version identifier. Always 2 for this version."
     },
     "product_version": {
       "type": "string",
@@ -185,7 +185,8 @@
         "active_digest",
         "lkg_digest",
         "last_success",
-        "last_error"
+        "last_error",
+        "masked_keys"
       ],
       "additionalProperties": false,
       "properties": {
@@ -247,6 +248,22 @@
           ],
           "maxLength": 512,
           "description": "Validation failure description. Max 512 UTF-8 bytes. No raw file paths, no secrets, no raw config content. Null when no error."
+        },
+        "masked_keys": {
+          "type": "array",
+          "description": "Dynconf keys masked by explicit static server/location configuration.",
+          "uniqueItems": true,
+          "maxItems": 5,
+          "items": {
+            "type": "string",
+            "enum": [
+              "filter",
+              "prune_noise",
+              "log_verbosity",
+              "error_policy",
+              "streaming_buffer"
+            ]
+          }
         }
       },
       "allOf": [
@@ -594,6 +611,9 @@
             "timeout",
             "memory_budget",
             "internal",
+            "conversion",
+            "resource_limit",
+            "system",
             null
           ],
           "description": "Error origin dimension. Null when outcome is not a failure."

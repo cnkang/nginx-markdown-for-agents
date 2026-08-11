@@ -26,10 +26,10 @@
 //! 3. Otherwise the trusted forwarded data is parsed and **strictly
 //!    validated** (trusted source is not blindly believed): the `Forwarded`
 //!    header (RFC 7239) takes precedence over `X-Forwarded-*`; multi-hop
-//!    comma chains take the **right-most** element (closest to the trusted
-//!    proxy) so a client-prepended malicious `host=` cannot poison the base
-//!    URL.  The left-most element is attacker-controlled when the client
-//!    pre-builds the header before the trusted proxy appends its own.
+//!    comma chains are walked right-to-left, trusted proxy hops are stripped,
+//!    and the first untrusted hop supplies the client-facing value. Bracketed
+//!    IPv6 addresses are accepted for matching; bracketed IPv4 addresses are
+//!    not trusted.
 //! 4. Invalid host/proto values fall back to the `Host` header or a safe
 //!    default with an explicit reason code.
 //!

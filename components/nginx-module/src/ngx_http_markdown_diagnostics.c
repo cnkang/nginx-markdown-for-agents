@@ -8,8 +8,9 @@
  *   - Metrics snapshot (current counter values)
  *   - Dynamic configuration state (mtime, version, LKG)
  *
- * The endpoint is gated by the markdown_diagnostics directive (on/off)
- * and native NGINX access-phase directives (allow/deny).
+ * The endpoint is gated by the markdown_diagnostics directive (on/off),
+ * loopback-only peer validation, and native NGINX access-phase directives
+ * (allow/deny).
  *
  * Requirement: REQ-0700-OPERABILITY-001
  * Risk Pack: dynamic-config-hot-reload
@@ -18,6 +19,7 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
+#include <string.h>
 #include <time.h>
 
 #include "ngx_http_markdown_diagnostics.h"
@@ -78,6 +80,8 @@ static ngx_int_t ngx_http_markdown_diag_json_string(
     u_char **pos, const u_char *last, const u_char *value, size_t len);
 static ngx_int_t ngx_http_markdown_diag_json_control(
     u_char **pos, const u_char *last, u_char value);
+static ngx_int_t ngx_http_markdown_diag_masked_keys(
+    u_char **pos, const u_char *last, ngx_uint_t mask);
 static const char *ngx_http_markdown_diag_outcome(ngx_int_t code);
 static const char *ngx_http_markdown_diag_decision_stage(ngx_int_t code);
 static const char *ngx_http_markdown_diag_error_origin(ngx_int_t code);
@@ -216,6 +220,37 @@ ngx_http_markdown_diagnostics_record(ngx_http_markdown_diag_state_t *state,
     ngx_http_markdown_diagnostics_record_classified(
         state, outcome, ngx_http_markdown_diag_decision_stage(reason_code),
         reason_code, error_origin, duration_ms);
+}
+
+
+void
+ngx_http_markdown_diagnostics_record_reason(
+    ngx_http_markdown_diag_state_t *state,
+    const u_char *reason,
+    size_t reason_len,
+    const char *error_category,
+    ngx_msec_t duration_ms)
+{
+    ngx_int_t    reason_code;
+    const char  *outcome;
+    const char  *error_origin;
+
+    if (reason == NULL && reason_len != 0) {
+        return;
+    }
+
+    reason_code = ngx_http_markdown_diagnostics_reason_to_code(
+        reason, reason_len);
+    outcome = ngx_http_markdown_diag_outcome(reason_code);
+    error_origin = (outcome[0] == 'f' || outcome[0] == 'a')
+        ? error_category : NULL;
+    ngx_http_markdown_diagnostics_record_classified(
+        state,
+        outcome,
+        ngx_http_markdown_diag_decision_stage(reason_code),
+        reason_code,
+        error_origin,
+        duration_ms);
 }
 
 
@@ -428,6 +463,7 @@ ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
     /* Access control check (default deny) */
     rc = ngx_http_markdown_diagnostics_check_access(r);
     if (rc != NGX_OK) {
+        r->headers_out.status = (ngx_uint_t) rc;
         return rc;
     }
 
@@ -534,10 +570,9 @@ ngx_http_markdown_diagnostics_get_state(void)
 /*
  * Access control for the diagnostics endpoint.
  *
- * Access control is delegated to NGINX's native access-phase directives
- * (allow/deny/auth_basic/satisfy). The diagnostics content handler runs
- * in the content phase, which executes AFTER the access phase has already
- * applied any configured restrictions.
+ * Diagnostics are loopback-only by default. Native NGINX access-phase
+ * directives (allow/deny/auth_basic/satisfy) may add restrictions but cannot
+ * broaden the peer boundary. The content handler runs after that phase.
  *
  * Operators should use standard NGINX access directives:
  *
@@ -548,9 +583,7 @@ ngx_http_markdown_diagnostics_get_state(void)
  *       deny all;
  *   }
  *
- * The handler performs only a minimal NULL sockaddr check as a safety
- * guard; the actual CIDR-based access control is handled by NGINX's
- * access module before this handler is invoked.
+ * Unknown address families and missing peer addresses are denied.
  *
  * Parameters:
  *   r - HTTP request
@@ -562,10 +595,42 @@ ngx_http_markdown_diagnostics_get_state(void)
 static ngx_int_t
 ngx_http_markdown_diagnostics_check_access(ngx_http_request_t *r)
 {
+    if (r == NULL || r->connection == NULL) {
+        return NGX_HTTP_FORBIDDEN;
+    }
+
     if (r->connection->sockaddr == NULL) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
             "markdown: no client address, "
             "denying diagnostics access");
+        return NGX_HTTP_FORBIDDEN;
+    }
+
+    if (r->connection->sockaddr->sa_family == AF_INET) {
+        const struct sockaddr_in *sin =
+            (const struct sockaddr_in *) r->connection->sockaddr;
+
+        if (ntohl(sin->sin_addr.s_addr) != INADDR_LOOPBACK) {
+            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                "markdown: access denied from non-localhost IPv4 address");
+            return NGX_HTTP_FORBIDDEN;
+        }
+    }
+#if (NGX_HAVE_INET6)
+    else if (r->connection->sockaddr->sa_family == AF_INET6) {
+        const struct sockaddr_in6 *sin6 =
+            (const struct sockaddr_in6 *) r->connection->sockaddr;
+
+        if (!IN6_IS_ADDR_LOOPBACK(&sin6->sin6_addr)) {
+            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                "markdown: access denied from non-localhost IPv6 address");
+            return NGX_HTTP_FORBIDDEN;
+        }
+    }
+#endif
+    else {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+            "markdown: access denied from unknown address family");
         return NGX_HTTP_FORBIDDEN;
     }
 
@@ -797,6 +862,54 @@ ngx_http_markdown_diag_json_string(
 }
 
 
+static ngx_int_t
+ngx_http_markdown_diag_masked_keys(
+    u_char **pos, const u_char *last, ngx_uint_t mask)
+{
+    static const struct {
+        ngx_uint_t bit;
+        const char *name;
+    } fields[] = {
+        { NGX_HTTP_MARKDOWN_DIAG_MASK_FILTER, "filter" },
+        { NGX_HTTP_MARKDOWN_DIAG_MASK_PRUNE_NOISE, "prune_noise" },
+        { NGX_HTTP_MARKDOWN_DIAG_MASK_LOG_VERBOSITY, "log_verbosity" },
+        { NGX_HTTP_MARKDOWN_DIAG_MASK_ERROR_POLICY, "error_policy" },
+        { NGX_HTTP_MARKDOWN_DIAG_MASK_STREAMING_BUFFER, "streaming_buffer" }
+    };
+    ngx_flag_t emitted;
+
+    if (pos == NULL || *pos == NULL || last == NULL || *pos > last) {
+        return NGX_ERROR;
+    }
+
+    if (ngx_http_markdown_diag_json_put_byte(pos, last, '[') != NGX_OK) {
+        return NGX_ERROR;
+    }
+
+    emitted = 0;
+    for (ngx_uint_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++) {
+        if ((mask & fields[i].bit) == 0) {
+            continue;
+        }
+        if (emitted
+            && ngx_http_markdown_diag_json_put_byte(
+                   pos, last, ',') != NGX_OK)
+        {
+            return NGX_ERROR;
+        }
+        if (ngx_http_markdown_diag_json_string(
+                pos, last, (const u_char *) fields[i].name,
+                strlen(fields[i].name)) != NGX_OK)
+        {
+            return NGX_ERROR;
+        }
+        emitted = 1;
+    }
+
+    return ngx_http_markdown_diag_json_put_byte(pos, last, ']');
+}
+
+
 static const char *
 ngx_http_markdown_diag_outcome(ngx_int_t code)
 {
@@ -980,7 +1093,7 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
 
     dynconf_state = ngx_http_markdown_diag_dynconf_state_name(dynconf.state);
     p = ngx_slprintf(p, last,
-        "{\"schema_version\":1,\"product_version\":\"0.9.2\","
+        "{\"schema_version\":2,\"product_version\":\"0.9.2\","
         "\"worker\":{\"pid\":%P,\"scope\":\"worker-local\"},"
         "\"build\":{\"source_sha\":\"%s\","
         "\"nginx_version\":\"%s\",\"rust_version\":\"%s\","
@@ -1045,6 +1158,13 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
             "\"generation\":null,\"source_digest\":null,"
             "\"active_digest\":null,\"lkg_digest\":null,"
             "\"last_success\":null,\"last_error\":null");
+    }
+
+    p = ngx_slprintf(p, last, ",\"masked_keys\":");
+    if (ngx_http_markdown_diag_masked_keys(
+            &p, last, dynconf.masked_fields) != NGX_OK)
+    {
+        return NGX_ERROR;
     }
 
     p = ngx_slprintf(p, last,
@@ -1236,9 +1356,12 @@ ngx_http_markdown_log_decision_path(ngx_http_request_t *r,
      * not just the ones that were logged.
      */
     if (ngx_http_markdown_diagnostics_recording_active()) {
-        ngx_http_markdown_diagnostics_record(
+        ngx_http_markdown_diagnostics_record_reason(
             ngx_http_markdown_diagnostics_get_state(),
-            ngx_http_markdown_diagnostics_reason_to_code(path->reason_code),
+            (const u_char *) path->reason_code,
+            path->reason_code != NULL
+                ? strlen(path->reason_code) : 0,
+            path->error_category,
             path->duration_ms);
     }
 
@@ -1293,11 +1416,12 @@ ngx_http_markdown_log_decision_path(ngx_http_request_t *r,
         "accept_result=%s "
         "conditional_result=%s "
         "conversion_status=%s "
-        "reason_code=%s "
+        "reason_code=%s error_category=%s "
         "duration_ms=%M",
         accept_str,
         cond_str,
         conv_str,
         reason_str,
+        path->error_category != NULL ? path->error_category : "-",
         path->duration_ms);
 }

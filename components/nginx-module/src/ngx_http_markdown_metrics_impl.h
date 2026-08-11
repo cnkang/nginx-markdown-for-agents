@@ -140,6 +140,7 @@ typedef struct {
     struct {
         ngx_atomic_uint_t failopen_count;
         ngx_atomic_uint_t delivery_count;
+        ngx_atomic_uint_t full_buffer_delivery_count;
         ngx_atomic_uint_t decision_count;
         ngx_atomic_uint_t estimated_token_savings;
         ngx_atomic_uint_t replay_buffer_errors_total;
@@ -169,6 +170,7 @@ typedef struct {
         ngx_atomic_uint_t requests_total;
         ngx_atomic_uint_t fallback_total;
         ngx_atomic_uint_t succeeded_total;
+        ngx_atomic_uint_t commit_total;
         ngx_atomic_uint_t failed_total;
         ngx_atomic_uint_t postcommit_error_total;
         ngx_atomic_uint_t precommit_failopen_total;
@@ -563,6 +565,7 @@ ngx_http_markdown_collect_streaming_snapshot(
     snapshot->streaming.requests_total = metrics->streaming.requests_total;
     snapshot->streaming.fallback_total = metrics->streaming.fallback_total;
     snapshot->streaming.succeeded_total = metrics->streaming.succeeded_total;
+    snapshot->streaming.commit_total = metrics->streaming.commit_total;
     snapshot->streaming.failed_total = metrics->streaming.failed_total;
     snapshot->streaming.postcommit_error_total =
         metrics->streaming.postcommit_error_total;
@@ -614,6 +617,8 @@ ngx_http_markdown_collect_result_snapshot(
 {
     snapshot->results.failopen_count = metrics->results.failopen_count;
     snapshot->results.delivery_count = metrics->results.delivery_count;
+    snapshot->results.full_buffer_delivery_count =
+        metrics->results.full_buffer_delivery_count;
     snapshot->results.decision_count = metrics->results.decision_count;
     snapshot->results.estimated_token_savings =
         metrics->results.estimated_token_savings;
@@ -772,14 +777,9 @@ ngx_http_markdown_metrics_to_v1(
 #ifdef MARKDOWN_STREAMING_ENABLED
     v1->attempts.streaming = snapshot->path_hits.streaming;
 #endif
-    v1->deliveries.full_buffer = snapshot->results.delivery_count;
+    v1->deliveries.full_buffer = snapshot->results.full_buffer_delivery_count;
 #ifdef MARKDOWN_STREAMING_ENABLED
     v1->deliveries.streaming = snapshot->streaming.succeeded_total;
-    if (v1->deliveries.full_buffer >= v1->deliveries.streaming) {
-        v1->deliveries.full_buffer -= v1->deliveries.streaming;
-    } else {
-        v1->deliveries.full_buffer = 0;
-    }
 #endif
 
     /* Existing C buckets are exclusive bands; map them to v1 boundaries. */
@@ -789,8 +789,6 @@ ngx_http_markdown_metrics_to_v1(
         snapshot->conversion_latency_v1.full_buffer.le_100ms;
     v1->duration_full_buffer.buckets[8] =
         snapshot->conversion_latency_v1.full_buffer.le_1000ms;
-    v1->duration_full_buffer.buckets[9] =
-        snapshot->conversion_latency_v1.full_buffer.gt_1000ms;
     v1->duration_full_buffer.sum_us =
         snapshot->conversion_latency_v1.full_buffer.sum_ms * 1000;
     v1->duration_full_buffer.count =
@@ -801,8 +799,6 @@ ngx_http_markdown_metrics_to_v1(
         snapshot->conversion_latency_v1.streaming.le_100ms;
     v1->duration_streaming.buckets[8] =
         snapshot->conversion_latency_v1.streaming.le_1000ms;
-    v1->duration_streaming.buckets[9] =
-        snapshot->conversion_latency_v1.streaming.gt_1000ms;
     v1->duration_streaming.sum_us =
         snapshot->conversion_latency_v1.streaming.sum_ms * 1000;
     v1->duration_streaming.count =
@@ -816,8 +812,6 @@ ngx_http_markdown_metrics_to_v1(
             snapshot->conversion_latency.le_100ms;
         v1->duration_full_buffer.buckets[8] =
             snapshot->conversion_latency.le_1000ms;
-        v1->duration_full_buffer.buckets[9] =
-            snapshot->conversion_latency.gt_1000ms;
         v1->duration_full_buffer.sum_us =
             snapshot->conversion_time_sum_ms * 1000;
         v1->duration_full_buffer.count = snapshot->conversions_succeeded
@@ -834,13 +828,14 @@ ngx_http_markdown_metrics_to_v1(
     v1->inflight = snapshot->perf.inflight.current;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
-    v1->streaming_events.commit = snapshot->streaming.succeeded_total;
+    v1->streaming_events.commit = snapshot->streaming.commit_total;
     v1->streaming_events.fallback = snapshot->streaming.fallback_total;
     v1->streaming_events.safe_finish_start =
         snapshot->streaming.streaming_failure_postcommit_safe_finish;
     v1->streaming_events.abort_start =
         snapshot->streaming.streaming_failure_postcommit_abort;
-    v1->streaming_events.resume_success = snapshot->streaming.succeeded_total;
+    v1->streaming_events.resume_success =
+        snapshot->perf.backpressure_resume_total;
     v1->streaming_events.resume_failure = snapshot->streaming.failed_total;
 #endif
 

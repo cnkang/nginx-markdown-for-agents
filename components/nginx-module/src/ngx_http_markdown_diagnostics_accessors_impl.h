@@ -163,6 +163,8 @@ ngx_http_markdown_diagnostics_get_dynconf_state(
     out->config_version = ngx_http_markdown_dynconf_watcher.diagnostic_state.version;
     out->last_known_good_mtime = ngx_http_markdown_dynconf_watcher.digest_state.lkg_mtime;
     out->lkg_valid = ngx_http_markdown_dynconf_watcher.digest_state.lkg_valid ? 1 : 0;
+    out->masked_fields =
+        ngx_http_markdown_dynconf_watcher.diagnostic_state.last_masked_fields;
 }
 
 

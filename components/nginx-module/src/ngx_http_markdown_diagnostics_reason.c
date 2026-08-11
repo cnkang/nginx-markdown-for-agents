@@ -8,14 +8,9 @@
 
 #include <ngx_config.h>
 #include <ngx_core.h>
+#include <string.h>
 
 #include "ngx_http_markdown_diagnostics.h"
-
-#ifndef ngx_strcmp
-#include <string.h>
-#define ngx_strcmp(s1, s2) \
-    strcmp((const char *) (s1), (const char *) (s2))
-#endif
 
 /*
  * Convert a diagnostics reason string to its canonical
@@ -26,7 +21,8 @@
  * render them distinctly without guessing.
  */
 ngx_int_t
-ngx_http_markdown_diagnostics_reason_to_code(const char *reason)
+ngx_http_markdown_diagnostics_reason_to_code(const u_char *reason,
+    size_t reason_len)
 {
     static const struct {
         const char  *name;
@@ -89,12 +85,18 @@ ngx_http_markdown_diagnostics_reason_to_code(const char *reason)
         { "FAIL_SYSTEM",                  13 },
         { "BYPASS_NO_TRANSFORM",          25 },
     };
-    if (reason == NULL) {
+    if (reason == NULL && reason_len != 0) {
         return -1;
     }
 
     for (size_t i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
-        if (ngx_strcmp(reason, map[i].name) == 0) {
+        size_t name_len = strlen(map[i].name);
+
+        if (reason_len == name_len
+            && (reason_len == 0
+                || strncmp((const char *) reason, map[i].name,
+                           reason_len) == 0))
+        {
             return map[i].code;
         }
     }

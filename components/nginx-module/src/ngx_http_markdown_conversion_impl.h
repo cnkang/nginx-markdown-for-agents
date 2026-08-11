@@ -1857,6 +1857,7 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
 
     if (rc == NGX_OK || rc == NGX_DONE) {
         NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count);
+        NGX_HTTP_MARKDOWN_METRIC_INC(results.full_buffer_delivery_count);
     }
 
     if (rc == NGX_AGAIN) {
@@ -1910,6 +1911,7 @@ ngx_http_markdown_body_filter_resume_pending(ngx_http_request_t *r,
 
     if (rc == NGX_OK || rc == NGX_DONE) {
         NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count);
+        NGX_HTTP_MARKDOWN_METRIC_INC(results.full_buffer_delivery_count);
         /* Backpressure resume: drain completed successfully */
         NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_resume_total);
     }

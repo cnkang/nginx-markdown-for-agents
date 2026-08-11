@@ -66,9 +66,10 @@ impl Encoding {
 /// - `Malformed` maps to the canonical `ENCODING_HEADER_INVALID` reason with
 ///   `stage=decompression` and `error_origin=format` during outer precommit
 ///   routing; no decoder starts and no response header is mutated.
-/// - `UnknownToken` and `DepthExceeded` are capability bypasses: the entire
-///   conversion is bypassed in precommit and the original response passes
-///   through unchanged, with no error-policy dispatch.
+/// - `UnknownToken` and `DepthExceeded` are parser classifications. The C
+///   precommit router sends both through the configured error policy before
+///   any decoder starts; only an explicit `pass` policy forwards the original
+///   response unchanged.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChainParseError {
     /// Malformed grammar (comma error, empty/quoted token, token parameter,
@@ -275,7 +276,15 @@ pub fn decode_chain(
             ));
         }
         let input_len = current.len();
-        let decoded = decode_layer(&current, *enc, limits)?;
+        let remaining_budget = limits
+            .max_output
+            .checked_sub(cumulative)
+            .ok_or(ChainDecodeError::BudgetExceeded)?;
+        let layer_limits = DecodeLimits {
+            max_output: remaining_budget,
+            ratio: limits.ratio,
+        };
+        let decoded = decode_layer(&current, *enc, layer_limits)?;
         validate_decoded_layer(input_len, decoded.len(), &mut cumulative, limits)?;
         current = decoded;
         has_decoded_layer = true;

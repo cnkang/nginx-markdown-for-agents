@@ -174,34 +174,36 @@ pub struct FFIDynconfResult {
     pub streaming_buffer: u64,
 }
 
+fn default_dynconf_result() -> FFIDynconfResult {
+    FFIDynconfResult {
+        error_code: DYNCONF_ERR_INTERNAL,
+        error_message: ptr::null(),
+        error_message_len: 0,
+        source_digest: ptr::null(),
+        source_digest_len: 0,
+        active_digest: ptr::null(),
+        active_digest_len: 0,
+        filter: DYNCONF_NOT_SET_U8,
+        prune_noise: DYNCONF_NOT_SET_U8,
+        log_verbosity: DYNCONF_NOT_SET_U8,
+        error_policy: DYNCONF_NOT_SET_U8,
+        streaming_buffer: DYNCONF_NOT_SET_U64,
+    }
+}
+
 /// Initialize an FFIDynconfResult to safe defaults.
 ///
 /// # Safety
 ///
 /// `result` must point to a valid, writable `FFIDynconfResult`.
+// safe-init: default_dynconf_result contains only NULL and scalar defaults.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn markdown_dynconf_result_init(result: *mut FFIDynconfResult) {
     if result.is_null() {
         return;
     }
     unsafe {
-        ptr::write(
-            result,
-            FFIDynconfResult {
-                error_code: DYNCONF_ERR_INTERNAL,
-                error_message: ptr::null(),
-                error_message_len: 0,
-                source_digest: ptr::null(),
-                source_digest_len: 0,
-                active_digest: ptr::null(),
-                active_digest_len: 0,
-                filter: DYNCONF_NOT_SET_U8,
-                prune_noise: DYNCONF_NOT_SET_U8,
-                log_verbosity: DYNCONF_NOT_SET_U8,
-                error_policy: DYNCONF_NOT_SET_U8,
-                streaming_buffer: DYNCONF_NOT_SET_U64,
-            },
-        );
+        ptr::write(result, default_dynconf_result());
     }
 }
 
@@ -218,6 +220,8 @@ pub unsafe extern "C" fn markdown_dynconf_result_init(result: *mut FFIDynconfRes
 ///   if `data_len` is 0.
 /// - `result` must point to a valid, writable `FFIDynconfResult` that has
 ///   been initialized via `markdown_dynconf_result_init`.
+/// - An initialized result may be reused for another parse; the previous
+///   owned strings are released before the new result is written.
 /// - After a successful call, `result` contains heap-allocated strings that
 ///   must be freed via `markdown_dynconf_result_free`.
 #[unsafe(no_mangle)]
@@ -230,10 +234,11 @@ pub unsafe extern "C" fn markdown_dynconf_parse(
         return;
     }
 
-    // Initialize to safe defaults before any work.  If a panic occurs
+    // Release a prior parse before resetting to safe defaults.  If a panic occurs
     // during parsing or result writing, the result struct retains this
     // safe state (all pointers NULL, error_code = DYNCONF_ERR_INTERNAL).
     unsafe {
+        markdown_dynconf_result_free(result);
         markdown_dynconf_result_init(result);
     }
 
@@ -283,7 +288,8 @@ pub unsafe extern "C" fn markdown_dynconf_parse(
 
 /// Free heap memory owned by an FFIDynconfResult.
 ///
-/// After calling this function, all pointer fields in `result` become invalid.
+/// After calling this function, all pointer fields and scalar result fields in
+/// `result` are reset to safe defaults.
 /// It is safe to call this on a result that was initialized but never
 /// populated (e.g., after a NULL pointer early-return).
 ///
@@ -291,7 +297,8 @@ pub unsafe extern "C" fn markdown_dynconf_parse(
 ///
 /// - `result` must point to a valid `FFIDynconfResult` that was populated
 ///   by `markdown_dynconf_parse` or initialized via `markdown_dynconf_result_init`.
-/// - Must be called exactly once per successful `markdown_dynconf_parse` call.
+/// - Call this after the final parse using the result. It is also safe to call
+///   it on an initialized, already-reset result.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn markdown_dynconf_result_free(result: *mut FFIDynconfResult) {
     if result.is_null() {
@@ -332,15 +339,12 @@ pub unsafe extern "C" fn markdown_dynconf_result_free(result: *mut FFIDynconfRes
             };
         }
 
-        // Clear all pointers
+        // Reset every field after releasing the owned buffers.  This makes a
+        // freed result safe for reuse and prevents stale optional values from
+        // being observed by a caller that parses into it again.
         // SAFETY: result was validated non-NULL above.
         let r_mut = unsafe { &mut *result };
-        r_mut.error_message = ptr::null();
-        r_mut.error_message_len = 0;
-        r_mut.source_digest = ptr::null();
-        r_mut.source_digest_len = 0;
-        r_mut.active_digest = ptr::null();
-        r_mut.active_digest_len = 0;
+        *r_mut = default_dynconf_result();
     }));
 }
 
