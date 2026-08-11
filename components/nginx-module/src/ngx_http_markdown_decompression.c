@@ -223,8 +223,10 @@ ngx_http_markdown_collect_content_encoding(ngx_http_request_t *r,
  *                      non-identity decoder list in application order
  *   MALFORMED        - canonical ENCODING_HEADER_INVALID (stage=decompression,
  *                      error_origin=format); no decoder is started
- *   UNKNOWN_TOKEN    - capability bypass (passthrough, no error policy)
- *   DEPTH_EXCEEDED   - capability bypass (passthrough, no error policy)
+ *   UNKNOWN_TOKEN    - unsupported token; the caller routes it through the
+ *                      configured error policy without starting a decoder
+ *   DEPTH_EXCEEDED   - unsupported chain depth; the caller routes it through
+ *                      the configured error policy without starting a decoder
  *
  * Returns the ENCODING_CHAIN_* classification, or DECOMP_CATEGORY_INVALID_ARGS
  * on FFI contract failure.

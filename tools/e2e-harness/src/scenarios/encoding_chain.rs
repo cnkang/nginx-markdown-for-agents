@@ -8,9 +8,10 @@
 //! - malformed grammar produces the `ENCODING_HEADER_INVALID` outcome
 //!   (PASS returns the original encoded response unchanged; fail_closed
 //!   returns the resolved reject status)
-//! - syntactically valid unknown tokens bypass the entire conversion
-//!   (passthrough with no error-policy dispatch)
-//! - more than three non-identity layers bypass the entire conversion
+//! - syntactically valid unknown tokens route through the configured error
+//!   policy (pass forwards the original response; fail_closed rejects)
+//! - more than three non-identity layers route through the configured error
+//!   policy
 
 use crate::fixtures::{EncodingFault, EncodingLayer, FixtureSpec, RouteBehavior, RouteSpec};
 use crate::http::HttpResponse;
@@ -255,37 +256,47 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         format!("status={}", malformed_closed.status),
     );
 
-    /* Unknown token: precommit passthrough with no error-policy dispatch
-     * (Requirement 12.7): original response unchanged under both policies. */
-    for (name, path) in [
-        ("unknown_pass", "/chain/unknown-token"),
-        ("unknown_closed", "/chain-fail-closed/unknown-token"),
-    ] {
-        let response = request_raw(&base_url, path)?;
-        push_assertion(
-            &mut assertions,
-            name,
-            response.status == 200 && response.headers.contains_key("Content-Encoding"),
-            "unknown-token passthrough preserves the original response",
-            format!("status={} headers={:?}", response.status, response.headers),
-        );
-    }
+    /* Unknown token: route through the configured error policy
+     * (Requirement 12.7). PASS forwards the original response; fail_closed
+     * returns the resolved reject status. */
+    let unknown_pass = request_raw(&base_url, "/chain/unknown-token")?;
+    push_assertion(
+        &mut assertions,
+        "unknown_pass",
+        unknown_pass.status == 200 && unknown_pass.headers.contains_key("Content-Encoding"),
+        "unknown-token PASS preserves the original response",
+        format!(
+            "status={} headers={:?}",
+            unknown_pass.status, unknown_pass.headers
+        ),
+    );
+    let unknown_closed = request_raw(&base_url, "/chain-fail-closed/unknown-token")?;
+    push_assertion(
+        &mut assertions,
+        "unknown_closed",
+        unknown_closed.status == 502,
+        "unknown-token fail_closed emits the resolved reject status",
+        format!("status={}", unknown_closed.status),
+    );
 
-    /* Depth overflow (4+ non-identity layers): precommit passthrough
-     * (Requirement 12.3), original response preserved under both policies. */
-    for (name, path) in [
-        ("depth_pass", "/chain/depth-overflow"),
-        ("depth_closed", "/chain-fail-closed/depth-overflow"),
-    ] {
-        let response = request_raw(&base_url, path)?;
-        push_assertion(
-            &mut assertions,
-            name,
-            response.status == 200 && response.headers.contains_key("Content-Encoding"),
-            "depth-overflow passthrough preserves the original response",
-            format!("status={} headers={:?}", response.status, response.headers),
-        );
-    }
+    /* Depth overflow (4+ non-identity layers) follows the same configured
+     * error policy as an unknown token. */
+    let depth_pass = request_raw(&base_url, "/chain/depth-overflow")?;
+    push_assertion(
+        &mut assertions,
+        "depth_pass",
+        depth_pass.status == 200 && depth_pass.headers.contains_key("Content-Encoding"),
+        "depth-overflow PASS preserves the original response",
+        format!("status={} headers={:?}", depth_pass.status, depth_pass.headers),
+    );
+    let depth_closed = request_raw(&base_url, "/chain-fail-closed/depth-overflow")?;
+    push_assertion(
+        &mut assertions,
+        "depth_closed",
+        depth_closed.status == 502,
+        "depth-overflow fail_closed emits the resolved reject status",
+        format!("status={}", depth_closed.status),
+    );
 
     /* Truncated outer layer: full-buffer decode fails cleanly and the
      * PASS policy returns the original response. */

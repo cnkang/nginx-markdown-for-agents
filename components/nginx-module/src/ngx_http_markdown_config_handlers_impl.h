@@ -15,6 +15,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include "ngx_http_markdown_diagnostics.h"
+#include "ngx_http_markdown_directive_names.h"
 
 static ngx_int_t
 ngx_http_markdown_conf_args_ready(
@@ -1743,13 +1744,15 @@ ngx_http_markdown_dynconf_flag(ngx_conf_t *cf,
         return NGX_CONF_ERROR;
     }
     if (ngx_http_markdown_arg_equals(
-            &cmd->name, (const u_char *) "markdown_dynamic_config",
-            sizeof("markdown_dynamic_config") - 1))
+            &cmd->name,
+            (const u_char *) NGX_HTTP_MARKDOWN_DIRECTIVE_DYNAMIC_CONFIG,
+            sizeof(NGX_HTTP_MARKDOWN_DIRECTIVE_DYNAMIC_CONFIG) - 1))
     {
         slot = &mcf->advanced.dynconf_enabled;
     } else if (ngx_http_markdown_arg_equals(
-                   &cmd->name, (const u_char *) "markdown_dynconf_dry_run",
-                   sizeof("markdown_dynconf_dry_run") - 1))
+                   &cmd->name,
+                   (const u_char *) NGX_HTTP_MARKDOWN_DIRECTIVE_DYNCONF_DRY_RUN,
+                   sizeof(NGX_HTTP_MARKDOWN_DIRECTIVE_DYNCONF_DRY_RUN) - 1))
     {
         slot = &mcf->advanced.dynconf_dry_run;
     } else {
