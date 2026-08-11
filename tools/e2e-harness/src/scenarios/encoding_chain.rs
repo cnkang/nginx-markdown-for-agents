@@ -117,10 +117,27 @@ pub fn fixture_spec(listen_port: u16) -> FixtureSpec {
                 EncodingFault::UnknownToken,
             ),
             chain_route(
+                "/unknown-token-baseline",
+                small.clone(),
+                vec![EncodingLayer::Gzip],
+                EncodingFault::None,
+            ),
+            chain_route(
                 "/depth-overflow",
                 small.clone(),
                 vec![EncodingLayer::Gzip],
                 EncodingFault::DepthOverflow,
+            ),
+            chain_route(
+                "/depth-overflow-baseline",
+                small.clone(),
+                vec![
+                    EncodingLayer::Gzip,
+                    EncodingLayer::Gzip,
+                    EncodingLayer::Gzip,
+                    EncodingLayer::Gzip,
+                ],
+                EncodingFault::None,
             ),
             chain_route(
                 "/truncated",
@@ -260,14 +277,18 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
      * (Requirement 12.7). PASS forwards the original response; fail_closed
      * returns the resolved reject status. */
     let unknown_pass = request_raw(&base_url, "/chain/unknown-token")?;
+    let unknown_baseline = request_raw(&base_url, "/chain-raw/unknown-token-baseline")?;
     push_assertion(
         &mut assertions,
         "unknown_pass",
-        unknown_pass.status == 200 && unknown_pass.headers.contains_key("Content-Encoding"),
-        "unknown-token PASS preserves the original response",
+        same_wire_response(&unknown_pass, &unknown_baseline),
+        "unknown-token PASS preserves the upstream wire response",
         format!(
-            "status={} headers={:?}",
-            unknown_pass.status, unknown_pass.headers
+            "pass_status={} baseline_status={} pass_headers={:?} baseline_headers={:?}",
+            unknown_pass.status,
+            unknown_baseline.status,
+            unknown_pass.headers,
+            unknown_baseline.headers
         ),
     );
     let unknown_closed = request_raw(&base_url, "/chain-fail-closed/unknown-token")?;
@@ -282,12 +303,16 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     /* Depth overflow (4+ non-identity layers) follows the same configured
      * error policy as an unknown token. */
     let depth_pass = request_raw(&base_url, "/chain/depth-overflow")?;
+    let depth_baseline = request_raw(&base_url, "/chain-raw/depth-overflow-baseline")?;
     push_assertion(
         &mut assertions,
         "depth_pass",
-        depth_pass.status == 200 && depth_pass.headers.contains_key("Content-Encoding"),
-        "depth-overflow PASS preserves the original response",
-        format!("status={} headers={:?}", depth_pass.status, depth_pass.headers),
+        same_wire_response(&depth_pass, &depth_baseline),
+        "depth-overflow PASS preserves the upstream wire response",
+        format!(
+            "pass_status={} baseline_status={} pass_headers={:?} baseline_headers={:?}",
+            depth_pass.status, depth_baseline.status, depth_pass.headers, depth_baseline.headers
+        ),
     );
     let depth_closed = request_raw(&base_url, "/chain-fail-closed/depth-overflow")?;
     push_assertion(
@@ -322,6 +347,13 @@ fn request_markdown(base_url: &str, path: &str) -> Result<HttpResponse> {
 fn request_raw(base_url: &str, path: &str) -> Result<HttpResponse> {
     crate::http::get(&format!("{base_url}{path}"))
         .with_context(|| format!("request failed for {path}"))
+}
+
+fn same_wire_response(left: &HttpResponse, right: &HttpResponse) -> bool {
+    left.status == right.status
+        && left.body == right.body
+        && left.headers.get("Content-Encoding") == right.headers.get("Content-Encoding")
+        && left.headers.get("Content-Type") == right.headers.get("Content-Type")
 }
 
 fn append_converted_assertions(
