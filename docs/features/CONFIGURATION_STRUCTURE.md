@@ -76,7 +76,7 @@ the order shown in the example.
 | Policy | `policy.auth_policy`, cookie patterns, cache validation | `markdown_auth_policy`, `markdown_auth_cookies`, `markdown_cache_validation` |
 | Routing | content-type allowlist, in-flight limit | `markdown_content_types`, `markdown_limits max_inflight` |
 | Streaming | mode, exclusions, bounded buffer | `markdown_streaming`, `markdown_stream_excluded_types`, `markdown_limits streaming_buffer` |
-| Decompression | automatic mode and bounded decoder state | `markdown_auto_decompress`, `markdown_limits decompressed_size`, `decompression_ratio` |
+| Decompression | automatic mode and bounded decoder state | `markdown_auto_decompress`, `markdown_limits decompressed_size`, `markdown_limits decompression_ratio` |
 | Observability | logs, diagnostics, metrics shared memory | `markdown_log_verbosity`, `markdown_diagnostics`, `markdown_metrics_shm_size`, `markdown_metrics` |
 | Dynamic config | watcher, path, dry-run | `markdown_dynamic_config`, `markdown_dynamic_config_path`, `markdown_dynconf_dry_run` |
 

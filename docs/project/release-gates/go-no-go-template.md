@@ -41,7 +41,7 @@ The team may exclude the P1 sub-spec without blocking the release (Req 7.5).
 
 ## Exceptions
 
-The reviewer must record unresolved failures with documented exceptions here with risk assessment and mitigation (Req 7.6).
+Every unresolved failure must have an exception record here that includes its rationale, risk assessment, and mitigation (Req 7.6).
 
 | # | Gate Item | Exception Rationale | Risk Assessment | Mitigation |
 |---|----------|-------------------|-----------------|------------|

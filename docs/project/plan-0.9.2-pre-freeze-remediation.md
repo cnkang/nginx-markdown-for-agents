@@ -17,7 +17,7 @@
   report consolidated `decisions/` into `docs/architecture/ADR/` and
   `docs/release/` into `docs/releases/`.
 - The release-matrix migration keeps legacy aliases only at the input boundary.
-  all consumers resolve canonical `entries` and preserve compatibility metadata
+  All consumers resolve canonical `entries` and preserve compatibility metadata
   in the same change.
 - THIRD-PARTY-NOTICES serde_json 1.0.150 → 1.0.151 (Rule 49).
 - No CI workflow additions in pre-freeze (F4 relabeled instead of wired).

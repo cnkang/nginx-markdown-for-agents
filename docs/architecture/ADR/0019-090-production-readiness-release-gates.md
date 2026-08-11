@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (0.9.0 contract freeze, gate implementation follows in the release-hardening phase)
+Accepted (0.9.0 contract freeze, gate implemented)
 
 ## Context
 
@@ -25,14 +25,15 @@ release-gates wave (final wave).
 
 ### Structure
 
-`release-gates-check-090` models on the real 17-step `-080` gate
+`release-gates-check-090` follows the real 17-step `-080` gate
 (`Makefile:568`), extended with 0.9.0-specific steps (Config V2 reject-only
 golden errors, HeaderPlan fault-injection, reason-registry/diagnostics renderer
-contract, production-examples smoke, version-consistency). It MUST NOT recursively
-invoke `release-gates-check-080` from inside its own recipe, prior-version
-the validators it reuses invoke directly and stay **caller-parameterized** for the
-active version (`RELEASE_GATE_EXPECTED_CARGO_VERSION=0.9.0`), per AGENTS.md Rule
-13.
+contract, production-examples smoke, version-consistency). It MUST NOT
+recursively invoke `release-gates-check-080` from inside its own recipe. Reused
+the gate directly invokes prior-version validators, which remain
+**caller-parameterized**
+for the active version
+(`RELEASE_GATE_EXPECTED_CARGO_VERSION=0.9.0`), per AGENTS.md Rule 13.
 
 ### Blocking semantics (frozen)
 

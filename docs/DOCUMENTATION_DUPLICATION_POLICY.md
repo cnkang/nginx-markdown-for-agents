@@ -21,6 +21,10 @@ The repository now follows a **single-source documentation policy**.
 - Feature docs: `docs/features/`
 - Testing docs: `docs/testing/`
 - Project status: `docs/project/`
+- Release notes, release checklists, and release matrices: `docs/releases/`
+- In-flight implementation plans: `docs/development/`
+- Machine-readable evidence artifacts: `docs/evidence/`
+- Deployment and operational reference: `docs/operations/`
 - Repository structure: `docs/architecture/REPOSITORY_STRUCTURE.md`
 
 ## Validation Commands

@@ -267,20 +267,22 @@ signing during the release workflow.
 
 | Secret Name | Content | Format |
 |-------------|---------|--------|
-| `GPG_PRIVATE_KEY` | Armored private key (including subkeys) | ASCII-armored PEM |
+| `GPG_PRIVATE_KEY` | Armored signing-subkey-only export; the primary secret key must not be included | ASCII-armored OpenPGP |
 | `GPG_PASSPHRASE` | Key passphrase | Plain text |
 | `GPG_KEY_ID` | Key ID used for signing | 16-character hex ID |
 
 ### Setting Up Secrets
 
 ```bash
-# Export private key for CI
-gpg --armor --export-secret-keys <KEY_ID> > private-key.asc
+# Export only the signing subkey for CI. The `!` selects that exact key
+# material; never export the primary secret key into CI.
+gpg --armor --export-secret-subkeys '<SIGNING_SUBKEY_FINGERPRINT>!' \
+  > private-signing-subkey.asc
 
 # Store in GitHub Secrets:
 # Settings → Secrets and variables → Actions → New repository secret
 #   Name: GPG_PRIVATE_KEY
-#   Value: (contents of private-key.asc)
+#   Value: (contents of private-signing-subkey.asc)
 #
 #   Name: GPG_PASSPHRASE
 #   Value: (key passphrase)
@@ -289,7 +291,7 @@ gpg --armor --export-secret-keys <KEY_ID> > private-key.asc
 #   Value: (16-char key ID, e.g. ABCDEF1234567890)
 
 # Clean up - securely delete the exported key
-shred -u private-key.asc
+shred -u private-signing-subkey.asc
 ```
 
 ### Workflow Usage

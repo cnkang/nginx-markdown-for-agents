@@ -67,7 +67,10 @@ The parser decodes entities consistently across all HTML contexts:
 - **In code blocks**: `<code>&lt;html&gt;</code>` → `<html>`
 - **In lists**: `<li>&amp; item</li>` → `& item`
 
-Note: While html5ever decodes entities in code blocks, the Markdown output preserves the decoded characters. If you need to display literal `<` or `>` in code, escape them in the Markdown output. The code block formatter handles this.
+Note: While html5ever decodes entities in code blocks, the Markdown output
+preserves the decoded characters. Code spans and fenced code blocks preserve
+their code context. Callers do not need to pre-escape `<` or `>`
+in the source HTML.
 
 ## Testing
 
@@ -109,7 +112,9 @@ Using html5ever's built-in entity decoding ensures:
 - **Specification Compliance**: Follows HTML5 specification exactly
 - **Comprehensive Support**: The converter supports all valid HTML entities
 - **Edge Case Handling**: The converter handles malformed entities, invalid code points, and so on correctly
-- **Security**: No risk of entity-related vulnerabilities (XSS, and so on)
+- **Security**: Entity decoding itself does not execute markup or scripts.
+  Normal URL and Markdown-output sanitization still applies to the decoded
+  text.
 
 ## Requirements Satisfied
 

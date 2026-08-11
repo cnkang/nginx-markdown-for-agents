@@ -119,9 +119,14 @@ expansion.
 
 ### Positive
 
-- No partial header mutation, commit is allocation-free and cannot half-apply.
-- All `Content-Type`/`Content-Length`/`ETag`/`Vary` edge cases handled in one
-  atomic place.
+- No partial mutation occurs within the HeaderPlan-covered fields. The commit
+  is allocation-free and cannot half-apply.
+- Content-Type, Content-Encoding, and Content-Length edge cases handled in
+  one atomic place. ETag and Vary remain explicit post-plan operations under
+  the scope boundary above.
+- A post-plan failure can leave the core mutations applied, but it occurs
+  before `ngx_http_send_header()` and therefore cannot expose those partial
+  headers on the wire.
 - Honest streaming post-commit semantics (no false 502/rewrite promises).
 
 ### Negative

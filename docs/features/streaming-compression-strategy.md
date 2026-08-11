@@ -143,7 +143,7 @@ The 0.9.2 boundary rests on validated decoder lifecycles:
 - **Brotli upstreams, Brotli-disabled build**: The module routes responses to bounded
   full-buffer decompression via the Rust FFI path. No streaming TTFB benefit.
 - **Budget tuning**: Set `markdown_limits decompressed_size=<size>` and
-  `decompression_ratio=<N>` to accommodate legitimate compressed responses
+  `markdown_limits decompression_ratio=<N>` to accommodate legitimate compressed responses
   while still protecting against decompression bombs.
 
 ## Build Compatibility

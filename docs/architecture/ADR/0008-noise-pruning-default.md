@@ -6,7 +6,11 @@
 
 ## Context
 
-v0.5.x ships noise pruning as an opt-in Cargo feature (`prune_noise_regions`). When enabled, it removes structural HTML regions that have no value for AI agent consumption. These include nav, footer, aside, ad slots, and cookie banners. This typically reduces output volume by 15–60% depending on page noise ratio. The pruning targets non-content regions only.
+v0.5.x ships noise pruning as an opt-in Cargo feature (`prune_noise_regions`).
+When enabled, it removes the built-in structural selectors `nav`, `footer`,
+and `aside`, which have little value for AI-agent consumption. This typically
+reduces output volume by 15–60% depending on page noise ratio. The pruning
+targets non-content regions only.
 
 Current limitations:
 1. Pruning is opt-in at compile time — operators must rebuild with `--features prune_noise_regions`

@@ -149,7 +149,7 @@ Vary: Accept
 ```
 
 If the response returns `Content-Type: text/markdown`, the module loads and
-converting HTML to Markdown for agent clients.
+converts HTML to Markdown for agent clients.
 
 ---
 

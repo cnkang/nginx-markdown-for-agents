@@ -16,7 +16,7 @@ Copy the table below into your sub-spec and populate it with identified risks.
 ## Rules
 
 1. Risks with **High likelihood OR High impact** must have an explicit, actionable mitigation strategy achievable within the 0.4.0 timeline. A blank or vague mitigation field is not acceptable for these entries.
-2. The Go/No-Go review reviews risk registers. Unmitigated high-severity risks may block the release decision.
+2. The Go/No-Go review examines risk registers. Unmitigated high-severity risks may block the release decision.
 3. New risks discovered during implementation must enter the register promptly. Do not defer risk documentation to the end of the sub-spec lifecycle.
 
 ## Instructions for Sub-Spec Owners

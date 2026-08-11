@@ -2,7 +2,9 @@
 
 ## Overview
 
-This checklist aggregates all release gate verification steps, organized by the five gate categories. Each item verifies via a specific artifact, command, or review action.
+This checklist aggregates all release gate verification steps. It organizes
+them by the five gate categories. Each item has a specific artifact, command,
+or review action.
 
 ## Documentation Gates
 

@@ -158,10 +158,13 @@ dpkg-sig --verify nginx-module-markdown-for-agents_*.deb
 
 When you rotate the signing key:
 
-1. You publish the new key at the same URL (`gpg.key`)
-2. A transition period allows both old and new keys
-3. Release announcements include the new key fingerprint
-4. Users should re-import the key:
+1. Publish the new key alongside the still-valid old key at the key URL.
+2. Announce the new fingerprint and have users install and independently
+   verify it before repository metadata relies on it.
+3. Maintain an overlap period in which signatures made by both keys are
+   accepted.
+4. Remove the old key only after migration is complete. Users can then
+   install the new key:
 
 ```bash
 curl -fsSL https://pkg.example.com/nginx-markdown/gpg.key | \

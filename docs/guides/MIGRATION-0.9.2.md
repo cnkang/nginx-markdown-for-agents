@@ -421,7 +421,8 @@ sudo nginx -t
 bash tools/doctor/nginx-markdown-doctor.sh
 
 # Verify metrics endpoint still works
-curl -s http://localhost/markdown-metrics | head -5
+curl -s -H 'Accept: text/plain; version=0.0.4' \
+  http://localhost/markdown-metrics | head -5
 
 # Verify diagnostics endpoint
 curl -s http://localhost/nginx-markdown/diagnostics | python3 -m json.tool | head

@@ -14,8 +14,8 @@ this guide.
 > Publication status: 0.9.2 is currently a development candidate. At the
 > time of writing, no `v0.9.2` tag, GitHub Release, package checksum, Docker
 > image, or Helm repository entry gets asserted. The prebuilt, Helm, and Docker
-> commands below are release-time templates and must only run after those
-> the project publishes artifacts and verifies them independently. For the current
+> commands below are release-time templates and must only run after the project
+> publishes the artifacts and verifies them independently. For the current
 > candidate, build from the exact branch commit or use locally produced
 > artifacts.
 

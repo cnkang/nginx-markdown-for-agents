@@ -97,7 +97,8 @@ configuration.
 ## Relationship to Other ADRs
 
 - [ADR-0004](0004-streaming-bounded-memory-conversion.md): this ADR changes the default rollout phase from "disabled by default" (Phase 1) to "auto by default".
-- [ADR-0006](0006-otel-integration.md): auto mode selection is observable via OTel span attribute `nginx.markdown.engine`.
+- [ADR-0006](0006-otel-integration.md): its former OTel observation note is
+  historical. 0.9.2 has no module-owned span attribute or OTel lifecycle.
 
 ## References
 

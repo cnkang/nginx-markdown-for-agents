@@ -215,7 +215,12 @@ http {
 }
 ```
 
-If you are using a reverse proxy upstream instead of PHP-FPM, `proxy_set_header Accept-Encoding "";` is still a useful first-step simplification. It is optional. The module can automatically decompress upstream `gzip`, `br`, and `deflate` responses when you keep compression enabled end to end.
+If you are using a reverse proxy upstream instead of PHP-FPM, keep
+`markdown_auto_decompress on` whenever the module must convert compressed
+upstream responses. `proxy_set_header Accept-Encoding "";` offers an optional
+first-step simplification. It asks the upstream for an uncompressed response,
+but it does not substitute for the module's decompression policy when
+compression remains enabled end to end.
 
 ### Bot-Targeted Conversion (User-Agent Based)
 
@@ -531,7 +536,7 @@ If PHP compresses output itself (`zlib.output_compression=On`), disable that for
 
 ### Existing `.md` files bypass conversion automatically
 
-The module only converts eligible `text/html` responses. Native Markdown or plain text responses bypass conversionssed. You can still explicitly exclude `.md` paths:
+The module only converts eligible `text/html` responses. Native Markdown or plain text responses bypass conversion. You can still explicitly exclude `.md` paths:
 
 ```nginx
 location ~* \.md$ {

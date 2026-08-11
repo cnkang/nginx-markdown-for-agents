@@ -44,7 +44,8 @@ The converter applies the following normalization rules to all Markdown output:
 
 ### 1. Line Endings (CRLF → LF)
 
-**Rule**: The module normalizes all line endings to LF (`\n`), never CRLF (`\r\n`).
+**Rule**: The module normalizes CRLF line endings to LF (`\n`). Lone carriage
+returns are not part of the documented line-ending guarantee.
 
 **Rationale**: Different systems use different line endings (Windows: CRLF, Unix/Linux/macOS: LF). Normalizing to LF ensures consistent output across platforms.
 

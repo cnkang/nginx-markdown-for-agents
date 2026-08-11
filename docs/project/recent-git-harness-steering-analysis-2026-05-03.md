@@ -8,7 +8,7 @@ refs from `refs/heads` and `refs/remotes`, excluding
 `origin/HEAD`, and deduplicated commits by SHA.
 `tools/harness/resolve_spec.py --hint "review last two weeks all branch commits
 for harness rule updates"` returned `SKIP_NOT_PRESENT`, so this work counts as
-as cross-cutting harness maintenance.
+cross-cutting harness maintenance.
 
 ## Phase 1 Analysis
 

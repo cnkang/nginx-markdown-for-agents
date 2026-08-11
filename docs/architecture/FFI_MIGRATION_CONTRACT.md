@@ -34,11 +34,10 @@ The following families have current NGINX production consumers:
 | Header plan | `markdown_build_header_plan`, `markdown_header_plan_init`, `markdown_header_plan_free` | Rust-owned atomic plan, C application |
 | Base URL | `markdown_trusted_proxies_new`, `markdown_trusted_proxies_push`, `markdown_trusted_proxies_free`, `markdown_decide_base_url` | CIDR-aware trusted forwarding decision |
 | Decompression | `markdown_decompress_bounded`, `markdown_decomp_result_init`, `markdown_decompress_free` | Bounded Rust decompression path |
-| Config conflicts | `markdown_detect_conflicts`, `markdown_free_conflicts` | Config-time profile/explicit conflict list |
 | Error/reason | `markdown_classify_error_code`, `markdown_reason_code_str`, `markdown_reason_code_metric_key`, `markdown_reason_code_count` | Canonical cross-language classification and labels |
 | Streaming | `markdown_streaming_new_with_code`, `markdown_streaming_feed`, `markdown_streaming_finalize`, `markdown_streaming_abort`, `markdown_streaming_safe_finish`, `markdown_streaming_output_free` | Streaming request lifecycle |
 | Incremental | `markdown_incremental_new_with_code`, `markdown_incremental_feed`, `markdown_incremental_finalize`, `markdown_incremental_free` | Bounded incremental conversion |
-| ABI alignment | `markdown_abi_version` | Startup-enforced Rust/C version match |
+| ABI alignment | `markdown_abi_version`, `markdown_abi_header_hash`, `markdown_abi_symbol_set_hash`, `markdown_abi_layout_fingerprint` | Startup-enforced version, generated-header, exported-symbol, and layout match |
 
 The generated header contains only the bundled production boundary. Test-only
 Rust helpers are not emitted as C declarations.
@@ -68,6 +67,7 @@ boundary.
 | `markdown_get_diagnostics_schema`, `markdown_free_diagnostics` | Separate Rust specimen drifted from the C endpoint | C diagnostics renderer and schema document |
 | `markdown_incremental_new`, `markdown_streaming_new` | Redundant wrappers hid constructor error codes | Corresponding `_new_with_code` exports |
 | `markdown_streaming_finish`, `markdown_streaming_free`, `markdown_streaming_reason` | No production caller; duplicated finalize/abort/error-code paths | `finalize`, `abort`, `safe_finish`, and return codes |
+| Profile/conflict FFI snapshots and `markdown_*conflicts` | No production C consumer; the pre-v1 profile model was not part of the active request boundary | C owns the active merged configuration and Rust exposes only consumed request-path decisions |
 
 ## Shared struct policy
 
@@ -77,13 +77,6 @@ These remain separate because their lifecycles and consumers differ. Repeated
 semantic fields must update together, but v0.9.1 does not combine the
 structs merely for aesthetic deduplication. Both flavor fields accept only 0
 (CommonMark) and 1 (GFM).
-
-### Config/profile structs
-
-`FFIExplicitConfig` and `FFIEffectiveConfig` contain one streaming field:
-`streaming` (`off=0`, `auto=1`, `force=2`). There is no independent engine
-field. `markdown_detect_conflicts` consumes these snapshots at configuration
-time. Request-path semantics remain in the C effective configuration.
 
 ### Results and handles
 
@@ -115,8 +108,8 @@ must cover every code in the relevant category. Non-trivial exports catch Rust
 panics. Output structs are fail-safe before the catch and committed only after
 success. Cleanup helpers also catch panics so unwinding never crosses C.
 
-Both sides of the boundary validate NULL and empty inputs independently
-boundary. Empty output buffers appear as `NULL`/0. No C allocator may
+Both sides of the boundary validate NULL and empty inputs independently at
+the boundary. Empty output buffers appear as `NULL`/0. No C allocator may
 free Rust-owned memory.
 
 ## v1 freeze

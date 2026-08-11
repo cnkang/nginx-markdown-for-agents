@@ -94,7 +94,7 @@ abort" — all operations are now in the prepare phase.
 | Vary: Accept (new) | push inert slot | assign key/value/hash=1 |
 | Vary: Accept (append) | allocate appended value copy | swap value pointer |
 | X-Markdown-Tokens | push inert slot, format value | assign key/value/hash=1 |
-| Cache-Control auth | scan + allocate rewrite | pointer swap (done in prepare) |
+| Cache-Control auth | scan + allocate rewrite | pointer swap (commit only) |
 | Content-Length set | — | scalar assignment |
 | Accept-Ranges remove | — | hash=0, pointer clear |
 | Content-Encoding clear | — | pointer clear |

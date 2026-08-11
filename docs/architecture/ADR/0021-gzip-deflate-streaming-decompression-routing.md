@@ -7,7 +7,7 @@ Accepted — Brotli full-buffer section superseded by [ADR-0024](0024-brotli-str
 ## Context
 
 0.9.1 routes compressed responses through streaming decompression when the
-the module selects the streaming engine, `auto_decompress` turns on, and cache validation is
+module selects the streaming engine, `auto_decompress` turns on, and cache validation is
 not `full`. Deflate already supports both RFC 1950 zlib-wrapped and RFC 1951
 raw framing through deferred header sniffing. Gzip uses zlib's gzip wrapper
 mode (`MAX_WBITS + 16`), including header and trailer validation.
@@ -56,8 +56,8 @@ when earlier output exactly fills that budget.
 - Existing decompression and streaming counters classify routing, budget,
   pre-commit, and post-commit outcomes.
 - `streaming_first` prefers streaming when the selected codec and validation
-  requirements stay supported. ADR-0024 superseded the original Brotli exclusion
-  ADR-0024.
+  requirements stay supported. ADR-0024 superseded the original Brotli
+  exclusion.
 
 ## Consequences
 

@@ -164,7 +164,7 @@ Wait at least 30 minutes, then verify:
 # Check for conversion activity
 curl -s -H "Accept: text/plain; version=0.0.4" \
   http://localhost/markdown-metrics | \
-  grep -E "nginx_markdown_(requests_total|conversion_attempts_total)"
+  grep -E "nginx_markdown_(requests_total|conversion_attempts_total|conversion_deliveries_total)"
 
 # Check decision log entries
 grep "markdown decision:" /var/log/nginx/error.log | tail -10
@@ -258,7 +258,7 @@ Wait at least 1 hour, then verify:
 # Check overall conversion metrics
 curl -s -H "Accept: text/plain; version=0.0.4" \
   http://localhost/markdown-metrics | \
-  grep -E "nginx_markdown_(requests_total|conversion_deliveries_total)"
+  grep -E "nginx_markdown_(requests_total|conversion_attempts_total|conversion_deliveries_total)"
 
 # Check reason code distribution
 grep "markdown decision:" /var/log/nginx/error.log | \
@@ -355,7 +355,7 @@ Wait at least 24 hours to cover a full traffic cycle, then verify:
 # Check production conversion metrics
 curl -s -H "Accept: text/plain; version=0.0.4" \
   http://localhost/markdown-metrics | \
-  grep -E "nginx_markdown_(requests_total|conversion_deliveries_total)"
+  grep -E "nginx_markdown_(requests_total|conversion_attempts_total|conversion_deliveries_total)"
 
 # Check for failure reason codes in the last 24 hours
 grep "markdown decision:" /var/log/nginx/error.log | \
@@ -1088,9 +1088,15 @@ Fail-open (`pass`) is the safe choice for production because conversion is an en
 
 #### `markdown_accept strict`
 
-With `off`, only requests containing an explicit `Accept: text/markdown` media type trigger conversion. Wildcard Accept values like `Accept: */*` or `Accept: text/*` — which browsers and many HTTP clients send by default — do not trigger conversion.
+With `strict`, only requests containing an explicit `Accept: text/markdown`
+media type trigger conversion. Wildcard Accept values like `Accept: */*` or
+`Accept: text/*` — which browsers and many HTTP clients send by default — do
+not trigger conversion.
 
-This prevents accidental conversion of browser traffic. Without this default, a standard browser request (`Accept: text/html, */*`) could match the wildcard and receive Markdown instead of HTML. That would break the page rendering. Keeping `off` during rollout ensures only clients that specifically request Markdown receive it.
+This prevents accidental conversion of browser traffic. A standard browser
+request (`Accept: text/html, */*`) does not match the strict policy and keeps
+HTML. Use `markdown_accept wildcard` only for a scope where wildcard clients
+are intentionally meant to receive Markdown.
 
 #### `markdown_log_verbosity info`
 
@@ -1270,7 +1276,7 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 # Show failure outcomes from the metrics endpoint
 curl -s -H "Accept: text/plain; version=0.0.4" \
   http://localhost/markdown-metrics | \
-  grep 'nginx_markdown_requests_total{outcome="failed_'
+  grep -E 'nginx_markdown_requests_total\{[^}]*outcome="failed_[^"}]*"'
 ```
 
 #### Check conversion latency buckets

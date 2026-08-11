@@ -26,6 +26,7 @@ Publication and artifact availability are separate release gates.
 
    ```bash
    sudo nginx -s quit
+   while sudo systemctl is-active --quiet nginx; do sleep 1; done
    ```
 
 2. **Restore the 0.9.1 module binary:**
@@ -63,6 +64,8 @@ Publication and artifact availability are separate release gates.
 2. **Install, validate, and start:**
 
    ```bash
+   sudo nginx -s quit
+   while sudo systemctl is-active --quiet nginx; do sleep 1; done
    sudo cp objs/ngx_http_markdown_filter_module.so /usr/lib/nginx/modules/
    sudo nginx -t && sudo nginx
    ```
@@ -108,6 +111,8 @@ Key reversions:
 ### Step 3: Install 0.9.0 binary and validate
 
 ```bash
+sudo nginx -s quit
+while sudo systemctl is-active --quiet nginx; do sleep 1; done
 sudo cp /path/to/ngx_http_markdown_filter_module.so.0.9.0 \
     /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
 sudo nginx -t && sudo nginx

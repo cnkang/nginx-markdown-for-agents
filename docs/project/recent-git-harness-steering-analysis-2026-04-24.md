@@ -10,7 +10,7 @@ We refreshed remote state with `git fetch --all --prune --tags` before
 analysis. We enumerated local and remote refs from `refs/heads` and
 `refs/remotes`, excluding `origin/HEAD`, and deduplicated commits by SHA.
 `tools/harness/resolve_spec.py --hint "recent git harness steering analysis and
-remediation"` returned `WARN_NEEDS_AUTHOR_REVIEW`, this work is therefore
+remediation"` returned `WARN_NEEDS_AUTHOR_REVIEW`. This work is therefore
 treated as cross-cutting harness maintenance rather than a single bound spec.
 
 ## Phase 1 Analysis

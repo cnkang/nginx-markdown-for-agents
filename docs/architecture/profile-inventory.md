@@ -197,7 +197,9 @@ profile):
 - `metrics_*`, `otel_*` — observability plumbing
 - `prune_*` — content surgery, site-specific
 - `dynconf_*` — operational plumbing
-- `llm_provider`, `chars_per_token` — estimation tuning (directives removed in 0.9.2. FFI fields retained until 8.13 freeze)
+- `llm_provider`, `chars_per_token` — historical estimation tuning (directives
+  removed in 0.9.2. The final 1.0 compatibility freeze governs the retained
+  FFI fields)
 - `decompress.*`, `parse_timeout`, `parser_budget` — hard safety caps
 - `log_verbosity` — debugging
 

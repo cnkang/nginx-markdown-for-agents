@@ -54,11 +54,17 @@ Response arrives at body filter
 
 ### Full-Buffer Path (Existing)
 
-No changes. The module buffers the complete response body, optionally decompresses it, resolves conditional requests, then calls `markdown_convert()` through FFI. This is the only active path when you disable the feature.
+No changes. The module buffers the complete response body, optionally
+decompresses it, resolves conditional requests, then calls `markdown_convert()`
+through FFI. This full-buffer Rust path remains available when incremental
+the module disables conversion.
 
 ### Incremental Path (New, Feature-Gated)
 
-When the threshold router selects the incremental path, the NGINX module still buffers the complete response body. It decompresses the body if needed. The module hands the full buffer to the Rust `IncrementalConverter` via FFI. The call sequence is:
+When the feature-gated incremental conversion path handles a request, the NGINX
+module still buffers the complete response body. It decompresses the body if
+needed and hands the full buffer to the Rust `IncrementalConverter` via FFI.
+The call sequence is:
 
 1. `markdown_incremental_new_with_code()` — create a converter instance with the current `ConversionOptions` and retain the status code
 2. `markdown_incremental_feed()` — called once with the complete buffered body (`ctx->buffer.data`)
@@ -68,7 +74,10 @@ When the threshold router selects the incremental path, the NGINX module still b
    non-NULL arguments, `finalize` consumes the handle regardless of its
    return code
 
-True per-upstream-chunk feeding from NGINX (calling `feed` as each body chunk arrives from upstream) is not implemented yet. It remains a future change. The current implementation buffers first, then delegates to the incremental Rust API.
+True per-upstream-chunk feeding from NGINX (calling `feed` as each body chunk
+arrives from upstream) is not implemented yet. It remains a future change.
+The current implementation buffers first, then delegates to the incremental
+Rust API. No current operator threshold selects this path.
 
 In practical terms, the current incremental path should be understood as:
 

@@ -159,10 +159,11 @@ Total: 35 unit tests for charset detection
 
 ### UTF-8 Only Parsing
 
-The current implementation only supports UTF-8 parsing with html5ever. If the detector finds a non-UTF-8 charset:
+The current implementation detects declared charsets but only parses UTF-8
+with html5ever. If the detector finds a non-UTF-8 charset:
 
 1. The module logs a warning to stderr
-2. The parser attempts to parse as UTF-8 anyway
+2. The parser receives the bytes as UTF-8 without transcoding.
 3. If the content is not valid UTF-8, the module returns an encoding error
 
 **Future Enhancement**: Add charset transcoding support using the `encoding_rs` crate to convert non-UTF-8 content to UTF-8 before parsing.

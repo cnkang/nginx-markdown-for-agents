@@ -63,6 +63,18 @@ default gets introduced. The existing `markdown_decompress_max_size` budget
 applies identically to Brotli. The existing `markdown_error_policy` governs
 fail-open/reject behavior.
 
+### Decoder Workspace Budget
+
+The module creates the Brotli decoder with a custom allocator. The allocator
+charges live allocations to an atomic counter in the main configuration and
+caps the total at `NGX_HTTP_MARKDOWN_BROTLI_WORKSPACE_LIMIT` (32 MiB) per
+worker. Concurrent requests in that worker share the counter, and the
+allocator releases each reservation from its allocation header before NGINX
+reclaims the request pool. If reservation fails, the allocator reports an
+allocation failure and follows the existing
+pre-commit error policy. Decoded output remains governed separately by the
+cumulative `markdown_decompress_max_size` budget.
+
 ### Error Code Semantics — Two-Layer Model
 
 The decompressor implements a two-layer error model:
@@ -201,11 +213,11 @@ Configure-time environment variable `NGX_MARKDOWN_BROTLI_STREAMING` (values:
 
 - Adds a build-time and runtime dependency on `libbrotlidec` for
   Brotli-enabled builds (official release artifacts)
-- Brotli decoder internal allocations (ring buffers, context maps) are not
-  bounded by `markdown_decompress_max_size` — only decoded output volume gets
-  budgeted. Standard RFC 7932 streams use WBITS 10–24. The module does not set
-  `BROTLI_DECODER_PARAM_LARGE_WINDOW`, so the decoder rejects the RFC 9841
-  large-window extension (WBITS > 24). Performance evidence must include
+- Brotli decoder internal allocations (ring buffers, context maps) use a
+  separate fixed 32 MiB per-worker workspace budget rather than the decoded
+  output budget. Standard RFC 7932 streams use WBITS 10–24. The module does
+  not set `BROTLI_DECODER_PARAM_LARGE_WINDOW`, so the decoder rejects the RFC
+  9841 large-window extension (WBITS > 24). Performance evidence must include
   high-standard-window and high-compression-ratio RSS measurements.
 - CI matrix grows: the project must test both Brotli-enabled and
   Brotli-disabled builds,
@@ -219,10 +231,9 @@ Configure-time environment variable `NGX_MARKDOWN_BROTLI_STREAMING` (values:
 - **New public directive for Brotli streaming control**: Rejected because the
   existing `markdown_auto_decompress` + routing gates provide sufficient
   control without directive proliferation.
-- **Custom allocator for Brotli decoder internal memory**: Deferred. The
-  default system allocator is sufficient for the 0.9.1 scope. A pool-backed
-  allocator would require careful thread-safety analysis for future
-  multi-threaded decoders.
+- **Custom allocator for Brotli decoder internal memory**: Adopted. A
+  per-worker atomic byte budget bounds concurrent decoder state while the
+  allocation header lets the free callback release the exact reservation.
 - **Concatenated Brotli stream support**: Not applicable. RFC 7932 defines a
   single-stream format. It needs no concatenated member handling.
 

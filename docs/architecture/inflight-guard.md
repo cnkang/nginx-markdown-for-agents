@@ -50,9 +50,9 @@ terminate a request.
 | NGX_AGAIN (backpressure) | — | — | Request still in progress |
 | NGX_DONE (subrequest) | — | — | Request still in progress |
 
-**Key invariant**: The module increments the counter exactly once per eligible
-request, and decremented exactly once when that request completes (by any
-means).
+**Key invariant**: The module increments the counter exactly once for each
+admitted eligible request and decrements it exactly once when that request
+completes by any means.
 
 ## Overflow Protection
 
@@ -84,7 +84,9 @@ The default value of 64 is chosen to protect typical deployments where:
 
 When `current >= max_inflight`:
 
-1. The module increments the `overload_total` counter
+1. The module records a terminal request outcome in the frozen
+   `nginx_markdown_requests_total{outcome,stage,reason}` family with
+   `reason="overload"`.
 2. The request is **not** counted in the inflight counter
 3. The configured error policy determines behavior:
    - **pass** (default): Original response passed through unmodified
@@ -101,7 +103,8 @@ The frozen Prometheus surface exposes the current gauge and request outcome:
 | `nginx_markdown_requests_total{outcome=...,stage=...,reason=...}` | counter | Terminal request outcomes, including inflight-limit decisions |
 
 The module aggregates counters and gauges in its shared metrics zone and
-exposes them at the configured `markdown_metrics` location.
+exposes them at the configured `markdown_metrics` location. There is no
+separate `overload_total` metric family.
 
 ## Implementation Files
 

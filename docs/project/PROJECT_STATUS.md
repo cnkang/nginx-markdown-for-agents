@@ -31,7 +31,8 @@ The project implements and tests the core feature set. It ships working features
 
 **Status:** Development release line. 0.9.2 is the final pre-1.0 breaking
 release, with the public configuration surface reduced from 63 directives to
-25 and the bundled FFI ABI at version 2. Development version metadata is
+25, retired profile/conflict FFI snapshots removed, and the bundled FFI ABI at
+version 2. Development version metadata is
 0.9.2. The release tag, GitHub Release, package assets, and checksums remain
 pending until the blocking gates pass.
 

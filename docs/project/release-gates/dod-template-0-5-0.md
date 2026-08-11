@@ -38,7 +38,7 @@ Each sub-spec fills in the following table upon completion, recorded as part of 
 2. The sub-spec's completion artifacts record assessment results
 3. Streaming-related sub-specs must additionally include streaming-to-full-buffer rollback verification in the "Rollbackable" checkpoint
 4. All checkpoints must pass before the team declares a sub-spec complete
-5. The Go/No-Go review reviews DoD assessments
+5. The Go/No-Go review examines DoD assessments
 
 ## Document Updates
 

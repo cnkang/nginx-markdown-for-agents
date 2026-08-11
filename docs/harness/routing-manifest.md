@@ -60,7 +60,6 @@ Plan-only targets (for example `*-plan`) are documentation aids, not evidence.
 | `security-static-supply-chain` | workflow static security, secret scanning, Rust dependency policy, supply-chain visibility | ci-gating, docs-tooling | [risk-packs/security-static-supply-chain.md](risk-packs/security-static-supply-chain.md) |
 | `release-governance` | release gates, scope governance, source-build CI | docs-tooling, harness-remediation | [risk-packs/release-governance.md](risk-packs/release-governance.md) |
 | `harness-remediation` | harness rules, steering adapters, post-analysis closeout | docs-tooling, observability | [risk-packs/harness-remediation.md](risk-packs/harness-remediation.md) |
-| `otel-integration` | OTel tracing, OTel metrics, OTLP export, span attributes | observability, nginx-protocol | [risk-packs/otel-integration.md](risk-packs/otel-integration.md) |
 | `packaging-distribution` | APT/YUM repos, Homebrew tap, Helm chart, K8s Ingress | docs-tooling, release-governance | [risk-packs/packaging-distribution.md](risk-packs/packaging-distribution.md) |
 | `dynamic-config-hot-reload` | dynamic config parser, reload lifecycle, runtime apply | nginx-protocol, observability, docs-tooling | [risk-packs/dynamic-config-hot-reload.md](risk-packs/dynamic-config-hot-reload.md) |
 | `output-safety` | Markdown escaping, link/URL emission, injection prevention | nginx-protocol, docs-tooling | [risk-packs/output-safety.md](risk-packs/output-safety.md) |
