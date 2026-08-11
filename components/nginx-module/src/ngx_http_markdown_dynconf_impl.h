@@ -3176,7 +3176,7 @@ ngx_http_markdown_dynconf_stage_candidate(
         ngx_http_markdown_record_dynconf_reload(failure_code);
         ngx_http_markdown_dynconf_record_candidate_error(
             watcher, failure_code);
-        ngx_log_error(NGX_LOG_WARN, log,
+        ngx_log_error(NGX_LOG_WARN, log, 0,
             "markdown: dynamic configuration candidate rejected "
             "(error_code=%ui)", failure_code);
         watcher->diagnostic_state.last_result = conf->advanced.dynconf_dry_run

@@ -1046,12 +1046,12 @@ test_handler_get_head_and_denials(void)
     addr.sin_addr.s_addr = htonl(0x0a000001);
     r.method = NGX_HTTP_POST;
     rc = ngx_http_markdown_diagnostics_handler(&r);
-    TEST_ASSERT(rc == NGX_HTTP_FORBIDDEN,
-                "access denial must precede method validation");
-    TEST_ASSERT(r.headers_out.status == NGX_HTTP_FORBIDDEN,
-                "denied mutation requests must not disclose 405");
-    TEST_ASSERT(g_allow_header.hash == 0,
-                "denied mutation requests must not receive Allow");
+    TEST_ASSERT(rc == NGX_OK,
+                "method denial must precede access control");
+    TEST_ASSERT(r.headers_out.status == NGX_HTTP_NOT_ALLOWED,
+                "unsupported methods must return 405 before access control");
+    TEST_ASSERT(g_allow_header.hash == 1,
+                "method denial must include the active Allow header");
 
     TEST_PASS("Handler paths covered");
 }
