@@ -817,6 +817,40 @@ test_v1_engine_delivery_and_event_sources(void)
 }
 
 static void
+test_v1_latency_sum_conversion_is_bounded(void)
+{
+    ngx_http_markdown_metrics_snapshot_t  snapshot;
+    ngx_http_markdown_metrics_v1_snapshot_t v1;
+    ngx_atomic_uint_t                      maximum;
+
+    TEST_SUBSECTION("v1 latency sum conversion is bounded");
+
+    maximum = (ngx_atomic_uint_t) -1;
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.conversion_latency_v1.full_buffer.count = 1;
+    snapshot.conversion_latency_v1.full_buffer.sum_ms = maximum / 1000 + 1;
+
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+    TEST_ASSERT(v1.duration_full_buffer.sum_us == maximum,
+                "full-buffer millisecond conversion must saturate");
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.conversion_latency_v1.streaming.count = 1;
+    snapshot.conversion_latency_v1.streaming.sum_ms = 1234;
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+    TEST_ASSERT(v1.duration_streaming.sum_us == 1234000,
+                "streaming millisecond conversion must preserve precision");
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.conversion_time_sum_ms = maximum / 1000 + 1;
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+    TEST_ASSERT(v1.duration_full_buffer.sum_us == maximum,
+                "aggregate millisecond conversion must saturate");
+
+    TEST_PASS("v1 latency sum conversion is bounded");
+}
+
+static void
 test_json_single_path_fits(void)
 {
     u_char buf[16384];
@@ -1727,6 +1761,7 @@ main(void)
     test_metrics_handler_uses_frozen_v1_surface();
     test_v1_output_bytes_include_streaming_delivery();
     test_v1_engine_delivery_and_event_sources();
+    test_v1_latency_sum_conversion_is_bounded();
     test_json_single_path_fits();
     test_json_zero_paths();
     test_json_overflow_produces_other();

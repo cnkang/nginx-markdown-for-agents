@@ -571,14 +571,6 @@ find_directive(const char *name)
     return NULL;
 }
 
-static int command_table_contains(const char *name);
-static ngx_command_t *
-streaming_zero_copy_directive(void)
-{
-    /* Directive removed in 0.9.2. */
-    return NULL;
-}
-
 static void
 test_trusted_proxies_http_only_command_contract(void)
 {
@@ -719,7 +711,10 @@ test_valid_values(void)
 static void
 test_streaming_zero_copy_flag_values(void)
 {
-    /* Removed in 0.9.2 */
+    TEST_SUBSECTION("removed zero-copy directive is absent");
+    TEST_ASSERT(find_directive("markdown_streaming_zero_copy") == NULL,
+        "removed zero-copy directive must not be registered");
+    TEST_PASS("removed zero-copy directive is absent");
 }
 
 /* ================================================================
@@ -781,7 +776,10 @@ test_invalid_values(void)
 static void
 test_streaming_zero_copy_rejects_invalid_value(void)
 {
-    /* Removed in 0.9.2 */
+    TEST_SUBSECTION("removed zero-copy directive has no handler");
+    TEST_ASSERT(find_directive("markdown_streaming_zero_copy") == NULL,
+        "removed zero-copy directive must have no handler");
+    TEST_PASS("removed zero-copy directive has no handler");
 }
 
 /* ================================================================

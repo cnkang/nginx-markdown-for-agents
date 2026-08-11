@@ -225,9 +225,16 @@ ngx_conf_log_error(ngx_uint_t level, ngx_conf_t *cf, ngx_err_t err,
                    && *(fmt + 2) == 'i'))
         {
             ngx_uint_t val = va_arg(ap, ngx_uint_t);
-            int written = snprintf(p, (size_t)(end - p),
-                                   "%lu", (unsigned long) val);
-            if (written > 0) { p += written; }
+            size_t available = (size_t) (end - p);
+            int written;
+
+            if (available != 0) {
+                written = snprintf(p, available, "%lu", (unsigned long) val);
+                if (written > 0) {
+                    p += (size_t) written >= available
+                        ? available - 1 : (size_t) written;
+                }
+            }
             fmt += 3;
         } else {
             *p++ = *fmt++;

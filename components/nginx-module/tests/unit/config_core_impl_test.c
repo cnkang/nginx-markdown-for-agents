@@ -325,43 +325,6 @@ ngx_http_complex_value(ngx_http_request_t *r,
     return val->eval_rc;
 }
 
-/*
- * FFI stubs for profile conflict detection.
- *
- * The production header (config_core_impl.h) references Rust FFI types and
- * functions from markdown_converter.h.  The unit test does not link the Rust
- * library, so we include the shared header for struct definitions and provide
- * no-op function stubs.  The conflict detection returns "no conflicts" — the
- * behavior being tested in this file is the C configuration lifecycle, not
- * the Rust conflict logic.
- */
-#include "../../src/markdown_converter.h"
-
-struct FFIConflictList
-markdown_detect_conflicts(uint8_t profile,
-    const struct FFIExplicitConfig *explicit_cfg,
-    const struct FFIEffectiveConfig *effective_cfg)
-{
-    struct FFIConflictList list;
-
-    UNUSED(profile);
-    UNUSED(explicit_cfg);
-    UNUSED(effective_cfg);
-
-    list.conflicts = NULL;
-    list.count = 0;
-    return list;
-}
-
-/*
- * No-op stub: nothing to free in the test environment.
- */
-void
-markdown_free_conflicts(struct FFIConflictList *list)
-{
-    UNUSED(list);
-}
-
 #include "../../src/ngx_http_markdown_config_core_impl.h"
 
 static ngx_pool_t g_pool;
@@ -551,6 +514,35 @@ test_create_conf_defaults(void)
         "streaming budget should be unset");
 
     TEST_PASS("create_conf defaults covered");
+}
+
+static void
+test_merge_conf_default_cache_validation(void)
+{
+    ngx_conf_t                  cf;
+    ngx_http_markdown_conf_t   *parent;
+    ngx_http_markdown_conf_t   *child;
+    char                       *rc;
+
+    TEST_SUBSECTION("merge_conf default cache validation");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+    cf.log = &g_log;
+
+    parent = ngx_http_markdown_create_conf(&cf);
+    child = ngx_http_markdown_create_conf(&cf);
+    TEST_ASSERT(parent != NULL && child != NULL,
+        "create_conf should allocate merge inputs");
+
+    rc = ngx_http_markdown_merge_conf(&cf, parent, child);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+        "default cache validation merge should succeed");
+    TEST_ASSERT(child->policy.conditional_requests
+                == NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE,
+        "unset cache validation should default to if_modified_since");
+
+    TEST_PASS("merge_conf default cache validation covered");
 }
 
 /*
@@ -1594,6 +1586,7 @@ main(void)
     test_metrics_zone_init();
     test_main_conf_create_and_init();
     test_create_conf_defaults();
+    test_merge_conf_default_cache_validation();
     test_merge_conf();
     test_dynconf_owner_uses_merged_config();
     test_merge_conf_double_unset();

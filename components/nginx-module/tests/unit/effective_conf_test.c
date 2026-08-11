@@ -252,7 +252,7 @@ markdown_dynconf_result_init(FFIDynconfResult *result)
 }
 
 void
-markdown_dynconf_parse(const uint8_t *data, size_t data_len,
+markdown_dynconf_parse(const uint8_t *data, uintptr_t data_len,
     FFIDynconfResult *result)
 {
     UNUSED(data);

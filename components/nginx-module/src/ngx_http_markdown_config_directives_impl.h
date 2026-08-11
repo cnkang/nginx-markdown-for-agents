@@ -193,7 +193,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *              "markdown_on_wildcard on")
      *   force    - convert regardless of the Accept header (dangerous)
      * Public default: strict
-     * Context: http
+     * Context: http, server, location
      *
      * Example:
      *   markdown_accept wildcard;
@@ -216,7 +216,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * - allow: Convert authenticated requests (default)
      * - deny: Skip conversion for authenticated requests
      * Default: allow
-     * Context: http
+     * Context: http, server, location
      *
      * Example:
      *   markdown_auth_policy deny;
@@ -237,7 +237,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * Supports exact match, prefix match (pattern*), and wildcards.
      * Public default: none
      * Default: none (only Authorization header detection)
-     * Context: http
+     * Context: http, server, location
      *
      * Example:
      *   markdown_auth_cookies session* auth_token PHPSESSID;

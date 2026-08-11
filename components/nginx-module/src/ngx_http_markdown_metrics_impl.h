@@ -4,6 +4,8 @@
 #include "ngx_http_markdown_metrics_json_perf_impl.h"
 #include "ngx_http_markdown_metrics_format.h"
 
+#include <stdint.h>
+
 #ifndef NGX_MAX_SIZE_T_VALUE
 #define NGX_MAX_SIZE_T_VALUE ((size_t) -1)
 #endif
@@ -222,6 +224,19 @@ typedef struct {
     /* Performance metrics (backpressure, decompression path, output mode) */
     ngx_http_markdown_metrics_perf_snapshot_t perf;
 } ngx_http_markdown_metrics_snapshot_t;
+
+static ngx_atomic_uint_t
+ngx_http_markdown_metrics_ms_to_us(ngx_atomic_uint_t milliseconds)
+{
+    uint64_t maximum;
+
+    maximum = (uint64_t) ((ngx_atomic_uint_t) -1);
+    if ((uint64_t) milliseconds > maximum / 1000U) {
+        return (ngx_atomic_uint_t) maximum;
+    }
+
+    return (ngx_atomic_uint_t) ((uint64_t) milliseconds * 1000U);
+}
 
 typedef struct {
     ngx_atomic_uint_t conversions_completed;
@@ -790,7 +805,8 @@ ngx_http_markdown_metrics_to_v1(
     v1->duration_full_buffer.buckets[8] =
         snapshot->conversion_latency_v1.full_buffer.le_1000ms;
     v1->duration_full_buffer.sum_us =
-        snapshot->conversion_latency_v1.full_buffer.sum_ms * 1000;
+        ngx_http_markdown_metrics_ms_to_us(
+            snapshot->conversion_latency_v1.full_buffer.sum_ms);
     v1->duration_full_buffer.count =
         snapshot->conversion_latency_v1.full_buffer.count;
     v1->duration_streaming.buckets[2] =
@@ -800,7 +816,8 @@ ngx_http_markdown_metrics_to_v1(
     v1->duration_streaming.buckets[8] =
         snapshot->conversion_latency_v1.streaming.le_1000ms;
     v1->duration_streaming.sum_us =
-        snapshot->conversion_latency_v1.streaming.sum_ms * 1000;
+        ngx_http_markdown_metrics_ms_to_us(
+            snapshot->conversion_latency_v1.streaming.sum_ms);
     v1->duration_streaming.count =
         snapshot->conversion_latency_v1.streaming.count;
     latency_count = v1->duration_full_buffer.count
@@ -813,7 +830,8 @@ ngx_http_markdown_metrics_to_v1(
         v1->duration_full_buffer.buckets[8] =
             snapshot->conversion_latency.le_1000ms;
         v1->duration_full_buffer.sum_us =
-            snapshot->conversion_time_sum_ms * 1000;
+            ngx_http_markdown_metrics_ms_to_us(
+                snapshot->conversion_time_sum_ms);
         v1->duration_full_buffer.count = snapshot->conversions_succeeded
             + snapshot->conversions_failed;
     }

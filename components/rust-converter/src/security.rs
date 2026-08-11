@@ -143,7 +143,8 @@ const DANGEROUS_URL_SCHEMES: &[&str] = &[
 /// Streaming tokenizers can split one logical text node across arbitrary
 /// chunks. Keeping the line-prefix state across those fragments prevents a
 /// punctuation character in the middle of a source line from being treated
-/// as a block marker merely because it arrived in a new chunk.
+/// as a block marker merely because it arrived in a new chunk.  The same
+/// state protects line-leading GFM table bars and setext underline markers.
 #[derive(Clone, Copy)]
 pub(crate) struct MarkdownTextEscapeState {
     line_prefix: bool,
@@ -188,7 +189,8 @@ pub(crate) fn escape_markdown_text_with_state(
     for ch in s.chars() {
         let block_marker = state.line_prefix
             && state.indent <= 3
-            && (matches!(ch, '#' | '>' | '+' | '-' | '!') || (ch == '.' && state.ordered_digits));
+            && (matches!(ch, '#' | '>' | '+' | '-' | '!' | '|' | '=')
+                || (ch == '.' && state.ordered_digits));
         let inline_delimiter = matches!(ch, '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '~');
 
         if block_marker || inline_delimiter {
@@ -1112,5 +1114,18 @@ mod url_validation_tests {
             "\\- item\n\\# heading\n1\\. item"
         );
         assert_eq!(escape_markdown_text("a-b"), "a-b");
+    }
+
+    #[test]
+    fn test_escape_markdown_text_blocks_table_and_setext_markers() {
+        assert_eq!(escape_markdown_text("| cell |"), r"\| cell |");
+        assert_eq!(escape_markdown_text("heading\n===="), "heading\n\\====");
+
+        let mut state = MarkdownTextEscapeState::default();
+        assert_eq!(
+            escape_markdown_text_with_state("heading\n=", &mut state),
+            "heading\n\\="
+        );
+        assert_eq!(escape_markdown_text_with_state("===", &mut state), "===");
     }
 }

@@ -9,8 +9,8 @@
  *
  * Verified defaults:
  *   - decompress_max_size: inherits max_size (10MB default) when unset
- *   - parse_timeout: 30000ms (30 seconds)
- *   - parser_budget: 64MB (64 * 1024 * 1024 bytes)
+ *   - parse_timeout: 10000ms (10 seconds)
+ *   - parser_budget: 32MB (32 * 1024 * 1024 bytes)
  *   - dynconf_dry_run: 0 (off)
  *   - markdown_diagnostics: not yet a per-location directive (E01.4 pending)
  *
@@ -249,31 +249,6 @@ ngx_http_complex_value(ngx_http_request_t *r,
     }
     *value = val->value;
     return val->eval_rc;
-}
-
-#include "../../src/markdown_converter.h"
-
-struct FFIConflictList
-markdown_detect_conflicts(uint8_t profile,
-    const struct FFIExplicitConfig *explicit_,
-    const struct FFIEffectiveConfig *effective)
-{
-    struct FFIConflictList list;
-
-    UNUSED(profile);
-    UNUSED(explicit_);
-    UNUSED(effective);
-
-    list.conflicts = NULL;
-    list.count = 0;
-
-    return list;
-}
-
-void
-markdown_free_conflicts(struct FFIConflictList *list)
-{
-    UNUSED(list);
 }
 
 #include "../../src/ngx_http_markdown_config_core_impl.h"
@@ -654,8 +629,8 @@ main(void)
     printf("========================================\n");
     printf("\nVerified defaults summary:\n");
     printf("  decompress_max_size : inherits max_size (10MB default)\n");
-    printf("  parse_timeout       : 30000ms (30 seconds)\n");
-    printf("  parser_budget       : 67108864 bytes (64MB)\n");
+    printf("  parse_timeout       : 10000ms (10 seconds)\n");
+    printf("  parser_budget       : 33554432 bytes (32MB)\n");
     printf("  dynconf_dry_run     : 0 (off)\n");
     printf("  markdown_diagnostics: not yet a per-location directive\n");
     printf("\n");

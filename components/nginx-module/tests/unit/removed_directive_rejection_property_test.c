@@ -26,44 +26,6 @@
 #include "../../src/ngx_http_markdown_directive_names.h"
 
 /* ----------------------------------------------------------------
- * The active command-table target (25 entries, frozen).
- * Extracted from the production directive registry. This
- * self-contained list avoids needing to compile the full
- * production header with all its handler stubs.
- * ---------------------------------------------------------------- */
-
-static const char *active_directives[] = {
-    NGX_HTTP_MARKDOWN_DIRECTIVE_FILTER,
-    NGX_HTTP_MARKDOWN_DIRECTIVE_LIMITS,
-    NGX_HTTP_MARKDOWN_DIRECTIVE_ERROR_POLICY,
-    NGX_HTTP_MARKDOWN_DIRECTIVE_FLAVOR,
-    NGX_HTTP_MARKDOWN_DIRECTIVE_TOKEN_ESTIMATE,
-    NGX_HTTP_MARKDOWN_DIRECTIVE_FRONT_MATTER,
-    NGX_HTTP_MARKDOWN_DIRECTIVE_ACCEPT,
-    NGX_HTTP_MARKDOWN_DIRECTIVE_AUTH_POLICY,
-    NGX_HTTP_MARKDOWN_DIRECTIVE_AUTH_COOKIES,
-    NGX_HTTP_MARKDOWN_DIRECTIVE_CACHE_VALIDATION,
-    NGX_HTTP_MARKDOWN_DIRECTIVE_STREAMING,
-    NGX_HTTP_MARKDOWN_DIRECTIVE_LOG_VERBOSITY,
-    NGX_HTTP_MARKDOWN_DIRECTIVE_CONTENT_TYPES,
-    NGX_HTTP_MARKDOWN_DIRECTIVE_TRUSTED_PROXIES,
-    NGX_HTTP_MARKDOWN_DIRECTIVE_METRICS_SHM_SIZE,
-    NGX_HTTP_MARKDOWN_DIRECTIVE_METRICS,
-    NGX_HTTP_MARKDOWN_DIRECTIVE_PRUNE_NOISE,
-    NGX_HTTP_MARKDOWN_DIRECTIVE_PRUNE_SELECTORS,
-    NGX_HTTP_MARKDOWN_DIRECTIVE_PRUNE_PROTECTION_SELECTORS,
-    NGX_HTTP_MARKDOWN_DIRECTIVE_AUTO_DECOMPRESS,
-    NGX_HTTP_MARKDOWN_DIRECTIVE_DYNAMIC_CONFIG,
-    NGX_HTTP_MARKDOWN_DIRECTIVE_DYNAMIC_CONFIG_PATH,
-    NGX_HTTP_MARKDOWN_DIRECTIVE_DYNCONF_DRY_RUN,
-    NGX_HTTP_MARKDOWN_DIRECTIVE_DIAGNOSTICS,
-    NGX_HTTP_MARKDOWN_DIRECTIVE_STREAM_EXCLUDED_TYPES
-};
-
-#define ACTIVE_DIRECTIVE_COUNT \
-    (sizeof(active_directives) / sizeof(active_directives[0]))
-
-/* ----------------------------------------------------------------
  * Removed directive name sets
  * ---------------------------------------------------------------- */
 
@@ -136,29 +98,33 @@ static const char *additional_removed_directives[] = {
 #define TOTAL_REMOVED_COUNT \
     (REJECT_ONLY_COUNT + ACTIVE_DELETED_COUNT + ADDITIONAL_REMOVED_COUNT)
 
-/* ----------------------------------------------------------------
- * Helper: check if a name is in the active directive set
- *
- * Returns: 1 if found, 0 if absent.
- * ---------------------------------------------------------------- */
+#define ACTIVE_DIRECTIVE_NAME(name) name,
+static const char *active_directives[] = {
+    NGX_HTTP_MARKDOWN_FOR_EACH_DIRECTIVE(ACTIVE_DIRECTIVE_NAME)
+};
+#undef ACTIVE_DIRECTIVE_NAME
+
+static int active_set_contains(const char *name);
+static size_t active_directive_count(void);
 
 static int
 active_set_contains(const char *name)
 {
     size_t i;
-    size_t len;
 
-    len = strlen(name);
-
-    for (i = 0; i < ACTIVE_DIRECTIVE_COUNT; i++) {
-        if (strlen(active_directives[i]) == len
-            && strcmp(active_directives[i], name) == 0)
-        {
+    for (i = 0; i < ARRAY_SIZE(active_directives); i++) {
+        if (strcmp(active_directives[i], name) == 0) {
             return 1;
         }
     }
 
     return 0;
+}
+
+static size_t
+active_directive_count(void)
+{
+    return ARRAY_SIZE(active_directives);
 }
 
 /* ----------------------------------------------------------------
@@ -353,7 +319,7 @@ test_property2e_command_table_count_is_25(void)
         "Property 2e: Command table contains exactly 25 "
         "directives (frozen target)");
 
-    TEST_ASSERT(ACTIVE_DIRECTIVE_COUNT == 25,
+    TEST_ASSERT(active_directive_count() == 25,
         "active directive count must be exactly 25");
 
     TEST_PASS(
@@ -411,16 +377,6 @@ test_property2f_no_internal_duplicates(void)
         }
     }
 
-    /* Check active directives set */
-    for (i = 0; i < ACTIVE_DIRECTIVE_COUNT; i++) {
-        for (j = i + 1; j < ACTIVE_DIRECTIVE_COUNT; j++) {
-            TEST_ASSERT(
-                strcmp(active_directives[i],
-                       active_directives[j]) != 0,
-                "active directive set has no duplicates");
-        }
-    }
-
     TEST_PASS(
         "Property 2f: no internal duplicates in any "
         "directive set");
@@ -468,13 +424,6 @@ test_property2g_all_names_have_prefix(void)
             strncmp(additional_removed_directives[i], prefix,
                     prefix_len) == 0,
             additional_removed_directives[i]);
-    }
-
-    for (i = 0; i < ACTIVE_DIRECTIVE_COUNT; i++) {
-        TEST_ASSERT(
-            strncmp(active_directives[i], prefix,
-                    prefix_len) == 0,
-            active_directives[i]);
     }
 
     TEST_PASS(

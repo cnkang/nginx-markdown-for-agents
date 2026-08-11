@@ -32,6 +32,9 @@
 #ifndef NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED
 #define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED 0
 #endif
+#ifndef NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE
+#define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE 1
+#endif
 #ifndef NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE
 #define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE 2
 #endif
@@ -429,6 +432,60 @@ test_ffi_paths(const char *path)
     TEST_PASS("production dynconf FFI paths are covered");
 }
 
+static void
+test_successful_reload_is_idempotent(const char *path)
+{
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_log_t                             log;
+    ngx_int_t                             rc;
+    ngx_uint_t                            generation;
+    ngx_uint_t                            version;
+    time_t                                last_success;
+    ngx_flag_t                            active_enabled;
+
+    TEST_SUBSECTION("production dynconf identical reload");
+
+    reset_state();
+    write_file(path, "{\"schema_version\":1}");
+    init_watcher(&watcher, &conf, path);
+    watcher.active_snapshot.valid = 1;
+    watcher.active_snapshot.enabled = 0;
+    watcher.active_snapshot.prune_noise = 1;
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
+                "first production reload should apply");
+    TEST_ASSERT(watcher.last_known_good.enabled == 0,
+                "first reload should preserve the bootstrap LKG snapshot");
+    TEST_ASSERT(watcher.active_snapshot.enabled == 1,
+                "first reload should publish the active snapshot");
+
+    generation = watcher.digest_state.generation;
+    version = watcher.diagnostic_state.version;
+    last_success = watcher.diagnostic_state.last_success;
+    active_enabled = watcher.active_snapshot.enabled;
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE,
+                "identical source content should be a no-change reload");
+    TEST_ASSERT(watcher.digest_state.generation == generation,
+                "no-change reload must not increment generation");
+    TEST_ASSERT(watcher.diagnostic_state.version == version,
+                "no-change reload must not increment version");
+    TEST_ASSERT(watcher.diagnostic_state.last_success == last_success,
+                "no-change reload must not update last_success");
+    TEST_ASSERT(watcher.active_snapshot.enabled == active_enabled,
+                "no-change reload must preserve active snapshot");
+    TEST_ASSERT(g_reload_counts[DYNCONF_OK] == 1,
+                "no-change reload must not increment success metrics");
+    TEST_ASSERT(watcher.diagnostic_state.last_result
+                == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE,
+                "no-change reload records its result code");
+
+    TEST_PASS("production dynconf identical reload is a no-op");
+}
+
 int
 main(void)
 {
@@ -446,6 +503,7 @@ main(void)
     test_failure_paths_are_exact_once(path);
     reset_state();
     test_ffi_paths(path);
+    test_successful_reload_is_idempotent(path);
 
     unlink(path);
     TEST_PASS("All dynconf production tests passed");

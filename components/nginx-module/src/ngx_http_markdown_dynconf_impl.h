@@ -1247,11 +1247,22 @@ ngx_http_markdown_dynconf_apply_ffi_result_with_log(
     ngx_http_markdown_dynconf_snapshot_t candidate;
 
     if (failure_code != NULL) {
-        *failure_code = DYNCONF_ERR_INVALID_TYPE;
+        *failure_code = DYNCONF_ERR_INTERNAL;
     }
 
-    if (snapshot == NULL || result == NULL || result->error_code != DYNCONF_OK) {
+    if (snapshot == NULL || result == NULL) {
         return NGX_ERROR;
+    }
+
+    if (result->error_code != DYNCONF_OK) {
+        if (failure_code != NULL) {
+            *failure_code = result->error_code;
+        }
+        return NGX_ERROR;
+    }
+
+    if (failure_code != NULL) {
+        *failure_code = DYNCONF_ERR_INVALID_TYPE;
     }
 
     candidate = *snapshot;
@@ -1265,14 +1276,36 @@ ngx_http_markdown_dynconf_apply_ffi_result_with_log(
         }
         return NGX_ERROR;
     }
-    if (ngx_http_markdown_dynconf_apply_filter(&candidate, result) != NGX_OK
-        || ngx_http_markdown_dynconf_apply_prune_noise(&candidate, result)
-           != NGX_OK
-        || ngx_http_markdown_dynconf_apply_log_verbosity(&candidate, result)
-           != NGX_OK
-        || ngx_http_markdown_dynconf_apply_error_policy(&candidate, result)
-           != NGX_OK)
+    if (ngx_http_markdown_dynconf_apply_filter(&candidate, result)
+        != NGX_OK)
     {
+        if (failure_code != NULL) {
+            *failure_code = DYNCONF_ERR_INVALID_TYPE;
+        }
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_dynconf_apply_prune_noise(&candidate, result)
+        != NGX_OK)
+    {
+        if (failure_code != NULL) {
+            *failure_code = DYNCONF_ERR_INVALID_TYPE;
+        }
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_dynconf_apply_log_verbosity(&candidate, result)
+        != NGX_OK)
+    {
+        if (failure_code != NULL) {
+            *failure_code = DYNCONF_ERR_INVALID_TYPE;
+        }
+        return NGX_ERROR;
+    }
+    if (ngx_http_markdown_dynconf_apply_error_policy(&candidate, result)
+        != NGX_OK)
+    {
+        if (failure_code != NULL) {
+            *failure_code = DYNCONF_ERR_INVALID_TYPE;
+        }
         return NGX_ERROR;
     }
 
@@ -3078,6 +3111,161 @@ ngx_http_markdown_dynconf_log_masked_fields(ngx_log_t *log, ngx_uint_t mask)
     }
 }
 
+
+static void
+ngx_http_markdown_dynconf_parse_candidate(
+    ngx_http_markdown_dynconf_watcher_t *watcher, ngx_log_t *log,
+    u_char *data, size_t file_size, FFIDynconfResult *result)
+{
+    size_t first_non_ows;
+
+    first_non_ows = 0;
+    while (data != NULL && first_non_ows < file_size
+           && (data[first_non_ows] == ' '
+               || data[first_non_ows] == '\t'
+               || data[first_non_ows] == '\r'
+               || data[first_non_ows] == '\n'))
+    {
+        first_non_ows++;
+    }
+    if (data != NULL && first_non_ows < file_size
+        && data[first_non_ows] != '{'
+        && !watcher->legacy_format_warning_logged)
+    {
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+            "markdown: legacy line format detected - migrate to JSON v1");
+        watcher->legacy_format_warning_logged = 1;
+    }
+    markdown_dynconf_parse(data, file_size, result);
+    ngx_free(data);
+}
+
+
+static ngx_int_t
+ngx_http_markdown_dynconf_candidate_error(
+    ngx_http_markdown_dynconf_watcher_t *watcher,
+    ngx_http_markdown_conf_t *conf, FFIDynconfResult *result)
+{
+    ngx_int_t rc;
+
+    ngx_http_markdown_record_dynconf_reload(result->error_code);
+    ngx_http_markdown_dynconf_record_error(watcher, result);
+    rc = conf->advanced.dynconf_dry_run
+        ? NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL
+        : NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
+    watcher->diagnostic_state.last_result = rc;
+    return rc;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_dynconf_stage_candidate(
+    ngx_http_markdown_dynconf_watcher_t *watcher,
+    ngx_http_markdown_conf_t *conf, ngx_log_t *log,
+    FFIDynconfResult *result, u_char *source_digest, u_char *active_digest)
+{
+    ngx_uint_t failure_code;
+    ngx_uint_t masked_fields;
+
+    watcher->staging_snapshot = watcher->active_snapshot;
+    failure_code = DYNCONF_ERR_INVALID_TYPE;
+    if (ngx_http_markdown_dynconf_apply_ffi_result_with_log(
+            &watcher->staging_snapshot, result, log, &failure_code)
+        != NGX_OK)
+    {
+        ngx_http_markdown_record_dynconf_reload(failure_code);
+        ngx_http_markdown_dynconf_record_candidate_error(
+            watcher, failure_code);
+        ngx_log_error(NGX_LOG_WARN, log,
+            "markdown: dynamic configuration candidate rejected "
+            "(error_code=%ui)", failure_code);
+        watcher->diagnostic_state.last_result = conf->advanced.dynconf_dry_run
+            ? NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL
+            : NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
+        return NGX_ERROR;
+    }
+
+    masked_fields = ngx_http_markdown_dynconf_masked_fields(watcher, result);
+    watcher->diagnostic_state.last_masked_fields = masked_fields;
+    ngx_http_markdown_dynconf_log_masked_fields(log, masked_fields);
+
+    if (ngx_http_markdown_dynconf_copy_digest(
+            source_digest, NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_LEN,
+            result->source_digest, result->source_digest_len) != NGX_OK
+        || ngx_http_markdown_dynconf_copy_digest(
+            active_digest, NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_LEN,
+            result->active_digest, result->active_digest_len) != NGX_OK)
+    {
+        ngx_http_markdown_record_dynconf_reload(DYNCONF_ERR_INTERNAL);
+        ngx_http_markdown_dynconf_record_candidate_error(
+            watcher, DYNCONF_ERR_INTERNAL);
+        watcher->diagnostic_state.last_result =
+            NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
+        return NGX_ERROR;
+    }
+
+    return NGX_OK;
+}
+
+
+static ngx_flag_t
+ngx_http_markdown_dynconf_source_unchanged(
+    const ngx_http_markdown_dynconf_watcher_t *watcher,
+    const u_char *source_digest)
+{
+    return watcher->digest_state.generation > 0
+        && ngx_memcmp(watcher->digest_state.source_digest, source_digest,
+                      sizeof(watcher->digest_state.source_digest)) == 0;
+}
+
+
+static void
+ngx_http_markdown_dynconf_clear_last_error(
+    ngx_http_markdown_dynconf_watcher_t *watcher)
+{
+    watcher->diagnostic_state.last_error_len = 0;
+    watcher->diagnostic_state.last_error[0] = '\0';
+}
+
+
+static void
+ngx_http_markdown_dynconf_publish_candidate(
+    ngx_http_markdown_dynconf_watcher_t *watcher,
+    ngx_http_markdown_conf_t *conf, const u_char *source_digest,
+    const u_char *active_digest)
+{
+    if (watcher->digest_state.generation > 0) {
+        watcher->last_known_good = watcher->active_snapshot;
+        watcher->digest_state.lkg_valid = 1;
+        ngx_memcpy(watcher->digest_state.lkg_digest,
+                   watcher->digest_state.active_digest,
+                   sizeof(watcher->digest_state.lkg_digest));
+        watcher->digest_state.lkg_mtime = watcher->file_state.applied_mtime;
+    }
+    ngx_memcpy(watcher->digest_state.source_digest, source_digest,
+               sizeof(watcher->digest_state.source_digest));
+    ngx_memcpy(watcher->digest_state.active_digest, active_digest,
+               sizeof(watcher->digest_state.active_digest));
+    watcher->active_snapshot = watcher->staging_snapshot;
+    ngx_http_markdown_dynconf_apply_snapshot(conf, &watcher->active_snapshot);
+    watcher->digest_state.generation++;
+    watcher->diagnostic_state.version++;
+    watcher->file_state.applied_mtime = watcher->file_state.last_mtime;
+    watcher->diagnostic_state.last_success = ngx_time();
+    watcher->diagnostic_state.last_result =
+        NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED;
+    ngx_http_markdown_record_dynconf_reload(DYNCONF_OK);
+    ngx_http_markdown_dynconf_clear_last_error(watcher);
+    if (!watcher->digest_state.lkg_valid) {
+        watcher->last_known_good = watcher->active_snapshot;
+        ngx_memcpy(watcher->digest_state.lkg_digest,
+                   watcher->digest_state.active_digest,
+                   sizeof(watcher->digest_state.lkg_digest));
+        watcher->digest_state.lkg_mtime = watcher->file_state.applied_mtime;
+        watcher->digest_state.lkg_valid = 1;
+    }
+}
+
 /* Reload the bounded file, validate its JSON result, and publish it atomically.
  * The staged snapshot and digest copies are request-independent, so all
  * validation completes before active state or last-known-good state changes.
@@ -3096,9 +3284,6 @@ ngx_http_markdown_dynconf_reload(
     u_char               next_active_digest[
         NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_LEN];
     FFIDynconfResult    result;
-    ngx_uint_t           failure_code;
-    ngx_uint_t           masked_fields;
-    size_t               first_non_ows;
 
     if (watcher == NULL || conf == NULL || log == NULL)
     {
@@ -3113,119 +3298,45 @@ ngx_http_markdown_dynconf_reload(
     }
 
     markdown_dynconf_result_init(&result);
-    first_non_ows = 0;
-    while (data != NULL && first_non_ows < file_size
-           && (data[first_non_ows] == ' '
-               || data[first_non_ows] == '\t'
-               || data[first_non_ows] == '\r'
-               || data[first_non_ows] == '\n'))
-    {
-        first_non_ows++;
-    }
-    if (data != NULL && first_non_ows < file_size
-        && data[first_non_ows] != '{'
-        && !watcher->legacy_format_warning_logged)
-    {
-        ngx_log_error(NGX_LOG_WARN, log, 0,
-            "markdown: legacy line format detected - migrate to JSON v1");
-        watcher->legacy_format_warning_logged = 1;
-    }
-    markdown_dynconf_parse(data, file_size, &result);
-    ngx_free(data);
+    ngx_http_markdown_dynconf_parse_candidate(
+        watcher, log, data, file_size, &result);
 
     if (result.error_code != DYNCONF_OK) {
-        /* Preserve the active snapshot when the candidate is invalid. */
-        ngx_http_markdown_record_dynconf_reload(result.error_code);
-        ngx_http_markdown_dynconf_record_error(watcher, &result);
-        watcher->diagnostic_state.last_result = conf->advanced.dynconf_dry_run
-            ? NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL
-            : NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
-        rc = conf->advanced.dynconf_dry_run
-            ? NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL
-            : NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
+        rc = ngx_http_markdown_dynconf_candidate_error(
+            watcher, conf, &result);
         markdown_dynconf_result_free(&result);
         return rc;
     }
 
-    watcher->staging_snapshot = watcher->active_snapshot;
-    /* Apply only validated fields to the staging copy. */
-    failure_code = DYNCONF_ERR_INVALID_TYPE;
-    if (ngx_http_markdown_dynconf_apply_ffi_result_with_log(
-            &watcher->staging_snapshot, &result, log,
-            &failure_code) != NGX_OK)
+    if (ngx_http_markdown_dynconf_stage_candidate(
+            watcher, conf, log, &result,
+            next_source_digest, next_active_digest) != NGX_OK)
     {
-        /* Invalid FFI values are a validation failure, not a partial reload. */
-        ngx_http_markdown_record_dynconf_reload(failure_code);
-        ngx_http_markdown_dynconf_record_candidate_error(
-            watcher, failure_code);
-        ngx_log_error(NGX_LOG_WARN, log, 0,
-            "markdown: dynamic configuration candidate rejected "
-            "(error_code=%ui)", failure_code);
-        watcher->diagnostic_state.last_result = conf->advanced.dynconf_dry_run
-            ? NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL
-            : NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
         markdown_dynconf_result_free(&result);
         return watcher->diagnostic_state.last_result;
     }
 
-    masked_fields = ngx_http_markdown_dynconf_masked_fields(watcher, &result);
-    watcher->diagnostic_state.last_masked_fields = masked_fields;
-    ngx_http_markdown_dynconf_log_masked_fields(log, masked_fields);
-
-    if (ngx_http_markdown_dynconf_copy_digest(
-            next_source_digest, sizeof(next_source_digest),
-            result.source_digest, result.source_digest_len) != NGX_OK
-        || ngx_http_markdown_dynconf_copy_digest(
-            next_active_digest, sizeof(next_active_digest),
-            result.active_digest, result.active_digest_len) != NGX_OK)
-    {
-        /* Digest truncation is a validation failure, not a partial reload. */
-        ngx_http_markdown_record_dynconf_reload(DYNCONF_ERR_INTERNAL);
-        ngx_http_markdown_dynconf_record_candidate_error(
-            watcher, DYNCONF_ERR_INTERNAL);
-        watcher->diagnostic_state.last_result = NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
-        markdown_dynconf_result_free(&result);
-        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
-    }
-
     if (conf->advanced.dynconf_dry_run) {
-        /* Dry-run records success without publishing the staged candidate. */
         ngx_http_markdown_record_dynconf_reload(DYNCONF_OK);
-        watcher->diagnostic_state.last_result = NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_OK;
-        watcher->diagnostic_state.last_error_len = 0;
-        watcher->diagnostic_state.last_error[0] = '\0';
+        watcher->diagnostic_state.last_result =
+            NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_OK;
+        ngx_http_markdown_dynconf_clear_last_error(watcher);
         markdown_dynconf_result_free(&result);
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_OK;
     }
 
-    /* Publish all correlated state together after every precondition passes. */
-    if (watcher->digest_state.generation > 0) {
-        watcher->last_known_good = watcher->active_snapshot;
-        watcher->digest_state.lkg_valid = 1;
-        ngx_memcpy(watcher->digest_state.lkg_digest, watcher->digest_state.active_digest,
-                   sizeof(watcher->digest_state.lkg_digest));
-        watcher->digest_state.lkg_mtime = watcher->file_state.applied_mtime;
+    if (ngx_http_markdown_dynconf_source_unchanged(
+            watcher, next_source_digest))
+    {
+        watcher->diagnostic_state.last_result =
+            NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE;
+        ngx_http_markdown_dynconf_clear_last_error(watcher);
+        markdown_dynconf_result_free(&result);
+        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE;
     }
-    ngx_memcpy(watcher->digest_state.source_digest, next_source_digest,
-               sizeof(watcher->digest_state.source_digest));
-    ngx_memcpy(watcher->digest_state.active_digest, next_active_digest,
-               sizeof(watcher->digest_state.active_digest));
-    watcher->active_snapshot = watcher->staging_snapshot;
-    ngx_http_markdown_dynconf_apply_snapshot(conf, &watcher->active_snapshot);
-    watcher->digest_state.generation++;
-    watcher->diagnostic_state.version++;
-    watcher->file_state.applied_mtime = watcher->file_state.last_mtime;
-    watcher->diagnostic_state.last_success = ngx_time();
-    watcher->diagnostic_state.last_result = NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED;
-    ngx_http_markdown_record_dynconf_reload(DYNCONF_OK);
-    watcher->diagnostic_state.last_error_len = 0;
-    watcher->diagnostic_state.last_error[0] = '\0';
-    if (!watcher->digest_state.lkg_valid) {
-        ngx_memcpy(watcher->digest_state.lkg_digest, watcher->digest_state.active_digest,
-                   sizeof(watcher->digest_state.lkg_digest));
-        watcher->digest_state.lkg_mtime = watcher->file_state.applied_mtime;
-        watcher->digest_state.lkg_valid = 1;
-    }
+
+    ngx_http_markdown_dynconf_publish_candidate(
+        watcher, conf, next_source_digest, next_active_digest);
     markdown_dynconf_result_free(&result);
     return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED;
 }

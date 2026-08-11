@@ -74,11 +74,6 @@ pub unsafe extern "C" fn markdown_sha256_hex(
     // On panic we return DYNCONF_ERR_INTERNAL; the output buffer contents
     // are undefined (the caller must not rely on them on error return).
     let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        // SAFETY: output was validated non-NULL and >= 64 bytes above.
-        unsafe {
-            ptr::write_bytes(output, b'0', 64);
-        }
-
         let bytes = if data_len == 0 {
             &[][..]
         } else {
@@ -254,7 +249,7 @@ pub unsafe extern "C" fn markdown_dynconf_parse(
         if data.is_null() && data_len > 0 {
             // SAFETY: result was validated non-NULL above.
             unsafe {
-                write_error(result, DYNCONF_ERR_INVALID_JSON);
+                write_error(result, DYNCONF_ERR_INVALID_TYPE);
             }
             return;
         }
