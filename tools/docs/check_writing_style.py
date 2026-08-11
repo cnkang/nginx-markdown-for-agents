@@ -360,7 +360,9 @@ def audit(text: str, path: Path, limit: int | None) -> list[str]:
     rel = str(path.relative_to(ROOT)) if path.is_absolute() else str(path)
     warnings.extend(_sentence_warnings(prose, rel))
     warnings.extend(_pattern_warnings(prose, rel))
-    return warnings[:limit] if limit else warnings
+    if limit is None:
+        return warnings
+    return warnings[:limit]
 
 
 def _noun_chains(text: str) -> Iterator[tuple[str, int]]:
@@ -537,7 +539,16 @@ def _select_files(
             parser.error(f"--base does not name a valid commit: {args.base}")
         return _changed_md_files(base), base
     if args.paths:
-        return [ROOT / path for path in args.paths], None
+        files: list[Path] = []
+        root = ROOT.resolve()
+        for supplied in args.paths:
+            candidate = (ROOT / supplied).resolve()
+            try:
+                candidate.relative_to(root)
+            except ValueError:
+                parser.error(f"path is outside repository root: {supplied}")
+            files.append(candidate)
+        return files, None
     return _tracked_md_files(), None
 
 

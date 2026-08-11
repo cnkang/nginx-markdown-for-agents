@@ -395,6 +395,16 @@ def run_real_gate(args) -> int:
     )
     candidate = load_json(candidate_manifest_path, "candidate manifest")
     candidate_sha = candidate.get("candidate_sha")
+    if (
+        not isinstance(candidate_sha, str)
+        or not CANDIDATE_SHA_PATTERN.fullmatch(candidate_sha)
+    ):
+        print(
+            "ERROR: malformed: candidate manifest candidate_sha must be "
+            "40 lowercase hex",
+            file=sys.stderr,
+        )
+        return 1
 
     index = load_json(index_path, "candidate artifact index")
     reasons = validate_index(index, candidate_sha)

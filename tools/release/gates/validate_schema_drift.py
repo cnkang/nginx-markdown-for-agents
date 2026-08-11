@@ -165,20 +165,25 @@ def gate_metrics_registry() -> list[str]:
     """Run the metrics validator with the selected artifact version."""
     if not METRICS_VALIDATOR.exists():
         return ["validate_metrics_registry.py not found"]
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(METRICS_VALIDATOR),
-            "--version",
-            CURRENT_VERSION,
-            "--artifact-dir",
-            str(METRICS_REGISTRY.parent),
-        ],
-        cwd=str(REPO_ROOT),
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(METRICS_VALIDATOR),
+                "--version",
+                CURRENT_VERSION,
+                "--artifact-dir",
+                str(METRICS_REGISTRY.parent),
+            ],
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        return ["Metrics registry v1 gate timed out after 60 seconds"]
+    except OSError as exc:
+        return [f"Metrics registry v1 gate could not start: {exc}"]
     if result.returncode != 0:
         return [
             "Metrics registry v1 gate FAILED:\n"

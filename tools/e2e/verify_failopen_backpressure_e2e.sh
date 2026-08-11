@@ -227,11 +227,19 @@ intact without any truncation or data corruption.</p>
 HTML
 
 python3 - "${RUNTIME}/html/failopen.html" <<'PY'
+import os
 import pathlib
+import re
 import sys
 
 path = pathlib.Path(sys.argv[1])
-target = 128 * 1024
+raw_limit = os.environ["MARKDOWN_MAX_SIZE"].strip().lower()
+match = re.fullmatch(r"([0-9]+)([kmgt]?)", raw_limit)
+if match is None:
+    raise SystemExit(f"invalid MARKDOWN_MAX_SIZE: {raw_limit!r}")
+units = {"": 1, "k": 1024, "m": 1024**2, "g": 1024**3, "t": 1024**4}
+limit = int(match.group(1)) * units[match.group(2)]
+target = limit + 1
 data = path.read_bytes()
 padding = b"<p>padding for the bounded fail-open fixture</p>\n"
 while len(data) < target:

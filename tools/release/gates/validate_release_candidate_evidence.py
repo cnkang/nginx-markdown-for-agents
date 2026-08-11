@@ -411,16 +411,11 @@ def _check_entry(entry: dict, index: int, seen_ids: set, reasons: list) -> None:
             f"malformed: entries[{index}] blocking must be a boolean")
 
     if entry.get("blocking") is True:
-        if status == "pending":
+        if status != "pass":
             reasons.append(
                 f"blocking-pending: entries[{index}] "
                 f"(gate={entry.get('gate')!r}) is blocking with "
-                f"status=pending")
-        elif status == "fail":
-            reasons.append(
-                f"blocking-pending: entries[{index}] "
-                f"(gate={entry.get('gate')!r}) is blocking with "
-                f"status=fail")
+                f"status={status!r}; blocking entries must pass")
 
 
 def run_fixture_gate(args) -> int:

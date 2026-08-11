@@ -7,7 +7,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HEADER_PATH = REPO_ROOT / "components" / "rust-converter" / "include" / "markdown_converter.h"
-BOUNDARY_RE = re.compile(r"(} FFIEffectiveConfig;)\n{2,}(?=/\*\*)")
+BOUNDARY_RE = re.compile(
+    r"(}\s+(?:FFI|Markdown)[A-Za-z0-9_]*;)\n{2,}(?=/\*\*)"
+)
 
 
 def normalize_header() -> None:
@@ -17,9 +19,12 @@ def normalize_header() -> None:
     if repo_root not in path.parents:
         raise RuntimeError("generated header escaped the repository root")
     content = path.read_text(encoding="utf-8")
-    normalized, count = BOUNDARY_RE.subn(r"\1\n\n", content, count=1)
-    if count != 1:
-        raise RuntimeError("FFIEffectiveConfig cbindgen boundary was not found")
+    matches = list(BOUNDARY_RE.finditer(content))
+    if not matches:
+        raise RuntimeError("cbindgen type/function boundary was not found")
+    match = matches[-1]
+    replacement = f"{match.group(1)}\n\n"
+    normalized = content[:match.start()] + replacement + content[match.end():]
     path.write_text(normalized, encoding="utf-8")
 
 

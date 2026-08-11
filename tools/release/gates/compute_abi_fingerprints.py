@@ -37,7 +37,8 @@ FFI_EXPORT_RE = re.compile(
     r'#\[unsafe\(no_mangle\)\]\s*pub\s+(?:unsafe\s+)?extern\s+"C"\s+fn\s+(\w+)'
 )
 HEADER_HASH_DEFINE = re.compile(
-    rb"(#define\s+MARKDOWN_HEADER_HASH\s+)\d+(?:ull|ULL)?"
+    rb"(#define\s+MARKDOWN_HEADER_HASH\s+)"
+    rb"(?:0[xX][0-9a-fA-F]+|[0-9]+)(?:[uUlL]+)?"
 )
 
 

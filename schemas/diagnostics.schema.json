@@ -511,7 +511,9 @@
           "enum": [
             "static",
             "dynconf",
-            "request_variable"
+            "request_variable",
+            "http_baseline",
+            "default"
           ],
           "description": "Source of the effective filter value."
         },
@@ -519,7 +521,9 @@
           "type": "string",
           "enum": [
             "static",
-            "dynconf"
+            "dynconf",
+            "http_baseline",
+            "default"
           ],
           "description": "Source of the effective prune_noise value."
         },
@@ -527,7 +531,9 @@
           "type": "string",
           "enum": [
             "static",
-            "dynconf"
+            "dynconf",
+            "http_baseline",
+            "default"
           ],
           "description": "Source of the effective log_verbosity value."
         },
@@ -535,7 +541,9 @@
           "type": "string",
           "enum": [
             "static",
-            "dynconf"
+            "dynconf",
+            "http_baseline",
+            "default"
           ],
           "description": "Source of the effective error_policy value."
         },
@@ -543,7 +551,9 @@
           "type": "string",
           "enum": [
             "static",
-            "dynconf"
+            "dynconf",
+            "http_baseline",
+            "default"
           ],
           "description": "Source of the effective streaming_buffer value."
         }

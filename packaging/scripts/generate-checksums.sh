@@ -17,6 +17,7 @@
 #   1  Error (missing directory, no artifacts, format validation failure)
 
 set -euo pipefail
+export LC_ALL=C
 
 ##############################################################################
 # Helpers
@@ -68,6 +69,11 @@ fi
 
 if [[ ! -d "$ARTIFACT_DIR" ]]; then
     die "Artifact directory '$ARTIFACT_DIR' does not exist."
+fi
+
+if [[ -z "$OUTPUT_FILE" || "$OUTPUT_FILE" != "${OUTPUT_FILE##*/}" \
+    || "$OUTPUT_FILE" == *..* ]]; then
+    die "Output must be a safe filename within the artifact directory."
 fi
 
 ##############################################################################
@@ -131,6 +137,12 @@ done < <(find . -type f \( \
 if [[ ${#ALL_FILES[@]} -eq 0 ]]; then
     die "No release artifacts found in '$ARTIFACT_DIR'."
 fi
+
+for artifact in "${ALL_FILES[@]}"; do
+    if [[ "$OUTPUT_FILE" == "$artifact" ]]; then
+        die "Output filename '$OUTPUT_FILE' would overwrite an artifact."
+    fi
+done
 
 info "Found ${DEB_COUNT} .deb, ${RPM_COUNT} .rpm, ${TARBALL_COUNT} .tar.gz, and manifest=${MANIFEST_FILE:-none}"
 

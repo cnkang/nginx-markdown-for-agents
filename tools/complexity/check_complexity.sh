@@ -111,14 +111,16 @@ if [[ -d "$C_SRC" ]]; then
         --CCN "$C_CCN_THRESHOLD" \
         --length "$C_LENGTH_THRESHOLD" \
         --arguments "$C_PARAMS_THRESHOLD" \
+        --ignore_warnings -1 \
         > "$C_REPORT" 2>&1
     c_lizard_rc=$?
     python3 -m lizard "$C_SRC" -l cpp \
         --CCN "$C_CCN_THRESHOLD" \
         --length "$C_LENGTH_THRESHOLD" \
         --arguments "$C_PARAMS_THRESHOLD" \
-        -w 2>&1 | grep "warning:" > "$C_WARNINGS"
-    c_lizard_warn_rc=${PIPESTATUS[0]}
+        --ignore_warnings -1 \
+        -w > "$C_WARNINGS" 2>&1
+    c_lizard_warn_rc=$?
     set -e
     if [[ $c_lizard_rc -ne 0 || $c_lizard_warn_rc -ne 0 ]]; then
         echo "ERROR: lizard failed for C sources" >&2
@@ -143,14 +145,16 @@ if [[ -d "$RUST_SRC" ]]; then
         --CCN "$RUST_CCN_THRESHOLD" \
         --length "$RUST_LENGTH_THRESHOLD" \
         --arguments "$RUST_PARAMS_THRESHOLD" \
+        --ignore_warnings -1 \
         > "$RUST_REPORT" 2>&1
     rust_lizard_rc=$?
     python3 -m lizard "$RUST_SRC" -l rust \
         --CCN "$RUST_CCN_THRESHOLD" \
         --length "$RUST_LENGTH_THRESHOLD" \
         --arguments "$RUST_PARAMS_THRESHOLD" \
-        -w 2>&1 | grep "warning:" > "$RUST_WARNINGS"
-    rust_lizard_warn_rc=${PIPESTATUS[0]}
+        --ignore_warnings -1 \
+        -w > "$RUST_WARNINGS" 2>&1
+    rust_lizard_warn_rc=$?
     set -e
     if [[ $rust_lizard_rc -ne 0 || $rust_lizard_warn_rc -ne 0 ]]; then
         echo "ERROR: lizard failed for Rust sources" >&2
@@ -175,14 +179,16 @@ if [[ -d "$PY_SRC" ]]; then
         --CCN "$PY_CCN_THRESHOLD" \
         --length "$PY_LENGTH_THRESHOLD" \
         --arguments "$PY_PARAMS_THRESHOLD" \
+        --ignore_warnings -1 \
         > "$PY_LIZARD_REPORT" 2>&1
     py_lizard_rc=$?
     python3 -m lizard "$PY_SRC" -l python \
         --CCN "$PY_CCN_THRESHOLD" \
         --length "$PY_LENGTH_THRESHOLD" \
         --arguments "$PY_PARAMS_THRESHOLD" \
-        -w 2>&1 | grep "warning:" > "$PY_LIZARD_WARNINGS"
-    py_lizard_warn_rc=${PIPESTATUS[0]}
+        --ignore_warnings -1 \
+        -w > "$PY_LIZARD_WARNINGS" 2>&1
+    py_lizard_warn_rc=$?
     set -e
     if [[ $py_lizard_rc -ne 0 || $py_lizard_warn_rc -ne 0 ]]; then
         echo "ERROR: lizard failed for Python sources" >&2

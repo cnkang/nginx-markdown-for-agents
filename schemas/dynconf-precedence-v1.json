@@ -4,9 +4,8 @@
   "title": "nginx-markdown-for-agents Dynamic Configuration Precedence v1 Contract",
   "description": "Canonical precedence and provenance contract for dynconf-mutable fields.",
   "schema_version": 1,
-  "allowed_provenance": [
-    "request_variable",
-    "static",
+          "allowed_provenance": [
+          "static",
     "dynconf",
     "http_baseline",
     "default"
@@ -47,7 +46,6 @@
     "fields": {
       "error_policy": {
         "allowed_provenance": [
-          "request_variable",
           "static",
           "dynconf",
           "http_baseline",
@@ -65,7 +63,6 @@
       },
       "log_verbosity": {
         "allowed_provenance": [
-          "request_variable",
           "static",
           "dynconf",
           "http_baseline",
@@ -74,7 +71,6 @@
       },
       "prune_noise": {
         "allowed_provenance": [
-          "request_variable",
           "static",
           "dynconf",
           "http_baseline",
@@ -83,7 +79,6 @@
       },
       "streaming_buffer": {
         "allowed_provenance": [
-          "request_variable",
           "static",
           "dynconf",
           "http_baseline",

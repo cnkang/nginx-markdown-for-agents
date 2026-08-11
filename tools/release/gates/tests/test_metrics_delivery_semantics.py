@@ -21,6 +21,7 @@ Verifies the delivery counter semantics defined in Requirement 5.8:
 
 from __future__ import annotations
 
+import json
 import sys
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -34,6 +35,23 @@ from hypothesis import strategies as st
 sys.path.insert(
     0, str(Path(__file__).resolve().parent.parent.parent.parent)
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+METRICS_CONTRACT_PATH = REPO_ROOT / "schemas" / "metrics-v1.registry.json"
+
+
+def _canonical_transition_allowlist() -> frozenset[str]:
+    """Load transition labels from the checked-in Metrics v1 contract."""
+    contract = json.loads(METRICS_CONTRACT_PATH.read_text(encoding="utf-8"))
+    family = next(
+        family
+        for family in contract["families"]
+        if family["name"] == "nginx_markdown_streaming_events_total"
+    )
+    transition = next(
+        label for label in family["labels"] if label["name"] == "transition"
+    )
+    return frozenset(transition["values"])
 
 
 # --- Terminal outcome model ---
@@ -67,14 +85,7 @@ NON_DELIVERY_OUTCOMES: Set[TerminalOutcome] = {
 # --- streaming_events_total transition label model ---
 
 # The closed allowlist for the `transition` label on streaming_events_total
-TRANSITION_ALLOWLIST: Set[str] = frozenset({
-    "commit",
-    "fallback",
-    "safe_finish_start",
-    "abort_start",
-    "resume_success",
-    "resume_failure",
-})
+TRANSITION_ALLOWLIST: Set[str] = _canonical_transition_allowlist()
 
 # The 19 State Machine Events (DIFFERENT from transition label values)
 # These must NEVER appear as streaming_events_total transition labels
@@ -516,9 +527,9 @@ def test_transition_allowlist_exact_size():
 
     **Validates: Requirements 5.8**
     """
-    assert len(TRANSITION_ALLOWLIST) == 6, (
-        f"Expected exactly 6 transition allowlist values, "
-        f"got {len(TRANSITION_ALLOWLIST)}: {sorted(TRANSITION_ALLOWLIST)}"
+    assert len(TRANSITION_ALLOWLIST) == len(_canonical_transition_allowlist()), (
+        "Transition allowlist size drifted from the canonical Metrics v1 "
+        "registry"
     )
 
 
@@ -529,14 +540,7 @@ def test_transition_allowlist_exact_values():
 
     **Validates: Requirements 5.8**
     """
-    expected = {
-        "commit",
-        "fallback",
-        "safe_finish_start",
-        "abort_start",
-        "resume_success",
-        "resume_failure",
-    }
+    expected = _canonical_transition_allowlist()
     assert TRANSITION_ALLOWLIST == expected, (
         f"Transition allowlist mismatch.\n"
         f"  Expected: {sorted(expected)}\n"

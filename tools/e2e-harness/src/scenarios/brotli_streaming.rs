@@ -364,15 +364,23 @@ fn metric_value(base_url: &str, name: &str) -> Result<u64> {
         "streaming_events" => ("nginx_markdown_streaming_events_total", None),
         other => (other, None),
     };
+    let mut matched_samples = 0_u64;
     let value = response
         .body
         .lines()
         .filter(|line| line.starts_with(family) && !line.starts_with('#'))
         .filter(|line| label.map_or(true, |required| line.contains(required)))
         .filter_map(|line| line.split_whitespace().last())
-        .filter_map(|sample| sample.parse::<f64>().ok())
+        .filter_map(|sample| {
+            let value = sample.parse::<f64>().ok()?;
+            if !value.is_finite() || value < 0.0 {
+                return None;
+            }
+            matched_samples += 1;
+            Some(value)
+        })
         .sum::<f64>();
-    if value.is_finite() && value >= 0.0 {
+    if matched_samples > 0 {
         Ok(value as u64)
     } else {
         Err(anyhow::anyhow!(

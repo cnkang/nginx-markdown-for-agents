@@ -69,7 +69,6 @@ LIFECYCLE_PAIRS = {
     "markdown_dynconf_result_free": "markdown_dynconf_parse",
     "markdown_trusted_proxies_new": "markdown_trusted_proxies_push",
     "markdown_trusted_proxies_free": "markdown_trusted_proxies_push",
-    "markdown_free_conflicts": "markdown_detect_conflicts",
     "markdown_streaming_output_free": "markdown_streaming_feed",
 }
 
@@ -84,6 +83,21 @@ C_PROTOTYPE_RE = re.compile(
 
 # Pattern to match function calls or function pointer assignments in C code.
 CALLSITE_RE = re.compile(r"\b(markdown_\w+)\s*\(")
+
+# C declarations/definitions are references, not production callsites. Keep
+# this deliberately line-anchored so a call embedded in an expression is not
+# filtered out. The generated header and project wrapper headers both use
+# these return-type spellings.
+DECLARATION_LINE_RE = re.compile(
+    r"^\s*(?:(?:static|inline|extern|const|struct\s+\w+|"
+    r"void|u?int(?:8|16|32|64)_t|uint8_t|uintptr_t|bool)\s+)+"
+    r"(?:\w+\s+\*\s*)?markdown_\w+\s*\("
+)
+
+IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+HEADER_CONTROL_KEYWORDS = frozenset(
+    {"if", "for", "while", "switch", "return"}
+)
 
 # Function pointer pattern: assigned to a variable or struct field.
 FN_POINTER_RE = re.compile(r"\b(markdown_\w+)\b")
@@ -115,21 +129,58 @@ def read_text(path: Path) -> str:
     return validated.read_text(encoding="utf-8")
 
 
+def _header_declaration_name(line: str) -> str | None:
+    """Return a function name from a header declaration line, if present."""
+    stripped = line.strip()
+    if not stripped or stripped.split(None, 1)[0] in HEADER_CONTROL_KEYWORDS:
+        return None
+    prefix, separator, _ = stripped.partition("(")
+    if not separator:
+        return None
+    tokens = prefix.split()
+    if len(tokens) < 2:
+        return None
+    name = tokens[-1]
+    if not name.startswith("markdown_") or IDENTIFIER_RE.fullmatch(name) is None:
+        return None
+    if any(token != "*" and IDENTIFIER_RE.fullmatch(token) is None
+           for token in tokens[:-1]):
+        return None
+    return name
+
+
 def parse_header_exports(header_path: Path) -> list[str]:
     """Extract all markdown_* function names declared in the generated header."""
     text = read_text(header_path)
+    return sorted(set(_prototype_exports(text) + _line_exports(text)))
+
+
+def _prototype_exports(text: str) -> list[str]:
+    """Extract declarations matched by the generated-header prototype regex."""
+    return [match.group(1) for match in C_PROTOTYPE_RE.finditer(text)]
+
+
+def _line_exports(text: str) -> list[str]:
+    """Extract declarations that need the line-oriented fallback parser."""
     exports: list[str] = []
-    for match in C_PROTOTYPE_RE.finditer(text):
-        name = match.group(1)
-        if name not in exports:
+    for line in text.splitlines():
+        name = _line_export_name(line)
+        if name is not None:
             exports.append(name)
-    # Also catch return types we may have missed with the above pattern.
-    # Use a broader fallback for any line that looks like a function declaration.
-    for match in CALLSITE_RE.finditer(text):
-        name = match.group(1)
-        if name not in exports:
-            exports.append(name)
-    return sorted(set(exports))
+    return exports
+
+
+def _line_export_name(line: str) -> str | None:
+    """Return an export name from one non-comment declaration line."""
+    # Also catch return types missed by the narrow prototype expression, but
+    # only on declaration lines. Documentation comments contain many examples
+    # such as `markdown_convert(...)` and must never become exports.
+    if line.lstrip().startswith(("/*", "*", "//")):
+        return None
+    if DECLARATION_LINE_RE.match(line):
+        match = CALLSITE_RE.search(line)
+        return match.group(1) if match else None
+    return _header_declaration_name(line)
 
 
 def scan_c_callsites(
@@ -153,22 +204,35 @@ def scan_c_callsites(
     suffixes = {".c", ".h"} if include_headers else {".c"}
 
     for path in sorted(validated_directory.rglob("*")):
-        if path.suffix not in suffixes:
-            continue
-        # Skip the generated header itself — it declares, not calls.
-        if path.name == "markdown_converter.h":
-            continue
-        text = _read_text(path)
-        if text is None:
-            continue
-
-        active_guards: list[str] = []
-        for lineno, line in enumerate(text.splitlines(), start=1):
-            _update_guard_stack(line, active_guards)
-            for match in CALLSITE_RE.finditer(line):
-                _record_callsite(callsites, match, path, lineno, line, active_guards)
+        if path.suffix in suffixes and path.name != "markdown_converter.h":
+            _scan_c_call_file(path, callsites)
 
     return callsites
+
+
+def _scan_c_call_file(
+    path: Path, callsites: dict[str, list[dict[str, Any]]]
+) -> None:
+    """Scan one C-family source file and append its callsites."""
+    text = _read_text(path)
+    if text is None:
+        return
+
+    active_guards: list[str] = []
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        _update_guard_stack(line, active_guards)
+        if _is_non_callsite_line(line):
+            continue
+        for match in CALLSITE_RE.finditer(line):
+            _record_callsite(callsites, match, path, lineno, line, active_guards)
+
+
+def _is_non_callsite_line(line: str) -> bool:
+    """Return whether a source line is a comment or declaration."""
+    stripped = line.lstrip()
+    return stripped.startswith(("/*", "*", "//")) or bool(
+        DECLARATION_LINE_RE.match(line)
+    )
 
 
 def _read_text(path: Path) -> str | None:
@@ -399,7 +463,7 @@ def main() -> int:
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Exit nonzero if any dead exports are found (advisory, not blocking)",
+        help="Exit nonzero when dead exports are found; suitable for CI gates",
     )
     parser.add_argument(
         "--summary",

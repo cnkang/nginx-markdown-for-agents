@@ -261,7 +261,11 @@ fn encoding_chain_fixture_bytes(
             /* Replace the separator between the first two tokens with a
              * malformed grammar: "gzip,,deflate". */
             let joined = tokens.join(", ");
-            let broken = joined.replace(", ", ",,");
+            let broken = if tokens.len() >= 2 {
+                joined.replace(", ", ",,")
+            } else {
+                format!("{joined},,")
+            };
             return Ok((bytes, vec![broken]));
         }
         EncodingFault::UnknownToken => {
@@ -291,9 +295,9 @@ fn gzip_bytes(data: &[u8]) -> Result<Vec<u8>> {
 
 fn deflate_bytes(data: &[u8]) -> Result<Vec<u8>> {
     use flate2::Compression;
-    use flate2::write::DeflateEncoder;
+    use flate2::write::ZlibEncoder;
 
-    let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
     encoder
         .write_all(data)
         .context("deflate fixture compression failed")?;

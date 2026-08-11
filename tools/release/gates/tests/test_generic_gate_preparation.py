@@ -240,6 +240,7 @@ class TestSoakQualification:
             self.SCRIPT, "soak-qualification-malformed.json",
             self.MANIFEST_ARGS)
         assert result.returncode == 1
+        assert "missing-observation" in result.stderr
 
     def test_stale_digest_fails(self):
         result = _run_gate(

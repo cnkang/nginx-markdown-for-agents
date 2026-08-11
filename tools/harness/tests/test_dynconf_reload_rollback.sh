@@ -756,7 +756,8 @@ if compgen -G "${cleanup_fail_target%/*}/.markdown-dynconf-backup.*" >/dev/null 
     echo "PASS: cleanup-restore-fail-rc0 exited 70 and backup retained" >&2
     rm -f -- "${cleanup_fail_target%/*}/.markdown-dynconf-backup."* 2>/dev/null || true
 else
-    echo "PASS: cleanup-restore-fail-rc0 exited 70" >&2
+    echo "FAIL: cleanup-restore-fail-rc0 exited 70 but backup was not retained" >&2
+    exit 1
 fi
 
 # Case: original rc != 0 + restore fails → preserve original rc (41).

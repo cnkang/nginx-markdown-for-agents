@@ -16,6 +16,7 @@ Flags:
 
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -55,6 +56,131 @@ RUST_REASON_AS_STR = "            let s = rc.as_str();"
 RUST_OUT_LEN_GUARD = "            if !out_len.is_null() {"
 RUST_TEST_ATTRIBUTE = "    #[test]"
 RUST_ALL_LOOP = "        for rc in &ALL {"
+REASON_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+VALID_STAGES = frozenset({
+    "eligibility", "decompression", "parsing", "conversion",
+    "precommit", "postcommit", "delivery", "dynconf",
+})
+VALID_ERROR_ORIGINS = frozenset({
+    "allocation", "downstream", "invariant", "format", "truncated",
+    "timeout", "memory_budget", "internal",
+})
+REASON_REQUIRED_FIELDS = frozenset({
+    "discriminant", "key", "default_stage", "allowed_origins",
+    "operator_visible",
+})
+
+
+def _validate_discriminant(
+    index: int,
+    discriminant: object,
+    key: object,
+    seen: dict[int, str],
+) -> list[str]:
+    """Validate and record one reason discriminant."""
+    if (
+        isinstance(discriminant, bool)
+        or not isinstance(discriminant, int)
+        or not 0 <= discriminant <= 255
+    ):
+        return [f"reasons[{index}] discriminant must be an integer in 0..255"]
+    if discriminant in seen:
+        return [
+            f"duplicate discriminant {discriminant}: "
+            f"{key!r} conflicts with {seen[discriminant]!r}"
+        ]
+    seen[discriminant] = str(key)
+    return []
+
+
+def _validate_reason_key(
+    index: int, key: object, discriminant: object, seen: dict[str, object]
+) -> list[str]:
+    """Validate and record one reason key."""
+    if not isinstance(key, str) or REASON_KEY_RE.fullmatch(key) is None:
+        return [f"reasons[{index}] key must match lowercase snake_case"]
+    if key in seen:
+        return [
+            f"duplicate reason key {key!r}: discriminants "
+            f"{seen[key]} and {discriminant}"
+        ]
+    seen[key] = discriminant
+    return []
+
+
+def _validate_reason_metadata(index: int, entry: dict) -> list[str]:
+    """Validate stage, origins, and visibility metadata for one reason."""
+    errors: list[str] = []
+    stage = entry["default_stage"]
+    if not isinstance(stage, str) or stage not in VALID_STAGES:
+        errors.append(f"reasons[{index}] default_stage {stage!r} is invalid")
+
+    origins = entry["allowed_origins"]
+    if not isinstance(origins, list):
+        errors.append(f"reasons[{index}] allowed_origins must be an array")
+    else:
+        invalid_origins = [
+            origin
+            for origin in origins
+            if not isinstance(origin, str) or origin not in VALID_ERROR_ORIGINS
+        ]
+        if invalid_origins:
+            errors.append(
+                f"reasons[{index}] invalid allowed_origins: "
+                f"{invalid_origins!r}"
+            )
+
+    if not isinstance(entry["operator_visible"], bool):
+        errors.append(f"reasons[{index}] operator_visible must be boolean")
+    return errors
+
+
+def _validate_reason_entry(
+    index: int,
+    entry: object,
+    seen_discriminants: dict[int, str],
+    seen_keys: dict[str, object],
+) -> list[str]:
+    """Validate one registry entry and update duplicate trackers."""
+    if not isinstance(entry, dict):
+        return [f"reasons[{index}] must be a table"]
+    missing = REASON_REQUIRED_FIELDS - set(entry)
+    if missing:
+        return [f"reasons[{index}] missing fields: {sorted(missing)}"]
+
+    discriminant = entry["discriminant"]
+    key = entry["key"]
+    errors = _validate_discriminant(
+        index, discriminant, key, seen_discriminants
+    )
+    errors.extend(_validate_reason_key(index, key, discriminant, seen_keys))
+    errors.extend(_validate_reason_metadata(index, entry))
+    return errors
+
+
+def _validate_reasons(reasons: object) -> list[str]:
+    """Validate registry entries before sorting or generating artifacts."""
+    if not isinstance(reasons, list) or not reasons:
+        return ["reasons must be a non-empty array"]
+
+    errors: list[str] = []
+    seen_discriminants: dict[int, str] = {}
+    seen_keys: dict[str, object] = {}
+    for index, entry in enumerate(reasons):
+        errors.extend(
+            _validate_reason_entry(
+                index, entry, seen_discriminants, seen_keys
+            )
+        )
+
+    expected = set(range(len(reasons)))
+    actual = set(seen_discriminants)
+    if not errors and actual != expected:
+        errors.append(
+            "reason discriminants must be contiguous 0..count-1: "
+            f"expected={sorted(expected)!r}, actual={sorted(actual)!r}"
+        )
+    return errors
 
 
 def load_registry():
@@ -62,8 +188,10 @@ def load_registry():
     raw_bytes = REGISTRY_PATH.read_bytes()
     data = tomllib.loads(raw_bytes.decode("utf-8"))
     reasons = data.get("reasons", [])
-    if not reasons:
-        print("ERROR: No [[reasons]] entries found in registry", file=sys.stderr)
+    errors = _validate_reasons(reasons)
+    if errors:
+        for error in errors:
+            print(f"ERROR: {error}", file=sys.stderr)
         sys.exit(1)
     # Sort by discriminant for deterministic output
     reasons.sort(key=lambda r: r["discriminant"])

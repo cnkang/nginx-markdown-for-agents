@@ -309,11 +309,18 @@ def check_matrix_consistency() -> list[str]:
     row in the installation guide compatibility matrix table."""
     errors: list[str] = []
     try:
-        matrix_data = normalize_compatibility_document(
-            json.loads(_read(RELEASE_MATRIX))
-        )
-    except (json.JSONDecodeError, MatrixNormalizationError):
-        return [f"{RELEASE_MATRIX.relative_to(ROOT)} is invalid JSON"]
+        matrix_raw = json.loads(_read(RELEASE_MATRIX))
+    except json.JSONDecodeError as exc:
+        return [
+            f"{RELEASE_MATRIX.relative_to(ROOT)} is invalid JSON: {exc}"
+        ]
+    try:
+        matrix_data = normalize_compatibility_document(matrix_raw)
+    except MatrixNormalizationError as exc:
+        return [
+            f"{RELEASE_MATRIX.relative_to(ROOT)} has invalid matrix schema: "
+            f"{exc}"
+        ]
     install_text = _read(INSTALL_GUIDE)
 
     m = re.search(

@@ -227,12 +227,11 @@ def test_reject_only_otel_directive_requires_reject_only_docs(tmp_path: Path) ->
     inventory = tmp_path / detector.PUBLIC_INVENTORY_PATH
     inventory.write_text(
         """
-There are 3 `markdown_*` command-table entries: 1 active parser entries and
-2 reject-only migration entries.
+There are 2 `markdown_*` command-table entries: 1 active parser entries and
+1 reject-only migration entries.
 
 ### Reject-only migration directives
 
-| `markdown_streaming_engine` | migration |
 | `markdown_otel_metrics` | migration |
 """,
         encoding="utf-8",

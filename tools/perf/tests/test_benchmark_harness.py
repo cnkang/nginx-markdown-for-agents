@@ -169,6 +169,32 @@ def test_missing_diagnostics_counters_fail_closed_in_scenario_metrics():
     assert "precommit_failopen_total" not in result["metrics"]
 
 
+def test_endpoint_fetch_failure_fails_scenario_closed():
+    result = build_scenario_result(
+        ScenarioResultInput(
+            raw_content=VALID_AB_OUTPUT,
+            name="streaming-first",
+            profile="streaming_first",
+            compression="none",
+            transfer_encoding="chunked",
+            concurrency=1,
+            worker_rss_kb=1,
+            load_generator="ab",
+            ttfb={"ttfb_p50_ms": 1.0, "ttfb_p95_ms": 2.0},
+            nginx_metrics={},
+            input_bytes=1,
+            baseline_rss_kb=1,
+            peak_rss_kb=1,
+            iterations=10,
+            load_exit_code=0,
+            metrics_exit_code=7,
+        )
+    )
+    assert result["status"] == "failed"
+    assert result["endpoint_integrity"]["verdict"] == "fail"
+    assert "metrics_curl_exit: 7" in result["reason"]
+
+
 def test_ab_requires_all_requests_and_zero_failures():
     assert parse_ab_result(VALID_AB_OUTPUT, 10)["verdict"] == "pass"
 

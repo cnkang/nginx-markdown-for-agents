@@ -204,14 +204,14 @@ EOF
       fi
 
       local expected_auth expected_unauth
-      local -a auth_curl_args=()
+      local auth_requires_credentials=0
       case "${policy}" in
         allow_deny)
           expected_auth=200; expected_unauth=403
           ;;
         auth_basic)
           expected_auth=200; expected_unauth=401
-          auth_curl_args=(-u "${AUTH_USER}:${AUTH_PASSWORD}")
+          auth_requires_credentials=1
           ;;
         satisfy_any)
           expected_auth=200; expected_unauth=401
@@ -228,8 +228,8 @@ EOF
       if [[ -n "${method_flag}" ]]; then
         curl_cmd+=("${method_flag}")
       fi
-      if [[ ${#auth_curl_args[@]} -gt 0 ]]; then
-        curl_cmd+=("${auth_curl_args[@]}")
+      if [[ "${auth_requires_credentials}" -eq 1 ]]; then
+        curl_cmd+=(-u "${AUTH_USER}:${AUTH_PASSWORD}")
       fi
       curl_cmd+=(-o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/${handler}")
       auth_status="$("${curl_cmd[@]}")"
@@ -249,9 +249,11 @@ EOF
       local unauth_status
       case "${policy}" in
         allow_deny)
-          unauth_status="$(curl -sS --interface 127.0.0.2 ${method_flag} \
+          if ! unauth_status="$(curl -sS --interface 127.0.0.2 ${method_flag} \
             -o /dev/null -w '%{http_code}' \
-            "http://127.0.0.1:${PORT}/${handler}")"
+            "http://127.0.0.1:${PORT}/${handler}" 2>/dev/null)"; then
+            unauth_status=000
+          fi
           if [[ "${unauth_status}" != "${expected_unauth}" ]]; then
             echo "FAIL: ${policy}/${handler}/${method}/unauthorized: expected=${expected_unauth} actual=${unauth_status}" >&2
             fail_count=$((fail_count + 1))

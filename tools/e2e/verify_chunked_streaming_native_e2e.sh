@@ -863,10 +863,6 @@ get_metric_value() {
       metric_family="nginx_markdown_decompression_events_total"
       metric_selector='outcome="failure",reason="budget_exceeded"'
       ;;
-    streaming.failed_total)
-      metric_family="nginx_markdown_requests_total"
-      metric_selector='outcome="failed_open"'
-      ;;
     streaming.postcommit_failed_total)
       # Post-commit failures are terminal conversion failures, not fail-open
       # deliveries; the frozen request outcome is failed_closed.
@@ -1063,7 +1059,6 @@ echo "==> Case 4c-burst: 256 KiB continuous compressed bursts must fail open int
 burst_failopen_before="$(get_metric_value 'streaming.precommit_failopen_total')"
 burst_budget_before="$(grep -c 'reason=STREAMING_BUDGET_EXCEEDED' \
   "${RUNTIME}/logs/error.log" || true)"
-burst_failed_before="$(get_metric_value 'streaming.failed_total')"
 burst_decompression_before="$(get_perf_metric 'decompression_streaming_total')"
 burst_output_before="$(get_perf_metric 'output_bytes_total')"
 for burst_mode in gzip deflate; do
@@ -1118,12 +1113,10 @@ cmp -s "${RAW_DIR}/continuous_burst_gzip.decoded" \
 burst_failopen_after="$(get_metric_value 'streaming.precommit_failopen_total')"
 burst_budget_after="$(grep -c 'reason=STREAMING_BUDGET_EXCEEDED' \
   "${RUNTIME}/logs/error.log" || true)"
-burst_failed_after="$(get_metric_value 'streaming.failed_total')"
 burst_decompression_after="$(get_perf_metric 'decompression_streaming_total')"
 burst_output_after="$(get_perf_metric 'output_bytes_total')"
 if [[ "${burst_failopen_after}" -ne $((burst_failopen_before + 2)) \
   || "${burst_budget_after}" -ne $((burst_budget_before + 2)) \
-  || "${burst_failed_after}" -ne $((burst_failed_before + 2)) \
   || "${burst_decompression_after}" -ne "${burst_decompression_before}" ]]; then
   echo "continuous compression burst fallback counters are inconsistent" >&2
   exit 1

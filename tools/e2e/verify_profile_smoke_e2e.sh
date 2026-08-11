@@ -294,6 +294,13 @@ assert_diag_field /strict/diagnostics configuration.effective.streaming_buffer 2
 assert_diag_field /balanced/diagnostics configuration.effective.streaming_buffer 2097152
 assert_diag_field /streaming/diagnostics configuration.effective.streaming_buffer 16777216
 
+for path in /strict/diagnostics /balanced/diagnostics /streaming/diagnostics; do
+    assert_diag_field "${path}" configuration.effective.filter off
+    assert_diag_field "${path}" configuration.effective.prune_noise on
+    assert_diag_field "${path}" configuration.effective.log_verbosity info
+    assert_diag_field "${path}" configuration.effective.error_policy pass
+done
+
 if "${NGINX_EXECUTABLE}" -p "${RUNTIME}" \
     -c conf/invalid-strict-streaming.conf -t >/dev/null 2>&1; then
     fail "full cache validation rejects explicit streaming=force"

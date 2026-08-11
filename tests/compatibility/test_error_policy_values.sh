@@ -55,6 +55,11 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --nginx-bin)
+      if [[ $# -lt 2 ]]; then
+        echo "ERROR: --nginx-bin requires a value" >&2
+        usage
+        exit 2
+      fi
       NGINX_BIN="$2"
       shift 2
       ;;

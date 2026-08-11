@@ -118,26 +118,33 @@ def validate_registry_matches_contract(registry: dict, contract: dict) -> list[s
     return errors
 
 
-def _validate_family_structure(
-    family: dict,
-    seen_names: set[str],
-    constraints: dict,
-) -> list[str]:
-    """Validate one metric family using canonical structural constraints."""
-    errors = []
+def _validate_family_identity(
+    family: dict, seen_names: set[str], constraints: dict
+) -> tuple[list[str], str]:
+    """Validate family name/type and return the name for further checks."""
+    errors: list[str] = []
     name = family.get("name", "")
     family_type = family.get("type", "")
     prefix = constraints.get("family_prefix")
     valid_types = set(constraints.get("valid_types", []))
 
-    if not isinstance(name, str) or not name.startswith(prefix):
+    if not isinstance(prefix, str) or not prefix:
+        errors.append("constraints.family_prefix must be a non-empty string")
+    elif not isinstance(name, str) or not name.startswith(prefix):
         errors.append(f"Family '{name}' missing {prefix} prefix")
     if family_type not in valid_types:
         errors.append(f"Family '{name}' has invalid type '{family_type}'")
     if name in seen_names:
         errors.append(f"Duplicate family name: {name}")
     seen_names.add(name)
+    return errors, name
 
+
+def _validate_family_labels(
+    family: dict, name: str, constraints: dict
+) -> list[str]:
+    """Validate family label uniqueness and the forbidden-label contract."""
+    errors: list[str] = []
     labels = family.get("labels", [])
     label_names = [label.get("name") for label in labels]
     if len(label_names) != len(set(label_names)):
@@ -148,19 +155,38 @@ def _validate_family_structure(
             errors.append(
                 f"Family '{name}' has forbidden label '{label_name}'"
             )
+    return errors
 
-    if family_type == "histogram":
-        bucket_count = len(family.get("bucket_boundaries", []))
-        max_buckets = constraints.get("max_histogram_buckets")
-        if max_buckets is not None and bucket_count > max_buckets:
-            errors.append(
-                f"Family '{name}' has {bucket_count} buckets "
-                f"(max {max_buckets})"
-            )
-        if family.get("bucket_count") != bucket_count:
-            errors.append(
-                f"Family '{name}' bucket_count does not match boundaries"
-            )
+
+def _validate_histogram_family(
+    family: dict, name: str, constraints: dict
+) -> list[str]:
+    """Validate histogram bucket count and boundary consistency."""
+    if family.get("type") != "histogram":
+        return []
+    errors: list[str] = []
+    bucket_count = len(family.get("bucket_boundaries", []))
+    max_buckets = constraints.get("max_histogram_buckets")
+    if max_buckets is not None and bucket_count > max_buckets:
+        errors.append(
+            f"Family '{name}' has {bucket_count} buckets (max {max_buckets})"
+        )
+    if family.get("bucket_count") != bucket_count:
+        errors.append(f"Family '{name}' bucket_count does not match boundaries")
+    return errors
+
+
+def _validate_family_structure(
+    family: dict,
+    seen_names: set[str],
+    constraints: dict,
+) -> list[str]:
+    """Validate one metric family using canonical structural constraints."""
+    errors, name = _validate_family_identity(
+        family, seen_names, constraints
+    )
+    errors.extend(_validate_family_labels(family, name, constraints))
+    errors.extend(_validate_histogram_family(family, name, constraints))
     return errors
 
 
