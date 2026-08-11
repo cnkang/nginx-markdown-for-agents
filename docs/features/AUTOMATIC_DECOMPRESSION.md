@@ -39,6 +39,10 @@ remain independently bounded by `parser_memory` and `streaming_buffer`.
 All growing buffers have explicit limits and error paths release auxiliary
 storage.
 
+Malformed, unknown, or excessively deep `Content-Encoding` chains follow the
+configured `markdown_error_policy`. Only the explicit `pass` policy forwards
+the original response. `fail_closed` and status policies reject it.
+
 ## Failure behavior
 
 The module classifies decompression failures as budget, format,
@@ -57,7 +61,7 @@ decompression family is:
 nginx_markdown_decompression_events_total{
   encoding="gzip|deflate|brotli",
   outcome="success|failure",
-  reason="budget|format|truncated|io"
+  reason="ok|budget_exceeded|format_error|truncated_input|io_error"
 }
 ```
 

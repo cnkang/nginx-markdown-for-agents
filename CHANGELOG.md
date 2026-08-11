@@ -51,13 +51,30 @@ before/after examples.
   `NGX_HTTP_MD_ACTION_REJECT_502`. This change has no configuration impact.
 - After 0.9.2, all 1.x releases maintain backward compatibility for a
   minimum of 24 months.
+- **Dynconf JSON v1 migration.** Convert legacy line-format keys
+  `markdown_filter` → `filter` and `streaming_budget` → `streaming_buffer`.
+  0.9.2 removes `memory_budget` from runtime configuration. Set static
+  `markdown_limits conversion_memory=<size>` instead. A watcher logs
+  `legacy line format detected - migrate to JSON v1` once per worker when a
+  watched file does not begin with `{`. See the
+  [breaking-change reference](docs/guides/0.9.2-breaking-changes.md) and
+  [migration guide](docs/guides/MIGRATION-0.9.2.md).
+- **Dynconf precedence and limits.** Explicit server/location values mask
+  matching runtime keys and exposes them in diagnostics as `masked_keys`.
+  The watcher logs each masked key. The `streaming_buffer` default is 2 MiB
+  in 0.9.2. Pin `markdown_limits streaming_buffer=256k` to retain 0.9.1's
+  256 KiB default. `markdown_stream_threshold` and
+  `markdown_stream_flush_min` have no replacement.
+- **Content-Encoding policy.** Malformed, unknown, and excessively deep
+  encoding chains follow `markdown_error_policy`. Only `pass` forwards the
+  original response.
 
 ### Fixed
 
 - Diagnostics `reason_to_code` mapping was missing `bypass_no_transform`
   entry. The diagnostics endpoint now returns the complete mapping.
 - C reason code constants were missing the decompression error series
-  (codes 4–11). All 12 reason code constants are now synchronized between
+  (codes 4–11). All 27 reason code constants are now synchronized between
   Rust and C.
 - `stream_state` `PRE_COMMIT` fallthrough now logs an invariant violation
   instead of silently advancing state.

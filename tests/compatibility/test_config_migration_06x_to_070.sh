@@ -1,15 +1,14 @@
 #!/bin/bash
 #
-# Configuration Migration Test: 0.6.x → 0.8.0 Semantic Equivalence
+# Configuration Migration Test: 0.6.x → 0.8.0 (retired)
 #
 # NOTE: The filename retains the historical "070" suffix even though the test
 # validates against the 0.8.0 module; it was introduced when the 0.7.0 release
 # line was current and has been extended ever since. The filename is kept for
 # compatibility with existing CI references.
 #
-# Validates that all configuration directives available in 0.6.x are still
-# accepted by the 0.8.0 module without errors (where not intentionally removed),
-# and that removed directives are properly rejected by nginx -t.
+# This historical fixture is retained as documentation only. Its assertions
+# describe the 0.8.0 surface and conflict with the frozen 0.9.2 contract.
 #
 # Removed in 0.8.0:
 #   - markdown_streaming_auto_threshold (use markdown_stream_threshold)
@@ -33,6 +32,10 @@
 #
 
 set -euo pipefail
+
+echo "SKIP: historical 0.6.x-to-0.8.0 compatibility fixture is retired;" >&2
+echo "      use the current directive validator and migration tests." >&2
+exit 0
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC2034

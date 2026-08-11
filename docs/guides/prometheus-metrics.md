@@ -61,6 +61,13 @@ outcomes are `success` and `failure`.
 The conversion histogram boundaries are `0.001`, `0.005`, `0.01`, `0.025`,
 `0.05`, `0.1`, `0.25`, `0.5`, `1.0`, and `5.0` seconds, followed by `+Inf`.
 
+The engine delivery series use direct counters: `full_buffer` counts successful
+full-buffer terminal deliveries and `streaming` counts successful streaming
+terminal deliveries. They are not derived by subtracting one engine from the
+aggregate. In `streaming_events_total`, `commit` counts successful streaming
+header commits, while `resume_success` counts successful downstream resume
+drains after backpressure.
+
 ## Semantics and conservation
 
 The frozen event model is:

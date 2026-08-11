@@ -75,6 +75,12 @@ release target. The 0.8.x-era gate targets remain available for historical
 validation. `make release-gates-check` remains the framework baseline and
 is not the full release gate.
 
+In GitHub Actions, `release-092-contract-gates` is the blocking 0.9.2 contract
+job for source metadata, ABI, version, and reason-code drift. The
+`release-regression-gates` job is informational and has
+`continue-on-error: true`. Do not use its result as the blocking 0.9.2 release
+decision.
+
 Run `make release-gates-check-legacy` only when the legacy spec inputs it
 requires are present.  In clones where those inputs are absent, record the
 absence instead of treating legacy validation as default evidence.
