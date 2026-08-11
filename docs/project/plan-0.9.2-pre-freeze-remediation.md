@@ -6,14 +6,19 @@
 
 ## Scope decisions (pre-freeze)
 
-- Comment/doc/rule-only changes. This historical pre-freeze plan covers no
-  behavior changes to production C/Rust paths.
+- Comment/doc/rule-only changes were the original scope. The closeout also
+  requires narrowly scoped tooling and consumer migrations where needed to
+  make the canonical contracts executable and deterministic. Production
+  C/Rust behavior remains outside that historical plan unless a later review
+  finding explicitly identifies a correctness defect.
 - The review documents dead-code paths rather than removing them (pre-freeze
   risk control). Production dead-code paths remain untouched, except for the
   documented directory moves/removals in the companion report. The companion
   report consolidated `decisions/` into `docs/architecture/ADR/` and
   `docs/release/` into `docs/releases/`.
-- `tools/release-matrix.json` legacy `matrix` array removal requires migrating two consumers (`validate_matrix_install_consistency.py`, `check_packaging_consistency.py`) to canonical `entries` in the same change.
+- The release-matrix migration keeps legacy aliases only at the input boundary.
+  all consumers resolve canonical `entries` and preserve compatibility metadata
+  in the same change.
 - THIRD-PARTY-NOTICES serde_json 1.0.150 → 1.0.151 (Rule 49).
 - No CI workflow additions in pre-freeze (F4 relabeled instead of wired).
 

@@ -959,7 +959,7 @@ NOT_ENABLED = sum(requests_total{outcome="skipped",reason="disabled"})
 
 CONVERTED   = sum(requests_total{outcome="converted"})
 
-SKIPPED     = sum(requests_total{outcome="skipped",reason=~"not_eligible|skipped_.*|bypass_no_transform"})
+SKIPPED     = sum(requests_total{outcome="skipped",reason=~"not_eligible|skipped_accept|skipped_no_accept|skipped_conditional|skipped_accept_reject|bypass_no_transform"})
 
 FAILED      = sum(requests_total{outcome=~"failed_.*"})
 ```
@@ -992,13 +992,13 @@ grep "markdown decision:" /var/log/nginx/error.log | grep -c "reason=disabled"
 
 # Count SKIPPED from logs (excluding the disabled/NOT_ENABLED state)
 grep "markdown decision:" /var/log/nginx/error.log | \
-  grep "reason=not_eligible" | grep -vc "reason=disabled"
+  grep -E "reason=(not_eligible|skipped_accept|skipped_no_accept|skipped_conditional|skipped_accept_reject|bypass_no_transform)"
 
 # Count CONVERTED from logs
 grep "markdown decision:" /var/log/nginx/error.log | grep -c "reason=converted"
 
 # Count FAILED from logs
-grep "markdown decision:" /var/log/nginx/error.log | grep -E "reason=failed_open\|reason=failed_closed"
+grep "markdown decision:" /var/log/nginx/error.log | grep -E 'reason=(failed_open|failed_closed)'
 ```
 
 ### Reason Code and Metrics Label Alignment
@@ -1030,7 +1030,7 @@ grep "markdown decision:" /var/log/nginx/error.log | grep "category=FAIL_CONVERS
 
 # Example: you see failed_open or failed_closed samples increasing
 # Find the matching log entries:
-grep "markdown decision:" /var/log/nginx/error.log | grep -E "reason=failed_open\|reason=failed_closed"
+grep "markdown decision:" /var/log/nginx/error.log | grep -E 'reason=(failed_open|failed_closed)'
 
 # See the full reason code distribution:
 grep "markdown decision:" /var/log/nginx/error.log | \
@@ -1189,14 +1189,14 @@ Example output:
 ```bash
 # Find all failures
 grep "markdown decision:" /var/log/nginx/error.log | \
-  grep -E "reason=failed_open\|reason=failed_closed"
+  grep -E 'reason=(failed_open|failed_closed)'
 ```
 
 #### Extract URIs that failed conversion
 ```bash
 # Extract URIs that failed conversion
 grep "markdown decision:" /var/log/nginx/error.log | \
-  grep -E "reason=failed_open\|reason=failed_closed" | \
+  grep -E 'reason=(failed_open|failed_closed)' | \
   grep -oP 'uri=\K[^ ]+' | sort | uniq -c | sort -rn
 ```
 

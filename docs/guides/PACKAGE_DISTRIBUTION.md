@@ -216,10 +216,17 @@ unsigned release asset.
 
 ### Importing the Project Public Key
 
-Before verifying signatures, import the project signing public key:
+Before verifying signatures, obtain the project signing public key and its
+full fingerprint from the release's independently authenticated project
+channel. A key ID or keyserver result only transports the key. It does not
+establish identity. The current repository does not publish that fingerprint,
+so do not treat a GitHub Release signature as trusted until the release
+process publishes and independently authenticates it. See
+[GPG Key Management](GPG_KEY_MANAGEMENT.md) for the fail-closed status.
 
 ```bash
-# Import from a keyserver (replace KEY_ID with the published project key ID)
+# Import from a keyserver only after checking the independently published
+# full fingerprint (replace KEY_ID with the published project key ID)
 gpg --keyserver hkps://keys.openpgp.org --recv-keys <KEY_ID>
 
 # Or import from a local file if provided
@@ -266,7 +273,10 @@ gpg --verify SHA256SUMS.asc SHA256SUMS
 sha256sum --check --ignore-missing SHA256SUMS
 ```
 
-If all steps succeed, the package and manifest are authentic and intact.
+If all steps succeed and the imported key matches the independently
+authenticated full fingerprint, the package and manifest are authentic and
+intact. A successful `gpg --verify` result without that identity check proves
+integrity under an untrusted key, not project authenticity.
 The manifest (`release-manifest.json`) appears in `SHA256SUMS`. The GPG
 signature on `SHA256SUMS` therefore covers it.
 

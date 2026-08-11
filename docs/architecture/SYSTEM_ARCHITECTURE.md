@@ -353,7 +353,7 @@ surface before the 1.0 LTS compatibility freeze:
   decompression_ratio, and max_inflight replace the former standalone
   limit directives.
 - **Metrics freeze**: The production endpoint emits the twelve-family v1
-  contract (see [observability-schema-v1.md](observability-schema-v1.md)).
+  contract (see [observability-schema-v2.md](observability-schema-v2.md)).
   Legacy multi-format, per-path, shadow, and debug families no longer exist.
 - **Streaming threshold**: The streaming auto-route threshold stays fixed
   internally at 1 MiB and is not operator-configurable.

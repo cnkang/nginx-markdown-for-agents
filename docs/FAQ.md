@@ -146,11 +146,14 @@ See [Performance Tuning](guides/OPERATIONS.md#performance-tuning) for details.
 
 ### Does it support streaming?
 
-Yes. `markdown_streaming auto` is the default processing-path policy. It uses
-bounded-memory incremental conversion for eligible large or chunked responses
-and retains full-buffer conversion for small responses and hard-blocked cases.
-Use `markdown_streaming off` to require full-buffer processing or
+Yes, the current `markdown_streaming auto` policy can select the bounded
+streaming engine for eligible large or chunked responses and retains
+full-buffer conversion for small responses and hard-blocked cases. Use
+`markdown_streaming off` to require full-buffer processing or
 `markdown_streaming force` to prefer streaming for every eligible response.
+This is distinct from the legacy Rust `incremental` API: that API still
+receives the complete NGINX-side buffer and accumulates bytes in Rust, so it is
+not true per-upstream-chunk streaming.
 
 See [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md) and [ADR-0002](architecture/ADR/0002-full-buffering-approach.md) for the reasoning behind this design.
 

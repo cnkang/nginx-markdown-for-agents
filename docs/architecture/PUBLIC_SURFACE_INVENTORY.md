@@ -61,7 +61,7 @@ value overrides it. `markdown_limits` inherits each key independently.
 | Metrics endpoint | `markdown_metrics` | L | no endpoint by default. Installs the handler in the configured location. | `ngx_http_markdown_metrics_handler`; `tools/e2e/verify_metrics_endpoint_e2e.sh` and Rust E2E metrics scenario |
 | Global metrics storage | `markdown_metrics_shm_size` | H | bounded SHM allocation; global and not inherited through S/L. | SHM initialization and metrics unit/E2E tests |
 | Dynamic configuration | `markdown_dynamic_config`, `markdown_dynamic_config_path`, `markdown_dynconf_dry_run` | H | off; no path; off. One watcher per worker; requests bind one snapshot for their lifetime. | dynconf reload, snapshot, and effective-config tests |
-| Diagnostics | `markdown_diagnostics` | L | off; native NGINX access-phase directives control access. | diagnostics production/access/output tests |
+| Diagnostics | `markdown_diagnostics` | L | off; the built-in handler permits loopback clients only, while native NGINX access-phase directives may narrow access further. | diagnostics production/access/output tests |
 
 The streaming threshold is an internal 1 MiB heuristic. The module selects
 zero-copy delivery automatically from ownership and backpressure state.
@@ -100,7 +100,7 @@ rollback response schema.
 
 | Top-level field | Current shape | Class |
 |-----------------|---------------|-------|
-| `schema_version` | integer constant `1` | `STABLE_FOR_1_0` |
+| `schema_version` | integer constant `2` | `STABLE_FOR_1_0` |
 | `product_version` | non-empty product version string | `STABLE_FOR_1_0` |
 | `worker` | `{pid, scope}` with `scope="worker-local"` | `STABLE_FOR_1_0` |
 | `build` | `{source_sha, nginx_version, rust_version, features}` | `STABLE_FOR_1_0` |
@@ -111,7 +111,7 @@ rollback response schema.
 The full JSON Schema is `schemas/diagnostics.schema.json`. The effective
 field/source contract artifact ships alongside the schema.
 Legacy `config_snapshot`, profile, streaming, and duplicated metrics fields are
-not part of the v1 wire schema. The endpoint accepts only GET and HEAD. HEAD computes
+not part of the v2 wire schema. The endpoint accepts only GET and HEAD. HEAD computes
 the complete body length but sends no body.
 
 ## Metrics and Reason-Code Contract
@@ -218,10 +218,11 @@ header filter and keeps it for the request lifetime.
 Every generated C symbol below is `INTERNAL_ONLY`. The Rust static library and
 NGINX module ship as one product. This project does not publish the
 generated header as a third-party SDK or promise ABI compatibility to external
-callers. Rust/C struct layouts, function signatures, and numeric constants may
-change between any two versions without notice. The project may add, remove,
-rename, or change the signatures of exports in any release. No long-term
-append-only promise applies to the FFI export set.
+callers. The [FFI ABI Compatibility](FFI_ABI_COMPATIBILITY.md) document
+defines the in-repository compatibility handshake and update procedure. Any incompatible
+Rust/C layout, signature, or numeric-constant change must update that contract,
+the generated header, all in-repository callers, and the release notes in one
+change. No external append-only promise applies to the FFI export set.
 
 | Group | Entrypoints |
 |-------|-------------|

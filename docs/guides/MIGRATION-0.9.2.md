@@ -84,7 +84,7 @@ response. `fail_closed` and status policies reject it.
 |----------|-------|--------|
 | Reject-only migration stubs removed | 19 | Already caused `nginx -t` failure; now produce standard "unknown directive" |
 | Active directives removed | 14 | Replace with equivalents (see below) |
-| Directives unified into `markdown_limits` | 5 | Use `markdown_limits key=value` syntax |
+| Directives unified into `markdown_limits` | 4 | Use `markdown_limits key=value` syntax. `markdown_stream_flush_min` has no replacement |
 | Total retained directives | 25 | No change needed |
 
 ---
@@ -253,9 +253,11 @@ markdown_stream_threshold 512k;
 # Remove the directive. The threshold stays fixed at 1 MiB internally.
 ```
 
-### `markdown_stream_precommit_buffer` / `markdown_stream_flush_min` → `markdown_limits streaming_buffer=`
+### `markdown_stream_precommit_buffer` → `markdown_limits streaming_buffer=`
 
-Precommit buffer size is now controlled through `markdown_limits`.
+Precommit buffer size is now controlled through `markdown_limits`. The release
+drops the `markdown_stream_flush_min` directive separately and provides no
+replacement because flush coalescing uses an internal heuristic.
 
 ```nginx
 # BEFORE (0.9.1)

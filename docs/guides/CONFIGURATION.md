@@ -177,7 +177,9 @@ Scrape with `Accept: text/plain; version=0.0.4`. The endpoint emits exactly
 the twelve frozen Prometheus families documented in
 [`prometheus-metrics.md`](prometheus-metrics.md). `markdown_diagnostics` is a
 read-only JSON endpoint for effective configuration, provenance, decisions,
-and bounded runtime state. It accepts only `GET` and `HEAD`.
+and bounded runtime state. Its built-in access boundary is loopback-only.
+Native NGINX `allow`/`deny` or authentication directives may narrow that
+boundary but cannot broaden it. It accepts only `GET` and `HEAD`.
 
 ## Dynamic configuration (dynconf)
 
@@ -248,8 +250,10 @@ versioned documents. Do not copy those examples into a 0.9.2 configuration.
 ## Removed directives
 
 `markdown_streaming_auto_threshold` — REMOVED. Use the explicit
-`markdown_streaming off | auto | force` policy and the
-`markdown_limits streaming_buffer=` key instead.
+`markdown_streaming off | auto | force` policy. The selection threshold is
+an internal heuristic and has no replacement directive. Use
+`markdown_limits streaming_buffer=` only to bound streaming working and replay
+memory.
 
 `markdown_decompress_max_size` — REMOVED. Use the
 `markdown_limits decompressed_size=` key instead.

@@ -156,10 +156,13 @@ rpm -qa gpg-pubkey* --qf '%{NAME}-%{VERSION}-%{RELEASE}\t%{SUMMARY}\n' \
   | grep -i markdown
 ```
 
-The current GitHub Release artifact channel does not publish a repository
-fingerprint in this document. Operators must compare the fingerprint of the
-release-provided public key with an independently authenticated project value
-before trusting a signature.
+The current GitHub Release artifact channel does not publish a complete
+release-key fingerprint or public-key trust anchor. This policy fails closed:
+operators must withhold project-signature trust until the release process
+publishes the complete fingerprint in the release documentation and repeats it
+through an independently authenticated project channel. A key ID, keyserver
+lookup, or the public-key file attached to the same release is only a transport
+mechanism and cannot establish identity by itself.
 
 ---
 
