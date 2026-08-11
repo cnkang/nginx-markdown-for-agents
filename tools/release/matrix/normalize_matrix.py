@@ -12,8 +12,13 @@ Fail-closed semantics:
   different values → error
 - an entry that resolves to no canonical identity → error
 
-The canonical key set is frozen: nginx_version, os, libc, target,
+The evidence key set is frozen: nginx_version, os, libc, target,
 artifact_type, feature_manifest_digest, abi_version.
+
+The compatibility matrix is a separate repository-owned contract.  Its
+consumers use the same alias/conflict machinery below, but normalize into the
+shared identity vocabulary (nginx_version, libc, target, support_tier) before
+projecting presentation fields such as ``arch``.
 """
 
 from __future__ import annotations
@@ -61,6 +66,28 @@ DROPPED_LEGACY_KEYS = frozenset(
         "managed_by",
     }
 )
+
+COMPATIBILITY_TIER_ALIASES = {
+    "full": "supported",
+    "source_only": "best-effort",
+}
+
+COMPATIBILITY_TOP_LEVEL_KEYS = frozenset(
+    {
+        "schema_version",
+        "entries",
+        LEGACY_TOP_LEVEL_ALIAS,
+        "updated_at",
+        "support_tiers",
+        "tier_mapping",
+    }
+)
+
+COMPATIBILITY_ALIASES = {
+    "nginx": "nginx_version",
+    "os_type": "libc",
+    "arch": "target",
+}
 
 
 class MatrixNormalizationError(ValueError):
@@ -160,7 +187,116 @@ def normalize_entry_aliases(entry: Dict[str, Any]) -> Dict[str, Any]:
     preserve tool-specific fields.  They must still use the same fail-closed
     alias conflict rules as the canonical validator.
     """
-    return _fold_entry_keys(entry)
+    return normalize_compatibility_entry(entry, require_fields=False)
+
+
+def _fold_compatibility_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Fold compatibility aliases while retaining compatibility metadata."""
+    canonical: Dict[str, Any] = {}
+    for key, value in entry.items():
+        canonical_key = COMPATIBILITY_ALIASES.get(key, key)
+        if canonical_key in canonical and canonical[canonical_key] != value:
+            raise MatrixNormalizationError(
+                f"alias {key!r} disagrees with canonical key "
+                f"{canonical_key!r}"
+            )
+        if canonical_key in {
+            "nginx_version",
+            "os",
+            "libc",
+            "target",
+            "artifact_type",
+            "feature_manifest_digest",
+            "abi_version",
+            "nginx_channel",
+            "test_level",
+            "support_tier",
+            "release_blocking",
+            "owner_workflow",
+            "managed_by",
+        }:
+            canonical[canonical_key] = value
+            continue
+        raise MatrixNormalizationError(f"unknown matrix entry key: {key!r}")
+    return canonical
+
+
+def _normalize_compatibility_tier(value: Any) -> Any:
+    if isinstance(value, str):
+        return COMPATIBILITY_TIER_ALIASES.get(value, value)
+    return value
+
+
+def normalize_compatibility_entry(
+    entry: Dict[str, Any], *, require_fields: bool = True
+) -> Dict[str, Any]:
+    """Normalize one compatibility-matrix row to shared identity keys.
+
+    ``target`` is the canonical architecture field internally.  Presentation
+    consumers may project it to ``amd64``/``arm64`` or another display form.
+    The legacy ``os_type`` field means libc in the compatibility contract;
+    this is intentionally distinct from the evidence matrix's ``os`` field.
+    """
+    if not isinstance(entry, dict):
+        raise MatrixNormalizationError("matrix entry must be an object")
+
+    normalized = _fold_compatibility_entry(entry)
+    if "support_tier" in normalized:
+        normalized["support_tier"] = _normalize_compatibility_tier(
+            normalized["support_tier"]
+        )
+
+    if require_fields:
+        aliases = {
+            "nginx_version": "nginx",
+            "libc": "os_type",
+            "target": "arch",
+        }
+        for required in ("nginx_version", "libc", "target", "support_tier"):
+            if required not in normalized:
+                alias = aliases.get(required)
+                hint = f" (or {alias} alias)" if alias else ""
+                raise MatrixNormalizationError(
+                    f"compatibility entry has no {required}{hint}"
+                )
+    return normalized
+
+
+def normalize_compatibility_entries(
+    entries: List[Dict[str, Any]], *, require_fields: bool = True
+) -> List[Dict[str, Any]]:
+    """Normalize all compatibility rows through one alias/conflict path."""
+    if not isinstance(entries, list):
+        raise MatrixNormalizationError("entries must be an array")
+    return [
+        normalize_compatibility_entry(entry, require_fields=require_fields)
+        for entry in entries
+    ]
+
+
+def normalize_compatibility_document(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize the compatibility matrix while keeping it distinct from evidence."""
+    if not isinstance(doc, dict):
+        raise MatrixNormalizationError("matrix document must be an object")
+
+    unknown = set(doc) - COMPATIBILITY_TOP_LEVEL_KEYS
+    if unknown:
+        raise MatrixNormalizationError(
+            f"unknown compatibility top-level keys: {sorted(unknown)}"
+        )
+    if "entries" in doc and LEGACY_TOP_LEVEL_ALIAS in doc:
+        raise MatrixNormalizationError(
+            "both 'entries' and legacy 'matrix' present: fail closed"
+        )
+
+    raw_entries = doc.get("entries", doc.get(LEGACY_TOP_LEVEL_ALIAS))
+    if raw_entries is None:
+        raise MatrixNormalizationError("compatibility matrix has no entries")
+
+    return {
+        "schema_version": doc.get("schema_version", 1),
+        "entries": normalize_compatibility_entries(raw_entries),
+    }
 
 
 def load_and_normalize(path: str) -> Dict[str, Any]:

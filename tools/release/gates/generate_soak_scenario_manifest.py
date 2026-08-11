@@ -23,6 +23,7 @@ if str(REPO_ROOT / "tools") not in sys.path:
 from lib.path_validation import (  # noqa: E402
     validate_filename_strict,
     validate_read_path,
+    validate_write_path_within_root,
 )
 
 

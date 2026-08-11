@@ -119,3 +119,29 @@ def test_module_metrics_render_accepts_http_and_location_scopes(
     validator._validate_module_metrics_render(result, "helm", Path("chart"))
 
     assert not result.has_failures
+
+
+def test_module_enabled_render_rejects_duplicate_markdown_limits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The chart must emit one combined markdown_limits directive."""
+    rendered_config = """
+load_module /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so;
+server {
+    markdown_filter on;
+    markdown_limits conversion_memory=64m conversion_timeout=5s;
+    markdown_streaming auto;
+    markdown_limits streaming_buffer=2m;
+}
+"""
+    completed = subprocess.CompletedProcess(
+        args=["helm", "template"],
+        returncode=0,
+        stdout=rendered_config,
+    )
+    monkeypatch.setattr(validator, "_run_helm_template", lambda *args: completed)
+
+    result = ValidationResult()
+    validator._validate_module_enabled_render(result, "helm", Path("chart"))
+
+    assert result.has_failures

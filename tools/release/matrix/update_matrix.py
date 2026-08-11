@@ -36,9 +36,19 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError
 
 try:
-    from .normalize_matrix import normalize_entry_aliases
+    from .normalize_matrix import (
+        MatrixNormalizationError,
+        normalize_compatibility_document,
+        normalize_compatibility_entry,
+        normalize_entry_aliases,
+    )
 except ImportError:
-    from normalize_matrix import normalize_entry_aliases
+    from normalize_matrix import (
+        MatrixNormalizationError,
+        normalize_compatibility_document,
+        normalize_compatibility_entry,
+        normalize_entry_aliases,
+    )
 
 # ---------------------------------------------------------------------------
 # Path constants (same pattern as validate_doc_matrix_sync.py)
@@ -425,17 +435,25 @@ def _read_matrix_json(path: Path) -> dict:
         _matrix_error(
             f"Invalid matrix structure in {path}: missing 'matrix' or 'entries' key"
         )
+    try:
+        normalize_compatibility_document(data)
+    except MatrixNormalizationError as exc:
+        _matrix_error(
+            f"Invalid compatibility matrix in {path}: missing required keys "
+            f"or invalid aliases ({exc})"
+        )
     return data
 
 
 def _supported_dynamic_entry(entry: dict) -> dict | None:
     """Project a supported canonical row into the updater's legacy shape."""
-    if entry.get("artifact_type") != "dynamic-module":
+    normalized = normalize_compatibility_entry(entry)
+    if normalized.get("artifact_type") != "dynamic-module":
         return None
-    if entry.get("support_tier") != "supported":
+    if normalized.get("support_tier") != "supported":
         return None
     try:
-        version, os_type, arch = _matrix_entry_identity(entry)
+        version, os_type, arch = _matrix_entry_identity(normalized)
     except ValueError:
         return None
     if os_type not in OS_TYPES or arch not in {"x86_64", "aarch64"}:
@@ -450,22 +468,51 @@ def _supported_dynamic_entry(entry: dict) -> dict | None:
 
 def _matrix_entry_list(data: dict, path: Path) -> list:
     """Return the matrix entry list from supported schema variants."""
-    if isinstance(data.get("entries"), list) and "matrix" not in data:
-        matrix_entries = []
-        for index, entry in enumerate(data["entries"]):
-            if not isinstance(entry, dict):
-                _matrix_error(
-                    f"Invalid matrix entry at index {index} in {path}: "
-                    f"expected dict, got {type(entry).__name__}"
-                )
-            if canonical := _supported_dynamic_entry(entry):
-                matrix_entries.append(canonical)
-        return matrix_entries
+    raw_entries = data.get("entries")
+    canonical_entries_shape = isinstance(raw_entries, list) and "matrix" not in data
+    if not canonical_entries_shape:
+        raw_entries = data.get("matrix")
+    if not isinstance(raw_entries, list):
+        _matrix_error(
+            f"Invalid matrix structure in {path}: matrix/entries must be a list"
+        )
 
-    matrix_entries = data.get("matrix")
-    if not isinstance(matrix_entries, list):
-        _matrix_error(f"Invalid matrix structure in {path}: matrix must be a list")
-    return matrix_entries
+    try:
+        normalized_entries = [
+            normalize_compatibility_entry(entry) for entry in raw_entries
+        ]
+    except MatrixNormalizationError as exc:
+        _matrix_error(
+            f"Invalid compatibility matrix in {path}: missing required keys "
+            f"or invalid aliases ({exc})"
+        )
+
+    if canonical_entries_shape:
+        return [
+            canonical
+            for entry in normalized_entries
+            if (canonical := _supported_dynamic_entry(entry))
+        ]
+
+    # Legacy updater inputs use the historical presentation vocabulary.  The
+    # shared normalizer owns alias resolution; this projection is only for the
+    # updater's existing merge/write contract.
+    entries: list[dict] = []
+    for entry in normalized_entries:
+        projected = dict(entry)
+        projected["nginx"] = projected.pop("nginx_version")
+        projected["os_type"] = projected.pop("libc")
+        target = projected.pop("target")
+        projected["arch"] = {
+            "amd64": "x86_64",
+            "arm64": "aarch64",
+        }.get(target, target)
+        projected["support_tier"] = {
+            "supported": "full",
+            "best-effort": "source_only",
+        }.get(projected.get("support_tier"), projected.get("support_tier"))
+        entries.append(projected)
+    return entries
 
 
 def _validate_matrix_entry(entry: object, index: int, path: Path) -> dict:
@@ -1060,24 +1107,12 @@ def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
         _matrix_entry_identity(entry)
         for entry in dynamic_entries
     }
-    non_generated_dynamic_tiers = {
-        "candidate",
-        "experimental",
-        "best-effort",
-        "unsupported",
-    }
     other_entries = [
         entry
         for entry in entries
         if not isinstance(entry, dict)
         or entry.get("artifact_type") != "dynamic-module"
-        or (
-            _matrix_entry_identity(entry) not in generated_keys
-            and (
-                entry.get("managed_by") == "manual"
-                or entry.get("support_tier") in non_generated_dynamic_tiers
-            )
-        )
+        or _matrix_entry_identity(entry) not in generated_keys
     ]
     dynamic_entries.sort(
         key=lambda entry: (

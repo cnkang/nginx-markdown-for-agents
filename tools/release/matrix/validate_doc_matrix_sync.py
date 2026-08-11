@@ -12,12 +12,17 @@ Usage:
 
 from __future__ import annotations
 
-import json
 import sys
+import json
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from lib.path_validation import validate_read_path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from normalize_matrix import (  # noqa: E402
+    MatrixNormalizationError,
+    normalize_compatibility_document,
+)
 
 # Paths relative to the repository root
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -51,10 +56,10 @@ def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
         list[tuple[str, str, str, str]]: Sorted list of (nginx, os_type, arch, tier) tuples where `tier` has been normalized (lowercased, spaces/hyphens replaced with underscores).
     """
     validated = validate_read_path(path, purpose="doc matrix")
-    with open(validated, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    if not isinstance(data, dict) or not isinstance(data.get("entries"), list):
+    try:
+        with open(validated, "r", encoding="utf-8") as f:
+            data = normalize_compatibility_document(json.load(f))
+    except (OSError, json.JSONDecodeError, MatrixNormalizationError):
         return []
 
     entries = []
@@ -63,7 +68,7 @@ def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
             item["nginx_version"],
             item["libc"],
             {"amd64": "x86_64", "arm64": "aarch64"}.get(
-                item["arch"], item["arch"]
+                item["target"], item["target"]
             ),
             _normalize_tier(item["support_tier"]),
         )

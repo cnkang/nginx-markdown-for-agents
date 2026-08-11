@@ -323,7 +323,6 @@ e2e-streaming-config-check:
 
 reason-codegen-check:
 	@echo "=== Reason Registry Code Generation Drift Check ==="
-	python3 tools/reason-codegen/generate.py
 	python3 tools/reason-codegen/generate.py --check
 	@echo "  Reason Code Generation Drift Check: PASSED"
 
@@ -959,7 +958,7 @@ release-gates-check-092: release-gates-check-091
 	@echo "  [5/13] Streaming lifecycle unit test"
 	$(MAKE) -C $(NGINX_TEST_DIR) unit-streaming_impl
 	@echo "  [6/13] Official build feature manifest"
-	python3 tools/release/gates/validate_official_feature_manifest.py --write
+	python3 tools/release/gates/validate_official_feature_manifest.py
 	@echo "  [7/13] Canonical release matrix"
 	PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
 	@echo "  [8/13] Release candidate evidence bound to HEAD"
@@ -985,7 +984,7 @@ release-gates-check-092: release-gates-check-091
 # Classification: BLOCKING
 release-matrix-check:
 	@echo "=== Canonical Release Matrix Check ==="
-	python3 tools/release/gates/validate_official_feature_manifest.py --write
+	python3 tools/release/gates/validate_official_feature_manifest.py
 	PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
 	PYTHONPATH=. python3 -m pytest tools/release/matrix/tests/test_validate_release_matrix.py -q --tb=short
 	@echo "  Canonical Release Matrix Check: PASSED"
