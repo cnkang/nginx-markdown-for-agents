@@ -397,7 +397,7 @@ ngx_http_markdown_diagnostics_recording_active(void)
 /*
  * HTTP content handler for the diagnostics endpoint.
  *
- * Validates access control, then:
+ * Rejects unsupported methods before access control, then:
  *   - GET/HEAD: builds and sends the full diagnostics JSON response
  *   - Other methods: returns 405 Not Allowed; the endpoint has no mutation
  *     operation
@@ -456,13 +456,6 @@ ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
     ngx_buf_t    *b;
     ngx_chain_t   out;
 
-    /* Access control check (default deny) */
-    rc = ngx_http_markdown_diagnostics_check_access(r);
-    if (rc != NGX_OK) {
-        r->headers_out.status = (ngx_uint_t) rc;
-        return rc;
-    }
-
     /* Only allow read-only GET and HEAD requests. */
     if (!(r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD))) {
         ngx_table_elt_t  *allow_hdr;
@@ -480,6 +473,13 @@ ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
         }
 
         return ngx_http_markdown_diagnostics_method_not_allowed(r);
+    }
+
+    /* Access control check (default deny) */
+    rc = ngx_http_markdown_diagnostics_check_access(r);
+    if (rc != NGX_OK) {
+        r->headers_out.status = (ngx_uint_t) rc;
+        return rc;
     }
 
     /* Discard request body */
@@ -932,7 +932,7 @@ typedef struct {
 } ngx_http_markdown_diag_reason_meta_t;
 
 static const ngx_http_markdown_diag_reason_meta_t
-    ngx_http_markdown_diag_reason_meta[REASON_CODE_COUNT] = {
+    ngx_http_markdown_diag_reason_meta[] = {
     [0] = { "converted", "eligibility", "invariant" },
     [1] = { "skipped", "eligibility", "invariant" },
     [2] = { "skipped", "eligibility", "invariant" },
@@ -962,10 +962,16 @@ static const ngx_http_markdown_diag_reason_meta_t
     [26] = { "failed_closed", "decompression", "format" }
 };
 
+enum {
+    NGX_HTTP_MARKDOWN_DIAG_REASON_COUNT =
+        sizeof(ngx_http_markdown_diag_reason_meta)
+        / sizeof(ngx_http_markdown_diag_reason_meta[0])
+};
+
 static const ngx_http_markdown_diag_reason_meta_t *
 ngx_http_markdown_diag_reason_meta_for(ngx_int_t code)
 {
-    if (code < 0 || code >= REASON_CODE_COUNT) {
+    if (code < 0 || code >= NGX_HTTP_MARKDOWN_DIAG_REASON_COUNT) {
         return &ngx_http_markdown_diag_reason_meta[0];
     }
 
