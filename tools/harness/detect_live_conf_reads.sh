@@ -169,7 +169,7 @@ while IFS= read -r match; do
     # the static_config_manifest_v1 call chain and must not be mistaken for
     # request conversion code.
     if function_contains_line "$file" "$line" \
-        'ngx_http_markdown_manifest_append_(policy|runtime|limit|prune|trusted_proxies)_fields|ngx_http_markdown_manifest_append_trusted_proxies'; then
+        '(ngx_http_markdown_manifest_append_(policy|runtime|limit|prune|trusted_proxies)_fields|ngx_http_markdown_manifest_append_trusted_proxies)'; then
         echo "  OK      ${file}:${line} — static_config_manifest_v1 helper reads compiled static conf: ${content}" >&2
         hits=$((hits + 1))
         continue
