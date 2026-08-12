@@ -984,7 +984,7 @@ pub unsafe extern "C" fn markdown_header_plan_init(result: *mut FFIHeaderPlan) {
 /// # Format Codes
 ///
 /// - `0` = gzip (RFC 1952)
-/// - `1` = deflate (RFC 1951)
+/// - `1` = zlib-wrapped deflate (RFC 1950 carrying RFC 1951 data)
 /// - `2` = brotli (RFC 7932)
 ///
 /// # Return Value

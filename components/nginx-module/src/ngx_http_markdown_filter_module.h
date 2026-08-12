@@ -689,8 +689,8 @@ typedef struct {
     ngx_flag_t   enabled;              /* markdown_filter static resolved value */
     ngx_uint_t   enabled_source;       /* markdown_filter source (static|complex|unset) */
     ngx_http_complex_value_t *enabled_complex; /* markdown_filter variable/complex expression */
-    size_t       max_size;             /* markdown_limits memory (default: 10MB) */
-    ngx_msec_t   timeout;              /* markdown_limits timeout (default: 5000ms) */
+    size_t       max_size;             /* legacy compat; decompressed_size via markdown_limits */
+    ngx_msec_t   timeout;              /* legacy compat; conversion_timeout via markdown_limits */
     ngx_uint_t   on_error;             /* markdown_error_policy pass|fail_closed|status (default: pass) */
     ngx_uint_t   error_status;         /* markdown_error_policy status <code> (default: 502; honored on fail-closed) */
     ngx_uint_t   flavor;               /* markdown_flavor commonmark|gfm (default: commonmark) */
@@ -716,7 +716,7 @@ typedef struct {
         ngx_flag_t   auto_decompress;      /* markdown_auto_decompress on|off (default: on) */
         size_t       max_size;             /* markdown_limits decompressed_size (default: same as max_size) */
         ngx_msec_t   parse_timeout;        /* markdown_limits parser_timeout (default: 30000ms) */
-        size_t       parser_budget;        /* markdown_limits parser_memory (default: 64MB) */
+        size_t       parser_budget;        /* legacy compat; parser_memory via markdown_limits */
         ngx_flag_t   max_size_explicit;    /* 1 if operator set markdown_limits memory at this or parent level */
     } decompress;
 

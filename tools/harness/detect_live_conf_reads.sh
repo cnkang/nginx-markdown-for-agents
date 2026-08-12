@@ -4,7 +4,7 @@
 #
 # Scans C source files in the request path for direct reads of
 # dynconf-mutable fields (enabled, enabled_source, prune_noise,
-# log_verbosity, memory_budget, streaming_budget) from live conf->
+# log_verbosity, error_policy, error_status, streaming_buffer) from live conf->
 # instead of through effective_conf helpers.
 #
 # Per AGENTS.md Rule 34, request-path code must read these fields
@@ -34,8 +34,8 @@ readonly SRC_DIR="${1:-components/nginx-module/src}"
 
 # Dynconf-mutable fields that must be read through effective_conf
 # in request-path code.
-readonly MUTABLE_FIELDS="enabled|enabled_source|prune_noise|log_verbosity|memory_budget|streaming_budget"
-readonly MUTABLE_FIELDS_EXACT="^(enabled|enabled_source|prune_noise|log_verbosity|memory_budget|streaming_budget)$"
+readonly MUTABLE_FIELDS="enabled|enabled_source|prune_noise|log_verbosity|error_policy|error_status|streaming_buffer"
+readonly MUTABLE_FIELDS_EXACT="^(enabled|enabled_source|prune_noise|log_verbosity|error_policy|error_status|streaming_buffer)$"
 
 # Files where direct conf-> reads of mutable fields are allowed
 # (configuration/initialization/snapshot code).
@@ -214,7 +214,7 @@ while IFS= read -r match; do
     echo "  ERROR   ${file}:${line} — request-path reads live conf->: ${content}" >&2
     errors=$((errors + 1))
     hits=$((hits + 1))
-done < <(grep -rnE "conf->(enabled|enabled_source|prune_noise|log_verbosity|memory_budget|streaming_budget)[^_a-zA-Z]" "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
+done < <(grep -rnE "conf->(enabled|enabled_source|prune_noise|log_verbosity|error_policy|error_status|streaming_buffer)[^_a-zA-Z]" "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
 
 if [[ "$hits" -eq 0 ]]; then
     echo "  (none found)" >&2
