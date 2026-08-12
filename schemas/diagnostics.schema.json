@@ -231,7 +231,7 @@
             "null"
           ],
           "pattern": "^sha256:[0-9a-f]{64}$",
-          "description": "Canonical digest of the LKG configuration. Equals active_digest in active and lkg_preserved states. Null when state is disabled, no_file, or invalid_without_lkg."
+          "description": "Canonical digest of the previous active dynconf configuration. Null when the LKG is the bootstrap static configuration, or when state is disabled, no_file, or invalid_without_lkg."
         },
         "last_success": {
           "type": [
@@ -385,7 +385,10 @@
                 "pattern": "^sha256:[0-9a-f]{64}$"
               },
               "lkg_digest": {
-                "type": "string",
+                "type": [
+                  "string",
+                  "null"
+                ],
                 "pattern": "^sha256:[0-9a-f]{64}$"
               },
               "last_success": {
@@ -421,7 +424,10 @@
                 "pattern": "^sha256:[0-9a-f]{64}$"
               },
               "lkg_digest": {
-                "type": "string",
+                "type": [
+                  "string",
+                  "null"
+                ],
                 "pattern": "^sha256:[0-9a-f]{64}$"
               },
               "last_success": {
