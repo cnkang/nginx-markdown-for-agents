@@ -250,6 +250,7 @@ typedef struct {
         ngx_atomic_t  streaming_fallback_precommit_reject;
         ngx_atomic_t  streaming_failure_postcommit_abort;
         ngx_atomic_t  streaming_failure_postcommit_safe_finish;
+        ngx_atomic_t  terminal_aborted_total;
         struct {
             ngx_atomic_t  streaming;
             ngx_atomic_t  full_buffer;

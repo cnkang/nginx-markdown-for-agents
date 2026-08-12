@@ -115,6 +115,36 @@ def _validate_reason_key(
     return []
 
 
+def _validate_allowed_origins(index: int, origins: object) -> list[str]:
+    """Validate the allowed_origins array for one reason entry."""
+    if not isinstance(origins, list):
+        return [f"reasons[{index}] allowed_origins must be an array"]
+    invalid_origins = [
+        origin
+        for origin in origins
+        if not isinstance(origin, str) or origin not in VALID_ERROR_ORIGINS
+    ]
+    if invalid_origins:
+        return [
+            f"reasons[{index}] invalid allowed_origins: {invalid_origins!r}"
+        ]
+    return []
+
+
+def _validate_default_origin(
+    index: int, default_origin: object, origins: list
+) -> list[str]:
+    """Validate default_origin is a known origin and is reachable."""
+    if not isinstance(default_origin, str) or default_origin not in VALID_ERROR_ORIGINS:
+        return [f"reasons[{index}] default_origin {default_origin!r} is invalid"]
+    if default_origin != "none" and default_origin not in origins:
+        return [
+            f"reasons[{index}] default_origin {default_origin!r} "
+            f"must be in allowed_origins or 'none'"
+        ]
+    return []
+
+
 def _validate_reason_metadata(index: int, entry: dict) -> list[str]:
     """Validate stage, origins, and visibility metadata for one reason."""
     errors: list[str] = []
@@ -123,19 +153,7 @@ def _validate_reason_metadata(index: int, entry: dict) -> list[str]:
         errors.append(f"reasons[{index}] default_stage {stage!r} is invalid")
 
     origins = entry["allowed_origins"]
-    if not isinstance(origins, list):
-        errors.append(f"reasons[{index}] allowed_origins must be an array")
-    else:
-        invalid_origins = [
-            origin
-            for origin in origins
-            if not isinstance(origin, str) or origin not in VALID_ERROR_ORIGINS
-        ]
-        if invalid_origins:
-            errors.append(
-                f"reasons[{index}] invalid allowed_origins: "
-                f"{invalid_origins!r}"
-            )
+    errors.extend(_validate_allowed_origins(index, origins))
 
     if not isinstance(entry["operator_visible"], bool):
         errors.append(f"reasons[{index}] operator_visible must be boolean")
@@ -144,16 +162,7 @@ def _validate_reason_metadata(index: int, entry: dict) -> list[str]:
     if not isinstance(outcome, str) or outcome not in VALID_OUTCOMES:
         errors.append(f"reasons[{index}] outcome {outcome!r} is invalid")
 
-    default_origin = entry.get("default_origin")
-    if not isinstance(default_origin, str) or default_origin not in VALID_ERROR_ORIGINS:
-        errors.append(
-            f"reasons[{index}] default_origin {default_origin!r} is invalid"
-        )
-    elif default_origin != "none" and default_origin not in origins:
-        errors.append(
-            f"reasons[{index}] default_origin {default_origin!r} "
-            f"must be in allowed_origins or 'none'"
-        )
+    errors.extend(_validate_default_origin(index, entry.get("default_origin"), origins))
     return errors
 
 

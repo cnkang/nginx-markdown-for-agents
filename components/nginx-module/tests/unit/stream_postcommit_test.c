@@ -148,6 +148,7 @@ ngx_http_markdown_metrics_record_postcommit_copied_delivery(size_t bytes)
 /* Track postcommit_abort metric invocations */
 static int test_abort_metric_count;
 static int test_safe_finish_metric_count;
+static int test_terminal_abort_metric_count;
 
 void
 ngx_http_markdown_metrics_record_postcommit_abort(void)
@@ -159,6 +160,12 @@ void
 ngx_http_markdown_metrics_record_postcommit_safe_finish(void)
 {
     test_safe_finish_metric_count++;
+}
+
+void
+ngx_http_markdown_metrics_record_terminal_abort(void)
+{
+    test_terminal_abort_metric_count++;
 }
 
 /* Include the decision engine source directly */
@@ -384,6 +391,7 @@ static void test_setup(void)
     test_pending_output_requests = 0;
     test_abort_metric_count = 0;
     test_safe_finish_metric_count = 0;
+    test_terminal_abort_metric_count = 0;
 }
 
 

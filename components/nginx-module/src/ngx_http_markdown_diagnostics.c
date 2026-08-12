@@ -951,7 +951,7 @@ ngx_http_markdown_diag_outcome(ngx_int_t code)
 }
 
 static const char *
-ngx_http_markdown_diag_stage(ngx_int_t code)
+ngx_http_markdown_diag_decision_stage(ngx_int_t code)
 {
     return ngx_http_markdown_diag_reason_meta_for(code)->stage;
 }

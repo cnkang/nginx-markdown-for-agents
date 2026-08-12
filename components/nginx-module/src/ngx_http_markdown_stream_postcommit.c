@@ -36,6 +36,28 @@ ngx_http_markdown_stream_postcommit_send_closing(
 static ngx_int_t
 ngx_http_markdown_stream_postcommit_finish_via_rust(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx);
+
+/* Postcommit metric helpers are defined in
+ * ngx_http_markdown_postcommit_metrics_impl.h, included by
+ * ngx_http_markdown_filter_module.c.  Forward-declared here so this
+ * translation unit does not rely on implicit declarations under
+ * strict C99 (-Wimplicit-function-declaration).  The definitions are
+ * compiled only when MARKDOWN_STREAMING_ENABLED is defined, so the
+ * prototypes share the same guard. */
+void
+ngx_http_markdown_metrics_record_postcommit_pending(size_t bytes);
+
+void
+ngx_http_markdown_metrics_record_postcommit_copied_delivery(size_t bytes);
+
+void
+ngx_http_markdown_metrics_record_postcommit_abort(void);
+
+void
+ngx_http_markdown_metrics_record_postcommit_safe_finish(void);
+
+void
+ngx_http_markdown_metrics_record_terminal_abort(void);
 #endif
 
 static ngx_flag_t
