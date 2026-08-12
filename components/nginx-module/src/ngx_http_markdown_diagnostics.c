@@ -466,14 +466,6 @@ ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
     ngx_buf_t    *b;
     ngx_chain_t   out;
 
-    /* Check access before method handling so denied requests cannot learn
-     * handler behavior through the 405 branch. */
-    rc = ngx_http_markdown_diagnostics_check_access(r);
-    if (rc != NGX_OK) {
-        r->headers_out.status = (ngx_uint_t) rc;
-        return rc;
-    }
-
     /* Only allow read-only GET and HEAD requests. */
     if (!(r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD))) {
         ngx_table_elt_t  *allow_hdr;
@@ -491,6 +483,13 @@ ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
         }
 
         return ngx_http_markdown_diagnostics_method_not_allowed(r);
+    }
+
+    /* Access control applies to read-only diagnostics requests. */
+    rc = ngx_http_markdown_diagnostics_check_access(r);
+    if (rc != NGX_OK) {
+        r->headers_out.status = (ngx_uint_t) rc;
+        return rc;
     }
 
     /* Discard request body */
