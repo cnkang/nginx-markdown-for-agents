@@ -806,24 +806,34 @@ ngx_http_markdown_route_streaming_compression(
 #endif
 
 
+/*
+ * Bundle of the four string fields describing a buffered conversion's
+ * terminal decision, used so the log helper stays below the parameter
+ * limit.  All members are pre-formatted constant string pointers.
+ */
+typedef struct {
+    const char   *conditional_result;
+    const char   *conversion_status;
+    const char   *reason_code;
+    const char   *stage;
+} ngx_http_markdown_buffered_decision_t;
+
+
 static void
 ngx_http_markdown_log_buffered_decision_path(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf,
-    const char *conditional_result,
-    const char *conversion_status,
-    const char *reason_code,
-    const char *stage,
+    const ngx_http_markdown_buffered_decision_t *decision,
     ngx_msec_t duration_ms)
 {
     ngx_http_markdown_decision_path_t  dp;
 
     dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_CONVERT;
-    dp.conditional_result = conditional_result;
-    dp.conversion_status = conversion_status;
-    dp.reason_code = reason_code;
-    dp.stage = stage;
+    dp.conditional_result = decision->conditional_result;
+    dp.conversion_status = decision->conversion_status;
+    dp.reason_code = decision->reason_code;
+    dp.stage = decision->stage;
     dp.error_category = ctx->error.has_category
         ? (const char *) ngx_http_markdown_error_category_string(
               ctx->error.last_category)->data : NULL;
@@ -1361,9 +1371,12 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
 
         NGX_HTTP_MARKDOWN_METRIC_INC(skips.conditional);
         ngx_http_markdown_log_buffered_decision_path(
-            r, ctx, conf, NGX_HTTP_MARKDOWN_COND_NOT_MODIFIED,
-            NGX_HTTP_MARKDOWN_CONV_SKIPPED,
-            "skipped_conditional", "conversion", elapsed_ms);
+            r, ctx, conf,
+            &((const ngx_http_markdown_buffered_decision_t){
+                NGX_HTTP_MARKDOWN_COND_NOT_MODIFIED,
+                NGX_HTTP_MARKDOWN_CONV_SKIPPED,
+                "skipped_conditional", "conversion"}),
+            elapsed_ms);
 
         return NGX_OK;
     }
@@ -1371,13 +1384,16 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
         /* Conditional processing failed — log failure outcome */
         ngx_http_markdown_log_failure_decision(r, ctx, conf);
         ngx_http_markdown_log_buffered_decision_path(
-            r, ctx, conf, NGX_HTTP_MARKDOWN_COND_PROCEED,
-            NGX_HTTP_MARKDOWN_CONV_FAILED,
-            ngx_http_markdown_effective_error_policy(
-                ctx->effective_conf, conf)
-                == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT
-                ? "failed_closed" : "failed_open",
-            "conversion", elapsed_ms);
+            r, ctx, conf,
+            &((const ngx_http_markdown_buffered_decision_t){
+                NGX_HTTP_MARKDOWN_COND_PROCEED,
+                NGX_HTTP_MARKDOWN_CONV_FAILED,
+                ngx_http_markdown_effective_error_policy(
+                    ctx->effective_conf, conf)
+                    == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT
+                    ? "failed_closed" : "failed_open",
+                "conversion"}),
+            elapsed_ms);
         return rc;
     }
 
@@ -1387,13 +1403,16 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
             /* Conversion failed — log failure outcome */
             ngx_http_markdown_log_failure_decision(r, ctx, conf);
             ngx_http_markdown_log_buffered_decision_path(
-                r, ctx, conf, NGX_HTTP_MARKDOWN_COND_PROCEED,
-                NGX_HTTP_MARKDOWN_CONV_FAILED,
-                ngx_http_markdown_effective_error_policy(
-                    ctx->effective_conf, conf)
-                    == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT
-                    ? "failed_closed" : "failed_open",
-                "conversion", elapsed_ms);
+                r, ctx, conf,
+                &((const ngx_http_markdown_buffered_decision_t){
+                    NGX_HTTP_MARKDOWN_COND_PROCEED,
+                    NGX_HTTP_MARKDOWN_CONV_FAILED,
+                    ngx_http_markdown_effective_error_policy(
+                        ctx->effective_conf, conf)
+                        == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT
+                        ? "failed_closed" : "failed_open",
+                    "conversion"}),
+                elapsed_ms);
             return rc;
         }
     }
@@ -1409,9 +1428,12 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_converted());
         ngx_http_markdown_log_buffered_decision_path(
-            r, ctx, conf, NGX_HTTP_MARKDOWN_COND_PROCEED,
-            NGX_HTTP_MARKDOWN_CONV_SUCCESS,
-            "converted", "conversion", elapsed_ms);
+            r, ctx, conf,
+            &((const ngx_http_markdown_buffered_decision_t){
+                NGX_HTTP_MARKDOWN_COND_PROCEED,
+                NGX_HTTP_MARKDOWN_CONV_SUCCESS,
+                "converted", "conversion"}),
+            elapsed_ms);
 
     } else {
         /*
@@ -1422,13 +1444,16 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
          */
         ngx_http_markdown_log_failure_decision(r, ctx, conf);
         ngx_http_markdown_log_buffered_decision_path(
-            r, ctx, conf, NGX_HTTP_MARKDOWN_COND_PROCEED,
-            NGX_HTTP_MARKDOWN_CONV_FAILED,
-            ngx_http_markdown_effective_error_policy(
-                ctx->effective_conf, conf)
-                == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT
-                ? "failed_closed" : "failed_open",
-            "delivery", elapsed_ms);
+            r, ctx, conf,
+            &((const ngx_http_markdown_buffered_decision_t){
+                NGX_HTTP_MARKDOWN_COND_PROCEED,
+                NGX_HTTP_MARKDOWN_CONV_FAILED,
+                ngx_http_markdown_effective_error_policy(
+                    ctx->effective_conf, conf)
+                    == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT
+                    ? "failed_closed" : "failed_open",
+                "delivery"}),
+            elapsed_ms);
 
     }
 
