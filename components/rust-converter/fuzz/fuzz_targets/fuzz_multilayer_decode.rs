@@ -56,9 +56,9 @@ fn gzip_compress(data: &[u8]) -> Vec<u8> {
     enc.finish().unwrap()
 }
 
-/// Compress a payload with raw deflate.
+/// Compress a payload with zlib-wrapped deflate.
 fn deflate_compress(data: &[u8]) -> Vec<u8> {
-    let mut enc = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+    let mut enc = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
     enc.write_all(data).unwrap();
     enc.finish().unwrap()
 }
@@ -135,7 +135,8 @@ fuzz_target!(|data: &[u8]| {
              * reproduce its original payload exactly.  The oracle applies
              * only when the payload format matches the layer encoding: the
              * kind byte and the encoding byte are independently derived, and
-             * raw deflate legitimately "succeeds" on bytes of any format
+             * zlib-wrapped deflate may legitimately classify arbitrary bytes
+             * as a format or truncation error without panicking.
              * (no checksum), so a mismatched pair must not be compared. */
             if layers.len() == 1
                 && let Some(orig) = original
