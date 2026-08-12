@@ -131,18 +131,30 @@ typedef struct {
     } conversion_latency;
     struct {
         struct {
+            ngx_atomic_t le_1ms;
+            ngx_atomic_t le_5ms;
             ngx_atomic_t le_10ms;
+            ngx_atomic_t le_25ms;
+            ngx_atomic_t le_50ms;
             ngx_atomic_t le_100ms;
+            ngx_atomic_t le_250ms;
+            ngx_atomic_t le_500ms;
             ngx_atomic_t le_1000ms;
-            ngx_atomic_t gt_1000ms;
+            ngx_atomic_t le_5000ms;
             ngx_atomic_t sum_ms;
             ngx_atomic_t count;
         } full_buffer;
         struct {
+            ngx_atomic_t le_1ms;
+            ngx_atomic_t le_5ms;
             ngx_atomic_t le_10ms;
+            ngx_atomic_t le_25ms;
+            ngx_atomic_t le_50ms;
             ngx_atomic_t le_100ms;
+            ngx_atomic_t le_250ms;
+            ngx_atomic_t le_500ms;
             ngx_atomic_t le_1000ms;
-            ngx_atomic_t gt_1000ms;
+            ngx_atomic_t le_5000ms;
             ngx_atomic_t sum_ms;
             ngx_atomic_t count;
         } streaming;
@@ -814,6 +826,61 @@ test_v1_engine_delivery_and_event_sources(void)
     TEST_ASSERT(v1.streaming_events.resume_success == 3,
                 "resume successes must use downstream resume counter");
     TEST_PASS("v1 engine delivery and event sources");
+}
+
+static void
+test_v1_latency_mapping_uses_all_frozen_boundaries(void)
+{
+    static const ngx_atomic_uint_t expected_full[] =
+        { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+    static const ngx_atomic_uint_t expected_streaming[] =
+        { 11, 12, 13, 14, 15, 16, 17, 18, 19, 20 };
+    ngx_http_markdown_metrics_snapshot_t  snapshot;
+    ngx_http_markdown_metrics_v1_snapshot_t  v1;
+    ngx_uint_t                              i;
+
+    TEST_SUBSECTION("v1 latency mapping uses all frozen boundaries");
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.conversion_latency_v1.full_buffer.le_1ms = 1;
+    snapshot.conversion_latency_v1.full_buffer.le_5ms = 2;
+    snapshot.conversion_latency_v1.full_buffer.le_10ms = 3;
+    snapshot.conversion_latency_v1.full_buffer.le_25ms = 4;
+    snapshot.conversion_latency_v1.full_buffer.le_50ms = 5;
+    snapshot.conversion_latency_v1.full_buffer.le_100ms = 6;
+    snapshot.conversion_latency_v1.full_buffer.le_250ms = 7;
+    snapshot.conversion_latency_v1.full_buffer.le_500ms = 8;
+    snapshot.conversion_latency_v1.full_buffer.le_1000ms = 9;
+    snapshot.conversion_latency_v1.full_buffer.le_5000ms = 10;
+    snapshot.conversion_latency_v1.full_buffer.count = 60;
+    snapshot.conversion_latency_v1.streaming.le_1ms = 11;
+    snapshot.conversion_latency_v1.streaming.le_5ms = 12;
+    snapshot.conversion_latency_v1.streaming.le_10ms = 13;
+    snapshot.conversion_latency_v1.streaming.le_25ms = 14;
+    snapshot.conversion_latency_v1.streaming.le_50ms = 15;
+    snapshot.conversion_latency_v1.streaming.le_100ms = 16;
+    snapshot.conversion_latency_v1.streaming.le_250ms = 17;
+    snapshot.conversion_latency_v1.streaming.le_500ms = 18;
+    snapshot.conversion_latency_v1.streaming.le_1000ms = 19;
+    snapshot.conversion_latency_v1.streaming.le_5000ms = 20;
+    snapshot.conversion_latency_v1.streaming.count = 200;
+
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+
+    for (i = 0; i < 10; i++) {
+        TEST_ASSERT(v1.duration_full_buffer.buckets[i] == expected_full[i],
+                    "full-buffer finite buckets must preserve source bands");
+        TEST_ASSERT(v1.duration_streaming.buckets[i] == expected_streaming[i],
+                    "streaming finite buckets must preserve source bands");
+    }
+    TEST_ASSERT(v1.duration_full_buffer.buckets[9] == 10
+                && v1.duration_full_buffer.count == 60,
+                "full-buffer values above 5s must remain only in +Inf");
+    TEST_ASSERT(v1.duration_streaming.buckets[9] == 20
+                && v1.duration_streaming.count == 200,
+                "streaming values above 5s must remain only in +Inf");
+
+    TEST_PASS("All ten v1 latency boundaries map to production buckets");
 }
 
 static void
@@ -1761,6 +1828,7 @@ main(void)
     test_metrics_handler_uses_frozen_v1_surface();
     test_v1_output_bytes_include_streaming_delivery();
     test_v1_engine_delivery_and_event_sources();
+    test_v1_latency_mapping_uses_all_frozen_boundaries();
     test_v1_latency_sum_conversion_is_bounded();
     test_json_single_path_fits();
     test_json_zero_paths();

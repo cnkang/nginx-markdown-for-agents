@@ -653,18 +653,36 @@ ngx_http_markdown_record_conversion_latency_for_path(ngx_uint_t path,
         NGX_HTTP_MARKDOWN_METRIC_ADD(
             conversion_latency_v1.streaming.sum_ms, elapsed_ms);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency_v1.streaming.count);
-        if (elapsed_ms <= 10) {
+        if (elapsed_ms <= 1) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                conversion_latency_v1.streaming.le_1ms);
+        } else if (elapsed_ms <= 5) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                conversion_latency_v1.streaming.le_5ms);
+        } else if (elapsed_ms <= 10) {
             NGX_HTTP_MARKDOWN_METRIC_INC(
                 conversion_latency_v1.streaming.le_10ms);
+        } else if (elapsed_ms <= 25) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                conversion_latency_v1.streaming.le_25ms);
+        } else if (elapsed_ms <= 50) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                conversion_latency_v1.streaming.le_50ms);
         } else if (elapsed_ms <= 100) {
             NGX_HTTP_MARKDOWN_METRIC_INC(
                 conversion_latency_v1.streaming.le_100ms);
+        } else if (elapsed_ms <= 250) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                conversion_latency_v1.streaming.le_250ms);
+        } else if (elapsed_ms <= 500) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                conversion_latency_v1.streaming.le_500ms);
         } else if (elapsed_ms <= 1000) {
             NGX_HTTP_MARKDOWN_METRIC_INC(
                 conversion_latency_v1.streaming.le_1000ms);
-        } else {
+        } else if (elapsed_ms <= 5000) {
             NGX_HTTP_MARKDOWN_METRIC_INC(
-                conversion_latency_v1.streaming.gt_1000ms);
+                conversion_latency_v1.streaming.le_5000ms);
         }
         return;
     }
@@ -672,18 +690,36 @@ ngx_http_markdown_record_conversion_latency_for_path(ngx_uint_t path,
     NGX_HTTP_MARKDOWN_METRIC_ADD(
         conversion_latency_v1.full_buffer.sum_ms, elapsed_ms);
     NGX_HTTP_MARKDOWN_METRIC_INC(conversion_latency_v1.full_buffer.count);
-    if (elapsed_ms <= 10) {
+    if (elapsed_ms <= 1) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            conversion_latency_v1.full_buffer.le_1ms);
+    } else if (elapsed_ms <= 5) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            conversion_latency_v1.full_buffer.le_5ms);
+    } else if (elapsed_ms <= 10) {
         NGX_HTTP_MARKDOWN_METRIC_INC(
             conversion_latency_v1.full_buffer.le_10ms);
+    } else if (elapsed_ms <= 25) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            conversion_latency_v1.full_buffer.le_25ms);
+    } else if (elapsed_ms <= 50) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            conversion_latency_v1.full_buffer.le_50ms);
     } else if (elapsed_ms <= 100) {
         NGX_HTTP_MARKDOWN_METRIC_INC(
             conversion_latency_v1.full_buffer.le_100ms);
+    } else if (elapsed_ms <= 250) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            conversion_latency_v1.full_buffer.le_250ms);
+    } else if (elapsed_ms <= 500) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            conversion_latency_v1.full_buffer.le_500ms);
     } else if (elapsed_ms <= 1000) {
         NGX_HTTP_MARKDOWN_METRIC_INC(
             conversion_latency_v1.full_buffer.le_1000ms);
-    } else {
+    } else if (elapsed_ms <= 5000) {
         NGX_HTTP_MARKDOWN_METRIC_INC(
-            conversion_latency_v1.full_buffer.gt_1000ms);
+            conversion_latency_v1.full_buffer.le_5000ms);
     }
 }
 

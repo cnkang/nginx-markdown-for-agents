@@ -1367,18 +1367,30 @@ typedef struct {
      */
     struct {
         struct {
+            ngx_atomic_t  le_1ms;
+            ngx_atomic_t  le_5ms;
             ngx_atomic_t  le_10ms;
+            ngx_atomic_t  le_25ms;
+            ngx_atomic_t  le_50ms;
             ngx_atomic_t  le_100ms;
+            ngx_atomic_t  le_250ms;
+            ngx_atomic_t  le_500ms;
             ngx_atomic_t  le_1000ms;
-            ngx_atomic_t  gt_1000ms;
+            ngx_atomic_t  le_5000ms;
             ngx_atomic_t  sum_ms;
             ngx_atomic_t  count;
         } full_buffer;
         struct {
+            ngx_atomic_t  le_1ms;
+            ngx_atomic_t  le_5ms;
             ngx_atomic_t  le_10ms;
+            ngx_atomic_t  le_25ms;
+            ngx_atomic_t  le_50ms;
             ngx_atomic_t  le_100ms;
+            ngx_atomic_t  le_250ms;
+            ngx_atomic_t  le_500ms;
             ngx_atomic_t  le_1000ms;
-            ngx_atomic_t  gt_1000ms;
+            ngx_atomic_t  le_5000ms;
             ngx_atomic_t  sum_ms;
             ngx_atomic_t  count;
         } streaming;

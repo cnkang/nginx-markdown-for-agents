@@ -34,6 +34,21 @@
  * limit while preserving the bounded internal test renderers.
  */
 typedef struct {
+    ngx_atomic_uint_t le_1ms;
+    ngx_atomic_uint_t le_5ms;
+    ngx_atomic_uint_t le_10ms;
+    ngx_atomic_uint_t le_25ms;
+    ngx_atomic_uint_t le_50ms;
+    ngx_atomic_uint_t le_100ms;
+    ngx_atomic_uint_t le_250ms;
+    ngx_atomic_uint_t le_500ms;
+    ngx_atomic_uint_t le_1000ms;
+    ngx_atomic_uint_t le_5000ms;
+    ngx_atomic_uint_t sum_ms;
+    ngx_atomic_uint_t count;
+} ngx_http_markdown_metrics_v1_source_histogram_t;
+
+typedef struct {
     /* Conversion attempt tracking */
     ngx_atomic_uint_t conversions_attempted;
     ngx_atomic_uint_t conversions_succeeded;
@@ -60,22 +75,8 @@ typedef struct {
 
     /* Per-engine v1 histogram bands and totals. */
     struct {
-        struct {
-            ngx_atomic_uint_t le_10ms;
-            ngx_atomic_uint_t le_100ms;
-            ngx_atomic_uint_t le_1000ms;
-            ngx_atomic_uint_t gt_1000ms;
-            ngx_atomic_uint_t sum_ms;
-            ngx_atomic_uint_t count;
-        } full_buffer;
-        struct {
-            ngx_atomic_uint_t le_10ms;
-            ngx_atomic_uint_t le_100ms;
-            ngx_atomic_uint_t le_1000ms;
-            ngx_atomic_uint_t gt_1000ms;
-            ngx_atomic_uint_t sum_ms;
-            ngx_atomic_uint_t count;
-        } streaming;
+        ngx_http_markdown_metrics_v1_source_histogram_t full_buffer;
+        ngx_http_markdown_metrics_v1_source_histogram_t streaming;
     } conversion_latency_v1;
 
     /* Decompression metrics (grouped to keep top-level field count <= 20) */
@@ -455,26 +456,50 @@ ngx_http_markdown_collect_v1_latency_snapshot(
     ngx_http_markdown_metrics_snapshot_t *snapshot,
     const ngx_http_markdown_metrics_t *metrics)
 {
+    snapshot->conversion_latency_v1.full_buffer.le_1ms =
+        metrics->conversion_latency_v1.full_buffer.le_1ms;
+    snapshot->conversion_latency_v1.full_buffer.le_5ms =
+        metrics->conversion_latency_v1.full_buffer.le_5ms;
     snapshot->conversion_latency_v1.full_buffer.le_10ms =
         metrics->conversion_latency_v1.full_buffer.le_10ms;
+    snapshot->conversion_latency_v1.full_buffer.le_25ms =
+        metrics->conversion_latency_v1.full_buffer.le_25ms;
+    snapshot->conversion_latency_v1.full_buffer.le_50ms =
+        metrics->conversion_latency_v1.full_buffer.le_50ms;
     snapshot->conversion_latency_v1.full_buffer.le_100ms =
         metrics->conversion_latency_v1.full_buffer.le_100ms;
+    snapshot->conversion_latency_v1.full_buffer.le_250ms =
+        metrics->conversion_latency_v1.full_buffer.le_250ms;
+    snapshot->conversion_latency_v1.full_buffer.le_500ms =
+        metrics->conversion_latency_v1.full_buffer.le_500ms;
     snapshot->conversion_latency_v1.full_buffer.le_1000ms =
         metrics->conversion_latency_v1.full_buffer.le_1000ms;
-    snapshot->conversion_latency_v1.full_buffer.gt_1000ms =
-        metrics->conversion_latency_v1.full_buffer.gt_1000ms;
+    snapshot->conversion_latency_v1.full_buffer.le_5000ms =
+        metrics->conversion_latency_v1.full_buffer.le_5000ms;
     snapshot->conversion_latency_v1.full_buffer.sum_ms =
         metrics->conversion_latency_v1.full_buffer.sum_ms;
     snapshot->conversion_latency_v1.full_buffer.count =
         metrics->conversion_latency_v1.full_buffer.count;
+    snapshot->conversion_latency_v1.streaming.le_1ms =
+        metrics->conversion_latency_v1.streaming.le_1ms;
+    snapshot->conversion_latency_v1.streaming.le_5ms =
+        metrics->conversion_latency_v1.streaming.le_5ms;
     snapshot->conversion_latency_v1.streaming.le_10ms =
         metrics->conversion_latency_v1.streaming.le_10ms;
+    snapshot->conversion_latency_v1.streaming.le_25ms =
+        metrics->conversion_latency_v1.streaming.le_25ms;
+    snapshot->conversion_latency_v1.streaming.le_50ms =
+        metrics->conversion_latency_v1.streaming.le_50ms;
     snapshot->conversion_latency_v1.streaming.le_100ms =
         metrics->conversion_latency_v1.streaming.le_100ms;
+    snapshot->conversion_latency_v1.streaming.le_250ms =
+        metrics->conversion_latency_v1.streaming.le_250ms;
+    snapshot->conversion_latency_v1.streaming.le_500ms =
+        metrics->conversion_latency_v1.streaming.le_500ms;
     snapshot->conversion_latency_v1.streaming.le_1000ms =
         metrics->conversion_latency_v1.streaming.le_1000ms;
-    snapshot->conversion_latency_v1.streaming.gt_1000ms =
-        metrics->conversion_latency_v1.streaming.gt_1000ms;
+    snapshot->conversion_latency_v1.streaming.le_5000ms =
+        metrics->conversion_latency_v1.streaming.le_5000ms;
     snapshot->conversion_latency_v1.streaming.sum_ms =
         metrics->conversion_latency_v1.streaming.sum_ms;
     snapshot->conversion_latency_v1.streaming.count =
@@ -741,6 +766,30 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
 }
 
 
+/* Map one source engine's frozen latency bands into the v1 histogram. */
+static void
+ngx_http_markdown_metrics_map_v1_histogram(
+    const ngx_http_markdown_metrics_v1_source_histogram_t *source,
+    ngx_http_markdown_metrics_v1_histogram_t *destination)
+{
+    if (source == NULL || destination == NULL) {
+        return;
+    }
+
+    destination->buckets[0] = source->le_1ms;
+    destination->buckets[1] = source->le_5ms;
+    destination->buckets[2] = source->le_10ms;
+    destination->buckets[3] = source->le_25ms;
+    destination->buckets[4] = source->le_50ms;
+    destination->buckets[5] = source->le_100ms;
+    destination->buckets[6] = source->le_250ms;
+    destination->buckets[7] = source->le_500ms;
+    destination->buckets[8] = source->le_1000ms;
+    destination->buckets[9] = source->le_5000ms;
+    destination->sum_us = ngx_http_markdown_metrics_ms_to_us(source->sum_ms);
+    destination->count = source->count;
+}
+
 /*
  * Translate the legacy storage snapshot into the frozen v1 metric contract.
  * The mapping keeps public counters stable while preserving streaming-only
@@ -797,29 +846,12 @@ ngx_http_markdown_metrics_to_v1(
     v1->deliveries.streaming = snapshot->streaming.succeeded_total;
 #endif
 
-    /* Existing C buckets are exclusive bands; map them to v1 boundaries. */
-    v1->duration_full_buffer.buckets[2] =
-        snapshot->conversion_latency_v1.full_buffer.le_10ms;
-    v1->duration_full_buffer.buckets[5] =
-        snapshot->conversion_latency_v1.full_buffer.le_100ms;
-    v1->duration_full_buffer.buckets[8] =
-        snapshot->conversion_latency_v1.full_buffer.le_1000ms;
-    v1->duration_full_buffer.sum_us =
-        ngx_http_markdown_metrics_ms_to_us(
-            snapshot->conversion_latency_v1.full_buffer.sum_ms);
-    v1->duration_full_buffer.count =
-        snapshot->conversion_latency_v1.full_buffer.count;
-    v1->duration_streaming.buckets[2] =
-        snapshot->conversion_latency_v1.streaming.le_10ms;
-    v1->duration_streaming.buckets[5] =
-        snapshot->conversion_latency_v1.streaming.le_100ms;
-    v1->duration_streaming.buckets[8] =
-        snapshot->conversion_latency_v1.streaming.le_1000ms;
-    v1->duration_streaming.sum_us =
-        ngx_http_markdown_metrics_ms_to_us(
-            snapshot->conversion_latency_v1.streaming.sum_ms);
-    v1->duration_streaming.count =
-        snapshot->conversion_latency_v1.streaming.count;
+    ngx_http_markdown_metrics_map_v1_histogram(
+        &snapshot->conversion_latency_v1.full_buffer,
+        &v1->duration_full_buffer);
+    ngx_http_markdown_metrics_map_v1_histogram(
+        &snapshot->conversion_latency_v1.streaming,
+        &v1->duration_streaming);
     latency_count = v1->duration_full_buffer.count
         + v1->duration_streaming.count;
     if (latency_count == 0) {
