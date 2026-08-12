@@ -64,6 +64,11 @@ the structure above and rejects cross-key violations before mutation:
 - `parser_memory <= conversion_memory`
 - `streaming_buffer <= conversion_memory`
 
+`streaming_buffer` is the total per-request streaming working-set and
+pre-commit replay budget. It is not merely a transport chunk size. A value
+that is too small for the converter's resident state can produce a
+`STREAMING_BUDGET_EXCEEDED` fail-open decision.
+
 The defaults are `30s`, `10s`, `64m`, `32m`, `2m`, `10m`, `100`, and `64`, in
 the order shown in the example.
 
@@ -75,7 +80,7 @@ the order shown in the example.
 | Conversion | `flavor`, `token_estimate`, `front_matter`, `accept_policy` | `markdown_flavor`, `markdown_token_estimate`, `markdown_front_matter`, `markdown_accept` |
 | Policy | `policy.auth_policy`, cookie patterns, cache validation | `markdown_auth_policy`, `markdown_auth_cookies`, `markdown_cache_validation` |
 | Routing | content-type allowlist, in-flight limit | `markdown_content_types`, `markdown_limits max_inflight` |
-| Streaming | mode, exclusions, bounded buffer | `markdown_streaming`, `markdown_stream_excluded_types`, `markdown_limits streaming_buffer` |
+| Streaming | mode, exclusions, bounded working/replay budget | `markdown_streaming`, `markdown_stream_excluded_types`, `markdown_limits streaming_buffer` |
 | Decompression | automatic mode and bounded decoder state | `markdown_auto_decompress`, `markdown_limits decompressed_size`, `markdown_limits decompression_ratio` |
 | Observability | logs, diagnostics, metrics shared memory | `markdown_log_verbosity`, `markdown_diagnostics`, `markdown_metrics_shm_size`, `markdown_metrics` |
 | Dynamic config | watcher, path, dry-run | `markdown_dynamic_config`, `markdown_dynamic_config_path`, `markdown_dynconf_dry_run` |
