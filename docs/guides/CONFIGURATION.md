@@ -84,7 +84,7 @@ streaming_buffer=2m`.
 | `parser_timeout` | Cooperative parser deadline |
 | `conversion_memory` | Full-buffer input/conversion bound |
 | `parser_memory` | Rust parser allocation bound |
-| `streaming_buffer` | Streaming working/replay bound |
+| `streaming_buffer` | Per-request streaming working-set and replay budget |
 | `decompressed_size` | Cumulative decompressed output bound |
 | `decompression_ratio` | Maximum decompressed/input ratio |
 | `max_inflight` | Per-worker concurrent conversion bound |
@@ -101,6 +101,12 @@ The bounds are cumulative where the decoder has multiple gzip members. The
 decoder rejects a truncated final member. A decompression failure follows
 `markdown_error_policy` before commit and cannot replay the original body
 after streaming headers have been sent.
+
+`streaming_buffer` is a total per-request byte budget shared by the Rust
+streaming converter's working set and the pre-commit original-body replay
+buffer. It is not an upstream chunk-size or flush-size setting. If the budget
+is too small for the converter's resident state, the request can report
+`STREAMING_BUDGET_EXCEEDED` and follow the configured fail-open policy.
 
 The 0.9.2 default for `streaming_buffer` is 2 MiB, up from 256 KiB in 0.9.1.
 Set `markdown_limits streaming_buffer=256k` to retain the previous default.
@@ -252,8 +258,8 @@ versioned documents. Do not copy those examples into a 0.9.2 configuration.
 `markdown_streaming_auto_threshold` — REMOVED. Use the explicit
 `markdown_streaming off | auto | force` policy. The selection threshold is
 an internal heuristic and has no replacement directive. Use
-`markdown_limits streaming_buffer=` only to bound streaming working and replay
-memory.
+`markdown_limits streaming_buffer=` only to bound the streaming working set and
+pre-commit replay memory. This setting does not select the upstream chunk size.
 
 `markdown_decompress_max_size` — REMOVED. Use the
 `markdown_limits decompressed_size=` key instead.

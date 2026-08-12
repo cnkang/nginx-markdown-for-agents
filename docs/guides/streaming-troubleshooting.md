@@ -106,14 +106,17 @@ curl -s -H 'Accept: text/plain; version=0.0.4' \
 
 If fallback is frequent, first review `markdown_limits conversion_memory=...`,
 `parser_memory=...`, `parser_timeout=...`, and `streaming_buffer=...`. Keep
-the values bounded and change one setting at a time. Also inspect the
+the values bounded and remember that `streaming_buffer` is a total working-set
+and pre-commit replay budget, not a network chunk size. Change one setting at
+a time. Also inspect the
 `requests_total` reason labels to distinguish resource limits from malformed
 input or policy bypass.
 
 ## Post-commit failure or shortened output
 
 After the module commits converted headers, it cannot replay the original
-body. Check safe-finish and abort transitions:
+body. A safe-finish can complete a converted response when earlier compressed
+members produced valid Markdown. Check safe-finish and abort transitions:
 
 ```bash
 curl -s -H 'Accept: text/plain; version=0.0.4' \

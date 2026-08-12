@@ -191,7 +191,9 @@ The architecture supports two conversion engines:
   - you should usually bypass very large or streaming-style content
 
 - **Streaming engine** (since v0.8.0, enabled via `markdown_streaming`): processes HTML incrementally through a bounded-memory pipeline. The pipeline runs charset detection, tokenization, sanitization, a state machine, and emission. Tradeoffs:
-  - bounded memory per request (configurable via `markdown_limits streaming_buffer=<size>`)
+  - bounded per-request working-set memory (configurable via
+    `markdown_limits streaming_buffer=<size>`). This value is a total budget,
+    not a network chunk size.
   - first Markdown bytes available before upstream finishes
   - more complex state machine (fallback to full-buffer or passthrough on errors)
 
@@ -247,8 +249,10 @@ threshold is not operator-configurable.
 ### Streaming Body Filter
 The streaming body filter consumes upstream buffers incrementally and emits
 Markdown chunks without making the complete response body the default working
-set. Before the module commits any Markdown output, it can replay the
-original HTML from `markdown_limits streaming_buffer=` if conversion fails.
+set. The module shares `markdown_limits streaming_buffer=` between the
+converter's resident working set and the pre-commit replay buffer. Before the
+module commits any Markdown output, it can replay the original HTML from that
+bounded buffer if conversion fails.
 After commit, failures are terminal because the response representation has
 already changed.
 

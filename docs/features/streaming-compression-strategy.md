@@ -126,7 +126,7 @@ The 0.9.2 boundary rests on validated decoder lifecycles:
 | `markdown_auto_decompress` | Controls whether the module attempts decompression at all. Default: `on`. When off, compressed responses pass through unconverted. |
 | `markdown_limits decompressed_size=<size>` | Maximum decompressed output size. Prevents decompression bombs. |
 | `markdown_limits decompression_ratio=<N>` | Maximum decompression expansion ratio. |
-| `markdown_limits streaming_buffer=<size>` | Bounded streaming working buffer. |
+| `markdown_limits streaming_buffer=<size>` | Total per-request streaming working-set and pre-commit replay budget. It is not a transport chunk size. |
 
 ## Operator Guidance
 

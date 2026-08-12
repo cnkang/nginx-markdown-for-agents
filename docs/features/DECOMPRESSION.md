@@ -68,7 +68,10 @@ independent of whether the original body is ultimately delivered.
 4. For `fail_closed`, the module finalizes the request with the configured status.
 
 After streaming commit, the module uses post-commit safe-finish or abort
-semantics and does not attempt impossible replay of already-sent bytes.
+semantics and does not attempt impossible replay of already-sent bytes. A
+safe-finish can preserve valid Markdown from earlier gzip members and complete
+one converted delivery after a later member fails. If safe-finish cannot
+complete, the abort path terminates the response without replay.
 
 ## Verification
 
