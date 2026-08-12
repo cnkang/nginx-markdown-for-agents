@@ -14,8 +14,11 @@
 
 struct MarkdownOptions;
 
-typedef struct ngx_http_markdown_loc_validation_index_s
-    ngx_http_markdown_loc_validation_index_t;
+typedef struct ngx_http_markdown_loc_validation_summary_s {
+    size_t      min_applicable_conversion_memory;
+    ngx_flag_t  min_applicable_set;
+    ngx_uint_t  block_mask_union;
+} ngx_http_markdown_loc_validation_summary_t;
 
 /*
  * NGINX represents unset size values as (size_t) -1.  Use the public macro
@@ -856,7 +859,7 @@ typedef struct {
     ngx_str_t       dynconf_first_path;      /* Path value from the first directive (for diagnostics) */
     /* Merged config that owns the unique dynconf path. */
     ngx_http_markdown_conf_t *dynconf_owner_conf;
-    ngx_http_markdown_loc_validation_index_t *loc_validation_index;
+    ngx_http_markdown_loc_validation_summary_t *loc_validation_summary;
     /*
      * spec 47: http-only trusted-proxy CIDR set for forwarded-header trust.
      * trusted_proxies is a Rust-owned opaque handle (NULL when the directive

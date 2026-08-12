@@ -189,7 +189,7 @@ typedef struct ngx_http_markdown_dynconf_snapshot_s {
 #endif
     size_t       memory_budget;
     size_t       conversion_memory;
-    const ngx_http_markdown_loc_validation_index_t *validation_index;
+    const ngx_http_markdown_loc_validation_summary_t *validation_summary;
     ngx_uint_t   valid;
 } ngx_http_markdown_dynconf_snapshot_t;
 
@@ -270,7 +270,7 @@ typedef struct {
     ngx_http_markdown_dynconf_snapshot_t         staging_snapshot;
     ngx_http_markdown_dynconf_snapshot_t         last_known_good;
     ngx_http_markdown_conf_t                    *conf;
-    const ngx_http_markdown_loc_validation_index_t *validation_index;
+    const ngx_http_markdown_loc_validation_summary_t *validation_summary;
     ngx_http_markdown_dynconf_diagnostic_state_t diagnostic_state;
     ngx_flag_t    legacy_format_warning_logged;
 } ngx_http_markdown_dynconf_watcher_t;
@@ -1001,7 +1001,7 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
     /* Initialize active snapshot from current configuration. */
     ngx_http_markdown_dynconf_snapshot_from_conf(&watcher->active_snapshot,
                                                   conf);
-    watcher->active_snapshot.validation_index = watcher->validation_index;
+    watcher->active_snapshot.validation_summary = watcher->validation_summary;
 
     /*
      * Apply the dynconf file immediately at startup so that runtime
@@ -1103,9 +1103,8 @@ ngx_http_markdown_dynconf_apply_streaming_buffer(
         return NGX_OK;
     }
 
-    has_location_index = snapshot->validation_index != NULL
-        && snapshot->validation_index->entries != NULL
-        && snapshot->validation_index->count > 0;
+    has_location_index = snapshot->validation_summary != NULL
+        && snapshot->validation_summary->min_applicable_set;
 
     /* The bounded index owns per-location applicability and limits. */
     if (result->streaming_buffer
@@ -1314,9 +1313,9 @@ ngx_http_markdown_dynconf_apply_ffi_result_with_log(
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     if (result->streaming_buffer != DYNCONF_NOT_SET_U64
-        && candidate.validation_index != NULL
-        && ngx_http_markdown_validate_snapshot_against_index(
-               candidate.validation_index,
+        && candidate.validation_summary != NULL
+        && ngx_http_markdown_validate_snapshot_against_summary(
+               candidate.validation_summary,
                candidate.streaming_budget, log) != NGX_OK)
     {
         return ngx_http_markdown_dynconf_apply_reject(
@@ -2691,7 +2690,7 @@ ngx_http_markdown_dynconf_reload_normal(
          * do not use atomic builtins on this aggregate snapshot because
          * coverage builds treat large/misaligned atomic struct access as
          * a compile error.  The pointer fields (enabled_complex and
-         * validation_index) point into cycle-level configuration storage
+         * validation_summary) point into cycle-level configuration storage
          * that outlives both snapshots.  If a new pointer field is
          * added to ngx_http_markdown_dynconf_snapshot_t that references
          * staging-local memory, this assignment must be reviewed for
@@ -3029,7 +3028,6 @@ static ngx_uint_t
 ngx_http_markdown_dynconf_blocked_fields(
     const ngx_http_markdown_dynconf_watcher_t *watcher)
 {
-    const ngx_http_markdown_loc_validation_index_t *index;
     ngx_uint_t mask;
 
     if (watcher == NULL) {
@@ -3038,13 +3036,8 @@ ngx_http_markdown_dynconf_blocked_fields(
 
     mask = watcher->conf != NULL
         ? watcher->conf->advanced.dynconf_block_mask : 0;
-    index = watcher->validation_index;
-    if (index == NULL || index->entries == NULL) {
-        return mask;
-    }
-
-    for (ngx_uint_t i = 0; i < index->count; i++) {
-        mask |= index->entries[i].block_mask;
+    if (watcher->validation_summary != NULL) {
+        mask |= watcher->validation_summary->block_mask_union;
     }
 
     return mask;

@@ -64,42 +64,21 @@
  * value after precedence resolution.
  */
 /*
- * Location validation index entry.
+ * Location validation summary (0.9.2 pre-freeze).
  *
- * One entry per merged location, built during configuration merge.
- * Used at dynconf reload time to validate streaming_buffer candidates
- * against each location's effective static conversion_memory.
- */
-typedef struct ngx_http_markdown_loc_validation_index_entry_s {
-    size_t        conversion_memory;    /* effective static conversion_memory */
-    ngx_uint_t    block_mask;           /* dynconf block mask for this location */
-    ngx_flag_t    applicable;           /* 1 if streaming_buffer not blocked */
-} ngx_http_markdown_loc_validation_entry_t;
-
-
-/*
- * Location validation index.
+ * Aggregates the minimum applicable conversion_memory and the union
+ * of all block masks across merged locations.  Replaces the former
+ * bounded 4096-entry index: the validation invariant
+ *   streaming_buffer <= every applicable conversion_memory
+ * is equivalent to
+ *   streaming_buffer <= min(applicable conversion_memory)
+ * and the aggregate has no capacity limit.
  *
- * Bounded read-only array built once at configuration time.
- * Contains one entry for every merged location that could consume
- * a dynconf streaming_buffer overlay.
- *
- * The index is bounded by the number of merged locations and is
- * built once at configuration time; reload validation is a bounded
- * scan and does not traverse the live NGINX configuration tree.
+ * One instance is allocated from the main configuration pool and shared
+ * (by pointer) across the watcher and snapshots — no per-location
+ * allocation, no capacity cap.
  */
-typedef struct ngx_http_markdown_loc_validation_index_s {
-    ngx_http_markdown_loc_validation_entry_t  *entries;
-    ngx_uint_t                                 count;
-    ngx_uint_t                                 capacity;
-} ngx_http_markdown_loc_validation_index_t;
-
-
-/*
- * Maximum number of locations in the validation index.
- * Provides an allocation upper bound to prevent unbounded growth.
- */
-#define NGX_HTTP_MARKDOWN_LOC_INDEX_MAX  4096
+/* Type defined in ngx_http_markdown_filter_module.h */
 
 
 /*
@@ -147,132 +126,84 @@ ngx_http_markdown_field_blocked(ngx_uint_t mask, ngx_uint_t field_bit)
 
 
 /*
- * Validate a dynconf candidate snapshot against the location
- * validation index.
+ * Update the location validation summary with one merged location.
  *
- * Checks that the candidate streaming_buffer value does not exceed
- * the effective static conversion_memory for any applicable
- * (unblocked) location.
+ * If streaming_buffer is NOT blocked for this location, its
+ * conversion_memory participates in the minimum.  The block mask
+ * is always OR'd into the union regardless of applicability.
  *
  * Parameters:
- *   index             - the location validation index
+ *   summary           - the validation summary (must be non-NULL)
+ *   conversion_memory - effective static conversion_memory for this location
+ *   block_mask        - the location's dynconf block mask
+ */
+static ngx_inline void
+ngx_http_markdown_loc_validation_update(
+    ngx_http_markdown_loc_validation_summary_t *summary,
+    size_t conversion_memory, ngx_uint_t block_mask)
+{
+    if (summary == NULL) {
+        return;
+    }
+
+    summary->block_mask_union |= block_mask;
+
+    if (ngx_http_markdown_field_blocked(
+            block_mask, NGX_HTTP_MARKDOWN_BLOCK_STREAMING_BUFFER)) {
+        return;
+    }
+
+    if (conversion_memory == 0
+        || conversion_memory == (size_t) -1) {
+        return;
+    }
+
+    if (!summary->min_applicable_set
+        || conversion_memory < summary->min_applicable_conversion_memory)
+    {
+        summary->min_applicable_conversion_memory = conversion_memory;
+        summary->min_applicable_set = 1;
+    }
+}
+
+
+/*
+ * Validate a dynconf candidate streaming_buffer against the
+ * location validation summary.
+ *
+ * Returns NGX_OK when the summary has no applicable minimum
+ * (caller falls back to conversion_memory/memory_budget checks)
+ * or when streaming_buffer is within bounds.
+ *
+ * Parameters:
+ *   summary           - the validation summary
  *   streaming_buffer  - the candidate streaming_buffer value
  *   log               - NGINX log for error reporting
  *
  * Returns:
- *   NGX_OK if the candidate is valid for all applicable locations
- *   NGX_ERROR if any applicable location would be violated
+ *   NGX_OK if the candidate is valid or no applicable minimum exists
+ *   NGX_ERROR if streaming_buffer exceeds the minimum
  */
 static ngx_inline ngx_int_t
-ngx_http_markdown_validate_snapshot_against_index(
-    const ngx_http_markdown_loc_validation_index_t *index,
+ngx_http_markdown_validate_snapshot_against_summary(
+    const ngx_http_markdown_loc_validation_summary_t *summary,
     size_t streaming_buffer, ngx_log_t *log)
 {
-    ngx_uint_t  violated_count;
-
-    if (index == NULL || index->entries == NULL || index->count == 0) {
+    if (summary == NULL || !summary->min_applicable_set) {
         return NGX_OK;
     }
 
-    violated_count = 0;
-
-    for (ngx_uint_t i = 0; i < index->count; i++) {
-        if (!index->entries[i].applicable) {
-            continue;
-        }
-
-        if (streaming_buffer > index->entries[i].conversion_memory) {
-            violated_count++;
-        }
-    }
-
-    if (violated_count > 0) {
+    if (streaming_buffer > summary->min_applicable_conversion_memory) {
         if (log != NULL) {
             ngx_log_error(NGX_LOG_WARN, log, 0,
                 "dynconf candidate rejected: streaming_buffer (%uz) "
-                "exceeds conversion_memory in %ui applicable location(s)",
-                streaming_buffer, violated_count);
+                "exceeds the minimum applicable conversion_memory (%uz); "
+                "at least one location would be violated",
+                streaming_buffer,
+                summary->min_applicable_conversion_memory);
         }
         return NGX_ERROR;
     }
-
-    return NGX_OK;
-}
-
-
-/*
- * Initialize the location validation index.
- *
- * Allocates the index entry array from the provided pool.
- * Must be called once at configuration time before any
- * merge operations add entries.
- *
- * Parameters:
- *   index - the index to initialize
- *   pool  - NGINX pool for allocation
- *
- * Returns:
- *   NGX_OK on success, NGX_ERROR on allocation failure
- */
-static ngx_inline ngx_int_t
-ngx_http_markdown_loc_index_init(
-    ngx_http_markdown_loc_validation_index_t *index, ngx_pool_t *pool)
-{
-    if (index == NULL || pool == NULL) {
-        return NGX_ERROR;
-    }
-
-    index->entries = ngx_pcalloc(pool,
-        NGX_HTTP_MARKDOWN_LOC_INDEX_MAX
-        * sizeof(ngx_http_markdown_loc_validation_entry_t));
-    if (index->entries == NULL) {
-        return NGX_ERROR;
-    }
-
-    index->count = 0;
-    index->capacity = NGX_HTTP_MARKDOWN_LOC_INDEX_MAX;
-
-    return NGX_OK;
-}
-
-
-/*
- * Add a location entry to the validation index.
- *
- * Called during merge_conf for each location.  Records the
- * location's effective static conversion_memory and whether
- * the streaming_buffer field is blocked from dynconf overlay.
- *
- * Parameters:
- *   index             - the location validation index
- *   conversion_memory - effective static conversion_memory for this location
- *   block_mask        - the location's dynconf block mask
- *
- * Returns:
- *   NGX_OK on success
- *   NGX_ERROR if the index is full (capacity exceeded)
- */
-static ngx_inline ngx_int_t
-ngx_http_markdown_loc_index_add(
-    ngx_http_markdown_loc_validation_index_t *index,
-    size_t conversion_memory, ngx_uint_t block_mask)
-{
-    ngx_http_markdown_loc_validation_entry_t  *entry;
-
-    if (index == NULL || index->entries == NULL) {
-        return NGX_ERROR;
-    }
-
-    if (index->count >= index->capacity) {
-        return NGX_ERROR;
-    }
-
-    entry = &index->entries[index->count];
-    entry->conversion_memory = conversion_memory;
-    entry->block_mask = block_mask;
-    entry->applicable = !ngx_http_markdown_field_blocked(
-        block_mask, NGX_HTTP_MARKDOWN_BLOCK_STREAMING_BUFFER);
-    index->count++;
 
     return NGX_OK;
 }

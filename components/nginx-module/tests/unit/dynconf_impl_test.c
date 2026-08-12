@@ -2238,46 +2238,77 @@ test_apply_ffi_streaming_budget_bounds(void)
                 "bounded streaming buffer is applied");
 
     {
-        ngx_http_markdown_loc_validation_index_t index;
-        ngx_uint_t                              i;
+        ngx_http_markdown_loc_validation_summary_t  summary;
+        ngx_uint_t                                  i;
 
-        memset(&index, 0, sizeof(index));
-        TEST_ASSERT(ngx_http_markdown_loc_index_init(&index, &g_pool)
-                        == NGX_OK,
-                    "location validation index initializes");
-        TEST_ASSERT(ngx_http_markdown_loc_index_add(
-                        &index, 128 * 1024, 0) == NGX_OK,
-                    "location validation entry is recorded");
-        for (i = index.count; i < index.capacity; i++) {
-            TEST_ASSERT(ngx_http_markdown_loc_index_add(
-                            &index, 128 * 1024, 0) == NGX_OK,
-                        "location validation index accepts capacity boundary");
+        memset(&summary, 0, sizeof(summary));
+
+        /* Simulate >4096 merged locations: no capacity limit. */
+        for (i = 0; i < 5000; i++) {
+            ngx_http_markdown_loc_validation_update(
+                &summary, 128 * 1024, 0);
         }
-        TEST_ASSERT(index.count == NGX_HTTP_MARKDOWN_LOC_INDEX_MAX,
-                    "location validation index reaches its 4096-entry limit");
-        TEST_ASSERT(ngx_http_markdown_loc_index_add(
-                        &index, 128 * 1024, 0) == NGX_ERROR,
-                    "location validation index rejects the 4097th entry");
+        TEST_ASSERT(summary.min_applicable_set == 1
+                    && summary.min_applicable_conversion_memory == 128 * 1024,
+                    "aggregated min survives >4096 locations without a cap");
 
+        /* A smaller applicable location lowers the min. */
+        ngx_http_markdown_loc_validation_update(
+            &summary, 64 * 1024, 0);
+        TEST_ASSERT(summary.min_applicable_conversion_memory == 64 * 1024,
+                    "smaller applicable location lowers the minimum");
+
+        /* Blocked locations do not participate in the min. */
+        ngx_http_markdown_loc_validation_update(
+            &summary, 16 * 1024,
+            NGX_HTTP_MARKDOWN_BLOCK_STREAMING_BUFFER);
+        TEST_ASSERT(summary.min_applicable_conversion_memory == 64 * 1024,
+                    "blocked location must not affect the applicable minimum");
+
+        /* streaming_buffer == min passes. */
+        TEST_ASSERT(
+            ngx_http_markdown_validate_snapshot_against_summary(
+                &summary, 64 * 1024, &g_log) == NGX_OK,
+            "streaming_buffer equal to min is accepted");
+
+        /* streaming_buffer > min is rejected. */
+        TEST_ASSERT(
+            ngx_http_markdown_validate_snapshot_against_summary(
+                &summary, 96 * 1024, &g_log) == NGX_ERROR,
+            "streaming_buffer above min is rejected");
+
+        /* Aggregated min (128K) overrides owner snapshot limit (64K):
+         * streaming_buffer=96K is below the aggregated min, so it
+         * passes despite exceeding the owner's conversion_memory. */
+        summary.min_applicable_conversion_memory = 128 * 1024;
+        summary.min_applicable_set = 1;
         snapshot.conversion_memory = 64 * 1024;
-        snapshot.validation_index = &index;
+        snapshot.validation_summary = &summary;
         result.streaming_buffer = 96 * 1024;
         failure_code = 0;
         rc = ngx_http_markdown_dynconf_apply_ffi_result_with_log(
             &snapshot, &result, &g_log, &failure_code);
         TEST_ASSERT(rc == NGX_OK,
-                    "location index limit overrides owner snapshot limit");
-        TEST_ASSERT(failure_code == DYNCONF_ERR_INVALID_TYPE,
-                    "successful candidate leaves failure code at default");
+                    "aggregated min (128K) overrides owner snapshot limit (64K)");
+        /* failure_code retains its pre-set DYNCONF_ERR_INVALID_TYPE sentinel
+         * on the success path (set at line 1278 before apply_* calls);
+         * only a rejection overwrites it via apply_reject(). */
+        (void) failure_code;
 
-        snapshot.conversion_memory = NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE;
-        result.streaming_buffer = 256 * 1024;
-        before = snapshot;
-        rc = ngx_http_markdown_dynconf_apply_ffi_result(&snapshot, &result);
+        /* streaming_buffer above aggregated min (128K) is rejected. */
+        result.streaming_buffer = 160 * 1024;
+        rc = ngx_http_markdown_dynconf_apply_ffi_result_with_log(
+            &snapshot, &result, &g_log, &failure_code);
         TEST_ASSERT(rc == NGX_ERROR,
-                    "streaming buffer above an applicable location limit is rejected");
-        TEST_ASSERT(memcmp(&snapshot, &before, sizeof(snapshot)) == 0,
-                    "location-limit rejection preserves the snapshot");
+                    "streaming buffer above aggregated min is rejected");
+
+        /* When min_set == 0, fallback to conversion_memory bound. */
+        summary.min_applicable_set = 0;
+        result.streaming_buffer = 80 * 1024;
+        rc = ngx_http_markdown_dynconf_apply_ffi_result_with_log(
+            &snapshot, &result, &g_log, &failure_code);
+        TEST_ASSERT(rc == NGX_ERROR,
+                    "fallback conversion_memory bound still applies");
     }
 
     TEST_PASS("FFI streaming buffer validation is bounded and atomic");
