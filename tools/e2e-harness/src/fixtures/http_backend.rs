@@ -803,7 +803,7 @@ mod tests {
         }
         let mut deflated = Vec::new();
         {
-            let mut decoder = flate2::read::DeflateDecoder::new(out.as_slice());
+            let mut decoder = flate2::read::ZlibDecoder::new(out.as_slice());
             std::io::Read::read_to_end(&mut decoder, &mut deflated).unwrap();
         }
         let mut gunzipped = Vec::new();
