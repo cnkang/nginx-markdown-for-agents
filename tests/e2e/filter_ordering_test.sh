@@ -33,6 +33,7 @@ set -e
 
 NGINX_URL="${NGINX_URL:-http://localhost:8080}"
 TEST_PATH="${TEST_PATH:-/}"
+GUNZIP_TEST_PATH="${GUNZIP_TEST_PATH:-/}"
 UPSTREAM_ENCODING_HEADER="${UPSTREAM_ENCODING_HEADER-X-Upstream-Content-Encoding}"
 CACHE_STATUS_HEADER="${CACHE_STATUS_HEADER-X-Cache-Status}"
 PASS_COUNT=0
@@ -119,7 +120,7 @@ test_markdown_gunzip() {
     # With gunzip on or markdown_auto_decompress on, the client should receive
     # uncompressed Markdown.
     local response headers content_type content_encoding status
-    response="$(curl -sS -D - -o /dev/null -H "Accept: text/markdown" -H "Accept-Encoding: gzip" "${NGINX_URL}${TEST_PATH}" 2>&1)" || true
+    response="$(curl -sS -D - -o /dev/null -H "Accept: text/markdown" -H "Accept-Encoding: gzip" "${NGINX_URL}${GUNZIP_TEST_PATH}" 2>&1)" || true
     headers="$response"
 
     status="$(echo "$headers" | head -1 | awk '{print $2}')"
