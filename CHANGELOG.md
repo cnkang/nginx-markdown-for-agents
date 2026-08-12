@@ -67,9 +67,11 @@ before/after examples.
   `markdown_stream_flush_min` have no replacement.
 - **Content-Encoding policy.** Malformed, unknown, and excessively deep
   encoding chains follow `markdown_error_policy`. Only `pass` forwards the
-  original response. The `deflate` coding is strictly RFC 1950 zlib-wrapped.
-  The module rejects raw RFC 1951 streams and does not retry them through a raw
-  fallback.
+  original response. The supported `deflate` coding is strictly RFC 1950
+  zlib-wrapped. The supported converter rejects raw RFC 1951 and never retries
+  it through a raw fallback. The project keeps a legacy C streaming
+  compatibility branch only for historical fixtures. Callers must not rely on
+  that branch.
 - **Diagnostics JSON schema v2.** The endpoint now declares
   `schema_version: 2`. Migrate consumers from the old `config_snapshot`,
   `metrics_snapshot`, `dynconf_state`, `streaming_config`, and profile-oriented
@@ -178,8 +180,10 @@ completing before the long-lived contract begins.
   across backpressure and request teardown.
 - Streaming decompression routing for gzip and zlib-wrapped RFC 1950 deflate
   responses under the streaming path with `markdown_auto_decompress on` and
-  `markdown_cache_validation` not `full`. The module rejects raw RFC 1951 deflate.
-  The module does not provide a raw fallback.
+  `markdown_cache_validation` not `full`. Raw RFC 1951 remains outside the
+  supported 0.9.2 public contract. The project keeps the legacy C streaming
+  compatibility branch only for historical coverage and makes no compatibility
+  guarantee for it.
   Gzip is member-aware across chunks.
 - Brotli streaming decompression: Brotli-compressed upstream responses now
   decompress incrementally via the streaming path (same as gzip/deflate) under
