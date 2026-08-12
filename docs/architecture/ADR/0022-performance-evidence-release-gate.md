@@ -17,11 +17,13 @@ Add `evidence_gate.py` as the formal release gate for 0.9.1.
 - **Blocking mode** (`make release-gates-check-091`): Required for release tags.
 
 ### Performance Thresholds
-The gate fails if the following exceed the 0.9.0 baseline:
+The latency, TTFB, and memory thresholds are relative to the recorded 0.9.0
+baseline. The streaming fallback rate is an absolute cap, not a percentage
+relative to a baseline:
 - **p50 latency**: ≤ +10%
 - **p95 latency**: ≤ +15%
 - **TTFB**: ≤ +10%
-- **Streaming fallback rate**: ≤ 5%
+- **Streaming fallback rate**: ≤ 5% absolute
 - **Memory slope**: ≤ +20%
 
 ### Tooling

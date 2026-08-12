@@ -54,7 +54,7 @@ The implementation includes comprehensive unit tests:
 5. **`test_nested_non_content_removal`**: Tests removal of non-content elements nested within other elements
 6. **`test_script_with_attributes_removal`**: Tests removal of script tags with attributes (type, src, and so on)
 7. **`test_style_in_head_removal`**: Tests removal of style tags in the `<head>` section
-8. **`test_inline_script_removal`**: Tests removal of inline JavaScript event handlers in script tags
+8. **`test_inline_script_removal`**: Tests removal of `on*` event-handler attributes from elements (for example, a button's `onclick`). The separate script-element test covers tag removal.
 9. **`test_content_preservation_around_non_content`**: Verifies that content before and after non-content elements stays preserved correctly
 
 ### Test Results

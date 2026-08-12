@@ -61,7 +61,10 @@ Required:
   `Cargo.lock` (not the semver range in Cargo.toml).
 - Add new dependencies with the correct license type, copyright notice, and
   license text. Delete entries for removed dependencies.
-- Verify with: `diff <(grep '^version =' Cargo.lock) <(grep '[0-9]\+\.[0-9]\+' THIRD-PARTY-NOTICES)`
+- Verify with the structured checker: `python3 tools/ci/check_third_party_notices.py`.
+  It resolves each Cargo.lock package by name and version and matches that
+  version to its corresponding `THIRD-PARTY-NOTICES` entry; do not compare
+  unrelated file-order or line-number output with `diff`.
 
 ### 63. Non-native-reader writing style (STE-inspired) for maintained docs
 Historical issues: writing-pass semantic drift found in the docs/kb-pilot

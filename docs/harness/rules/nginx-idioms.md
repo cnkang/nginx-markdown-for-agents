@@ -99,7 +99,7 @@ Required:
 Verification:
 - `grep -rn 'ngx_strcasecmp\|ngx_file_info\|stat(' components/nginx-module/src/`
 - For each hit, verify the input guarantees NUL-termination or that a
-  a length-bounded alternative should run instead.
+  length-bounded alternative should run instead.
 - `grep -rn "while.*\\\\n\|split_on.*\\\\n" components/rust-converter/src/` —
   verify EOF-last-line handling in Rust line iterators.
 

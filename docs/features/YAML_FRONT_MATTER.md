@@ -135,7 +135,10 @@ markdown_front_matter on;  # Enable YAML front matter
 
 - All metadata values are properly escaped to prevent YAML injection
 - Unicode characters preserve correctly
-- The module includes no sensitive information in front matter by default
+- Front matter is not a privacy boundary: it emits the documented metadata
+  fields when present, and those fields may contain sensitive values supplied
+  by the source document. The implementation has no general sensitive-data
+  redaction allowlist.
 - URL resolution respects the configured base_url
 
 ## Performance Impact

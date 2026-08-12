@@ -57,7 +57,9 @@ Output: "Line 1\nLine 2\n"
 
 ### 2. Consecutive Blank Lines
 
-**Rule**: The module collapses multiple consecutive blank lines to a single blank line.
+**Rule**: Outside fenced code blocks, the module collapses multiple consecutive
+blank lines to a single blank line. The module preserves blank lines inside a
+fenced code block as raw code content.
 
 **Rationale**: Markdown uses blank lines to separate block elements. Multiple blank lines do not add semantic meaning and create inconsistent output.
 
@@ -69,7 +71,9 @@ Output: "Para 1\n\nPara 2"
 
 ### 3. Trailing Whitespace
 
-**Rule**: The module removes trailing whitespace (spaces and tabs) from all lines.
+**Rule**: Outside fenced code blocks, the module removes trailing whitespace
+(spaces and tabs) from each line. Fenced code content keeps trailing spaces.
+The module normalizes the fence delimiter only enough to identify the fence.
 
 **Rationale**: Trailing whitespace is invisible and does not affect Markdown rendering. Removing it ensures consistent output and prevents spurious diffs.
 
@@ -94,8 +98,9 @@ Input:  "Content\n"         → Output: "Content\n"
 
 ### 5. Whitespace Normalization
 
-**Rule**: The module collapses consecutive spaces within text to a single space, **except**:
-- Inside fenced code blocks (` ``` `)
+**Rule**: The module collapses consecutive spaces within text to a single
+space, **except**:
+- Inside fenced code blocks, where the module preserves raw line content
 - Inside inline code (` ` `)
 - At the start of lines (for list indentation)
 
@@ -136,8 +141,9 @@ to context.
 **Rationale**: Ensures that special characters in HTML content are correctly represented in Markdown without breaking formatting.
 
 **Ordinary text**: `\`, `` ` ``, `*`, `_`, `[`, `]`, `<`, `>`, and `~` are
-escaped before untrusted text is emitted. Line-start block markers (`#`, `>`,
-`+`, `-`, `!`, and ordered-list periods) are escaped when they could change
+The module escapes untrusted text before emitting it. It also escapes
+line-start block markers (`#`, `>`, `+`, `-`, `!`, and ordered-list periods)
+when they could change
 the Markdown structure. This keeps ordinary prose such as `a-b` readable.
 
 **Generated syntax**: Code spans/blocks retain their code content, and link or

@@ -22,8 +22,7 @@ decompression via the Rust FFI path.
 | Encoding | Streaming-eligible conditions | 0.9.2 path |
 |----------|-------------------------------|------------|
 | identity | streaming selected | streaming conversion |
-| deflate RFC 1950 | auto decompress on; cache validation not `full` | streaming decompression |
-| deflate RFC 1951 | auto decompress on; cache validation not `full` | streaming decompression |
+| deflate (RFC 1950 zlib-wrapped) | auto decompress on; cache validation not `full` | streaming decompression |
 | gzip | auto decompress on; cache validation not `full` | member-aware streaming decompression |
 | Brotli (`br`) | auto decompress on; cache validation not `full`; `NGX_HTTP_BROTLI` defined | streaming decompression |
 | Brotli (`br`) | `NGX_HTTP_BROTLI` not defined | bounded full-buffer decompression (Rust FFI) |
@@ -38,8 +37,7 @@ eligible response, the following logic applies:
    the response passes through unchanged (no conversion attempted).
 2. If `markdown_auto_decompress` is **on** and the module selects streaming with cache
    validation not `full`:
-   - **Deflate** (zlib-wrapped RFC 1950 or raw RFC 1951) decompresses
-     incrementally after a two-byte framing sniff.
+   - **Deflate** (zlib-wrapped RFC 1950) decompresses incrementally.
    - **Gzip** decompresses incrementally with gzip member/trailer validation.
    - **Brotli** decompresses incrementally (single-stream, trailing-data
      rejection, no-progress guard) when the build defines `NGX_HTTP_BROTLI`.
@@ -78,8 +76,8 @@ member reset does not reset the budget. A gzip
 later chunk begin another member. Finalization succeeds only at a complete
 member boundary. The module rejects a truncated final member.
 
-**Deflate trailing-data integrity**: deflate (zlib-wrapped RFC 1950 or raw
-RFC 1951) does not support concatenated members. A complete deflate stream
+**Deflate trailing-data integrity**: zlib-wrapped deflate (RFC 1950) does not
+support concatenated members. A complete deflate stream
 must consume every byte of the compressed payload. If zlib reaches
 `Z_STREAM_END` with `avail_in > 0`, the remaining bytes are trailing data and
 the module rejects the response as `FORMAT_ERROR` rather than silently
@@ -112,8 +110,8 @@ The 0.9.2 boundary rests on validated decoder lifecycles:
 - Preserves backpressure semantics (NGX_AGAIN handling) while decompression
   state is in-flight.
 
-- Deflate has deterministic RFC 1950/RFC 1951 framing selection before input
-  is irreversibly consumed.
+- Deflate uses the fixed zlib-wrapped RFC 1950 framing. Raw RFC 1951 framing
+  and raw fallback are outside the frozen 0.9.2 public contract.
 - Gzip uses zlib's gzip wrapper plus member-aware reset, cumulative budget,
   truncation, backpressure, and terminal-once validation.
 - Brotli uses the official `BrotliDecoderDecompressStream` C API with
@@ -169,6 +167,7 @@ route to bounded full-buffer decompression regardless of streaming preference.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-12 | Codex | Align the public deflate contract with RFC 1950 zlib-wrapped decoding and mark raw framing as historical compatibility behavior |
 | 0.9.1 | 2026-07-18 | Kang | Promoted Brotli from bounded full-buffer to streaming decompression path; updated routing table, flowchart, rationale, and operator guidance; replaced Deferred Work with Build Compatibility section |
 | 0.9.1 | 2026-07-17 | Kang | Document deflate trailing-data integrity: complete input consumption required, trailing bytes after Z_STREAM_END rejected as FORMAT_ERROR, gzip concatenated members remain supported |
 | 0.9.1 | 2026-07-14 | Codex | Document gzip plus zlib/raw-deflate streaming routing, gzip member lifecycle, and bounded Brotli full-buffer boundary |

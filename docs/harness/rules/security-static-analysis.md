@@ -67,7 +67,7 @@ Required:
   gate unless the project adopts explicit threshold semantics.
 - Local Trivy filesystem scans exclude Git-ignored adapters, caches, build
   output, and prior reports. At minimum `.kiro/`, `.codeartsdoer/`, and
-  `build/` stay out of scope, clean CI checkouts remain fully scanned.
+  `build/` stay out of scope. Clean CI checkouts remain fully scanned.
 - Tracked runnable Dockerfiles must end with a non-root `USER`. NGINX runtime
   images must pair that user with an unprivileged listener and writable PID and
   temporary paths. ClusterFuzzLite images must keep the toolchain readable and

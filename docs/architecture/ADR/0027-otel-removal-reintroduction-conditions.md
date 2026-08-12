@@ -80,11 +80,13 @@ conditions are met:
 
 - Operators using `markdown_otel on` will see an "unknown directive" error at
   `nginx -t` after upgrading to 0.9.2.
-- No observability data loss: the module's built-in metrics endpoint
-  (`markdown_metrics`) and diagnostics endpoint (`markdown_diagnostics`)
-  continue to provide per-request decision visibility.
-- The module exports no spans and provides no distributed-trace correlation.
-  Deployments requiring that capability must use an external or NGINX-native
-  OTel integration.
+- Core decision observability remains available through the module's built-in
+  metrics endpoint (`markdown_metrics`) and diagnostics endpoint
+  (`markdown_diagnostics`), which continue to provide per-request decision
+  visibility.
+- The 0.9.2 module no longer provides OpenTelemetry trace data or
+  distributed-trace correlation. It exports no spans. Deployments requiring
+  that capability must use an
+  external or NGINX-native OTel integration.
 - Migration guidance appears in `docs/guides/MIGRATION-0.9.2.md` and
   the CHANGELOG.

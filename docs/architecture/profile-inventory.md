@@ -251,11 +251,14 @@ build_effective_conf(eff, snapshot, conf):
 ```
 
 Dynconf-mutable fields (the only fields in the effective-conf view today):
-- `enabled`, `enabled_source`
+- `enabled` / `enabled_source` (the `filter` field)
 - `prune_noise`
 - `log_verbosity`
-- `memory_budget`
-- `streaming_budget` (when streaming enabled)
+- `error_policy`
+- `streaming_buffer` (the `streaming_budget` storage field when the build enables streaming)
+
+`memory_budget` is a static safety limit in 0.9.2 and is not a dynconf
+override. This list is the source used by the request-lifecycle documentation.
 
 ### 3.3 Profile Integration Point (not implemented — feature removed)
 

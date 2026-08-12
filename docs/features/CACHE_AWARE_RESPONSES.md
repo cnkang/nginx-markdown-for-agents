@@ -346,7 +346,7 @@ With `full` mode:
 - Cost: Same as normal conversion
 - Benefit: Saves bandwidth if ETag matches
 
-With `if_modified_since_only` mode:
+With `ims_only` mode:
 - Conditional requests skip module processing
 - No conversion or ETag generation
 - Cost: Minimal

@@ -214,22 +214,22 @@ input size or elapsed time.
 Request arrives
     │
     ├─ markdown_limits conversion_memory= check (C layer)
-    │   └─ FAIL → pass-through, reason: SIZE_EXCEEDED
+    │   └─ FAIL → pass-through, reason: not_eligible
     │
     ├─ markdown_limits parser_timeout= pre-check
-    │   └─ FAIL → pass-through, reason: PARSE_TIMEOUT
+    │   └─ FAIL → pass-through, reason: timeout
     │
     ├─ html5ever parse_document (uninterruptible)
     │   └─ Bounded by markdown_limits conversion_memory= ≤ 64 MiB
     │
     ├─ markdown_limits parser_timeout= post-parse check
-    │   └─ FAIL → pass-through, reason: PARSE_TIMEOUT
+    │   └─ FAIL → pass-through, reason: timeout
     │
     ├─ DOM traversal with cooperative checkpoints
     │   ├─ Every 100 nodes: check_timeout()
     │   │   └─ FAIL → pass-through, reason: PARSE_TIMEOUT
     │   └─ Memory budget checks (streaming path)
-    │       └─ FAIL → pass-through, reason: PARSE_BUDGET_EXCEEDED
+    │       └─ FAIL → pass-through, reason: budget_exceeded
     │
     └─ Output normalization + final timeout check
         └─ FAIL → pass-through, reason: PARSE_TIMEOUT

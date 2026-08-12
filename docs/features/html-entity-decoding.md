@@ -67,10 +67,11 @@ The parser decodes entities consistently across all HTML contexts:
 - **In code blocks**: `<code>&lt;html&gt;</code>` → `<html>`
 - **In lists**: `<li>&amp; item</li>` → `& item`
 
-Note: While html5ever decodes entities in code blocks, the Markdown output
-preserves the decoded characters. Code spans and fenced code blocks preserve
-their code context. Callers do not need to pre-escape `<` or `>`
-in the source HTML.
+Literal angle brackets in source text must be written as `&lt;` (and may be
+written as `&gt;` for `>`). The parser treats a literal `<tag>` as HTML markup, not as
+text, so callers must not use a raw opening tag when they intend literal text.
+After parsing, code spans and fenced code blocks preserve the decoded
+characters in their code context.
 
 ## Testing
 

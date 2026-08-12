@@ -37,7 +37,7 @@ ingested by `tools/perf/evidence_gate.py`) must carry all of the following:
 | `normalization` | Normalization mode applied | `"none"` for `verbatim_run`; `"conservative"` for `conservative_normalized` |
 
 **Evidence object levels.** These fields are intentionally scoped to their
-own objects, provenance is not copied into every scenario record:
+own objects. Do not copy provenance into every scenario record:
 
 - `baseline_policy` carries `source_git_commit`, `source_run`,
   `source_artifact`, `source_artifact_sha256`, `measurement_timestamp`, and

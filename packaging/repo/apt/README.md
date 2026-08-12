@@ -162,14 +162,15 @@ When you rotate the signing key:
 2. Announce the new fingerprint and have users install and independently
    verify it before repository metadata relies on it.
 3. Maintain an overlap period in which signatures made by both keys are
-   accepted.
-4. Remove the old key only after migration is complete. Users can then
-   install the new key:
+   accepted. Existing clients must refresh their local keyring during this
+   overlap, before the old key is removed:
 
 ```bash
 curl -fsSL https://pkg.example.com/nginx-markdown/gpg.key | \
     sudo gpg --dearmor -o /usr/share/keyrings/nginx-markdown-archive-keyring.gpg
 ```
+
+4. Remove the old key only after the overlap migration is complete.
 
 The project documents key rotation in its
 [PACKAGE_DISTRIBUTION.md](../../docs/guides/PACKAGE_DISTRIBUTION.md) guide.

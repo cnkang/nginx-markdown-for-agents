@@ -59,7 +59,9 @@ pub enum EncodingLayer {
     /// `gzip` (RFC 1952).
     #[default]
     Gzip,
-    /// raw `deflate` (RFC 1951).
+    /// Legacy raw `deflate` (RFC 1951) compatibility fixture.
+    ///
+    /// The frozen 0.9.2 public contract uses zlib-wrapped RFC 1950 deflate.
     Deflate,
     /// `br` (RFC 7932).
     Br,

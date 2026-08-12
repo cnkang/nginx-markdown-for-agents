@@ -8,9 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.9.2] - Unreleased candidate
 
 Maintenance and hardening release. Fixes diagnostics and reason-code mapping
-gaps, documents request-scoped OTel ownership, removes the unsafe worker-local
-dynconf restore path, and establishes a public surface source metadata and
-ABI drift gate for release integrity.
+gaps, records the removal and historical disposition of the experimental OTel
+surface, removes the unsafe worker-local dynconf restore path, and establishes
+a public surface source metadata and ABI drift gate for release integrity.
 
 ### Breaking Changes
 
@@ -67,7 +67,9 @@ before/after examples.
   `markdown_stream_flush_min` have no replacement.
 - **Content-Encoding policy.** Malformed, unknown, and excessively deep
   encoding chains follow `markdown_error_policy`. Only `pass` forwards the
-  original response.
+  original response. The `deflate` coding is strictly RFC 1950 zlib-wrapped.
+  The module rejects raw RFC 1951 streams and does not retry them through a raw
+  fallback.
 - **Diagnostics JSON schema v2.** The endpoint now declares
   `schema_version: 2`. Migrate consumers from the old `config_snapshot`,
   `metrics_snapshot`, `dynconf_state`, `streaming_config`, and profile-oriented
@@ -92,9 +94,10 @@ before/after examples.
 
 ### Added
 
-- OTel ownership is now explicit: spans and export subrequests are
-  request-pool scoped. The implementation creates or flushes no worker-owned
-  queue, thread, timer, or file descriptor at worker exit.
+- OTel removal is explicit: the experimental module directives, metrics,
+  spans, and export paths are not built into 0.9.2. The historical ownership
+  sketch remains in ADR-0006 for traceability. Use NGINX's native OTel module
+  for tracing.
 - Dynconf diagnostics is read-only. Operators restore a prior valid dynconf
   file atomically. The watcher validates it and promotes it through the normal
   reload path. The internal last-known-good snapshot remains available for
@@ -125,7 +128,7 @@ completing before the long-lived contract begins.
 - **Rust source-build baseline raised from 1.91 to 1.97.** All first-party
   crates now declare MSRV 1.97 and repository/CI/release builds use exact Rust
   1.97.0. Source builders must update their toolchain (for rustup users,
-  `rustup toolchain install 1.97.0`). Prebuilt module users do not need Rust;
+  `rustup toolchain install 1.97.0`). Prebuilt module users do not need Rust.
   their runtime compatibility remains governed by the published NGINX,
   OS/libc, architecture, and exact dynamic-module compatibility matrix.
 - **Streaming configuration consolidated.** `markdown_streaming off|auto|force`
@@ -135,7 +138,7 @@ completing before the long-lived contract begins.
   `on` to `markdown_streaming force`. The Helm value moves from
   `markdown.streaming.engine` to `markdown.streaming.mode`. Diagnostics expose
   the selector as `streaming_config.policy` and its origin as
-  `streaming_config.policy_source`; the old engine-named keys are removed.
+  `streaming_config.policy_source`. The old engine-named keys are removed.
 - **Non-semantic flavors removed.** `markdown_flavor mdx` and `org-mode` now
   fail `nginx -t` with a `commonmark`/`gfm` migration hint. They were
   experimental selectors that never produced distinct output formats.
@@ -173,9 +176,10 @@ completing before the long-lived contract begins.
 - Hybrid zero-copy output path for streaming responses (`markdown_streaming_zero_copy on`,
   default off), with NGINX pool cleanup ownership guarding Rust-backed buffers
   across backpressure and request teardown.
-- Streaming decompression routing for gzip and deflate responses (both
-  zlib-wrapped RFC 1950 and raw RFC 1951 deflate) under `streaming_first` with
-  `markdown_auto_decompress on` and `markdown_cache_validation` not `full`.
+- Streaming decompression routing for gzip and zlib-wrapped RFC 1950 deflate
+  responses under the streaming path with `markdown_auto_decompress on` and
+  `markdown_cache_validation` not `full`. The module rejects raw RFC 1951 deflate.
+  The module does not provide a raw fallback.
   Gzip is member-aware across chunks.
 - Brotli streaming decompression: Brotli-compressed upstream responses now
   decompress incrementally via the streaming path (same as gzip/deflate) under
@@ -425,8 +429,9 @@ documentation closeout.
   (fail-closed), and return values are written atomically after the closure
   completes (Rule 15).
 - **Harness ngx_log arg-count and NOSONAR discipline detectors**:
-  `detect_ngx_log_arg_count.sh` verifies `ngx_log_debugN`/`ngx_log_errorN`
-  suffix digits match actual argument count (Rule 8);
+  `detect_ngx_log_arg_count.sh` verifies `ngx_log_debugN` suffix digits match
+  actual argument count (Rule 8); `ngx_log_errorN` is an NGINX API macro and
+  is intentionally outside this detector's proof contract;
   `detect_nosonar_discipline.sh` rejects bare `/* NOSONAR */` without a reason
   annotation (Rule 24). Both detectors include fixture tests and are registered
   in `harness-security-checks` and `test-harness` Makefile targets.

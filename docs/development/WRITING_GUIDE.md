@@ -114,9 +114,11 @@ python3 tools/docs/check_writing_style.py [--strict|--changed --base REF|--basel
 - `--baseline [N]`: exits 1 when the repository-wide warning total exceeds
   the retained budget N (default 0, see `DEFAULT_BASELINE` in the
   checker). Guards against regressions. Lower N as docs improve.
-- `--limit N`: cap warnings per file.
+- `--limit N`: cap warnings per file for advisory output only. Do not combine it
+  with `--strict`, `--changed`, or `--baseline`, because truncating
+  the warning list would make a gate under-count findings.
 - The checker excludes code blocks, tables, headings, and inline code. It
-  scans prose only. It ignores quoted text only on explicitly labelled
+  scans prose only. It ignores quoted text only on explicitly labeled
   `Source:`, `Citation:`, `Requirement:`, or `Reference:` lines.
 - Both gates run inside `make docs-check` via
   `make docs-style-check-regression` and `make docs-style-check-baseline`.

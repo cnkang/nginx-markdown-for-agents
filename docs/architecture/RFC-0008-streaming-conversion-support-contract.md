@@ -119,13 +119,15 @@ markdown_streaming auto;
 
 **Default**: `auto`
 
-### 2.2 Automatic Streaming Threshold
+### 2.2 Automatic Streaming Threshold (historical 0.8.0 contract)
 
 ```nginx
 markdown_stream_threshold 1m;
 ```
 
-**Default**: `1m`
+**Default in the historical 0.8.0 contract**: `1m`. The directive is not
+active in 0.9.2. Current selection uses `markdown_streaming auto` and the
+bounded internal response-shape heuristic.
 
 In `auto` mode, a response becomes a **streaming candidate** when ANY of the
 following is true:
@@ -265,9 +267,9 @@ If the raw replay buffer can no longer cover all upstream bytes read so far
 but the module has not yet committed headers, HTML passthrough fallback is no
 longer available. The module MUST either continue with a safe conversion path,
 switch to full-buffer conversion within configured resource limits, or reject
-the response before the module commits headers according to `markdown_on_error`.
+the response before the module commits headers according to `markdown_error_policy`.
 
-#### `markdown_on_error pass`
+#### `markdown_error_policy pass`
 
 - Return the original HTML.
 - Replay already-read raw bytes from the pre-commit replay buffer.
@@ -275,7 +277,7 @@ the response before the module commits headers according to `markdown_on_error`.
 - Preserve or restore upstream HTML response headers.
 - Metric: `streaming_fallback_total{phase="precommit",action="pass"}`
 
-#### `markdown_on_error reject`
+#### `markdown_error_policy fail_closed`
 
 - If headers have not been sent, return 502.
 - Metric: `streaming_fallback_total{phase="precommit",action="reject"}`
@@ -284,7 +286,8 @@ the response before the module commits headers according to `markdown_on_error`.
 
 The following scenarios MUST NOT use streaming and MUST automatically switch to
 full-buffer conversion, provided the response remains within configured
-full-buffer resource limits (for example `markdown_max_size`, memory budget):
+full-buffer resource limits (for example `markdown_limits conversion_memory=`
+and the memory budget):
 
 - Strict ETag / `If-None-Match` handling that requires computing an ETag from
   the complete Markdown output.
@@ -298,7 +301,7 @@ full-buffer resource limits (for example `markdown_max_size`, memory budget):
   outweighs benefit.
 
 If the response would exceed full-buffer resource limits, fallback proceeds to
-passthrough or reject according to the applicable `markdown_on_error` policy.
+passthrough or reject according to the applicable `markdown_error_policy`.
 Exceeding the limits triggers the fallback path. The module then applies the configured policy.
 
 Full-buffer fallback is **not** an error. It is a normal `auto`-mode decision.
@@ -310,7 +313,7 @@ Metric: `engine_choice{engine="full_buffer",reason="<reason_code>"}`
 The following scenarios bypass conversion entirely:
 
 - Response is not convertible HTML.
-- Response exceeds `markdown_max_size` and current policy does not allow
+- Response exceeds `markdown_limits conversion_memory=` and current policy does not allow
   streaming to bypass this limit.
 - Response is a hard-excluded streaming content type.
 - Request did not pass Accept negotiation or UA policy.
@@ -330,7 +333,7 @@ critical semantic boundary in 0.8.0 true streaming.
 
 When an error occurs post-commit:
 
-- `markdown_on_error pass` can no longer mean "return original HTML".
+- `markdown_error_policy pass` can no longer mean "return original HTML".
 - The module MUST log the error, update metrics, and end the response in a
   protocol-safe manner.
 - If the response can still produce structurally valid Markdown, emit a minimal
@@ -353,9 +356,9 @@ When an error occurs post-commit:
 phase=postcommit engine=streaming committed=true fallback_available=false reason=<reason_code>
 ```
 
-### 3.5 Precise Semantics of `markdown_on_error` Under Streaming
+### 3.5 Precise Semantics of `markdown_error_policy` Under Streaming
 
-| Phase        | `markdown_on_error pass`                              | `markdown_on_error reject`                              |
+| Phase        | `markdown_error_policy pass`                          | `markdown_error_policy fail_closed`                    |
 |--------------|-------------------------------------------------------|---------------------------------------------------------|
 | Pre-commit   | Return original HTML                                  | Return 502                                              |
 | Full-buffer  | Return original HTML on conversion failure            | Return 502 on conversion failure                        |

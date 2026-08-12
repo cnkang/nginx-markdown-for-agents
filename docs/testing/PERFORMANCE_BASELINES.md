@@ -48,7 +48,7 @@ records contain scenario metadata, `load_integrity`, `metrics`, and
 environment-consistency validation only when present.
 
 The canonical module benchmark retains response probes at
-`perf/baselines/module-baseline-091-raw-probes/`, derived from the raw report
+`perf/baselines/module-baseline-092-raw-probes/`, derived from the raw report
 output path. The workflow validates non-empty `.headers`, `.body`, and `.json`
 files for all eight scenarios. It verifies each probe's verdict, curl exit code,
 and body SHA-256. It validates the complete response-correctness schema

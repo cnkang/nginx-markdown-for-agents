@@ -13,7 +13,7 @@ state machine to handle errors in each phase with different recovery semantics.
 
 Without a formal state machine, error handling in the streaming path was
 ad-hoc, risking inconsistent behavior between pre-commit replay (where the
-the original HTML can still reach the client) and post-commit degradation (where the
+original HTML can still reach the client) and post-commit degradation (where the
 output is already partially delivered and cannot retract).
 
 ## Decision

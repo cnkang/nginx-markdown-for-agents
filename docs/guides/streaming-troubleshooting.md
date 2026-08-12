@@ -139,10 +139,11 @@ markdown_limits decompressed_size=20m decompression_ratio=100
 ```
 
 `decompressed_size` and `decompression_ratio` are cumulative across a gzip
-response's members. A truncated final member, invalid framing, I/O error, or
-The module first fails decompression on a budget violation. It then records
-the event in `nginx_markdown_decompression_events_total` and follows the
-configured `markdown_error_policy` before commit.
+response's members. A truncated final member, invalid framing, decoder error,
+or I/O error records a decompression failure. A budget violation gets a
+separate budget-limit failure classification. The module records the event in
+`nginx_markdown_decompression_events_total` and follows the configured
+`markdown_error_policy` before commit.
 
 ## Rollback checklist
 

@@ -1,8 +1,9 @@
 # ADR-0013: Streaming Default Policy
 
 > Historical decision for the pre-Config-V2 selector. ADR-0023 supersedes its
-> active configuration recommendation in v0.9.1. Use
-> `markdown_streaming off|auto|force`.
+> active configuration recommendation in v0.9.1. The current directive is
+> `markdown_streaming off|auto|force`. The former engine selector is not an
+> active configuration surface.
 
 **Status**: Accepted (implemented in 0.8.0)
 **Date**: 2026-06-04
@@ -34,9 +35,9 @@ Default to `auto` mode per RFC 0008 section 2.1:
    eligibility checks per RFC 0008 section 2.2).
 3. All other responses use the full-buffer path.
 
-The operator MAY override this default with explicit `markdown_streaming_engine
-off` (full-buffer only) or `markdown_streaming_engine on` (streaming for all
-responses).
+The operator may override this default with `markdown_streaming off`
+(full-buffer only) or `markdown_streaming force` (prefer streaming for eligible
+responses). `markdown_streaming auto` retains the default policy.
 
 The threshold increase from 32K (0.6.0 ADR-0007) to 1m (0.8.0 RFC 0008)
 reflects the goal of reducing regression risk from the new true streaming code

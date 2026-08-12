@@ -56,8 +56,9 @@ Response arrives at body filter
 
 No changes. The module buffers the complete response body, optionally
 decompresses it, resolves conditional requests, then calls `markdown_convert()`
-through FFI. This full-buffer Rust path remains available when incremental
-the module disables conversion.
+through FFI. This full-buffer Rust path remains available when the module
+selects full-buffer processing (`markdown_streaming off`) or when the build
+disables incremental processing.
 
 ### Incremental Path (New, Feature-Gated)
 
@@ -88,10 +89,13 @@ In practical terms, the current incremental path should be understood as:
 It should not yet be understood as a true streaming or peak-memory-reduction path. The request body still exists as a full NGINX-side buffer. The Rust incremental API currently accumulates fed bytes internally before parsing.
 
 > [!NOTE]
-> **64 MiB Hard Limit**: To prevent uncontrolled memory growth, the `IncrementalConverter` in Rust enforces a strict 64 MiB buffer limit. This applies until the project implements true streaming. If the sum of fed chunks exceeds this size, `feed_chunk` returns a `MemoryLimit` error. The C module then applies `markdown_error_policy`.
+> **Historical pre-0.9.0 limit**: Before the bounded streaming path was
+> implemented, the Rust `IncrementalConverter` used a strict 64 MiB buffer
+> limit. This note describes that retired path. The active configuration sets
+> limits through `markdown_limits` and the active streaming engine.
 
 > [!WARNING]
-> **Architecture Warning: Do not increase the 64 MiB limit**
+> **Historical architecture warning: do not increase the old 64 MiB limit**
 > 
 > A 64 MiB HTML document currently translates to roughly 2.5GB-3GB of peak RAM consumption during Rust DOM tree construction. That is an empirical ~40x memory bloat factor.
 > 
@@ -101,9 +105,13 @@ It should not yet be understood as a true streaming or peak-memory-reduction pat
 > 
 > **To safely support GB-scale responses in the future**, the architecture must be fundamentally shifted from DOM-tree building to a **Streaming SAX Parser**. True stream processing maintains $O(1)$ memory by discarding parsed chunks instantly. It is the only safe way to surpass the 64 MiB limit without unbounded memory amplification.
 
-The build compiles the incremental API only when you enable the `incremental` Rust feature flag. When the feature is not compiled but you configure a threshold, the module logs a warning per request. It falls back to the full-buffer path.
+The incremental API and its threshold router are historical pre-0.9.0
+material. The current 0.9.2 binary does not expose
+`markdown_large_body_threshold`. That directive is unavailable. Use
+`markdown_streaming` and `markdown_limits streaming_buffer=` for the active
+path.
 
-## Threshold Router
+## Historical pre-0.9.0 threshold router
 
 > ⚠️ **RETIRED IN 0.9.0, REMOVED IN 0.9.2** — The `markdown_large_body_threshold`
 > directive was a **reject-only stub** in 0.9.0 and 0.9.1. The 0.9.2 release

@@ -67,7 +67,7 @@ still requiring every overgrown function to refactor before delivery.
 
 Every violation is blocking. The harness has no baseline exception list,
 suppression mechanism, or threshold waiver. If a function exceeds a threshold,
-extract helpers, simplify the control flow, or redesign the boundary until the
+extract helpers, simplify the control flow, or redesign the boundary until
 the team removes the reported violation.
 
 **When to run:**

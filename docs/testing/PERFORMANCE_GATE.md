@@ -80,10 +80,10 @@ The script builds the release binary, runs benchmarks, generates a
 Measurement Report, invokes the threshold engine for a Verdict Report,
 and prints a text summary to stderr.
 
-### 0.9.1 Release Gate Evidence
-For the 0.9.1 release, the team gathers evidence via the following targets:
-- `make release-gates-check-091`: (Blocking) Verifies all core architectural and functional requirements.
-- `make perf-evidence-check`: (Non-blocking) Verifies that 0.9.1 meets performance baselines across the target matrix.
+### 0.9.2 Release Gate Evidence
+For the 0.9.2 release, the team gathers evidence via the following targets:
+- `make release-gates-check-092`: (Blocking) Verifies all core architectural and functional requirements.
+- `make perf-evidence-check`: (Non-blocking) Verifies that 0.9.2 meets performance baselines across the target matrix.
 
 For deep analysis, use:
 - `python3 tools/perf/doctor_advice.py`: Analyzes measurement reports and suggests configuration tuning.
@@ -125,12 +125,12 @@ adjustment rule, person or reason, and date in `baseline_policy`. Missing raw
 artifact provenance is an audit failure to disclose, not a reason to invent a
 workflow identifier.
 
-The checked-in 0.9.1 baseline is now a verbatim eight-scenario canonical run.
+The checked-in 0.9.2 baseline is now a verbatim eight-scenario canonical run.
 Its `baseline_policy` binds the measured data to source commit
-`cab92df229b0b68cb02d88817a208e009f3ce106`, workflow run
-`30405031983/attempts/1`, measurement timestamp `2026-07-28T22:41:12Z`, and
+`97672b57d4479febbf6d9a3d947a339236b698f3`, workflow run
+`30604344481/attempts/1`, measurement timestamp `2026-07-31T04:36:09Z`, and
 the retained raw artifact SHA-256
-`a511b90f82d05f827ea011faccec3ff5b3aead892943180f98e617c6c09aad12`.
+`ebcd73ec55c4e85a6cdbc85371832342d97b2edcdf06c56cf5bb7a91f0ab5c92`.
 Machine validation recomputes that digest and requires the finalized report to
 match the raw report exactly apart from `baseline_policy`.
 
@@ -142,7 +142,7 @@ metadata, `load_integrity`, `metrics`, and `response_correctness`. Optional
 consistency only when supplied.
 
 The canonical workflow retains response probes at
-`perf/baselines/module-baseline-091-raw-probes/`, derived from the raw report
+`perf/baselines/module-baseline-092-raw-probes/`, derived from the raw report
 path. It validates every scenario's non-empty `.headers`, `.body`, and `.json`
 files, requires a passing probe with `curl_exit_code == 0`, verifies the body
 SHA-256, validates the complete response-correctness schema, parses the final

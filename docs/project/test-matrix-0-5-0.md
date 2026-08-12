@@ -21,13 +21,13 @@ Each sub-spec fills in the following template to identify its covered cells:
 ```markdown
 ## Test Matrix Coverage — [Sub-Spec Name]
 
-| Dimension | Covered Values | Test Type |
-|-----------|---------------|-----------|
-| Platform | [Ubuntu, macOS] | [CI matrix / manual] |
-| NGINX Version | [1.24.x, 1.26.x, 1.27.x] | [CI matrix] |
-| Response Size Tier | [Small, Medium, Large, Extra-Large] | [Unit / e2e / benchmark] |
-| Conversion Engine | [full-buffer, streaming] | [Unit / e2e / diff test] |
-| Conversion Path | [convert, skip, fallback/fail-open] | [Unit / e2e] |
+| Combination ID | Dimension | Covered Values | Test Type | Covering Sub-Spec |
+|---------------|-----------|----------------|-----------|------------------|
+| TM-PLATFORM-01 | Platform | [Ubuntu, macOS] | [CI matrix / manual] | [sub-spec name] |
+| TM-NGINX-01 | NGINX Version | [1.24.x, 1.26.x, 1.27.x] | [CI matrix] | [sub-spec name] |
+| TM-SIZE-01 | Response Size Tier | [Small, Medium, Large, Extra-Large] | [Unit / e2e / benchmark] | [sub-spec name] |
+| TM-ENGINE-01 | Conversion Engine | [full-buffer, streaming] | [Unit / e2e / diff test] | [sub-spec name] |
+| TM-PATH-01 | Conversion Path | [convert, skip, fallback/fail-open] | [Unit / e2e] | [sub-spec name] |
 ```
 
 ## Gap Record Format
@@ -44,22 +44,22 @@ Before release, aggregate all sub-spec coverage mappings. Ensure every
 required combination of values across the matrix has at least one covering
 sub-spec. Covering each value independently is not sufficient:
 
-| Dimension | Value | Covering Sub-Spec | Status |
-|-----------|-------|-------------------|--------|
-| Platform | Ubuntu | — | Pending |
-| Platform | macOS | — | Pending |
-| NGINX Version | 1.24.x | — | Pending |
-| NGINX Version | 1.26.x | — | Pending |
-| NGINX Version | 1.27.x | — | Pending |
-| Response Size Tier | Small | — | Pending |
-| Response Size Tier | Medium | — | Pending |
-| Response Size Tier | Large | — | Pending |
-| Response Size Tier | Extra-Large | — | Pending |
-| Conversion Engine | full-buffer | — | Pending |
-| Conversion Engine | streaming | — | Pending |
-| Conversion Path | convert | — | Pending |
-| Conversion Path | skip | — | Pending |
-| Conversion Path | fallback/fail-open | — | Pending |
+| Combination ID | Dimension | Value | Covering Sub-Spec | Status |
+|---------------|-----------|-------|-------------------|--------|
+| TM-PLATFORM-01 | Platform | Ubuntu | — | Pending |
+| TM-PLATFORM-01 | Platform | macOS | — | Pending |
+| TM-NGINX-01 | NGINX Version | 1.24.x | — | Pending |
+| TM-NGINX-01 | NGINX Version | 1.26.x | — | Pending |
+| TM-NGINX-01 | NGINX Version | 1.27.x | — | Pending |
+| TM-SIZE-01 | Response Size Tier | Small | — | Pending |
+| TM-SIZE-01 | Response Size Tier | Medium | — | Pending |
+| TM-SIZE-01 | Response Size Tier | Large | — | Pending |
+| TM-SIZE-01 | Response Size Tier | Extra-Large | — | Pending |
+| TM-ENGINE-01 | Conversion Engine | full-buffer | — | Pending |
+| TM-ENGINE-01 | Conversion Engine | streaming | — | Pending |
+| TM-PATH-01 | Conversion Path | convert | — | Pending |
+| TM-PATH-01 | Conversion Path | skip | — | Pending |
+| TM-PATH-01 | Conversion Path | fallback/fail-open | — | Pending |
 
 ## Document Updates
 

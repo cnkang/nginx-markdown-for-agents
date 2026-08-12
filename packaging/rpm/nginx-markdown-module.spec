@@ -1,7 +1,7 @@
 # Legacy copy; CI uses packaging/rpm/SPECS/nginx-module-markdown.spec with
 # parameterized %{version}. This file is retained for historical reference only.
 Name:           nginx-module-markdown-for-agents
-Version:        0.9.2
+Version:        0.6.1
 Release:        1%{?dist}
 Summary:        NGINX module for HTML-to-Markdown conversion
 
