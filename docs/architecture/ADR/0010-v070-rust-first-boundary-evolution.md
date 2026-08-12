@@ -94,8 +94,11 @@ NGINX-coupled responsibilities.
   infrastructure, property-based tests cover negotiation and decision paths.
 - **Safety**: Memory-safe Rust eliminates classes of bugs in parsing, validation,
   and decision logic.
-- **Single source of truth**: Reason codes, error categories, and decision logic
-  have one canonical definition—no C/Rust semantic forks.
+- **Single source of truth**: At the time of this v0.7.0 decision, the Rust
+  projection owned reason codes, error categories, and decision logic. The
+  current canonical reason source is
+  `components/rust-converter/reason_registry.toml`; generated Rust and C
+  projections prevent C/Rust semantic forks (see ADR-0018).
 - **CI enforcement**: Header drift checks and layout tests catch ABI
   incompatibilities before merge.
 - **Incremental migration**: Existing stable FFI functions remain unchanged,

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "generator": "tools/reason-codegen/generate.py",
   "source": "components/rust-converter/reason_registry.toml",
-  "source_sha256": "6d395a04ca766c4be1486937c27741c6db6cf8b042a4af5f7672db9da8cbebae",
+  "source_sha256": "bd302c40372a40777ed12b0dec324c75c43f4fdb03e6ae3b364b3019346cd997",
   "generated_artifacts": [
     {
       "path": "components/rust-converter/src/decision/reason_code.rs",

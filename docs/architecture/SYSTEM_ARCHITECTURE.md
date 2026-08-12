@@ -103,7 +103,15 @@ The Rust converter is responsible for:
 - producing optional metadata such as token estimates and front matter
 - returning structured results through a stable C-compatible interface
 
-Inside the converter crate, the Markdown renderer splits into distinct units. These units cover traversal, block handling, inline handling, table rendering, front-matter emission, and normalization helpers. The FFI boundary splits into ABI, option-decoding, conversion, memory-management, and export units. Metadata extraction and URL resolution live in separate helper modules. This split keeps logic concentrated in smaller files. It leaves the public API and the C ABI unchanged.
+Inside the converter crate, the Markdown renderer splits into distinct units.
+These units cover traversal, block handling, inline handling, table rendering,
+front-matter emission, and normalization helpers. The FFI boundary splits into
+ABI, option-decoding, conversion, memory-management, and export units. Metadata
+extraction and URL resolution live in separate helper modules. This split keeps
+logic concentrated in smaller files. The documented Rust public API is stable
+for supported callers. The internal C ABI is stable only between matched
+Rust-converter and NGINX-module versions shipped as a pair. It may change
+across releases, and the ABI handshake rejects mismatches.
 
 ## Why the FFI Boundary Is Small
 
@@ -145,7 +153,7 @@ sequenceDiagram
     N->>M: Evaluate markdown_filter
     M->>M: Check eligibility (method, status, content-type, policy)
     alt Eligible
-        M->>M: Buffer body + decompress if needed
+        M->>M: Full-buffer engine: buffer body + decompress if needed
         M->>R: FFI call (HTML bytes + options)
         R->>R: Parse HTML → Sanitize → Generate Markdown
         R-->>M: Markdown output + metadata
@@ -161,8 +169,11 @@ Step-by-step:
 
 1. NGINX receives the request and evaluates the configured `markdown_filter` behavior.
 2. The module checks request and response eligibility such as method, status, content type, and policy exclusions.
-3. If needed, the module buffers the upstream body and decompresses supported encodings.
-4. The module passes the buffered payload to the Rust converter through FFI.
+3. In the full-buffer engine, the module buffers the upstream body and
+   decompresses supported encodings. The streaming engine feeds bounded chunks
+   through its separate streaming FFI path.
+4. The full-buffer engine passes its buffered payload to the Rust converter
+   through FFI.
 5. The converter returns Markdown output and optional metadata.
 6. The module updates headers such as `Content-Type`, `Vary`, and variant `ETag`, records shared metrics, then sends the Markdown response.
 
@@ -270,12 +281,12 @@ Implements `If-None-Match` (ETag strong/weak comparison) and
 `If-Modified-Since` (HTTP-date parsing and time comparison) for 304 Not
 Modified responses. Used internally by the C conditional-request path.
 
-### Decision Engine (`decision/mod.rs` + `decision/reason_code.rs`)
+### Decision Engine (`decision/mod.rs` + generated `decision/reason_code.rs`)
 Pure function `make_decision(DecisionContext) -> Decision` (where `Decision`
 is `Convert` or `Skip(SkipReason)`) that centralizes the conversion/skip
 decision logic. Each decision path maps to a canonical `ReasonCode`
-discriminant (the single source of truth in `decision/reason_code.rs`) for
-logging and metrics.
+discriminant declared in `reason_registry.toml` and projected into
+`decision/reason_code.rs` and generated C metadata for logging and metrics.
 
 ### Header Plan (`header_plan.rs`)
 Builder for response header mutations (Content-Type, Content-Length, ETag,
@@ -322,14 +333,17 @@ worker has its own watcher cycle and may briefly expose a different
 controlled NGINX reload is the strong synchronization boundary.
 `applied_mtime` updates only after successful application (Rule 35).
 
-### Reason Code FFI Accessor (`reason_code.rs` + FFI)
-A Rust enum defines the reason codes (single source of truth). C
-accesses reason code values and display strings through the
+### Reason Code FFI Accessor (registry projections + FFI)
+The declarative `reason_registry.toml` defines the reason codes. The generated
+Rust enum in `reason_code.rs` projects that registry. C accesses canonical
+reason strings and metric families through the
 `markdown_reason_code_str()` / `markdown_reason_code_metric_key()` FFI
 exports (wrapped C-side by `ngx_http_markdown_get_reason_code_str()` and
-`ngx_http_markdown_get_reason_code_metric_key()`). C-side independent
-`#define` constants no longer exist. All consumers go through the FFI accessor.
-This ensures Rust enum, C usage, docs, and metrics labels stay aligned.
+`ngx_http_markdown_get_reason_code_metric_key()`). C diagnostics also consume
+the generated metadata, discriminant, and compatibility-alias tables. No
+independent canonical C constants or mapping tables remain. C-only streaming
+event labels are a separate internal surface. This keeps the Rust enum,
+generated C metadata, diagnostics, docs, and metrics labels aligned.
 
 ### Header Plan Atomic Application (`ngx_http_markdown_header_plan.c`)
 The C module applies `FFIHeaderPlan` operations (set, delete, modify)

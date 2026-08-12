@@ -2,18 +2,14 @@
  * NGINX Markdown Filter Module - Rust FFI Reason Code Accessor
  *
  * This file provides C-side wrappers around the Rust-defined reason code
- * FFI functions.  The Rust enum in decision/reason_code.rs is the SINGLE
- * SOURCE OF TRUTH for all reason codes.  C code should use these accessors
- * rather than defining independent reason code constants.
+ * FFI functions.  The declarative reason_registry.toml is the single source
+ * of truth; the Rust enum and C metadata are generated projections. C code
+ * should use these accessors rather than defining independent reason data.
  *
  * Migration note (v0.7.0):
- *   The existing ngx_http_markdown_reason.c file defines C-side string
- *   literals for legacy eligibility-based reason codes.  Those are retained
- *   for backward compatibility during the transition period.  New code
- *   should use the FFI accessors in this file to obtain reason code strings
- *   from the Rust enum.  Once the full decision engine migration is complete,
- *   the legacy C-side constants in ngx_http_markdown_reason.c will be
- *   removed entirely.
+ *   The existing ngx_http_markdown_reason.c file retains legacy C-only
+ *   streaming labels for backward compatibility. New canonical reason data
+ *   comes from the generated registry projections and these FFI accessors.
  *
  * Requirements: REQ-0700-RUST-006
  */

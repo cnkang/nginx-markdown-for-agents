@@ -2,18 +2,20 @@
  * NGINX Markdown Filter Module - Reason Code Lookup (via Rust FFI)
  *
  * This file provides accessor functions that map C-side eligibility enums
- * and error categories to reason code strings.  All strings are sourced
- * from the Rust ReasonCode enum via FFI — there are no C-side string
- * literals for reason codes.
+ * and error categories to canonical reason code strings. Canonical strings
+ * are sourced from the registry projections via FFI; C-only streaming event
+ * labels remain separate implementation details.
  *
- * The Rust enum in components/rust-converter/src/decision/reason_code.rs
- * is the SINGLE SOURCE OF TRUTH for all reason code strings.
+ * The declarative registry in components/rust-converter/reason_registry.toml
+ * is the single source. The Rust enum and C metadata are generated
+ * projections of that registry.
  *
  * Requirements: FR-01.1, FR-01.2, FR-01.3, FR-01.4, FR-01.5,
  *               FR-13.3, FR-13.4
  */
 
 #include "ngx_http_markdown_filter_module.h"
+#include "markdown_reason_meta.h"
 
 
 /*
@@ -22,42 +24,6 @@
  */
 ngx_int_t ngx_http_markdown_get_reason_code_str(uint32_t code,
     ngx_str_t *out_str);
-
-
-/*
- * Reason code discriminant constants matching the Rust ReasonCode enum.
- *
- * These MUST stay in sync with ReasonCode in
- * components/rust-converter/src/decision/reason_code.rs.
- * See that file for the full variant list and string representations.
- */
-#define REASON_CONVERTED                 0
-#define REASON_SKIPPED_ACCEPT            1
-#define REASON_SKIPPED_NO_ACCEPT         2
-#define REASON_SKIPPED_CONDITIONAL       3
-#define REASON_DECOMPRESSION_ERROR       4
-#define REASON_DECOMPRESSION_BUDGET_EXCEEDED  5
-#define REASON_DECOMPRESSION_FORMAT_ERROR     6
-#define REASON_DECOMPRESSION_TRUNCATED_INPUT  7
-#define REASON_DECOMPRESSION_IO_ERROR         8
-#define REASON_TIMEOUT                   9
-#define REASON_BUDGET_EXCEEDED          10
-#define REASON_REPLAY_ERROR             11
-#define REASON_SKIPPED_ACCEPT_REJECT    12
-#define REASON_FFI_PANIC                13
-#define REASON_NOT_ELIGIBLE             14
-#define REASON_DISABLED                 15
-#define REASON_FAILED_OPEN              16
-#define REASON_FAILED_CLOSED            17
-#define REASON_CONVERSION_ERROR         18
-#define REASON_MEMORY_BUDGET_EXCEEDED   19
-#define REASON_OVERLOAD                 20
-#define REASON_INVALID_DYNCONF          21
-#define REASON_DEGRADED_SNAPSHOT        22
-#define REASON_HEADER_PLAN_APPLY_ERR    23
-#define REASON_STREAMING_MID_FLIGHT_ERR 24
-#define REASON_BYPASS_NO_TRANSFORM      25
-#define REASON_ENCODING_HEADER_INVALID  26
 
 
 /*
@@ -111,59 +77,59 @@ ngx_http_markdown_reason_init_strs(void)
         return;
     }
 
-    ngx_http_markdown_get_reason_code_str(REASON_CONVERTED,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_CONVERTED,
         &reason_str_converted);
-    ngx_http_markdown_get_reason_code_str(REASON_SKIPPED_ACCEPT,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_SKIPPED_ACCEPT,
         &reason_str_skipped_accept);
-    ngx_http_markdown_get_reason_code_str(REASON_SKIPPED_NO_ACCEPT,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_SKIPPED_NO_ACCEPT,
         &reason_str_skipped_no_accept);
-    ngx_http_markdown_get_reason_code_str(REASON_SKIPPED_CONDITIONAL,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_SKIPPED_CONDITIONAL,
         &reason_str_skipped_conditional);
-    ngx_http_markdown_get_reason_code_str(REASON_DECOMPRESSION_ERROR,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_DECOMPRESSION_ERROR,
         &reason_str_decompression_error);
-    ngx_http_markdown_get_reason_code_str(REASON_DECOMPRESSION_BUDGET_EXCEEDED,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_DECOMPRESSION_BUDGET_EXCEEDED,
         &reason_str_decompression_budget_exceeded);
-    ngx_http_markdown_get_reason_code_str(REASON_DECOMPRESSION_FORMAT_ERROR,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_DECOMPRESSION_FORMAT_ERROR,
         &reason_str_decompression_format_error);
-    ngx_http_markdown_get_reason_code_str(REASON_DECOMPRESSION_TRUNCATED_INPUT,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_DECOMPRESSION_TRUNCATED_INPUT,
         &reason_str_decompression_truncated_input);
-    ngx_http_markdown_get_reason_code_str(REASON_DECOMPRESSION_IO_ERROR,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_DECOMPRESSION_IO_ERROR,
         &reason_str_decompression_io_error);
-    ngx_http_markdown_get_reason_code_str(REASON_TIMEOUT,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_TIMEOUT,
         &reason_str_timeout);
-    ngx_http_markdown_get_reason_code_str(REASON_BUDGET_EXCEEDED,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_BUDGET_EXCEEDED,
         &reason_str_budget_exceeded);
-    ngx_http_markdown_get_reason_code_str(REASON_REPLAY_ERROR,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_REPLAY_ERROR,
         &reason_str_replay_error);
-    ngx_http_markdown_get_reason_code_str(REASON_SKIPPED_ACCEPT_REJECT,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_SKIPPED_ACCEPT_REJECT,
         &reason_str_skipped_accept_reject);
-    ngx_http_markdown_get_reason_code_str(REASON_NOT_ELIGIBLE,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_NOT_ELIGIBLE,
         &reason_str_not_eligible);
-    ngx_http_markdown_get_reason_code_str(REASON_DISABLED,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_DISABLED,
         &reason_str_disabled);
-    ngx_http_markdown_get_reason_code_str(REASON_FAILED_OPEN,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_FAILED_OPEN,
         &reason_str_failed_open);
-    ngx_http_markdown_get_reason_code_str(REASON_FAILED_CLOSED,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_FAILED_CLOSED,
         &reason_str_failed_closed);
-    ngx_http_markdown_get_reason_code_str(REASON_CONVERSION_ERROR,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_CONVERSION_ERROR,
         &reason_str_conversion_error);
-    ngx_http_markdown_get_reason_code_str(REASON_MEMORY_BUDGET_EXCEEDED,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_MEMORY_BUDGET_EXCEEDED,
         &reason_str_memory_budget_exceeded);
-    ngx_http_markdown_get_reason_code_str(REASON_OVERLOAD,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_OVERLOAD,
         &reason_str_overload);
-    ngx_http_markdown_get_reason_code_str(REASON_INVALID_DYNCONF,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_INVALID_DYNCONF,
         &reason_str_invalid_dynconf);
-    ngx_http_markdown_get_reason_code_str(REASON_DEGRADED_SNAPSHOT,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_DEGRADED_SNAPSHOT,
         &reason_str_degraded_snapshot);
-    ngx_http_markdown_get_reason_code_str(REASON_HEADER_PLAN_APPLY_ERR,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_HEADER_PLAN_APPLY_ERROR,
         &reason_str_header_plan_apply_err);
-    ngx_http_markdown_get_reason_code_str(REASON_STREAMING_MID_FLIGHT_ERR,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_STREAMING_MID_FLIGHT_ERROR,
         &reason_str_streaming_mid_flight_err);
-    ngx_http_markdown_get_reason_code_str(REASON_FFI_PANIC,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_FFI_PANIC,
         &reason_str_ffi_panic);
-    ngx_http_markdown_get_reason_code_str(REASON_BYPASS_NO_TRANSFORM,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_BYPASS_NO_TRANSFORM,
         &reason_str_bypass_no_transform);
-    ngx_http_markdown_get_reason_code_str(REASON_ENCODING_HEADER_INVALID,
+    ngx_http_markdown_get_reason_code_str(MARKDOWN_REASON_CODE_ENCODING_HEADER_INVALID,
         &reason_str_encoding_header_invalid);
 
     reason_strs_initialized = 1;
@@ -581,21 +547,21 @@ ngx_http_markdown_reason_streaming_skip_compressed(void)
 /*
  * Streaming reason codes.
  *
- * These are C-only reason codes for the streaming path.  They do NOT
- * have a corresponding Rust ReasonCode variant yet (streaming codes
- * are local to the C streaming engine).  They retain their UPPERCASE
- * format as legacy constants until a future spec adds them to Rust.
+ * These are C-only labels for the streaming path. They do NOT have a
+ * corresponding canonical registry entry yet because they describe local
+ * engine events rather than operator-visible outcomes. They retain their
+ * UPPERCASE format as internal implementation labels.
  *
  * NAMING CONVENTION NOTE: These UPPERCASE codes differ from the
  * lowercase snake_case convention used by the Rust ReasonCode enum.
  * This is a known inconsistency.  It does not affect production
  * behavior because these codes are internal to the C streaming engine
  * and are not emitted through the Rust FFI reason-code accessor path.
- * In the 1.x release, when streaming reason codes are migrated to
- * Rust enum variants, they will be renamed to lowercase snake_case
- * (e.g. streaming_convert, streaming_fail_postcommit).  See
- * docs/harness/rules/observability-metrics.md for the full migration
- * plan.
+ * If a future release promotes these events to operator-visible reasons,
+ * add them to reason_registry.toml and regenerate the Rust/C projections;
+ * do not add a parallel C mapping table. See
+ * docs/harness/rules/observability-metrics.md for the boundary and migration
+ * contract.
  */
 
 static ngx_str_t ngx_http_markdown_reason_engine_streaming_str =

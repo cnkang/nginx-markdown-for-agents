@@ -4,12 +4,24 @@
 
 Every request that reaches the Markdown filter module passes through an ordered sequence of checks called the decision chain. The first failing check determines the outcome and assigns a reason code. If all checks pass, the module attempts conversion and the outcome depends on whether conversion succeeds or fails.
 
-Reason codes are the canonical, machine-readable outcome identifiers. The module emits them in two places and uses the **same lowercase snake_case strings** everywhere:
+Canonical reason codes are the machine-readable, operator-visible outcome
+identifiers. The module emits those codes in two places and uses the **same
+lowercase snake_case strings** in both:
 
 - Decision log entries: `markdown: reason=<code> ...` (see `components/nginx-module/src/ngx_http_markdown_decision_log_impl.h`)
 - Prometheus metrics labels (`reason="<code>"`, see `components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h`)
 
-The single source of truth for the reason code list is `components/rust-converter/src/decision/reason_code.rs`, mirrored in [Observability Schema v2](../architecture/observability-schema-v2.md). This document describes the check order, what each check evaluates, and how the module determines outcomes. Rollout procedures are in the [Rollout Cookbook](../guides/ROLLOUT_COOKBOOK.md). Rollback procedures are in the [Rollback Guide](../guides/ROLLBACK_GUIDE.md).
+C-only streaming engine labels are internal event names, not canonical reason
+codes or Prometheus label values. See the boundary below.
+
+The single source of truth for the reason code list is
+`components/rust-converter/reason_registry.toml`. The Rust, C, diagnostics, and
+the generator consume that registry. The generator creates release projections
+and mirrors them in [Observability Schema v2](../architecture/observability-schema-v2.md).
+This document describes the check order, what each check evaluates, and how the
+module determines outcomes.
+Rollout procedures are in the [Rollout Cookbook](../guides/ROLLOUT_COOKBOOK.md).
+Rollback procedures are in the [Rollback Guide](../guides/ROLLBACK_GUIDE.md).
 
 ## Decision Chain Flowchart
 
@@ -66,8 +78,9 @@ The decision chain evaluates checks in a fixed order. The first check that fails
 
 ### Accept negotiation outcomes
 
-When the request is eligible on checks 1–7 but the `Accept` header does not
-resolve in favor of Markdown, the module emits one of three distinct skip
+Checks 2–7 collapse to the canonical `not_eligible` reason when they reject a
+request. Accept negotiation is the exception: when the request is otherwise
+eligible but the `Accept` header does not resolve in favor of Markdown, the module emits one of three distinct skip
 reason codes (this is the one eligibility branch that preserves sub-case
 granularity, because the failure cause is operationally meaningful for content
 negotiation):
@@ -116,9 +129,9 @@ When conversion fails (either `failed_open` or `failed_closed`), the module reco
 | Failure Reason Code | Meaning |
 |---------------------|---------|
 | `conversion_error` | HTML parse or conversion error — the input HTML could not be processed |
-| `memory_budget_exceeded` | Memory limit reached (`markdown_limits conversion_memory=` or `parser_memory=`) |
+| `memory_budget_exceeded` | Conversion-memory limit reached (`markdown_limits conversion_memory=`) |
 | `timeout` | Parser execution exceeded `markdown_limits parser_timeout=` |
-| `budget_exceeded` | Parser memory exceeded `markdown_limits parser_memory=` |
+| `budget_exceeded` | Parser memory exceeded `markdown_limits parser_memory=`; this is distinct from `memory_budget_exceeded` and takes precedence for parser allocations |
 | `ffi_panic` | Internal/system error (unexpected Rust↔C panic) |
 | `decompression_error` / `decompression_budget_exceeded` / `decompression_format_error` / `decompression_truncated_input` / `decompression_io_error` | Decompression failures (see [Automatic Decompression](../features/AUTOMATIC_DECOMPRESSION.md)) |
 | `replay_error` | Fail-open replay buffer init/append failure |
@@ -146,7 +159,15 @@ Operators can determine request state counts from metrics and logs:
 
 ## Reason Code Reference
 
-The complete set of 27 reason codes lives in `components/rust-converter/src/decision/reason_code.rs`. It mirrors into [Observability Schema v2](../architecture/observability-schema-v2.md). All `as_str()` values are lowercase snake_case. The table below maps the high-level decision outcomes described in this document to their reason codes. The full registry (including decompression, dynconf, and streaming sub-codes) lives in the schema document.
+The registry declares the complete set of 27 reason codes in
+`components/rust-converter/reason_registry.toml`. The generator projects it
+into `reason_code.rs`, C metadata, diagnostics aliases, and release artifacts.
+The projections mirror [Observability Schema v2](../architecture/observability-schema-v2.md).
+All `as_str()` values are lowercase snake_case. The table below maps the
+high-level decision outcomes described in this document to their reason codes.
+The full registry (including decompression, dynconf, and canonical streaming
+outcome codes) lives in the schema document. C-only streaming event labels are
+not registry entries.
 
 | Decision Outcome | Reason Code | Request State | Description |
 |---|---|---|---|
@@ -186,7 +207,10 @@ The complete set of 27 reason codes lives in `components/rust-converter/src/deci
 | `streaming_mid_flight_error` | Streaming conversion mid-flight error |
 | Delivery vs Decision counter separation | `failopen_count` (delivery) increments only after downstream `NGX_OK`; decision counter increments on decision regardless of downstream status |
 
-All reason codes use lowercase snake_case format. The same strings appear in both decision log entries and Prometheus metrics labels. Operators can correlate log entries with metric counters without translation.
+All canonical reason codes use lowercase snake_case format. The same strings
+appear in both decision log entries and Prometheus metrics labels, so operators
+can correlate log entries with metric counters without translation. Internal
+C-only streaming event labels are outside this operator-visible contract.
 
 ## Implementation Details
 
@@ -196,7 +220,13 @@ The check order matches the eligibility evaluation in `components/nginx-module/s
 - The module evaluates auth policy (check 7) as part of eligibility.
 - The module evaluates Accept negotiation (check 8) after the core eligibility checks pass.
 
-The Rust `ReasonCode::as_str()` registry produces the reason code strings. The `markdown_reason_code_str()` FFI accessor surfaces them to C. C-side code never hard-codes reason code literals. It converts the `ReasonCode` discriminant into the canonical lowercase string. See [Observability Schema v2](../architecture/observability-schema-v2.md) for the full registry and FFI accessor list.
+The generated Rust `ReasonCode::as_str()` projection produces the reason code
+strings. The `markdown_reason_code_str()` FFI accessor surfaces them to C. C-side
+canonical reason data comes from generated discriminant and metadata macros.
+the accessor converts each discriminant into the canonical lowercase string.
+Legacy C-only streaming event labels remain a separate internal compatibility
+surface. See [Observability Schema v2](../architecture/observability-schema-v2.md)
+for the full registry and FFI accessor list.
 
 ## Related Documentation
 

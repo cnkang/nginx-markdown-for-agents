@@ -78,6 +78,22 @@ REASON_REQUIRED_FIELDS = frozenset({
 })
 
 
+def _validate_legacy_keys(index: int, entry: dict) -> list[str]:
+    """Validate optional compatibility aliases on one reason entry."""
+    aliases = entry.get("legacy_keys", [])
+    if not isinstance(aliases, list):
+        return [f"reasons[{index}] legacy_keys must be an array"]
+    invalid = [alias for alias in aliases
+               if not isinstance(alias, str) or not alias]
+    if invalid:
+        return [
+            f"reasons[{index}] legacy_keys contains invalid values: {invalid!r}"
+        ]
+    if len(set(aliases)) != len(aliases):
+        return [f"reasons[{index}] legacy_keys contains duplicates"]
+    return []
+
+
 def _validate_discriminant(
     index: int,
     discriminant: object,
@@ -186,6 +202,7 @@ def _validate_reason_entry(
     )
     errors.extend(_validate_reason_key(index, key, discriminant, seen_keys))
     errors.extend(_validate_reason_metadata(index, entry))
+    errors.extend(_validate_legacy_keys(index, entry))
     return errors
 
 
@@ -197,12 +214,22 @@ def _validate_reasons(reasons: object) -> list[str]:
     errors: list[str] = []
     seen_discriminants: dict[int, str] = {}
     seen_keys: dict[str, object] = {}
+    seen_legacy_keys: dict[str, int] = {}
     for index, entry in enumerate(reasons):
         errors.extend(
             _validate_reason_entry(
                 index, entry, seen_discriminants, seen_keys
             )
         )
+        if isinstance(entry, dict):
+            for alias in entry.get("legacy_keys", []):
+                if alias in seen_legacy_keys:
+                    errors.append(
+                        f"duplicate legacy reason key {alias!r}: "
+                        f"entries {seen_legacy_keys[alias]} and {index}"
+                    )
+                else:
+                    seen_legacy_keys[alias] = index
 
     expected = set(range(len(reasons)))
     actual = set(seen_discriminants)
@@ -289,7 +316,7 @@ def get_metric_family(key: str) -> str:
     return "markdown_errors_total"
 
 
-# Log callsite descriptions (from the existing reason_code.rs)
+# Log callsite descriptions for the generated Rust projection.
 LOG_CALLSITES = {
     "converted": "body_filter: after successful conversion and downstream NGX_OK",
     "skipped_accept": "header_filter: Accept negotiation determined text/html preferred",
@@ -349,13 +376,13 @@ def generate_rust(reasons, hash_hex: str) -> str:
     lines = []
     lines.append(generate_do_not_edit_header(hash_hex, "rust"))
     lines.append("")
-    lines.append("//! Reason code enum — single source of truth for all decision reason codes.")
+    lines.append("//! Generated reason-code projection for the declarative registry.")
     lines.append("//!")
-    lines.append("//! This module defines the canonical [`ReasonCode`] enum that represents")
-    lines.append("//! every possible outcome of the module's conversion decision chain. It is")
-    lines.append("//! the **single source of truth** for reason codes across the entire system:")
+    lines.append("//! The canonical source is `reason_registry.toml`; this module defines")
+    lines.append("//! the [`ReasonCode`] enum projected from that registry. It represents")
+    lines.append("//! every possible outcome of the module's conversion decision chain.")
     lines.append("//! C code accesses these values through FFI, and all metrics, logging, and")
-    lines.append("//! documentation derive from this enum.")
+    lines.append("//! documentation use the generated projections.")
     lines.append("//!")
     lines.append("//! # FFI Boundary")
     lines.append("//!")
@@ -389,7 +416,7 @@ def generate_rust(reasons, hash_hex: str) -> str:
 def generate_rust_enum(reasons) -> str:
     """Generate the enum definition portion."""
     lines = []
-    lines.append("/// Comprehensive reason code enum — single source of truth.")
+    lines.append("/// Generated reason code enum projected from `reason_registry.toml`.")
     lines.append("///")
     lines.append("/// Every conversion decision path produces exactly one `ReasonCode`.")
     lines.append("/// The numeric discriminants are stable and must not be reordered.")
@@ -471,25 +498,6 @@ def _append_rust_as_str(lines, reasons):
     lines.append("")
 
 
-def _append_metric_family(lines, reasons, family, members):
-    """Append one grouped family arm to the Rust metric-key match."""
-    matching = [reason for reason in reasons if reason["key"] in members]
-    if not matching:
-        return
-    if len(matching) == 1:
-        variant = snake_to_pascal(matching[0]["key"])
-        lines.append(f'            ReasonCode::{variant} => "{family}",')
-        return
-    for index, reason in enumerate(matching):
-        variant = snake_to_pascal(reason["key"])
-        if index == 0:
-            lines.append(f"            ReasonCode::{variant}")
-        elif index < len(matching) - 1:
-            lines.append(f"            | ReasonCode::{variant}")
-        else:
-            lines.append(f'            | ReasonCode::{variant} => "{family}",')
-
-
 def _append_rust_metric_key(lines, reasons):
     """Append the Rust `metric_key` method."""
 
@@ -509,8 +517,13 @@ def _append_rust_metric_key(lines, reasons):
     lines.append("    pub fn metric_key(self) -> &'static str {")
     lines.append(RUST_MATCH_SELF)
 
-    for family, members in METRIC_FAMILIES.items():
-        _append_metric_family(lines, reasons, family, members)
+    # Emit one arm per registry entry.  This keeps the Rust match exhaustive
+    # when a new reason is temporarily absent from METRIC_FAMILIES; the
+    # central classifier still supplies the safe error-family fallback.
+    for reason in reasons:
+        variant = snake_to_pascal(reason["key"])
+        family = get_metric_family(reason["key"])
+        lines.append(f'            ReasonCode::{variant} => "{family}",')
 
     lines.append("        }")
     lines.append("    }")
@@ -940,15 +953,20 @@ def check_drift(path: Path, content: str) -> bool:
 
 def generate_c_header(reasons, hash_hex: str) -> str:
     """Generate the C reason metadata header from the registry."""
+    aliases = [
+        (alias, reason["discriminant"])
+        for reason in reasons
+        for alias in reason.get("legacy_keys", [])
+    ]
     lines = [
         "/*",
         " * Generated by tools/reason-codegen/generate.py — DO NOT EDIT.",
         f" * Source: components/rust-converter/reason_registry.toml (SHA-256: {hash_hex[:16]}...)",
         " *",
-        " * This file provides the canonical reason metadata table consumed",
-        " * by the C diagnostics renderer. It is the single C-side source of",
-        " * truth for outcome/stage/origin mappings, replacing the former",
-        " * hand-maintained ngx_http_markdown_diag_reason_meta[] table.",
+        " * This file provides generated reason metadata and stable discriminants",
+        " * consumed by the C diagnostics renderer and reason accessors. The TOML",
+        " * registry remains the only source; this header replaces former",
+        " * hand-maintained diagnostics reason and compatibility tables.",
         " */",
         "#ifndef MARKDOWN_REASON_META_H",
         "#define MARKDOWN_REASON_META_H",
@@ -965,13 +983,24 @@ def generate_c_header(reasons, hash_hex: str) -> str:
         "",
         f"#define MARKDOWN_REASON_META_COUNT {len(reasons)}",
         "",
+        "/* Stable discriminants projected from the canonical registry. */",
+    ]
+
+    for reason in reasons:
+        lines.append(
+            f"#define MARKDOWN_REASON_CODE_{reason['key'].upper()} "
+            f"{reason['discriminant']}"
+        )
+
+    lines.extend([
+        "",
         "/*",
         " * Reason metadata table (index = discriminant).",
         " * Entry MARKDOWN_REASON_META_COUNT is the unknown sentinel.",
         " */",
         "static const markdown_reason_meta_t",
         "    markdown_reason_meta[MARKDOWN_REASON_META_COUNT + 1] = {",
-    ]
+    ])
 
     for r in reasons:
         disc = r["discriminant"]
@@ -989,6 +1018,27 @@ def generate_c_header(reasons, hash_hex: str) -> str:
         f'    [{len(reasons)}] = {{ "unknown", "failed_closed", '
         f'"delivery", "internal" }},'
     )
+
+    lines.extend([
+        "};",
+        "",
+        "/*",
+        " * Legacy uppercase aliases retained for diagnostics compatibility.",
+        " * This table is generated from each reason's legacy_keys field.",
+        " */",
+        "typedef struct {",
+        "    const char    *key;",
+        "    ngx_int_t      code;",
+        "} markdown_reason_alias_t;",
+        "",
+        f"#define MARKDOWN_REASON_ALIAS_COUNT {len(aliases)}",
+        "",
+        "static const markdown_reason_alias_t",
+        "    markdown_reason_aliases[MARKDOWN_REASON_ALIAS_COUNT] = {",
+    ])
+
+    for alias, code in aliases:
+        lines.append(f'    {{ "{alias}", {code} }},')
 
     lines.extend([
         "};",
