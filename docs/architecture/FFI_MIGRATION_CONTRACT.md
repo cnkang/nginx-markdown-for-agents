@@ -1,10 +1,10 @@
-# FFI Migration Contract — Historical v0.9.1 Baseline
+# FFI Migration Contract — Historical v0.9.1 / Final v0.9.2
 
 ## Purpose and ownership
 
-This document inventories the coordinated Rust↔C boundary after the v0.9.1
-pre-v1 reset. Rust owns conversion and pure decision logic. C owns NGINX
-lifecycle, pools, chains, filters, headers, and request finalization.
+This document inventories the coordinated Rust↔C boundary after the v0.9.2
+release post-freeze. Rust owns conversion and pure decision logic. C owns
+NGINX lifecycle, pools, chains, filters, headers, and request finalization.
 
 This is a bundled internal ABI, not an external converter SDK. The canonical
 declarations are Rust source plus the generated header. The NGINX module is
@@ -49,7 +49,7 @@ The canonical reason-code source is
 Reason-code variants and discriminants must remain synchronized across this
 boundary.
 
-## Removed v0.9.1 entries
+## Historical v0.9.1 removals
 
 | Removed entry | Evidence | Replacement |
 |---------------|----------|-------------|
@@ -67,6 +67,11 @@ boundary.
 | `markdown_get_diagnostics_schema`, `markdown_free_diagnostics` | Separate Rust specimen drifted from the C endpoint | C diagnostics renderer and schema document |
 | `markdown_incremental_new`, `markdown_streaming_new` | Redundant wrappers hid constructor error codes | Corresponding `_new_with_code` exports |
 | `markdown_streaming_finish`, `markdown_streaming_free`, `markdown_streaming_reason` | No production caller; duplicated finalize/abort/error-code paths | `finalize`, `abort`, `safe_finish`, and return codes |
+
+## Final v0.9.2 removals
+
+| Removed entry | Evidence | Replacement |
+|---------------|----------|-------------|
 | Profile/conflict FFI snapshots and `markdown_*conflicts` | No production C consumer; the pre-v1 profile model was not part of the active request boundary | C owns the active merged configuration and Rust exposes only consumed request-path decisions |
 
 ## Shared struct policy
@@ -74,9 +79,9 @@ boundary.
 ### `MarkdownOptions` and `StreamingOptions`
 
 These remain separate because their lifecycles and consumers differ. Repeated
-semantic fields must update together, but v0.9.1 does not combine the
+semantic fields must update together, but the final v0.9.2 contract does not combine the
 structs merely for aesthetic deduplication. Both flavor fields accept only 0
-(CommonMark) and 1 (GFM).
+(CommonMark) and 1 (GFM) in the final v0.9.2 contract.
 
 ### Results and handles
 
@@ -114,8 +119,9 @@ free Rust-owned memory.
 
 ## v1 freeze
 
-After v0.9.1, existing layouts, discriminants, ownership rules, and export
-signatures are frozen for the bundled v1 contract. Prefer new structs or
+After the v0.9.2 release post-freeze, existing layouts, discriminants,
+ownership rules, and export signatures are frozen for the bundled v1 contract.
+Prefer new structs or
 exports for additive work. Any permitted incompatible change increments
 `MARKDOWN_ABI_VERSION`, updates both halves atomically, adds mismatch and layout
 tests, and the release notes call it out as breaking behavior.
