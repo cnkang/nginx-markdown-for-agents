@@ -757,13 +757,17 @@ http {
             proxy_pass http://127.0.0.1:${UPSTREAM_PORT}/;
         }
 
+        # streaming_buffer is the per-request working/replay budget, not an
+        # upstream chunk-size setting. Keep the normal conversion routes at
+        # the full smoke budget; the bounded 256 KiB route below is dedicated
+        # to fail-open coverage when that budget is intentionally exhausted.
         location /streaming/ {
             markdown_filter on;
             markdown_accept wildcard;
             markdown_streaming force;
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}
                 parser_memory=${MARKDOWN_MAX_SIZE} conversion_timeout=120s
-                streaming_buffer=256k;
+                streaming_buffer=${MARKDOWN_MAX_SIZE};
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -779,7 +783,7 @@ http {
             markdown_streaming force;
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}
                 parser_memory=${MARKDOWN_MAX_SIZE} conversion_timeout=120s
-                streaming_buffer=256k;
+                streaming_buffer=${MARKDOWN_MAX_SIZE};
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -790,6 +794,8 @@ http {
         }
 
         location /streaming-256k/ {
+            # This route intentionally exercises the bounded working/replay
+            # budget and must preserve the compressed fail-open contract.
             markdown_filter on;
             markdown_accept wildcard;
             markdown_streaming force;
@@ -864,9 +870,9 @@ get_metric_value() {
       metric_family="nginx_markdown_decompression_events_total"
       metric_selector='outcome="failure",reason="budget_exceeded"'
       ;;
-    streaming.postcommit_failed_total)
-      # Post-commit failures are terminal conversion failures, not fail-open
-      # deliveries; the frozen request outcome is failed_closed.
+    streaming.failed_closed_total)
+      # Compatibility alias for the request-level failed_closed outcome. A
+      # recoverable safe-finish must not classify the request this way.
       metric_family="nginx_markdown_requests_total"
       metric_selector='outcome="failed_closed"'
       ;;
@@ -1587,9 +1593,11 @@ assert_truncated_decompression_metric_delta \
   "truncated gzip" "${trunc_gzip_truncated_before}" \
   "${trunc_gzip_format_before}" "${trunc_gzip_io_before}"
 
-echo "==> Case 5b: truncated later gzip member uses post-commit failure semantics"
+echo "==> Case 5b: truncated later gzip member uses post-commit safe-finish semantics"
 gzip_postcommit_errors_before="$(get_metric_value 'streaming.postcommit_error_total')"
-gzip_postcommit_failed_before="$(get_metric_value 'streaming.postcommit_failed_total')"
+gzip_postcommit_failed_closed_before="$(get_metric_value 'streaming.failed_closed_total')"
+gzip_postcommit_succeeded_before="$(get_metric_value 'streaming.succeeded_total')"
+gzip_postcommit_delivery_before="$(get_metric_value 'delivery_count')"
 gzip_postcommit_truncated_before="$(get_metric_value 'decompression_truncated_input_total')"
 gzip_postcommit_format_before="$(get_metric_value 'decompression_format_error_total')"
 gzip_postcommit_io_before="$(get_metric_value 'decompression_io_error_total')"
@@ -1622,15 +1630,27 @@ if grep -q "${GZIP_POSTCOMMIT_LATE_TOKEN}" \
   exit 1
 fi
 gzip_postcommit_errors_after="$(get_metric_value 'streaming.postcommit_error_total')"
-gzip_postcommit_failed_after="$(get_metric_value 'streaming.postcommit_failed_total')"
+gzip_postcommit_failed_closed_after="$(get_metric_value 'streaming.failed_closed_total')"
+gzip_postcommit_succeeded_after="$(get_metric_value 'streaming.succeeded_total')"
+gzip_postcommit_delivery_after="$(get_metric_value 'delivery_count')"
 if [[ "${gzip_postcommit_errors_after}" -ne $((gzip_postcommit_errors_before + 1)) ]]; then
   echo "FAIL: gzip post-commit error count was not exactly one" \
     "(before=${gzip_postcommit_errors_before}, after=${gzip_postcommit_errors_after})" >&2
   exit 1
 fi
-if [[ "${gzip_postcommit_failed_after}" -ne $((gzip_postcommit_failed_before + 1)) ]]; then
-  echo "FAIL: gzip streaming failure count was not exactly one" \
-    "(before=${gzip_postcommit_failed_before}, after=${gzip_postcommit_failed_after})" >&2
+if [[ "${gzip_postcommit_failed_closed_after}" -ne "${gzip_postcommit_failed_closed_before}" ]]; then
+  echo "FAIL: safe-finished gzip was classified as failed_closed" \
+    "(before=${gzip_postcommit_failed_closed_before}, after=${gzip_postcommit_failed_closed_after})" >&2
+  exit 1
+fi
+if [[ "${gzip_postcommit_succeeded_after}" -ne $((gzip_postcommit_succeeded_before + 1)) ]]; then
+  echo "FAIL: safe-finished gzip did not record one streaming delivery" \
+    "(before=${gzip_postcommit_succeeded_before}, after=${gzip_postcommit_succeeded_after})" >&2
+  exit 1
+fi
+if [[ "${gzip_postcommit_delivery_after}" -ne $((gzip_postcommit_delivery_before + 1)) ]]; then
+  echo "FAIL: safe-finished gzip did not record one conversion delivery" \
+    "(before=${gzip_postcommit_delivery_before}, after=${gzip_postcommit_delivery_after})" >&2
   exit 1
 fi
 assert_truncated_decompression_metric_delta \
@@ -1641,10 +1661,10 @@ gzip_postcommit_log_bytes=$((gzip_postcommit_log_size - gzip_postcommit_log_offs
 tail -c "${gzip_postcommit_log_bytes}" "${RUNTIME}/logs/error.log" \
   > "${RAW_DIR}/gzip_postcommit_request.log"
 gzip_postcommit_reason_logs="$(grep -Ec \
-  'reason=STREAMING_FAIL_POSTCOMMIT .*uri=/streaming/postcommit-gzip([[:space:]]|$)' \
+  'reason=STREAMING_CONVERT .*uri=/streaming/postcommit-gzip([[:space:]]|$)' \
   "${RAW_DIR}/gzip_postcommit_request.log" || true)"
 if [[ "${gzip_postcommit_reason_logs}" != "1" ]]; then
-  echo "FAIL: gzip post-commit failure reason must be logged exactly once" \
+  echo "FAIL: safe-finished gzip conversion reason must be logged exactly once" \
     "(count=${gzip_postcommit_reason_logs})" >&2
   exit 1
 fi
@@ -1806,8 +1826,12 @@ echo "  gzip_postcommit_compressed_bytes=${GZIP_POSTCOMMIT_COMPRESSED_LEN}"
 echo "  gzip_postcommit_curl_rc=${gzip_postcommit_curl_rc:-unknown}"
 printf '  gzip_postcommit_error_total=%s->%s\n' \
   "${gzip_postcommit_errors_before:-0}" "${gzip_postcommit_errors_after:-0}"
-printf '  gzip_postcommit_failed_total=%s->%s\n' \
-  "${gzip_postcommit_failed_before:-0}" "${gzip_postcommit_failed_after:-0}"
+printf '  gzip_postcommit_failed_closed_total=%s->%s\n' \
+  "${gzip_postcommit_failed_closed_before:-0}" "${gzip_postcommit_failed_closed_after:-0}"
+printf '  gzip_postcommit_succeeded_total=%s->%s\n' \
+  "${gzip_postcommit_succeeded_before:-0}" "${gzip_postcommit_succeeded_after:-0}"
+printf '  gzip_postcommit_delivery_count=%s->%s\n' \
+  "${gzip_postcommit_delivery_before:-0}" "${gzip_postcommit_delivery_after:-0}"
 echo "  gzip_postcommit_reason_logs=${gzip_postcommit_reason_logs:-0}"
 printf '  gzip_postcommit_worker_pid=%s->%s\n' \
   "${gzip_postcommit_worker_before:-unknown}" \
