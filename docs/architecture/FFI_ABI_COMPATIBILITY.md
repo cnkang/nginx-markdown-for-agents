@@ -41,14 +41,14 @@ Rust owns:
 
 ```text
 MARKDOWN_ABI_VERSION = 2
-MARKDOWN_HEADER_HASH = 0x5345ff0aa2768d82
-MARKDOWN_SYMBOL_SET_HASH = 0x480d8b73c3163e17
-MARKDOWN_LAYOUT_FINGERPRINT = 0x27accfa463b60c3b
+MARKDOWN_HEADER_HASH = 0x1d24bd7fe164e3e3
+MARKDOWN_SYMBOL_SET_HASH = 0x00280b5301cc06a9
+MARKDOWN_LAYOUT_FINGERPRINT = 0x5082868a7afe5890
 
 markdown_abi_version() -> 2
-markdown_abi_header_hash() -> 0x5345ff0aa2768d82
-markdown_abi_symbol_set_hash() -> 0x480d8b73c3163e17
-markdown_abi_layout_fingerprint() -> 0x27accfa463b60c3b
+markdown_abi_header_hash() -> 0x1d24bd7fe164e3e3
+markdown_abi_symbol_set_hash() -> 0x00280b5301cc06a9
+markdown_abi_layout_fingerprint() -> 0x5082868a7afe5890
 ```
 
 `cbindgen` emits all declarations into the generated header. During NGINX
