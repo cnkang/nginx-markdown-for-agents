@@ -63,7 +63,7 @@ warnings=0
 
 function_contains_line() {
     local file="$1" target_line="$2" name_pattern="$3"
-    local start end depth
+    local start end
 
     start="$(grep -nE "^[[:space:]]*(static[[:space:]]+)?[^;]*${name_pattern}[[:space:]]*\\(" "${file}" \
         2>/dev/null | awk -F: -v target="${target_line}" '$1 <= target { line = $1 } END { if (line != "") print line }' || true)"
