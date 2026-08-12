@@ -52,13 +52,26 @@ def test_guard_stack_preserves_ifndef_else_and_elif_polarity() -> None:
     assert guards == ["OTHER"]
 
 
-def test_guard_stack_accepts_whitespace_without_backtracking_patterns() -> None:
+def test_guard_stack_accepts_whitespace_in_directives() -> None:
     """Guard parsing preserves names with spaced preprocessor expressions."""
     guards: list[str] = []
 
     detector._update_guard_stack(" \t#if\tdefined ( FEATURE )  ", guards)
 
     assert guards == ["FEATURE"]
+
+
+def test_guard_stack_ignores_non_directive_and_incomplete_lines() -> None:
+    """Only complete conditional directives change the guard stack."""
+    guards: list[str] = []
+
+    detector._update_guard_stack("#ifdef FEATURE", guards)
+    detector._update_guard_stack("text #ifdef FEATURE", guards)
+    detector._update_guard_stack("#if", guards)
+    detector._update_guard_stack("#ifdefined FEATURE", guards)
+    detector._update_guard_stack("#endif/* comment */", guards)
+
+    assert guards == []
 
 
 @pytest.mark.parametrize(

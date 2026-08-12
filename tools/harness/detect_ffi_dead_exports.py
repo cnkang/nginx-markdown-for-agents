@@ -102,18 +102,6 @@ HEADER_CONTROL_KEYWORDS = frozenset(
 # Function pointer pattern: assigned to a variable or struct field.
 FN_POINTER_RE = re.compile(r"\b(markdown_\w+)\b")
 
-# Conditional compilation guard patterns.  A leading ``!`` records an
-# ``#ifndef``/else branch so callers can distinguish the actual compilation
-# branch instead of treating every guard as a positive feature requirement.
-# The expression capture is a single line character class rather than a lazy
-# dot paired with trailing whitespace, keeping scans linear for long guards.
-IFDEF_RE = re.compile(
-    r"^[ \t]*#[ \t]*(if|ifdef|ifndef)[ \t]+([^\r\n]*)$"
-)
-ELSE_RE = re.compile(r"^\s*#\s*else\b", re.MULTILINE)
-ELIF_RE = re.compile(r"^[ \t]*#[ \t]*elif[ \t]+([^\r\n]*)$")
-ENDIF_RE = re.compile(r"^\s*#\s*endif\b", re.MULTILINE)
-
 # Guards that are header-include guards and should not be tracked as feature
 # guards for the purpose of conditional compilation classification.
 HEADER_INCLUDE_GUARDS = frozenset({
@@ -248,20 +236,52 @@ def _read_text(path: Path) -> str | None:
         return None
 
 
+def _parse_guard_directive(line: str) -> tuple[str, str] | None:
+    """Return a preprocessor directive and expression from one source line."""
+    directive_line = line.lstrip(" \t")
+    if not directive_line.startswith("#"):
+        return None
+
+    directive_text = directive_line[1:].lstrip(" \t")
+    directive_end = 0
+    while (
+        directive_end < len(directive_text)
+        and (directive_text[directive_end].isalnum()
+             or directive_text[directive_end] == "_")
+    ):
+        directive_end += 1
+    if directive_end == 0:
+        return None
+
+    directive = directive_text[:directive_end]
+    expression = directive_text[directive_end:].lstrip(" \t")
+    if directive in {"else", "endif"}:
+        return directive, ""
+    if directive not in {"if", "ifdef", "ifndef", "elif"}:
+        return None
+    if not expression:
+        return None
+    return directive, expression
+
+
 def _update_guard_stack(line: str, active_guards: list[str]) -> None:
     """Track conditional compilation state for one source line."""
-    if ENDIF_RE.match(line):
+    parsed = _parse_guard_directive(line)
+    if parsed is None:
+        return
+
+    directive, expression = parsed
+    if directive == "endif":
         if active_guards:
             active_guards.pop()
         return
 
-    elif_match = ELIF_RE.match(line)
-    if elif_match:
+    if directive == "elif":
         if active_guards:
-            active_guards[-1] = _guard_token(elif_match.group(1))
+            active_guards[-1] = _guard_token(expression)
         return
 
-    if ELSE_RE.match(line):
+    if directive == "else":
         if active_guards:
             current = active_guards[-1]
             active_guards[-1] = (
@@ -269,9 +289,7 @@ def _update_guard_stack(line: str, active_guards: list[str]) -> None:
             )
         return
 
-    ifdef_match = IFDEF_RE.match(line)
-    if ifdef_match:
-        directive, expression = ifdef_match.groups()
+    if directive in {"if", "ifdef", "ifndef"}:
         active_guards.append(
             _guard_token(expression, negate=directive == "ifndef")
         )
