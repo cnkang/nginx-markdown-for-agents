@@ -13,10 +13,13 @@
 
 #include "../include/test_common.h"
 
+#include <arpa/inet.h>
 #include <fcntl.h>
+#include <netinet/in.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #define MARKDOWN_STREAMING_ENABLED 1
@@ -44,8 +47,38 @@
 #ifndef NGX_LOG_INFO
 #define NGX_LOG_INFO 3
 #endif
+#ifndef NGX_LOG_ERR
+#define NGX_LOG_ERR 1
+#endif
+#ifndef NGX_LOG_DEBUG
+#define NGX_LOG_DEBUG 8
+#endif
 #ifndef NGX_LOG_WARN
 #define NGX_LOG_WARN 2
+#endif
+#ifndef NGX_HTTP_GET
+#define NGX_HTTP_GET 0x0002
+#endif
+#ifndef NGX_HTTP_HEAD
+#define NGX_HTTP_HEAD 0x0004
+#endif
+#ifndef NGX_HTTP_OK
+#define NGX_HTTP_OK 200
+#endif
+#ifndef NGX_HTTP_NOT_ALLOWED
+#define NGX_HTTP_NOT_ALLOWED 405
+#endif
+#ifndef NGX_HTTP_INTERNAL_SERVER_ERROR
+#define NGX_HTTP_INTERNAL_SERVER_ERROR 500
+#endif
+#ifndef NGX_HTTP_FORBIDDEN
+#define NGX_HTTP_FORBIDDEN 403
+#endif
+#ifndef NGINX_VERSION
+#define NGINX_VERSION "1.26.3"
+#endif
+#ifndef ngx_pid
+#define ngx_pid 1234
 #endif
 #ifndef NGX_HTTP_TOO_MANY_REQUESTS
 #define NGX_HTTP_TOO_MANY_REQUESTS 429
@@ -84,6 +117,55 @@ struct ngx_cycle_s {
     ngx_log_t  *log;
 };
 
+typedef struct ngx_connection_s ngx_connection_t;
+
+struct ngx_connection_s {
+    ngx_log_t        *log;
+    struct sockaddr  *sockaddr;
+};
+
+typedef struct {
+    ngx_uint_t  hash;
+    ngx_str_t   key;
+    ngx_str_t   value;
+} ngx_table_elt_t;
+
+typedef struct ngx_list_part_s ngx_list_part_t;
+
+struct ngx_list_part_s {
+    void            *elts;
+    ngx_uint_t       nelts;
+    ngx_list_part_t *next;
+};
+
+typedef struct {
+    ngx_list_part_t  part;
+    ngx_list_part_t *last;
+} ngx_list_t;
+
+struct ngx_chain_s {
+    ngx_buf_t   *buf;
+    ngx_chain_t *next;
+};
+
+typedef struct {
+    ngx_uint_t  status;
+    size_t      content_type_len;
+    ngx_str_t   content_type;
+    u_char     *content_type_lowcase;
+    off_t       content_length_n;
+    ngx_list_t  headers;
+} ngx_http_headers_out_t;
+
+struct ngx_http_request_s {
+    ngx_uint_t              method;
+    ngx_pool_t             *pool;
+    ngx_connection_t       *connection;
+    ngx_http_headers_out_t  headers_out;
+    ngx_http_request_t     *main;
+    void                    *loc_conf;
+};
+
 ngx_module_t ngx_http_markdown_filter_module;
 ngx_str_t ngx_http_markdown_metrics_shm_name = ngx_string("");
 ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
@@ -92,6 +174,12 @@ ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
 #define ngx_memcpy(dst, src, n) memcpy((dst), (src), (n))
 #define ngx_strlen(s) strlen((const char *) (s))
 #define ngx_close_file(fd) close(fd)
+#define ngx_strcmp(s1, s2) strcmp((const char *) (s1), (const char *) (s2))
+#define ngx_str_set(str, text)                         \
+    do {                                               \
+        (str)->len = sizeof(text) - 1;                 \
+        (str)->data = (u_char *) (text);               \
+    } while (0)
 
 #define NGX_MAX_PATH 1024
 #define NGX_FILE_ERROR (-1)
@@ -109,22 +197,25 @@ static int g_read_fail;
 static int g_alloc_fail;
 static int g_invalid_digest;
 static off_t g_forced_size = -1;
+static ngx_uint_t g_masked_fields_warns;
 
 static void
-test_log_ignore(const char *fmt, ...)
+test_log_capture(ngx_uint_t level, const char *fmt)
 {
-    UNUSED(fmt);
+    if (level == NGX_LOG_WARN && fmt != NULL
+        && strstr(fmt, "masked by") != NULL)
+    {
+        g_masked_fields_warns++;
+    }
 }
 
 #undef ngx_log_error
 #define ngx_log_error(level, log, err, fmt, ...)             \
     do {                                                     \
+        test_log_capture((level), (fmt));                    \
         UNUSED(level);                                       \
         UNUSED(log);                                         \
         UNUSED(err);                                         \
-        if (0) {                                             \
-            test_log_ignore((fmt), ##__VA_ARGS__);           \
-        }                                                    \
     } while (0)
 
 static ngx_fd_t
@@ -218,6 +309,197 @@ ngx_http_markdown_record_dynconf_reload(ngx_uint_t error_code)
 #include "../../src/markdown_converter.h"
 #include "../../src/ngx_http_markdown_dynconf_impl.h"
 
+static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher;
+static ngx_http_markdown_metrics_t *ngx_http_markdown_metrics;
+
+ngx_atomic_uint_t
+ngx_http_markdown_pending_output_current(void)
+{
+    return 0;
+}
+
+static ngx_atomic_int_t
+ngx_http_markdown_inflight_current(void)
+{
+    return 0;
+}
+
+static ngx_atomic_int_t
+ngx_http_markdown_inflight_overload_total(void)
+{
+    return 0;
+}
+
+/* Keep the dynconf accessor production-real while using narrow fixtures for
+ * unrelated diagnostics fields in this focused contract binary. */
+#undef NGINX_MARKDOWN_CONVERTER_H
+#include "../../src/ngx_http_markdown_diagnostics_accessors_impl.h"
+
+void
+ngx_http_markdown_diagnostics_get_effective(
+    const void *opaque_conf, ngx_http_markdown_diag_effective_t *out)
+{
+    const ngx_http_markdown_conf_t *conf;
+
+    if (out == NULL) {
+        return;
+    }
+    memset(out, 0, sizeof(*out));
+    conf = (const ngx_http_markdown_conf_t *) opaque_conf;
+    if (conf == NULL) {
+        return;
+    }
+    out->filter = conf->enabled;
+    out->prune_noise = conf->advanced.prune_noise;
+    out->log_verbosity = conf->policy.log_verbosity;
+    out->error_policy = conf->on_error;
+    out->error_status = conf->error_status;
+    out->streaming_buffer = conf->stream.budget;
+}
+
+ngx_int_t
+ngx_http_markdown_diagnostics_get_static_digest(
+    const void *request, ngx_pool_t *pool, u_char *out, size_t out_len)
+{
+    static const u_char digest[] =
+        "sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
+
+    UNUSED(request);
+    UNUSED(pool);
+    if (out == NULL || out_len < sizeof(digest)) {
+        return NGX_ERROR;
+    }
+    memcpy(out, digest, sizeof(digest));
+    return NGX_OK;
+}
+
+ngx_int_t
+ngx_http_markdown_get_reason_code_str(uint32_t code, ngx_str_t *out_str)
+{
+    static u_char reason[] = "converted";
+
+    UNUSED(code);
+    if (out_str == NULL) {
+        return NGX_ERROR;
+    }
+    out_str->data = reason;
+    out_str->len = sizeof(reason) - 1;
+    return NGX_OK;
+}
+
+static void *
+ngx_palloc(ngx_pool_t *pool, size_t size)
+{
+    UNUSED(pool);
+    return malloc(size);
+}
+
+static ngx_table_elt_t g_diagnostics_header;
+
+static void *
+ngx_list_push(ngx_list_t *list)
+{
+    UNUSED(list);
+    memset(&g_diagnostics_header, 0, sizeof(g_diagnostics_header));
+    return &g_diagnostics_header;
+}
+
+static void *
+ngx_http_get_module_loc_conf(ngx_http_request_t *request, ngx_module_t module)
+{
+    UNUSED(module);
+    return request == NULL ? NULL : request->loc_conf;
+}
+
+static ngx_int_t
+ngx_http_discard_request_body(ngx_http_request_t *request)
+{
+    UNUSED(request);
+    return NGX_OK;
+}
+
+static ngx_int_t
+ngx_http_send_header(ngx_http_request_t *request)
+{
+    UNUSED(request);
+    return NGX_OK;
+}
+
+static ngx_int_t
+ngx_http_output_filter(ngx_http_request_t *request, ngx_chain_t *out)
+{
+    UNUSED(request);
+    UNUSED(out);
+    return NGX_OK;
+}
+
+static u_char *
+ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...)
+{
+    char translated[1024];
+    char *dst;
+    const char *src;
+    va_list args;
+    int n;
+    size_t remaining;
+
+    if (buf == NULL || last == NULL || buf >= last || fmt == NULL) {
+        return last;
+    }
+
+    dst = translated;
+    remaining = sizeof(translated);
+    for (src = fmt; *src != '\0' && remaining > 1; src++) {
+        if (*src == '%' && src[1] == 'P') {
+            *dst++ = '%';
+            *dst++ = 'd';
+            src++;
+            remaining -= 2;
+        } else if (*src == '%' && src[1] == 'M') {
+            *dst++ = '%';
+            *dst++ = 'l';
+            *dst++ = 'u';
+            src++;
+            remaining -= 3;
+        } else if (*src == '%' && src[1] == 'u'
+                   && src[2] == 'A') {
+            *dst++ = '%';
+            *dst++ = 'l';
+            *dst++ = 'u';
+            src += 2;
+            remaining -= 3;
+        } else if (*src == '%' && src[1] == 'u'
+                   && src[2] == 'i') {
+            *dst++ = '%';
+            *dst++ = 'l';
+            *dst++ = 'u';
+            src += 2;
+            remaining -= 3;
+        } else if (*src == '%' && src[1] == 'u'
+                   && src[2] == 'z') {
+            *dst++ = '%';
+            *dst++ = 'z';
+            *dst++ = 'u';
+            src += 2;
+            remaining -= 3;
+        } else {
+            *dst++ = *src;
+            remaining--;
+        }
+    }
+    *dst = '\0';
+
+    va_start(args, fmt);
+    n = vsnprintf((char *) buf, (size_t) (last - buf), translated, args);
+    va_end(args);
+    if (n < 0 || (size_t) n >= (size_t) (last - buf)) {
+        return last;
+    }
+    return buf + n;
+}
+
+#include "../../src/ngx_http_markdown_diagnostics.c"
+
 void
 markdown_dynconf_result_init(FFIDynconfResult *result)
 {
@@ -236,7 +518,10 @@ markdown_dynconf_parse(const uint8_t *data, uintptr_t data_len,
 {
     static const uint8_t digest[] =
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    static const uint8_t digest_v2[] =
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
     static const uint8_t invalid_message[] = "invalid JSON";
+    const uint8_t *selected_digest;
 
     if (data == NULL || data_len == 0
         || (data_len >= sizeof("invalid") - 1
@@ -248,10 +533,18 @@ markdown_dynconf_parse(const uint8_t *data, uintptr_t data_len,
         return;
     }
 
+    selected_digest = digest;
+    if (data_len >= sizeof("{\"schema_version\":2}") - 1
+        && memcmp(data, "{\"schema_version\":2}",
+                  sizeof("{\"schema_version\":2}") - 1) == 0)
+    {
+        selected_digest = digest_v2;
+    }
+
     result->error_code = DYNCONF_OK;
-    result->source_digest = digest;
+    result->source_digest = selected_digest;
     result->source_digest_len = g_invalid_digest ? 63 : 64;
-    result->active_digest = digest;
+    result->active_digest = selected_digest;
     result->active_digest_len = g_invalid_digest ? 63 : 64;
     result->filter = DYNCONF_FILTER_ON;
 }
@@ -280,6 +573,7 @@ reset_state(void)
     g_alloc_fail = 0;
     g_invalid_digest = 0;
     g_forced_size = -1;
+    g_masked_fields_warns = 0;
 }
 
 static void
@@ -486,6 +780,110 @@ test_successful_reload_is_idempotent(const char *path)
     TEST_PASS("production dynconf identical reload is a no-op");
 }
 
+static void
+test_diagnostics_renderer_tracks_dynconf_lkg(const char *path)
+{
+    static const char first_config[] = "{\"schema_version\":1}";
+    static const char second_config[] = "{\"schema_version\":2}";
+    ngx_http_markdown_conf_t conf;
+    ngx_http_markdown_diag_dynconf_t dynconf;
+    ngx_http_request_t request;
+    ngx_connection_t connection;
+    ngx_http_markdown_conf_t *request_conf;
+    ngx_buf_t buffer;
+    ngx_cycle_t cycle;
+    ngx_pool_t pool;
+    ngx_log_t log;
+    ngx_str_t path_str;
+    ngx_int_t rc;
+    char expected_lkg[128];
+    char first_active[NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_LEN];
+    const char *json;
+
+    TEST_SUBSECTION("dynconf watcher to diagnostics renderer contract");
+
+    reset_state();
+    memset(&ngx_http_markdown_dynconf_watcher, 0,
+           sizeof(ngx_http_markdown_dynconf_watcher));
+    write_file(path, first_config);
+    memset(&conf, 0, sizeof(conf));
+    conf.advanced.dynconf_block_mask = NGX_HTTP_MARKDOWN_BLOCK_FILTER;
+    cycle.pool = &pool;
+    cycle.log = &log;
+    path_str.data = (u_char *) path;
+    path_str.len = strlen(path);
+
+    rc = ngx_http_markdown_dynconf_start(
+        &ngx_http_markdown_dynconf_watcher, &cycle, &path_str, &conf, &log);
+    TEST_ASSERT(rc == NGX_OK, "watcher init should apply the first valid file");
+    TEST_ASSERT(ngx_http_markdown_dynconf_watcher.digest_state.generation == 1,
+                "watcher init should publish the first generation");
+    TEST_ASSERT(ngx_http_markdown_dynconf_watcher.digest_state.lkg_valid == 1,
+                "static snapshot should become bootstrap LKG");
+    TEST_ASSERT(ngx_http_markdown_dynconf_watcher.digest_state.lkg_digest[0]
+                == '\0',
+                "bootstrap static LKG must not receive a dynconf digest");
+    TEST_ASSERT(g_masked_fields_warns == 1,
+                "first changed candidate should emit one masked-field warning");
+
+    memcpy(first_active,
+           ngx_http_markdown_dynconf_watcher.digest_state.active_digest,
+           sizeof(first_active));
+
+    memset(&request, 0, sizeof(request));
+    memset(&connection, 0, sizeof(connection));
+    request.pool = &pool;
+    request.connection = &connection;
+    request.main = &request;
+    request_conf = &conf;
+    request.loc_conf = request_conf;
+    connection.log = &log;
+    memset(&buffer, 0, sizeof(buffer));
+    rc = ngx_http_markdown_diagnostics_build_json(&request, &buffer);
+    TEST_ASSERT(rc == NGX_OK, "first diagnostics render should succeed");
+    json = (const char *) buffer.pos;
+    TEST_ASSERT(strstr(json, "\"lkg_digest\":null") != NULL,
+                "bootstrap static LKG must render a JSON null digest");
+    TEST_ASSERT(strstr(json, "\"lkg_digest\":\"\"") == NULL,
+                "bootstrap LKG must not render an empty-string digest");
+    ngx_http_markdown_diagnostics_get_dynconf_state(&dynconf);
+    TEST_ASSERT(dynconf.lkg_valid == 1 && dynconf.lkg_digest[0] == '\0',
+                "real diagnostics accessor must preserve bootstrap empty state");
+
+    write_file(path, second_config);
+    rc = ngx_http_markdown_dynconf_reload(
+        &ngx_http_markdown_dynconf_watcher, &conf, &log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
+                "changed valid file should publish a second generation");
+    TEST_ASSERT(g_masked_fields_warns == 2,
+                "second changed candidate should emit a second warning");
+
+    memset(&buffer, 0, sizeof(buffer));
+    rc = ngx_http_markdown_diagnostics_build_json(&request, &buffer);
+    TEST_ASSERT(rc == NGX_OK, "second diagnostics render should succeed");
+    json = (const char *) buffer.pos;
+    snprintf(expected_lkg, sizeof(expected_lkg),
+             "\"lkg_digest\":\"%s\"", first_active);
+    TEST_ASSERT(strstr(json, expected_lkg) != NULL,
+                "second render must expose the previous active digest as LKG");
+
+    write_file(path, "invalid");
+    rc = ngx_http_markdown_dynconf_reload(
+        &ngx_http_markdown_dynconf_watcher, &conf, &log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE,
+                "invalid file should preserve the previous LKG");
+    memset(&buffer, 0, sizeof(buffer));
+    rc = ngx_http_markdown_diagnostics_build_json(&request, &buffer);
+    TEST_ASSERT(rc == NGX_OK, "failed reload diagnostics render should succeed");
+    json = (const char *) buffer.pos;
+    TEST_ASSERT(strstr(json, "\"state\":\"lkg_preserved\"") != NULL,
+                "failed reload should render the LKG-preserved state");
+    TEST_ASSERT(strstr(json, expected_lkg) != NULL,
+                "failed reload must retain the previous active LKG digest");
+
+    TEST_PASS("Production watcher, accessor, renderer, and schema shape agree");
+}
+
 int
 main(void)
 {
@@ -504,6 +902,7 @@ main(void)
     reset_state();
     test_ffi_paths(path);
     test_successful_reload_is_idempotent(path);
+    test_diagnostics_renderer_tracks_dynconf_lkg(path);
 
     unlink(path);
     TEST_PASS("All dynconf production tests passed");

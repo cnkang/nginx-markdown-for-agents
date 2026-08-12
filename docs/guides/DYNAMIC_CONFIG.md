@@ -166,6 +166,14 @@ When a reload succeeds, the module preserves the previous active snapshot as
 the last-known-good configuration. This happens automatically on every
 successful reload cycle.
 
+After the first successful reload, the module retains the static snapshot as
+the bootstrap LKG when applicable. That snapshot has no dynconf canonical
+digest, so diagnostics renders `configuration.dynconf.lkg_digest` as `null`.
+After each later successful reload, `lkg_digest` identifies the previous
+active dynconf configuration. See
+[`schemas/diagnostics.schema.json`](../../schemas/diagnostics.schema.json) for
+the schema contract.
+
 ### Operator Rollback
 
 The diagnostics endpoint is read-only and accepts only `GET` and `HEAD`. It

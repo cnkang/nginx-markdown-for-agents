@@ -3187,7 +3187,6 @@ ngx_http_markdown_dynconf_stage_candidate(
 
     masked_fields = ngx_http_markdown_dynconf_masked_fields(watcher, result);
     watcher->diagnostic_state.last_masked_fields = masked_fields;
-    ngx_http_markdown_dynconf_log_masked_fields(log, masked_fields);
 
     if (ngx_http_markdown_dynconf_copy_digest(
             source_digest, NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_LEN,
@@ -3341,6 +3340,8 @@ ngx_http_markdown_dynconf_reload(
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE;
     }
 
+    ngx_http_markdown_dynconf_log_masked_fields(
+        log, watcher->diagnostic_state.last_masked_fields);
     ngx_http_markdown_dynconf_publish_candidate(
         watcher, conf, next_source_digest, next_active_digest);
     markdown_dynconf_result_free(&result);

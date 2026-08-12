@@ -1124,10 +1124,15 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     {
         p = ngx_slprintf(p, last,
             "\"generation\":%ui,\"source_digest\":\"%s\","
-            "\"active_digest\":\"%s\",\"lkg_digest\":\"%s\","
-            "\"last_success\":",
+            "\"active_digest\":\"%s\",\"lkg_digest\":",
             dynconf.generation, dynconf.source_digest,
-            dynconf.active_digest, dynconf.lkg_digest);
+            dynconf.active_digest);
+        if (dynconf.lkg_valid && dynconf.lkg_digest[0] != '\0') {
+            p = ngx_slprintf(p, last, "\"%s\"", dynconf.lkg_digest);
+        } else {
+            p = ngx_slprintf(p, last, "null");
+        }
+        p = ngx_slprintf(p, last, ",\"last_success\":");
         if (dynconf.has_last_success) {
             p = ngx_slprintf(p, last, "\"");
             p = ngx_http_markdown_diag_time(p, last,
