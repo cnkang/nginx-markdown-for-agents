@@ -14,8 +14,8 @@ As of the **current release line (0.9.2)**, the project includes a
 streaming-default conversion model with full-buffer fallback,
 Rust-first
 architecture modules for Accept negotiation, conditional requests, decision
-logic, and header plan application, independent decompression budget with parse
-timeout and parser budget directives, read-only runtime diagnostics endpoint,
+logic, and header plan application, unified decompression budget via
+markdown_limits (conversion_memory, parser_memory, decompressed_size), read-only runtime diagnostics endpoint,
 dynconf dry-run and last-known-good failed-reload protection with atomic file
 restore, DEB/RPM packaging pipeline, Kubernetes
 deployment examples, FFI ABI layout verification, CI supply-chain hardening,
@@ -67,7 +67,7 @@ pending until the blocking gates pass.
   - Full-buffer pending chain on NGX_AGAIN with resume (Rule 1).
   - `failopen_completed` flag prevents duplicate finalize (Rule 38).
   - Safe output ordering: alloc→copy→chain→headers→body filter.
-  - `markdown_decompress_max_size` directive: independent decompression
+  - `markdown_limits` directive: unified decompression budget
     budget decoupled from `max_size`.
   - `markdown_parse_timeout` directive (default: 30s).
   - `markdown_parser_budget` directive (default: 64m).

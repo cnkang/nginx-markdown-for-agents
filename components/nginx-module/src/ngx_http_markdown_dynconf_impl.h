@@ -11,7 +11,7 @@
  *   - Dedicated file watcher per worker process
  *   - Coarse-grained polling (1s interval via ngx_event_t timer)
  *   - On mtime change, the timer handler reads and parses the
- *     entire file into a staging snapshot.  If every line parses
+ *     entire file into a staging snapshot.  If the JSON schema parses
  *     and applies successfully, the staging snapshot atomically
  *     replaces the active snapshot.  On any parse error the
  *     staging is discarded and the active snapshot is preserved.
