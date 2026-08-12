@@ -293,14 +293,14 @@ static void
 ngx_http_markdown_update_loc_validation(
     ngx_conf_t *cf, const ngx_http_markdown_conf_t *conf)
 {
-    ngx_http_conf_ctx_t       *http_ctx;
+    const ngx_http_conf_ctx_t *http_ctx;
     ngx_http_markdown_main_conf_t *main_conf;
 
     if (cf == NULL || cf->ctx == NULL) {
         return;
     }
 
-    http_ctx = (ngx_http_conf_ctx_t *) cf->ctx;
+    http_ctx = (const ngx_http_conf_ctx_t *) cf->ctx;
     main_conf = http_ctx->main_conf[
         ngx_http_markdown_filter_module.ctx_index];
     if (main_conf == NULL) {
