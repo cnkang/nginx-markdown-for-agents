@@ -41,12 +41,12 @@ Rust owns:
 
 ```text
 MARKDOWN_ABI_VERSION = 2
-MARKDOWN_HEADER_HASH = 0x8668ab00511610c6
+MARKDOWN_HEADER_HASH = 0x1d24bd7fe164e3e3
 MARKDOWN_SYMBOL_SET_HASH = 0x00280b5301cc06a9
 MARKDOWN_LAYOUT_FINGERPRINT = 0x5082868a7afe5890
 
 markdown_abi_version() -> 2
-markdown_abi_header_hash() -> 0x8668ab00511610c6
+markdown_abi_header_hash() -> 0x1d24bd7fe164e3e3
 markdown_abi_symbol_set_hash() -> 0x00280b5301cc06a9
 markdown_abi_layout_fingerprint() -> 0x5082868a7afe5890
 ```

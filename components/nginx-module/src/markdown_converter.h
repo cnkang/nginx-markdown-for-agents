@@ -1739,7 +1739,7 @@ void markdown_header_plan_init(struct FFIHeaderPlan *result);
  * # Format Codes
  *
  * - `0` = gzip (RFC 1952)
- * - `1` = zlib-wrapped deflate (RFC 1950 carrying RFC 1951 data)
+ * - `1` = deflate (RFC 1951)
  * - `2` = brotli (RFC 7932)
  *
  * # Return Value
