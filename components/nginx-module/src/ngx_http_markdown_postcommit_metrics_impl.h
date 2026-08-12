@@ -83,6 +83,30 @@ ngx_http_markdown_metrics_record_postcommit_safe_finish(void)
         streaming.streaming_failure_postcommit_safe_finish);
 }
 
+/*
+ * Record a terminal abort outcome (delivery confirmed).
+ *
+ * Semantics: this metric counts protocol-safe abort OUTCOMES — i.e.,
+ * the abort terminal chain was confirmed delivered downstream
+ * (NGX_OK or NGX_DONE).  This is distinct from the abort ATTEMPT
+ * counter (streaming_failure_postcommit_abort) which fires at the
+ * first abort attempt regardless of delivery result.
+ *
+ * The v1 requests_total{outcome="aborted"} family uses this counter
+ * to maintain the conservation invariant:
+ *   sum(requests_total) == number of requests
+ * because each request can transition to exactly one terminal outcome.
+ *
+ * Guard: the caller (stream_postcommit_abort) ensures this fires at
+ * most once per request via ctx->streaming.completion.terminal_aborted_recorded.
+ */
+void
+ngx_http_markdown_metrics_record_terminal_abort(void)
+{
+    NGX_HTTP_MARKDOWN_METRIC_INC(
+        streaming.terminal_aborted_total);
+}
+
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
 #endif /* NGX_HTTP_MARKDOWN_POSTCOMMIT_METRICS_IMPL_H */
