@@ -33,11 +33,6 @@
 #define NGX_HTTP_MARKDOWN_LOG_INFO   2
 #define NGX_HTTP_MARKDOWN_LOG_DEBUG  3
 
-#define NGX_HTTP_MARKDOWN_PROFILE_NONE             0
-#define NGX_HTTP_MARKDOWN_PROFILE_STRICT_CACHE     1
-#define NGX_HTTP_MARKDOWN_PROFILE_BALANCED         2
-#define NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST  3
-
 #define NGX_HTTP_MARKDOWN_ACCEPT_STRICT    0
 #define NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD  1
 #define NGX_HTTP_MARKDOWN_ACCEPT_FORCE     2
@@ -188,11 +183,6 @@ typedef struct ngx_http_markdown_conf_s {
         ngx_flag_t    budget_explicit;
         ngx_flag_t    shadow;
     } stream;
-    struct {
-        ngx_uint_t   name;
-        ngx_flag_t   set;
-        ngx_flag_t   cache_validation_explicit;
-    } profile;
 } ngx_http_markdown_conf_t;
 
 typedef struct ngx_http_markdown_effective_conf_s {
@@ -838,7 +828,7 @@ test_diagnostics_has_no_legacy_profile_surface(void)
 
     rc = ngx_http_markdown_diagnostics_build_json(&r, &b);
     TEST_ASSERT(rc == NGX_OK,
-                "balanced profile diagnostics JSON should succeed");
+                "effective configuration diagnostics JSON should succeed");
     json = (const char *) b.pos;
     TEST_ASSERT(strstr(json, "\"profile\"") == NULL
                 && strstr(json, "\"streaming_config\"") == NULL,
@@ -847,7 +837,7 @@ test_diagnostics_has_no_legacy_profile_surface(void)
                 && strstr(json, "\"effective_sources\":") != NULL,
                 "effective configuration must carry the replacement surface");
 
-    TEST_PASS("Balanced profile streaming source is preserved");
+    TEST_PASS("Effective streaming source is preserved");
 }
 
 static void
