@@ -2,11 +2,15 @@
   "schema_version": 1,
   "generator": "tools/reason-codegen/generate.py",
   "source": "components/rust-converter/reason_registry.toml",
-  "source_sha256": "c3e6978cbc2ff8fb364facec818ea406e9827abe6e2daed978a05ec8558f97c3",
+  "source_sha256": "6d395a04ca766c4be1486937c27741c6db6cf8b042a4af5f7672db9da8cbebae",
   "generated_artifacts": [
     {
       "path": "components/rust-converter/src/decision/reason_code.rs",
       "description": "Rust enum with all metadata and FFI exports"
+    },
+    {
+      "path": "components/nginx-module/src/markdown_reason_meta.h",
+      "description": "C reason metadata table for diagnostics"
     },
     {
       "path": "artifacts/release/0.9.2/reason-registry-report.json",

@@ -7,11 +7,14 @@
 #   Outcome x Stage x Reason x ErrorOrigin
 #
 # Outcome is determined at runtime decision time (not statically bound here).
-# Each entry defines: discriminant, key, default_stage, allowed_origins, and
-# operator_visible.
+# Each entry defines: discriminant, key, default_stage, allowed_origins,
+# operator_visible, outcome (static terminal classification), and
+# default_origin (static fallback origin; runtime origin passthrough
+# is a 1.x enhancement).
 #
 # A build-time generator reads this file and produces:
 #   - components/rust-converter/src/decision/reason_code.rs (Rust enum + metadata)
+#   - components/nginx-module/src/markdown_reason_meta.h (C reason metadata table)
 #   - Metrics label arrays
 #   - Diagnostics field mappings
 #   - Count/hash manifest
@@ -22,7 +25,7 @@
 [metadata]
 schema_version = 1
 description = "Canonical reason code registry for nginx-markdown-for-agents"
-generator = "xtask reason-codegen"
+generator = "tools/reason-codegen/generate.py"
 
 # Taxonomy dimensions (reference)
 # Outcome (5): converted, skipped, failed_open, failed_closed, aborted
@@ -37,6 +40,8 @@ key = "converted"
 default_stage = "conversion"
 allowed_origins = []
 operator_visible = true
+outcome = "converted"
+default_origin = "none"
 
 # --- Skip: eligibility ---
 
@@ -46,6 +51,8 @@ key = "skipped_accept"
 default_stage = "eligibility"
 allowed_origins = []
 operator_visible = true
+outcome = "skipped"
+default_origin = "none"
 
 [[reasons]]
 discriminant = 2
@@ -53,6 +60,8 @@ key = "skipped_no_accept"
 default_stage = "eligibility"
 allowed_origins = []
 operator_visible = true
+outcome = "skipped"
+default_origin = "none"
 
 [[reasons]]
 discriminant = 3
@@ -60,6 +69,8 @@ key = "skipped_conditional"
 default_stage = "eligibility"
 allowed_origins = []
 operator_visible = true
+outcome = "skipped"
+default_origin = "none"
 
 # --- Decompression failures ---
 
@@ -69,6 +80,8 @@ key = "decompression_error"
 default_stage = "decompression"
 allowed_origins = ["internal"]
 operator_visible = true
+outcome = "failed_closed"
+default_origin = "internal"
 
 [[reasons]]
 discriminant = 5
@@ -76,6 +89,8 @@ key = "decompression_budget_exceeded"
 default_stage = "decompression"
 allowed_origins = ["memory_budget"]
 operator_visible = true
+outcome = "failed_closed"
+default_origin = "memory_budget"
 
 [[reasons]]
 discriminant = 6
@@ -83,6 +98,8 @@ key = "decompression_format_error"
 default_stage = "decompression"
 allowed_origins = ["format"]
 operator_visible = true
+outcome = "failed_closed"
+default_origin = "format"
 
 [[reasons]]
 discriminant = 7
@@ -90,6 +107,8 @@ key = "decompression_truncated_input"
 default_stage = "decompression"
 allowed_origins = ["truncated"]
 operator_visible = true
+outcome = "failed_closed"
+default_origin = "truncated"
 
 [[reasons]]
 discriminant = 8
@@ -97,6 +116,8 @@ key = "decompression_io_error"
 default_stage = "decompression"
 allowed_origins = ["downstream"]
 operator_visible = true
+outcome = "failed_closed"
+default_origin = "downstream"
 
 # --- Parsing failures ---
 
@@ -106,6 +127,8 @@ key = "timeout"
 default_stage = "parsing"
 allowed_origins = ["timeout"]
 operator_visible = true
+outcome = "failed_closed"
+default_origin = "timeout"
 
 [[reasons]]
 discriminant = 10
@@ -113,6 +136,8 @@ key = "budget_exceeded"
 default_stage = "parsing"
 allowed_origins = ["memory_budget"]
 operator_visible = true
+outcome = "failed_closed"
+default_origin = "memory_budget"
 
 # --- Precommit failures ---
 
@@ -122,6 +147,8 @@ key = "replay_error"
 default_stage = "precommit"
 allowed_origins = ["allocation"]
 operator_visible = true
+outcome = "failed_closed"
+default_origin = "allocation"
 
 # --- Skip: eligibility (continued) ---
 
@@ -131,6 +158,8 @@ key = "skipped_accept_reject"
 default_stage = "eligibility"
 allowed_origins = []
 operator_visible = true
+outcome = "skipped"
+default_origin = "none"
 
 # --- Conversion failures ---
 
@@ -140,6 +169,8 @@ key = "ffi_panic"
 default_stage = "conversion"
 allowed_origins = ["internal"]
 operator_visible = true
+outcome = "failed_closed"
+default_origin = "internal"
 
 # --- Skip: eligibility (continued) ---
 
@@ -149,6 +180,8 @@ key = "not_eligible"
 default_stage = "eligibility"
 allowed_origins = []
 operator_visible = true
+outcome = "skipped"
+default_origin = "none"
 
 [[reasons]]
 discriminant = 15
@@ -156,6 +189,8 @@ key = "disabled"
 default_stage = "eligibility"
 allowed_origins = []
 operator_visible = true
+outcome = "skipped"
+default_origin = "none"
 
 # --- Delivery outcomes ---
 
@@ -165,6 +200,8 @@ key = "failed_open"
 default_stage = "delivery"
 allowed_origins = ["allocation", "downstream", "invariant", "format", "truncated", "timeout", "memory_budget", "internal"]
 operator_visible = true
+outcome = "failed_open"
+default_origin = "downstream"
 
 [[reasons]]
 discriminant = 17
@@ -172,6 +209,8 @@ key = "failed_closed"
 default_stage = "delivery"
 allowed_origins = ["allocation", "downstream", "invariant", "format", "truncated", "timeout", "memory_budget", "internal"]
 operator_visible = true
+outcome = "failed_closed"
+default_origin = "downstream"
 
 # --- Conversion failures (continued) ---
 
@@ -181,6 +220,8 @@ key = "conversion_error"
 default_stage = "conversion"
 allowed_origins = ["internal", "format"]
 operator_visible = true
+outcome = "failed_closed"
+default_origin = "internal"
 
 [[reasons]]
 discriminant = 19
@@ -188,6 +229,8 @@ key = "memory_budget_exceeded"
 default_stage = "conversion"
 allowed_origins = ["memory_budget"]
 operator_visible = true
+outcome = "failed_closed"
+default_origin = "memory_budget"
 
 # --- Eligibility: overload ---
 
@@ -197,6 +240,8 @@ key = "overload"
 default_stage = "eligibility"
 allowed_origins = ["allocation"]
 operator_visible = true
+outcome = "skipped"
+default_origin = "allocation"
 
 # --- Dynconf failures ---
 
@@ -206,6 +251,8 @@ key = "invalid_dynconf"
 default_stage = "dynconf"
 allowed_origins = ["format"]
 operator_visible = true
+outcome = "failed_closed"
+default_origin = "format"
 
 [[reasons]]
 discriminant = 22
@@ -213,6 +260,8 @@ key = "degraded_snapshot"
 default_stage = "dynconf"
 allowed_origins = ["internal"]
 operator_visible = true
+outcome = "failed_closed"
+default_origin = "internal"
 
 # --- Precommit failures (continued) ---
 
@@ -222,6 +271,8 @@ key = "header_plan_apply_error"
 default_stage = "precommit"
 allowed_origins = ["invariant", "allocation"]
 operator_visible = true
+outcome = "failed_closed"
+default_origin = "invariant"
 
 # --- Delivery failures (continued) ---
 
@@ -231,6 +282,8 @@ key = "streaming_mid_flight_error"
 default_stage = "delivery"
 allowed_origins = ["internal", "downstream", "allocation", "invariant"]
 operator_visible = true
+outcome = "aborted"
+default_origin = "internal"
 
 # --- Skip: eligibility (continued) ---
 
@@ -240,6 +293,8 @@ key = "bypass_no_transform"
 default_stage = "eligibility"
 allowed_origins = []
 operator_visible = true
+outcome = "skipped"
+default_origin = "none"
 
 # --- Encoding: malformed Content-Encoding grammar (0.9.2 addition) ---
 # Malformed Content-Encoding grammar uses this key and never reuses the
@@ -253,3 +308,5 @@ key = "encoding_header_invalid"
 default_stage = "decompression"
 allowed_origins = ["format"]
 operator_visible = true
+outcome = "failed_closed"
+default_origin = "format"
