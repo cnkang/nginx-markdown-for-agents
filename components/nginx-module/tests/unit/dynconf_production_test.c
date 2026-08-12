@@ -743,6 +743,7 @@ test_successful_reload_is_idempotent(const char *path)
     reset_state();
     write_file(path, "{\"schema_version\":1}");
     init_watcher(&watcher, &conf, path);
+    conf.advanced.dynconf_block_mask = NGX_HTTP_MARKDOWN_BLOCK_FILTER;
     watcher.active_snapshot.valid = 1;
     watcher.active_snapshot.enabled = 0;
     watcher.active_snapshot.prune_noise = 1;
@@ -754,6 +755,8 @@ test_successful_reload_is_idempotent(const char *path)
                 "first reload should preserve the bootstrap LKG snapshot");
     TEST_ASSERT(watcher.active_snapshot.enabled == 1,
                 "first reload should publish the active snapshot");
+    TEST_ASSERT(g_masked_fields_warns == 1,
+                "first changed candidate should emit one masked-field warning");
 
     generation = watcher.digest_state.generation;
     version = watcher.diagnostic_state.version;
@@ -771,6 +774,8 @@ test_successful_reload_is_idempotent(const char *path)
                 "no-change reload must not update last_success");
     TEST_ASSERT(watcher.active_snapshot.enabled == active_enabled,
                 "no-change reload must preserve active snapshot");
+    TEST_ASSERT(g_masked_fields_warns == 1,
+                "no-change reload must not emit a masked-field warning");
     TEST_ASSERT(g_reload_counts[DYNCONF_OK] == 1,
                 "no-change reload must not increment success metrics");
     TEST_ASSERT(watcher.diagnostic_state.last_result
