@@ -51,8 +51,10 @@ def check_reason_code_count(repo: Path) -> dict:
     the distinct ``encoding_header_invalid`` code, so a prior-version
     regression gate must not reject the newer release solely because its
     registry has grown.  It still verifies that Rust and the production C
-    reason constants expose the same count and that the baseline floor
-    remains present.
+    generated C reason metadata exposes the same count and that the baseline
+    floor remains present. The C projection lives in
+    ``markdown_reason_meta.h``; the older hand-written constants in
+    ``ngx_http_markdown_reason.c`` no longer exist.
     """
     rc_file = repo / "components/rust-converter/src/decision/reason_code.rs"
     if not rc_file.exists():
@@ -70,16 +72,34 @@ def check_reason_code_count(repo: Path) -> dict:
         return {"name": "reason_code_count", "status": "fail",
                 "message": f"Expected at least 26, got {count}"}
 
-    c_file = repo / "components/nginx-module/src/ngx_http_markdown_reason.c"
-    if not c_file.exists():
+    c_meta_file = repo / "components/nginx-module/src/markdown_reason_meta.h"
+    if not c_meta_file.exists():
         return {"name": "reason_code_count", "status": "fail",
-                "message": "ngx_http_markdown_reason.c not found"}
-    c_content = c_file.read_text(encoding="utf-8")
+                "message": "markdown_reason_meta.h not found"}
+    c_content = c_meta_file.read_text(encoding="utf-8")
+    meta_match = re.search(
+        r"^#define\s+MARKDOWN_REASON_META_COUNT\s+(\d+)\s*$",
+        c_content,
+        re.MULTILINE,
+    )
+    if not meta_match:
+        return {"name": "reason_code_count", "status": "fail",
+                "message": "MARKDOWN_REASON_META_COUNT not found"}
+    declared_count = int(meta_match.group(1))
     c_count = len(re.findall(
-        r"^#define\s+REASON_[A-Z0-9_]+\s+\d+",
+        r"^#define\s+MARKDOWN_REASON_CODE_[A-Z0-9_]+\s+\d+\s*$",
         c_content,
         re.MULTILINE,
     ))
+    if c_count != declared_count:
+        return {
+            "name": "reason_code_count",
+            "status": "fail",
+            "message": (
+                "generated C reason metadata count mismatch: "
+                f"declared={declared_count}, entries={c_count}"
+            ),
+        }
     if c_count != count:
         return {
             "name": "reason_code_count",
