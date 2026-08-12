@@ -23,6 +23,7 @@
 #include <time.h>
 
 #include "ngx_http_markdown_diagnostics.h"
+#include "markdown_reason_meta.h"
 #include "ngx_http_markdown_dynconf_snapshot.h"
 #include "ngx_http_markdown_filter_module.h"
 
@@ -925,57 +926,22 @@ ngx_http_markdown_diag_masked_keys(
 }
 
 
-typedef struct {
-    const char *outcome;
-    const char *stage;
-    const char *error_origin;
-} ngx_http_markdown_diag_reason_meta_t;
+/*
+ * Reason metadata is now generated from reason_registry.toml by
+ * tools/reason-codegen/generate.py into markdown_reason_meta.h.
+ * The generated table includes an unknown sentinel at index
+ * MARKDOWN_REASON_META_COUNT with safe defaults (failed_closed /
+ * delivery / internal) — never the "converted" outcome that the
+ * former hand-written table returned for invalid codes.
+ */
 
-static const ngx_http_markdown_diag_reason_meta_t
-    ngx_http_markdown_diag_reason_meta[] = {
-    [0] = { "converted", "eligibility", "invariant" },
-    [1] = { "skipped", "eligibility", "invariant" },
-    [2] = { "skipped", "eligibility", "invariant" },
-    [3] = { "skipped", "eligibility", "invariant" },
-    [4] = { "failed_closed", "decompression", "format" },
-    [5] = { "failed_closed", "decompression", "invariant" },
-    [6] = { "failed_closed", "decompression", "format" },
-    [7] = { "failed_closed", "decompression", "truncated" },
-    [8] = { "failed_closed", "decompression", "invariant" },
-    [9] = { "failed_closed", "parsing", "timeout" },
-    [10] = { "failed_closed", "parsing", "memory_budget" },
-    [11] = { "failed_closed", "precommit", "internal" },
-    [12] = { "skipped", "eligibility", "invariant" },
-    [13] = { "failed_closed", "conversion", "internal" },
-    [14] = { "skipped", "eligibility", "invariant" },
-    [15] = { "skipped", "eligibility", "invariant" },
-    [16] = { "failed_open", "delivery", "downstream" },
-    [17] = { "failed_closed", "delivery", "downstream" },
-    [18] = { "failed_closed", "conversion", "internal" },
-    [19] = { "failed_closed", "conversion", "memory_budget" },
-    [20] = { "skipped", "eligibility", "invariant" },
-    [21] = { "failed_closed", "dynconf", "internal" },
-    [22] = { "failed_closed", "dynconf", "internal" },
-    [23] = { "failed_closed", "precommit", "internal" },
-    [24] = { "aborted", "delivery", "downstream" },
-    [25] = { "skipped", "eligibility", "invariant" },
-    [26] = { "failed_closed", "decompression", "format" }
-};
-
-enum {
-    NGX_HTTP_MARKDOWN_DIAG_REASON_COUNT =
-        sizeof(ngx_http_markdown_diag_reason_meta)
-        / sizeof(ngx_http_markdown_diag_reason_meta[0])
-};
-
-static const ngx_http_markdown_diag_reason_meta_t *
+static const markdown_reason_meta_t *
 ngx_http_markdown_diag_reason_meta_for(ngx_int_t code)
 {
-    if (code < 0 || code >= NGX_HTTP_MARKDOWN_DIAG_REASON_COUNT) {
-        return &ngx_http_markdown_diag_reason_meta[0];
+    if (code < 0 || code >= MARKDOWN_REASON_META_COUNT) {
+        return &markdown_reason_meta[MARKDOWN_REASON_META_COUNT];
     }
-
-    return &ngx_http_markdown_diag_reason_meta[code];
+    return &markdown_reason_meta[code];
 }
 
 static const char *
@@ -985,7 +951,7 @@ ngx_http_markdown_diag_outcome(ngx_int_t code)
 }
 
 static const char *
-ngx_http_markdown_diag_decision_stage(ngx_int_t code)
+ngx_http_markdown_diag_stage(ngx_int_t code)
 {
     return ngx_http_markdown_diag_reason_meta_for(code)->stage;
 }
@@ -995,8 +961,6 @@ ngx_http_markdown_diag_error_origin(ngx_int_t code)
 {
     return ngx_http_markdown_diag_reason_meta_for(code)->error_origin;
 }
-
-
 static ngx_int_t
 ngx_http_markdown_diagnostics_fmt_decisions(
     u_char **pos, u_char *last,

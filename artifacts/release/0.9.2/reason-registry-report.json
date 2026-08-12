@@ -2,7 +2,7 @@
   "schema_version": 1,
   "generator": "tools/reason-codegen/generate.py",
   "source": "components/rust-converter/reason_registry.toml",
-  "source_sha256": "c3e6978cbc2ff8fb364facec818ea406e9827abe6e2daed978a05ec8558f97c3",
+  "source_sha256": "6d395a04ca766c4be1486937c27741c6db6cf8b042a4af5f7672db9da8cbebae",
   "total_count": 27,
   "discriminant_range": {
     "min": 0,
@@ -23,5 +23,12 @@
     "eligibility",
     "parsing",
     "precommit"
+  ],
+  "outcomes": [
+    "aborted",
+    "converted",
+    "failed_closed",
+    "failed_open",
+    "skipped"
   ]
 }
