@@ -3,6 +3,53 @@
 from tools.release.gates import validate_release_gates_090 as validator
 
 
+def _write_reason_count_fixture(tmp_path, *, c_count=27, declared_count=None):
+    """Create the generated Rust/C reason-count boundary used by the gate."""
+    declared_count = c_count if declared_count is None else declared_count
+    rust_path = (
+        tmp_path
+        / "components/rust-converter/src/decision/reason_code.rs"
+    )
+    c_path = tmp_path / "components/nginx-module/src/markdown_reason_meta.h"
+    rust_path.parent.mkdir(parents=True)
+    c_path.parent.mkdir(parents=True)
+    rust_path.write_text(
+        "pub const REASON_CODE_COUNT: usize = 27;\n", encoding="utf-8"
+    )
+    entries = "\n".join(
+        f"#define MARKDOWN_REASON_CODE_CODE_{index} {index}"
+        for index in range(c_count)
+    )
+    c_path.write_text(
+        f"#define MARKDOWN_REASON_META_COUNT {declared_count}\n{entries}\n",
+        encoding="utf-8",
+    )
+
+
+def test_reason_code_count_accepts_generated_c_metadata(tmp_path):
+    """The legacy gate must read the generated C reason projection."""
+    _write_reason_count_fixture(tmp_path)
+
+    result = validator.check_reason_code_count(tmp_path)
+
+    assert result == {
+        "name": "reason_code_count",
+        "status": "pass",
+        "details": {"count": 27},
+    }
+
+
+def test_reason_code_count_rejects_generated_c_metadata_drift(tmp_path):
+    """A generated C count mismatch must fail the legacy regression gate."""
+    _write_reason_count_fixture(tmp_path, c_count=26, declared_count=27)
+
+    result = validator.check_reason_code_count(tmp_path)
+
+    assert result["name"] == "reason_code_count"
+    assert result["status"] == "fail"
+    assert "declared=27, entries=26" in result["message"]
+
+
 def test_production_examples_reject_default_gzip_type_redeclaration(tmp_path):
     """NGINX warns when gzip_types redundantly lists its text/html default."""
     examples = tmp_path / "examples/production"
