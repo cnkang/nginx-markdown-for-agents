@@ -173,8 +173,8 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
             && dynconf_conf->advanced.dynconf_enabled
             && dynconf_conf->advanced.dynconf_path.len > 0)
         {
-            ngx_http_markdown_dynconf_watcher.validation_index =
-                mcf->loc_validation_index;
+            ngx_http_markdown_dynconf_watcher.validation_summary =
+                mcf->loc_validation_summary;
 
             if (ngx_http_markdown_dynconf_start(
                     &ngx_http_markdown_dynconf_watcher,
