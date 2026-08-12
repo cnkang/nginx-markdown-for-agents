@@ -627,9 +627,6 @@
             "timeout",
             "memory_budget",
             "internal",
-            "conversion",
-            "resource_limit",
-            "system",
             null
           ],
           "description": "Error origin dimension. Null when outcome is not a failure."

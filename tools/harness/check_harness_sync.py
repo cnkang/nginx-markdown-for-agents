@@ -334,6 +334,9 @@ def _make_targets(makefile: Path) -> tuple[set[str], str | None]:
     targets: set[str] = set()
     target_name_pattern = re.compile(r"[A-Za-z0-9_.%+-]+")
     for line in text.splitlines():
+        # Recipe bodies and Make assignments are not target declarations.
+        if line.startswith("\t") or ":=" in line.split("#", 1)[0]:
+            continue
         lhs = line.split("#", 1)[0].partition(":")[0].strip()
         if not lhs:
             continue
@@ -367,6 +370,9 @@ def _missing_make_targets(command: str, tokens: list[str], targets: set[str]) ->
             skip_next = False
         elif candidate in {"-C", "-f", "--file"}:
             skip_next = True
+        elif "=" in candidate:
+            # VAR=value overrides are Make options, not target names.
+            continue
         elif not candidate.startswith("-") and candidate not in targets:
             missing.append(
                 f"{command!r}: Make target {candidate!r} is not declared"

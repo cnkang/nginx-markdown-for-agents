@@ -102,13 +102,15 @@ HEADER_CONTROL_KEYWORDS = frozenset(
 # Function pointer pattern: assigned to a variable or struct field.
 FN_POINTER_RE = re.compile(r"\b(markdown_\w+)\b")
 
-# Conditional compilation guard pattern.
-# Matches: #ifdef X, #if defined(X), #if defined X, #ifndef X.
-# Note: for compound expressions, this captures only the first macro/guard.
+# Conditional compilation guard patterns.  A leading ``!`` records an
+# ``#ifndef``/else branch so callers can distinguish the actual compilation
+# branch instead of treating every guard as a positive feature requirement.
 IFDEF_RE = re.compile(
-    r"^\s*#\s*if(?:n?def)?\s+(?:defined\s*\(\s*)?(\w+)", re.MULTILINE
+    r"^\s*#\s*(if|ifdef|ifndef)\s+(.+?)\s*$", re.MULTILINE
 )
-ENDIF_RE = re.compile(r"^\s*#\s*endif", re.MULTILINE)
+ELSE_RE = re.compile(r"^\s*#\s*else\b", re.MULTILINE)
+ELIF_RE = re.compile(r"^\s*#\s*elif\s+(.+?)\s*$", re.MULTILINE)
+ENDIF_RE = re.compile(r"^\s*#\s*endif\b", re.MULTILINE)
 
 # Guards that are header-include guards and should not be tracked as feature
 # guards for the purpose of conditional compilation classification.
@@ -246,12 +248,44 @@ def _read_text(path: Path) -> str | None:
 
 def _update_guard_stack(line: str, active_guards: list[str]) -> None:
     """Track conditional compilation state for one source line."""
+    if ENDIF_RE.match(line):
+        if active_guards:
+            active_guards.pop()
+        return
+
+    elif_match = ELIF_RE.match(line)
+    if elif_match:
+        if active_guards:
+            active_guards[-1] = _guard_token(elif_match.group(1))
+        return
+
+    if ELSE_RE.match(line):
+        if active_guards:
+            current = active_guards[-1]
+            active_guards[-1] = (
+                current[1:] if current.startswith("!") else f"!{current}"
+            )
+        return
+
     ifdef_match = IFDEF_RE.match(line)
     if ifdef_match:
-        active_guards.append(ifdef_match.group(1))
-        return
-    if ENDIF_RE.match(line) and active_guards:
-        active_guards.pop()
+        directive, expression = ifdef_match.groups()
+        active_guards.append(
+            _guard_token(expression, negate=directive == "ifndef")
+        )
+
+
+def _guard_token(expression: str, negate: bool = False) -> str:
+    """Return a compact, polarity-preserving label for a preprocessor guard."""
+    match = re.search(r"defined\s*\(?\s*(\w+)", expression)
+    if match:
+        name = match.group(1)
+    else:
+        token = re.match(r"\w+", expression.strip())
+        name = token.group(0) if token else ""
+    if not name:
+        name = expression.strip().split()[0] if expression.strip() else "unknown"
+    return f"!{name}" if negate else name
 
 
 def _record_callsite(
@@ -506,7 +540,7 @@ def main() -> int:
             if e["classification"] == "dead"
         ]
         print(
-            "ADVISORY: {} dead export(s) found: {}".format(
+            "FAILURE: {} dead export(s) found: {}".format(
                 len(dead_names), ", ".join(dead_names)
             ),
             file=sys.stderr,

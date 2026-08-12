@@ -127,6 +127,17 @@ def test_code_block_excluded_from_prose_scan():
     assert warnings == []
 
 
+def test_literal_fence_marker_inside_code_block_stays_excluded():
+    text = (
+        "```rust\n"
+        'if line.starts_with("```") { in_code_block = !in_code_block; }\n'
+        "The file is edited by the agent; e.g. don't.\n"
+        "```\n"
+    )
+    warnings = cws.audit(text, Path("x.md"), None)
+    assert warnings == []
+
+
 def test_table_row_excluded_from_prose_scan():
     text = "| A | B |\n| the file is edited; e.g. | x |\n"
     warnings = cws.audit(text, Path("x.md"), None)
@@ -161,6 +172,22 @@ def test_limit_caps_warnings():
     text = "The file is edited by the agent; another is checked; a third is read.\n"
     warnings = cws.audit(text, Path("x.md"), limit=1)
     assert len(warnings) == 1
+
+
+@pytest.mark.parametrize(
+    "mode_args",
+    [["--strict"], ["--changed", "--base", "HEAD"], ["--baseline", "0"]],
+)
+def test_limit_is_rejected_for_gate_modes(monkeypatch, mode_args):
+    """A warning display limit must not hide findings from a gate."""
+    monkeypatch.setattr(
+        cws.sys,
+        "argv",
+        ["check_writing_style.py", *mode_args, "--limit", "1"],
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        cws.main()
+    assert exc_info.value.code == 2
 
 
 def test_is_maintained_scope():
@@ -412,8 +439,15 @@ def test_allowlisted_formal_title_exempt():
     assert not any("noun chain" in w for w in warnings)
 
 
-def test_cross_line_allowlisted_noun_chain_exempt():
-    # Cross-line merge of an allowlisted title with neighboring prose.
-    prose = "Send an explicit Prometheus header. See\nPrometheus Metrics Guide for the catalog."
+def test_allowlisted_noun_chain_with_neighboring_capitals_exempt():
+    # A run longer than NOUN_CHAIN_MAX that contains an allowlisted title.
+    prose = "See Prometheus Metrics Guide Now for the catalog."
     warnings = cws.audit(prose, Path("docs/guides/x.md"), None)
     assert not any("noun chain" in w for w in warnings)
+
+
+def test_unallowlisted_noun_chain_is_reported():
+    """A four-word capitalized noun chain must remain visible to the audit."""
+    prose = "Review the Stable Public Surface Contract before release."
+    warnings = cws.audit(prose, Path("docs/guides/x.md"), None)
+    assert any("noun chain" in warning for warning in warnings)

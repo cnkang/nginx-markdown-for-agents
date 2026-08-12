@@ -15,6 +15,7 @@ SCOPE = json.loads(
     (ROOT / "release/scope/short-soak-scope.json").read_text(encoding="utf-8")
 )
 SHA = "a" * 40
+CREATED_AT = "2026-08-12T00:00:00Z"
 
 
 def _scope(duration: float | int) -> dict:
@@ -25,10 +26,11 @@ def _scope(duration: float | int) -> dict:
 
 def test_build_manifest_binds_scope_to_candidate() -> None:
     manifest = generator.build_manifest(
-        SCOPE, SHA, ROOT / "release/scope/short-soak-scope.json"
+        SCOPE, SHA, ROOT / "release/scope/short-soak-scope.json", CREATED_AT
     )
 
     assert manifest["candidate_sha"] == SHA
+    assert manifest["created_at"] == CREATED_AT
     assert manifest["duration_minutes"] == 30
     assert manifest["concurrency"] == 16
     assert manifest["corpus"] == [
@@ -41,7 +43,10 @@ def test_build_manifest_binds_scope_to_candidate() -> None:
 def test_build_manifest_rejects_invalid_candidate_sha() -> None:
     with pytest.raises(ValueError, match="candidate SHA"):
         generator.build_manifest(
-            SCOPE, "not-a-sha", ROOT / "release/scope/short-soak-scope.json"
+            SCOPE,
+            "not-a-sha",
+            ROOT / "release/scope/short-soak-scope.json",
+            CREATED_AT,
         )
 
 
@@ -51,7 +56,10 @@ def test_build_manifest_rejects_missing_scenario_memory() -> None:
 
     with pytest.raises(ValueError, match="all scenario memory"):
         generator.build_manifest(
-            scope, SHA, ROOT / "release/scope/short-soak-scope.json"
+            scope,
+            SHA,
+            ROOT / "release/scope/short-soak-scope.json",
+            CREATED_AT,
         )
 
 
@@ -88,5 +96,8 @@ def test_scope_rejects_boolean_numeric_values(field: str) -> None:
     scope[field] = True
     with pytest.raises(ValueError):
         generator.build_manifest(
-            scope, SHA, ROOT / "release/scope/short-soak-scope.json"
+            scope,
+            SHA,
+            ROOT / "release/scope/short-soak-scope.json",
+            CREATED_AT,
         )

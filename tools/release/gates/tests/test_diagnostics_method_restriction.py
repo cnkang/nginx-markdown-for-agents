@@ -289,11 +289,13 @@ def test_allow_header_value_exact():
     )
 
 
-def test_method_check_is_first_guard():
+def test_access_check_precedes_method_guard():
     """
-    The method check must appear before access control and body handling.
+    Access control must run before method and body handling.
 
-    This ensures that 405 is returned before any other processing occurs.
+    This ensures denied requests do not learn handler behavior through the
+    405 branch, while allowed requests still reject unsupported methods before
+    discarding a request body.
     """
     method_check_pos = _HANDLER_BODY.find("r->method & (NGX_HTTP_GET")
     access_check_pos = _HANDLER_BODY.find("diagnostics_check_access")
@@ -303,8 +305,8 @@ def test_method_check_is_first_guard():
     assert access_check_pos != -1, "Access check not found"
     assert discard_body_pos != -1, "Body discard not found"
 
-    assert method_check_pos < access_check_pos, (
-        "Method check must occur before access control check"
+    assert access_check_pos < method_check_pos, (
+        "Access control check must occur before method handling"
     )
     assert method_check_pos < discard_body_pos, (
         "Method check must occur before body discard"

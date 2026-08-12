@@ -8,7 +8,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HEADER_PATH = REPO_ROOT / "components" / "rust-converter" / "include" / "markdown_converter.h"
 BOUNDARY_RE = re.compile(
-    r"(}\s+(?:FFI|Markdown)\w*;)\n{2,}(?=/\*\*)"
+    r"(}\s+(?:FFI|Markdown)\w*;)\n+(?=/\*\*)"
 )
 
 

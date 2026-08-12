@@ -108,14 +108,20 @@ def test_metric_cardinality_policy_drift_is_reported() -> None:
     inventory = copy.deepcopy(detector.load_inventory())
     actual = detector.extract_metric_contract_from_c()
     metric_name = inventory["metrics"][0]["name"]
-    inventory["metrics"][0]["bounded_cardinality"] = "unbounded"
+    mutated = not actual[
+        metric_name
+    ]["bounded_cardinality"]
+    inventory["metrics"][0]["bounded_cardinality"] = mutated
 
     drift = detector.check_metric_contract(inventory, actual)
 
     assert drift == [
         "metric bounded_cardinality mismatch for {}: "
-        "inventory='unbounded' source='{}'".format(
-            metric_name, actual[metric_name]["bounded_cardinality"])
+        "inventory={!r} source={!r}".format(
+            metric_name,
+            mutated,
+            actual[metric_name]["bounded_cardinality"],
+        )
     ]
 
 

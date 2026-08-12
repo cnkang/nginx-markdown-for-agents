@@ -459,17 +459,44 @@ PY
     while IFS=$'\t' read -r block_name expect label; do
       PREPARED_CONF="${RUNTIME_DIR}/migration_${block_name}"
       PREPARED_HANDLE=0
+      if grep -Eq '^[[:space:]]*http[[:space:]]*\{' \
+          "${BLOCK_DIR}/${block_name}"; then
+        BLOCK_CONTEXT="top"
+      elif grep -Eq '^[[:space:]]*server[[:space:]]*\{' \
+          "${BLOCK_DIR}/${block_name}" \
+          || grep -Eq '^[[:space:]]*markdown_trusted_proxies([[:space:]]|;)' \
+          "${BLOCK_DIR}/${block_name}"; then
+        BLOCK_CONTEXT="http"
+      else
+        BLOCK_CONTEXT="server"
+      fi
       {
         echo "worker_processes 1;"
         echo "error_log logs/error.log crit;"
         echo "pid logs/nginx.pid;"
         echo "events { worker_connections 64; }"
-        echo "http {"
-        echo "    server {"
-        echo "        listen 18180;"
-        cat "${BLOCK_DIR}/${block_name}"
-        echo "    }"
-        echo "}"
+        case "${BLOCK_CONTEXT}" in
+          top)
+            cat "${BLOCK_DIR}/${block_name}"
+            ;;
+          http)
+            echo "http {"
+            cat "${BLOCK_DIR}/${block_name}"
+            echo "}"
+            ;;
+          server)
+            echo "http {"
+            echo "    server {"
+            echo "        listen 18180;"
+            cat "${BLOCK_DIR}/${block_name}"
+            echo "    }"
+            echo "}"
+            ;;
+          *)
+            echo "ERROR: unknown migration block context ${BLOCK_CONTEXT}" >&2
+            exit 1
+            ;;
+        esac
       } > "${PREPARED_CONF}"
       check_conf "migration-guide ${label}" "${expect}" || true
     done < "${MANIFEST}"

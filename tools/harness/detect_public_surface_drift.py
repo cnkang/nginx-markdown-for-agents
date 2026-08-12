@@ -385,7 +385,8 @@ def validate_inventory_schema(inventory):
 
 def _strip_c_comments(text):
     """Remove C comments before parsing the flat command registry."""
-    return re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    without_block_comments = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    return re.sub(r"//[^\n]*", "", without_block_comments)
 
 
 def _directive_registry_block(text):

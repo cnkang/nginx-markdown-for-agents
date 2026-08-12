@@ -4,8 +4,9 @@
   "title": "nginx-markdown-for-agents Dynamic Configuration Precedence v1 Contract",
   "description": "Canonical precedence and provenance contract for dynconf-mutable fields.",
   "schema_version": 1,
-          "allowed_provenance": [
-          "static",
+  "allowed_provenance": [
+    "request_variable",
+    "static",
     "dynconf",
     "http_baseline",
     "default"

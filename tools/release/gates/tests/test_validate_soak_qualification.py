@@ -38,7 +38,7 @@ def test_below_threshold_fails() -> None:
 
 def test_malformed_fails() -> None:
     with pytest.raises(SystemExit, match="malformed|missing-observation"):
-        _run_fixture("soak-qualification-malformed.json")
+        _run_fixture("soak-qualification-schema-invalid.json")
 
 
 def test_blocking_pending_fails() -> None:

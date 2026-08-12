@@ -47,3 +47,17 @@ def test_cargo_default_features_cannot_add_unmanifested_feature() -> None:
     )
 
     assert any("unreviewed" in failure for failure in failures)
+
+
+def test_cargo_dependency_feature_consumers_reject_forbidden_names() -> None:
+    """Target-specific dependency feature requests share the same allowlist."""
+    failures: list[str] = []
+    validator.check_cargo_features(
+        '[features]\n'
+        'default = ["incremental", "streaming", "prune_noise_regions"]\n'
+        '[target."cfg(unix)".dependencies.parser]\n'
+        'version = "1"\nfeatures = ["brotli"]\n',
+        failures,
+    )
+
+    assert any("forbidden Cargo feature name 'brotli'" in failure for failure in failures)

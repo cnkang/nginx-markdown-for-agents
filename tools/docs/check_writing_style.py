@@ -156,7 +156,7 @@ def _prose_only(raw: str) -> str:
     )
     t = re.sub(r"^[ \t]*///[ \t]*```[^\n]*\n?", " ", t, flags=re.M)
     t = re.sub(r"^[ \t]*///[ \t]?", "", t, flags=re.M)
-    t = re.sub(r"```.*?```", " ", t, flags=re.S)
+    t = _strip_fenced_blocks(t)
     t = re.sub(r"<!--.*?-->", " ", t, flags=re.S)
     t = re.sub(r"\|[^\n]*\|", " ", t)
     t = re.sub(r"^\s*#{1,6}\s.*$", " ", t, flags=re.M)
@@ -174,6 +174,27 @@ def _prose_only(raw: str) -> str:
     # items / blockquote lines don't merge into one giant pseudo-sentence.
     t = re.sub(r"[ \t]+", " ", t)
     return t
+
+
+def _strip_fenced_blocks(text: str) -> str:
+    """Replace fenced code blocks without treating code as fence syntax.
+
+    A regex-only replacement closes early when an example contains a literal
+    triple-backtick marker, such as code that detects Markdown fences. Track
+    fence boundaries by line so those literals remain inside the code block.
+    """
+    lines: list[str] = []
+    in_fence = False
+    for line in text.splitlines(keepends=True):
+        is_fence = re.match(r"^[ \t]*```", line) is not None
+        if is_fence:
+            in_fence = not in_fence
+            lines.append(" ")
+        elif in_fence:
+            lines.append(" ")
+        else:
+            lines.append(line)
+    return "".join(lines)
 
 
 # Rule-checklist item line: "- **Title**: ..." or "N. **Title**: ...".
@@ -603,6 +624,13 @@ def main() -> int:
         parser.error("--limit must be non-negative")
     if args.baseline is not None and args.baseline < 0:
         parser.error("--baseline must be non-negative")
+    if args.limit is not None and (
+        args.strict or args.changed or args.baseline is not None
+    ):
+        parser.error(
+            "--limit cannot be combined with a gate mode; it truncates the "
+            "warnings being counted"
+        )
 
     files, base = _select_files(parser, args)
     if args.changed and not files:

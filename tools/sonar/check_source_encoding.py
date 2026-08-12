@@ -205,11 +205,19 @@ def _validate_file(
 
 
 def _audit_tracked(manifest: dict[str, dict[str, Any]]) -> tuple[int, int]:
-    """Audit git-tracked text files.  Returns (exit_code, checked_count)."""
+    """Audit present git-tracked text files.
+
+    ``git ls-files`` also reports paths deleted in an unstaged worktree.  A
+    deletion is a valid transition for a tracked file, so the encoding gate
+    must omit that path until the deletion is staged rather than reporting a
+    misleading read error.
+    """
     files = _run_git_ls_files()
     text_files = [
         p for p in files
-        if _is_text_file(p) and not _should_skip_path(p)
+        if _is_text_file(p)
+        and not _should_skip_path(p)
+        and (_resolve_repository_path(p, "Tracked path").is_file())
     ]
     failures: list[str] = []
 

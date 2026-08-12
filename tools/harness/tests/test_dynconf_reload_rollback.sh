@@ -1,5 +1,8 @@
 #!/bin/bash
 # Regression tests for dynconf_reload_rollback.sh ownership and polling.
+#
+# run_case passes the library path, target path, and private directory to its
+# fixed snippet as $1, $2, and $3. The PID cases below use a different seam.
 
 set -e
 
@@ -244,10 +247,8 @@ KILL_LOG="$TMP_ROOT/kill-stub.log"
 # Run a snippet with kill and ps stubbed so no real process is ever
 # signaled.  The snippet is sourced after the library; stubs override the
 # real kill/ps for the lifetime of the subshell.
-#   $1 = expected exit code
-#   $2 = description
-#   $3 = shell code to run (uses $SCRIPT, $3 as private dir by convention)
-#   $4.. = extra args passed to bash -c as "$@"
+# run_pid_case parameters are: $1 = case name, $2 = expected exit code, and
+# $3 = fixed shell code. The snippet receives only "$SCRIPT" as its $1.
 run_pid_case() {
     local name="$1"
     local expected_rc="$2"

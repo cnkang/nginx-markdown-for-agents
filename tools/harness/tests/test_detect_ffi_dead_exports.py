@@ -40,6 +40,18 @@ def test_guard_stack_handles_nested_ifdef_and_endif() -> None:
     assert guards == ["OUTER"]
 
 
+def test_guard_stack_preserves_ifndef_else_and_elif_polarity() -> None:
+    """Conditional branches must remain distinguishable in callsite records."""
+    guards: list[str] = []
+
+    detector._update_guard_stack("#ifndef FEATURE", guards)
+    assert guards == ["!FEATURE"]
+    detector._update_guard_stack("#else", guards)
+    assert guards == ["FEATURE"]
+    detector._update_guard_stack("#elif defined(OTHER)", guards)
+    assert guards == ["OTHER"]
+
+
 @pytest.mark.parametrize(
     "scanner",
     (detector.scan_c_callsites, detector.scan_test_references),

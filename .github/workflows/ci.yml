@@ -15,6 +15,7 @@ on:
       - "docs/**"
       - "perf/**"
       - "packaging/**"
+      - "release/**"
       - "examples/nginx-configs/**"
       - "examples/kubernetes/**"
       - "examples/production/**"
@@ -43,6 +44,7 @@ on:
       - "docs/**"
       - "perf/**"
       - "packaging/**"
+      - "release/**"
       - "examples/nginx-configs/**"
       - "examples/kubernetes/**"
       - "examples/production/**"
@@ -194,6 +196,7 @@ jobs:
               - '.github/workflows/**'
             contract_gates:
               - 'schemas/**'
+              - 'release/**'
               - 'tools/reason-codegen/**'
             workflows:
               - '.github/workflows/**'

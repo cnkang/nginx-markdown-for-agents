@@ -45,6 +45,13 @@ def _histogram_function(source: str) -> str:
     return match.group(0)
 
 
+def _registry_artifact() -> dict:
+    """Load the generated metrics registry artifact once per test call."""
+    registry_path = REPO_ROOT / "artifacts/release/0.9.2/metrics-registry.json"
+    assert registry_path.is_file(), f"metrics registry artifact missing: {registry_path}"
+    return json.loads(registry_path.read_text(encoding="utf-8"))
+
+
 def test_renderer_boundaries_match_registry() -> None:
     """The C renderer's actual bucket array must match the public registry."""
     source = _histogram_function(_renderer_source())
@@ -93,9 +100,7 @@ def test_v1_mapping_does_not_put_gt_1000ms_in_finite_5s_bucket() -> None:
 
 
 def test_registry_histogram_has_correct_boundaries() -> None:
-    registry_path = REPO_ROOT / "artifacts/release/0.9.2/metrics-registry.json"
-    assert registry_path.is_file(), f"metrics registry artifact missing: {registry_path}"
-    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry = _registry_artifact()
     histograms = [
         family for family in registry.get("families", [])
         if family.get("type") == "histogram"
@@ -107,9 +112,7 @@ def test_registry_histogram_has_correct_boundaries() -> None:
 
 
 def test_registry_histogram_is_only_histogram() -> None:
-    registry_path = REPO_ROOT / "artifacts/release/0.9.2/metrics-registry.json"
-    assert registry_path.is_file(), f"metrics registry artifact missing: {registry_path}"
-    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry = _registry_artifact()
     names = [
         family["name"] for family in registry.get("families", [])
         if family.get("type") == "histogram"

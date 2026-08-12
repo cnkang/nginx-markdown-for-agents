@@ -279,6 +279,7 @@ while IFS= read -r rs_file; do
                 has_static_read = 0
                 has_alloc = 0
                 has_deref_ffi_input = 0
+                has_panic_source = 0
                 body = ""
                 code_body = ""
                 # Track set of sibling names called in the body
@@ -326,6 +327,7 @@ while IFS= read -r rs_file; do
                 if (codeline ~ /[A-Z_][A-Z0-9_]+/) has_static_read = 1
                 if (codeline ~ /Box::new|Box::into_raw|Vec::with_capacity|Vec::new|alloc/) has_alloc = 1
                 if (codeline ~ /unsafe[[:space:]]*\{[[:space:]]*\*/) has_deref_ffi_input = 1
+                if (codeline ~ /panic!?[[:space:]]*\(|unwrap[[:space:]]*\(|expect[[:space:]]*\(|assert!?[[:space:]]*\(/) has_panic_source = 1
                 # Detect calls to any other known FFI export name
                 line = codeline
                 for (sib in global_has_catch) {
@@ -367,7 +369,7 @@ while IFS= read -r rs_file; do
                         category = "direct_catch"
                     } else if (calls_sibling_with_catch) {
                         category = "delegated_catch"
-                    } else if ((has_ptr_write_zeroed || (body ~ /ptr::write[[:space:]]*\(/ && body ~ /FFIDynconfResult[[:space:]]*\{/)) && !has_validate && !has_slice_from_raw && !has_alloc) {
+                    } else if ((has_ptr_write_zeroed || (body ~ /ptr::write[[:space:]]*\(/ && body ~ /FFIDynconfResult[[:space:]]*\{/)) && !has_validate && !has_slice_from_raw && !has_alloc && !has_panic_source) {
                         category = "safe_init_helper"
                     } else if (func_name ~ /_count$/ && !has_validate && !has_alloc && !has_deref_ffi_input && has_static_read) {
                         category = "safe_static_lookup"

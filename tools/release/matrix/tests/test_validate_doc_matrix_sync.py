@@ -126,3 +126,28 @@ def test_tier_normalization_supported_display_label(tmp_path):
 
     diffs = compare_matrices(json_entries, doc_entries)
     assert not diffs, f"Expected no differences but got: {diffs}"
+
+
+def test_load_matrix_entries_retains_source_only_row(tmp_path):
+    """Best-effort source support remains comparable with Source Only docs."""
+    matrix_path = tmp_path / "release-matrix.json"
+    matrix_path.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "nginx_version": "1.26.3",
+                        "libc": "n/a",
+                        "arch": "any",
+                        "artifact_type": "source",
+                        "support_tier": "best-effort",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert load_matrix_entries(matrix_path) == [
+        ("1.26.3", "n/a", "any", "source_only"),
+    ]

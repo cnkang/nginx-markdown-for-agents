@@ -292,6 +292,18 @@ def check_limit_key(
     key: str, handler_src: str, docs: str, result: ValidationResult
 ) -> None:
     """Verify that a frozen markdown_limits key is implemented and documented."""
+    if not handler_src:
+        result.fail(
+            "limits-prerequisite:handler",
+            "config handler source not found; cannot validate markdown_limits keys",
+        )
+        return
+    if not docs:
+        result.fail(
+            "limits-prerequisite:docs",
+            "configuration documentation not found; cannot validate markdown_limits keys",
+        )
+        return
     source_id = f"limits-source:{key}"
     if re.search(rf'"{re.escape(key)}"', handler_src):
         result.pass_(source_id, "nested limit key found in handler")

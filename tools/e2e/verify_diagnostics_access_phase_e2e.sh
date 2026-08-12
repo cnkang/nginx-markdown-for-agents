@@ -111,6 +111,15 @@ sha256_file() {
 
 MODULE_SHA="$(sha256_file "${NGINX_MODULE_SO}")"
 
+stop_case_nginx() {
+  if [[ -n "${NGINX_PID:-}" ]]; then
+    kill "${NGINX_PID}" 2>/dev/null || true
+    wait "${NGINX_PID}" 2>/dev/null || true
+    NGINX_PID=""
+  fi
+  return 0
+}
+
 # ── Run a single access-policy case ───────────────────────────────
 run_case() {
   local policy="$1"
@@ -132,6 +141,7 @@ run_case() {
       ;;
     *)
       echo "ERROR: unknown policy: ${policy}" >&2
+      stop_case_nginx
       return 2
       ;;
   esac
@@ -164,6 +174,7 @@ EOF
   if ! "${NGINX_BIN}" -t -p "${prefix}" -c conf/nginx.conf > "${prefix}/config-test.log" 2>&1; then
     echo "FAIL: nginx -t failed for policy=${policy}" >&2
     cat "${prefix}/config-test.log" >&2
+    stop_case_nginx
     return 1
   fi
 
@@ -190,10 +201,24 @@ EOF
 
   if [[ "${ready}" -ne 1 ]]; then
     echo "FAIL: nginx did not become ready for policy=${policy}" >&2
+    stop_case_nginx
     return 1
   fi
 
   local fail_count=0
+  local loopback_alias_available=1
+  local alias_probe
+  alias_probe="$(curl -sS --interface 127.0.0.2 -o /dev/null -w '%{http_code}' \
+    "http://127.0.0.1:${PORT}/diagnostics" 2>/dev/null || echo "000")"
+  if [[ "${alias_probe}" == "000" ]]; then
+    local primary_probe
+    primary_probe="$(curl -sS -o /dev/null -w '%{http_code}' \
+      "http://127.0.0.1:${PORT}/diagnostics" 2>/dev/null || echo "000")"
+    if [[ "${primary_probe}" != "000" ]]; then
+      loopback_alias_available=0
+      echo "SKIP: 127.0.0.2 is unavailable; skipping allow_deny unauthorized probes" >&2
+    fi
+  fi
 
   # Test each handler with GET and HEAD
   for handler in diagnostics metrics; do
@@ -218,6 +243,7 @@ EOF
           ;;
         *)
           echo "FAIL: unsupported access policy=${policy}" >&2
+          stop_case_nginx
           return 1
           ;;
       esac
@@ -249,6 +275,9 @@ EOF
       local unauth_status
       case "${policy}" in
         allow_deny)
+          if [[ "${loopback_alias_available}" -eq 0 ]]; then
+            continue
+          fi
           if ! unauth_status="$(curl -sS --interface 127.0.0.2 ${method_flag} \
             -o /dev/null -w '%{http_code}' \
             "http://127.0.0.1:${PORT}/${handler}" 2>/dev/null)"; then
@@ -287,16 +316,14 @@ EOF
           ;;
         *)
           echo "FAIL: unsupported access policy=${policy}" >&2
+          stop_case_nginx
           return 1
           ;;
       esac
     done
   done
 
-  # Stop nginx
-  kill "${NGINX_PID}" 2>/dev/null || true
-  wait "${NGINX_PID}" 2>/dev/null || true
-  NGINX_PID=""
+  stop_case_nginx
 
   return "${fail_count}"
 }

@@ -146,7 +146,14 @@ def _validate_family_labels(
     """Validate family label uniqueness and the forbidden-label contract."""
     errors: list[str] = []
     labels = family.get("labels", [])
-    label_names = [label.get("name") for label in labels]
+    label_names: list[str] = []
+    for index, label in enumerate(labels):
+        if not isinstance(label, dict):
+            errors.append(
+                f"Family '{name}' label {index} must be an object"
+            )
+            continue
+        label_names.append(label.get("name"))
     if len(label_names) != len(set(label_names)):
         errors.append(f"Family '{name}' has duplicate label names")
     forbidden = set(constraints.get("forbidden_labels", []))

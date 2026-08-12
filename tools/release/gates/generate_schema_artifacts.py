@@ -5,8 +5,9 @@ Generates the three release artifacts consumed by ``validate_schema_drift.py``
 from checked-in canonical contracts and implementation cross-checks:
 
 - ``metrics-registry.json`` — projected from
-  ``schemas/metrics-v1.registry.json`` and cross-checked against the v1
-  renderer header (``components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h``).
+  ``schemas/metrics-v1.registry.json``.  The renderer-header comparison is
+  performed by ``validate_schema_drift.py`` through
+  ``validate_metrics_registry.py`` after generation.
 - ``diagnostics-field-contract.json`` — derived from
   ``schemas/diagnostics.schema.json`` (``effective_config`` definition).
 - ``dynconf-precedence-report.json`` — projected from

@@ -188,10 +188,13 @@ def test_reason_code_registry_rejects_malformed_source(tmp_path: Path) -> None:
 
 def test_reason_code_registry_rejects_duplicate_discriminants(tmp_path: Path) -> None:
     """Duplicate Rust discriminants must not be hidden by dictionary parsing."""
+    last_index = validator.EXPECTED_REASON_CODE_COUNT - 1
     _write_reason_fixture(
         tmp_path,
         source_edit=lambda source: source.replace(
-            "Code25 = 25,", "Code25 = 24,"),
+            f"Code{last_index} = {last_index},",
+            f"Code{last_index} = {last_index - 1},",
+        ),
     )
 
     result = validator.check_reason_code_registry(tmp_path)
@@ -205,7 +208,10 @@ def test_reason_code_registry_rejects_all_array_ordering(tmp_path: Path) -> None
     result_path = tmp_path
     _write_reason_fixture(
         result_path,
-        all_names=["Code1", "Code0"] + [f"Code{index}" for index in range(2, 26)],
+        all_names=["Code1", "Code0"] + [
+            f"Code{index}"
+            for index in range(2, validator.EXPECTED_REASON_CODE_COUNT)
+        ],
     )
 
     result = validator.check_reason_code_registry(result_path)

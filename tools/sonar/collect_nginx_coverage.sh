@@ -1367,16 +1367,56 @@ curl -sS -H 'Accept: ' \
 
 # ── Extended Prometheus scenarios (coverage for ngx_http_markdown_prometheus_impl.h) ──
 
+check_prometheus_response() {
+  # Verify the frozen Prometheus response contract for one Accept variant.
+  #
+  # Arguments:
+  #   $1 - short case label used for temporary artifact names
+  #   $2 - optional Accept header value
+  #
+  # The endpoint must return HTTP 200, a text/plain Prometheus content type,
+  # and at least one metric-family line in the body. This keeps coverage from
+  # proving only that curl received a status code.
+  local case_label="$1"
+  local accept_header="${2:-}"
+  local header_file="${RUNTIME}/prometheus-${case_label}.headers"
+  local body_file="${RUNTIME}/prometheus-${case_label}.body"
+  local status content_type
+  local -a curl_args
+
+  curl_args=(-sS -D "${header_file}" -o "${body_file}")
+  if [[ -n "${accept_header}" ]]; then
+    curl_args+=(-H "${accept_header}")
+  fi
+  status="$(curl "${curl_args[@]}" \
+    "http://127.0.0.1:${PORT}/metrics-prometheus" -w '%{http_code}')"
+  if [[ "${status}" != "200" ]]; then
+    echo "ERROR: Prometheus ${case_label} returned HTTP ${status}" >&2
+    return 1
+  fi
+  content_type="$(awk -F': ' 'tolower($1) == "content-type" { print tolower($2) }' \
+    "${header_file}" | tr -d '\r' | tail -n 1)"
+  if [[ "${content_type}" != text/plain* ]]; then
+    echo "ERROR: Prometheus ${case_label} content type was ${content_type}" >&2
+    return 1
+  fi
+  if ! grep -qE '^# (HELP|TYPE) nginx_markdown_' "${body_file}" \
+      || ! grep -qE '^nginx_markdown_[A-Za-z0-9_]+' "${body_file}"; then
+    echo "ERROR: Prometheus ${case_label} body is not metric text" >&2
+    return 1
+  fi
+  echo "  prometheus ${case_label}: HTTP ${status}, ${content_type}" >&2
+  return 0
+}
+
 # Prometheus: explicit text 0.0.4 Accept
-curl -sS -H 'Accept: text/plain; version=0.0.4' \
-  "http://127.0.0.1:${PORT}/metrics-prometheus" -o /dev/null -w "  prometheus openmetrics: HTTP %{http_code}\n"
+check_prometheus_response "openmetrics" 'Accept: text/plain; version=0.0.4'
 
 # Prometheus: arbitrary Accept still returns the frozen format
-curl -sS -H 'Accept: application/openmetrics-text; version=1.0.0' \
-  "http://127.0.0.1:${PORT}/metrics-prometheus" -o /dev/null -w "  prometheus arbitrary-accept: HTTP %{http_code}\n"
+check_prometheus_response "arbitrary-accept" 'Accept: application/openmetrics-text; version=1.0.0'
 
 # Prometheus: no Accept header
-curl -sS "http://127.0.0.1:${PORT}/metrics-prometheus" -o /dev/null -w "  prometheus no-accept: HTTP %{http_code}\n"
+check_prometheus_response "no-accept"
 
 # Prometheus: after streaming conversion (populates streaming metrics)
 curl -sS -H "${ACCEPT_MARKDOWN}" \
