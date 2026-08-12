@@ -17,6 +17,25 @@
       "predicate": "Source archive provenance predicate: repo URL + git commit SHA + archive sha256",
       "producer": "packaging/scripts/generate-release-manifest.py (release-packages.yml integrity-checksums)",
       "consumer": "packaging/scripts/validate-release-manifest.py, release gates, downstream evidence consumers",
+      "candidate_binding": {
+        "required_fields": [
+          "candidate_sha",
+          "artifact_sha256",
+          "feature_manifest_digest",
+          "abi_version",
+          "artifact_identity",
+          "producer",
+          "consumer",
+          "retention",
+          "storage_class",
+          "run_id",
+          "attempt",
+          "authoritative",
+          "superseded_attempt",
+          "retrieval_location"
+        ],
+        "validator": "packaging/scripts/validate-release-manifest.py"
+      },
       "verification_commands": [
         "python3 packaging/scripts/validate-release-manifest.py"
       ]
@@ -26,6 +45,25 @@
       "predicate": "DEB provenance: candidate_sha + artifact sha256 + feature-manifest digest + ABI version + build runner identity + nginx version",
       "producer": "candidate-bound release artifact index producer",
       "consumer": "artifact-registry-check gate, release evidence checkpoint, downstream consumers",
+      "candidate_binding": {
+        "required_fields": [
+          "candidate_sha",
+          "artifact_sha256",
+          "feature_manifest_digest",
+          "abi_version",
+          "artifact_identity",
+          "producer",
+          "consumer",
+          "retention",
+          "storage_class",
+          "run_id",
+          "attempt",
+          "authoritative",
+          "superseded_attempt",
+          "retrieval_location"
+        ],
+        "validator": "artifact-registry-check and release evidence checkpoint"
+      },
       "verification_commands": [
         "make artifact-registry-check",
         "dpkg-deb --info <package>.deb"
@@ -36,6 +74,25 @@
       "predicate": "RPM provenance: candidate_sha + artifact sha256 + feature-manifest digest + ABI version + build runner identity + nginx version",
       "producer": "candidate-bound release artifact index producer",
       "consumer": "artifact-registry-check gate, release evidence checkpoint, downstream consumers",
+      "candidate_binding": {
+        "required_fields": [
+          "candidate_sha",
+          "artifact_sha256",
+          "feature_manifest_digest",
+          "abi_version",
+          "artifact_identity",
+          "producer",
+          "consumer",
+          "retention",
+          "storage_class",
+          "run_id",
+          "attempt",
+          "authoritative",
+          "superseded_attempt",
+          "retrieval_location"
+        ],
+        "validator": "artifact-registry-check and release evidence checkpoint"
+      },
       "verification_commands": [
         "make artifact-registry-check",
         "rpm -qip <package>.rpm"
@@ -46,6 +103,10 @@
       "predicate": "No OCI artifact is published by the 0.9.2 release workflow",
       "producer": "Not applicable",
       "consumer": "Not applicable",
+      "candidate_binding": {
+        "required_fields": [],
+        "validator": "not applicable while OCI publication is disabled"
+      },
       "verification_commands": []
     },
     "homebrew_formula_source": {
@@ -53,6 +114,25 @@
       "predicate": "Formula provenance: tag archive sha256 equals local git archive of the resolved tag commit",
       "producer": "packaging/scripts/render_homebrew_formula.py + verify_git_archive.py",
       "consumer": "homebrew-formula-gate.yml, homebrew-tap-publish.yml",
+      "candidate_binding": {
+        "required_fields": [
+          "candidate_sha",
+          "artifact_sha256",
+          "feature_manifest_digest",
+          "abi_version",
+          "artifact_identity",
+          "producer",
+          "consumer",
+          "retention",
+          "storage_class",
+          "run_id",
+          "attempt",
+          "authoritative",
+          "superseded_attempt",
+          "retrieval_location"
+        ],
+        "validator": "packaging/scripts/verify_homebrew_formula.py and verify_git_archive.py"
+      },
       "verification_commands": [
         "python3 packaging/scripts/verify_homebrew_formula.py",
         "python3 packaging/scripts/verify_git_archive.py --tag <tag>"
@@ -63,8 +143,27 @@
       "predicate": "Bottle provenance: bottle sha256 binds exact bottle bytes",
       "producer": "Homebrew bottle build",
       "consumer": "formula/bottle consumers",
+      "candidate_binding": {
+        "required_fields": [
+          "candidate_sha",
+          "artifact_sha256",
+          "feature_manifest_digest",
+          "abi_version",
+          "artifact_identity",
+          "producer",
+          "consumer",
+          "retention",
+          "storage_class",
+          "run_id",
+          "attempt",
+          "authoritative",
+          "superseded_attempt",
+          "retrieval_location"
+        ],
+        "validator": "Homebrew bottle provenance validator"
+      },
       "verification_commands": [
-        "shasum -a 256 <bottle>.tar.gz"
+        "test \"$(shasum -a 256 <bottle>.tar.gz | awk '{print $1}')\" = \"<recorded_bottle_sha256>\""
       ]
     }
   },

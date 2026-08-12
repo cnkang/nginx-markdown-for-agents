@@ -102,7 +102,7 @@ def test_cargo_default_features_match_official_manifest() -> None:
 @pytest.mark.parametrize("workflow", OFFICIAL_PRODUCER_WORKFLOWS)
 def test_official_producer_uses_fixed_feature_set(workflow: str) -> None:
     """Every official artifact producer builds with the same fixed feature
-    set; no producer may disable a required feature."""
+    set; no producer may add, omit, or disable a feature."""
     path = WORKFLOW_DIR / workflow
     if not path.is_file():
         pytest.skip(f"{workflow} not present in this checkout")
@@ -110,10 +110,9 @@ def test_official_producer_uses_fixed_feature_set(workflow: str) -> None:
     if not feature_sets:
         return  # producer relies on Cargo defaults, which the other tests pin
     for features in feature_sets:
-        missing = OFFICIAL_FEATURES - features
-        assert not missing, (
-            f"{workflow} builds with features {sorted(features)} missing "
-            f"required official features {sorted(missing)}"
+        assert features == set(OFFICIAL_FEATURES), (
+            f"{workflow} must use exactly the official feature set "
+            f"{sorted(OFFICIAL_FEATURES)}, got {sorted(features)}"
         )
 
 

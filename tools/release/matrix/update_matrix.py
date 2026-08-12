@@ -446,8 +446,21 @@ def _read_matrix_json(path: Path) -> dict:
 
 
 def _supported_dynamic_entry(entry: dict) -> dict | None:
-    """Project a supported canonical row into the updater's legacy shape."""
+    """Project a documented canonical row into the updater's legacy shape."""
     normalized = normalize_compatibility_entry(entry)
+    if (
+        normalized.get("artifact_type") == "source"
+        and normalized.get("support_tier") == "best-effort"
+        and normalized.get("libc") == "n/a"
+        and normalized.get("target") == "any"
+    ):
+        return {
+            "nginx": normalized["nginx_version"],
+            "os_type": normalized["libc"],
+            "arch": normalized["target"],
+            "support_tier": "source_only",
+            "managed_by": "manual",
+        }
     if normalized.get("artifact_type") != "dynamic-module":
         return None
     if normalized.get("support_tier") != "supported":

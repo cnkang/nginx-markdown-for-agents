@@ -21,6 +21,7 @@ import pathlib
 import sys
 import tomllib
 from argparse import ArgumentParser
+from collections.abc import Iterator
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 MANIFEST_PATH = (
@@ -40,7 +41,7 @@ def manifest_digest(manifest: dict) -> str:
 
 def check_cargo_features(cargo_toml: str, failures: list) -> None:
     """Verify Cargo default features agree with the manifest and no
-    forbidden feature name is used."""
+    forbidden feature name is used by a package feature consumer."""
     try:
         cargo = tomllib.loads(cargo_toml)
     except tomllib.TOMLDecodeError as exc:
@@ -69,6 +70,61 @@ def check_cargo_features(cargo_toml: str, failures: list) -> None:
     for name in FORBIDDEN_FEATURE_NAMES:
         if name in features:
             failures.append(f"forbidden Cargo feature name {name!r} is used")
+
+    _check_feature_consumers(cargo, failures)
+
+
+def _forbidden_feature_consumers(
+    value: object, path: tuple[str, ...] = ()
+) -> Iterator[tuple[str, str]]:
+    """Yield forbidden feature names and their parsed TOML locations."""
+    if isinstance(value, dict):
+        yield from _forbidden_feature_dict(value, path)
+    elif isinstance(value, list):
+        yield from _forbidden_feature_list(value, path)
+
+
+def _forbidden_feature_dict(
+    value: dict, path: tuple[str, ...]
+) -> Iterator[tuple[str, str]]:
+    """Walk a parsed TOML table for feature consumers."""
+    for key, child in value.items():
+        child_path = (*path, str(key))
+        if key == "features" and isinstance(child, list):
+            yield from _forbidden_feature_values(child, child_path)
+        yield from _forbidden_feature_consumers(child, child_path)
+
+
+def _forbidden_feature_list(
+    value: list, path: tuple[str, ...]
+) -> Iterator[tuple[str, str]]:
+    """Walk a parsed TOML array for nested feature consumers."""
+    for index, child in enumerate(value):
+        yield from _forbidden_feature_consumers(child, (*path, str(index)))
+
+
+def _forbidden_feature_values(
+    values: list, path: tuple[str, ...]
+) -> Iterator[tuple[str, str]]:
+    """Yield forbidden values from one Cargo ``features`` array."""
+    location = ".".join(path)
+    for feature in values:
+        if feature in FORBIDDEN_FEATURE_NAMES:
+            yield feature, location
+
+
+def _check_feature_consumers(value: object, failures: list) -> None:
+    """Reject forbidden names in every Cargo ``features = [...]`` consumer.
+
+    Checking only the package ``[features]`` table misses dependency feature
+    requests such as ``some-parser = { features = ["brotli"] }``.  Walk the
+    parsed TOML tree so target-specific and build/dev dependency tables use
+    the same allowlist as the default feature contract.
+    """
+    for feature, location in _forbidden_feature_consumers(value):
+        failures.append(
+            f"forbidden Cargo feature name {feature!r} is used at {location}"
+        )
 
 
 def load_cargo_toml(failures: list) -> str:

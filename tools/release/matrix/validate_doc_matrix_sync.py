@@ -39,10 +39,15 @@ def _normalize_tier(tier: str) -> str:
         normalized_tier (str): The input string trimmed, lowercased, with spaces and hyphens replaced by underscores.
     """
     normalized = tier.strip().lower().replace(" ", "_").replace("-", "_")
-    # INSTALLATION.md retains the historical display label "Full" while the
-    # canonical release matrix uses "supported". Compare the two vocabularies
-    # at this presentation boundary instead of reintroducing a legacy matrix.
-    return "full" if normalized == "supported" else normalized
+    # INSTALLATION.md retains historical display labels while the canonical
+    # release matrix uses machine-facing tier names. Compare the vocabularies
+    # at this presentation boundary instead of reintroducing legacy matrix
+    # values into the source of truth.
+    if normalized == "supported":
+        return "full"
+    if normalized == "best_effort":
+        return "source_only"
+    return normalized
 
 
 def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
@@ -74,9 +79,19 @@ def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
             _normalize_tier(item["support_tier"]),
         )
         for item in data["entries"]
-        if item.get("artifact_type") == "dynamic-module"
-        and item.get("support_tier") == "supported"
-        and item.get("libc") in {"glibc", "musl"}
+        if (
+            (
+                item.get("artifact_type") == "dynamic-module"
+                and item.get("support_tier") == "supported"
+                and item.get("libc") in {"glibc", "musl"}
+            )
+            or (
+                item.get("artifact_type") == "source"
+                and item.get("support_tier") == "best-effort"
+                and item.get("libc") == "n/a"
+                and item.get("target") == "any"
+            )
+        )
     )
     return sorted(entries)
 

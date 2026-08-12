@@ -104,7 +104,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help="fixture mode: qualification record to validate")
     parser.add_argument(
         "--output",
-        help="real mode: alternate filename under the release output directory",
+        help=(
+            "real mode: compatibility option; output is always written to "
+            "DEFAULT_RECORD"
+        ),
     )
     parser.add_argument("--allow-skip-fuzz", action="store_true",
                         help="exit 0 when cargo +nightly is unavailable")

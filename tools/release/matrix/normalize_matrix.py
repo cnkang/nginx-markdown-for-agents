@@ -345,7 +345,7 @@ def main(argv: List[str]) -> int:
             normalized = normalize_document(doc)
         else:
             normalized = load_and_normalize(argv[1])
-    except MatrixNormalizationError as exc:
+    except (MatrixNormalizationError, json.JSONDecodeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     json.dump(normalized, sys.stdout, indent=2, sort_keys=True)

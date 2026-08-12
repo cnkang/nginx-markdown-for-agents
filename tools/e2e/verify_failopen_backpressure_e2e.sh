@@ -194,8 +194,22 @@ NGINX_EXECUTABLE="${NGINX_BIN}"
 RUNTIME="$(mktemp -d "${TMPDIR:-/tmp}/failopen-e2e.XXXXXXXX")"
 mkdir -p "${RUNTIME}/logs" "${RUNTIME}/html" "${RUNTIME}/conf"
 
-# Generate a large HTML file that exceeds markdown_limits conversion_memory to trigger fail-open
-LARGE_HTML_SIZE=131072
+# Generate a large HTML file just above the parsed conversion-memory limit so
+# the fixture follows the configured budget instead of a stale fixed size.
+if ! LARGE_HTML_SIZE="$(MARKDOWN_MAX_SIZE_VALUE="${MARKDOWN_MAX_SIZE}" python3 -c '
+import os
+import re
+
+raw = os.environ["MARKDOWN_MAX_SIZE_VALUE"].strip().lower()
+match = re.fullmatch(r"([0-9]+)([kmgt]?)", raw)
+if match is None:
+    raise SystemExit(f"invalid MARKDOWN_MAX_SIZE: {raw!r}")
+units = {"": 1, "k": 1024, "m": 1024**2, "g": 1024**3, "t": 1024**4}
+print(int(match.group(1)) * units[match.group(2)] + 1)
+')"; then
+    echo "ERROR: unable to parse MARKDOWN_MAX_SIZE=${MARKDOWN_MAX_SIZE}" >&2
+    exit 1
+fi
 python3 -c "
 import sys
 body = '<h1>Title</h1>' + '<p>' + 'x' * 200 + '</p>\n' * 20

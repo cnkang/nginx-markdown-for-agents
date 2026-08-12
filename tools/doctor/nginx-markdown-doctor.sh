@@ -547,8 +547,16 @@ check_rust_toolchain() {
     # A packaged or copied doctor script must not accidentally inspect the
     # caller's current directory and report a repository toolchain as active.
     local doctor_source="${BASH_SOURCE[0]}"
-    local doctor_dir doctor_link
+    local doctor_dir doctor_link symlink_hops=0
+    local max_symlink_hops=40
     while [[ -n "$doctor_source" && -L "$doctor_source" ]]; do
+        symlink_hops=$((symlink_hops + 1))
+        if (( symlink_hops > max_symlink_hops )); then
+            emit_check "rust_toolchain" "fail" \
+                "doctor script symlink chain exceeds ${max_symlink_hops} hops" \
+                '{"repository_checkout":false,"symlink_chain_bounded":false}'
+            return 1
+        fi
         doctor_dir=$(cd -P "$(dirname "$doctor_source")" \
             && pwd 2>/dev/null || printf '')
         doctor_link=$(readlink "$doctor_source" 2>/dev/null || printf '')

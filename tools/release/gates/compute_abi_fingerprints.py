@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
-"""Compute the three ABI handshake identity hashes (the fourth identity,
-MARKDOWN_ABI_VERSION, is a plain constant).
+"""Compute and verify the ABI handshake identity hashes.
+
+The script computes three hashes; the fourth identity,
+MARKDOWN_ABI_VERSION, is a plain constant.  It reads the generated C header,
+Rust FFI export modules, and the checked-in C layout assertions so the inputs
+match the artifacts used by the ABI handshake.
 
 Formulas (documented in components/rust-converter/src/ffi/abi.rs):
 
@@ -8,13 +12,14 @@ Formulas (documented in components/rust-converter/src/ffi/abi.rs):
   the numeric MARKDOWN_HEADER_HASH macro value with the fixed spelling 0ull,
   truncated to the first 8 bytes interpreted big-endian.  Normalizing the
   self-referential field makes the fingerprint reproducible.
-- MARKDOWN_SYMBOL_SET_HASH: SHA-256 of the sorted newline-joined
-  `#[unsafe(no_mangle)] pub extern "C" fn` export names (excluding
-  `#[cfg]`-gated duplicates and helpers), truncated to the first 8 bytes.
-- MARKDOWN_LAYOUT_FINGERPRINT: SHA-256 of the sorted newline-joined
-  `struct_name:size` lines for every shared `#[repr(C)]` struct in
-  `src/ffi/abi.rs` and `src/ffi/streaming.rs` (and the encoding chain
-  result structs), truncated to the first 8 bytes.
+- MARKDOWN_SYMBOL_SET_HASH: SHA-256 of the sorted newline-joined names of
+  every matching ``#[unsafe(no_mangle)] pub extern "C" fn`` found by
+  ``FFI_EXPORT_RE`` in the four export modules, truncated to the first 8
+  bytes.  The scan does not exclude cfg-gated duplicates or helpers.
+- MARKDOWN_LAYOUT_FINGERPRINT: SHA-256 of the sorted unique
+  ``struct_name:size`` lines parsed from the generated NGINX FFI
+  layout-check header's ``_Static_assert`` entries, truncated to the first
+  8 bytes.
 
 Usage:
     python3 tools/release/gates/compute_abi_fingerprints.py
@@ -40,6 +45,10 @@ HEADER_HASH_DEFINE = re.compile(
     rb"(#define\s+MARKDOWN_HEADER_HASH\s+)"
     rb"(?:0[xX][0-9a-fA-F]+|[0-9]+)(?:[uUlL]+)?"
 )
+ABI_CONSTANTS = re.compile(
+    r"pub const (MARKDOWN_(?:HEADER_HASH|SYMBOL_SET_HASH|LAYOUT_FINGERPRINT))"
+    r"\s*:\s*u64\s*=\s*(0x[0-9a-fA-F]+)\s*;"
+)
 
 
 def _repo_file(path: pathlib.Path) -> pathlib.Path:
@@ -62,9 +71,9 @@ def header_hash() -> int:
     # The digest cannot include its own numeric value: replacing it with a
     # fixed spelling makes the header fingerprint reproducible and gives the
     # generated constant a stable value.
-    canonical = HEADER_HASH_DEFINE.sub(rb"\g<1>0ull", raw, count=1)
-    if canonical == raw:
+    if HEADER_HASH_DEFINE.search(raw) is None:
         raise ValueError("MARKDOWN_HEADER_HASH definition is missing")
+    canonical = HEADER_HASH_DEFINE.sub(rb"\g<1>0ull", raw, count=1)
     return truncate8(hashlib.sha256(canonical).digest())
 
 
@@ -126,10 +135,42 @@ def rust_struct_size(name: str) -> int | None:
     return None
 
 
+def checked_in_abi_constants() -> dict[str, int]:
+    """Read the constants that the Rust handshake exports."""
+    content = _repo_file(ABI_PATH).read_text(encoding="utf-8")
+    values = {
+        name: int(value, 16) for name, value in ABI_CONSTANTS.findall(content)
+    }
+    expected = {
+        "MARKDOWN_HEADER_HASH",
+        "MARKDOWN_SYMBOL_SET_HASH",
+        "MARKDOWN_LAYOUT_FINGERPRINT",
+    }
+    if set(values) != expected:
+        raise ValueError("abi.rs is missing one or more fingerprint constants")
+    return values
+
+
 def main() -> int:
     hdr = header_hash()
     sym = symbol_set_hash()
     layout = layout_fingerprint()
+    computed = {
+        "MARKDOWN_HEADER_HASH": hdr,
+        "MARKDOWN_SYMBOL_SET_HASH": sym,
+        "MARKDOWN_LAYOUT_FINGERPRINT": layout,
+    }
+    checked_in = checked_in_abi_constants()
+    if computed != checked_in:
+        raise SystemExit(
+            "ABI fingerprint drift: "
+            + ", ".join(
+                f"{name} expected 0x{computed[name]:016x} "
+                f"found 0x{checked_in[name]:016x}"
+                for name in sorted(computed)
+                if computed[name] != checked_in[name]
+            )
+        )
     print(f"MARKDOWN_HEADER_HASH = 0x{hdr:016x}")
     print(f"MARKDOWN_SYMBOL_SET_HASH = 0x{sym:016x}")
     print(f"MARKDOWN_LAYOUT_FINGERPRINT = 0x{layout:016x}")

@@ -80,6 +80,42 @@ def test_candidate_digest_does_not_follow_external_symlink(
     assert any("escapes repository root" in reason for reason in reasons)
 
 
+def test_candidate_manifest_null_digests_fail_closed() -> None:
+    """JSON null must not satisfy a required release digest field."""
+    reasons: list[str] = []
+    candidate_gate._check_manifest_digest_fields(
+        {
+            "feature_manifest_digest": None,
+            "final_ffi_freeze_digest": None,
+            "canonical_performance_environment_digest": None,
+            "release_matrix_digest": None,
+        },
+        reasons,
+    )
+
+    assert len(reasons) == 4
+    assert all("must be a sha256 digest" in reason for reason in reasons)
+
+
+def test_candidate_evidence_schema_null_digest_fails_closed(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Declared evidence schema digests must reject null values."""
+    schema = tmp_path / "schema.json"
+    schema.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(candidate_gate, "REPO_ROOT", tmp_path)
+    reasons: list[str] = []
+
+    candidate_gate._check_evidence_schemas(
+        {"evidence_schema_digests": {"schema.json": None}}, reasons
+    )
+
+    assert reasons == [
+        "malformed: evidence schema digest for 'schema.json' "
+        "must be a sha256 digest"
+    ]
+
+
 @pytest.mark.parametrize(
     "gate",
     (config_gate, fuzz_gate, metrics_gate, reason_gate),

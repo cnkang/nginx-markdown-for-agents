@@ -195,7 +195,7 @@ def _check_manifest_identity(manifest: dict, reasons: list) -> None:
 
 
 def _check_manifest_digest_fields(manifest: dict, reasons: list) -> None:
-    """Validate the release digest fields are strings."""
+    """Validate that every required release digest is present and canonical."""
     for digest_field in (
         "feature_manifest_digest",
         "final_ffi_freeze_digest",
@@ -203,9 +203,7 @@ def _check_manifest_digest_fields(manifest: dict, reasons: list) -> None:
         "release_matrix_digest",
     ):
         value = manifest.get(digest_field)
-        if value is not None and (
-            not isinstance(value, str) or not DIGEST_PATTERN.fullmatch(value)
-        ):
+        if not isinstance(value, str) or not DIGEST_PATTERN.fullmatch(value):
             reasons.append(
                 f"malformed: {digest_field} must be a sha256 digest"
             )
@@ -283,50 +281,59 @@ def _check_required_inputs(manifest: dict, reasons: list) -> None:
         _check_required_input(input_path, expected, repo_resolved, reasons)
 
 
+def _record_evidence_schema_digest(
+    schema_path: object,
+    expected: object,
+    repo_resolved: Path,
+    reasons: list,
+) -> None:
+    """Validate one evidence schema path and its recorded digest."""
+    if not isinstance(schema_path, str) or not schema_path:
+        reasons.append("malformed: evidence schema paths must be non-empty strings")
+        return
+    if not isinstance(expected, str) or not DIGEST_PATTERN.fullmatch(expected):
+        reasons.append(
+            f"malformed: evidence schema digest for {schema_path!r} "
+            "must be a sha256 digest"
+        )
+        return
+    schema_file = validate_read_path(
+        REPO_ROOT / schema_path,
+        must_exist=False,
+        purpose=f"evidence schema {schema_path}",
+    )
+    try:
+        schema_file.relative_to(repo_resolved)
+    except ValueError:
+        reasons.append(
+            f"malformed: evidence_schema_digests[{schema_path!r}] "
+            "escapes repository root"
+        )
+        return
+    if not schema_file.is_file():
+        reasons.append(f"missing-observation: evidence schema missing: {schema_path}")
+        return
+    actual = file_digest(schema_file)
+    if actual != expected:
+        reasons.append(
+            f"stale-digest: evidence schema {schema_path} "
+            f"digest {actual} != recorded {expected}"
+        )
+
+
 def _check_evidence_schemas(manifest: dict, reasons: list) -> None:
     """Validate evidence schema digests when declared."""
-    repo_resolved = REPO_ROOT.resolve()
-
-    def _contains(candidate: Path, label: str) -> bool:
-        try:
-            candidate.relative_to(repo_resolved)
-        except ValueError:
-            reasons.append(f"malformed: {label} escapes repository root")
-            return False
-        return True
-
     evidence_schema_digests = manifest.get("evidence_schema_digests")
     if evidence_schema_digests is None:
         return
     if not isinstance(evidence_schema_digests, dict):
-        reasons.append(
-            "malformed: evidence_schema_digests must be an object")
+        reasons.append("malformed: evidence_schema_digests must be an object")
         return
+    repo_resolved = REPO_ROOT.resolve()
     for schema_path, expected in evidence_schema_digests.items():
-        if not isinstance(schema_path, str) or not schema_path:
-            reasons.append(
-                "malformed: evidence schema paths must be non-empty strings"
-            )
-            continue
-        schema_file = validate_read_path(
-            REPO_ROOT / schema_path,
-            must_exist=False,
-            purpose=f"evidence schema {schema_path}",
+        _record_evidence_schema_digest(
+            schema_path, expected, repo_resolved, reasons
         )
-        if not _contains(
-            schema_file, f"evidence_schema_digests[{schema_path!r}]"
-        ):
-            continue
-        if not schema_file.is_file():
-            reasons.append(
-                f"missing-observation: evidence schema missing: "
-                f"{schema_path}")
-            continue
-        actual = file_digest(schema_file)
-        if actual != expected:
-            reasons.append(
-                f"stale-digest: evidence schema {schema_path} "
-                f"digest {actual} != recorded {expected}")
 
 
 def _check_git_head(manifest: dict, git_head: bool, reasons: list) -> None:

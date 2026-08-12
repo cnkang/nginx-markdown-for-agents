@@ -63,10 +63,30 @@ warnings=0
 
 function_contains_line() {
     local file="$1" target_line="$2" name_pattern="$3"
-    local start end
+    local start end candidate candidate_text probe offset
 
-    start="$(grep -nE "^[[:space:]]*(static[[:space:]]+)?[^;]*${name_pattern}[[:space:]]*\\(" "${file}" \
-        2>/dev/null | awk -F: -v target="${target_line}" '$1 <= target { line = $1 } END { if (line != "") print line }' || true)"
+    start=""
+    while IFS=: read -r candidate candidate_text; do
+        if [[ -z "${candidate}" || "${candidate}" -gt "${target_line}" ||
+              "${candidate_text}" == *";"* ]]; then
+            continue
+        fi
+        # A C definition may put the return type, name, parameters, and
+        # opening brace on separate lines. Walk forward until the first
+        # statement terminator or opening brace so multiline definitions are
+        # recognized while ordinary call sites are not.
+        for ((offset = 0; offset <= 64; offset++)); do
+            probe="$(sed -n "$((candidate + offset))p" "${file}" \
+                2>/dev/null || true)"
+            if [[ "${probe}" == *";"* ]]; then
+                break
+            fi
+            if [[ "${probe}" == *"{"* ]]; then
+                start="${candidate}"
+                break
+            fi
+        done
+    done < <(grep -nE "^[[:space:]]*(static[[:space:]]+)?[^;]*${name_pattern}[[:space:]]*\\(" "${file}" 2>/dev/null || true)
     if [[ -z "${start}" ]]; then
         return 1
     fi
@@ -350,8 +370,8 @@ if [[ -f "$request_impl" ]]; then
         call_content="$(echo "$call_match" | cut -d: -f2-)"
         # Check if the call passes NULL as the eff argument
         # Pattern: handle_ctx_alloc_failure(r, conf, NULL) or handle_ctx_alloc_failure(r, conf) (2-arg old form)
-        if echo "$call_content" | grep -qE 'handle_ctx_alloc_failure\([^)]*,[[:space:]]*NULL[[:space:]]*\)' \
-            || echo "$call_content" | grep -qE 'handle_ctx_alloc_failure\([^)]*,[[:space:]]*conf[[:space:]]*\)$'; then
+        if echo "$call_content" | grep -qE 'handle_ctx_alloc_failure\([^)]*,[[:space:]]*NULL[[:space:]]*\);$' \
+            || echo "$call_content" | grep -qE 'handle_ctx_alloc_failure\([^)]*,[[:space:]]*conf[[:space:]]*\);$'; then
             echo "  ERROR   ${request_impl}:${call_line} — handle_ctx_alloc_failure called with NULL/missing eff: ${call_content}" >&2
             errors=$((errors + 1))
         else

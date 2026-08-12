@@ -561,8 +561,12 @@ def _path_metrics(
     """Derive path ratios and streaming counters from the metrics adapter."""
     perf = nginx_metrics.get("perf", {}) or {}
     streaming = nginx_metrics.get("streaming", {}) or {}
-    streaming_hits = nginx_metrics.get("streaming_path_hits", 0)
-    fullbuffer_hits = nginx_metrics.get("fullbuffer_path_hits", 0)
+    streaming_hits = _normalise_path_hits(
+        nginx_metrics.get("streaming_path_hits")
+    )
+    fullbuffer_hits = _normalise_path_hits(
+        nginx_metrics.get("fullbuffer_path_hits")
+    )
     total_hits = streaming_hits + fullbuffer_hits
     streaming_ratio = streaming_hits / total_hits if total_hits > 0 else None
     fullbuffer_ratio = fullbuffer_hits / total_hits if total_hits > 0 else None
@@ -588,6 +592,21 @@ def _path_metrics(
     ), requests_total, failopen_total, fallback_rate, total_hits
 
 
+def _normalise_path_hits(value: object) -> int | float:
+    """Return a non-negative numeric path count, treating invalid input as 0."""
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, (int, float)):
+        return value if value >= 0 else 0
+    if isinstance(value, str):
+        try:
+            parsed = float(value)
+        except ValueError:
+            return 0
+        return parsed if parsed >= 0 else 0
+    return 0
+
+
 def _decompression_path_metrics(
     compression: str,
     perf: Mapping[str, Any],
@@ -597,6 +616,8 @@ def _decompression_path_metrics(
     """Map decompression events to the benchmark's path fields."""
     events = perf.get("decompression_events_total", 0)
     if compression != "none" and events:
+        if streaming_hits == 0 and fullbuffer_hits == 0:
+            return None, None
         if streaming_hits == 0:
             return 0, events
         if fullbuffer_hits == 0:

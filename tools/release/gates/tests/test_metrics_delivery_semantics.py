@@ -527,10 +527,15 @@ def test_transition_allowlist_exact_size():
 
     **Validates: Requirements 5.8**
     """
-    assert len(TRANSITION_ALLOWLIST) == len(_canonical_transition_allowlist()), (
-        "Transition allowlist size drifted from the canonical Metrics v1 "
-        "registry"
-    )
+    expected = {
+        "commit",
+        "fallback",
+        "safe_finish_start",
+        "abort_start",
+        "resume_success",
+        "resume_failure",
+    }
+    assert len(TRANSITION_ALLOWLIST) == len(expected)
 
 
 def test_transition_allowlist_exact_values():
@@ -540,7 +545,14 @@ def test_transition_allowlist_exact_values():
 
     **Validates: Requirements 5.8**
     """
-    expected = _canonical_transition_allowlist()
+    expected = {
+        "commit",
+        "fallback",
+        "safe_finish_start",
+        "abort_start",
+        "resume_success",
+        "resume_failure",
+    }
     assert TRANSITION_ALLOWLIST == expected, (
         f"Transition allowlist mismatch.\n"
         f"  Expected: {sorted(expected)}\n"

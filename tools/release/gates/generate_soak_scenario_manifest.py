@@ -67,15 +67,22 @@ def _validate_scope(scope: dict) -> None:
         raise ValueError("short-soak scenario memory limits must be positive integers")
 
 
-def build_manifest(scope: dict, candidate_sha: str, scope_path: Path) -> dict:
+def build_manifest(
+    scope: dict,
+    candidate_sha: str,
+    scope_path: Path,
+    created_at: str,
+) -> dict:
     """Build the immutable scenario identity consumed by the soak gate."""
     if not SHA_RE.fullmatch(candidate_sha):
         raise ValueError("candidate SHA must be 40 lowercase hexadecimal characters")
+    if not isinstance(created_at, str) or not created_at:
+        raise ValueError("created_at must be a non-empty string")
     _validate_scope(scope)
     return {
         "schema_version": "release.short-soak-scenario-manifest.v1",
         "candidate_sha": candidate_sha,
-        "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "created_at": created_at,
         "duration_minutes": scope["duration_minutes"],
         "concurrency": scope["concurrency"],
         "corpus": [
@@ -104,6 +111,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scope", default=str(DEFAULT_SCOPE))
     parser.add_argument("--candidate-sha", required=True)
     parser.add_argument("--version", default=DEFAULT_VERSION)
+    parser.add_argument(
+        "--created-at",
+        help="Timestamp to record in the manifest (defaults to the generation time)",
+    )
     return parser
 
 
@@ -119,7 +130,12 @@ def main(argv: list[str] | None = None) -> int:
             purpose="short-soak manifest",
         )
         manifest = build_manifest(
-            _load_json(scope_path), args.candidate_sha, scope_path
+            _load_json(scope_path),
+            args.candidate_sha,
+            scope_path,
+            args.created_at or datetime.now(timezone.utc).isoformat().replace(
+                "+00:00", "Z"
+            ),
         )
         output.parent.mkdir(parents=True, exist_ok=True)
         # NOSONAR suppression for pythonsecurity:S2083: _output_path accepts

@@ -106,14 +106,16 @@ class TestArtifactRegistry:
         assert "stale-digest" in result.stderr
 
     def test_blocking_pending_fails(self):
-        result = _run_gate(self.SCRIPT, "artifact-registry-blocking-pending.json")
+        result = _run_gate(self.SCRIPT, "artifact-registry-duplicate-id.json")
         assert result.returncode == 1
-        assert "blocking-pending" in result.stderr
+        assert "duplicate" in result.stderr
 
-    def test_below_threshold_fails(self):
-        result = _run_gate(self.SCRIPT, "artifact-registry-below-threshold.json")
+    def test_invalid_digest_algorithm_fails(self):
+        result = _run_gate(
+            self.SCRIPT, "artifact-registry-invalid-digest-algorithm.json"
+        )
         assert result.returncode == 1
-        assert "below-threshold" in result.stderr
+        assert "valid sha256 format" in result.stderr
 
     def test_missing_observation_fails(self):
         result = _run_gate(self.SCRIPT, "artifact-registry-missing-observation.json")
@@ -237,7 +239,7 @@ class TestSoakQualification:
 
     def test_malformed_fails(self):
         result = _run_gate(
-            self.SCRIPT, "soak-qualification-malformed.json",
+            self.SCRIPT, "soak-qualification-schema-invalid.json",
             self.MANIFEST_ARGS)
         assert result.returncode == 1
         assert "missing-observation" in result.stderr

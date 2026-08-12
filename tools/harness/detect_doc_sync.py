@@ -512,7 +512,7 @@ def _read_directive_source(project_root: Path, errors: List[str]) -> str | None:
     directives = _read_required(project_root, DIRECTIVES_PATH, errors)
     directive_names = _read_required(project_root, DIRECTIVE_NAMES_PATH, errors)
     if directives is None or directive_names is None:
-        return directives
+        return None
     return _expand_directive_macros(f"{directives}\n{directive_names}")
 
 

@@ -62,10 +62,12 @@ while IFS= read -r -d '' file; do
     rel_path="${file#${REPO_ROOT}/}"
     in_run_block=0
     in_env_block=0
+    inline_run_command=0
     line_num=0
 
     while IFS= read -r line || [[ -n "$line" ]]; do
         line_num=$((line_num + 1))
+        inline_run_command=0
 
         # Detect start/end of run: blocks (line starts with "run:" or contains "run: |")
         # YAML structure: we look for lines with "run:" that start a multiline block
@@ -83,7 +85,7 @@ while IFS= read -r -d '' file; do
         # interpolation checks as a multiline run block.
         if [[ "$line" =~ ^[[:space:]]*run:[[:space:]]+.+ ]] || \
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*run:[[:space:]]+.+ ]]; then
-            in_run_block=1
+            inline_run_command=1
             in_env_block=0
         fi
 
@@ -107,7 +109,7 @@ while IFS= read -r -d '' file; do
         fi
 
         # Check for input interpolation inside run blocks
-        if [[ $in_run_block -eq 1 ]]; then
+        if [[ $in_run_block -eq 1 || $inline_run_command -eq 1 ]]; then
             # Flag ${{ inputs.* }} inside run blocks
             if [[ "$line" =~ \$\{\{[[:space:]]*inputs\.[a-zA-Z_]+[[:space:]]*\}\} ]]; then
                 echo "ERROR: ${rel_path}:${line_num}: inputs.* directly interpolated in run block" >&2
