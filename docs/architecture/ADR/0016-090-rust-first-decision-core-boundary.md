@@ -33,7 +33,7 @@ snapshots), never on `ngx_http_request_t`:
 | `decide_base_url` / `decide_forwarded_headers` | `security.rs` + new | migrate forwarded-header/base-URL pure logic |
 | `decide_conditional` | `conditional.rs` | exists; C `ngx_http_markdown_conditional.c` becomes thin wrapper |
 | `decide_streaming` | streaming eligibility (pure parts) | migrate pure parts; lifecycle stays C |
-| `select_reason` | `decision/reason_code.rs` | single source (ADR-0018) |
+| `select_reason` | `reason_registry.toml` → generated `decision/reason_code.rs` | single source (ADR-0018) |
 | `classify_error` | `error.rs` | pure classification |
 
 Any aggregation layer MUST be a thin wrapper over these small APIs, not a new
@@ -53,14 +53,14 @@ ADR-justified exception.
 
 ### Trusted proxies — http-only CIDR trust
 
-Source IP is taken from `r->connection->sockaddr` (after the realip module,
+Source IP comes from `r->connection->sockaddr` (after the realip module,
 if configured). `markdown_trusted_proxies` is **http context only**, CIDR-based
-(IPv4 + IPv6, parsed at config time), and `Forwarded` takes precedence over
-`X-Forwarded-*` with right-most value selection on multi-hop chains (the
-right-most element is the one appended by the trusted proxy. The left-most
-element is client-controlled, so the module must not trust it). `proto` stays
-restricted to `http`/`https`. Untrusted sources produce a reason code and never
-leak raw header values into logs/metrics.
+(IPv4 + IPv6, parsed at config time). The module begins with the connection
+peer, walks aligned `Forwarded` or `X-Forwarded-*` hops from right to left,
+strips trusted hops, and selects the first untrusted hop as the client-facing
+value. `Forwarded` takes precedence over `X-Forwarded-*`. `proto` accepts only
+`http` or `https`. Untrusted sources produce a reason code and never leak raw
+header values into logs or metrics.
 
 ### C complexity reduction acceptance (per migrated file)
 

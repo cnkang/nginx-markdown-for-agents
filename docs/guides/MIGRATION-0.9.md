@@ -277,7 +277,8 @@ sed -i 's/markdown_parse_timeouts_total/markdown_errors_total{reason="timeout"}/
 ### Reference
 
 - Full schema: [Observability Schema v1](../architecture/observability-schema-v1.md)
-- Single source of truth: `components/rust-converter/src/decision/reason_code.rs`
+- Single source of truth: `components/rust-converter/reason_registry.toml`
+  (the Rust `reason_code.rs` file is a generated projection)
 
 
 ---

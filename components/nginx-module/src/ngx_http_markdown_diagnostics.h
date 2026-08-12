@@ -256,7 +256,8 @@ ngx_int_t ngx_http_markdown_diagnostics_recording_active(void);
 
 /*
  * Map a decision-path reason code string to its canonical numeric
- * ReasonCode discriminant (decision/reason_code.rs is the source of truth).
+ * ReasonCode discriminant (reason_registry.toml is the source; the generated
+ * Rust enum and C metadata provide its projections).
  *
  * Parameters:
  *   reason - reason code bytes (may be NULL when reason_len is zero)

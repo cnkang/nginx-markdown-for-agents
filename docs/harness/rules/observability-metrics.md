@@ -298,8 +298,9 @@ Required:
   the number of format arguments passed after the format string.  A
   mismatch (for example `ngx_log_debug2` with only one `%`-substitution
   argument) silently reads garbage from the stack or corrupts the log
-  output.  This applies equally to   `ngx_log_debugN` and the error-level
-  `ngx_log_errorN` family.
+  output. NGINX provides `ngx_log_error` for error logging. Validate the
+  suffix argument count only for `ngx_log_debug0` through `ngx_log_debug8`;
+  error logging has no numbered suffix to validate.
 
 ---
 
@@ -319,11 +320,11 @@ streaming engine and are not emitted through the Rust FFI reason-code
 accessor path. They appear only in C-side `ngx_log_decision()` calls
 and metrics classification within the streaming filter path.
 
-**Migration plan**: In the 1.x release, when streaming reason codes
-migrate to Rust enum variants (as part of the Rust-first streaming
-engine migration), they will rename to lowercase snake_case (for
-example `streaming_convert`, `streaming_fail_postcommit`,
-`eligible_streaming_auto`) to match the established Rust convention.
-The C-side UPPERCASE constants will become aliases or get removed
-entirely. The team must announce this migration in the changelog and
-migration guide with a mapping table.
+**Migration plan**: If a future release promotes any of these internal
+streaming labels to operator-visible reason codes, add the lowercase
+`snake_case` entries to `components/rust-converter/reason_registry.toml`
+and regenerate the Rust/C projections. Do not add a parallel C mapping
+table. The registry generator already owns compatibility aliases for
+canonical legacy keys. Those aliases are distinct from the C-only streaming
+labels described here. Announce any newly public reason in the changelog
+and migration guide with a mapping table.

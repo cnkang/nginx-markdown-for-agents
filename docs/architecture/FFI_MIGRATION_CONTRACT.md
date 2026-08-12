@@ -43,11 +43,13 @@ The generated header contains only the bundled production boundary. Test-only
 Rust helpers are not emitted as C declarations.
 
 The canonical reason-code source is
-`components/rust-converter/src/decision/reason_code.rs`. The
+`components/rust-converter/reason_registry.toml`. The generated
+`components/rust-converter/src/decision/reason_code.rs` is a projection. The
 `markdown_reason_code_str`, `markdown_reason_code_metric_key`, and
 `markdown_reason_code_count` exports expose that source to the C consumer.
-Reason-code variants and discriminants must remain synchronized across this
-boundary.
+Diagnostics use the generated C reason metadata header for bounded lookup and
+compatibility aliases. Reason-code variants and discriminants must
+remain synchronized across both generated projections and this FFI boundary.
 
 ## Historical v0.9.1 removals
 

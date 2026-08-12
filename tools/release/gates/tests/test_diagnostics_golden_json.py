@@ -21,7 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
 import jsonschema
-from hypothesis import given, settings
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 
@@ -84,6 +84,28 @@ _safe_error_msg = st.text(
     min_size=1,
     max_size=100,
 ).filter(_is_safe_error_text)
+
+# The production redactor is implemented in the C diagnostics path and does
+# not currently have a Python binding. Keep these tests useful if a binding is
+# added later, while making the no-binding fallback explicit model coverage.
+_raw_error_msg = st.text(
+    alphabet=st.characters(blacklist_categories=("Cs",)),
+    min_size=1,
+    max_size=600,
+)
+
+
+def _redact_error_for_test(error_text):
+    """Use a production redactor when a test binding exposes one.
+
+    Without a binding, only already-safe model text can be checked. That
+    fallback documents the model and does not claim to exercise production C.
+    """
+    redactor = globals().get("redact_last_error")
+    if callable(redactor):
+        return redactor(error_text)
+    assume(_is_safe_error_text(error_text))
+    return error_text
 
 _masked_keys = st.lists(
     st.sampled_from([
@@ -341,8 +363,17 @@ def _compute_static_digest(manifest_dict: dict) -> str:
     The canonical form is: schema_version first, then remaining keys in
     ascending byte order, compact separators, no insignificant whitespace.
     """
+    canonical_keys = {
+        "accept", "auth_cookies", "auth_policy", "auto_decompress",
+        "cache_validation", "content_types", "diagnostics", "dynamic_config",
+        "dynamic_config_path", "dynconf_dry_run", "error_policy", "filter",
+        "flavor", "front_matter", "limits", "log_verbosity", "metrics",
+        "metrics_shm_size", "prune_noise", "prune_protection_selectors",
+        "prune_selectors", "stream_excluded_types", "streaming",
+        "token_estimate", "trusted_proxies",
+    }
     ordered = {"schema_version": "static_config_manifest_v1"}
-    for key in sorted(k for k in manifest_dict if k != "schema_version"):
+    for key in sorted(k for k in manifest_dict if k in canonical_keys):
         ordered[key] = manifest_dict[key]
     canonical = json.dumps(ordered, separators=(",", ":"), ensure_ascii=False)
     digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -580,14 +611,14 @@ class TestStaticDigestDeterminism:
         do not change the digest — the manifest is computed from the
         canonical JSON, not from C struct memory.
         """
-        # Simulate: adding a "pointer" or "padding" field that would exist
-        # in a C struct but is never part of the canonical manifest.
-        # The digest function only serializes known manifest keys.
+        assume("pointer_padding" not in manifest)
         d1 = _compute_static_digest(manifest)
 
-        # A second computation from the same logical config is identical
-        manifest_copy = json.loads(json.dumps(manifest))
-        d2 = _compute_static_digest(manifest_copy)
+        # Simulate a C-struct pointer/padding byte that is not part of the
+        # canonical manifest.  It must not affect the published digest.
+        manifest_with_padding = json.loads(json.dumps(manifest))
+        manifest_with_padding["pointer_padding"] = padding.hex()
+        d2 = _compute_static_digest(manifest_with_padding)
         assert d1 == d2
 
     @settings(max_examples=50)
@@ -656,35 +687,20 @@ class TestLastErrorBounds:
             assert len(last_error.encode("utf-8")) <= 512
 
     @settings(max_examples=100)
-    @given(error_text=_safe_error_msg)
+    @given(error_text=_raw_error_msg)
     def test_error_no_file_paths(self, error_text):
-        """
-        Model: any error text that looks like a file path violates
-        the redaction contract.
-        """
-        # If the text contains path-like patterns, it would be invalid
-        # (the module must redact it). We verify the constraint by
-        # checking that none of the path patterns match.
+        """Check redacted output, or document the unbound model fallback."""
+        redacted = _redact_error_for_test(error_text)
         for pattern in _PATH_PATTERNS:
-            if pattern.search(error_text):
-                assert False, (
-                    "error text contains a path-like pattern; "
-                    "production module must redact last_error"
-                )
-        # No path detected — this is a valid error message
+            assert not pattern.search(redacted)
 
     @settings(max_examples=100)
-    @given(error_text=_safe_error_msg)
+    @given(error_text=_raw_error_msg)
     def test_error_no_secrets(self, error_text):
-        """
-        Model: error text must not contain secret-like patterns.
-        """
+        """Check redacted output, or document the unbound model fallback."""
+        redacted = _redact_error_for_test(error_text)
         for pattern in _SECRET_PATTERNS:
-            if pattern.search(error_text):
-                assert False, (
-                    "error text contains a secret-like pattern; "
-                    "production module must redact last_error"
-                )
+            assert not pattern.search(redacted)
 
     @settings(max_examples=50)
     @given(dynconf=_dynconf_invalid_without_lkg())

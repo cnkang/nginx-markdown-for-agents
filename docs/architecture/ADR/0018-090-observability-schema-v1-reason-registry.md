@@ -6,19 +6,21 @@ Accepted (0.9.0 contract freeze — initial contract phase)
 
 ## Context
 
-Today there are **two** parallel reason registries: a Rust `ReasonCode` enum (18
-variants) and a C-side set (32+ `SKIP_*` / `ELIGIBLE_*` / `STREAMING_*` codes).
-Metrics labels, diagnostics JSON, and response headers have grown without a
-stability contract. 0.9.0 is the last chance before 1.0 to converge these into a
-single, additive-only observability schema.
+Historically there were **two** parallel reason registries: a Rust `ReasonCode`
+enum and a C-side set of `SKIP_*` / `ELIGIBLE_*` / `STREAMING_*` codes. Metrics
+labels, diagnostics JSON, and response headers had grown without a stability
+contract. The frozen contract now converges them through one registry and
+generated projections.
 
 ## Decision
 
 ### Single reason-code source of truth
 
-The Rust `decision/reason_code.rs` `ReasonCode` enum is the **single source**.
-C consumes it via FFI (`select_reason`, ADR-0016), the C-side string table and
-the release removes parallel codes or turns them into FFI shims. Naming rules:
+`components/rust-converter/reason_registry.toml` is the **single source**.
+The generator emits the Rust reason code projection, C metadata and aliases,
+release artifacts, and reverse lookup data. C consumes the generated metadata.
+There is no hand-maintained C string table or parallel public reason list.
+Naming rules:
 
 - Wire/label form is `lower_snake_case` (for example `streaming_block_full_cache_validation`).
 - Discriminants are **never reused**, deprecated codes keep their slot.
@@ -56,8 +58,10 @@ Frozen response-header behavior: `Content-Type: text/markdown` on conversion,
 ### Single-source enforcement
 
 A docs-sync test asserts that the reason-code registry, Prometheus output, and
-the C diagnostics renderer stay synchronized with the canonical registry (no
-unvalidated parallel public list). `make check-headers` covers FFI drift.
+the C diagnostics renderer stay synchronized with the canonical registry and
+its generated projections (no unvalidated parallel public list).
+`python3 tools/reason-codegen/generate.py --check` and `make check-headers`
+cover generated and FFI drift.
 
 ## Consequences
 
