@@ -36,7 +36,7 @@ pub const RATIO_ACTIVATION_THRESHOLD: usize = 256;
 pub enum Encoding {
     /// gzip (RFC 1952)
     Gzip = 0,
-    /// raw deflate (RFC 1951)
+    /// zlib-wrapped deflate (RFC 1950 carrying RFC 1951 data)
     Deflate = 1,
     /// brotli (RFC 7932)
     Br = 2,
@@ -353,7 +353,7 @@ mod tests {
     use super::*;
     use crate::decompress::{Format, decompress_bounded};
     use flate2::Compression;
-    use flate2::write::{DeflateEncoder, GzEncoder};
+    use flate2::write::{GzEncoder, ZlibEncoder};
     use std::io::Write;
 
     fn gzip_compress(data: &[u8]) -> Vec<u8> {
@@ -363,7 +363,7 @@ mod tests {
     }
 
     fn deflate_compress(data: &[u8]) -> Vec<u8> {
-        let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(data).unwrap();
         encoder.finish().unwrap()
     }

@@ -34,7 +34,7 @@ use proptest::prelude::*;
 use proptest::string::string_regex;
 
 use flate2::Compression;
-use flate2::write::{DeflateEncoder, GzEncoder};
+use flate2::write::{GzEncoder, ZlibEncoder};
 use std::io::Write;
 
 // ─── Strategies ───────────────────────────────────────────────────────────────
@@ -219,7 +219,7 @@ fn gzip_compress(data: &[u8]) -> Vec<u8> {
 }
 
 fn deflate_compress(data: &[u8]) -> Vec<u8> {
-    let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
     encoder.write_all(data).unwrap();
     encoder.finish().unwrap()
 }

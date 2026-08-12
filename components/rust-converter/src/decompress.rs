@@ -7,7 +7,7 @@
 //! # Supported Formats
 //!
 //! - `0` = gzip (RFC 1952)
-//! - `1` = deflate (RFC 1951)
+//! - `1` = zlib-wrapped deflate (RFC 1950 carrying RFC 1951 data)
 //! - `2` = brotli (RFC 7932)
 //!
 //! # Error Categories
@@ -30,7 +30,7 @@ use std::io::Read;
 pub enum Format {
     /// gzip (RFC 1952)
     Gzip = 0,
-    /// raw deflate (RFC 1951)
+    /// zlib-wrapped deflate (RFC 1950 carrying RFC 1951 data)
     Deflate = 1,
     /// brotli (RFC 7932)
     Brotli = 2,
@@ -219,7 +219,7 @@ fn decompress_gzip(input: &[u8], budget: usize) -> Result<DecompResult, DecompEr
     Ok(DecompResult { output })
 }
 
-/// Decompress raw deflate data with budget enforcement.
+/// Decompress zlib-wrapped deflate data with budget enforcement.
 fn decompress_deflate(input: &[u8], budget: usize) -> Result<DecompResult, DecompError> {
     use flate2::{Decompress, FlushDecompress, Status};
 
@@ -229,7 +229,7 @@ fn decompress_deflate(input: &[u8], budget: usize) -> Result<DecompResult, Decom
         ));
     }
 
-    let mut decoder = Decompress::new(false);
+    let mut decoder = Decompress::new(true);
     let mut output = Vec::new();
     let chunk_size = 8192.min(budget.saturating_add(1)).max(1);
     let mut buf = vec![0u8; chunk_size];
@@ -317,10 +317,10 @@ mod tests {
     /// Helper: compress data with deflate.
     fn deflate_compress(data: &[u8]) -> Vec<u8> {
         use flate2::Compression;
-        use flate2::write::DeflateEncoder;
+        use flate2::write::ZlibEncoder;
         use std::io::Write;
 
-        let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(data).unwrap();
         encoder.finish().unwrap()
     }
