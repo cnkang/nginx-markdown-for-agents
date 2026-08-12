@@ -266,8 +266,11 @@ check_conf() {
   TEST_COUNT=$((TEST_COUNT + 1))
   log="${RUNTIME_DIR}/check_${TEST_COUNT}.log"
 
-  run_nginx_t "${PREPARED_CONF}" "${log}" "${PREPARED_HANDLE}"
-  rc=$?
+  if run_nginx_t "${PREPARED_CONF}" "${log}" "${PREPARED_HANDLE}"; then
+    rc=0
+  else
+    rc=$?
+  fi
 
   if [[ "${expect}" == "fail" ]]; then
     if [[ "${rc}" -eq 0 ]]; then
