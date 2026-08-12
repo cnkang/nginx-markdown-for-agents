@@ -516,6 +516,7 @@ ngx_http_markdown_build_effective_conf(
         eff, snap, conf, mask, snap_valid);
 #else
     eff->streaming_buffer = conf->stream.budget;
+    eff->streaming_buffer_provenance = NGX_HTTP_MARKDOWN_PROVENANCE_STATIC;
 #endif
 }
 

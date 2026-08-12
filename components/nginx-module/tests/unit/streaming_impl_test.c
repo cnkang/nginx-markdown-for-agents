@@ -1228,6 +1228,14 @@ ngx_http_markdown_reason_streaming_convert(void)
 }
 
 const ngx_str_t *
+ngx_http_markdown_reason_failed_closed(void)
+{
+    static ngx_str_t s = { sizeof("failed_closed") - 1,
+        (u_char *) "failed_closed" };
+    return &s;
+}
+
+const ngx_str_t *
 ngx_http_markdown_reason_streaming_fail_postcommit(void)
 {
     static ngx_str_t s = { sizeof("STREAMING_FAIL_POSTCOMMIT") - 1,
@@ -2188,26 +2196,30 @@ test_postcommit_and_precommit_error_paths(void)
     rc = ngx_http_markdown_streaming_handle_postcommit_error(
         &r, &ctx, &conf, ERROR_MEMORY_LIMIT);
     TEST_ASSERT(rc == NGX_OK, "postcommit error should send terminal chunk");
-    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
-        "postcommit error should record failure once");
+    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 0,
+        "successful safe-finish must not record a failed outcome");
     TEST_ASSERT(metrics.streaming.budget_exceeded_total == 1,
         "memory-limit postcommit should classify budget exceeded");
+    TEST_ASSERT(metrics.streaming.succeeded_total == 1
+                && metrics.conversions_succeeded == 1
+                && metrics.results.delivery_count == 1,
+        "successful safe-finish must record one converted outcome");
     TEST_ASSERT(g_log_decision_calls == 2,
-        "postcommit budget failure should log classification and terminal reason");
+        "postcommit safe-finish should log classification and terminal reason");
     TEST_ASSERT(g_terminal_decision_calls == 1
         && strcmp(g_last_terminal_reason,
-                  "streaming_mid_flight_error") == 0
+                  "converted") == 0
         && strcmp(g_last_terminal_stage, "postcommit") == 0,
-        "postcommit failure should publish one terminal diagnostics path");
+        "postcommit safe-finish should publish one converted terminal path");
 
-    ngx_http_markdown_streaming_record_postcommit_failure(
+    ngx_http_markdown_streaming_record_postcommit_success(
         &r, &ctx, &conf);
-    TEST_ASSERT(metrics.streaming.postcommit_error_total == 1,
-        "repeated postcommit recording must not increment metrics");
+    TEST_ASSERT(metrics.streaming.succeeded_total == 1,
+        "repeated safe-finish success must not increment metrics");
     TEST_ASSERT(g_log_decision_calls == 2,
-        "repeated postcommit recording must not duplicate terminal reason");
+        "repeated safe-finish success must not duplicate terminal reason");
     TEST_ASSERT(g_terminal_decision_calls == 1,
-        "repeated postcommit recording must not duplicate diagnostics path");
+        "repeated safe-finish success must not duplicate diagnostics path");
 
     ctx.streaming.completion.failure_recorded = 0;
     ctx.streaming.handle = (struct StreamingConverterHandle *) (uintptr_t) 0x4;
@@ -2926,6 +2938,7 @@ test_commit_feed_and_finalize_core_paths(void)
         (uintptr_t) 0x16;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.pending_output = NULL;
+    ctx.streaming.main_terminal_sent = 0;
     g_streaming_finalize_rc = ERROR_INTERNAL;
     g_next_body_filter_rc = NGX_ERROR;
     rc = ngx_http_markdown_streaming_finalize_request(&r, &ctx, &conf);
@@ -3028,6 +3041,66 @@ test_commit_feed_and_finalize_core_paths(void)
         "terminal last_buf hard errors should record failure");
 
     TEST_PASS("commit/feed-result/finalize core branches covered");
+}
+
+
+/*
+ * Header commit is a two-step downstream operation.  A header filter
+ * NGX_AGAIN must retain only the retry marker; all commit latches and the
+ * commit metric publish together after the NULL-input resume succeeds.
+ */
+static void
+test_header_commit_backpressure_retry_is_atomic(void)
+{
+    ngx_http_request_t       r;
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t               pool;
+    ngx_connection_t         conn;
+    ngx_log_t                log;
+    ngx_event_t              read_event;
+    ngx_http_markdown_metrics_t metrics;
+    ngx_int_t                 rc;
+
+    TEST_SUBSECTION("header commit NGX_AGAIN retry");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+
+    g_next_header_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_AGAIN,
+                "header commit propagates downstream NGX_AGAIN");
+    TEST_ASSERT(ctx.stream_sm.headers_pending == 1
+                && ctx.stream_sm.headers_committed == 0
+                && ctx.streaming.commit_state
+                   == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE
+                && ctx.headers_forwarded == 0
+                && metrics.streaming.commit_total == 0,
+                "NGX_AGAIN leaves only the header retry marker published");
+
+    rc = ngx_http_markdown_streaming_handle_null_input(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_AGAIN,
+                "a second blocked header retry remains suspended");
+    TEST_ASSERT(ctx.stream_sm.headers_pending == 1
+                && metrics.streaming.commit_total == 0,
+                "repeated NGX_AGAIN does not publish commit state");
+
+    g_next_header_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_handle_null_input(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK,
+                "successful header retry resumes the streaming request");
+    TEST_ASSERT(ctx.stream_sm.headers_pending == 0
+                && ctx.stream_sm.headers_committed == 1
+                && ctx.streaming.commit_state
+                   == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST
+                && ctx.headers_forwarded == 1
+                && metrics.streaming.commit_total == 1,
+                "header commit latches publish atomically after NGX_OK");
+
+    TEST_PASS("header commit NGX_AGAIN retry is atomic");
 }
 
 /*
@@ -6148,6 +6221,110 @@ test_postcommit_terminal_only_backpressure_metrics(void)
 }
 
 
+/*
+ * Regression: a protocol-safe abort is a request-level outcome only after
+ * its terminal chain is delivered.  NGX_AGAIN must retain abort provenance;
+ * resume success records terminal_aborted_total exactly once, while resume
+ * failure records failed_closed and leaves the abort-delivery counter at 0.
+ */
+static void
+test_postcommit_abort_outcome_across_backpressure(void)
+{
+    ngx_http_request_t      r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t              pool;
+    ngx_connection_t        conn;
+    ngx_log_t               log;
+    ngx_event_t             read_event;
+    ngx_http_markdown_metrics_t metrics;
+    ngx_int_t               rc;
+
+    TEST_SUBSECTION("postcommit abort outcome across backpressure");
+
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+    ctx.streaming.handle =
+        (struct StreamingConverterHandle *) (uintptr_t) 0xa1;
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.stream_sm.headers_committed = 1;
+    g_streaming_safe_finish_rc = POST_COMMIT_ABORT;
+    g_next_body_filter_rc = NGX_AGAIN;
+
+    rc = ngx_http_markdown_streaming_handle_postcommit_error(
+        &r, &ctx, &conf, ERROR_INTERNAL);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "abort terminal backpressure must return NGX_AGAIN");
+    TEST_ASSERT(ctx.streaming.pending_meta.pending_abort_terminal == 1,
+        "abort NGX_AGAIN must retain abort-terminal provenance");
+    TEST_ASSERT(ctx.streaming.completion.terminal_aborted_recorded == 0,
+        "abort NGX_AGAIN must not record terminal abort yet");
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 0,
+        "abort NGX_AGAIN must not latch terminal delivery");
+    TEST_ASSERT(metrics.streaming.terminal_aborted_total == 0,
+        "abort NGX_AGAIN must not increment terminal-aborted metric");
+
+    g_next_body_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_body_filter(&r, NULL);
+    TEST_ASSERT(rc == NGX_OK,
+        "successful abort resume must return NGX_OK");
+    TEST_ASSERT(ctx.streaming.completion.terminal_aborted_recorded == 1,
+        "successful abort resume must latch terminal outcome");
+    TEST_ASSERT(metrics.streaming.terminal_aborted_total == 1,
+        "successful abort resume must increment terminal-aborted once");
+    TEST_ASSERT(metrics.conversions_failed == 1
+                && metrics.streaming.failed_total == 1
+                && metrics.streaming.postcommit_error_total == 1,
+        "successful abort resume must record one aborted failure outcome");
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 1,
+        "successful abort resume must latch main terminal delivery");
+    TEST_ASSERT(g_terminal_decision_calls == 1
+                && strcmp(g_last_terminal_reason,
+                          "streaming_mid_flight_error") == 0,
+        "successful abort resume must publish one aborted terminal path");
+
+    rc = ngx_http_markdown_streaming_body_filter(&r, NULL);
+    TEST_ASSERT(rc == NGX_OK,
+        "repeated abort resume entry must remain stable");
+    TEST_ASSERT(metrics.streaming.terminal_aborted_total == 1
+                && g_terminal_decision_calls == 1,
+        "repeated abort resume must not duplicate outcome accounting");
+
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+    ctx.streaming.handle =
+        (struct StreamingConverterHandle *) (uintptr_t) 0xa2;
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.stream_sm.headers_committed = 1;
+    g_streaming_safe_finish_rc = POST_COMMIT_ABORT;
+    g_next_body_filter_rc = NGX_AGAIN;
+
+    rc = ngx_http_markdown_streaming_handle_postcommit_error(
+        &r, &ctx, &conf, ERROR_INTERNAL);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "failed abort resume setup must return NGX_AGAIN");
+    g_next_body_filter_rc = NGX_ERROR;
+    rc = ngx_http_markdown_streaming_body_filter(&r, NULL);
+    TEST_ASSERT(rc == NGX_ERROR,
+        "failed abort resume must propagate downstream error");
+    TEST_ASSERT(metrics.streaming.terminal_aborted_total == 0,
+        "failed abort resume must not record terminal-aborted delivery");
+    TEST_ASSERT(metrics.conversions_failed == 1
+                && metrics.streaming.failed_total == 1
+                && metrics.streaming.postcommit_error_total == 1,
+        "failed abort resume must record one failed-closed outcome");
+    TEST_ASSERT(g_terminal_decision_calls == 1
+                && strcmp(g_last_terminal_reason, "failed_closed") == 0,
+        "failed abort resume must publish one failed-closed path");
+
+    TEST_PASS("postcommit abort outcome is conserved across backpressure");
+}
+
+
 static void
 test_postcommit_terminal_immediate_failure_no_handle_no_retry(void)
 {
@@ -6600,6 +6777,7 @@ main(void)
     test_null_input_tracking_and_body_filter_entry();
     test_init_handle_and_chunk_result_helpers();
     test_commit_feed_and_finalize_core_paths();
+    test_header_commit_backpressure_retry_is_atomic();
     test_postcommit_output_construction_failures();
     test_postcommit_ngx_done_is_delivery_success();
     test_postcommit_downstream_failure_classification();
@@ -6622,6 +6800,7 @@ main(void)
     test_postcommit_pending_backpressure_metrics_are_symmetric();
     test_postcommit_copied_output_accounting_matches_after_resume();
     test_postcommit_terminal_only_backpressure_metrics();
+    test_postcommit_abort_outcome_across_backpressure();
     test_postcommit_terminal_immediate_failure_no_handle_no_retry();
     test_postcommit_terminal_immediate_failure_live_handle_no_retry();
     test_streaming_decompression_error_metric_mapping();

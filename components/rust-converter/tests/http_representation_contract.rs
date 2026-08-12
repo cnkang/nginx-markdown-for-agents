@@ -1,8 +1,11 @@
 //! HTTP Representation Contract verification tests.
 //!
-//! Validates the 16-scenario HTTP representation truth table
-//! from the HTTP representation contract (Requirements 10.1-10.6, 10.8-10.10,
-//! 15.3).
+//! Covers the Rust-side scenarios for converted full-buffer and streaming
+//! header plans, conditional-request outcomes, passthrough, and error-policy
+//! decisions from the HTTP representation truth table. Scenarios 4, 5, 6,
+//! and 14 are covered by the C protocol suite (including
+//! `protocol_correctness_test.c`); this module does not claim to validate all
+//! 16 scenarios by itself.
 //!
 //! These tests verify the Rust-side contract for header plan construction
 //! and conditional request evaluation. The C module's `Vary: Accept`

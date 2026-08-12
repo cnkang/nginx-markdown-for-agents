@@ -31,13 +31,17 @@
 //! ```
 
 /// Maximum number of Accept header entries to parse.
-/// Prevents DoS from unreasonably long headers.
+/// Prevents DoS from unreasonably long headers. This is a fixed parser-safety
+/// bound, not a public directive: the frozen 0.9.2 surface has no negotiation
+/// limit setting to keep synchronized with this parser.
 const MAX_ACCEPT_ENTRIES: usize = 64;
 
 /// Maximum length of a single MIME type string.
 const MAX_MIME_LEN: usize = 128;
 
 /// Maximum length of the entire Accept header we will parse.
+/// This fixed DoS-defense bound is intentionally not configurable; changing it
+/// would change the frozen public contract and its validation/test surface.
 const MAX_HEADER_LEN: usize = 4096;
 
 /// Result of Accept header negotiation.

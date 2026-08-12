@@ -308,10 +308,10 @@ impl SecurityValidator {
     /// assert!(!validator.is_event_handler("href"));
     /// ```
     pub fn is_event_handler(&self, attr_name: &str) -> bool {
-        // Prefix-based detection following OWASP / DOMPurify conventions.
-        // The HTML spec reserves the "on*" attribute namespace exclusively
-        // for event handlers — no legitimate attribute starts with "on"
-        // without being an event handler.
+        // The frozen safety contract treats every non-empty `on*` attribute as
+        // an event handler. Keep the length guard so the bare `on` token is not
+        // stripped accidentally; the prefix rule catches future event names
+        // without maintaining an incomplete allowlist.
         attr_name.starts_with("on") && attr_name.len() > 2
     }
 

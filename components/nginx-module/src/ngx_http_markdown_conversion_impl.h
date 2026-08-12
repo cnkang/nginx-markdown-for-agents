@@ -931,12 +931,11 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
     }
 
     /*
-     * Unified memory budget with priority:
-     *   explicit per-engine > unified > default
-     * For streaming_budget: if streaming_budget was explicitly set
-     * (not NGX_CONF_UNSET_SIZE), use it; else if memory_budget is
-     * set, use it; else streaming_budget keeps its merge default.
-     * For max_size: same priority chain applies.
+     * Resolve the effective static conversion_memory budget once for this
+     * request. A zero value means no FFI-side constraint, so Rust may use its
+     * bounded full-buffer fallback; the normal NGINX default is 64 MiB from
+     * markdown_limits conversion_memory=64m. Runtime dynconf cannot replace
+     * this static public limit.
      */
     options->memory_budget =
         ngx_http_markdown_effective_memory_budget(eff, conf);
@@ -944,6 +943,7 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
         options->memory_budget = 0;
     }
 
+    /* This is the fixed flush minimum, not markdown_limits streaming_buffer. */
     options->flush_threshold =
         (NGX_HTTP_MARKDOWN_STREAM_FLUSH_MIN_FIXED > UINT32_MAX)
             ? UINT32_MAX

@@ -105,6 +105,9 @@ ngx_http_markdown_measure_content_encoding(
             if (!ngx_http_markdown_is_content_encoding_header(&headers[i])) {
                 continue;
             }
+            if (headers[i].value.len > 0 && headers[i].value.data == NULL) {
+                return NGX_ERROR;
+            }
 
             if (*match_count == 0) {
                 *single_value = &headers[i].value;
@@ -148,7 +151,9 @@ ngx_http_markdown_copy_content_encoding(ngx_http_request_t *r, u_char *data)
                 *data++ = ',';
                 *data++ = ' ';
             }
-            ngx_memcpy(data, headers[i].value.data, headers[i].value.len);
+            if (headers[i].value.len > 0) {
+                ngx_memcpy(data, headers[i].value.data, headers[i].value.len);
+            }
             data += headers[i].value.len;
             first = 0;
         }

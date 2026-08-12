@@ -221,7 +221,7 @@ ngx_http_markdown_streaming_policy_str(ngx_uint_t policy)
  * produces a JSON object fragment containing key-value pairs.
  *
  * The output contains active directive-shaped keys only.  The caller embeds
- * this fragment in the Diagnostics Schema v1 configuration.effective object;
+ * this fragment in the Diagnostics Schema v2 configuration.effective object;
  * removed directive names and legacy diagnostics sections are not emitted.
  *
  * Parameters:

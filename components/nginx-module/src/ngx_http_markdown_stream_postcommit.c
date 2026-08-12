@@ -305,7 +305,10 @@ ngx_http_markdown_stream_postcommit_abort(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx)
 {
-    ngx_int_t  rc;
+    ngx_int_t   rc;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    ngx_flag_t  terminal_already_sent;
+#endif
 
     if (r == NULL || ctx == NULL) {
         return NGX_ERROR;
@@ -350,8 +353,6 @@ ngx_http_markdown_stream_postcommit_abort(
          * state as the guard would cause the first real abort to be
          * missed (Rule 23: delivery ≠ decision counters).
          */
-        ngx_flag_t  terminal_already_sent;
-
         terminal_already_sent = (r == r->main)
             ? ctx->streaming.main_terminal_sent
             : ctx->streaming.subrequest_terminal_sent;
@@ -378,6 +379,11 @@ ngx_http_markdown_stream_postcommit_abort(
     rc = ngx_http_markdown_stream_postcommit_send_terminal(r, ctx);
     rc = ngx_http_markdown_stream_postcommit_handle_send_result(
         r, rc, "abort");
+#ifdef MARKDOWN_STREAMING_ENABLED
+    if (rc == NGX_AGAIN && !terminal_already_sent) {
+        ctx->streaming.pending_meta.pending_abort_terminal = 1;
+    }
+#endif
     if (rc != NGX_OK && rc != NGX_DONE) {
         return rc;
     }
@@ -386,7 +392,9 @@ ngx_http_markdown_stream_postcommit_abort(
      * One-shot: the postcommit_abort_recorded latch already prevents
      * a second attempt metric; this latch prevents a second outcome. */
 #ifdef MARKDOWN_STREAMING_ENABLED
-    if (!ctx->streaming.completion.terminal_aborted_recorded) {
+    if (!terminal_already_sent
+        && !ctx->streaming.completion.terminal_aborted_recorded)
+    {
         ngx_http_markdown_metrics_record_terminal_abort();
         ctx->streaming.completion.terminal_aborted_recorded = 1;
     }
@@ -563,6 +571,7 @@ ngx_http_markdown_stream_postcommit_capture_pending(
         (r == r->main && out->buf->last_buf);
     ctx->streaming.pending_meta.subrequest_terminal =
         (r != r->main && out->buf->last_in_chain);
+    ctx->streaming.pending_meta.pending_abort_terminal = 0;
     ngx_http_markdown_metrics_record_postcommit_pending(output_bytes);
     r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
 }

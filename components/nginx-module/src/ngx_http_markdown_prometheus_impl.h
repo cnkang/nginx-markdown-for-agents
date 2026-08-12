@@ -20,18 +20,7 @@
 u_char *ngx_slprintf(u_char *buf, u_char *last,
     const char *fmt, ...);
 
-/*
- * Per-path RB-tree walk removed from production builds in 0.9.2
- * (unbounded cardinality risk). Retained under debug guard only.
- * Unit test stubs define this to 0 before including this header.
- */
-#ifndef NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
-#ifdef MARKDOWN_METRICS_PER_PATH_DEBUG
-#define NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED  1
-#else
-#define NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED  0
-#endif
-#endif
+#include "ngx_http_markdown_metrics_config.h"
 
 #if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
 #define NGX_HTTP_MARKDOWN_PROM_PATH_HEADER                              \

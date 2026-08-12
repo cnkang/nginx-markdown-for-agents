@@ -63,11 +63,11 @@ typedef struct ngx_http_markdown_dynconf_snapshot_s
  * Dynconf-mutable fields that MUST be read through this struct
  * (via ngx_http_markdown_effective_*() helpers) in all request-path
  * code (body filter, conversion, logging, budget, streaming):
- *   - enabled, enabled_source
+ *   - filter (represented by enabled)
  *   - prune_noise
  *   - log_verbosity
- *   - memory_budget
- *   - streaming_budget
+ *   - error_policy
+ *   - streaming_buffer
  *
  * Direct conf-> reads of these fields in request-path code are
  * violations of AGENTS.md Rule 34 and will be flagged by
@@ -1051,6 +1051,7 @@ typedef struct {
         size_t                            replay_capacity; /* Max replay buffer size (from config) */
         ngx_flag_t                        replay_initialized;
         ngx_flag_t                        headers_committed; /* Headers sent downstream */
+        ngx_flag_t                        headers_pending;   /* Header filter returned NGX_AGAIN */
     } stream_sm;
 
     /*
@@ -1138,6 +1139,14 @@ typedef struct {
              */
             ngx_flag_t                        main_terminal;
             ngx_flag_t                        subrequest_terminal;
+
+            /*
+             * Abort terminal is pending downstream delivery. This marker
+             * is set only after an abort terminal returns NGX_AGAIN and is
+             * consumed after the downstream-owned chain gets a definitive
+             * result.
+             */
+            ngx_flag_t                        pending_abort_terminal;
         } pending_meta;
 
         /* Pre-Commit prebuffer for fallback */
@@ -1796,15 +1805,15 @@ const ngx_str_t *ngx_http_markdown_reason_eligible_fullbuffer_auto(void);
  * Rust FFI reason code accessors (v0.7.0+)
  *
  * These functions access reason code strings from the Rust-defined enum
- * via FFI.  The Rust enum (decision/reason_code.rs) is the SINGLE SOURCE
- * OF TRUTH for all reason codes.
+ * via FFI. The declarative reason_registry.toml is the single source; the
+ * Rust enum and C metadata are generated projections.
  *
  * New code should prefer these accessors over the legacy C-side string
  * literals defined above.  The legacy functions remain for backward
  * compatibility during the migration period.
  *
  * DO NOT define new reason code constants in C.  All reason codes must
- * come from the Rust enum via these FFI accessors.
+ * come from the generated registry projections via these FFI accessors.
  */
 
 /* Get reason code string from Rust enum (returns NGX_OK/NGX_DECLINED) */

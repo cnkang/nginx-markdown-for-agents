@@ -3,6 +3,7 @@
 
 #include "ngx_http_markdown_metrics_json_perf_impl.h"
 #include "ngx_http_markdown_metrics_format.h"
+#include "ngx_http_markdown_metrics_config.h"
 
 #include <stdint.h>
 
@@ -1037,14 +1038,6 @@ ngx_http_markdown_metrics_derive_values(
  * that lack full NGINX type definitions define the macro to 0
  * before including this header.
  */
-/*
- * Per-path walk removed in 0.9.2; default to disabled, only debug builds
- * with MARKDOWN_METRICS_PER_PATH_DEBUG may re-enable.
- */
-#ifndef NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
-#define NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED  0
-#endif
-
 #if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
 typedef struct {
     u_char             *pos;
@@ -1508,7 +1501,7 @@ ngx_http_markdown_escape_json_string(u_char *dst, u_char *last,
 /*
  * Bounded rendering context for per-path detail output.
  *
- * Shared by JSON and plain-text renderers to implement graceful
+ * Shared by the bounded Prometheus renderer to implement graceful
  * degradation when the output buffer cannot accommodate all
  * per-path entries.  Omitted entries are aggregated into an
  * __other__ pseudo-entry so the response always remains

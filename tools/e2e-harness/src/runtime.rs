@@ -144,7 +144,8 @@ impl ScenarioRuntime {
 
 /// Write an `nginx.conf` to `path`.
 ///
-/// For the `brotli-streaming` and `metrics-endpoint` scenarios, produces a
+/// For the `brotli-streaming`, `metrics-endpoint`, and `encoding-chain`
+/// scenarios, produces a
 /// module-enabled config with the routes needed by the scenario. For all
 /// other scenarios, writes a minimal proxy stub.
 ///

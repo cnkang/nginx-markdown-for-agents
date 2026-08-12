@@ -634,7 +634,7 @@ fn metrics_response(
     let body = format!(
         "# HELP nginx_markdown_requests_total Requests entering the decision chain\n\
 # TYPE nginx_markdown_requests_total counter\n\
-nginx_markdown_requests_total{{outcome=\"converted\",stage=\"delivery\",reason=\"none\"}} {}\n\
+nginx_markdown_requests_total{{outcome=\"converted\",stage=\"delivery\",reason=\"converted\"}} {}\n\
 nginx_markdown_requests_total{{outcome=\"skipped\",stage=\"eligibility\",reason=\"not_eligible\"}} {}\n\
 # HELP nginx_markdown_conversion_attempts_total Conversion attempts\n\
 # TYPE nginx_markdown_conversion_attempts_total counter\n\
@@ -658,13 +658,13 @@ nginx_markdown_output_bytes_total {}\n\
 nginx_markdown_inflight_requests 0\n\
 # HELP nginx_markdown_streaming_events_total Streaming lifecycle events\n\
 # TYPE nginx_markdown_streaming_events_total counter\n\
-nginx_markdown_streaming_events_total{{transition=\"commit\",reason=\"none\"}} 0\n\
+nginx_markdown_streaming_events_total{{transition=\"commit\",reason=\"converted\"}} 0\n\
 # HELP nginx_markdown_decompression_events_total Decompression events\n\
 # TYPE nginx_markdown_decompression_events_total counter\n\
-nginx_markdown_decompression_events_total{{encoding=\"gzip\",outcome=\"success\",reason=\"none\"}} 0\n\
+nginx_markdown_decompression_events_total{{encoding=\"gzip\",outcome=\"success\",reason=\"ok\"}} 0\n\
 # HELP nginx_markdown_dynconf_reloads_total Dynamic configuration reloads\n\
 # TYPE nginx_markdown_dynconf_reloads_total counter\n\
-nginx_markdown_dynconf_reloads_total{{outcome=\"success\",reason=\"none\"}} 0\n\
+nginx_markdown_dynconf_reloads_total{{outcome=\"success\",reason=\"ok\"}} 0\n\
 # HELP nginx_markdown_build_info Build information\n\
 # TYPE nginx_markdown_build_info gauge\n\
 nginx_markdown_build_info{{version=\"test\",nginx_version=\"test\",features=\"\"}} 1\n",
