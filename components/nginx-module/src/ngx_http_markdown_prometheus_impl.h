@@ -497,7 +497,6 @@ ngx_http_markdown_metrics_write_prometheus_streaming_failures(
         " %uA\n"
         "\n",
         snapshot->streaming.streaming_failure_postcommit_abort,
-        snapshot->streaming.terminal_aborted_total,
         snapshot->streaming.streaming_failure_postcommit_safe_finish);
 
     /* streaming_candidate_total */

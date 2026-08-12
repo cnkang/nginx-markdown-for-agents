@@ -19,6 +19,7 @@ typedef struct {
         } selection;
         ngx_atomic_t  streaming_failure_postcommit_abort;
         ngx_atomic_t  streaming_failure_postcommit_safe_finish;
+        ngx_atomic_t  terminal_aborted_total;
     } streaming;
     struct {
         ngx_atomic_t  backpressure_total;

@@ -119,9 +119,21 @@ while IFS= read -r match; do
     done
 
     # Skip lines that are inside effective_* helper definitions
-    # (these are the fallback paths when eff is NULL, which is allowed)
+    # (these are the fallback paths when eff is NULL, which is allowed).
+    # The content check catches lines that mention effective_ directly
+    # (for example the ternary fallback ": conf->enabled_source" lines
+    # inside is_enabled, which are already allowlisted).  The
+    # enclosing-function check catches the body of
+    # ngx_http_markdown_effective_*() helpers whose return statement
+    # reads conf-><mutable_field> as the NULL-eff fallback without
+    # spelling effective_ on that line.
     if echo "$content" | grep -qE 'effective_'; then
         echo "  OK      ${file}:${line} — inside effective_* helper: ${content}" >&2
+        hits=$((hits + 1))
+        continue
+    fi
+    if function_contains_line "$file" "$line" 'ngx_http_markdown_effective_[a-z_]+'; then
+        echo "  OK      ${file}:${line} — inside effective_* helper fallback: ${content}" >&2
         hits=$((hits + 1))
         continue
     fi

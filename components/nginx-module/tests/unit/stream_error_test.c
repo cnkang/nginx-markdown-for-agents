@@ -135,6 +135,11 @@ ngx_http_markdown_metrics_record_postcommit_safe_finish(void)
 }
 
 void
+ngx_http_markdown_metrics_record_terminal_abort(void)
+{
+}
+
+void
 ngx_http_markdown_pending_output_set(ngx_chain_t **slot, ngx_chain_t *value)
 {
     if (slot != NULL) {
