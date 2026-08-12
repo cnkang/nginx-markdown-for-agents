@@ -94,7 +94,7 @@ DECLARATION_LINE_RE = re.compile(
     r"(?:\w+\s+\*\s*)?markdown_\w+\s*\("
 )
 
-IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+IDENTIFIER_RE = re.compile(r"[A-Za-z_]\w*")
 HEADER_CONTROL_KEYWORDS = frozenset(
     {"if", "for", "while", "switch", "return"}
 )
