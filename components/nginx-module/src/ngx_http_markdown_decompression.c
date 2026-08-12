@@ -1284,9 +1284,13 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
                                              type, &total_decompressed);
     if (loop_rc != NGX_OK) {
         /*
-         * Fallback: if deflate decompression fails with FORMAT_ERROR,
-         * retry with raw deflate (-MAX_WBITS).  Some legacy servers
-         * (Microsoft IIS 5/6, older Java servlets) send raw deflate
+         * Legacy C compatibility fallback: if deflate decompression fails
+         * with FORMAT_ERROR, retry with raw deflate
+         * (-MAX_WBITS). This path is retained for historical C coverage;
+         * the frozen 0.9.2 public contract is zlib-wrapped RFC 1950 only.
+         *
+         * Some legacy servers (Microsoft IIS 5/6, older Java servlets)
+         * send raw deflate
          * (RFC 1951 only) under Content-Encoding: deflate instead of
          * zlib-wrapped (RFC 1950).  For gzip, no fallback is attempted.
          */

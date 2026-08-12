@@ -170,8 +170,9 @@ after gunzip has stripped it.
 | Brotli compresses | Markdown → Brotli bytes |
 | Client receives | `Content-Type: text/markdown; charset=utf-8`, `Content-Encoding: br` |
 
-**Key invariant:** If the Brotli filter module (`ngx_brotli`) loads,
-it compresses the **converted Markdown** output.  Markdown's built-in
+**Key invariant:** If the Brotli filter module (`ngx_brotli`) loads, it must be
+downstream of the Markdown body filter so that it compresses the **converted
+Markdown** output. Markdown's built-in
 decompression handles upstream Brotli regardless of whether the Brotli
 filter is present, because the Brotli filter is a **compressor** (response
 out), not a **decompressor** (response in).  Upstream Brotli

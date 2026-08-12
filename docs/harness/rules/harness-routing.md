@@ -22,7 +22,7 @@ Required:
 - If a new tooling area accepts CLI path inputs, add both path patterns and
   keywords to routing-manifest so `harness_route.py` can match by either
   changed files or task hints.
-- Every routing-manifest update must mirror into
+- Mirror every routing-manifest update into
   `docs/harness/routing-manifest.md` and the corresponding risk-pack docs in
   the same changeset.
 

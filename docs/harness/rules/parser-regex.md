@@ -20,8 +20,8 @@ Required:
 - Treat static-analysis ReDoS findings as design issues, not cosmetic lint.
 - `detect_regex_safety.py` provides AST-based automated detection of:
   - Nested quantifiers with non-separator content: `(aa+)+`, `(a\d+)+`,
-    `(.*)+`.  A group with an unbounded inner quantifier repeated by an
-    the detector flags an unbounded outer quantifier unless every alternation branch
+    `(.*)+`. The detector flags an unbounded outer quantifier around a group
+    containing an unbounded inner quantifier unless every alternation branch
   starts with a strong literal separator (a multi-char literal or a single
   non-alphanumeric char like `-`, `_`, `.`) that the inner unbounded atom
   cannot consume.  For multi-character separators, only the first character
@@ -35,19 +35,19 @@ Required:
   - Dynamic regex injection: CLI args, env vars, file content as patterns
   - `re.DOTALL` with an unescaped greedy `.*` over full documents.  Lazy
     `.*?`, possessive `.*+`, escaped dots, and character-class literals do
-    not trigger this broad advisory check, they still pass through the normal
+    not trigger this broad advisory check; they still pass through the normal
     structural ReDoS checks.
 - The detector extracts Python regex usage via the standard library `ast` module,
   covering: `re.compile`, `re.search`, `re.match`, `re.fullmatch`,
   `re.findall`, `re.finditer`, `re.split`, `re.sub`, `re.subn`, and
-  compiled-pattern methods.  Both positional and keyword argument forms
-  the detector supports (`pattern=`, `string=`, `flags=`).  Import aliases
+  compiled-pattern methods. The detector supports both positional and keyword
+  argument forms (`pattern=`, `string=`, `flags=`). Import aliases
   the detector resolves (`import re as X`, `from re import Y as Z`).
 - Scope-aware static string constant propagation using a unified `_Binding` /
   `_Scope` model with LEGB (Local → Enclosing → Global → Builtin) lookup.
   Module-level and function/class/lambda-local constants (`PATTERN = r"..."`)
-  the detector resolves them when used as patterns.  Finite static string collections and
-  the detector propagates fixed-width string rows through `for` loops and
+  the detector resolves them when used as patterns. It propagates finite static
+  string collections and fixed-width string rows through `for` loops and
   comprehensions, including destructured targets.  Their use in f-strings or
   the detector expands string concatenation as a bounded Cartesian product (at most
   256 alternatives), and analyzes every resulting pattern.  Expressions
@@ -66,7 +66,7 @@ Required:
   `del p` no longer removes a module binding, `global`/`nonlocal` are
   partially modeled (honored for delete routing) and otherwise conservative.
   Function/lambda defaults, decorators, return annotations, and parameter
-  the detector evaluates annotations in the enclosing scope before the function name
+  Python evaluates annotations in the enclosing scope before the function name
   binds and before the body scope opens, matching Python's real
   evaluation order.  Unknown RHS expressions produce DYNAMIC_VALUE (not
   the old static binding).  Cross-module imports are NOT resolved (those
@@ -97,14 +97,14 @@ Required:
   assignments, skips options, supports `-e`/`--regexp`/`-P` and `--`, and
   does not pick up patterns from preceding commands in a pipeline.
   Broken multi-line command recovery matches exact command tokens rather than
-  substrings in prose or arguments.  Common engine/output flags such as
-  the detector models `grep -E`/`-F`/`-G`/`-c` and `rg -F` as boolean options, so they
+  substrings in prose or arguments. The detector models common engine/output
+  flags such as `grep -E`/`-F`/`-G`/`-c` and `rg -F` as boolean options, so they
   do not become spurious pattern candidates.
   Shell argument parsing classifies options into boolean flags (consume
   nothing), required-value options (consume next token), optional-value
   options (do not consume next token), pattern options, pattern-file
   options, and PCRE flags.  After an unknown option, additional non-option
-  the detector collects tokens as pattern candidates so a dangerous pattern cannot
+  the detector collects additional non-option tokens as pattern candidates so a dangerous pattern cannot
   be hidden behind an unrecognized option.  Multiple `-e` patterns are all
   extracted.  Pattern-file options (`-f`/`--file`, multiple supported) get
   resolved relative to the shell script directory, validated to stay within
@@ -119,10 +119,10 @@ Required:
   PCRE2 pattern/match context. No `pcre2_compile()` or `pcre2_match()`
   calls in module code.
 - Suppression: `# nosec:regex-safety -- <justification>` with non-empty reason.
-  File-level or directory-level suppressions are not allowed.  Suppressions
-  the detector checks them at the call site, the preceding line, and upward through
-  consecutive comment/blank lines (up to 30) so multi-line `re.compile(...)`
-  a comment block above the statement can suppress calls.
+  File-level or directory-level suppressions are not allowed. The detector
+  checks them at the call site, the preceding line, and upward through
+  consecutive comment/blank lines (up to 30), so a comment block above a
+  multi-line `re.compile(...)` statement can suppress calls.
 
 CLI contract:
 - Default (no flags): advisory exit 0 regardless of findings.

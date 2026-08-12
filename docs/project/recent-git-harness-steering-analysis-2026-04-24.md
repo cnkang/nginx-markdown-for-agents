@@ -7,8 +7,11 @@ so the 60-day reassessment covers the complete repository history available in
 this clone.
 
 We refreshed remote state with `git fetch --all --prune --tags` before
-analysis. We enumerated local and remote refs from `refs/heads` and
-`refs/remotes`, excluding `origin/HEAD`, and deduplicated commits by SHA.
+analysis. We enumerated local, remote, and tag refs from `refs/heads`,
+`refs/remotes`, and `refs/tags`, excluding `origin/HEAD`, and deduplicated
+commits by SHA. The tag walk also recorded six tag-only commits that were not
+reachable from the scanned heads/remotes, so tag history was not silently
+omitted.
 `tools/harness/resolve_spec.py --hint "recent git harness steering analysis and
 remediation"` returned `WARN_NEEDS_AUTHOR_REVIEW`. This work is therefore
 treated as cross-cutting harness maintenance rather than a single bound spec.

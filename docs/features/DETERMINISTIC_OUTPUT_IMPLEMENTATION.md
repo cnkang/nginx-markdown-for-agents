@@ -79,7 +79,7 @@ fn normalize_line_whitespace(&self, line: &str) -> String {
 
 ## Testing
 
-### Unit Tests Added (13 new tests)
+### Unit Tests Added (14 new tests)
 
 Normalization-focused tests live in
 `components/rust-converter/src/converter.rs` and exercise the implementation
@@ -108,8 +108,8 @@ test result: ok. 136 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 **All tests pass**, including:
-- 123 existing tests (unchanged)
-- 13 new deterministic output tests
+- 122 existing tests (unchanged)
+- 14 new deterministic output tests
 
 ### Example Program
 

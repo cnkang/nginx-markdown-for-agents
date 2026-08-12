@@ -21,6 +21,11 @@
  * Gzip uses MAX_WBITS + 16 and preserves gzip member boundaries across
  * arbitrary input chunks. Brotli uses its incremental decoder when the
  * optional Brotli build support is enabled.
+ *
+ * PUBLIC CONTRACT NOTE (0.9.2): The raw-deflate branch remains in this C
+ * implementation for historical compatibility coverage. The frozen public
+ * contract and Rust decoder use zlib-wrapped RFC 1950 deflate only; callers
+ * must not rely on raw RFC 1951 fallback behavior.
  */
 
 #ifdef MARKDOWN_STREAMING_ENABLED

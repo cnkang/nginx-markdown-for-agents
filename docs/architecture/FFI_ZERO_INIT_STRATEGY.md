@@ -1,7 +1,7 @@
 # FFI Zero/Default Initialization Strategy
 
-> **Note**: This document originated in v0.7.0. The zero-initialization
-> policy remains in effect for v0.9.2, however, the FFI struct inventory
+> **Note**: This document originated in v0.7.0. Its zero/default
+> initialization safety goals remain in effect for v0.9.2, however, the FFI struct inventory
 > has evolved. See [FFI_MIGRATION_CONTRACT.md](FFI_MIGRATION_CONTRACT.md)
 > for the current v0.9.2 FFI boundary.
 

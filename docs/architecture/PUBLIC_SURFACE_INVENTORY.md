@@ -150,8 +150,10 @@ profile, and per-path dimensions are absent.
 
 ### Reason labels
 
-The numeric discriminants and strings below are `STABLE_FOR_1_0`. Their source
-is `components/rust-converter/src/decision/reason_code.rs`. C accesses the
+The numeric discriminants and strings below are `STABLE_FOR_1_0`. The single
+declarative source is `components/rust-converter/reason_registry.toml`.
+The generator emits `reason_code.rs`, `markdown_reason_meta.h`, and the
+release artifacts. These files are projections. C accesses the generated
 registry through FFI.
 
 ```text
@@ -186,14 +188,19 @@ registry through FFI.
 
 Production-path evidence includes generated reason artifacts,
 `reason_code_test.c`, `reason_code_ffi_test.c`, Prometheus renderer tests,
-and the metrics endpoint E2E scenario. The declarative source is
-`components/rust-converter/reason_registry.toml`.
+and the metrics endpoint E2E scenario. The generator is the only permitted
+source for reverse lookup and compatibility aliases.
 
 ## OTel Contract
 
-The 0.9.2 production surface no longer includes OTel. ADR-0027 records the
-worker-owned lifecycle, bounded queue, retry/backoff, timeout, shutdown-flush,
-and collector-backed E2E conditions required before a future 1.x reintroduction.
+The 0.9.2 production surface no longer includes OTel. A future reintroduction
+must satisfy the same six conditions as ADR-0027. The implementation needs a
+stable NGINX-native dependency. It needs complete span, context, export,
+timeout, retry, and degradation behavior. It needs a seven-day production soak
+with the stated leak, p99, outage, and correlation criteria. It must not block
+the request path. Compile-time gating remains required until release-candidate
+soak evidence exists. Directive compatibility with the NGINX-native module is
+also required.
 
 ## Dynamic Configuration Contract
 

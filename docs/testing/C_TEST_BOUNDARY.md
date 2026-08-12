@@ -147,11 +147,12 @@ compilation. Rust cannot express them without a circular dependency.
 
 **Why C:** The metrics subsystem is built on NGINX shared memory zones
 (`ngx_shm_zone_t`), NGINX atomic types (`ngx_atomic_t`), and a C struct
-(`ngx_http_markdown_metrics_t`) that is laid out in shared memory. The
-Prometheus, JSON, and plain-text renderers operate directly on this struct.
-Testing metrics correctness — counter increments, snapshot isolation, format
-rendering, SHM layout compatibility — requires direct access to these C
-structures and NGINX SHM APIs.
+(`ngx_http_markdown_metrics_t`) that is laid out in shared memory. The frozen
+metrics format selection is Prometheus-only, and the endpoint renders that
+Prometheus text directly from the C structures. Testing metrics correctness —
+counter increments, snapshot isolation, Prometheus rendering, and SHM layout
+compatibility — requires direct access to these C structures and NGINX SHM
+APIs.
 
 **Concrete examples:**
 

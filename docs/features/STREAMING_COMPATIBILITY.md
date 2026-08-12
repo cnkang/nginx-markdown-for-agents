@@ -24,7 +24,7 @@ mode. Use it to understand behavioral differences before enabling streaming.
 | Dynamic configuration | ✅ | ✅ | Runtime engine switching supported |
 | Shadow mode | ✅ | N/A | Runs streaming in background against full-buffer result |
 | Streaming decompression (gzip) | N/A | ✅ | Member-aware; since 0.9.1 |
-| Streaming decompression (deflate) | N/A | ✅ | RFC 1950/1951 sniff; since 0.9.1 |
+| Streaming decompression (deflate) | N/A | ✅ | RFC 1950 zlib-wrapped; raw RFC 1951 is outside the frozen 0.9.2 public contract |
 | Streaming decompression (Brotli) | N/A | ✅ | Requires `NGX_HTTP_BROTLI`; since 0.9.1 |
 
 ## Legend

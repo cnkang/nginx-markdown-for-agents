@@ -33,8 +33,8 @@ compilation.
 
 ## Rule 57: #ifdef-Guarded Function Visibility
 
-**Principle**: Functions declared inside `#ifdef FEATURE_GUARD` blocks must
-not reference it outside that guard. When both builds need a function
+**Principle**: Code outside an `#ifdef FEATURE_GUARD` block must not reference
+functions declared inside that guard. When both builds need a function
 (feature-enabled and feature-disabled), declare it outside the
 `#ifdef` guard. This catches the common mistake of adding a function
 declaration inside an `#ifdef` but forgetting to move it outside when the

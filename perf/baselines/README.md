@@ -53,7 +53,7 @@ environment consistency only when present.
 
 The module benchmark derives its retained probe directory from the report
 output path. For the canonical raw report this is
-`perf/baselines/module-baseline-091-raw-probes/`, containing non-empty
+`perf/baselines/module-baseline-092-raw-probes/`, containing non-empty
 `.headers`, `.body`, and `.json` files for each of the eight scenarios.
 `tools/perf/validate_module_probe_artifacts.py` verifies that complete
 triplet, its response verdict and digest, and the finalized baseline's

@@ -57,33 +57,26 @@ Required:
 - Decompression size accounting is response-wide.  Inflater reset at a gzip
   member boundary must not reset `total_decompressed` or independently grant
   another `max_decompressed_size` budget.
-- Streaming decompression must correctly handle both deflate formats.
-  The streaming decompressor defers `inflateInit2` until the first 2
-  bytes arrive, then sniffs the zlib wrapper:
-  - zlib-wrapped (RFC 1950, RFC 9110-compliant): `windowBits = 15`
-    (`MAX_WBITS`)
-  - raw deflate (RFC 1951): `windowBits = -15` (`-MAX_WBITS`)
-  Mixing the two formats without sniffing causes silent data corruption
-  or decompression failures on chunk boundaries.  The buffered path
-  retries on format mismatch, the streaming path cannot retry once
-  the module consumes chunks, so the sniff is mandatory.
-- Truncated gzip members and deflate streams (either deflate format) must be
+- The frozen 0.9.2 public contract supports zlib-wrapped deflate (RFC 1950)
+  only. The decoder must initialize deflate with `windowBits = 15`
+  (`MAX_WBITS`) and must not promise a raw RFC 1951 fallback. Older C
+  compatibility tests keep raw probes as historical coverage. Mark those
+  probes explicitly and do not use them to define new public behavior.
+- Truncated gzip members and zlib-wrapped deflate streams must be
   explicitly rejected
   with a budget or integrity error, not silently accepted.  When
   `inflate()` returns `Z_BUF_ERROR` or `Z_DATA_ERROR` on a terminal
   chunk, the decompressor must propagate a `DECOMP_CATEGORY_TRUNCATED`
   error rather than returning partial output.
-- Test harnesses that produce compressed payloads for streaming
-  decompression tests must use the correct deflate format matching
-  the test intent (raw deflate: `windowBits = -15`, zlib-wrapped:
-  `windowBits = 15`).  Mismatched compression modes between test
-  payload and production decompressor produce false passes or false
-  failures.
+- Test harnesses that produce new compressed payloads for streaming
+  decompression tests must use zlib-wrapped deflate (`windowBits = 15`).
+  Mismatched compression modes between a test payload and the frozen public
+  decoder contract produce false passes or false failures.
 - When the decompression implementation shares between full-buffer and
   streaming,
-  both paths must handle the same deflate formats.  If full-buffer uses
+  both paths must handle the same public deflate format. If full-buffer uses
   `ngx_http_markdown_decompress_gzip`, the streaming path must independently
-  configure gzip framing and sniff both deflate formats, do not assume the
+  configure gzip framing and `MAX_WBITS` deflate framing. Do not assume the
   two paths share format configuration or member lifecycle.
 
 - `Z_OK` and `Z_BUF_ERROR` have distinct semantics in `inflate()`:
@@ -104,8 +97,8 @@ Required:
 
 Verification:
 - `grep -rn 'windowBits\|Z_RAW\|inflateInit\|inflateReset\|zlib_header' components/nginx-module/src/ components/rust-converter/src/`
-- Verify streaming decompression sniffs the zlib header and selects
-  `MAX_WBITS` (zlib-wrapped) or `-MAX_WBITS` (raw deflate).
+- Verify streaming decompression selects `MAX_WBITS` for the frozen
+  zlib-wrapped deflate contract.
 - Verify gzip concatenated-member tests cover one feed, a boundary between
   feeds, a boundary inside a feed, a truncated later member, and cumulative
   response budget enforcement.  Full-buffer tests must cover both the default
@@ -114,8 +107,8 @@ Verification:
 - `grep -rn 'TRUNCATED\|truncated.*\(gzip\|deflat\|brotli\)\|Z_BUF_ERROR\|Z_DATA_ERROR\|no.progress' components/rust-converter/src/ components/nginx-module/src/`
 - Verify truncated-stream rejection propagates a budget/integrity error.
 - Verify the no-progress guard detects `Z_BUF_ERROR` with no state change.
-- `make test-rust` — streaming decompression tests cover both deflate
-  formats and truncated-stream rejection.
+- `make test-rust` — streaming decompression tests cover zlib-wrapped
+  deflate and truncated-stream rejection.
 - `make test-nginx-unit` — C unit tests cover the no-progress guard via
   `TEST_INFLATE_MODE_FEED_BUF_ERROR_NO_PROGRESS` and gzip member lifecycle.
 - `make verify-chunked-native-e2e-smoke` — native gzip streaming exercises

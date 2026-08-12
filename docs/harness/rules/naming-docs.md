@@ -17,9 +17,10 @@ Required:
   `j`, `n`) and well-established NGINX conventions (`r`, `cf`, `ctx`, `cl`).
   When a name encodes a unit or semantic (for example `elapsed_ms`,
   `pattern_count`), the name must match what the value actually represents.
-- NGINX numbered macros (`ngx_log_debug0` through `ngx_log_debug8`,
-  `ngx_log_error`) are framework conventions and must not rename.  The
-  trailing digit indicates the argument count, not a version or sequence.
+- NGINX logging macros (`ngx_log_error` and `ngx_log_debug0` through
+  `ngx_log_debug8`) follow framework conventions. Do not rename them. For
+  `ngx_log_debug0` through `ngx_log_debug8`, the trailing digit indicates the
+  argument count, not a version or sequence.
 - Every non-trivial function must have a block comment immediately before its
   definition describing purpose, parameters, return values, and side effects.
   For C code use `/* */` block comments per NGINX style.  For Rust use `///`

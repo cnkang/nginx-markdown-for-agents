@@ -2,7 +2,10 @@
 
 This document describes the request path at the frozen release-contract boundary.
 The important invariant is that eligibility, engine selection, streaming
-backpressure, and terminal metrics describe one request exactly once.
+backpressure, and terminal metrics describe one request. Backpressure may
+suspend that same request multiple times, but every event remains associated
+with it. The module records the terminal outcome and attempt metric exactly
+once.
 
 ## Lifecycle
 
@@ -25,10 +28,10 @@ It also captures the active dynamic-configuration snapshot once and builds the
 request's effective view. Later timer reloads cannot change that request's
 policy midway through processing.
 
-The effective view includes `filter`, `prune_noise`,
+The effective view includes `enabled` (the `filter` field), `prune_noise`,
 `log_verbosity`, `error_policy`, and `streaming_buffer` as runtime-overridable
-fields. Static-only limits and structural directives remain owned by the
-NGINX configuration lifecycle.
+fields. `memory_budget` and the other resource limits remain static safety
+constraints owned by the NGINX configuration lifecycle.
 
 ## Engine selection
 

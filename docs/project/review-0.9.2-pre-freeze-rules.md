@@ -71,7 +71,7 @@
 ## Verification method (post-fix)
 
 - `make harness-check`
-- `grep -rn '\s\|\d\|\w' tools/harness/detect_*.sh` → zero hits (Rule 41)
+- `grep -rnE '\\[sdw]' tools/harness/detect_*.sh` → zero hits (Rule 41)
 - `python3 -c` parse routing-manifest.json
 - `make complexity-check` (if scripts edited)
 - `make docs-check`

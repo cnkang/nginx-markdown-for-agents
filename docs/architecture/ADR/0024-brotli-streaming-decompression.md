@@ -167,9 +167,10 @@ No subsequent call may re-feed the same compressed data.
   are external library link-imports from `libbrotlidec`, not project exports
 - **Brotli-disabled builds** (`NGX_HTTP_BROTLI` undefined): identical public
   ABI, zero Brotli linker references, no unconditional dependency added
-- **Official Brotli-enabled builds** (release artifacts): intentionally depend
-  on `libbrotlidec` at build time and runtime (DEB: `libbrotli1`. RPM:
-  `libbrotli`. Homebrew: `depends_on "brotli"`)
+- **Official Brotli-enabled builds** (release artifacts): Debian/Ubuntu use
+  `libbrotli-dev` at build time and `libbrotli1` at runtime. RPM/Fedora use
+  `brotli-devel` at build time and `libbrotli` at runtime. Homebrew uses the
+  `brotli` formula for both.
 - All Brotli streaming code guarded by `#ifdef NGX_HTTP_BROTLI` — enforced by
   `detect_ifdef_guard_visibility.sh` CI gate
 

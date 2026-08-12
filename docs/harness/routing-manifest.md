@@ -26,7 +26,7 @@ This page is the readable overlay, not the machine-owned truth.
 | `schema-drift` | focused semantic | `make schema-drift-check` |
 | `reason-codegen` | focused semantic | `make reason-codegen-check` |
 | `observation` | report-oriented | `nightly-observation.yml`, `weekly-observation.yml` (release evidence and matrix drift, pinned SHAs) |
-| `release-governance` | focused semantic | `make release-gates-check-092`, `make release-gates-check`, `make release-gates-check-strict` |
+| `release-governance` | focused semantic | `make release-gates-check-080`, `make release-gates-check`, `make release-gates-check-strict` |
 | `release-manifest` | focused semantic | `python3 packaging/scripts/test_release_manifest.py`, `make release-gates-check` |
 | `release-matrix` | focused semantic | `make release-matrix-check` |
 | `release-candidate-evidence` | focused semantic | `make release-candidate-evidence-check` |
@@ -38,6 +38,7 @@ This page is the readable overlay, not the machine-owned truth.
 | `regex-security` | cheap blocker | `make regex-security-check` |
 | `e2e-streaming-config` | cheap blocker | `make e2e-streaming-config-check` |
 | `sonar-encoding` | cheap blocker | `make sonar-encoding-check` |
+| `diagnostics-access-phase` | focused semantic | `make verify-diagnostics-access-phase-e2e` (requires `NGINX_BIN` and `NGINX_MODULE_SO`; emits `SKIP` when unavailable) |
 | `runtime-e2e` | umbrella | `make verify-chunked-native-e2e-smoke`, `make verify-streaming-failure-cache-e2e` |
 | `release-quality` | umbrella | `make harness-check-full` |
 | `coverage-gate` | focused semantic | `make coverage-gate` |

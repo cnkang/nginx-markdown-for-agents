@@ -415,8 +415,10 @@ standard `normalize_output` two-pass approach.
 
 ## Security Baseline
 
-All `SecurityValidator` checks remain active regardless of which optimization
-path is taken:
+The optimization is security-sensitive. Early pruning intentionally bypasses
+`SecurityValidator::check_element` for elements classified as prunable, so the
+prunable-element allowlist and its safety tests are part of the security
+contract. Other elements still pass through the normal validator:
 
 - Dangerous element removal (`script`, `style`, `noscript`, and others in
   `DANGEROUS_ELEMENTS`)

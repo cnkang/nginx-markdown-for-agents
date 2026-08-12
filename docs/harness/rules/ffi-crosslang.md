@@ -152,8 +152,8 @@ Required:
 - When adding a new FFI operation (for example `DeleteAll`, `Clear`,
   `Reset`), verify the C-side handler explicitly checks for NULL data
   pointer and zero length on all string/buffer inputs before passing them
-  to Rust.  A NULL `ngx_str_t.data` with non-zero `len` has undefined behavior
-  behavior, a zero `len` with non-NULL `data` is semantically empty.
+  to Rust.  A NULL `ngx_str_t.data` with non-zero `len` has undefined behavior,
+  a zero `len` with non-NULL `data` is semantically empty.
 - On the Rust side, FFI entry points that receive raw pointers must
   validate them before dereferencing.  Use `if key.is_null() || key_len
   == 0` guard patterns.  Do not rely on the caller to have already

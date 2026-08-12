@@ -128,9 +128,10 @@ let markdown = converter.convert(&dom)?;
 ### FFI Integration
 
 The FFI layer automatically creates a `ConversionContext` from the overall
-`timeout_ms` option. The parser may use the separate parser-timeout deadline
-when configuration sets `markdown_limits parser_timeout=`. Parser checkpoints are
-not a second independent conversion timer.
+`timeout_ms` option. The parser may use the separate parser-related checkpoint
+deadline when configuration sets `markdown_limits parser_timeout=`. The
+module checks it at parser or traversal checkpoints. It does not interrupt an
+in-progress parse and is not a second independent conversion timer.
 
 ```c
 markdown_options_t options = {

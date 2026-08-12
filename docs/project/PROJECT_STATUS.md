@@ -165,7 +165,8 @@ pending until the blocking gates pass.
   - Noise pruning default enabled (`markdown_prune_noise on`).
   - Unified memory budget (`markdown_memory_budget`, 0.6.0, retired in 0.9.0 as `markdown_limits`) superseding dual
     `markdown_max_size` + `markdown_streaming_budget`.
-  - OpenTelemetry tracing integration (self-implemented OTLP HTTP/protobuf).
+  - Historical OpenTelemetry tracing proposal (the proposal selected OTLP
+    HTTP/JSON). No OTel implementation shipped in this release line.
   - Per-path metrics with cardinality control.
   - OS package manager distribution (APT, YUM/DNF, Homebrew).
   - Helm chart with Ingress annotation support.
@@ -570,7 +571,8 @@ breaking-release foundation.
 - Benchmark corpus and evidence-based release-gate validation
 - Repo-owned harness governance (`AGENTS.md`, `docs/harness/`, `tools/harness/`)
 - Prometheus-compatible metrics endpoint for operational monitoring
-- OpenTelemetry tracing integration (self-implemented OTLP HTTP/protobuf)
+- Historical OpenTelemetry tracing proposal (OTLP HTTP/JSON). The product has
+  no built-in OTel tracing implementation.
 - Per-path metrics with cardinality control
 - OS package manager distribution (APT, YUM/DNF, Homebrew)
 - Rollout and rollback guides with executable operator procedures
@@ -583,14 +585,17 @@ breaking-release foundation.
 
 ### Future Exploration
 - Additional Markdown flavors and output formats
-- Expanded observability integrations beyond built-in shared metrics and OTel tracing
+- Expanded observability integrations beyond built-in shared metrics and the
+  removed OTel tracing proposal
 
 ## Known Limitations
 
 The following limitations appear in the documentation:
 
-1. **Streaming Is Default**: Streaming is the default engine, full-buffer is
-   the fallback for explicit opt-out or engine-selection override
+1. **Streaming Is Default**: Streaming is the default policy, with
+   `markdown_streaming off|auto|force`. `off` explicitly selects full-buffer
+   conversion and ineligible or failed streaming requests follow fallback
+   policy.
 2. **HTML Input**: Requires HTML input (uncompressed or automatically decompressed)
 3. **Conversion Fidelity**: Some complex HTML structures may not convert perfectly to Markdown
 4. **Performance Overhead**: Large documents incur conversion overhead (mitigated by caching)

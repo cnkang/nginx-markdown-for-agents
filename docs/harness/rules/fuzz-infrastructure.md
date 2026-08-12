@@ -252,7 +252,7 @@ includes:
    source/build/output paths writable for the action's mounted directories.
    The `/rustc` standard-library source staging directory and fixed
    `/usr/lib/libFuzzingEngine.a` destination used by the OSS-Fuzz compile
-   The wrapper must pre-create those paths and set ownership for that user. Do
+   wrapper must be pre-created and owned by that user. Do
    not make the whole `/usr/lib` directory writable. Every workflow invoking
    `build_fuzzers` must also pre-create `build-out` before the container action
    runs, so the action's root process cannot make the bind-mounted output

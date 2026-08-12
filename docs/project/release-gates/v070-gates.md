@@ -30,8 +30,8 @@ Gate 6: Fuzz & Packaging Infrastructure (depends on Gate 1; validates specs 29-3
 **Release-blocking scope**: Gates 1 through 6 are blocking for 0.7.0 GA as
 defined in this document. The tag package workflow satisfies Gate 3 via its
 build, install-layout, checksum, and smoke-test chain. Gate 4 passes via
-chart lint/render validation, with live cluster smoke recorded when promoted
-for a tag.
+chart lint/render validation, promoted cluster smoke, and F5 assessment
+evidence. Final Go requires all three records.
 
 ---
 
@@ -90,10 +90,11 @@ for a tag.
 | # | Check Item | Verification Command | Pass Criteria |
 |---|-----------|---------------------|---------------|
 | 4.1 | Helm chart lint | `helm lint charts/nginx-markdown` | Exit 0, no errors |
-| 4.2 | K8s smoke tests | Smoke script execution | Conversion, Accept negotiation, /metrics all pass |
-| 4.3 | F5 feasibility assessment | Documentation review | Assessment document complete with conclusions |
+| 4.2 | Helm chart render | `helm template gate4-test charts/nginx-markdown --namespace gate4-smoke` | Exit 0 and rendered security checks pass |
+| 4.3 | Promoted cluster smoke | `tools/release/gates/gate4_local_k8s_smoke.sh` or the promoted-cluster equivalent | Evidence at `release-evidence/gate4/<candidate-sha>/cluster-smoke.json`; conversion, Accept, and metrics checks pass |
+| 4.4 | F5 feasibility assessment | Review `docs/guides/F5_INGRESS_FEASIBILITY.md` and record assessment | Evidence at `release-evidence/gate4/<candidate-sha>/f5-assessment.md` is complete |
 
-**Fail action**: Block release. Resolve chart lint/render validation gaps before proceeding. Record live cluster smoke when promoted for a tag.
+**Fail action**: Block release. Resolve any lint, render, cluster-smoke, or F5 evidence gap before proceeding.
 
 ---
 

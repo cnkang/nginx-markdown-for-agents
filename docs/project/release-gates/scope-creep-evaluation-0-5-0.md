@@ -8,7 +8,11 @@ This document defines the process for evaluating and rejecting out-of-scope prop
 
 **Does the work directly serve the streaming mainline?**
 
-All scope evaluations use this as the core criterion. The team must demote or defer work that cannot demonstrate a strong coupling to the streaming mainline.
+All scope evaluations use this as the core criterion. The team must demote or
+defer work that cannot demonstrate a strong coupling to the streaming mainline.
+Direct service to the streaming mainline is a mandatory gate. A proposal
+cannot reach approval until the reviewer records the affected streaming path,
+test, and rollback boundary.
 
 ## Evaluation Flow
 

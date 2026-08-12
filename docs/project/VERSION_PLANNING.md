@@ -32,8 +32,9 @@ ABI or configuration stability across 0.9.1 and 0.9.2.
 
 ### Scope
 
-- OTel ADR-0006 factual correction (OTLP HTTP/JSON, not protobuf) and explicit
-  request-pool ownership with no worker-exit cleanup claim.
+- OTel ADR-0006 factual correction (the historical proposal selected OTLP
+  HTTP/JSON, not protobuf). OTel tracing is not built into the 0.9.2 product.
+  No request-pool or worker-owned exporter state is part of the release.
 - Dynconf diagnostics remains read-only, operators restore a previous valid
   file atomically and rely on LKG protection for invalid reloads.
 - Release-gates-check-092 target with public-surface drift, version

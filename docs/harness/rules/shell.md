@@ -22,7 +22,7 @@ Required:
   with the colon variant) to safely expand potentially-empty arrays.
   This applies to all scripts that use `set -u` or `set -euo pipefail`.
 - **Heredoc variable references**: variables referenced inside heredocs
-  (`<<EOF ... $var ... EOF`) must define before the heredoc.  Under
+  (`<<EOF ... $var ... EOF`) must have a definition before the heredoc. Under
   `set -u`, an undefined variable inside a heredoc causes immediate script
   termination without a clear error message.  Use `[[ -n "${var:-}" ]]`
   guards or default values for optional heredoc variables.
@@ -90,6 +90,6 @@ Required:
 - Rationale: BRE/ERE confusion caused the `detect_header_hash_filter.sh`
   detector to silently produce false negatives (the `\s` pattern matched
   nothing on macOS BSD grep), allowing Rule 40 violations to go undetected.
-- Verification: `grep -rn '\\s\|\\d\|\\w' tools/harness/detect_*.sh | grep -E 'grep|sed|awk'` must
+- Verification: `grep -REn '\\s|\\d|\\w' tools/harness/detect_*.sh | grep -E 'grep|sed|awk'` must
   return zero hits (Python `re` patterns inside detectors are exempt: they use
   Python regex semantics, not POSIX ERE).

@@ -100,8 +100,9 @@ The release removed the 0.5.5-specific validator (`validate_release_gates_055.py
 
 ## Waiver Process
 
-If any go/no-go criterion cannot be met, the team may record a waiver. Each waiver
-entry MUST contain all four required fields:
+If any go/no-go criterion cannot be met, the team must record and approve a
+waiver before release proceeds. Each waiver entry MUST
+contain all four required fields:
 
 | Field | Format | Description |
 |-------|--------|-------------|

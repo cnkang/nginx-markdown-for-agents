@@ -87,24 +87,27 @@ Labels must be low-cardinality.
 
 ## 3. Decision Reason Codes
 
-The module emits reason codes in both decision-log `reason=` fields and Prometheus
-metric label values, and must be consistent across both surfaces. Two tiers:
+The module emits reason codes in both decision-log `reason=` fields and
+Prometheus metric label values. Values in these two operator-visible tiers must
+match exactly and use lowercase `snake_case`. Streaming lifecycle constants
+are internal transition names, not a second operator-visible reason taxonomy:
 
 - **Decision-chain reason codes** — lowercase snake_case. Returned by
   `ngx_http_markdown_get_reason_code_str()` (resolved from the Rust
   `ReasonCode` registry). Examples: `not_eligible`, `skipped_accept`,
   `skipped_conditional`, `disabled`, `converted`, `failed_open`, `failed_closed`,
   `bypass_no_transform`.
-- **Streaming engine reason codes** — uppercase snake_case. Examples:
+- **Streaming engine internal transition names** — uppercase snake_case. Examples:
   `ENGINE_STREAMING`, `STREAMING_CONVERT`, `STREAMING_FALLBACK_PREBUFFER`,
   `STREAMING_FAIL_POSTCOMMIT`, `STREAMING_SKIP_UNSUPPORTED`,
   `STREAMING_BUDGET_EXCEEDED`, `STREAMING_PRECOMMIT_FAILOPEN`,
   `STREAMING_PRECOMMIT_REJECT`, `STREAMING_SHADOW`.
 
-The authoritative reason-code list is
-`components/rust-converter/src/decision/reason_code.rs` (decision-chain) plus
-the streaming accessors in
-`components/nginx-module/src/ngx_http_markdown_reason.c`.
+The generator creates the authoritative operator-visible reason-code list from
+`components/rust-converter/reason_registry.toml`. Decision logs and Prometheus
+must use that exact lowercase list. Streaming accessors may retain internal
+uppercase transition labels only where the metrics registry explicitly defines
+them.
 
 ### Decision-chain reason code table (lowercase)
 

@@ -29,10 +29,10 @@ first satisfy ADR-0027 and create a new routing entry as part of its review.
 
 ## Historical sync points
 
-The former C header, tracing feature document, directive names, and
-Superseded ADRs and migration material retain the former trace-context
-behavior. Do not cite those materials as current source or configuration
-contracts.
+The former C header, tracing feature document, directive names, superseded
+ADRs, and migration material are historical sync points for the removed
+trace-context behavior. Do not cite any of them as current source or
+configuration contracts.
 
 ## Minimum Verification
 

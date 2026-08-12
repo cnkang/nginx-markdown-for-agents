@@ -24,11 +24,11 @@ Historical issues: Snyk SNYK-CWE-190 (dynconf size parsing overflow).
 
 Required:
 - Every conversion from `ssize_t` or `ngx_int_t` to `size_t` or `ngx_uint_t`
-  an explicit non-negative check must precede it.  The pattern
+  requires an explicit non-negative check before the cast. The pattern
   `if (parsed < 0) return NGX_ERROR;` must appear before any `(size_t) parsed`
   assignment.
 - Every narrowing conversion (for example `size_t → uInt`, `ngx_uint_t → uint8_t`,
-  `ngx_uint_t → uint32_t`) an explicit upper-bound check must precede
+  `ngx_uint_t → uint32_t`) requires an explicit upper-bound check before the cast,
   against the destination type's maximum value, with an error/clamp path.
 - Size-value parsing via `ngx_parse_size()` must go through
   `ngx_http_markdown_dynconf_parse_size_safe()` (or an equivalent
@@ -84,8 +84,8 @@ Required:
   `subprocess` must come from the fixed allowlist, not from the raw CLI value.
 - **ValueError propagation from validate_read_path**: When wrapping
   `validate_read_path()` in a try/except block, do NOT catch `ValueError`.
-  `validate_read_path()` raises `ValueError` when a path traversal attempt
-  the detector catches (for example `..` components).  Catching `ValueError` alongside
+  `validate_read_path()` raises `ValueError` when the path validator catches a
+  traversal attempt (for example `..` components). Catching `ValueError` alongside
   `ImportError` or `FileNotFoundError` silently swallows the traversal
   rejection, allowing an attacker-controlled path to proceed to `open()`.
   The correct exception tuple is `(ImportError, FileNotFoundError)` — these

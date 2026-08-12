@@ -4,6 +4,11 @@
 
 Accepted — Brotli full-buffer section superseded by [ADR-0024](0024-brotli-streaming-decompression.md)
 
+> **0.9.2 contract note:** This ADR records the 0.9.1 routing decision. The
+> frozen 0.9.2 public deflate contract is zlib-wrapped RFC 1950 only. Raw RFC
+> 1951 compatibility details below are historical and do not define behavior
+> that new callers may rely on.
+
 ## Context
 
 0.9.1 routes compressed responses through streaming decompression when the
