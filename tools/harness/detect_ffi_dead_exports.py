@@ -105,11 +105,13 @@ FN_POINTER_RE = re.compile(r"\b(markdown_\w+)\b")
 # Conditional compilation guard patterns.  A leading ``!`` records an
 # ``#ifndef``/else branch so callers can distinguish the actual compilation
 # branch instead of treating every guard as a positive feature requirement.
+# The expression capture is a single line character class rather than a lazy
+# dot paired with trailing whitespace, keeping scans linear for long guards.
 IFDEF_RE = re.compile(
-    r"^\s*#\s*(if|ifdef|ifndef)\s+(.+?)\s*$", re.MULTILINE
+    r"^[ \t]*#[ \t]*(if|ifdef|ifndef)[ \t]+([^\r\n]*)$"
 )
 ELSE_RE = re.compile(r"^\s*#\s*else\b", re.MULTILINE)
-ELIF_RE = re.compile(r"^\s*#\s*elif\s+(.+?)\s*$", re.MULTILINE)
+ELIF_RE = re.compile(r"^[ \t]*#[ \t]*elif[ \t]+([^\r\n]*)$")
 ENDIF_RE = re.compile(r"^\s*#\s*endif\b", re.MULTILINE)
 
 # Guards that are header-include guards and should not be tracked as feature
@@ -277,11 +279,16 @@ def _update_guard_stack(line: str, active_guards: list[str]) -> None:
 
 def _guard_token(expression: str, negate: bool = False) -> str:
     """Return a compact, polarity-preserving label for a preprocessor guard."""
-    match = re.search(r"defined\s*\(?\s*(\w+)", expression)
+    stripped = expression.strip()
+    match = None
+    if stripped.startswith("defined"):
+        match = IDENTIFIER_RE.match(
+            stripped[len("defined") :].lstrip(" (")
+        )
     if match:
-        name = match.group(1)
+        name = match.group(0)
     else:
-        token = re.match(r"\w+", expression.strip())
+        token = re.match(r"[A-Za-z0-9_]+", stripped)
         name = token.group(0) if token else ""
     if not name:
         name = expression.strip().split()[0] if expression.strip() else "unknown"

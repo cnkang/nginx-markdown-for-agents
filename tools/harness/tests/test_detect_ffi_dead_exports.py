@@ -52,6 +52,15 @@ def test_guard_stack_preserves_ifndef_else_and_elif_polarity() -> None:
     assert guards == ["OTHER"]
 
 
+def test_guard_stack_accepts_whitespace_without_backtracking_patterns() -> None:
+    """Guard parsing preserves names with spaced preprocessor expressions."""
+    guards: list[str] = []
+
+    detector._update_guard_stack(" \t#if\tdefined ( FEATURE )  ", guards)
+
+    assert guards == ["FEATURE"]
+
+
 @pytest.mark.parametrize(
     "scanner",
     (detector.scan_c_callsites, detector.scan_test_references),
