@@ -407,10 +407,11 @@ ngx_http_markdown_diagnostics_recording_active(void)
 /*
  * HTTP content handler for the diagnostics endpoint.
  *
- * Rejects unsupported methods before access control, then:
+ * Enforces access control before method handling, then:
  *   - GET/HEAD: builds and sends the full diagnostics JSON response
  *   - Other methods: returns 405 Not Allowed; the endpoint has no mutation
- *     operation
+ *     operation.  Keeping access control first prevents unauthorized callers
+ *     from learning handler behavior through the method-rejection branch.
  *
  * The response Content-Type is application/json.
  *
@@ -466,6 +467,16 @@ ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
     ngx_buf_t    *b;
     ngx_chain_t   out;
 
+    /*
+     * Check access before method handling so denied requests do not disclose
+     * the endpoint's 405 behavior or receive an Allow header.
+     */
+    rc = ngx_http_markdown_diagnostics_check_access(r);
+    if (rc != NGX_OK) {
+        r->headers_out.status = (ngx_uint_t) rc;
+        return rc;
+    }
+
     /* Only allow read-only GET and HEAD requests. */
     if (!(r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD))) {
         ngx_table_elt_t  *allow_hdr;
@@ -483,13 +494,6 @@ ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
         }
 
         return ngx_http_markdown_diagnostics_method_not_allowed(r);
-    }
-
-    /* Access control applies to read-only diagnostics requests. */
-    rc = ngx_http_markdown_diagnostics_check_access(r);
-    if (rc != NGX_OK) {
-        r->headers_out.status = (ngx_uint_t) rc;
-        return rc;
     }
 
     /* Discard request body */
