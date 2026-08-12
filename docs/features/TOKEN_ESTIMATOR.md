@@ -21,7 +21,8 @@ estimated_tokens = ceil(character_count / chars_per_token)
 - **Deterministic**: identical input always yields identical output. No
   randomness, no language detection, no model-specific behavior
 - **Fast**: no tokenizer dependency, just character counting
-- **Approximate**: not a replacement for actual tokenization
+- **Planning estimate**: the fixed 4.0 value is a deterministic planning
+  estimate, not an upper bound and not a replacement for actual tokenization
 
 ### Accuracy (quantified error margin)
 
@@ -35,8 +36,8 @@ The heuristic's accuracy depends on content type. As a rule of thumb with the
 | CJK text | underestimated by up to ~2× (~1.5–2 chars/token) |
 | Mixed-language documents | within ±50% in practice |
 
-Use the estimate when a quick budget upper bound suffices (context-window
-budget checks, progress logging) — never as an exact tokenizer-equivalent
+Use the estimate for planning, context-window sizing, or progress logging.
+Do not use it as a safety upper bound or as an exact tokenizer-equivalent
 count.
 
 ### API
