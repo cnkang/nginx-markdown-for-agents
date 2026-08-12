@@ -75,6 +75,9 @@ canonical_target_path() {
         directory="${raw%/*}"
         basename="${raw##*/}"
     fi
+    if [[ -z "$directory" ]]; then
+        directory="/"
+    fi
     if [[ -L "$raw" ]]; then
         echo "Error: DYNCONF_FILE must not be a symlink: $raw" >&2
         return 1
@@ -488,7 +491,7 @@ diagnostics_field() {
     local match=""
 
     case "$field" in
-        generation|last_success|filter|config_version|active_mtime)
+        generation|last_success|filter|config_version|active_mtime|state)
             match=$(printf '%s' "$json" | grep -E -o "\"${field}\"[[:space:]]*:[[:space:]]*(\"[^\"]*\"|[0-9]+|true|false|null)" | head -1 || true)
             ;;
         *)
@@ -704,7 +707,8 @@ fi
 
 # --- Step 5: Verify last-known-good with bounded polling ---
 
-if wait_for_diagnostics_field generation equals:"$NEW_GENERATION" 15 \
+if wait_for_diagnostics_field state equals:lkg_preserved 15 \
+    && wait_for_diagnostics_field generation equals:"$NEW_GENERATION" 15 \
     && wait_for_diagnostics_field filter equals:on 15; then
     pass "invalid reload preserved generation=$NEW_GENERATION and filter=on"
 else

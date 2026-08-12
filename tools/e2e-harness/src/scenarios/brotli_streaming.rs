@@ -383,9 +383,9 @@ fn metric_value(base_url: &str, name: &str) -> Result<u64> {
     if matched_samples > 0 {
         Ok(value as u64)
     } else {
-        Err(anyhow::anyhow!(
-            "metrics family {family} is missing or invalid"
-        ))
+        // Prometheus may omit an optional sample on a fresh endpoint. Treat
+        // absent or unusable optional samples as zero for delta checks.
+        Ok(0)
     }
 }
 

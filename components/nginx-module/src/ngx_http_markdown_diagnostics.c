@@ -260,8 +260,14 @@ ngx_http_markdown_diagnostics_record_reason_at_stage(
     reason_code = ngx_http_markdown_diagnostics_reason_to_code(
         reason, reason_len);
     outcome = ngx_http_markdown_diag_outcome(reason_code);
+    /*
+     * ErrorOrigin is canonical registry metadata, not a caller-selected
+     * coarse category. Keep the legacy parameter for the frozen API while
+     * deriving the emitted value from the resolved reason code.
+     */
+    (void) error_category;
     error_origin = (outcome[0] == 'f' || outcome[0] == 'a')
-        ? error_category : NULL;
+        ? ngx_http_markdown_diag_error_origin(reason_code) : NULL;
     ngx_http_markdown_diagnostics_record_classified(
         state,
         outcome,
@@ -460,6 +466,14 @@ ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
     ngx_buf_t    *b;
     ngx_chain_t   out;
 
+    /* Check access before method handling so denied requests cannot learn
+     * handler behavior through the 405 branch. */
+    rc = ngx_http_markdown_diagnostics_check_access(r);
+    if (rc != NGX_OK) {
+        r->headers_out.status = (ngx_uint_t) rc;
+        return rc;
+    }
+
     /* Only allow read-only GET and HEAD requests. */
     if (!(r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD))) {
         ngx_table_elt_t  *allow_hdr;
@@ -477,13 +491,6 @@ ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
         }
 
         return ngx_http_markdown_diagnostics_method_not_allowed(r);
-    }
-
-    /* Access control check (default deny) */
-    rc = ngx_http_markdown_diagnostics_check_access(r);
-    if (rc != NGX_OK) {
-        r->headers_out.status = (ngx_uint_t) rc;
-        return rc;
     }
 
     /* Discard request body */
@@ -772,7 +779,15 @@ ngx_http_markdown_diag_time(u_char *p, u_char *last, ngx_msec_t stamp)
 
     value = (time_t) stamp;
     if (gmtime_r(&value, &tm_value) == NULL) {
-        ngx_memzero(&tm_value, sizeof(tm_value));
+        time_t epoch;
+
+        epoch = 0;
+        if (gmtime_r(&epoch, &tm_value) == NULL) {
+            /* Preserve a valid RFC 3339 epoch even if libc is unavailable. */
+            ngx_memzero(&tm_value, sizeof(tm_value));
+            tm_value.tm_year = 70;
+            tm_value.tm_mday = 1;
+        }
     }
 
     return ngx_slprintf(p, last,

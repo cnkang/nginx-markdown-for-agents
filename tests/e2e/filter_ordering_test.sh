@@ -32,8 +32,18 @@
 set -e
 
 NGINX_URL="${NGINX_URL:-http://localhost:8080}"
-TEST_PATH="${TEST_PATH:-/}"
-GUNZIP_TEST_PATH="${GUNZIP_TEST_PATH:-/}"
+TEST_PATH_CONFIGURED=0
+if [[ "${TEST_PATH+x}" == "x" ]]; then
+    TEST_PATH_CONFIGURED=1
+else
+    TEST_PATH="/"
+fi
+GUNZIP_TEST_PATH_CONFIGURED=0
+if [[ "${GUNZIP_TEST_PATH+x}" == "x" ]]; then
+    GUNZIP_TEST_PATH_CONFIGURED=1
+else
+    GUNZIP_TEST_PATH="/"
+fi
 UPSTREAM_ENCODING_HEADER="${UPSTREAM_ENCODING_HEADER-X-Upstream-Content-Encoding}"
 CACHE_STATUS_HEADER="${CACHE_STATUS_HEADER-X-Cache-Status}"
 PASS_COUNT=0
@@ -293,9 +303,17 @@ main() {
     echo >&2
 
     test_markdown_gzip
-    test_markdown_gunzip
+    if [[ "${GUNZIP_TEST_PATH_CONFIGURED}" -eq 1 ]]; then
+        test_markdown_gunzip
+    else
+        skip "Test 2 skipped: GUNZIP_TEST_PATH was not configured"
+    fi
     test_markdown_brotli
-    test_markdown_proxy_cache
+    if [[ "${TEST_PATH_CONFIGURED}" -eq 1 ]]; then
+        test_markdown_proxy_cache
+    else
+        skip "Test 4 skipped: TEST_PATH was not configured"
+    fi
     test_markdown_no_compression
 
     echo >&2

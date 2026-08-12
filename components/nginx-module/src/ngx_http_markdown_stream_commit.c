@@ -300,8 +300,9 @@ ngx_http_markdown_stream_commit_apply_auth_cache_control(
  * Phase 2 (infallible): Content-Type, Content-Length, Content-Encoding.
  *   These are pointer/integer assignments that cannot fail.
  *
- * On success, transitions stream_sm to COMMITTED with
- * headers_committed = 1.
+ * On success, applies all header mutations and records a provisional
+ * COMMITTED state. The streaming caller must publish the request-level
+ * commit latches only after the downstream header filter accepts them.
  *
  * Returns:
  *   NGX_OK    - All mutations applied, committed flag set
@@ -402,6 +403,7 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
      * After this point, no HTML fallback is possible.
      */
     ctx->stream_sm.headers_committed = 1;
+    ctx->stream_sm.headers_pending = 0;
     ctx->stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,

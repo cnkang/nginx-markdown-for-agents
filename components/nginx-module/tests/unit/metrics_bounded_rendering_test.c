@@ -829,6 +829,38 @@ test_v1_engine_delivery_and_event_sources(void)
     TEST_PASS("v1 engine delivery and event sources");
 }
 
+
+static void
+test_v1_outcome_formula_clamps_underflow(void)
+{
+    ngx_http_markdown_metrics_snapshot_t  snapshot;
+    ngx_http_markdown_metrics_v1_snapshot_t  v1;
+
+    TEST_SUBSECTION("v1 outcome formula underflow boundary");
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.results.failopen_count = 4;
+    snapshot.streaming.terminal_aborted_total = 3;
+
+    snapshot.conversions_failed = 6;
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+    TEST_ASSERT(v1.requests.failed_closed == 0
+                && v1.requests.aborted == 3,
+        "failed_closed must clamp when failures are below deductions");
+
+    snapshot.conversions_failed = 7;
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+    TEST_ASSERT(v1.requests.failed_closed == 0,
+        "failed_closed must remain zero at the subtraction boundary");
+
+    snapshot.conversions_failed = 8;
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+    TEST_ASSERT(v1.requests.failed_closed == 1,
+        "failed_closed must preserve the positive residual");
+
+    TEST_PASS("v1 outcome formula clamps underflow");
+}
+
 static void
 test_v1_latency_mapping_uses_all_frozen_boundaries(void)
 {
@@ -1829,6 +1861,7 @@ main(void)
     test_metrics_handler_uses_frozen_v1_surface();
     test_v1_output_bytes_include_streaming_delivery();
     test_v1_engine_delivery_and_event_sources();
+    test_v1_outcome_formula_clamps_underflow();
     test_v1_latency_mapping_uses_all_frozen_boundaries();
     test_v1_latency_sum_conversion_is_bounded();
     test_json_single_path_fits();

@@ -153,6 +153,8 @@ ngx_http_markdown_loc_validation_update(
         return;
     }
 
+    /* Zero and UNSET mean "no conversion-memory constraint" here; neither
+     * value may become a false minimum that rejects a valid dynconf buffer. */
     if (conversion_memory == 0
         || conversion_memory == (size_t) -1) {
         return;

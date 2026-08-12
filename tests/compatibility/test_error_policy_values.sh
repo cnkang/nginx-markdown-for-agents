@@ -174,6 +174,15 @@ resolve_nginx_bin || exit 2
 
 TMPDIR_BASE="$(mktemp -d /tmp/error-policy-values.XXXXXX)"
 
+cleanup_tmpdir() {
+  if [[ "${KEEP_ARTIFACTS}" -eq 0 ]]; then
+    rm -rf "${TMPDIR_BASE}"
+  else
+    echo "Artifacts kept in: ${TMPDIR_BASE}" >&2
+  fi
+}
+trap cleanup_tmpdir EXIT
+
 echo "==========================================================" >&2
 echo " Error Policy Value Acceptance Test (Property 26)" >&2
 echo " NGINX binary: ${NGINX_BIN}" >&2
@@ -211,12 +220,6 @@ echo "" >&2
 echo "==========================================================" >&2
 echo " Results: ${TESTS_PASSED} passed, ${TESTS_FAILED} failed" >&2
 echo "==========================================================" >&2
-
-if [[ "${KEEP_ARTIFACTS}" -eq 0 ]]; then
-  rm -rf "${TMPDIR_BASE}"
-else
-  echo "Artifacts kept in: ${TMPDIR_BASE}" >&2
-fi
 
 if [[ "${TESTS_FAILED}" -eq 0 ]]; then
   echo "PASS: all ${TESTS_RUN} error policy value expectations met" >&2

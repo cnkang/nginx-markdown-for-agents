@@ -285,6 +285,8 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
         ngx_http_markdown_reason_from_error_category(
             NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
     rc = ngx_http_next_header_filter(r);
+    /* NGX_AGAIN is a pending header-filter retry, not delivery; the
+     * fail-open delivery counter remains unchanged until success. */
     /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
     if (rc == NGX_OK || rc == NGX_DONE) {
         ngx_http_markdown_metric_inc_failopen(eff, conf);
@@ -351,6 +353,12 @@ ngx_http_markdown_handle_encoding_collection_failure(
         ngx_http_markdown_reason_from_error_category(
             NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
     rc = ngx_http_next_header_filter(r);
+    /*
+     * NGX_AGAIN means the next header filter retained the request for a
+     * retry; it is not proof that headers crossed the downstream boundary.
+     * Keep headers_forwarded clear until NGX_OK/NGX_DONE so the retry remains
+     * eligible to forward headers (Rule 47: delivery latches follow success).
+     */
     if (rc == NGX_OK || rc == NGX_DONE) {
         ctx->headers_forwarded = 1;
         ngx_http_markdown_metric_inc_failopen(eff, conf);
@@ -692,6 +700,8 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
             r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_overload());
         rc = ngx_http_next_header_filter(r);
+        /* NGX_AGAIN is a pending header-filter retry, not delivery; keep
+         * headers_forwarded clear until NGX_OK/NGX_DONE. */
         /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
         if (rc == NGX_OK || rc == NGX_DONE) {
             ctx->headers_forwarded = 1;
@@ -722,6 +732,8 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
             r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_failed_open());
         rc = ngx_http_next_header_filter(r);
+        /* NGX_AGAIN is a pending header-filter retry, not delivery; keep
+         * headers_forwarded clear until NGX_OK/NGX_DONE. */
         /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
         if (rc == NGX_OK || rc == NGX_DONE) {
             ctx->headers_forwarded = 1;
@@ -924,6 +936,8 @@ ngx_http_markdown_handle_encoding_header_invalid(
                   "markdown: malformed Content-Encoding "
                   "chain, returning original encoded content");
     rc = ngx_http_next_header_filter(r);
+    /* NGX_AGAIN is a pending header-filter retry, not delivery; keep
+     * headers_forwarded clear until NGX_OK/NGX_DONE. */
     /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
     if (rc == NGX_OK || rc == NGX_DONE) {
         ctx->headers_forwarded = 1;
@@ -1021,6 +1035,8 @@ encoding_policy:
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_streaming_skip_compressed());
         *rc = ngx_http_next_header_filter(r);
+        /* NGX_AGAIN preserves the header retry; only definitive success may
+         * publish headers_forwarded to the body path. */
         if (*rc == NGX_OK || *rc == NGX_DONE) {
             ctx->headers_forwarded = 1;
         }

@@ -255,8 +255,10 @@ pub struct ConversionContext {
     output_budget: usize,
 }
 
-/// Default full-buffer output cap used when the FFI caller leaves the
-/// conversion-memory budget unset.
+/// Fallback full-buffer output cap used only when the FFI caller leaves the
+/// conversion-memory budget at zero. The production NGINX default is
+/// `markdown_limits conversion_memory=64m`, which is passed through the FFI;
+/// this constant is not a second replacement for that configured budget.
 const DEFAULT_FULL_BUFFER_OUTPUT_BUDGET: usize = 64 * 1024 * 1024;
 
 impl ConversionContext {

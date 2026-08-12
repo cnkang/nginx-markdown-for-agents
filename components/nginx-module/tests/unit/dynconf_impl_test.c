@@ -2243,6 +2243,10 @@ test_apply_ffi_streaming_budget_bounds(void)
 
         memset(&summary, 0, sizeof(summary));
 
+        ngx_http_markdown_loc_validation_update(&summary, 0, 0);
+        TEST_ASSERT(summary.min_applicable_set == 0,
+                    "zero conversion_memory is not a false minimum");
+
         /* Simulate >4096 merged locations: no capacity limit. */
         for (i = 0; i < 5000; i++) {
             ngx_http_markdown_loc_validation_update(
