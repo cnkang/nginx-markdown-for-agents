@@ -2582,7 +2582,12 @@ class TestEnvironmentCompatibility:
     def test_non_blocking_incompatible_baseline_is_not_compared(
         self, tmp_path, monkeypatch, capsys,
     ):
-        """Report-only runs expose incompatible percentage evidence as missing."""
+        """Expose incompatible percentage evidence as missing in report-only mode.
+
+        The fixture selects the legacy 0.9.1 baseline explicitly; production
+        runs now select the 0.9.2 baseline by default.
+        """
+        monkeypatch.setenv("MODULE_BASELINE_VERSION", "091")
         baseline_path = (
             tmp_path / "perf" / "baselines" / "module-baseline-091.json"
         )
@@ -2682,7 +2687,12 @@ class TestNonBlockingIntegrityVisibility:
     def test_baseline_malformed_fallback_is_missing_evidence(
         self, tmp_path, monkeypatch, capsys, blocking, expected_rc,
     ):
-        """A malformed baseline rate cannot produce a GO verdict."""
+        """A malformed baseline rate cannot produce a GO verdict.
+
+        The fixture selects the legacy 0.9.1 baseline explicitly; production
+        runs now select the 0.9.2 baseline by default.
+        """
+        monkeypatch.setenv("MODULE_BASELINE_VERSION", "091")
         baseline = _load_canonical_module_baseline()
         _scenario(baseline, "chunked-medium")["metrics"][
             "fallback_rate"
