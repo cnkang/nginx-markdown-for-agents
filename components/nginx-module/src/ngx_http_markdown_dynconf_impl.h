@@ -1236,6 +1236,22 @@ ngx_http_markdown_dynconf_apply_error_policy(
 }
 
 
+/*
+ * Record the failure code (when requested) and return NGX_ERROR.
+ * Keeps the apply chain terse so the caller's Cognitive Complexity
+ * stays within the allowed threshold.
+ */
+static ngx_int_t
+ngx_http_markdown_dynconf_apply_reject(ngx_uint_t *failure_code,
+    ngx_uint_t code)
+{
+    if (failure_code != NULL) {
+        *failure_code = code;
+    }
+    return NGX_ERROR;
+}
+
+
 /* The line-oriented parser remains only for its legacy unit-test contract.
  * Production reloads use the bounded Rust JSON/FFI parser below. */
 static ngx_int_t
@@ -1255,10 +1271,8 @@ ngx_http_markdown_dynconf_apply_ffi_result_with_log(
     }
 
     if (result->error_code != DYNCONF_OK) {
-        if (failure_code != NULL) {
-            *failure_code = result->error_code;
-        }
-        return NGX_ERROR;
+        return ngx_http_markdown_dynconf_apply_reject(
+            failure_code, result->error_code);
     }
 
     if (failure_code != NULL) {
@@ -1271,42 +1285,31 @@ ngx_http_markdown_dynconf_apply_ffi_result_with_log(
     if (ngx_http_markdown_dynconf_apply_streaming_buffer(
             snapshot, &candidate, result) != NGX_OK)
     {
-        if (failure_code != NULL) {
-            *failure_code = DYNCONF_ERR_VALUE_OUT_OF_RANGE;
-        }
-        return NGX_ERROR;
+        return ngx_http_markdown_dynconf_apply_reject(
+            failure_code, DYNCONF_ERR_VALUE_OUT_OF_RANGE);
     }
-    if (ngx_http_markdown_dynconf_apply_filter(&candidate, result)
-        != NGX_OK)
+    if (ngx_http_markdown_dynconf_apply_filter(&candidate, result) != NGX_OK)
     {
-        if (failure_code != NULL) {
-            *failure_code = DYNCONF_ERR_INVALID_TYPE;
-        }
-        return NGX_ERROR;
+        return ngx_http_markdown_dynconf_apply_reject(
+            failure_code, DYNCONF_ERR_INVALID_TYPE);
     }
     if (ngx_http_markdown_dynconf_apply_prune_noise(&candidate, result)
         != NGX_OK)
     {
-        if (failure_code != NULL) {
-            *failure_code = DYNCONF_ERR_INVALID_TYPE;
-        }
-        return NGX_ERROR;
+        return ngx_http_markdown_dynconf_apply_reject(
+            failure_code, DYNCONF_ERR_INVALID_TYPE);
     }
     if (ngx_http_markdown_dynconf_apply_log_verbosity(&candidate, result)
         != NGX_OK)
     {
-        if (failure_code != NULL) {
-            *failure_code = DYNCONF_ERR_INVALID_TYPE;
-        }
-        return NGX_ERROR;
+        return ngx_http_markdown_dynconf_apply_reject(
+            failure_code, DYNCONF_ERR_INVALID_TYPE);
     }
     if (ngx_http_markdown_dynconf_apply_error_policy(&candidate, result)
         != NGX_OK)
     {
-        if (failure_code != NULL) {
-            *failure_code = DYNCONF_ERR_INVALID_TYPE;
-        }
-        return NGX_ERROR;
+        return ngx_http_markdown_dynconf_apply_reject(
+            failure_code, DYNCONF_ERR_INVALID_TYPE);
     }
 
 #ifdef MARKDOWN_STREAMING_ENABLED
@@ -1316,10 +1319,8 @@ ngx_http_markdown_dynconf_apply_ffi_result_with_log(
                candidate.validation_index,
                candidate.streaming_budget, log) != NGX_OK)
     {
-        if (failure_code != NULL) {
-            *failure_code = DYNCONF_ERR_VALUE_OUT_OF_RANGE;
-        }
-        return NGX_ERROR;
+        return ngx_http_markdown_dynconf_apply_reject(
+            failure_code, DYNCONF_ERR_VALUE_OUT_OF_RANGE);
     }
 #endif
 
@@ -3144,7 +3145,7 @@ ngx_http_markdown_dynconf_parse_candidate(
 static ngx_int_t
 ngx_http_markdown_dynconf_candidate_error(
     ngx_http_markdown_dynconf_watcher_t *watcher,
-    ngx_http_markdown_conf_t *conf, FFIDynconfResult *result)
+    const ngx_http_markdown_conf_t *conf, const FFIDynconfResult *result)
 {
     ngx_int_t rc;
 
@@ -3161,8 +3162,9 @@ ngx_http_markdown_dynconf_candidate_error(
 static ngx_int_t
 ngx_http_markdown_dynconf_stage_candidate(
     ngx_http_markdown_dynconf_watcher_t *watcher,
-    ngx_http_markdown_conf_t *conf, ngx_log_t *log,
-    FFIDynconfResult *result, u_char *source_digest, u_char *active_digest)
+    const ngx_http_markdown_conf_t *conf, ngx_log_t *log,
+    const FFIDynconfResult *result, u_char *source_digest,
+    u_char *active_digest)
 {
     ngx_uint_t failure_code;
     ngx_uint_t masked_fields;
