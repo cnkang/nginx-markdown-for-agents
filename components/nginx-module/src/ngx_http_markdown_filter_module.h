@@ -1271,6 +1271,12 @@ typedef struct {
              * callers (stream_on_error) may pre-transition the state before
              * invoking postcommit_abort(). */
             ngx_flag_t                    postcommit_abort_recorded;
+
+            /* One-shot latch: terminal abort outcome has been recorded.
+             * Set when the abort terminal chain is confirmed delivered
+             * (NGX_OK/NGX_DONE), ensuring exactly-one terminal outcome
+             * per request (Rule 38/23: delivery ≠ decision counters). */
+            ngx_flag_t                    terminal_aborted_recorded;
         } completion;
     } streaming;
 } ngx_http_markdown_ctx_t;
@@ -1492,6 +1498,7 @@ typedef struct {
         ngx_atomic_t  streaming_fallback_precommit_reject; /* Pre-commit rejection */
         ngx_atomic_t  streaming_failure_postcommit_abort;  /* Post-commit abort */
         ngx_atomic_t  streaming_failure_postcommit_safe_finish; /* Post-commit safe finish */
+        ngx_atomic_t  terminal_aborted_total;             /* Terminal abort outcome (delivery confirmed) */
 
         /* Engine choice counters (v0.8.0 observability) */
         struct {

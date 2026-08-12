@@ -191,6 +191,7 @@ typedef struct {
         ngx_atomic_uint_t streaming_fallback_precommit_reject;
         ngx_atomic_uint_t streaming_failure_postcommit_abort;
         ngx_atomic_uint_t streaming_failure_postcommit_safe_finish;
+        ngx_atomic_uint_t terminal_aborted_total;
 
         /* Engine choice counters (v0.8.0 observability) */
         struct {
@@ -639,6 +640,8 @@ ngx_http_markdown_collect_streaming_snapshot(
         metrics->streaming.streaming_failure_postcommit_abort;
     snapshot->streaming.streaming_failure_postcommit_safe_finish =
         metrics->streaming.streaming_failure_postcommit_safe_finish;
+    snapshot->streaming.terminal_aborted_total =
+        metrics->streaming.terminal_aborted_total;
     snapshot->streaming.selection.candidate_total =
         metrics->streaming.selection.candidate_total;
     snapshot->streaming.selection.true_streaming_selected_total =
@@ -827,13 +830,22 @@ ngx_http_markdown_metrics_to_v1(
     v1->requests.skipped_bypass_no_transform =
         snapshot->skips.compression_passthrough;
     v1->requests.failed_open = snapshot->results.failopen_count;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    failed_closed = snapshot->conversions_failed
+        >= (snapshot->results.failopen_count
+            + snapshot->streaming.terminal_aborted_total)
+        ? snapshot->conversions_failed
+          - snapshot->results.failopen_count
+          - snapshot->streaming.terminal_aborted_total
+        : 0;
+    v1->requests.aborted =
+        snapshot->streaming.terminal_aborted_total;
+#else
     failed_closed = snapshot->conversions_failed >= snapshot->results.failopen_count
         ? snapshot->conversions_failed - snapshot->results.failopen_count : 0;
-    v1->requests.failed_closed = failed_closed;
-#ifdef MARKDOWN_STREAMING_ENABLED
-    v1->requests.aborted =
-        snapshot->streaming.streaming_failure_postcommit_abort;
+    v1->requests.aborted = 0;
 #endif
+    v1->requests.failed_closed = failed_closed;
 
     /* Attempts and deliveries use the frozen engine-specific counters. */
     v1->attempts.full_buffer = snapshot->path_hits.fullbuffer

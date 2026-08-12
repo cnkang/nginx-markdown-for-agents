@@ -360,6 +360,16 @@ ngx_http_markdown_stream_postcommit_abort(
         return rc;
     }
 
+    /* Record terminal abort outcome (delivery confirmed).
+     * One-shot: the postcommit_abort_recorded latch already prevents
+     * a second attempt metric; this latch prevents a second outcome. */
+#ifdef MARKDOWN_STREAMING_ENABLED
+    if (!ctx->streaming.completion.terminal_aborted_recorded) {
+        ngx_http_markdown_metrics_record_terminal_abort();
+        ctx->streaming.completion.terminal_aborted_recorded = 1;
+    }
+#endif
+
     /* Log the abort event */
     ngx_http_markdown_stream_postcommit_log(r, ctx,
         "abort", NGX_HTTP_MD_REASON_POST_COMMIT_ERROR);
