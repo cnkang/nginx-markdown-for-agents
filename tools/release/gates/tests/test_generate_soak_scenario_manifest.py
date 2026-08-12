@@ -73,8 +73,9 @@ def test_output_path_rejects_untrusted_version_components() -> None:
 
 @pytest.mark.parametrize("duration", [math.nan, math.inf, -math.inf])
 def test_scope_rejects_non_finite_duration(duration: float) -> None:
+    scope = _scope(duration)
     with pytest.raises(ValueError, match="positive finite"):
-        generator._validate_scope(_scope(duration))
+        generator._validate_scope(scope)
 
 
 def test_scope_accepts_positive_finite_duration() -> None:

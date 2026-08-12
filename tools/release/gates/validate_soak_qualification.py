@@ -718,7 +718,6 @@ def run_load_loop(
     finished = started + duration
     rss_series = []
     scenario_metrics = {sid: [] for sid in corpus}
-    chunk = 0
     if worker_pid > 0:
         rss_series.append([round(time.time() - started, 1),
                            read_worker_rss(worker_pid)])
@@ -734,7 +733,6 @@ def run_load_loop(
         if worker_pid > 0:
             rss_series.append([round(time.time() - started, 1),
                                read_worker_rss(worker_pid)])
-        chunk += 1
     while worker_pid > 0 and len(rss_series) < MIN_RSS_SAMPLES:
         rss_series.append([round(time.time() - started, 1),
                            read_worker_rss(worker_pid)])
