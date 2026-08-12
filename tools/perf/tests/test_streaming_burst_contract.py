@@ -1,4 +1,4 @@
-"""Contract tests for the native continuous-compression smoke."""
+"""Contract tests for native streaming smoke budget routing."""
 
 from pathlib import Path
 
@@ -7,6 +7,24 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 NATIVE_STREAMING_E2E = (
     REPO_ROOT / "tools" / "e2e" / "verify_chunked_streaming_native_e2e.sh"
 )
+
+
+def _location_block(source: str, location: str) -> str:
+    start = source.index(f"location {location} {{")
+    end = source.index("\n        }", start)
+    return source[start:end]
+
+
+def test_native_e2e_reserves_full_budget_for_conversion_routes():
+    source = NATIVE_STREAMING_E2E.read_text(encoding="utf-8")
+
+    for location in ("/streaming/", "/streaming-zero-copy/"):
+        block = _location_block(source, location)
+        assert "streaming_buffer=${MARKDOWN_MAX_SIZE};" in block
+        assert "streaming_buffer=256k;" not in block
+
+    bounded_block = _location_block(source, "/streaming-256k/")
+    assert "streaming_buffer=256k;" in bounded_block
 
 
 def test_native_e2e_covers_256k_continuous_compression_bursts():
