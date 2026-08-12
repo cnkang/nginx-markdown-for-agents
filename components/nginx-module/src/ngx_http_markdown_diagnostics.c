@@ -83,6 +83,9 @@ static ngx_int_t ngx_http_markdown_diag_json_control(
     u_char **pos, const u_char *last, u_char value);
 static ngx_int_t ngx_http_markdown_diag_masked_keys(
     u_char **pos, const u_char *last, ngx_uint_t mask);
+static ngx_int_t ngx_http_markdown_diag_render_dynconf(
+    u_char **pos, u_char *last,
+    const ngx_http_markdown_diag_dynconf_t *dynconf);
 static const char *ngx_http_markdown_diag_outcome(ngx_int_t code);
 static const char *ngx_http_markdown_diag_decision_stage(ngx_int_t code);
 static const char *ngx_http_markdown_diag_error_origin(ngx_int_t code);
@@ -1021,6 +1024,87 @@ ngx_http_markdown_diagnostics_fmt_decisions(
 }
 
 
+/*
+ * Render the dynconf JSON fragment (everything after "state" through the
+ * trailing fields) into the output buffer.  Extracted from build_json to
+ * keep the caller's Cognitive Complexity under the S3776 threshold.
+ *
+ * Layout per dynconf.state:
+ *   ACTIVE | LKG_PRESERVED   generation, source/active/lkg digests,
+ *                            last_success, last_error (LKG_PRESERVED only)
+ *   INVALID_NO_LKG (error)   null fields + last_error when present
+ *   other                    null fields, null last_error
+ *
+ * Returns NGX_OK on success, NGX_ERROR on a truncated/invalid write.
+ */
+static ngx_int_t
+ngx_http_markdown_diag_render_dynconf(
+    u_char **pos, u_char *last,
+    const ngx_http_markdown_diag_dynconf_t *dynconf)
+{
+    if (pos == NULL || *pos == NULL || last == NULL || dynconf == NULL
+        || *pos > last)
+    {
+        return NGX_ERROR;
+    }
+
+    if (dynconf->state == NGX_HTTP_MARKDOWN_DIAG_DYNCONF_ACTIVE
+        || dynconf->state == NGX_HTTP_MARKDOWN_DIAG_DYNCONF_LKG_PRESERVED)
+    {
+        *pos = ngx_slprintf(*pos, last,
+            "\"generation\":%ui,\"source_digest\":\"%s\","
+            "\"active_digest\":\"%s\",\"lkg_digest\":",
+            dynconf->generation, dynconf->source_digest,
+            dynconf->active_digest);
+        if (dynconf->lkg_valid && dynconf->lkg_digest[0] != '\0') {
+            *pos = ngx_slprintf(*pos, last, "\"%s\"", dynconf->lkg_digest);
+        } else {
+            *pos = ngx_slprintf(*pos, last, "null");
+        }
+        *pos = ngx_slprintf(*pos, last, ",\"last_success\":");
+        if (dynconf->has_last_success) {
+            *pos = ngx_slprintf(*pos, last, "\"");
+            *pos = ngx_http_markdown_diag_time(*pos, last,
+                (ngx_msec_t) dynconf->last_success);
+            *pos = ngx_slprintf(*pos, last, "\"");
+        } else {
+            *pos = ngx_slprintf(*pos, last, "null");
+        }
+        *pos = ngx_slprintf(*pos, last, ",\"last_error\":");
+        if (dynconf->state == NGX_HTTP_MARKDOWN_DIAG_DYNCONF_LKG_PRESERVED
+            && dynconf->last_error_len > 0)
+        {
+            if (ngx_http_markdown_diag_json_string(
+                    pos, last, dynconf->last_error,
+                    dynconf->last_error_len) != NGX_OK)
+            {
+                return NGX_ERROR;
+            }
+        } else {
+            *pos = ngx_slprintf(*pos, last, "null");
+        }
+        return NGX_OK;
+    }
+
+    if (dynconf->state == NGX_HTTP_MARKDOWN_DIAG_DYNCONF_INVALID_NO_LKG
+        && dynconf->last_error_len > 0)
+    {
+        *pos = ngx_slprintf(*pos, last,
+            "\"generation\":null,\"source_digest\":null,"
+            "\"active_digest\":null,\"lkg_digest\":null,"
+            "\"last_success\":null,\"last_error\":");
+        return ngx_http_markdown_diag_json_string(
+            pos, last, dynconf->last_error, dynconf->last_error_len);
+    }
+
+    *pos = ngx_slprintf(*pos, last,
+        "\"generation\":null,\"source_digest\":null,"
+        "\"active_digest\":null,\"lkg_digest\":null,"
+        "\"last_success\":null,\"last_error\":null");
+    return NGX_OK;
+}
+
+
 static ngx_int_t
 ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     ngx_buf_t *b)
@@ -1083,59 +1167,10 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
         "\"dynconf\":{\"state\":\"%s\",",
         static_digest, dynconf_state);
 
-    if (dynconf.state == NGX_HTTP_MARKDOWN_DIAG_DYNCONF_ACTIVE
-        || dynconf.state == NGX_HTTP_MARKDOWN_DIAG_DYNCONF_LKG_PRESERVED)
+    if (ngx_http_markdown_diag_render_dynconf(&p, last, &dynconf)
+        != NGX_OK)
     {
-        p = ngx_slprintf(p, last,
-            "\"generation\":%ui,\"source_digest\":\"%s\","
-            "\"active_digest\":\"%s\",\"lkg_digest\":",
-            dynconf.generation, dynconf.source_digest,
-            dynconf.active_digest);
-        if (dynconf.lkg_valid && dynconf.lkg_digest[0] != '\0') {
-            p = ngx_slprintf(p, last, "\"%s\"", dynconf.lkg_digest);
-        } else {
-            p = ngx_slprintf(p, last, "null");
-        }
-        p = ngx_slprintf(p, last, ",\"last_success\":");
-        if (dynconf.has_last_success) {
-            p = ngx_slprintf(p, last, "\"");
-            p = ngx_http_markdown_diag_time(p, last,
-                (ngx_msec_t) dynconf.last_success);
-            p = ngx_slprintf(p, last, "\"");
-        } else {
-            p = ngx_slprintf(p, last, "null");
-        }
-        p = ngx_slprintf(p, last, ",\"last_error\":");
-        if (dynconf.state == NGX_HTTP_MARKDOWN_DIAG_DYNCONF_LKG_PRESERVED
-            && dynconf.last_error_len > 0)
-        {
-            if (ngx_http_markdown_diag_json_string(
-                    &p, last, dynconf.last_error,
-                    dynconf.last_error_len) != NGX_OK)
-            {
-                return NGX_ERROR;
-            }
-        } else {
-            p = ngx_slprintf(p, last, "null");
-        }
-    } else if (dynconf.state == NGX_HTTP_MARKDOWN_DIAG_DYNCONF_INVALID_NO_LKG
-               && dynconf.last_error_len > 0)
-    {
-        p = ngx_slprintf(p, last,
-            "\"generation\":null,\"source_digest\":null,"
-            "\"active_digest\":null,\"lkg_digest\":null,"
-            "\"last_success\":null,\"last_error\":");
-        if (ngx_http_markdown_diag_json_string(
-                &p, last, dynconf.last_error,
-                dynconf.last_error_len) != NGX_OK)
-        {
-            return NGX_ERROR;
-        }
-    } else {
-        p = ngx_slprintf(p, last,
-            "\"generation\":null,\"source_digest\":null,"
-            "\"active_digest\":null,\"lkg_digest\":null,"
-            "\"last_success\":null,\"last_error\":null");
+        return NGX_ERROR;
     }
 
     p = ngx_slprintf(p, last, ",\"masked_keys\":");

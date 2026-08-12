@@ -372,6 +372,15 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
 
 #include "../src/ngx_http_markdown_diagnostics.c"
 
+/*
+ * Override hook for the dynconf-state stub.  When NULL (default) the stub
+ * returns the canonical ACTIVE snapshot used by the existing tests.  When
+ * non-NULL, the stub copies *g_dynconf_override into *out so tests can drive
+ * ngx_http_markdown_diag_render_dynconf through every state branch
+ * (ACTIVE/LKG_PRESERVED/INVALID_NO_LKG/disabled) via build_json.
+ */
+static const ngx_http_markdown_diag_dynconf_t *g_dynconf_override;
+
 void
 ngx_http_markdown_diagnostics_collect_metrics(
     ngx_http_markdown_diag_metrics_t *out)
@@ -401,12 +410,19 @@ ngx_http_markdown_diagnostics_get_dynconf_state(
         "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     memset(out, 0, sizeof(*out));
+
+    if (g_dynconf_override != NULL) {
+        *out = *g_dynconf_override;
+        return;
+    }
+
     out->state = NGX_HTTP_MARKDOWN_DIAG_DYNCONF_ACTIVE;
     snprintf((char *) out->source_digest, sizeof(out->source_digest), "%s",
              digest);
     snprintf((char *) out->active_digest, sizeof(out->active_digest), "%s",
              digest);
-    snprintf((char *) out->lkg_digest, sizeof(out->lkg_digest), "%s", digest);
+    snprintf((char *) out->lkg_digest, sizeof(out->lkg_digest), "%s",
+             digest);
     out->generation = 1;
     out->has_last_success = 1;
     out->last_success = 1700000000;
@@ -475,6 +491,7 @@ reset_test_state(void)
     memset(&g_allow_header, 0, sizeof(g_allow_header));
     g_discard_rc = NGX_OK;
     g_alloc_fail_after = -1;
+    g_dynconf_override = NULL;
     ngx_current_msec = 1000;
     memset(&ngx_http_markdown_g_diag_state, 0,
            sizeof(ngx_http_markdown_g_diag_state));
@@ -775,6 +792,119 @@ test_json_preserves_unified_error_policy(void)
     }
 
     TEST_PASS("Every unified error policy is preserved in diagnostics JSON");
+}
+
+
+/*
+ * Drive ngx_http_markdown_diag_render_dynconf (extracted from build_json to
+ * satisfy Rule 17 / S3776 cognitive-complexity limit) through every dynconf
+ * state branch.  Regression coverage for the refactor: the byte layout for
+ * each branch must match the pre-extraction output.
+ */
+static void
+test_json_dynconf_state_branches(void)
+{
+    static const char digest[] =
+        "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    ngx_http_markdown_diag_dynconf_t dynconf;
+    ngx_http_request_t       r;
+    ngx_connection_t         c;
+    ngx_http_markdown_conf_t conf;
+    struct sockaddr_in       addr;
+    ngx_buf_t                b;
+    ngx_int_t                rc;
+    const char              *json;
+
+    TEST_SUBSECTION("diagnostics render_dynconf state branches");
+
+    reset_test_state();
+    init_request(&r, &c, &conf, &addr);
+
+    /* ACTIVE: lkg_digest present, last_success present, no last_error. */
+    memset(&dynconf, 0, sizeof(dynconf));
+    dynconf.state = NGX_HTTP_MARKDOWN_DIAG_DYNCONF_ACTIVE;
+    snprintf((char *) dynconf.source_digest, sizeof(dynconf.source_digest),
+             "%s", digest);
+    snprintf((char *) dynconf.active_digest, sizeof(dynconf.active_digest),
+             "%s", digest);
+    snprintf((char *) dynconf.lkg_digest, sizeof(dynconf.lkg_digest),
+             "%s", digest);
+    dynconf.generation = 7;
+    dynconf.has_last_success = 1;
+    dynconf.last_success = 1700000000;
+    dynconf.lkg_valid = 1;
+    g_dynconf_override = &dynconf;
+
+    memset(&b, 0, sizeof(b));
+    rc = ngx_http_markdown_diagnostics_build_json(&r, &b);
+    TEST_ASSERT(rc == NGX_OK, "ACTIVE branch build should succeed");
+    json = (const char *) b.pos;
+    TEST_ASSERT(strstr(json, "\"generation\":7") != NULL,
+                "ACTIVE branch should render generation");
+    TEST_ASSERT(strstr(json, "\"lkg_digest\":\"sha256:") != NULL,
+                "ACTIVE branch should render lkg_digest string");
+    TEST_ASSERT(strstr(json, "\"last_success\":\"") != NULL,
+                "ACTIVE branch should render last_success timestamp");
+    TEST_ASSERT(strstr(json, "\"last_error\":null") != NULL,
+                "ACTIVE branch should render last_error null");
+
+    /* LKG_PRESERVED with last_error: lkg_digest present + last_error string. */
+    memset(&dynconf, 0, sizeof(dynconf));
+    dynconf.state = NGX_HTTP_MARKDOWN_DIAG_DYNCONF_LKG_PRESERVED;
+    snprintf((char *) dynconf.source_digest, sizeof(dynconf.source_digest),
+             "%s", digest);
+    snprintf((char *) dynconf.active_digest, sizeof(dynconf.active_digest),
+             "%s", digest);
+    snprintf((char *) dynconf.lkg_digest, sizeof(dynconf.lkg_digest),
+             "%s", digest);
+    dynconf.generation = 9;
+    dynconf.lkg_valid = 1;
+    memcpy(dynconf.last_error, "boom", 4);
+    dynconf.last_error_len = 4;
+    g_dynconf_override = &dynconf;
+
+    memset(&b, 0, sizeof(b));
+    rc = ngx_http_markdown_diagnostics_build_json(&r, &b);
+    TEST_ASSERT(rc == NGX_OK, "LKG_PRESERVED branch build should succeed");
+    json = (const char *) b.pos;
+    TEST_ASSERT(strstr(json, "\"generation\":9") != NULL,
+                "LKG_PRESERVED branch should render generation");
+    TEST_ASSERT(strstr(json, "\"last_error\":\"boom\"") != NULL,
+                "LKG_PRESERVED branch should render last_error string");
+
+    /* INVALID_NO_LKG with last_error: all-null fields + last_error string. */
+    memset(&dynconf, 0, sizeof(dynconf));
+    dynconf.state = NGX_HTTP_MARKDOWN_DIAG_DYNCONF_INVALID_NO_LKG;
+    memcpy(dynconf.last_error, "parse failed", 12);
+    dynconf.last_error_len = 12;
+    g_dynconf_override = &dynconf;
+
+    memset(&b, 0, sizeof(b));
+    rc = ngx_http_markdown_diagnostics_build_json(&r, &b);
+    TEST_ASSERT(rc == NGX_OK, "INVALID_NO_LKG branch build should succeed");
+    json = (const char *) b.pos;
+    TEST_ASSERT(strstr(json, "\"generation\":null") != NULL
+                && strstr(json, "\"source_digest\":null") != NULL
+                && strstr(json, "\"lkg_digest\":null") != NULL,
+                "INVALID_NO_LKG branch should render null digest fields");
+    TEST_ASSERT(strstr(json, "\"last_error\":\"parse failed\"") != NULL,
+                "INVALID_NO_LKG branch should render last_error string");
+
+    /* Disabled/other: every field null including last_error. */
+    memset(&dynconf, 0, sizeof(dynconf));
+    dynconf.state = NGX_HTTP_MARKDOWN_DIAG_DYNCONF_DISABLED;
+    g_dynconf_override = &dynconf;
+
+    memset(&b, 0, sizeof(b));
+    rc = ngx_http_markdown_diagnostics_build_json(&r, &b);
+    TEST_ASSERT(rc == NGX_OK, "DISABLED branch build should succeed");
+    json = (const char *) b.pos;
+    TEST_ASSERT(strstr(json, "\"generation\":null") != NULL
+                && strstr(json, "\"last_error\":null") != NULL,
+                "DISABLED branch should render all-null dynconf fields");
+
+    g_dynconf_override = NULL;
+    TEST_PASS("render_dynconf covers every state branch");
 }
 
 
@@ -1132,6 +1262,7 @@ main(void)
     test_decision_path_records_once_with_explicit_duration();
     test_access_and_json_builder();
     test_json_preserves_unified_error_policy();
+    test_json_dynconf_state_branches();
     test_json_preserves_effective_streaming_buffer();
     test_diagnostics_has_no_legacy_profile_surface();
     test_json_buffer_scales_with_ring_count();
