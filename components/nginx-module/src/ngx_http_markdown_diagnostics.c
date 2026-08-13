@@ -1046,9 +1046,14 @@ ngx_http_markdown_diagnostics_fmt_decisions(
             *pos, last, state->ring.entries[idx].timestamp);
         *pos = ngx_slprintf(*pos, last,
             "\",\"outcome\":\"%s\",\"stage\":\"%s\","
-            "\"reason\":\"%V\",\"error_origin\":",
-            outcome, stage,
-            &reason);
+            "\"reason\":",
+            outcome, stage);
+        if (ngx_http_markdown_diag_json_string(
+                pos, last, reason.data, reason.len) != NGX_OK)
+        {
+            return NGX_ERROR;
+        }
+        *pos = ngx_slprintf(*pos, last, ",\"error_origin\":");
         if (error_origin == NULL) {
             *pos = ngx_slprintf(*pos, last, "null");
         } else {
