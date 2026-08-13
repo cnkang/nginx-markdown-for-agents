@@ -40,8 +40,8 @@ removed or not part of the contract.
 
 Directives removed in 0.9.2 fail `nginx -t` with NGINX's standard
 `unknown directive` error — there are no migration stubs left. If docs or
-configs reference a removed directive, they are stale. Removed directive
-names are permitted in migration and removal documentation (including naming
+configs reference a removed directive, they are stale. Migration and removal
+documentation may use removed directive names (including naming
 `markdown_stream_threshold` and `markdown_stream_types` in before/after
 examples). See `docs/guides/0.9.2-breaking-changes.md` for the full removal list.
 

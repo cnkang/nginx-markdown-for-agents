@@ -38,7 +38,7 @@ Adopt a repo-owned harness with the following structure:
   source
 - `docs/harness/routing-manifest.md` is the human-readable summary of that same
   source
-- risk packs are organized by technical hazard, not by task label
+- the repository organizes risk packs by technical hazard, not by task label
 - local spec inputs remain read-only
 - local adapter layers remain optional and do not become a second source
   of truth

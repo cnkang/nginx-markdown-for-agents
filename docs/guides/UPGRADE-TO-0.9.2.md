@@ -163,7 +163,7 @@ kubectl rollout status deployment/nginx-markdown --namespace nginx-markdown
 
 ## Docker Upgrade
 
-> **Note:** OCI image publication is disabled for 0.9.2. No supported
+> **Note:** The project does not publish OCI images for 0.9.2. No supported
 > provenance or digest contract exists for the Docker upgrade path in this
 > release. Use the prebuilt-module or source-build upgrade paths instead.
 

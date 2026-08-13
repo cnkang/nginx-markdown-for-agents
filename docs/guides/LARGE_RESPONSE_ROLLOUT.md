@@ -3,7 +3,7 @@
 > ⚠️ **RETIRED IN 0.9.0** — The `markdown_large_body_threshold` directive
 > documented in this playbook was a **reject-only stub** in 0.9.0 and 0.9.1.
 > Setting it in `nginx.conf` caused `nginx -t` to fail with a migration hint.
-> In 0.9.2 the stub was deleted entirely. There is no
+> In 0.9.2 the project deleted the stub entirely. There is no
 > Config V2 replacement, the incremental-path threshold is no longer
 > user-configurable. This playbook stays as a historical reference for
 > pre-0.9.0 deployments. For current rollout guidance, use the

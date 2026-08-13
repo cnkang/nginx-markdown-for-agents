@@ -85,7 +85,7 @@ NGINX-coupled responsibilities.
 7. Worker request path must not contain hidden blocking operations
 8. All cross-boundary structs use `repr(C)`
 9. New FFI fields append to struct tail (non-breaking ABI change only for
-   prefix-based usage; by-value calls, caller-allocated instances, and arrays
+   prefix-based usage. By-value calls, caller-allocated instances, and arrays
    are not compatible because tail appends change `sizeof`)
 
 ## Consequences
