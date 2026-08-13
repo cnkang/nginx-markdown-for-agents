@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "ngx_http_markdown_diagnostics.h"
+#define MARKDOWN_REASON_META_DEFINE
 #include "markdown_reason_meta.h"
 
 /*

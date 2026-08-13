@@ -998,6 +998,10 @@ ngx_http_markdown_diagnostics_fmt_decisions(
 {
     ngx_uint_t  count;
 
+    if (pos == NULL || *pos == NULL || last == NULL || *pos > last) {
+        return NGX_ERROR;
+    }
+
     count = ngx_http_markdown_diag_ring_valid_count(state, NULL);
     for (ngx_uint_t i = 0; i < count; i++) {
         ngx_uint_t  idx;
@@ -1006,6 +1010,13 @@ ngx_http_markdown_diagnostics_fmt_decisions(
         const char *outcome;
         const char *stage;
         const char *error_origin;
+
+        /* Reserve one complete entry before writing any of its fields. */
+        if ((size_t) (last - *pos)
+            < NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE)
+        {
+            return NGX_ERROR;
+        }
 
         if (state->ring.head >= i + 1) {
             idx = state->ring.head - (i + 1);
@@ -1035,9 +1046,9 @@ ngx_http_markdown_diagnostics_fmt_decisions(
             *pos, last, state->ring.entries[idx].timestamp);
         *pos = ngx_slprintf(*pos, last,
             "\",\"outcome\":\"%s\",\"stage\":\"%s\","
-            "\"reason\":\"%*s\",\"error_origin\":",
+            "\"reason\":\"%V\",\"error_origin\":",
             outcome, stage,
-            reason.len, reason.data);
+            &reason);
         if (error_origin == NULL) {
             *pos = ngx_slprintf(*pos, last, "null");
         } else {

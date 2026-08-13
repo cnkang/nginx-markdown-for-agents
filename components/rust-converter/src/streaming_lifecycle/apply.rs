@@ -732,20 +732,31 @@ fn apply_begin_abort(
 
 /// SEND_ABORT_TERMINAL: send the abort terminal chain (last_buf=1, no content).
 fn apply_send_abort_terminal(
+    state: StreamingState,
+    frame: &TransitionFrame,
+    outcome: &ActionOutcome,
+) -> Result<ApplyResult, StateMachineError> {
+    apply_abort_terminal_with_prefix(state, frame, outcome, "ATERM")
+}
+
+fn apply_abort_terminal_with_prefix(
     _state: StreamingState,
     frame: &TransitionFrame,
     outcome: &ActionOutcome,
+    command_prefix: &str,
 ) -> Result<ApplyResult, StateMachineError> {
     match outcome.ngx_result {
         NgxResult::Ok | NgxResult::Done => {
             /* Success → DONE + latch + emit */
             let cmd_latch = format!(
-                "CMD_A{}-ATERM-LATCH",
-                frame.transition_id.replace("PLAN-", "")
+                "CMD_A{}-{}-LATCH",
+                frame.transition_id.replace("PLAN-", ""),
+                command_prefix,
             );
             let cmd_emit = format!(
-                "CMD_A{}-ATERM-EMIT",
-                frame.transition_id.replace("PLAN-", "")
+                "CMD_A{}-{}-EMIT",
+                frame.transition_id.replace("PLAN-", ""),
+                command_prefix,
             );
             Ok(ApplyResult {
                 new_state: StreamingState::Done,
@@ -802,12 +813,14 @@ fn apply_send_abort_terminal(
             };
             let pre_effect = promote_or_delivery(&frame.failure_ledger, &record);
             let cmd_store = format!(
-                "CMD_A{}-ATERM-STORE",
-                frame.transition_id.replace("PLAN-", "")
+                "CMD_A{}-{}-STORE",
+                frame.transition_id.replace("PLAN-", ""),
+                command_prefix,
             );
             let cmd_emit = format!(
-                "CMD_A{}-ATERM-FAIL-EMIT",
-                frame.transition_id.replace("PLAN-", "")
+                "CMD_A{}-{}-FAIL-EMIT",
+                frame.transition_id.replace("PLAN-", ""),
+                command_prefix,
             );
             Ok(ApplyResult {
                 new_state: StreamingState::Aborted,
@@ -1076,7 +1089,12 @@ fn apply_resume_abort_terminal(
     outcome: &ActionOutcome,
 ) -> Result<ApplyResult, StateMachineError> {
     /* Symmetric with SEND_ABORT_TERMINAL outcomes */
-    apply_send_abort_terminal(StreamingState::PendingAbortTerminal, frame, outcome)
+    apply_abort_terminal_with_prefix(
+        StreamingState::PendingAbortTerminal,
+        frame,
+        outcome,
+        "RATERM",
+    )
 }
 
 /// Promote-or-delivery helper for failure record placement.
@@ -1466,6 +1484,31 @@ mod tests {
             .unwrap();
             assert_eq!(result.new_state, state);
             assert!(result.side_effects.is_empty());
+        }
+    }
+
+    #[test]
+    fn resume_abort_terminal_uses_distinct_command_namespace() {
+        let frame = simple_frame(Action::ResumePending, "PLAN-30");
+
+        for outcome in [ok_outcome(), error_outcome(FailureSite::PendingResume)] {
+            let result = apply_result(
+                StreamingState::PendingAbortTerminal,
+                &frame,
+                &outcome,
+                &TransitionContext {
+                    downstream_usable: true,
+                },
+            )
+            .unwrap();
+
+            assert!(
+                result
+                    .side_effects
+                    .iter()
+                    .all(|command| command.command_id.contains("-RATERM-")
+                        && !command.command_id.contains("-ATERM-"))
+            );
         }
     }
 }

@@ -18,8 +18,6 @@
 #include "ngx_http_markdown_streaming_decomp_impl.h"
 #include "ngx_http_markdown_stream_postcommit.h"
 #include "ngx_http_markdown_stream_commit.h"
-#include "ngx_http_markdown_zerocopy_buf.h"
-#include "ngx_http_markdown_output_decision_impl.h"
 
 
 typedef struct {
@@ -474,12 +472,6 @@ ngx_http_markdown_streaming_cleanup(void *data)
      * (memory/temporary describe buffer *behavior*, not Rust
      * allocator *provenance*):
      *
-     *   - Zero-copy Rust output buffers (b->memory=1, b->temporary=0,
-     *     created by ngx_http_markdown_rust_buf_create_ex) own their
-     *     own pool cleanup context (ngx_http_markdown_rust_buf_cleanup_t)
-     *     registered at creation time.  That cleanup calls
-     *     markdown_streaming_output_free() exactly once, independent
-     *     of pending_output's lifetime.
      *   - Pool-copy output buffers (send_output) are ngx_palloc'd from
      *     the request pool and reclaimed with it; nothing to free here.
      *   - Fail-open cloned chain links share the ngx_buf_t with an
@@ -488,13 +480,10 @@ ngx_http_markdown_streaming_cleanup(void *data)
      *     calling markdown_streaming_output_free() on it would be an
      *     invalid free.
      *
-     * Walking pending_output and branching on cl->buf->temporary
-     * cannot distinguish these cases and previously caused exactly
-     * this invalid-free risk for shared fail-open buffers.  Freeing
-     * Rust-owned memory is therefore left entirely to the zero-copy
-     * buffer's own pool cleanup; this function only clears our
-     * tracking state so stale references are not observed after
-     * cleanup runs.
+     * Walking pending_output and branching on cl->buf->temporary cannot
+     * distinguish these cases and would risk an invalid free for shared
+     * fail-open buffers.  This function only clears our tracking state so
+     * stale references are not observed after cleanup runs.
      */
     ngx_http_markdown_pending_output_set(
         &ctx->streaming.pending_output, NULL);
@@ -728,9 +717,9 @@ ngx_http_markdown_select_processing_path(
  * while ensuring a single header mutation code path.
  *
  * Note: stream_commit_headers() applies the response-header mutations and
- * records a provisional commit. The caller publishes headers_committed,
- * COMMIT_POST, and headers_forwarded only after downstream accepts the
- * header chain; NGX_AGAIN keeps those latches clear until resume.
+ * eagerly records its committed state. The caller must roll back
+ * headers_committed and COMMIT_POST when downstream returns NGX_AGAIN, and
+ * publishes headers_forwarded only after the header chain is accepted.
  */
 static ngx_int_t
 ngx_http_markdown_streaming_update_headers(
@@ -832,7 +821,6 @@ ngx_http_markdown_streaming_abandon_pending_after_fatal(
         &ctx->streaming.pending_output, NULL);
     ctx->streaming.pending_meta.has_data = 0;
     ctx->streaming.pending_meta.bytes = 0;
-    ctx->streaming.pending_meta.zero_copy = 0;
     ctx->streaming.pending_meta.main_terminal = 0;
     ctx->streaming.pending_meta.subrequest_terminal = 0;
     ctx->streaming.pending_meta.pending_abort_terminal = 0;
@@ -1156,7 +1144,6 @@ ngx_http_markdown_streaming_save_pending(
     ngx_http_markdown_ctx_t *ctx,
     ngx_chain_t *out,
     const u_char *data, size_t len,
-    ngx_flag_t zero_copy,
     ngx_http_markdown_pending_terminal_t terminal)
 {
     if (ctx->streaming.pending_output != NULL) {
@@ -1174,7 +1161,6 @@ ngx_http_markdown_streaming_save_pending(
     ctx->streaming.pending_meta.has_data =
         (data != NULL && len > 0) ? 1 : 0;
     ctx->streaming.pending_meta.bytes = len;
-    ctx->streaming.pending_meta.zero_copy = zero_copy;
     ctx->streaming.pending_meta.main_terminal = terminal.main_terminal;
     ctx->streaming.pending_meta.subrequest_terminal =
         terminal.subrequest_terminal;
@@ -1252,6 +1238,11 @@ ngx_http_markdown_streaming_send_output(
             NGX_HTTP_MD_SEND_ORIGIN_ALLOCATION;
         return NGX_ERROR;
     }
+
+    /* Keep empty buffers in a valid, zero-length state even when the
+     * allocator does not guarantee zeroed memory. */
+    b->pos = (u_char *) b;
+    b->last = b->pos;
 
     if (data != NULL && len > 0) {
         /*
@@ -1333,7 +1324,7 @@ ngx_http_markdown_streaming_send_output(
 
     if (rc == NGX_AGAIN) {
         rc = ngx_http_markdown_streaming_save_pending(
-            r, ctx, out, data, len, 0, terminal);
+            r, ctx, out, data, len, terminal);
         if (rc == NGX_ERROR) {
             ctx->streaming.classify.last_send_failure_origin =
                 NGX_HTTP_MD_SEND_ORIGIN_INVARIANT;
@@ -1588,27 +1579,16 @@ static void
 ngx_http_markdown_streaming_account_pending_output(
     ngx_http_markdown_ctx_t *ctx, ngx_int_t rc)
 {
-    /*
-     * Zero-copy pending delivery is retained accounting only: since
-     * 0.9.2 no pending chain can carry the zero_copy flag (the output
-     * decision is always POOL_COPY), so the zero-copy counter stays
-     * at zero by construction.
-     */
     if (ngx_http_markdown_streaming_delivery_ok(rc)
         && ctx->streaming.pending_meta.bytes > 0)
     {
         NGX_HTTP_MARKDOWN_METRIC_ADD(
             streaming.selection.output_bytes_total,
             (ngx_atomic_int_t) ctx->streaming.pending_meta.bytes);
-        if (ctx->streaming.pending_meta.zero_copy) {
-            NGX_HTTP_MARKDOWN_METRIC_INC(perf.zero_copy_output_total);
-        } else {
-            NGX_HTTP_MARKDOWN_METRIC_INC(perf.copied_output_total);
-        }
+        NGX_HTTP_MARKDOWN_METRIC_INC(perf.copied_output_total);
     }
 
     ctx->streaming.pending_meta.bytes = 0;
-    ctx->streaming.pending_meta.zero_copy = 0;
 }
 
 
@@ -2394,6 +2374,10 @@ ngx_http_markdown_streaming_precommit_error(
  *   NGX_OK    on success (commit state updated)
  *   NGX_ERROR on header update or filter failure
  */
+static ngx_int_t ngx_http_markdown_streaming_resume_header_commit(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx);
+
 static ngx_int_t
 ngx_http_markdown_streaming_commit(
     ngx_http_request_t *r,
@@ -2401,6 +2385,13 @@ ngx_http_markdown_streaming_commit(
     const ngx_http_markdown_conf_t *conf)
 {
     ngx_int_t  rc;
+
+    /* A prior header-filter NGX_AGAIN already completed header mutation.
+     * Resume only the downstream header filter; replaying update_headers
+     * would apply the transaction a second time on the feed path. */
+    if (ctx->stream_sm.headers_pending) {
+        return ngx_http_markdown_streaming_resume_header_commit(r, ctx);
+    }
 
     rc = ngx_http_markdown_streaming_update_headers(
         r, ctx, conf);
@@ -2509,111 +2500,6 @@ ngx_http_markdown_streaming_add_output_bytes(
 
 
 static ngx_int_t
-ngx_http_markdown_streaming_send_zero_copy_feed_output(
-    ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx,
-    u_char *out_data,
-    size_t out_len)
-{
-    ngx_buf_t    *zb;
-    ngx_chain_t  *zout;
-    ngx_int_t     rc;
-    ngx_flag_t    owner_transferred;
-    ngx_http_markdown_pending_terminal_t  terminal;
-
-    ctx->streaming.classify.last_send_failure_origin = NGX_HTTP_MD_SEND_ORIGIN_NONE;
-
-    /*
-     * Zero-copy path: buffer factory creates an ngx_buf_t referencing
-     * Rust memory with pool cleanup registered.  On success, the pool
-     * cleanup owns the Rust buffer; caller does NOT free it.
-     *
-     * On failure, check owner_transferred to determine if we can
-     * fallback to pool-copy (caller still owns the buffer).
-     *
-     * Retained but never selected since 0.9.2: the output decision
-     * always returns POOL_COPY (see ngx_http_markdown_hybrid_output_decision),
-     * so this function is dead in the current release.  The code is
-     * kept intact (pre-freeze), not removed.
-     */
-    zb = ngx_http_markdown_rust_buf_create_ex(r->pool, out_data, out_len,
-                                              &owner_transferred);
-    if (zb == NULL) {
-        if (!owner_transferred) {
-            /*
-             * Factory failed before taking ownership of the Rust
-             * buffer.  Fallback to pool-copy: copy data into pool
-             * memory, then free the Rust buffer ourselves.
-             */
-            rc = ngx_http_markdown_streaming_send_output(
-                r, ctx, out_data, out_len, /* last_buf */ 0);
-
-            if (ngx_http_markdown_streaming_delivery_ok(rc)) {
-                NGX_HTTP_MARKDOWN_METRIC_INC(perf.copied_output_total);
-            }
-
-            markdown_streaming_output_free(out_data, out_len);
-            return rc;
-        }
-
-        /*
-         * Factory took ownership but still failed (cleanup alloc
-         * succeeded but something else went wrong, or it freed the
-         * buffer).  Cannot fallback — the data is gone.
-         */
-        ctx->streaming.classify.last_send_failure_origin =
-            NGX_HTTP_MD_SEND_ORIGIN_ALLOCATION;
-        return NGX_ERROR;
-    }
-
-    zb->flush = 1;
-    zb->last_buf = 0;
-    zb->last_in_chain = 0;
-
-    zout = ngx_alloc_chain_link(r->pool);
-    if (zout == NULL) {
-        ctx->streaming.classify.last_send_failure_origin =
-            NGX_HTTP_MD_SEND_ORIGIN_ALLOCATION;
-        return NGX_ERROR;
-    }
-    zout->buf = zb;
-    zout->next = NULL;
-
-    rc = ngx_http_next_body_filter(r, zout);
-
-    if (ngx_http_markdown_streaming_delivery_ok(rc)) {
-        ctx->streaming.flushes_sent++;
-        ngx_http_markdown_streaming_record_ttfb(ctx);
-        NGX_HTTP_MARKDOWN_METRIC_ADD(
-            streaming.selection.output_bytes_total,
-            (ngx_atomic_int_t) out_len);
-        NGX_HTTP_MARKDOWN_METRIC_INC(perf.zero_copy_output_total);
-    }
-
-    /* Classify downstream failure */
-    if (!ngx_http_markdown_streaming_delivery_ok(rc)
-        && rc != NGX_AGAIN)
-    {
-        ctx->streaming.classify.last_send_failure_origin =
-            NGX_HTTP_MD_SEND_ORIGIN_DOWNSTREAM;
-    }
-
-    if (rc == NGX_AGAIN) {
-        terminal.main_terminal = 0;
-        terminal.subrequest_terminal = 0;
-        rc = ngx_http_markdown_streaming_save_pending(
-            r, ctx, zout, out_data, out_len, 1, terminal);
-        if (rc == NGX_ERROR) {
-            ctx->streaming.classify.last_send_failure_origin =
-                NGX_HTTP_MD_SEND_ORIGIN_INVARIANT;
-        }
-    }
-
-    return rc;
-}
-
-
-static ngx_int_t
 ngx_http_markdown_streaming_send_feed_output(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
@@ -2621,29 +2507,14 @@ ngx_http_markdown_streaming_send_feed_output(
     u_char *out_data,
     size_t out_len)
 {
-    ngx_http_markdown_output_decision_t  decision;
-    ngx_flag_t                          bp_active;
-    ngx_int_t                           rc;
-
-    bp_active = (ctx->streaming.pending_output != NULL) ? 1 : 0;
-
-    decision = ngx_http_markdown_hybrid_output_decision(
-        conf, /* chunk_is_terminal */ 0, bp_active);
+    (void) conf;
 
     /*
-     * Zero-copy branch: retained but never selected since 0.9.2
-     * (decision is always POOL_COPY).
+     * The 0.9.2 contract has one streaming output ownership path: copy the
+     * Rust result into request-pool memory, then release the result after the
+     * downstream call (or after pending delivery records it).
      */
-    if (decision == NGX_HTTP_MARKDOWN_OUTPUT_ZERO_COPY) {
-        return ngx_http_markdown_streaming_send_zero_copy_feed_output(
-            r, ctx, out_data, out_len);
-    }
-
-    /*
-     * Pool-copy path: existing send_output copies data into pool memory.
-     * Caller frees the Rust buffer after return.
-     */
-    rc = ngx_http_markdown_streaming_send_output(
+    ngx_int_t rc = ngx_http_markdown_streaming_send_output(
         r, ctx, out_data, out_len, /* last_buf */ 0);
 
     if (ngx_http_markdown_streaming_delivery_ok(rc)) {

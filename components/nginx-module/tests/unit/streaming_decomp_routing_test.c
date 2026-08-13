@@ -18,6 +18,7 @@
  */
 
 #include "../include/test_common.h"
+#include "../../src/ngx_http_markdown_decompression_route.h"
 
 /* ----------------------------------------------------------------
  * Minimal NGINX type stubs for standalone compilation
@@ -171,12 +172,8 @@ ngx_http_markdown_decomp_routing_decision(
      * decompressor.  Gzip, deflate, and Brotli (when compiled)
      * are supported in 0.9.1.
      */
-    if (encoding != NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
-        && encoding != NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
-#ifdef NGX_HTTP_BROTLI
-        && encoding != NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI
-#endif
-        ) {
+    if (!ngx_http_markdown_decompression_is_streamable(
+            (unsigned) encoding)) {
         return NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER;
     }
 

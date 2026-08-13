@@ -406,6 +406,13 @@
 #define ENCODING_CHAIN_DEPTH_EXCEEDED 3
 
 /**
+ * Content-Encoding chain parse classification: invalid pointer arguments.
+ * This is kept in the u8 encoding-chain family; decompression's u32 error
+ * categories must not be truncated at this boundary.
+ */
+#define ENCODING_CHAIN_INVALID_ARGS 4
+
+/**
  * Reason code: client prefers text/markdown, proceed with conversion.
  */
 #define NEGOTIATE_REASON_CONVERT 0
@@ -429,6 +436,11 @@
  * Reason code: Accept header is malformed.
  */
 #define NEGOTIATE_REASON_MALFORMED 4
+
+/**
+ * Reason code: negotiation encountered an internal panic or invariant failure.
+ */
+#define NEGOTIATE_REASON_INTERNAL_ERROR 5
 
 /**
  * Wildcard mode: strict — wildcard MIME type does NOT match text/markdown.
@@ -1726,6 +1738,21 @@ void markdown_result_init(struct MarkdownResult *result);
 void markdown_header_plan_init(struct FFIHeaderPlan *result);
 
 /**
+ * Zero-initialize an `FFIBaseUrlInput` snapshot.
+ *
+ * The input contains only borrowed pointers and lengths.  Initializing it
+ * through this helper makes the NULL/zero pairing explicit before callers
+ * fill selected request-header fields and prevents stale stack bytes from
+ * crossing the FFI boundary.
+ *
+ * # Safety
+ *
+ * The caller must ensure that `result` points to writable storage for an
+ * `FFIBaseUrlInput`.
+ */
+void markdown_base_url_input_init(struct FFIBaseUrlInput *result);
+
+/**
  * Perform bounded decompression of compressed input data.
  *
  * Decompresses the input using the specified format (gzip, deflate, or brotli)
@@ -1814,14 +1841,14 @@ void markdown_decomp_result_init(struct FFIDecompResult *result);
  * # Return Value
  *
  * Returns one of the `ENCODING_CHAIN_*` classification constants, or
- * `DECOMP_CATEGORY_INVALID_ARGS` (105) when a NULL pointer is paired with a
+ * `ENCODING_CHAIN_INVALID_ARGS` (4) when a NULL pointer is paired with a
  * non-zero length.
  *
  * # Safety
  *
  * The caller must ensure that:
  * - `value` points to at least `value_len` readable bytes; NULL with
- *   non-zero length returns `DECOMP_CATEGORY_INVALID_ARGS`
+ *   non-zero length returns `ENCODING_CHAIN_INVALID_ARGS`
  * - `result` points to writable storage for an `FFIEncodingChainResult`
  */
 uint8_t markdown_parse_encoding_chain(const uint8_t *value,

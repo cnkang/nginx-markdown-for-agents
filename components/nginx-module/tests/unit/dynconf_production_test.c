@@ -450,41 +450,43 @@ ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...)
     dst = translated;
     remaining = sizeof(translated);
     for (src = fmt; *src != '\0' && remaining > 1; src++) {
-        if (*src == '%' && src[1] == 'P') {
+        if (*src == '%' && src[1] == 'P' && remaining >= 4) {
             *dst++ = '%';
             *dst++ = 'd';
             src++;
             remaining -= 2;
-        } else if (*src == '%' && src[1] == 'M') {
+        } else if (*src == '%' && src[1] == 'M' && remaining >= 4) {
             *dst++ = '%';
             *dst++ = 'l';
             *dst++ = 'u';
             src++;
             remaining -= 3;
         } else if (*src == '%' && src[1] == 'u'
-                   && src[2] == 'A') {
+                   && src[2] == 'A' && remaining >= 4) {
             *dst++ = '%';
             *dst++ = 'l';
             *dst++ = 'u';
             src += 2;
             remaining -= 3;
         } else if (*src == '%' && src[1] == 'u'
-                   && src[2] == 'i') {
+                   && src[2] == 'i' && remaining >= 4) {
             *dst++ = '%';
             *dst++ = 'l';
             *dst++ = 'u';
             src += 2;
             remaining -= 3;
         } else if (*src == '%' && src[1] == 'u'
-                   && src[2] == 'z') {
+                   && src[2] == 'z' && remaining >= 4) {
             *dst++ = '%';
             *dst++ = 'z';
             *dst++ = 'u';
             src += 2;
             remaining -= 3;
-        } else {
+        } else if (remaining >= 2) {
             *dst++ = *src;
             remaining--;
+        } else {
+            break;
         }
     }
     *dst = '\0';
@@ -512,6 +514,31 @@ markdown_dynconf_result_init(FFIDynconfResult *result)
     result->streaming_buffer = DYNCONF_NOT_SET_U64;
 }
 
+static int
+test_contains_bytes(const uint8_t *data, uintptr_t data_len,
+    const char *needle)
+{
+    uintptr_t offset;
+    size_t    needle_len;
+
+    if (data == NULL || needle == NULL) {
+        return 0;
+    }
+
+    needle_len = strlen(needle);
+    if (needle_len > data_len) {
+        return 0;
+    }
+
+    for (offset = 0; offset <= data_len - needle_len; offset++) {
+        if (memcmp(data + offset, needle, needle_len) == 0) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 void
 markdown_dynconf_parse(const uint8_t *data, uintptr_t data_len,
     FFIDynconfResult *result)
@@ -534,9 +561,7 @@ markdown_dynconf_parse(const uint8_t *data, uintptr_t data_len,
     }
 
     selected_digest = digest;
-    if (data_len >= sizeof("{\"schema_version\":2}") - 1
-        && memcmp(data, "{\"schema_version\":2}",
-                  sizeof("{\"schema_version\":2}") - 1) == 0)
+    if (test_contains_bytes(data, data_len, "\"schema_version\":2"))
     {
         selected_digest = digest_v2;
     }
@@ -546,7 +571,34 @@ markdown_dynconf_parse(const uint8_t *data, uintptr_t data_len,
     result->source_digest_len = g_invalid_digest ? 63 : 64;
     result->active_digest = selected_digest;
     result->active_digest_len = g_invalid_digest ? 63 : 64;
-    result->filter = DYNCONF_FILTER_ON;
+    if (test_contains_bytes(data, data_len, "\"filter\":\"off\"")) {
+        result->filter = DYNCONF_FILTER_OFF;
+    } else if (test_contains_bytes(data, data_len, "\"filter\":\"on\"")) {
+        result->filter = DYNCONF_FILTER_ON;
+    }
+    if (test_contains_bytes(data, data_len, "\"prune_noise\":\"off\""))
+    {
+        result->prune_noise = DYNCONF_PRUNE_NOISE_OFF;
+    } else if (test_contains_bytes(data, data_len,
+                                   "\"prune_noise\":\"on\""))
+    {
+        result->prune_noise = DYNCONF_PRUNE_NOISE_ON;
+    }
+    if (test_contains_bytes(data, data_len,
+                            "\"log_verbosity\":\"debug\""))
+    {
+        result->log_verbosity = DYNCONF_LOG_DEBUG;
+    }
+    if (test_contains_bytes(data, data_len,
+                            "\"error_policy\":\"pass\""))
+    {
+        result->error_policy = DYNCONF_POLICY_PASS;
+    }
+    if (test_contains_bytes(data, data_len,
+                            "\"streaming_buffer\":65536"))
+    {
+        result->streaming_buffer = 65536;
+    }
 }
 
 void
@@ -691,7 +743,7 @@ test_ffi_paths(const char *path)
                 "legacy migration warning must remain one-time per watcher");
 
     reset_state();
-    write_file(path, "{\"schema_version\":1}");
+    write_file(path, "{\"schema_version\":1,\"filter\":\"on\"}");
     init_watcher(&watcher, &conf, path);
     rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &log);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
@@ -741,7 +793,7 @@ test_successful_reload_is_idempotent(const char *path)
     TEST_SUBSECTION("production dynconf identical reload");
 
     reset_state();
-    write_file(path, "{\"schema_version\":1}");
+    write_file(path, "{\"schema_version\":1,\"filter\":\"on\"}");
     init_watcher(&watcher, &conf, path);
     conf.advanced.dynconf_block_mask = NGX_HTTP_MARKDOWN_BLOCK_FILTER;
     watcher.active_snapshot.valid = 1;
@@ -785,11 +837,128 @@ test_successful_reload_is_idempotent(const char *path)
     TEST_PASS("production dynconf identical reload is a no-op");
 }
 
+
+static void
+test_reload_replaces_omitted_fields(const char *path)
+{
+    ngx_http_markdown_dynconf_watcher_t  sequence_watcher;
+    ngx_http_markdown_dynconf_watcher_t  direct_watcher;
+    ngx_http_markdown_conf_t             sequence_conf;
+    ngx_http_markdown_conf_t             direct_conf;
+    ngx_log_t                            log;
+    ngx_int_t                            rc;
+    static const char                    first_config[] =
+        "{\"schema_version\":1,\"filter\":\"off\","
+        "\"prune_noise\":\"off\",\"log_verbosity\":\"debug\","
+        "\"error_policy\":\"pass\",\"streaming_buffer\":65536}";
+    static const char                    partial_config[] =
+        "{\"schema_version\":2}";
+
+    TEST_SUBSECTION("dynconf replacement resets omitted fields");
+
+    init_watcher(&sequence_watcher, &sequence_conf, path);
+    sequence_conf.enabled = 1;
+    sequence_conf.advanced.prune_noise = 1;
+    sequence_conf.policy.log_verbosity = 2;
+    sequence_conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    sequence_conf.error_status = NGX_HTTP_SERVICE_UNAVAILABLE;
+    sequence_conf.stream.budget = 131072;
+    sequence_conf.advanced.memory_budget = 262144;
+    sequence_conf.limits.conversion_memory = 524288;
+    ngx_http_markdown_dynconf_snapshot_from_conf(
+        &sequence_watcher.static_snapshot, &sequence_conf);
+    ngx_http_markdown_dynconf_snapshot_from_conf(
+        &sequence_watcher.active_snapshot, &sequence_conf);
+
+    write_file(path, first_config);
+    rc = ngx_http_markdown_dynconf_reload(
+        &sequence_watcher, &sequence_conf, &log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
+                "first generation should apply");
+    TEST_ASSERT(sequence_watcher.active_snapshot.enabled == 0,
+                "first generation should turn filter off");
+    TEST_ASSERT(sequence_watcher.active_snapshot.prune_noise == 0,
+                "first generation should turn prune_noise off");
+    TEST_ASSERT(sequence_watcher.active_snapshot.log_verbosity == 3,
+                "first generation should set debug logging");
+    TEST_ASSERT(sequence_watcher.active_snapshot.error_policy
+                == NGX_HTTP_MARKDOWN_ON_ERROR_PASS,
+                "first generation should set pass policy");
+    TEST_ASSERT(sequence_watcher.active_snapshot.streaming_budget == 65536,
+                "first generation should set streaming budget");
+
+    write_file(path, partial_config);
+    rc = ngx_http_markdown_dynconf_reload(
+        &sequence_watcher, &sequence_conf, &log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
+                "partial second generation should apply");
+    TEST_ASSERT(sequence_watcher.active_snapshot.enabled == 1,
+                "omitted filter must return to the static baseline");
+    TEST_ASSERT(sequence_watcher.active_snapshot.prune_noise == 1,
+                "omitted prune_noise must return to the static baseline");
+    TEST_ASSERT(sequence_watcher.active_snapshot.log_verbosity == 2,
+                "omitted log verbosity must return to the static baseline");
+    TEST_ASSERT(sequence_watcher.active_snapshot.error_policy
+                == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT,
+                "omitted error policy must return to the static baseline");
+    TEST_ASSERT(sequence_watcher.active_snapshot.error_status
+                == NGX_HTTP_SERVICE_UNAVAILABLE,
+                "omitted error status must return to the static baseline");
+    TEST_ASSERT(sequence_watcher.active_snapshot.streaming_budget == 131072,
+                "omitted streaming budget must return to the static baseline");
+    TEST_ASSERT(sequence_watcher.active_snapshot.memory_budget == 262144,
+                "omitted memory budget must return to the static baseline");
+    TEST_ASSERT(sequence_watcher.active_snapshot.conversion_memory == 524288,
+                "omitted conversion memory must return to the static baseline");
+
+    init_watcher(&direct_watcher, &direct_conf, path);
+    direct_conf.enabled = 1;
+    direct_conf.advanced.prune_noise = 1;
+    direct_conf.policy.log_verbosity = 2;
+    direct_conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    direct_conf.error_status = NGX_HTTP_SERVICE_UNAVAILABLE;
+    direct_conf.stream.budget = 131072;
+    direct_conf.advanced.memory_budget = 262144;
+    direct_conf.limits.conversion_memory = 524288;
+    ngx_http_markdown_dynconf_snapshot_from_conf(
+        &direct_watcher.static_snapshot, &direct_conf);
+    ngx_http_markdown_dynconf_snapshot_from_conf(
+        &direct_watcher.active_snapshot, &direct_conf);
+    rc = ngx_http_markdown_dynconf_reload(
+        &direct_watcher, &direct_conf, &log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
+                "direct partial generation should apply");
+    TEST_ASSERT(direct_watcher.active_snapshot.enabled
+                == sequence_watcher.active_snapshot.enabled,
+                "direct and cross-generation filter state must agree");
+    TEST_ASSERT(direct_watcher.active_snapshot.prune_noise
+                == sequence_watcher.active_snapshot.prune_noise,
+                "direct and cross-generation prune state must agree");
+    TEST_ASSERT(direct_watcher.active_snapshot.log_verbosity
+                == sequence_watcher.active_snapshot.log_verbosity,
+                "direct and cross-generation log state must agree");
+    TEST_ASSERT(direct_watcher.active_snapshot.error_policy
+                == sequence_watcher.active_snapshot.error_policy,
+                "direct and cross-generation error policy must agree");
+    TEST_ASSERT(memcmp(direct_watcher.digest_state.active_digest,
+                       sequence_watcher.digest_state.active_digest,
+                       sizeof(direct_watcher.digest_state.active_digest)) == 0,
+                "direct and cross-generation active digests must agree");
+    TEST_ASSERT(direct_watcher.diagnostic_state.last_result
+                == sequence_watcher.diagnostic_state.last_result,
+                "direct and cross-generation diagnostics result must agree");
+
+    TEST_PASS("dynconf replacement is independent of reload history");
+}
+
+
 static void
 test_diagnostics_renderer_tracks_dynconf_lkg(const char *path)
 {
-    static const char first_config[] = "{\"schema_version\":1}";
-    static const char second_config[] = "{\"schema_version\":2}";
+    static const char first_config[] =
+        "{\"schema_version\":1,\"filter\":\"on\"}";
+    static const char second_config[] =
+        "{\"schema_version\":2,\"filter\":\"on\"}";
     ngx_http_markdown_conf_t conf;
     ngx_http_markdown_diag_dynconf_t dynconf;
     ngx_http_request_t request;
@@ -907,6 +1076,7 @@ main(void)
     reset_state();
     test_ffi_paths(path);
     test_successful_reload_is_idempotent(path);
+    test_reload_replaces_omitted_fields(path);
     test_diagnostics_renderer_tracks_dynconf_lkg(path);
 
     unlink(path);

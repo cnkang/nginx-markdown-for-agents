@@ -267,6 +267,7 @@ typedef struct {
     ngx_http_markdown_dynconf_file_state_t       file_state;
     ngx_http_markdown_dynconf_digest_state_t     digest_state;
     ngx_http_markdown_dynconf_snapshot_t         active_snapshot;
+    ngx_http_markdown_dynconf_snapshot_t         static_snapshot;
     ngx_http_markdown_dynconf_snapshot_t         staging_snapshot;
     ngx_http_markdown_dynconf_snapshot_t         last_known_good;
     ngx_http_markdown_conf_t                    *conf;
@@ -274,6 +275,37 @@ typedef struct {
     ngx_http_markdown_dynconf_diagnostic_state_t diagnostic_state;
     ngx_flag_t    legacy_format_warning_logged;
 } ngx_http_markdown_dynconf_watcher_t;
+
+static void ngx_http_markdown_dynconf_snapshot_from_conf(
+    ngx_http_markdown_dynconf_snapshot_t *snapshot,
+    const ngx_http_markdown_conf_t *conf);
+
+/*
+ * Reset the staging snapshot to the immutable static/http baseline.
+ *
+ * The live module configuration is updated when a dynamic snapshot is
+ * published, so it cannot be used as the baseline for a later generation.
+ * Tests and narrow callers that do not run the full watcher startup path use
+ * the live configuration as a guarded fallback.
+ */
+static void
+ngx_http_markdown_dynconf_snapshot_reset_baseline(
+    ngx_http_markdown_dynconf_watcher_t *watcher,
+    const ngx_http_markdown_conf_t *conf)
+{
+    if (watcher == NULL || conf == NULL) {
+        return;
+    }
+
+    if (watcher->static_snapshot.valid) {
+        watcher->staging_snapshot = watcher->static_snapshot;
+    } else {
+        ngx_http_markdown_dynconf_snapshot_from_conf(
+            &watcher->staging_snapshot, conf);
+    }
+    watcher->staging_snapshot.validation_summary =
+        watcher->validation_summary;
+}
 
 static ngx_int_t ngx_http_markdown_dynconf_reload(
     ngx_http_markdown_dynconf_watcher_t *watcher,
@@ -518,6 +550,62 @@ ngx_http_markdown_build_effective_conf(
     eff->streaming_buffer = conf->stream.budget;
     eff->streaming_buffer_provenance = NGX_HTTP_MARKDOWN_PROVENANCE_STATIC;
 #endif
+}
+
+
+/*
+ * Bind the captured snapshot and effective view into request-pool storage.
+ * Production request code and conformance tests use this same seam so the
+ * allocation and dynconf gating rules cannot silently diverge.
+ */
+static void
+ngx_http_markdown_bind_request_snapshot(
+    ngx_pool_t *pool,
+    ngx_log_t *log,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_dynconf_snapshot_t *snap_copy,
+    const ngx_http_markdown_effective_conf_t *early_eff,
+    ngx_http_markdown_dynconf_snapshot_t **snapshot_slot,
+    ngx_http_markdown_effective_conf_t **effective_slot)
+{
+    if (pool == NULL || conf == NULL || snapshot_slot == NULL
+        || effective_slot == NULL)
+    {
+        return;
+    }
+
+    if (conf->advanced.dynconf_enabled) {
+        if (snap_copy == NULL) {
+            ngx_log_error(NGX_LOG_WARN, log, 0,
+                          "markdown: dynconf_enabled is true but "
+                          "snap_copy is NULL; skipping dynconf snapshot binding, "
+                          "request will use live conf values");
+        } else {
+            *snapshot_slot = ngx_pcalloc(
+                pool, sizeof(ngx_http_markdown_dynconf_snapshot_t));
+            if (*snapshot_slot != NULL) {
+                **snapshot_slot = *snap_copy;
+            } else {
+                ngx_log_error(NGX_LOG_WARN, log, 0,
+                              "markdown: failed to allocate dynconf snapshot "
+                              "from request pool; request will use live conf values");
+            }
+        }
+    }
+
+    if (early_eff == NULL) {
+        return;
+    }
+
+    *effective_slot = ngx_pcalloc(
+        pool, sizeof(ngx_http_markdown_effective_conf_t));
+    if (*effective_slot != NULL) {
+        **effective_slot = *early_eff;
+    } else {
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+                      "markdown: failed to allocate effective conf "
+                      "from request pool; request will use live conf values");
+    }
 }
 
 
@@ -999,10 +1087,11 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
     watcher->diagnostic_state.last_error_len = 0;
     watcher->diagnostic_state.last_error[0] = '\0';
 
-    /* Initialize active snapshot from current configuration. */
-    ngx_http_markdown_dynconf_snapshot_from_conf(&watcher->active_snapshot,
+    /* Initialize the immutable baseline and the active snapshot. */
+    ngx_http_markdown_dynconf_snapshot_from_conf(&watcher->static_snapshot,
                                                   conf);
-    watcher->active_snapshot.validation_summary = watcher->validation_summary;
+    watcher->static_snapshot.validation_summary = watcher->validation_summary;
+    watcher->active_snapshot = watcher->static_snapshot;
 
     /*
      * Apply the dynconf file immediately at startup so that runtime
@@ -1252,8 +1341,9 @@ ngx_http_markdown_dynconf_apply_reject(ngx_uint_t *failure_code,
 }
 
 
-/* The line-oriented parser remains only for its legacy unit-test contract.
- * Production reloads use the bounded Rust JSON/FFI parser below. */
+/* The line-oriented apply shim remains only for its legacy unit-test
+ * contract. Production reloads use the bounded Rust JSON/FFI parser below;
+ * legacy line-format files are diagnosed and rejected by that parser. */
 static ngx_int_t
 ngx_http_markdown_dynconf_apply_ffi_result_with_log(
     ngx_http_markdown_dynconf_snapshot_t *snapshot,
@@ -2565,6 +2655,93 @@ ngx_http_markdown_dynconf_reload_dryrun(
 }
 
 
+static void
+ngx_http_markdown_dynconf_assert_snapshot_layout(void)
+{
+#ifdef MARKDOWN_STREAMING_ENABLED
+    _Static_assert(
+        sizeof(ngx_http_markdown_dynconf_snapshot_t)
+            == 12 * sizeof(void *),
+        "dynconf_snapshot_t layout changed, review shallow copy");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            enabled) == 0,
+                   "dynconf snapshot enabled offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            enabled_source) == 8,
+                   "dynconf snapshot enabled_source offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            enabled_complex) == 16,
+                   "dynconf snapshot enabled_complex offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            prune_noise) == 24,
+                   "dynconf snapshot prune_noise offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            log_verbosity) == 32,
+                   "dynconf snapshot log_verbosity offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            error_policy) == 40,
+                   "dynconf snapshot error_policy offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            error_status) == 48,
+                   "dynconf snapshot error_status offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            streaming_budget) == 56,
+                   "dynconf snapshot streaming_budget offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            memory_budget) == 64,
+                   "dynconf snapshot memory_budget offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            conversion_memory) == 72,
+                   "dynconf snapshot conversion_memory offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            validation_summary) == 80,
+                   "dynconf snapshot validation_summary offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            valid) == 88,
+                   "dynconf snapshot valid offset changed");
+#else
+    _Static_assert(
+        sizeof(ngx_http_markdown_dynconf_snapshot_t)
+            == 11 * sizeof(void *),
+        "dynconf_snapshot_t layout changed, review shallow copy");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            enabled) == 0,
+                   "dynconf snapshot enabled offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            enabled_source) == 8,
+                   "dynconf snapshot enabled_source offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            enabled_complex) == 16,
+                   "dynconf snapshot enabled_complex offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            prune_noise) == 24,
+                   "dynconf snapshot prune_noise offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            log_verbosity) == 32,
+                   "dynconf snapshot log_verbosity offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            error_policy) == 40,
+                   "dynconf snapshot error_policy offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            error_status) == 48,
+                   "dynconf snapshot error_status offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            memory_budget) == 56,
+                   "dynconf snapshot memory_budget offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            conversion_memory) == 64,
+                   "dynconf snapshot conversion_memory offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            validation_summary) == 72,
+                   "dynconf snapshot validation_summary offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            valid) == 80,
+                   "dynconf snapshot valid offset changed");
+#endif
+
+}
+
+
 /**
  * Normal (non-dry-run) helper for ngx_http_markdown_dynconf_reload.
  *
@@ -2700,18 +2877,8 @@ ngx_http_markdown_dynconf_reload_normal(
          * Compile-time guard: if a field is added, sizeof changes and
          * this assertion fires, forcing a review of shallow-copy safety.
          */
+        ngx_http_markdown_dynconf_assert_snapshot_layout();
         watcher->active_snapshot = watcher->staging_snapshot;
-#ifdef MARKDOWN_STREAMING_ENABLED
-        _Static_assert(
-            sizeof(ngx_http_markdown_dynconf_snapshot_t)
-                == 12 * sizeof(void *),
-            "dynconf_snapshot_t layout changed, review shallow copy");
-#else
-        _Static_assert(
-            sizeof(ngx_http_markdown_dynconf_snapshot_t)
-                == 11 * sizeof(void *),
-            "dynconf_snapshot_t layout changed, review shallow copy");
-#endif
 
         /*
          * Increment generation counter on every successful reload.
@@ -2773,7 +2940,8 @@ ngx_http_markdown_dynconf_reload(
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
     }
 
-    watcher->staging_snapshot = watcher->active_snapshot;
+    /* Each JSON document replaces the effective runtime snapshot. */
+    ngx_http_markdown_dynconf_snapshot_reset_baseline(watcher, conf);
 
     /* Reset per-reload schema_version tracking (spec 45/53). */
     ngx_http_markdown_dynconf_schema_version_seen = 0;
@@ -3099,7 +3267,7 @@ ngx_http_markdown_dynconf_log_masked_fields(ngx_log_t *log, ngx_uint_t mask)
         if ((mask & fields[i].bit) != 0) {
             ngx_log_error(NGX_LOG_WARN, log, 0,
                           "markdown: dynconf key \"%s\" is masked by "
-                          "static server/location configuration; static "
+                          "explicit static configuration; static "
                           "value remains effective",
                           fields[i].name);
         }
@@ -3163,7 +3331,8 @@ ngx_http_markdown_dynconf_stage_candidate(
     ngx_uint_t failure_code;
     ngx_uint_t masked_fields;
 
-    watcher->staging_snapshot = watcher->active_snapshot;
+    /* Omitted fields must resolve against the static/http baseline. */
+    ngx_http_markdown_dynconf_snapshot_reset_baseline(watcher, conf);
     failure_code = DYNCONF_ERR_INVALID_TYPE;
     if (ngx_http_markdown_dynconf_apply_ffi_result_with_log(
             &watcher->staging_snapshot, result, log, &failure_code)

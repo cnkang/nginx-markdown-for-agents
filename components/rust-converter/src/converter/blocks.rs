@@ -241,9 +241,6 @@ impl MarkdownConverter {
                     ordered,
                     ctx.as_deref_mut(),
                 )?;
-                if let Some(context) = ctx.as_deref_mut() {
-                    context.check_output_budget(output.len())?;
-                }
             }
         }
 
@@ -326,7 +323,13 @@ impl MarkdownConverter {
             }
 
             if let Some(context) = ctx.as_deref_mut() {
-                context.check_output_budget(item_output.len())?;
+                let projected_len =
+                    output.len().checked_add(item_output.len()).ok_or_else(|| {
+                        ConversionError::MemoryLimit(
+                            "generated Markdown list output length overflow".to_string(),
+                        )
+                    })?;
+                context.check_output_budget(projected_len)?;
             }
         }
 

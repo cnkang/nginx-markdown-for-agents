@@ -697,66 +697,11 @@ test_effective_helpers_edge_values(void)
 }
 
 
-/*
- * Simulated request context for bind_request_snapshot test.
- * Only the fields exercised by bind_request_snapshot are included.
- * Field order and types must match ngx_http_markdown_ctx_t so that
- * casting to (ngx_http_markdown_ctx_t*) for bind_request_snapshot
- * is layout-compatible.
- */
+/* Simulated request context slots used by the shared production binder. */
 typedef struct {
     ngx_http_markdown_dynconf_snapshot_t *dynconf_snapshot;
     ngx_http_markdown_effective_conf_t   *effective_conf;
 } test_ctx_t;
-
-
-/*
- * Test helper that mirrors the production ngx_http_markdown_bind_request_snapshot
- * logic.  Kept in sync with ngx_http_markdown_request_impl.h — any change
- * to the production function must be reflected here.
- *
- * DIVERGENCE RISK: This is a mirror, not a direct call.  If the production
- * bind_request_snapshot logic changes (e.g. new allocation, different gating
- * condition), this helper must be updated in the same changeset or the test
- * will pass while behavior drifts.  The ideal fix is to extract the core
- * bind/copy logic into a shared helper that both production and test code
- * can include without pulling in the full NGINX request-path dependency set.
- * That refactoring is deferred pending a seam in request_impl.h.
- *
- * This helper exists because the production function is a static inline
- * in request_impl.h, which has NGINX-internal dependencies not available
- * in the unit test compilation environment.
- */
-static void
-test_bind_request_snapshot(
-    ngx_http_request_t *r,
-    test_ctx_t *ctx,
-    const ngx_http_markdown_dynconf_snapshot_t *snap_copy,
-    const ngx_http_markdown_effective_conf_t *early_eff,
-    const ngx_http_markdown_conf_t *conf)
-{
-    if (conf->advanced.dynconf_enabled) {
-        ctx->dynconf_snapshot =
-            ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_dynconf_snapshot_t));
-        if (ctx->dynconf_snapshot != NULL && snap_copy != NULL) {
-            *ctx->dynconf_snapshot = *snap_copy;
-        } else if (ctx->dynconf_snapshot == NULL) {
-            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                          "markdown filter: failed to allocate dynconf snapshot "
-                          "from request pool; request will use live conf values");
-        }
-    }
-
-    ctx->effective_conf =
-        ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_effective_conf_t));
-    if (ctx->effective_conf != NULL) {
-        *ctx->effective_conf = *early_eff;
-    } else {
-        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                      "markdown filter: failed to allocate effective conf "
-                      "from request pool; request will use live conf values");
-    }
-}
 
 
 static void
@@ -785,7 +730,7 @@ test_bind_request_snapshot_preserves_captured_snapshot(void)
     ngx_memzero(&conn, sizeof(conn));
     ngx_memzero(&log, sizeof(log));
 
-    r.pool = NULL;
+    r.pool = &g_pool;
     r.connection = &conn;
     conn.log = &log;
 
@@ -809,8 +754,9 @@ test_bind_request_snapshot_preserves_captured_snapshot(void)
     ngx_http_markdown_build_effective_conf(
         &eff_b_ignore, &snap_b, &conf);
 
-    /* Call bind_request_snapshot with snapshot A (mirrors production code) */
-    test_bind_request_snapshot(&r, &tctx, &snap_a, &early_eff_a, &conf);
+    ngx_http_markdown_bind_request_snapshot(
+        r.pool, conn.log, &conf, &snap_a, &early_eff_a,
+        &tctx.dynconf_snapshot, &tctx.effective_conf);
 
     TEST_ASSERT(tctx.dynconf_snapshot != NULL,
                 "ctx dynconf_snapshot allocated (dynconf_enabled=1)");
@@ -879,7 +825,7 @@ test_dynconf_snapshot_not_consumed_when_dynconf_disabled(void)
     ngx_memzero(&conn, sizeof(conn));
     ngx_memzero(&log, sizeof(log));
 
-    r.pool = NULL;
+    r.pool = &g_pool;
     r.connection = &conn;
     conn.log = &log;
 
@@ -906,7 +852,9 @@ test_dynconf_snapshot_not_consumed_when_dynconf_disabled(void)
     ngx_http_markdown_build_effective_conf(&early_eff, NULL, &conf);
 
     /* Bind: with dynconf_enabled=0, dynconf_snapshot must NOT be allocated */
-    test_bind_request_snapshot(&r, &tctx, &global_snap, &early_eff, &conf);
+    ngx_http_markdown_bind_request_snapshot(
+        r.pool, conn.log, &conf, &global_snap, &early_eff,
+        &tctx.dynconf_snapshot, &tctx.effective_conf);
 
     TEST_ASSERT(tctx.dynconf_snapshot == NULL,
                 "ctx dynconf_snapshot is NULL when dynconf_enabled=0");

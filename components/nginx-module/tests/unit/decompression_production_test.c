@@ -234,12 +234,8 @@ markdown_parse_encoding_chain(const uint8_t *value, size_t value_len,
         return ENCODING_CHAIN_MALFORMED;
     }
     memset(result, 0, sizeof(*result));
-    if (value == NULL && value_len != 0) {
-        return DECOMP_CATEGORY_INVALID_ARGS;
-    }
-    if (value_len == 0) {
-        return ENCODING_CHAIN_MALFORMED;
-    }
+    (void) value;
+    (void) value_len;
     return ENCODING_CHAIN_MALFORMED;
 }
 

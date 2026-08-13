@@ -858,6 +858,13 @@ test_v1_outcome_formula_clamps_underflow(void)
     TEST_ASSERT(v1.requests.failed_closed == 1,
         "failed_closed must preserve the positive residual");
 
+    snapshot.results.failopen_count = (ngx_atomic_uint_t) -1;
+    snapshot.streaming.terminal_aborted_total = 1;
+    snapshot.conversions_failed = (ngx_atomic_uint_t) -1;
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+    TEST_ASSERT(v1.requests.failed_closed == 0,
+        "failed_closed must not wrap when deduction counters overflow");
+
     TEST_PASS("v1 outcome formula clamps underflow");
 }
 
@@ -948,6 +955,58 @@ test_v1_latency_sum_conversion_is_bounded(void)
                 "aggregate millisecond conversion must saturate");
 
     TEST_PASS("v1 latency sum conversion is bounded");
+}
+
+static void
+test_v1_renderer_emits_frozen_families_and_fails_on_truncation(void)
+{
+    u_char                                      buf[32768];
+    u_char                                     *p;
+    ngx_http_markdown_metrics_v1_snapshot_t     snapshot;
+
+    TEST_SUBSECTION("v1 renderer emits frozen families and truncates safely");
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.requests.converted = 3;
+    snapshot.attempts.full_buffer = 4;
+    snapshot.deliveries.streaming = 5;
+    snapshot.duration_full_buffer.buckets[0] = 6;
+    snapshot.duration_full_buffer.count = 6;
+    snapshot.input_bytes = 7;
+    snapshot.output_bytes = 8;
+    snapshot.streaming_events.resume_failure = 9;
+    snapshot.decompression.gzip_failure_format = 10;
+    snapshot.dynconf_reloads.failure_file_error = 11;
+    snapshot.build_info.version = (const u_char *) "0.9.2";
+    snapshot.build_info.nginx_version_text = (const u_char *) "1.26.3";
+    snapshot.build_info.features = (const u_char *) "streaming";
+
+    p = ngx_http_markdown_metrics_v1_render(
+        buf, buf + sizeof(buf), &snapshot);
+    TEST_ASSERT(p != NULL && p < buf + sizeof(buf),
+                "v1 renderer should fit the bounded test buffer");
+    *p = '\0';
+    TEST_ASSERT(contains((char *) buf,
+                         "# TYPE nginx_markdown_requests_total counter"),
+                "v1 renderer must emit the requests family");
+    TEST_ASSERT(contains((char *) buf,
+                         "# TYPE nginx_markdown_conversion_duration_seconds histogram"),
+                "v1 renderer must emit the histogram family");
+    TEST_ASSERT(contains((char *) buf,
+                         "{engine=\"full_buffer\",le=\"0.001\"} 6"),
+                "v1 renderer must emit finite histogram buckets and labels");
+    TEST_ASSERT(contains((char *) buf,
+                         "{transition=\"resume_failure\",reason=\"streaming_mid_flight_error\"} 9"),
+                "v1 renderer must emit bounded streaming event labels");
+    TEST_ASSERT(contains((char *) buf,
+                         "# TYPE nginx_markdown_build_info gauge"),
+                "v1 renderer must emit build-info family");
+
+    TEST_ASSERT(ngx_http_markdown_metrics_v1_render(
+                    buf, buf + 64, &snapshot) == NULL,
+                "v1 renderer must return NULL on truncation");
+
+    TEST_PASS("v1 renderer emits frozen families and fails closed on truncation");
 }
 
 static void
@@ -1864,6 +1923,7 @@ main(void)
     test_v1_outcome_formula_clamps_underflow();
     test_v1_latency_mapping_uses_all_frozen_boundaries();
     test_v1_latency_sum_conversion_is_bounded();
+    test_v1_renderer_emits_frozen_families_and_fails_on_truncation();
     test_json_single_path_fits();
     test_json_zero_paths();
     test_json_overflow_produces_other();

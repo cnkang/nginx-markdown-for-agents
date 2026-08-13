@@ -832,12 +832,15 @@ ngx_http_markdown_metrics_to_v1(
         snapshot->skips.compression_passthrough;
     v1->requests.failed_open = snapshot->results.failopen_count;
 #ifdef MARKDOWN_STREAMING_ENABLED
+    /* Subtract each classified outcome independently to avoid overflow in
+     * the sum of deductions before applying the saturating floor. */
     failed_closed = snapshot->conversions_failed
-        >= (snapshot->results.failopen_count
-            + snapshot->streaming.terminal_aborted_total)
-        ? snapshot->conversions_failed
-          - snapshot->results.failopen_count
-          - snapshot->streaming.terminal_aborted_total
+        >= snapshot->results.failopen_count
+        ? snapshot->conversions_failed - snapshot->results.failopen_count
+        : 0;
+    failed_closed = failed_closed
+        >= snapshot->streaming.terminal_aborted_total
+        ? failed_closed - snapshot->streaming.terminal_aborted_total
         : 0;
     v1->requests.aborted =
         snapshot->streaming.terminal_aborted_total;
@@ -969,6 +972,12 @@ ngx_http_markdown_metrics_to_v1(
 static ngx_int_t
 ngx_http_markdown_metrics_validate_request(ngx_http_request_t *r)
 {
+    if (r == NULL || r->connection == NULL
+        || r->connection->sockaddr == NULL)
+    {
+        return NGX_HTTP_FORBIDDEN;
+    }
+
     if (!(r->method & (NGX_HTTP_GET|NGX_HTTP_HEAD))) {
         return NGX_HTTP_NOT_ALLOWED;
     }

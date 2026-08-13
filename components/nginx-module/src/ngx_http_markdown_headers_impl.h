@@ -528,7 +528,6 @@ ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r)
 #define NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_MAX_ENTRIES  1024
 
 typedef struct {
-    ngx_table_elt_t  *header;
     ngx_table_elt_t   saved;
 } ngx_http_markdown_header_snapshot_entry_t;
 
@@ -596,7 +595,6 @@ ngx_http_markdown_header_snapshot_prepare(
 
         headers = part->elts;
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
-            snapshot->entries[count].header = &headers[i];
             snapshot->entries[count].saved = headers[i];
             count++;
         }
@@ -623,8 +621,35 @@ ngx_http_markdown_header_snapshot_restore(
     r->headers_out = snapshot->headers_out;
     r->allow_ranges = snapshot->allow_ranges;
 
-    for (ngx_uint_t i = 0; i < snapshot->entry_count; i++) {
-        *snapshot->entries[i].header = snapshot->entries[i].saved;
+    /*
+     * Re-walk the live list after restoring its metadata.  NGINX normally
+     * appends a new part without moving existing elements, but a compatible
+     * list implementation may relocate a part while pushing.  Ordinal
+     * restoration avoids writing through snapshot-time element pointers and
+     * also leaves a truncated/malformed list fail-closed.
+     */
+    {
+        ngx_list_part_t  *part;
+        ngx_table_elt_t  *headers;
+        ngx_uint_t        restored;
+
+        restored = 0;
+        for (part = &r->headers_out.headers.part;
+             part != NULL && restored < snapshot->entry_count;
+             part = part->next)
+        {
+            if (part->nelts > snapshot->entry_count - restored
+                || (part->nelts != 0 && part->elts == NULL))
+            {
+                return;
+            }
+
+            headers = part->elts;
+            for (ngx_uint_t i = 0; i < part->nelts; i++) {
+                headers[i] = snapshot->entries[restored].saved;
+                restored++;
+            }
+        }
     }
 }
 

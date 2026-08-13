@@ -14,13 +14,56 @@
 //! - Tracking the generation counter as the C module would (increment on success)
 //! - Verifying monotonicity, correct counting, and digest-based convergence
 
-use nginx_markdown_converter::dynconf::parse_dynconf;
+use nginx_markdown_converter::dynconf::{
+    DynconfResult, ErrorPolicy, FilterValue, LogVerbosity, PruneNoiseValue, parse_dynconf,
+};
 use proptest::prelude::*;
 
 // ─── Worker Simulation ────────────────────────────────────────────────────────
 
 /// Simulates a single worker's dynconf reload state, mirroring the C module's
 /// worker-local generation counter behavior.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EffectiveDynconfFields {
+    filter: FilterValue,
+    prune_noise: PruneNoiseValue,
+    log_verbosity: LogVerbosity,
+    error_policy: ErrorPolicy,
+    streaming_buffer: u64,
+}
+
+impl Default for EffectiveDynconfFields {
+    fn default() -> Self {
+        Self {
+            filter: FilterValue::On,
+            prune_noise: PruneNoiseValue::Off,
+            log_verbosity: LogVerbosity::Info,
+            error_policy: ErrorPolicy::Pass,
+            streaming_buffer: 65_536,
+        }
+    }
+}
+
+impl EffectiveDynconfFields {
+    fn apply_present(&mut self, result: &DynconfResult) {
+        if let Some(value) = result.filter {
+            self.filter = value;
+        }
+        if let Some(value) = result.prune_noise {
+            self.prune_noise = value;
+        }
+        if let Some(value) = result.log_verbosity {
+            self.log_verbosity = value;
+        }
+        if let Some(value) = result.error_policy {
+            self.error_policy = value;
+        }
+        if let Some(value) = result.streaming_buffer {
+            self.streaming_buffer = value;
+        }
+    }
+}
+
 struct WorkerDynconfState {
     /// Worker-local monotonically increasing counter (starts at 1 on first load).
     generation: u64,
@@ -28,6 +71,10 @@ struct WorkerDynconfState {
     source_digest: Option<String>,
     /// The active snapshot's active_digest (SHA-256 over canonical JSON).
     active_digest: Option<String>,
+    /// Static/http baseline used to construct each new complete snapshot.
+    static_fields: EffectiveDynconfFields,
+    /// Effective fields in the current active snapshot.
+    effective_fields: EffectiveDynconfFields,
 }
 
 impl WorkerDynconfState {
@@ -36,6 +83,8 @@ impl WorkerDynconfState {
             generation: 0,
             source_digest: None,
             active_digest: None,
+            static_fields: EffectiveDynconfFields::default(),
+            effective_fields: EffectiveDynconfFields::default(),
         }
     }
 
@@ -45,6 +94,8 @@ impl WorkerDynconfState {
         match parse_dynconf(raw_bytes) {
             Ok(result) => {
                 self.generation += 1;
+                self.effective_fields = self.static_fields.clone();
+                self.effective_fields.apply_present(&result);
                 self.source_digest = Some(result.source_digest);
                 self.active_digest = Some(result.active_digest);
                 Ok(self.generation)
@@ -119,7 +170,7 @@ fn formatting_variants_of(base: &str) -> Vec<String> {
     variants.push(base.replace(": ", ":\t"));
 
     // Variant 5: trailing whitespace
-    variants.push(format!("{}  \n", base.trim_end_matches('}')).replace('\n', "") + "}");
+    variants.push(format!("{base}  \n"));
 
     variants
 }
@@ -518,4 +569,37 @@ fn test_generation_never_decreases() {
         );
         max_generation = current_gen;
     }
+}
+
+#[test]
+fn test_omitted_fields_reset_to_static_baseline_and_c_watcher_contract() {
+    let mut worker = WorkerDynconfState::new();
+    worker.static_fields = EffectiveDynconfFields {
+        filter: FilterValue::On,
+        prune_noise: PruneNoiseValue::Off,
+        log_verbosity: LogVerbosity::Warn,
+        error_policy: ErrorPolicy::Status503,
+        streaming_buffer: 131_072,
+    };
+
+    worker
+        .reload(
+            br#"{"schema_version":1,"filter":"off","prune_noise":"on","log_verbosity":"debug","error_policy":"pass","streaming_buffer":262144}"#,
+        )
+        .unwrap();
+    worker
+        .reload(br#"{"schema_version":1,"filter":"on"}"#)
+        .unwrap();
+
+    assert_eq!(worker.effective_fields.filter, FilterValue::On);
+    assert_eq!(worker.effective_fields.prune_noise, PruneNoiseValue::Off);
+    assert_eq!(worker.effective_fields.log_verbosity, LogVerbosity::Warn);
+    assert_eq!(worker.effective_fields.error_policy, ErrorPolicy::Status503);
+    assert_eq!(worker.effective_fields.streaming_buffer, 131_072);
+
+    let c_watcher = include_str!("../../nginx-module/src/ngx_http_markdown_dynconf_impl.h");
+    assert!(c_watcher.contains("static_snapshot"));
+    assert!(c_watcher.contains("staging_snapshot = watcher->static_snapshot"));
+    assert!(c_watcher.contains("ngx_http_markdown_dynconf_snapshot_from_conf"));
+    assert!(c_watcher.contains("digest_state.generation++"));
 }

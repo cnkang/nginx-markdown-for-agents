@@ -470,7 +470,7 @@ ngx_http_markdown_decide_base_authority(const ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    ngx_memzero(&input, sizeof(input));
+    markdown_base_url_input_init(&input);
 
     if (r->connection != NULL) {
         input.source_ip = r->connection->addr_text.data;
@@ -1149,11 +1149,44 @@ ngx_http_markdown_record_conversion_success(ngx_http_markdown_ctx_t *ctx,
                                             ngx_msec_t elapsed_ms)
 {
     ctx->conversion.succeeded = 1;
+    ctx->conversion.input_bytes = ctx->buffer.size;
+    ctx->conversion.output_bytes = result->markdown_len;
     ngx_http_markdown_record_conversion_latency_for_path(
         ctx->processing_path, elapsed_ms);
+}
+
+/* Record converted bytes and outcome only after downstream accepts the body. */
+static void
+ngx_http_markdown_record_buffered_delivery_success(
+    ngx_http_markdown_ctx_t *ctx)
+{
+    if (ctx == NULL
+        || !ctx->conversion.succeeded
+        || ctx->conversion.delivery_recorded)
+    {
+        return;
+    }
+
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
-    NGX_HTTP_MARKDOWN_METRIC_ADD(input_bytes, ctx->buffer.size);
-    NGX_HTTP_MARKDOWN_METRIC_ADD(output_bytes, result->markdown_len);
+    NGX_HTTP_MARKDOWN_METRIC_ADD(input_bytes, ctx->conversion.input_bytes);
+    NGX_HTTP_MARKDOWN_METRIC_ADD(output_bytes, ctx->conversion.output_bytes);
+    ctx->conversion.delivery_recorded = 1;
+}
+
+/* A definitive post-conversion delivery error is one terminal failure. */
+static void
+ngx_http_markdown_record_buffered_delivery_failure(
+    ngx_http_markdown_ctx_t *ctx)
+{
+    if (ctx == NULL
+        || !ctx->conversion.succeeded
+        || ctx->conversion.delivery_recorded
+        || ctx->error.has_category)
+    {
+        return;
+    }
+
+    ngx_http_markdown_record_system_failure(ctx);
 }
 
 /*
@@ -1815,6 +1848,7 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
     if (b == NULL) {
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                      "markdown: failed to allocate output buffer, category=system");
+        ngx_http_markdown_record_buffered_delivery_failure(ctx);
         markdown_result_free(result);
         return NGX_ERROR;
     }
@@ -1833,6 +1867,7 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
     } else {
         rc = ngx_http_markdown_prepare_body_output_buffer(r, b, result);
         if (rc != NGX_OK) {
+            ngx_http_markdown_record_buffered_delivery_failure(ctx);
             markdown_result_free(result);
             return NGX_ERROR;
         }
@@ -1845,6 +1880,7 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
     if (out == NULL) {
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                      "markdown: failed to allocate output chain, category=system");
+        ngx_http_markdown_record_buffered_delivery_failure(ctx);
         markdown_result_free(result);
         return NGX_ERROR;
     }
@@ -1883,6 +1919,9 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
      */
     rc = ngx_http_markdown_forward_headers(r, ctx);
     if (rc != NGX_OK) {
+        if (rc != NGX_AGAIN) {
+            ngx_http_markdown_record_buffered_delivery_failure(ctx);
+        }
         return rc;
     }
 
@@ -1892,6 +1931,7 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
     rc = ngx_http_next_body_filter(r, out);
 
     if (rc == NGX_OK || rc == NGX_DONE) {
+        ngx_http_markdown_record_buffered_delivery_success(ctx);
         NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count);
         NGX_HTTP_MARKDOWN_METRIC_INC(results.full_buffer_delivery_count);
     }
@@ -1911,6 +1951,8 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
                 perf.pending_output_high_watermark_bytes,
                 (ngx_atomic_t) (b->last - b->pos));
         }
+    } else if (rc != NGX_OK && rc != NGX_DONE) {
+        ngx_http_markdown_record_buffered_delivery_failure(ctx);
     }
 
     return rc;
@@ -1946,6 +1988,7 @@ ngx_http_markdown_body_filter_resume_pending(ngx_http_request_t *r,
     }
 
     if (rc == NGX_OK || rc == NGX_DONE) {
+        ngx_http_markdown_record_buffered_delivery_success(ctx);
         NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count);
         NGX_HTTP_MARKDOWN_METRIC_INC(results.full_buffer_delivery_count);
         /* Backpressure resume: drain completed successfully */

@@ -428,7 +428,7 @@ test_property2g_all_names_have_prefix(void)
 
     TEST_PASS(
         "Property 2g: all directive names have markdown_ "
-        "prefix (63 checked)");
+        "prefix (38 checked)");
 }
 
 /* ----------------------------------------------------------------

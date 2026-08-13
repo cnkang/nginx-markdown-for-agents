@@ -11,6 +11,11 @@ use super::schema::DynconfValue;
 
 /// Compute SHA-256 digest over raw input bytes.
 ///
+/// This digest provides change detection and provenance integrity only. It is
+/// not an authentication or trust boundary: callers must obtain the dynconf
+/// file through an authenticated, access-controlled channel when authenticity
+/// matters.
+///
 /// This produces the `source_digest` value that detects any byte-level
 /// change to the dynconf file, including formatting-only edits.
 ///
@@ -33,6 +38,9 @@ pub fn compute_source_digest(raw_bytes: &[u8]) -> String {
 }
 
 /// Compute SHA-256 digest over the canonical normalized JSON representation.
+///
+/// As with [`compute_source_digest`], this is an integrity/provenance digest,
+/// not a MAC or a signature.
 ///
 /// The canonical form is UTF-8 JSON with:
 /// - Fixed key order: schema_version, filter, prune_noise, log_verbosity,

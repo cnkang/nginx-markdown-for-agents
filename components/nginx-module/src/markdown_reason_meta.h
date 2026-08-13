@@ -55,7 +55,8 @@ typedef struct {
  * Reason metadata table (index = discriminant).
  * Entry MARKDOWN_REASON_META_COUNT is the unknown sentinel.
  */
-static const markdown_reason_meta_t
+#ifdef MARKDOWN_REASON_META_DEFINE
+const markdown_reason_meta_t
     markdown_reason_meta[MARKDOWN_REASON_META_COUNT + 1] = {
     [0] = { "converted", "converted", "conversion", "none" },
     [1] = { "skipped_accept", "skipped", "eligibility", "none" },
@@ -86,6 +87,10 @@ static const markdown_reason_meta_t
     [26] = { "encoding_header_invalid", "failed_closed", "decompression", "format" },
     [27] = { "unknown", "failed_closed", "delivery", "internal" },
 };
+#else
+extern const markdown_reason_meta_t
+    markdown_reason_meta[MARKDOWN_REASON_META_COUNT + 1];
+#endif
 
 /*
  * Legacy uppercase aliases retained for diagnostics compatibility.
@@ -98,8 +103,9 @@ typedef struct {
 
 #define MARKDOWN_REASON_ALIAS_COUNT 26
 
-static const markdown_reason_alias_t
-    markdown_reason_aliases[MARKDOWN_REASON_ALIAS_COUNT] = {
+#ifdef MARKDOWN_REASON_META_DEFINE
+const markdown_reason_alias_t
+    markdown_reason_aliases[MARKDOWN_REASON_ALIAS_COUNT > 0 ? MARKDOWN_REASON_ALIAS_COUNT : 1] = {
     { "CONVERTED", 0 },
     { "ELIGIBLE_CONVERTED", 0 },
     { "SKIPPED_ACCEPT", 1 },
@@ -127,5 +133,9 @@ static const markdown_reason_alias_t
     { "FAIL_RESOURCE_LIMIT", 19 },
     { "BYPASS_NO_TRANSFORM", 25 },
 };
+#else
+extern const markdown_reason_alias_t
+    markdown_reason_aliases[MARKDOWN_REASON_ALIAS_COUNT > 0 ? MARKDOWN_REASON_ALIAS_COUNT : 1];
+#endif
 
 #endif /* MARKDOWN_REASON_META_H */

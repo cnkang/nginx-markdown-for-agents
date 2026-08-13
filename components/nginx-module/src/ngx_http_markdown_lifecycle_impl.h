@@ -40,7 +40,7 @@ ngx_http_markdown_preconfiguration(ngx_conf_t *cf)
     if (actual_header_hash != MARKDOWN_HEADER_HASH) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "markdown: ABI handshake FAILED — header hash "
-                           "mismatch (expected=0x%016xL, actual=0x%016xL)",
+                           "mismatch (expected=0x%016uxL, actual=0x%016uxL)",
                            MARKDOWN_HEADER_HASH,
                            actual_header_hash);
         mismatch = 1;
@@ -51,7 +51,7 @@ ngx_http_markdown_preconfiguration(ngx_conf_t *cf)
     if (actual_symbol_hash != MARKDOWN_SYMBOL_SET_HASH) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "markdown: ABI handshake FAILED — symbol set hash "
-                           "mismatch (expected=0x%016xL, actual=0x%016xL)",
+                           "mismatch (expected=0x%016uxL, actual=0x%016uxL)",
                            MARKDOWN_SYMBOL_SET_HASH,
                            actual_symbol_hash);
         mismatch = 1;
@@ -63,7 +63,7 @@ ngx_http_markdown_preconfiguration(ngx_conf_t *cf)
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "markdown: ABI handshake FAILED — layout "
                            "fingerprint mismatch "
-                           "(expected=0x%016xL, actual=0x%016xL)",
+                           "(expected=0x%016uxL, actual=0x%016uxL)",
                            MARKDOWN_LAYOUT_FINGERPRINT,
                            actual_layout_fp);
         mismatch = 1;

@@ -300,9 +300,10 @@ ngx_http_markdown_stream_commit_apply_auth_cache_control(
  * Phase 2 (infallible): Content-Type, Content-Length, Content-Encoding.
  *   These are pointer/integer assignments that cannot fail.
  *
- * On success, applies all header mutations and records a provisional
- * COMMITTED state. The streaming caller must publish the request-level
- * commit latches only after the downstream header filter accepts them.
+ * On success, applies all header mutations and records the COMMITTED state.
+ * The streaming caller must roll back its request-level commit latches when
+ * the downstream header filter returns NGX_AGAIN, and publishes the
+ * downstream-forwarded latch only after acceptance.
  *
  * Returns:
  *   NGX_OK    - All mutations applied, committed flag set

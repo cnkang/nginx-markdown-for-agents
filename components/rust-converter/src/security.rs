@@ -30,6 +30,7 @@
 //! Validates: NFR-03.1, NFR-03.2, NFR-03.3, NFR-03.4
 
 use html5ever::Attribute;
+use std::borrow::Cow;
 use std::cell::Ref;
 
 /// Maximum allowed nesting depth for HTML elements
@@ -71,6 +72,27 @@ const FORM_ELEMENTS: &[&str] = &[
     "optgroup", // Group label for options
     "datalist", // Suggestion list
     "output",   // Calculation result text
+];
+
+/// HTML attributes whose values can navigate to or load a URL.
+///
+/// Keep this list shared by both attribute decision paths. Checking only
+/// `href` and `src` leaves less common but still active attributes such as
+/// `formaction`, `ping`, and `poster` outside the URL policy.
+pub(crate) const URL_ATTRIBUTES: &[&str] = &[
+    "href",
+    "src",
+    "action",
+    "formaction",
+    "longdesc",
+    "dynsrc",
+    "lowsrc",
+    "manifest",
+    "poster",
+    "cite",
+    "ping",
+    "data",
+    "codebase",
 ];
 
 /// Known event handler attributes (reference list for documentation/auditing).
@@ -190,7 +212,7 @@ pub(crate) fn escape_markdown_text_with_state(
         let block_marker = state.line_prefix
             && state.indent <= 3
             && (matches!(ch, '#' | '>' | '+' | '-' | '!' | '|' | '=')
-                || (ch == '.' && state.ordered_digits));
+                || (matches!(ch, '.' | ')') && state.ordered_digits));
         let inline_delimiter = matches!(ch, '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '~');
 
         if block_marker || inline_delimiter {
@@ -337,47 +359,12 @@ impl SecurityValidator {
     /// assert!(!validator.is_dangerous_url("/relative/path"));
     /// ```
     pub fn is_dangerous_url(&self, url: &str) -> bool {
-        let trimmed = url.trim();
-        if trimmed.chars().any(|ch| ch == '\0' || ch.is_control()) {
-            return true;
-        }
-        if Self::contains_percent_encoded_control(trimmed) {
-            return true;
-        }
-
-        let url_lower = trimmed.to_ascii_lowercase();
-        DANGEROUS_URL_SCHEMES
-            .iter()
-            .any(|scheme| url_lower.starts_with(scheme))
+        is_dangerous_url_value(url)
     }
 
+    #[cfg(test)]
     fn contains_percent_encoded_control(url: &str) -> bool {
-        let bytes = url.as_bytes();
-        for window in bytes.windows(3) {
-            if window[0] != b'%' {
-                continue;
-            }
-            let Some(high) = Self::hex_value(window[1]) else {
-                continue;
-            };
-            let Some(low) = Self::hex_value(window[2]) else {
-                continue;
-            };
-            let value = (high << 4) | low;
-            if value < 0x20 || value == 0x7f {
-                return true;
-            }
-        }
-        false
-    }
-
-    fn hex_value(byte: u8) -> Option<u8> {
-        match byte {
-            b'0'..=b'9' => Some(byte - b'0'),
-            b'a'..=b'f' => Some(byte - b'a' + 10),
-            b'A'..=b'F' => Some(byte - b'A' + 10),
-            _ => None,
-        }
+        contains_percent_encoded_control(url)
     }
 
     /// Check if attributes contain event handlers or dangerous URLs
@@ -403,8 +390,8 @@ impl SecurityValidator {
                 return SanitizeAction::StripAttributes;
             }
 
-            // Check for dangerous URLs in href and src attributes
-            if (attr_name == "href" || attr_name == "src") && self.is_dangerous_url(&attr.value) {
+            // Check every URL-bearing attribute for dangerous schemes.
+            if URL_ATTRIBUTES.contains(&attr_name) && self.is_dangerous_url(&attr.value) {
                 return SanitizeAction::StripUrl;
             }
         }
@@ -494,8 +481,8 @@ impl SecurityValidator {
                 to_remove.push(attr_name.to_string());
             }
 
-            // Remove dangerous URLs
-            if (attr_name == "href" || attr_name == "src") && self.is_dangerous_url(&attr.value) {
+            // Remove dangerous URLs from every URL-bearing attribute.
+            if URL_ATTRIBUTES.contains(&attr_name) && self.is_dangerous_url(&attr.value) {
                 to_remove.push(attr_name.to_string());
             }
         }
@@ -830,6 +817,55 @@ pub fn validate_link_url(url: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// Apply the URL scheme policy shared by full-buffer and streaming paths.
+///
+/// URL schemes are ASCII by definition. Rejecting a non-ASCII scheme prefix
+/// prevents Unicode confusables or replacement characters from being treated
+/// as an unvalidated scheme after a lossy decode. Raw overlong UTF-8 cannot
+/// become a Rust `str`; the FFI/parser boundary rejects malformed UTF-8 before
+/// this helper is reached.
+pub(crate) fn is_dangerous_url_value(url: &str) -> bool {
+    let trimmed = url.trim();
+    if trimmed.chars().any(|ch| ch == '\0' || ch.is_control()) {
+        return true;
+    }
+    if contains_percent_encoded_control(trimmed) {
+        return true;
+    }
+    if let Some(colon) = trimmed.find(':') {
+        let scheme = &trimmed[..colon];
+        if !scheme.is_empty() && scheme.bytes().any(|byte| byte >= 0x80) {
+            return true;
+        }
+    }
+
+    let url_lower = trimmed.to_ascii_lowercase();
+    DANGEROUS_URL_SCHEMES
+        .iter()
+        .any(|scheme| url_lower.starts_with(scheme))
+}
+
+fn contains_percent_encoded_control(url: &str) -> bool {
+    url.as_bytes().windows(3).any(|window| {
+        window[0] == b'%'
+            && hex_value(window[1])
+                .zip(hex_value(window[2]))
+                .is_some_and(|(high, low)| {
+                    let value = (high << 4) | low;
+                    value < 0x20 || value == 0x7f
+                })
+    })
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
 /// Parse X-Forwarded-Host and X-Forwarded-Proto headers to
 /// construct an effective base URL.
 ///
@@ -886,17 +922,29 @@ pub fn parse_forwarded_headers(
 /// Escape a string for safe use as a Markdown link label.
 ///
 /// Per CommonMark §4.7, link labels may contain backslash escapes.
-/// Escape: `[`, `]`, `\`, `<`, and `>`. Newlines are replaced with spaces to
+/// Escape Markdown inline delimiters (`*`, `_`, `` ` ``, `~`), brackets,
+/// backslashes, and angle brackets. Newlines are replaced with spaces to
 /// prevent injection via line breaks within link labels.
 ///
 /// This is the single canonical label-escaping implementation; the streaming
 /// emitter and the full-buffer traversal both delegate here so the escaping
 /// rule cannot drift between emission sites (AGENTS.md Rule 27).
-pub fn escape_link_label(s: &str) -> String {
+pub fn escape_link_label<'a>(s: &'a str) -> Cow<'a, str> {
+    let first_escape = s.char_indices().find(|(_, ch)| {
+        matches!(
+            ch,
+            '[' | ']' | '\\' | '<' | '>' | '*' | '_' | '`' | '~' | '\n' | '\r'
+        )
+    });
+    let Some((first_index, _)) = first_escape else {
+        return Cow::Borrowed(s);
+    };
+
     let mut out = String::with_capacity(s.len() + 8);
-    for ch in s.chars() {
+    out.push_str(&s[..first_index]);
+    for ch in s[first_index..].chars() {
         match ch {
-            '[' | ']' | '\\' | '<' | '>' => {
+            '[' | ']' | '\\' | '<' | '>' | '*' | '_' | '`' | '~' => {
                 out.push('\\');
                 out.push(ch);
             }
@@ -904,7 +952,7 @@ pub fn escape_link_label(s: &str) -> String {
             _ => out.push(ch),
         }
     }
-    out
+    Cow::Owned(out)
 }
 
 /// Escape ordinary Markdown text using a fresh line-prefix state.
@@ -1099,8 +1147,33 @@ mod url_validation_tests {
     fn test_escape_link_label() {
         assert_eq!(escape_link_label("foo [bar] baz"), r"foo \[bar\] baz");
         assert_eq!(escape_link_label("<tag>"), r"\<tag\>");
+        assert_eq!(
+            escape_link_label("*bold* _italic_ `code` ~strike~"),
+            r"\*bold\* \_italic\_ \`code\` \~strike\~"
+        );
         assert_eq!(escape_link_label("a\nb"), "a b");
         assert_eq!(escape_link_label("a\rb"), "a b");
+    }
+
+    #[test]
+    fn url_attribute_policy_covers_navigation_and_embedded_attributes() {
+        for attribute in [
+            "href",
+            "src",
+            "action",
+            "formaction",
+            "longdesc",
+            "dynsrc",
+            "lowsrc",
+            "manifest",
+            "poster",
+            "cite",
+            "ping",
+            "data",
+            "codebase",
+        ] {
+            assert!(URL_ATTRIBUTES.contains(&attribute));
+        }
     }
 
     #[test]

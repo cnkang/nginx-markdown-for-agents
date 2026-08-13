@@ -156,7 +156,7 @@ ngx_atomic_uint_t ngx_http_markdown_pending_output_current(void);
 /*
  * Post-commit send failure origin classification.
  *
- * Set by send_output / send_zero_copy_feed_output before returning
+ * Set by send_output before returning
  * NGX_ERROR so the caller (handle_success_output) can route the
  * failure to the correct metrics and recovery path:
  *
@@ -974,7 +974,10 @@ typedef struct {
     struct {
         ngx_flag_t                   attempted;
         ngx_flag_t                   succeeded;
+        ngx_flag_t                   delivery_recorded;
         ngx_flag_t                   bypass_counted;
+        size_t                       input_bytes;
+        size_t                       output_bytes;
     } conversion;
 
     /* Fail-open completed flag: prevents duplicate ngx_http_finalize_request
@@ -1119,9 +1122,6 @@ typedef struct {
             /* Pending output byte count (for deferred metric accounting) */
             size_t                            bytes;
 
-            /* Pending output delivery mode for deferred perf accounting. */
-            ngx_flag_t                        zero_copy;
-
             /*
              * Terminal metadata captured BEFORE the first downstream
              * body-filter call (Rule 1/47 ownership boundary).
@@ -1185,7 +1185,7 @@ typedef struct {
          *     abandoned, release upstream buffers.
          *
          * last_send_failure_origin: set by send_output /
-         *   send_zero_copy_feed_output on NGX_ERROR return.
+         *   send_output on NGX_ERROR return.
          *   Read by handle_success_output to classify post-commit
          *   failures into allocation, downstream, or invariant.
          *   Reset to NONE before each send call.
@@ -1282,8 +1282,8 @@ typedef struct {
             ngx_flag_t                    safe_finish_terminal_send_failed;
 
             /* One-shot latch: protocol-safe abort metric has been recorded
-             * for this request.  Independent of stream_sm.state because
-             * callers (stream_on_error) may pre-transition the state before
+             * for this request. Independent of stream_sm.state because the
+             * post-commit error path may pre-transition the state before
              * invoking postcommit_abort(). */
             ngx_flag_t                    postcommit_abort_recorded;
 
