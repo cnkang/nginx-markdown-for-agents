@@ -22,7 +22,7 @@ jobs:
         target: [parser_html, ffi_convert, security_validator, fuzz_streaming_no_panic, fuzz_streaming_chunk_split, fuzz_streaming_malformed, fuzz_decompression, fuzz_url_validation, convert_html, streaming_chunks, negotiation_and_headers, fuzz_encoding_chain, fuzz_multilayer_decode, fuzz_trusted_proxy_cidr]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -70,7 +70,7 @@ jobs:
       RUST_FEATURES: streaming,incremental,prune_noise_regions
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -223,7 +223,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
