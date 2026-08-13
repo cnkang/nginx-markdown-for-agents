@@ -66,7 +66,7 @@ unconditional success):
 
 **Pre-commit plan failure**: If prepare fails, response headers remain in
 their original unmodified state. The module frees Rust-owned plan resources. The
-the module logs the `header_plan_apply_error` reason code and applies the
+module logs the `header_plan_apply_error` reason code and applies the
 configured `markdown_error_policy` while the original response is still
 recoverable.
 
@@ -138,7 +138,7 @@ are sent, a streaming mid-flight error is NOT a pre-commit error. It does
 not follow the fail-open/fail-closed status selection because the
 downstream headers are already committed and the upstream connection is
 typically gone in streaming mode. The streaming post-commit error path
-(`ngx_http_markdown_stream_error.c`) is NOT an exception — it does not
+(`ngx_http_markdown_stream_postcommit.c`) is NOT an exception — it does not
 mutate committed headers or produce new status/header modifications.
 
 ---

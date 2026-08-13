@@ -70,7 +70,9 @@ when earlier output exactly fills that budget.
 
 ### Positive Consequences
 - Extends incremental decompression and streaming TTFB benefits to gzip, the
-  common HTTP content coding, while retaining both deflate framings.
+  common HTTP content coding, while keeping the public deflate contract on
+  zlib-wrapped RFC 1950. Raw RFC 1951 support is historical compatibility
+  coverage only.
 - Preserves gzip member/trailer integrity across arbitrary chunks and resumes.
 - Gives streaming, Rust full-buffer, and C fallback paths the same
   concatenated-member and cumulative-budget contract.

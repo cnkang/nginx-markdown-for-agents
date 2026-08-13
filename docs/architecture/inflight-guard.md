@@ -48,7 +48,7 @@ terminate a request.
 | HeaderPlan apply error | — | ✓ | Pool cleanup on `r->pool` destroy |
 | Streaming mid-flight error | — | ✓ | Pool cleanup on `r->pool` destroy |
 | NGX_AGAIN (backpressure) | — | — | Request still in progress |
-| NGX_DONE (subrequest) | — | — | Request still in progress |
+| NGX_DONE (filter terminal) | — | — | No retry or second delivery count; request-pool cleanup still owns the decrement |
 
 **Key invariant**: The module increments the counter exactly once for each
 admitted eligible request and decrements it exactly once when that request
@@ -75,10 +75,12 @@ markdown_limits max_inflight=64;
 - **Scope**: `http`, `server`, `location`
 - **Value 0**: Unlimited (no inflight guard)
 
-The default value of 64 is chosen to protect typical deployments where:
-- Each conversion may hold a response buffer up to `markdown_limits conversion_memory=<size>` (10 MB built-in default)
-- 64 × 10 MB = 640 MB peak memory per worker, which fits comfortably in most server configurations
-- Legitimate crawlers rarely exceed 10-20 concurrent requests to a single origin
+The default value of 64 is a conservative guardrail, not a capacity or
+concurrency promise. The actual per-worker working set depends on the
+effective `conversion_memory`, parser/decompression budgets, streaming
+working-set budget, request mix, and NGINX pool overhead. Operators must size
+`max_inflight` from measured worker memory and workload limits. Crawler
+concurrency is not used as a safety assumption.
 
 ## Overload Behavior
 

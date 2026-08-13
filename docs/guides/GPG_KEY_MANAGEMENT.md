@@ -202,7 +202,7 @@ builds:
 
 - Update `GPG_PRIVATE_KEY` secret with new private key
 - Update `GPG_PASSPHRASE` secret with new passphrase
-- Update `GPG_KEY_ID` secret with new key ID
+- Update `GPG_KEY_ID` secret with the new signing-subkey fingerprint
 
 #### Step 4: Update Repository Metadata Signatures
 
@@ -269,7 +269,7 @@ signing during the release workflow.
 |-------------|---------|--------|
 | `GPG_PRIVATE_KEY` | Armored signing-subkey-only export; the primary secret key must not be included | ASCII-armored OpenPGP |
 | `GPG_PASSPHRASE` | Key passphrase | Plain text |
-| `GPG_KEY_ID` | Key ID used for signing | 16-character hex ID |
+| `GPG_KEY_ID` | Full signing-subkey fingerprint used for signing | Exactly 40 hexadecimal characters, matching the published fingerprint |
 
 ### Setting Up Secrets
 
@@ -288,7 +288,7 @@ gpg --armor --export-secret-subkeys '<SIGNING_SUBKEY_FINGERPRINT>!' \
 #   Value: (key passphrase)
 #
 #   Name: GPG_KEY_ID
-#   Value: (16-char key ID, e.g. ABCDEF1234567890)
+#   Value: (40-character signing-subkey fingerprint, e.g. 0123456789ABCDEF0123456789ABCDEF01234567)
 
 # Clean up - securely delete the exported key
 shred -u private-signing-subkey.asc

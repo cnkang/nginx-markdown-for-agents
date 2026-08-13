@@ -53,13 +53,18 @@ in `ngx_http_markdown_route_streaming_compression()`:
 ```
 
 The same four-condition gate applies uniformly: `markdown_auto_decompress` ON,
-streaming selected, `markdown_cache_validation` not `full`, codec supported.
-The change introduces no new public directive or runtime policy branch.
+streaming selected, `markdown_cache_validation` not `full`, and a supported
+codec.
+The change introduces no new public directive or runtime policy branch. The
+configure-time `NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off` environment input
+controls whether the build includes the optional decoder. It is not a
+request-time directive, variable, or runtime default.
 
 ### No New Public Directives
 
-No new NGINX runtime directive, configuration parameter, or configuration
-default gets introduced. The existing `markdown_decompress_max_size` budget
+No new NGINX runtime directive, configuration parameter, or runtime
+configuration default gets introduced. The existing
+`markdown_decompress_max_size` budget
 applies identically to Brotli. The existing `markdown_error_policy` governs
 fail-open/reject behavior.
 
@@ -176,8 +181,10 @@ No subsequent call may re-feed the same compressed data.
 
 ### Build-Control Mechanism
 
-Configure-time environment variable `NGX_MARKDOWN_BROTLI_STREAMING` (values:
-`auto` | `on` | `off`, default `auto`):
+The configure-time environment variable
+`NGX_MARKDOWN_BROTLI_STREAMING` (values `auto` | `on` | `off`, default `auto`)
+is a build input, not an NGINX runtime directive or request parameter. The
+implementation adds no runtime configuration key or default:
 
 - `on`: probe for `<brotli/decode.h>` + `libbrotlidec`, define
   `NGX_HTTP_BROTLI`, link decoder. Configure failure if dependency missing.

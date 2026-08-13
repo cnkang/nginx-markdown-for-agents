@@ -10,7 +10,7 @@ All 0.4.0 sub-specs must follow these conventions for any new operator-facing su
 |--------------------------|---------------------------|---------------------------|------------------------------------------------------------------------|
 | NGINX directives         | `markdown_`               | lowercase + underscores   | `^markdown_[a-z][a-z0-9_]*$`                                          |
 | Prometheus metrics       | `nginx_markdown_`         | snake_case                | `^nginx_markdown_([a-z][a-z0-9_]*_seconds_(bucket\|sum\|count)\|(?!.*_(bucket\|sum\|count)$)[a-z][a-z0-9_]*(_total\|_bytes\|_seconds\|_info)?)$`  |
-| Decision reason codes    | —                         | uppercase snake_case      | `^[A-Z][A-Z0-9_]*$`                                                   |
+| Decision reason codes    | —                         | lowercase snake_case      | `^[a-z][a-z0-9_]*$`                                                   |
 | Benchmark report fields  | —                         | lowercase kebab-case JSON | `^[a-z][a-z0-9-]*$`                                                   |
 | C macro constants        | `NGX_HTTP_MARKDOWN_`      | uppercase + underscores   | `^NGX_HTTP_MARKDOWN_[A-Z][A-Z0-9_]*$`                                 |
 

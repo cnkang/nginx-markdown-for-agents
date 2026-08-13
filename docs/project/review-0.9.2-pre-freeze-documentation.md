@@ -8,7 +8,7 @@
 ## Summary
 
 - docs/ findings: 34 (High 13 / Medium 15 / Low 6)
-- root-level findings: 28 (High 4 / Medium 10 / Low 14)
+- root-level findings: 24 (High 4 / Medium 12 / Low 8)
 - Verified-clean: 25-directive table, limits keys, 12-family metrics table, reason codes, ABI=2, MSRV, release matrix entries, relative links.
 
 ## Findings — docs/
@@ -142,7 +142,8 @@
 
 ## Closeout (2026-08-07)
 
-All findings remediated on `dev/wip-0.9.2-harness`:
+The team remediated all non-deferred findings on `dev/wip-0.9.2-harness`.
+R-L5 remains explicitly deferred until the release-time Debian changelog update:
 
 | ID | Status |
 |----|--------|

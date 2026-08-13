@@ -28,6 +28,14 @@ The `reason` label is a fixed compile-time binding in the C streaming
 renderer. It is not looked up dynamically from the registry at render time.
 The internal C path-selection enum is not used for this family.
 
+The table above is the production label inventory. Lifecycle events use the
+`transition`/`reason` labels. The terminal request family uses the
+`outcome`/`stage`/`reason` labels. The `engine` label is the sole intentional
+label on the conversion-attempt and conversion-delivery families. Output bytes and
+inflight requests are intentionally unlabelled to keep series cardinality
+bounded. Rust helper-event names and enums are implementation details and do
+not expand this Prometheus label contract.
+
 The six series currently map to the following snapshot counters:
 
 | Transition | Fixed reason | Snapshot source | Contract note |

@@ -13,8 +13,8 @@ this guide.
 
 > Publication status: 0.9.2 is currently a development candidate. At the
 > time of writing, no `v0.9.2` tag, GitHub Release, package checksum, Docker
-> image, or Helm repository entry gets asserted. The prebuilt, Helm, and Docker
-> commands below are release-time templates and must only run after the project
+> image, or Helm repository entry gets asserted. The prebuilt and Helm commands
+> below are release-time templates and must only run after the project
 > publishes the artifacts and verifies them independently. For the current
 > candidate, build from the exact branch commit or use locally produced
 > artifacts.
@@ -26,7 +26,6 @@ Choose the upgrade method matching your deployment:
 | Prebuilt module (`.so` replacement) | [Prebuilt Module Upgrade](#prebuilt-module-upgrade) |
 | Source build | [Source Build Upgrade](#source-build-upgrade) |
 | Helm chart | [Helm Upgrade](#helm-upgrade) |
-| Docker | [Docker Upgrade](#docker-upgrade) |
 
 ---
 
@@ -157,32 +156,6 @@ helm upgrade nginx-markdown nginx-markdown/nginx-markdown-for-agents \
 ```bash
 helm status nginx-markdown --namespace nginx-markdown
 kubectl rollout status deployment/nginx-markdown --namespace nginx-markdown
-```
-
----
-
-## Docker Upgrade
-
-> **Note:** The project does not publish OCI images for 0.9.2. No supported
-> provenance or digest contract exists for the Docker upgrade path in this
-> release. Use the prebuilt-module or source-build upgrade paths instead.
-
-### 1. Pull the 0.9.2 image
-
-```bash
-docker pull cnkang/nginx-markdown-for-agents:v0.9.2
-```
-
-### 2. Update your compose or deployment
-
-```yaml
-image: cnkang/nginx-markdown-for-agents:v0.9.2
-```
-
-### 3. Restart
-
-```bash
-docker compose up -d
 ```
 
 ---

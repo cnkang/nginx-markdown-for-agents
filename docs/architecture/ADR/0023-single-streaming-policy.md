@@ -30,11 +30,11 @@ selector:
 - `force` selects streaming for every eligible response after hard request,
   content-type, and cache-validation gates.
 
-`markdown_streaming_engine` remained only as a reject-only parser entry
-through 0.9.1, so `nginx -t` reported an exact migration hint. The 0.9.2
-release deleted that stub: the directive now fails `nginx -t` with the
-standard `unknown directive` error. The migration table below documents
-the 0.9.1-era mapping:
+`markdown_streaming_engine` was reject-only through 0.9.1, so `nginx -t`
+reported an exact migration hint. The 0.9.2 release removed the parser entry:
+the directive now fails `nginx -t` with the standard `unknown directive`
+error. It is not part of the 1.0 configuration surface. The migration table
+below documents the 0.9.1-era mapping:
 
 | Removed value | Replacement |
 |---------------|-------------|

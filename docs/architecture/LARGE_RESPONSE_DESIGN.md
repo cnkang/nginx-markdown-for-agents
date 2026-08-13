@@ -20,47 +20,52 @@ For background on the existing request lifecycle and buffering model, see:
 
 ## Design Principles
 
-- **Default off**: the incremental path defaults to disabled at both the NGINX configuration level and the Rust compilation level
+- **Policy-selected**: `markdown_streaming off` selects bounded full-buffer
+  conversion. `auto` applies the bounded response-shape heuristic. `force`
+  requests streaming after hard eligibility gates
 - **Non-degradation**: introducing the new path must not regress small-response performance or break existing functionality
-- **Semantic equivalence**: for any valid input, the incremental path must produce output identical to the full-buffer path
+- **Semantic equivalence**: for any valid input, the active streaming path must
+  produce output equivalent to the full-buffer path
 - **Observable**: metrics track path selection, so operators can monitor routing behavior in production
 
-## Processing Path Architecture
+## Active 0.9.2 Processing Path Architecture
 
 ```text
-Response arrives at body filter
+Response enters the header/body filter chain
         |
         v
-+------------------+
-| Threshold Router |  (NGINX C module)
-+------------------+
++-------------------------+
+| markdown_streaming      |
++-------------------------+
         |
-        +--- threshold = off ---------> Full-Buffer Path (existing logic, unchanged)
+        +--- off ----------> Bounded Full-Buffer Path
         |
-        +--- HEAD / 304 / fail-open --> Full-Buffer Path (always, regardless of threshold)
+        +--- auto ---------> Shape heuristic + eligibility gates
+        |                         |
+        |                         +--> Streaming Path when eligible
+        |                         +--> Bounded Full-Buffer otherwise
         |
-        +--- Content-Length known
-        |       |
-        |       +--- CL < threshold --> Full-Buffer Path
-        |       |
-        |       +--- CL >= threshold -> Incremental Path
-        |
-        +--- No Content-Length -------> Buffer first, then decide:
-                |
-                +--- buffered < threshold --> Full-Buffer Path
-                |
-                +--- buffered >= threshold -> Incremental Path
+        +--- force --------> Streaming Path when all hard gates pass
 ```
 
-### Full-Buffer Path (Existing)
+### Full-Buffer Path
 
 No changes. The module buffers the complete response body, optionally
 decompresses it, resolves conditional requests, then calls `markdown_convert()`
 through FFI. This full-buffer Rust path remains available when the module
-selects full-buffer processing (`markdown_streaming off`) or when the build
-disables incremental processing.
+selects full-buffer processing (`markdown_streaming off`), when `auto` decides
+that streaming is not suitable, or when a codec/cache-validation gate requires
+it.
 
-### Incremental Path (New, Feature-Gated)
+### Active Streaming Path
+
+The active streaming path feeds bounded chunks through charset detection,
+tokenization, sanitization, state management, and emission. The
+`markdown_limits streaming_buffer=` setting bounds its working-set and replay
+memory. Its backpressure state preserves ownership across `NGX_AGAIN`. It is
+the supported large-response path in 0.9.2.
+
+### Historical Incremental Path (pre-0.9.0)
 
 When the feature-gated incremental conversion path handles a request, the NGINX
 module still buffers the complete response body. It decompresses the body if
@@ -75,8 +80,8 @@ The call sequence is:
    non-NULL arguments, `finalize` consumes the handle regardless of its
    return code
 
-True per-upstream-chunk feeding from NGINX (calling `feed` as each body chunk
-arrives from upstream) is not implemented yet. It remains a future change.
+True per-upstream-chunk feeding from NGINX was not implemented by this retired
+path. It remains historical context, not a 0.9.2 feature claim.
 The current implementation buffers first, then delegates to the incremental
 Rust API. No current operator threshold selects this path.
 
@@ -145,7 +150,8 @@ The router evaluates in this order:
 1. If `large_body_threshold == 0` (off): all requests use the full-buffer path. Behavior is identical to a build without this feature.
 2. If the request is HEAD, 304, or fail-open replay: always use the full-buffer path (see Special Path Semantics below).
 3. If `Content-Length` is present and `Content-Length >= large_body_threshold`: use the incremental path.
-4. If `Content-Length` is absent: buffer the response. Once buffered size exceeds the threshold, switch to the incremental path.
+4. If `Content-Length` is absent: buffer the response. Once the buffered size
+   reaches or exceeds the threshold, switch to the incremental path.
 
 ### Data Model Extensions
 

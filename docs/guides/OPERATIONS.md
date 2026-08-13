@@ -928,7 +928,11 @@ When the streaming engine is active (`markdown_streaming auto` or `force`), the 
 
 #### Failure Sub-Classification Codes
 
-When conversion fails (`failed_open` or `failed_closed`), the decision log also records a failure sub-classification in the `reason` label on `nginx_markdown_requests_total`:
+When conversion fails (`failed_open` or `failed_closed`), the decision log also
+records a bounded failure sub-classification in its `category` field. The
+`nginx_markdown_requests_total` family intentionally exposes only its canonical
+outcome/reason labels. It does not expose these sub-classifications as metric
+reason values.
 
 | Failure Code | Description | Suggested Operator Action |
 |---|---|---|
@@ -1014,7 +1018,7 @@ The alignment works as follows:
 | Reason Code Category | Metrics Endpoint Field | Log Correlation | Example |
 |---|---|---|---|
 | Skip codes (`not_eligible`, `skipped_*`, `bypass_no_transform`) | `nginx_markdown_requests_total{outcome="skipped",reason="..."}` | `reason` field in decision log | `grep "reason=not_eligible" error.log` |
-| Failure categories (`conversion_error`, `resource_limit`, `system_error`) | `nginx_markdown_requests_total{outcome=~"failed_.*",reason="..."}` | `reason` field in decision log | `grep "reason=conversion_error" error.log` |
+| Failure categories (`conversion_error`, `resource_limit`, `system_error`) | Canonical failed outcome in `nginx_markdown_requests_total{outcome=~"failed_.*",reason=~"failed_open|failed_closed"}` | `category` field in decision log | `grep -E "category=(conversion_error|resource_limit|system_error)" error.log` |
 | `converted` | `nginx_markdown_requests_total{outcome="converted"}` | `reason` field in decision log | `grep "reason=converted" error.log` |
 | `failed_open` | `nginx_markdown_requests_total{outcome="failed_open"}` | `reason` field in decision log | `grep "reason=failed_open" error.log` |
 | `failed_closed` | `nginx_markdown_requests_total{outcome="failed_closed"}` | `reason` field in decision log | `grep "reason=failed_closed" error.log` |

@@ -7,9 +7,9 @@
 
 ## Policy
 
-Every `#[repr(C)]` FFI struct needs its matching production helper when one
-exists. Zero-initialization is only a fallback for
-a struct with no semantic defaults and no initializer. This ensures that:
+Every `#[repr(C)]` FFI result struct uses its matching production helper when
+one exists. Zero-initialization is only a fallback for a struct with no
+semantic defaults and no initializer. This ensures that:
 
 1. Every field has a defined value (no uninitialized memory across FFI)
 2. Pointer fields are NULL (safe to call `free` on)
@@ -19,8 +19,8 @@ a struct with no semantic defaults and no initializer. This ensures that:
 
 ### Rust Side
 
-Before calling any FFI function that populates a result struct, the C
-caller must use the matching production initializer:
+Before calling any FFI function that populates a result struct with a
+production initializer, the C caller must use that matching initializer:
 
 ```c
 struct MarkdownResult result;

@@ -112,9 +112,22 @@ Conversion succeeded. The client receives the Markdown representation of the HTM
 
 ### Failure with `markdown_error_policy pass`: failed_open
 
-The module attempted conversion but it failed (HTML parse error, timeout, resource limit, decompression error, or internal/system error). Because `markdown_error_policy` is set to `pass` (the default), the module serves the original HTML response unchanged. The client sees no impact. The reason code is `failed_open` and the request state becomes FAILED.
+The module attempted conversion but failed before it committed the response
+(HTML parse error, timeout, resource limit, decompression error, or internal/
+system error). Because `markdown_error_policy` is set to `pass` (the default),
+the module replays the complete original HTML response unchanged. The reason
+code is `failed_open` and the request state becomes FAILED.
 
-This is the recommended configuration for production rollouts. Conversion failures never break client responses.
+This is the recommended configuration for production rollouts. Conversion
+failures before commit do not break client responses.
+
+If a streaming conversion fails after downstream filters have already accepted
+headers or Markdown bytes, the original HTML is no longer available for replay
+and the headers/body cannot be rewritten. The module records the
+`streaming_mid_flight_error` sub-classification and completes through its
+protocol-safe finish or abort path. The client may receive a truncated Markdown
+response. This post-commit case is intentionally not described as an
+unchanged fail-open HTML response.
 
 ### Failure with `markdown_error_policy fail_closed`: failed_closed
 

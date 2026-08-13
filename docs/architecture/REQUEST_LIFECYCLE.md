@@ -75,12 +75,16 @@ Downstream return codes have strict meanings:
 
 - `NGX_OK`: the module accepted the submitted chain
 - `NGX_AGAIN`: suspend and retain the correct pending-chain owner
-- `NGX_DONE`: terminal finalize path. Return immediately after finalization
+- `NGX_DONE`: terminal for this filter operation. Return immediately after
+  finalization. NGINX may still retain a subrequest until its request-pool
+  cleanup runs.
 - `NGX_ERROR`: terminal failure path
 
 Delivery counters advance only after successful terminal delivery. A request
-produces one terminal request outcome. Streaming transitions and
-decompression events record at their own bounded event points.
+produces one terminal request outcome. `NGX_DONE` does not cause a second
+delivery count, and the inflight guard remains held until the request-pool
+cleanup handler releases it. Streaming transitions and decompression events
+record at their own bounded event points.
 
 ## Verification surfaces
 

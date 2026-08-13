@@ -32,6 +32,14 @@ http {
         decompressed_size=20m decompression_ratio=100 max_inflight=64;
 
     server {
+        # Required before collecting the baseline. Keep the endpoint local-only.
+        location = /markdown-metrics {
+            allow 127.0.0.1;
+            allow ::1;
+            deny all;
+            markdown_metrics;
+        }
+
         location /docs {
             markdown_filter on;
             proxy_pass http://backend;

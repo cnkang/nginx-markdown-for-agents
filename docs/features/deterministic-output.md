@@ -179,15 +179,38 @@ fn normalize_output(&self, output: String) -> String {
     // 2-6. Process line by line
     let mut result = String::with_capacity(output.len());
     let mut prev_blank = false;
-    let mut in_code_block = false;
+    let mut active_fence_len: Option<usize> = None;
 
     for line in output.lines() {
-        // Detect code block boundaries
-        if line.trim_start().starts_with("```") {
-            in_code_block = !in_code_block;
+        let trimmed_start = line.trim_start();
+        let fence_len = trimmed_start.bytes().take_while(|&b| b == b'`').count();
+        let is_opening_fence = active_fence_len.is_none() && fence_len >= 3;
+        let is_closing_fence = active_fence_len
+            .map(|len| fence_len >= len && trimmed_start[fence_len..].trim().is_empty())
+            .unwrap_or(false);
+        let is_fence = is_opening_fence || is_closing_fence;
+
+        if is_fence {
+            active_fence_len = if is_opening_fence {
+                Some(fence_len)
+            } else {
+                None
+            };
+            // Fence lines retain their info string; only their line ending is normalized.
+            result.push_str(line.trim_end());
+            result.push('\n');
+            prev_blank = false;
+            continue;
         }
 
-        // Remove trailing whitespace
+        if active_fence_len.is_some() {
+            // Fenced code is raw: preserve trailing spaces and blank lines.
+            result.push_str(line);
+            result.push('\n');
+            prev_blank = false;
+            continue;
+        }
+
         let trimmed = line.trim_end();
 
         if trimmed.is_empty() {
@@ -233,6 +256,8 @@ The converter includes comprehensive tests for deterministic output:
 - `test_normalize_trailing_whitespace`: Verifies trailing whitespace removal
 - `test_normalize_single_final_newline`: Verifies single final newline
 - `test_normalize_consecutive_spaces`: Verifies space collapsing
+- Fenced-code regression cases: preserve raw trailing spaces and blank lines
+  inside fences while normalizing the surrounding Markdown
 - `test_normalize_preserves_code_blocks`: Verifies code block preservation
 - `test_normalize_preserves_inline_code_spaces`: Verifies inline code preservation
 - `test_normalize_preserves_list_indentation`: Verifies list indentation

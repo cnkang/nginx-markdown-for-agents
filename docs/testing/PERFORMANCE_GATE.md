@@ -44,7 +44,7 @@ Artifacts uploaded:
 - `perf-verdict-<platform>.json` (Verdict Report, for example `perf-verdict-linux-x86_64.json`)
 
 Platform identifiers use `uname`-style naming: `linux-x86_64` for GitHub
-Actions Ubuntu runners, `darwin-arm64` for Apple Silicon macOS, and so on
+Actions Ubuntu runners, `darwin-arm64` for Apple Silicon macOS, and so on.
 
 ### Nightly Full (`nightly-perf.yml`)
 

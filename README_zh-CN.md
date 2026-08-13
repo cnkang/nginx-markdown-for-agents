@@ -145,23 +145,18 @@ http {
 
 ## 针对特定 Bot 返回 Markdown
 
-大多数 AI 爬虫不会发送 `Accept: text/markdown`，它们使用和浏览器类似的 Accept 头。你可以用 NGINX 的 `map` 指令根据 User-Agent 改写 Accept 头，让匹配的 bot 自动收到 Markdown，而不需要 bot 自身做任何改变。
+大多数 AI 爬虫不会发送 `Accept: text/markdown`，它们使用和浏览器类似的 Accept 头。可以用 NGINX 的 `map` 指令只为指定 User-Agent 启用模块，并在该范围设置 `markdown_accept force`。`proxy_set_header Accept` 只会修改发往上游的请求，不会修改本模块实际判断的请求头。
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
 
 http {
-    # 为已知 AI bot 改写 Accept 头
-    map $http_user_agent $bot_accept_override {
-        default         "";
-        "~*ClaudeBot"   "text/markdown, text/html;q=0.9";
-        "~*GPTBot"      "text/markdown, text/html;q=0.9";
-        "~*Googlebot"   "text/markdown, text/html;q=0.9";
-    }
-
-    map $bot_accept_override $final_accept {
-        ""      $http_accept;
-        default $bot_accept_override;
+    # 不改写上游请求，只为已知 AI bot 启用 Markdown 转换
+    map $http_user_agent $markdown_for_bot {
+        default         off;
+        "~*ClaudeBot"   on;
+        "~*GPTBot"      on;
+        "~*Googlebot"   on;
     }
 
     upstream backend {
@@ -172,8 +167,8 @@ http {
         listen 80;
 
         location /docs/ {
-            markdown_filter on;
-            proxy_set_header Accept $final_accept;
+            markdown_filter $markdown_for_bot;
+            markdown_accept force;
             proxy_pass http://backend;
         }
     }
@@ -407,7 +402,7 @@ v0.9.1 是 **v1.0 前最后一次基线收敛与兼容性重置**。它在性能
 - **明确支持的 flavor**：`markdown_flavor` 仅支持 `commonmark` 和 `gfm`。实验性的 `mdx` 与 `org-mode` 从未有独立生产语义，现会被明确拒绝。
 - **自动零拷贝流式输出**：由缓冲区所有权和背压状态在内部选择安全的交付路径，不暴露零拷贝指令。
 - **流式解压路由（gzip + deflate + Brotli）**：设置 `markdown_streaming force`、`markdown_auto_decompress on`，且 `markdown_cache_validation` 不为 `full`。
-  此时流式引擎会增量解压 gzip、deflate（含 zlib 封装 RFC 1950 和原始 RFC 1951）及 Brotli 响应。它不会强制全缓冲积攒。gzip member 边界和 trailer 会跨分块校验。Brotli 流式解压需要构建时的 `libbrotlidec`。`NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off` 控制该依赖。官方构件默认启用。
+  此时流式引擎会增量解压 gzip、zlib 封装 RFC 1950 deflate 及 Brotli 响应。冻结的 0.9.2 公共契约拒绝原始 RFC 1951 deflate，不会强制全缓冲积攒。gzip member 边界和 trailer 会跨分块校验。Brotli 流式解压需要构建时的 `libbrotlidec`。`NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off` 控制该依赖。官方构件默认启用。
 - **全缓冲拷贝减少**：内部优化（默认开启，无配置项），通过将连续缓冲区直接传递给解压器并通过指针赋值交换输出，消除全缓冲压缩路径中冗余的 memcpy。
 - **`markdown_auto_decompress` 指令**：现已正式注册为可配置指令（默认开启）。此前仅为内部字段，无法通过 `nginx.conf` 设置。
 - **性能证据门禁**：模块级基准测试工具（`tools/perf/run_module_benchmark.sh`）与自动化发布门禁（`make release-gates-check-091`）在发布前强制验证延迟、TTFB、内存斜率和回退率阈值。

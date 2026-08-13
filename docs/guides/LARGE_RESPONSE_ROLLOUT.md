@@ -25,7 +25,14 @@
 
 ## Overview
 
-This playbook describes how to gradually enable the large-response incremental processing path controlled by the `markdown_large_body_threshold` directive. The rollout follows a phased approach: single location, single server, then global. It includes verification checkpoints at each stage and a one-command rollback that requires no code changes.
+This playbook applies only to deployments before 0.9.0 that still expose the
+historical large-response incremental path controlled by the
+`markdown_large_body_threshold` directive. It does not describe a supported
+0.9.0 or later configuration: 0.9.0 made the directive reject-only and 0.9.2
+removed it. For an in-scope pre-0.9.0 deployment, the rollout follows a phased
+approach—single location, single server, then global—with verification
+checkpoints at each stage and a one-command rollback that requires no code
+changes.
 
 ### Target Audience
 

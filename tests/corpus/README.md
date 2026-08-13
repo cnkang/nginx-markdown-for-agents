@@ -93,9 +93,10 @@ with the following schema fields:
 
 | Field | Description |
 |-------|-------------|
-| `expected_fallback` | Whether streaming is expected to fall back to full-buffer |
-| `known_diff_ids` | Known parity diff identifiers for this fixture |
-| `high_risk_structures` | List of HTML structures that are high-risk for streaming |
+| `streaming_notes` | Object containing streaming parity metadata |
+| `streaming_notes.expected_fallback` | Whether streaming is expected to fall back to full-buffer |
+| `streaming_notes.known_diff_ids` | Known parity diff identifiers for this fixture |
+| `streaming_notes.high_risk_structures` | List of HTML structures that are high-risk for streaming |
 
 ## Usage
 

@@ -88,9 +88,9 @@ structs merely for aesthetic deduplication. Both flavor fields accept only 0
 ### Results and handles
 
 Result pointer fields are Rust-owned until their matching free function.
-Opaque converter, streaming, incremental, header-plan, and trusted-proxy
-only the documented finalizer/free operation consumes handles. C must
-not use a handle or borrowed pointer after consumption.
+The documented finalizer/free operation consumes each opaque converter,
+streaming, incremental, header-plan, and trusted-proxy handle. C must not use a
+handle or borrowed pointer after consumption.
 
 ## Initialization contract
 

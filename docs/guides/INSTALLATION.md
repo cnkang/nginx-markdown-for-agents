@@ -129,8 +129,10 @@ The install script performs the following automatically:
 ### Integrity Guardrails (Install Script)
 
 - Default behavior: installation fails if no SHA-256 digest is available for the selected artifact.
-- `DOWNLOAD_URL_OVERRIDE` requires `DOWNLOAD_SHA256` by default.
-- Emergency bypass (not recommended): set `ALLOW_INSECURE_NO_CHECKSUM=1` only in trusted, controlled environments.
+- `DOWNLOAD_URL_OVERRIDE` always requires `DOWNLOAD_SHA256`.
+- The installer has no checksumless bypass. If an independently authenticated
+  digest is unavailable, withhold the binary installation and use the manual
+  source-build path instead.
 
 After the script completes, reload NGINX:
 
@@ -173,8 +175,9 @@ If you need deterministic control over compiler flags or local patching, use [Ma
 
 Starting with v0.7.0, release workflows can build DEB and RPM artifacts for
 supported Linux distributions. Public GitHub Release asset availability is
-tag-specific: confirm that the target release contains the exact package and
-`SHA256SUMS` before running these commands. A release candidate or a
+tag-specific: confirm that the target release contains the exact package,
+`SHA256SUMS`, and `SHA256SUMS.asc` before running these commands. `SHA256SUMS`
+detects transfer corruption but is not an authenticated trust anchor. A release candidate or a
 compatibility-matrix entry is not a downloadable package. If the release does not publish a matching asset, use [Manual Source Build](#6-secondary-manual-source-build).
 The project plans APT/YUM repository publishing. Public APT/YUM repository
 publishing is not part of the current GA channel. Do not use `apt-get install
@@ -192,8 +195,17 @@ NGINX_VERSION=1.26.3
 ARCH=amd64
 
 curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS"
+curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS.asc"
 curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
+# Obtain TRUSTED_FINGERPRINT through an independently authenticated channel.
+: "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated}"
+[[ "${TRUSTED_FINGERPRINT}" =~ ^[A-Fa-f0-9]{40}$ ]] || exit 1
+VALIDSIG="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
+    | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
+EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
+[[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1
 grep "nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb" SHA256SUMS | sha256sum -c -
+dpkg-sig --verify "nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
 sudo apt install "./nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
 ```
 
@@ -208,8 +220,17 @@ NGINX_VERSION=1.26.3
 ARCH=x86_64
 
 curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS"
+curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS.asc"
 curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
+# Obtain TRUSTED_FINGERPRINT through an independently authenticated channel.
+: "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated}"
+[[ "${TRUSTED_FINGERPRINT}" =~ ^[A-Fa-f0-9]{40}$ ]] || exit 1
+VALIDSIG="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
+    | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
+EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
+[[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1
 grep "nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm" SHA256SUMS | sha256sum -c -
+rpm -Kv "nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
 sudo rpm -Uvh "./nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
 ```
 
@@ -722,7 +743,7 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.31.3 | glibc | x86_64 | Full |
 | 1.31.3 | musl | aarch64 | Full |
 | 1.31.3 | musl | x86_64 | Full |
-| 1.26.3 | n/a | any | Source Only |
+| 1.26.3 | unlisted | unlisted | Source Only |
 <!-- END AUTO-GENERATED MATRIX -->
 
 <!-- BEGIN:release-matrix:installation-matrix -->
@@ -1255,7 +1276,10 @@ The SHA-256 hash of the downloaded binary does not match the expected checksum f
    ```
 3. If the checksum still fails, try downloading from a different network or machine to rule out a network intermediary.
 4. If the issue persists, report it on the project's GitHub issue tracker. The release artifact may need to be re-published.
-5. If you must install in a controlled emergency scenario without a published digest, set `ALLOW_INSECURE_NO_CHECKSUM=1` explicitly. Document the exception in your change record.
+5. Do not bypass verification for a published release. If the release lacks an
+   independently authenticated fingerprint or digest, withhold installation and
+   report the release-gate failure. The install-script emergency switch cannot
+   establish provenance.
 
 ---
 
@@ -1272,11 +1296,11 @@ The eligibility requirements are:
 1. **HTTP status 200** — the upstream response must have status code `200 OK`. Redirects (3xx), client errors (4xx), and server errors (5xx) are not eligible.
 2. **Upstream `Content-Type: text/html`** — the upstream response must have `Content-Type: text/html` (with any charset parameter). Other content types (for example `application/json`, `text/plain`) are not eligible.
 3. **Request `Accept` includes `text/markdown`** — the client request must include `text/markdown` in the `Accept` header. Without this, the module does not activate.
-4. **Response size within effective limits** — the upstream response body must
-   not exceed the effective full-buffer or streaming limit. If
-   `markdown_limits conversion_memory=<size>` is set, it acts as a unified override
-   unless a path-specific streaming buffer
-   (`markdown_limits streaming_buffer=<size>`) is explicitly set.
+4. **Response size within the body-size limit** — the upstream response body
+   must not exceed the effective `markdown_limits conversion_memory=<size>`
+   limit. `markdown_limits streaming_buffer=<size>` only bounds the streaming
+   working and replay budget. It does not change the response-body eligibility
+   limit.
 
 **Resolution Steps:**
 
