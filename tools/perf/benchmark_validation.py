@@ -578,11 +578,12 @@ def _path_metrics(
         and isinstance(failopen_total, int)
         and not isinstance(failopen_total, bool)
     ):
-        fallback_rate = (
-            failopen_total / requests_total
-            if requests_total > 0
-            else 0.0 if failopen_total == 0 else None
-        )
+        if requests_total > 0:
+            fallback_rate = failopen_total / requests_total
+        elif failopen_total == 0:
+            fallback_rate = 0.0
+        else:
+            fallback_rate = None
     else:
         fallback_rate = None
     return (

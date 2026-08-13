@@ -21,12 +21,40 @@ NAMES = ROOT / "components/nginx-module/src/ngx_http_markdown_directive_names.h"
 PROPERTY = ROOT / "components/nginx-module/tests/unit/removed_directive_rejection_property_test.c"
 
 
+def _parse_directive_macro(
+    line: str, continuation: str | None
+) -> tuple[str, str] | None:
+    prefix = "#define "
+    name_prefix = "NGX_HTTP_MARKDOWN_DIRECTIVE_"
+    definition = line.strip()
+    if not definition.startswith(prefix):
+        return None
+
+    parts = definition[len(prefix):].split(None, 1)
+    if len(parts) != 2 or not parts[0].startswith(name_prefix):
+        return None
+
+    name, value = parts
+    if value == "\\":
+        value = continuation
+    if value is None or len(value) < 2:
+        return None
+    if value[0] != '"' or value[-1] != '"':
+        return None
+    return name, value[1:-1]
+
+
 def _macro_values() -> dict[str, str]:
-    text = NAMES.read_text(encoding="utf-8")
-    return dict(re.findall(
-        r"#define\s+(NGX_HTTP_MARKDOWN_DIRECTIVE_[A-Z0-9_]+)\s*\\?\s*\n?\s*\"([^\"]+)\"",
-        text,
-    ))
+    lines = NAMES.read_text(encoding="utf-8").splitlines()
+    values: dict[str, str] = {}
+
+    for index, line in enumerate(lines):
+        continuation = lines[index + 1].strip() if index + 1 < len(lines) else None
+        parsed = _parse_directive_macro(line, continuation)
+        if parsed is not None:
+            values[parsed[0]] = parsed[1]
+
+    return values
 
 
 def _production_names() -> list[str]:
