@@ -73,7 +73,7 @@ while IFS= read -r -d '' file; do
         # YAML structure: we look for lines with "run:" that start a multiline block
         # or inline run: command.  Recognize all YAML block scalar indicators:
         # |, |-, |+, >, >-, >+
-        block_scalar_re='^[[:space:]]*-?run:[[:space:]]*[|>][-+]?[[:space:]]*$'
+        block_scalar_re='^[[:space:]]*(-[[:space:]]*)?run:[[:space:]]*[|>][-+]?[[:space:]]*$'
         if [[ "$line" =~ ^[[:space:]]*run:[[:space:]]*$ ]] || \
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*run:[[:space:]]*$ ]] || \
            [[ "$line" =~ $block_scalar_re ]]; then

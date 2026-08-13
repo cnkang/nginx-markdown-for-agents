@@ -34,11 +34,13 @@ compilation.
 ## Rule 57: #ifdef-Guarded Function Visibility
 
 **Principle**: Code outside an `#ifdef FEATURE_GUARD` block must not reference
-functions declared inside that guard. When both builds need a function
-(feature-enabled and feature-disabled), declare it outside the
-`#ifdef` guard. This catches the common mistake of adding a function
-declaration inside an `#ifdef` but forgetting to move it outside when the
-code references the function from non-feature-gated paths.
+functions whose declaration or definition exists only inside that guard. Any
+function referenced by non-feature-gated code must have both its declaration
+and its definition available in every supported feature build, including the
+feature-disabled build. When both builds need a function, keep the declaration
+and implementation outside the `#ifdef` (or provide equivalent definitions in
+both branches). This catches the common mistake of adding a function inside a
+feature guard but forgetting that non-feature-gated paths still call it.
 
 **Historical issue**: `a29d1a7b` — `ngx_http_markdown_reason_streaming_skip_compressed`
 the function sat inside `#ifdef MARKDOWN_STREAMING_ENABLED` but code referenced it

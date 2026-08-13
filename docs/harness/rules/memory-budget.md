@@ -41,8 +41,12 @@ Required:
   indefinitely.  `ngx_alloc/ngx_free` lets superseded buffers free
   immediately.
 - The module registers a pool cleanup handler (`ngx_pool_cleanup_add`) at
-  `buffer_init` time to ensure the backing store frees when the
-  request pool dies, even if no explicit `ngx_free` call happens.
+  `buffer_init` time to ensure the current backing store frees when the
+  request pool dies. The cleanup handler owns the current `data` pointer. A
+  resize frees only the superseded pointer before storing the replacement, so
+  the cleanup handler sees one current owner and never frees an old pointer a
+  second time. Any future explicit whole-buffer release must clear or disarm
+  the cleanup handler before releasing the current pointer.
 - When code outside `buffer.c` needs to replace `ctx->buffer.data`
   (for example decompression output exceeds capacity), it MUST use `ngx_alloc`
   for the new allocation and `ngx_free` for the old — never `ngx_palloc`

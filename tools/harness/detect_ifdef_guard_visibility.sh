@@ -148,6 +148,8 @@ for i, line in enumerate(lines, 1):
 
     if guard_enabled():
         # Find function declarations: return_type name(args);
+        if stripped.startswith(('//', '/*', '*')):
+            continue
         m = re.search(r'\b(ngx_http_markdown_\w+)\s*\(', stripped)
         if m and ';' in line:
             funcs.add(m.group(1))
@@ -251,7 +253,7 @@ for i, line in enumerate(lines, 1):
         # Skip comments and preprocessor text.  A function definition itself
         # is not a visibility reference; its enclosing guard is validated by
         # the same parser in this script.
-        if stripped.startswith('*') or stripped.startswith('/*'):
+        if stripped.startswith(('//', '/*', '*')):
             continue
         # A call can contain a declaration-like return type (for example
         # ``const ngx_str_t *r = func()``).  Only skip an actual definition;
