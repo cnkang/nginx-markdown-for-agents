@@ -268,8 +268,10 @@ def _resolve_expected_sha(args) -> str | None:
         return args.expected_sha
     # Derive the release version from the selected manifest's parent
     # directory (artifacts/release/<version>/...) rather than hardcoding 0.9.2.
-    manifest_dir = Path(args.manifest).resolve().parent
-    candidate_path = manifest_dir / "release-candidate-sha-manifest.json"
+    manifest_path = validate_read_path(
+        args.manifest, purpose="final evidence manifest"
+    )
+    candidate_path = manifest_path.parent / "release-candidate-sha-manifest.json"
     if not candidate_path.is_file():
         return None
     candidate = load_json(candidate_path, "release candidate manifest")
