@@ -94,6 +94,9 @@ struct ngx_log_s {
 
 static ngx_log_t test_log;
 
+/* The production allocator requires a logger for Brotli workspace memory. */
+#define NGX_HTTP_MARKDOWN_STREAMING_DECOMP_DEFAULT_LOG (&test_log)
+
 /* ----------------------------------------------------------------
  * Pool allocation tracking (same pattern as streaming_decomp_test)
  * ---------------------------------------------------------------- */

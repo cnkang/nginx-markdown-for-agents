@@ -86,6 +86,9 @@ main(void)
 
 static ngx_log_t test_log;
 
+/* The production allocator requires a logger for Brotli workspace memory. */
+#define NGX_HTTP_MARKDOWN_STREAMING_DECOMP_DEFAULT_LOG (&test_log)
+
 /* Allocation failure injection flags */
 static ngx_uint_t g_palloc_fail_once = 0;
 static ngx_uint_t g_pcalloc_fail_once = 0;
