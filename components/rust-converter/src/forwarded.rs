@@ -516,16 +516,11 @@ fn parse_forwarded_elements(s: &str) -> Option<Vec<ForwardedElement>> {
 fn parse_forwarded_element(raw: &str) -> Option<ForwardedElement> {
     let mut element = ForwardedElement::default();
     let mut seen: Vec<String> = Vec::new();
-    let mut any_param = false;
     for pair in split_quoted(raw, b';') {
         let pair = pair.trim();
         if pair.is_empty() {
-            if any_param {
-                return None;
-            }
-            continue;
+            return None;
         }
-        any_param = true;
         parse_forwarded_pair(pair, &mut element, &mut seen)?;
     }
     Some(element)

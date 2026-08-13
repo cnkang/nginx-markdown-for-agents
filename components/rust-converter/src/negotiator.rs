@@ -30,10 +30,10 @@
 //! assert!(matches!(result, NegotiationResult::Passthrough { .. }));
 //! ```
 
-/// Maximum number of Accept header entries to parse.
-/// Prevents DoS from unreasonably long headers. This is a fixed parser-safety
-/// bound, not a public directive: the frozen 0.9.2 surface has no negotiation
-/// limit setting to keep synchronized with this parser.
+/// Maximum number of Accept header entries to parse (an entry count, not a
+/// header byte length). Prevents DoS from headers carrying too many entries.
+/// This is a fixed parser-safety bound, not a public directive: the frozen
+/// 0.9.2 surface has no negotiation limit setting to keep synchronized with it.
 const MAX_ACCEPT_ENTRIES: usize = 64;
 
 /// Maximum length of a single MIME type string.
