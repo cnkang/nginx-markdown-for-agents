@@ -78,7 +78,7 @@ def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
             ),
             _normalize_tier(item["support_tier"]),
         )
-        for item in data["entries"]
+        for item in data.get("entries", [])
         if (
             (
                 item.get("artifact_type") == "dynamic-module"

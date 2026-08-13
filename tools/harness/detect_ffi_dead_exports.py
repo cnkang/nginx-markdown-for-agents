@@ -306,7 +306,7 @@ def _guard_token(expression: str, negate: bool = False) -> str:
     if match:
         name = match.group(0)
     else:
-        token = re.match(r"[A-Za-z0-9_]+", stripped)
+        token = re.match(r"\w+", stripped)
         name = token.group(0) if token else ""
     if not name:
         name = expression.strip().split()[0] if expression.strip() else "unknown"

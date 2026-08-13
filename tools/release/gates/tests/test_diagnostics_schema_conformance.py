@@ -121,12 +121,13 @@ def _dynconf_invalid_without_lkg(draw):
 @st.composite
 def _dynconf_active(draw):
     """Generate an active dynconf state."""
+    active_digest = draw(_sha256_digest)
     return {
         "state": "active",
         "generation": draw(st.integers(min_value=1, max_value=10000)),
         "source_digest": draw(_sha256_digest),
-        "active_digest": draw(_sha256_digest),
-        "lkg_digest": draw(_sha256_digest),
+        "active_digest": active_digest,
+        "lkg_digest": active_digest,
         "last_success": draw(_iso_datetime),
         "last_error": None,
         "masked_keys": draw(_masked_keys),
@@ -136,12 +137,13 @@ def _dynconf_active(draw):
 @st.composite
 def _dynconf_lkg_preserved(draw):
     """Generate a lkg_preserved dynconf state."""
+    active_digest = draw(_sha256_digest)
     return {
         "state": "lkg_preserved",
         "generation": draw(st.integers(min_value=1, max_value=10000)),
         "source_digest": draw(_sha256_digest),
-        "active_digest": draw(_sha256_digest),
-        "lkg_digest": draw(_sha256_digest),
+        "active_digest": active_digest,
+        "lkg_digest": active_digest,
         "last_success": draw(_iso_datetime),
         "last_error": draw(_error_msg),
         "masked_keys": draw(_masked_keys),

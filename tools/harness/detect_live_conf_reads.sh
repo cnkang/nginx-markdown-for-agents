@@ -71,6 +71,9 @@ function_contains_line() {
               "${candidate_text}" == *";"* ]]; then
             continue
         fi
+        # Reset the per-candidate match state so a non-definition candidate
+        # (call site / declaration) cannot leave a stale earlier definition.
+        start=""
         # A C definition may put the return type, name, parameters, and
         # opening brace on separate lines. Walk forward until the first
         # statement terminator or opening brace so multiline definitions are

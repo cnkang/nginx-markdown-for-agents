@@ -99,7 +99,7 @@ def build_manifest(
 def _output_path(version: str) -> Path:
     safe_version = validate_filename_strict(version, purpose="release version")
     if not VERSION_RE.fullmatch(safe_version):
-        raise ValueError(f"invalid release version: {version!r}")
+        raise ValueError(f"Invalid release version: {version!r}")
     expected_output = (
         REPO_ROOT / "artifacts" / "release" / safe_version / MANIFEST_NAME
     ).resolve()

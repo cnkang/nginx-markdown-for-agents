@@ -19,7 +19,7 @@ rejecting it with an identifiable reason:
   - malformed             record is not JSON or lacks required structure
   - stale-digest          record candidate_sha differs from expected
   - blocking-pending      a blocking entry has status != pass
-  - below-threshold       missing required gate entries
+  - below-threshold       empty/malformed required inputs or entries
   - missing-observation   entry missing required fields
 
 Exit codes:

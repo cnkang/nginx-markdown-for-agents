@@ -18,6 +18,8 @@ import re
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
 import jsonschema
@@ -96,16 +98,17 @@ _raw_error_msg = st.text(
 
 
 def _redact_error_for_test(error_text):
-    """Use a production redactor when a test binding exposes one.
+    """Use the production redactor when a test binding exposes one.
 
-    Without a binding, only already-safe model text can be checked. That
-    fallback documents the model and does not claim to exercise production C.
+    The production redactor lives in the C diagnostics module with no Python
+    import path; a harness may inject it as a module-global binding. Without
+    it unsafe generated inputs cannot be exercised, so skip rather than
+    silently discard them via assume().
     """
     redactor = globals().get("redact_last_error")
-    if callable(redactor):
-        return redactor(error_text)
-    assume(_is_safe_error_text(error_text))
-    return error_text
+    if not callable(redactor):
+        pytest.skip("production redact_last_error binding not available")
+    return redactor(error_text)
 
 _masked_keys = st.lists(
     st.sampled_from([
