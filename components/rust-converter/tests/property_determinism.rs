@@ -61,13 +61,15 @@ proptest! {
         html_a in arb_html(),
         html_b in arb_html(),
     ) {
-        let out_a = convert(&html_a);
-        let out_b = convert(&html_b);
-        /* Converting A after B must not change A's output (no shared
-         * converter state). */
-        let out_a_again = convert(&html_a);
+        let dom_a = parse_html(html_a.as_bytes()).expect("fixture HTML must parse");
+        let dom_b = parse_html(html_b.as_bytes()).expect("fixture HTML must parse");
+        let conv = converter();
+        let out_a = conv.convert(&dom_a).expect("fixture HTML must convert");
+        let _out_b = conv.convert(&dom_b).expect("fixture HTML must convert");
+        /* Converting A again on the SAME converter instance (after B) must
+         * not change A's output — the converter carries no cross-input state. */
+        let out_a_again = conv.convert(&dom_a).expect("fixture HTML must convert");
         assert_eq!(out_a, out_a_again);
-        let _ = out_b;
     }
 }
 

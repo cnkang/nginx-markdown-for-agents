@@ -778,10 +778,11 @@ fn prop_30_client_abort_creates_no_failure_record() {
         let result = plan(state, env, &default_ctx()).unwrap();
         // CLIENT_ABORT uses NONE action (no FailureRecord)
         assert_eq!(result.first_frame.action, Action::None);
-        // The failure_ledger is not modified by the event (no new record)
+        // The failure_ledger is left completely empty — no primary,
+        // secondary, or delivery record may be populated by CLIENT_ABORT.
         assert!(
-            !result.plan_decision.failure_ledger.is_populated()
-                || result.plan_decision.failure_ledger.primary.is_none()
+            !result.plan_decision.failure_ledger.is_populated(),
+            "CLIENT_ABORT must not populate the failure ledger at all"
         );
     }
 }

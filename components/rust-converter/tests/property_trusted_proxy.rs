@@ -77,9 +77,12 @@ proptest! {
     ) {
         /* Trusted peer; chain = client, fixed trusted hop 192.0.2.10. */
         let t = cidrs(&["10.0.0.0/8", "192.0.2.0/24"]);
-        let mut input = trusted_input("10.1.2.3");
-        input.x_forwarded_for = Some(Box::leak(format!("{client}, 192.0.2.10").into_boxed_str()));
-        input.x_forwarded_host = Some(Box::leak(format!("{host_a}, {host_b}").into_boxed_str()));
+        let source_ip = "10.1.2.3".to_string();
+        let xff = format!("{client}, 192.0.2.10");
+        let xfh = format!("{host_a}, {host_b}");
+        let mut input = trusted_input(&source_ip);
+        input.x_forwarded_for = Some(&xff);
+        input.x_forwarded_host = Some(&xfh);
         input.x_forwarded_proto = Some("https, https");
         input.x_forwarded_port = Some("443, 443");
 
@@ -100,9 +103,11 @@ proptest! {
         host in hostname_strategy(),
     ) {
         let t = cidrs(&["10.0.0.0/8"]);
-        let mut input = trusted_input("10.1.2.3");
-        input.x_forwarded_for = Some(Box::leak(format!("{client}, {trusted_hop}").into_boxed_str()));
-        input.x_forwarded_host = Some(Box::leak(host.into_boxed_str()));
+        let source_ip = "10.1.2.3".to_string();
+        let xff = format!("{client}, {trusted_hop}");
+        let mut input = trusted_input(&source_ip);
+        input.x_forwarded_for = Some(&xff);
+        input.x_forwarded_host = Some(&host);
         input.x_forwarded_proto = Some("https");
         input.x_forwarded_port = Some("443");
         let d = decide_base_url(&input, &t);
@@ -117,8 +122,9 @@ proptest! {
     #[test]
     fn p24_no_xff_ignores_xforwarded_metadata(host in hostname_strategy()) {
         let t = cidrs(&["10.0.0.0/8"]);
-        let mut input = trusted_input("10.1.2.3");
-        input.x_forwarded_host = Some(Box::leak(host.into_boxed_str()));
+        let source_ip = "10.1.2.3".to_string();
+        let mut input = trusted_input(&source_ip);
+        input.x_forwarded_host = Some(&host);
         input.x_forwarded_proto = Some("https");
         input.x_forwarded_port = Some("443");
         let d = decide_base_url(&input, &t);

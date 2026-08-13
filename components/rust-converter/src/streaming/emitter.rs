@@ -604,6 +604,19 @@ impl IncrementalEmitter {
         let fence_len = self.inline_code_backtick_max.saturating_add(1);
         let fence = "`".repeat(fence_len.max(1));
 
+        // CommonMark code-span convention: content that begins or ends
+        // with a backtick, or consists entirely of spaces, must be padded
+        // with a single space on each side so the opening/closing backtick
+        // runs never collide with the fence and prematurely close the span.
+        let content = if content.starts_with('`')
+            || content.ends_with('`')
+            || (!content.is_empty() && content.chars().all(|c| c == ' '))
+        {
+            format!(" {} ", content)
+        } else {
+            content
+        };
+
         if self.in_link {
             self.append_link_text(&fence);
             self.append_link_text(&content);
@@ -900,6 +913,8 @@ impl IncrementalEmitter {
         self.check_buffer_budget(prefix_size)?;
         for _ in 0..self.blockquote_depth {
             self.buffer.extend_from_slice(b"> ");
+            self.markdown_escape_state.advance('>');
+            self.markdown_escape_state.advance(' ');
         }
         Ok(())
     }
@@ -966,7 +981,15 @@ impl IncrementalEmitter {
             format!("{}- ", indent)
         };
 
-        self.write_str(&prefix)?;
+        // Synthetic list markers ("- ", "1. ") must not mutate the escape
+        // state: a following "# heading" must still be escaped as literal
+        // text. Writing via write_str() would advance the state and clear
+        // line_prefix, letting a raw '#' through as a real heading.
+        self.last_text_ended_whitespace = false;
+        self.check_buffer_budget(prefix.len())?;
+        self.buffer.extend_from_slice(prefix.as_bytes());
+        self.last_was_newline = false;
+        self.consecutive_blank_lines = 0;
         Ok(())
     }
 
@@ -1606,6 +1629,22 @@ mod tests {
         assert!(output.contains("- Item 2"), "got: {}", output);
     }
 
+    #[test]
+    fn test_list_item_heading_marker_is_escaped() {
+        let output = emit_html(&[
+            start_tag("ul"),
+            start_tag("li"),
+            text("# heading"),
+            end_tag("li"),
+            end_tag("ul"),
+        ]);
+        assert!(
+            output.contains("- \\# heading"),
+            "a leading '#' in list-item text must be escaped, got: {}",
+            output
+        );
+    }
+
     // ── Ordered list tests ──────────────────────────────────────────
 
     #[test]
@@ -2152,6 +2191,42 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_inline_code_pads_single_backtick_content() {
+        let output = emit_html(&[
+            start_tag("p"),
+            start_tag("code"),
+            text("`"),
+            end_tag("code"),
+            end_tag("p"),
+        ]);
+        assert_eq!(output, "`` ` ``\n");
+    }
+
+    #[test]
+    fn test_inline_code_pads_leading_and_trailing_backticks() {
+        let output = emit_html(&[
+            start_tag("p"),
+            start_tag("code"),
+            text("`x`"),
+            end_tag("code"),
+            end_tag("p"),
+        ]);
+        assert_eq!(output, "`` `x` ``\n");
+    }
+
+    #[test]
+    fn test_inline_code_pads_all_space_content() {
+        let output = emit_html(&[
+            start_tag("p"),
+            start_tag("code"),
+            text("   "),
+            end_tag("code"),
+            end_tag("p"),
+        ]);
+        assert_eq!(output, "`     `\n");
+    }
+
     // ── Blockquote tests ────────────────────────────────────────────
 
     #[test]
@@ -2211,6 +2286,27 @@ mod tests {
         assert!(
             prefixed_lines.len() >= 2,
             "Each line within a blockquote should start with '> ', got: {:?}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_blockquote_does_not_over_escape_content() {
+        let output = emit_html(&[
+            start_tag("blockquote"),
+            start_tag("p"),
+            text("# heading"),
+            end_tag("p"),
+            end_tag("blockquote"),
+        ]);
+        assert!(
+            output.contains("> # heading"),
+            "blockquote content must not over-escape a leading '#', got: {}",
+            output
+        );
+        assert!(
+            !output.contains("> \\#"),
+            "blockquote content was over-escaped, got: {}",
             output
         );
     }
