@@ -548,7 +548,7 @@ ngx_http_markdown_header_snapshot_prepare(
     ngx_http_markdown_header_snapshot_t *snapshot)
 {
     ngx_list_part_t  *part;
-    ngx_table_elt_t  *headers;
+    const ngx_table_elt_t  *headers;
     ngx_uint_t        count;
 
     memset(snapshot, 0, sizeof(*snapshot));
@@ -629,12 +629,11 @@ ngx_http_markdown_header_snapshot_restore(
      * also leaves a truncated/malformed list fail-closed.
      */
     {
-        ngx_list_part_t  *part;
         ngx_table_elt_t  *headers;
         ngx_uint_t        restored;
 
         restored = 0;
-        for (part = &r->headers_out.headers.part;
+        for (ngx_list_part_t *part = &r->headers_out.headers.part;
              part != NULL && restored < snapshot->entry_count;
              part = part->next)
         {
