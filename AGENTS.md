@@ -497,7 +497,7 @@ Follow evidence-first verification (no completion claim without fresh command ou
 - If warnings were part of the task or findings, include the exact warning
   sweep command(s) and whether residual warnings remain.
 
-If full suite is too heavy for current scope, run the narrowest relevant target set. Explicitly report what was not run.
+If the full suite is too heavy for the current scope, run the narrowest relevant target set. Explicitly report what was not run.
 
 ### After fixing bugs or addressing review findings
 - Evaluate whether the fix reveals a generalizable pattern that `AGENTS.md`
