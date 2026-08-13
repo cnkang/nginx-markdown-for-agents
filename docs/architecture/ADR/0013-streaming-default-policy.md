@@ -53,7 +53,7 @@ conversion enter the streaming path targeted by the 0.8.0 release.
 - Small responses retain the simpler full-buffer path, avoiding state machine
   overhead for trivial conversions
 - Backward-compatible: operators who use `markdown_streaming off|auto|force`
-  are unaffected
+  see no change
 - Aligns with the 0.6.0 auto-mode precedent (ADR-0007) and extends it with
   the 0.8.0 true streaming contract
 - Conservative threshold (1m) reduces risk during initial 0.8.0 development

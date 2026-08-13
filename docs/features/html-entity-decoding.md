@@ -67,8 +67,8 @@ The parser decodes entities in supported text and attribute contexts:
 - **In code blocks**: `<code>&lt;html&gt;</code>` → `<html>`
 - **In lists**: `<li>&amp; item</li>` → `& item`
 
-Raw-text elements such as `<script>` and `<style>` are not decoded — their
-content is passed through as-is.
+Raw-text elements such as `<script>` and `<style>` remain undecoded. The
+converter passes their content through as-is.
 
 Literal angle brackets in source text must be written as `&lt;` (and may be
 written as `&gt;` for `>`). The parser treats a literal `<tag>` as HTML markup, not as
