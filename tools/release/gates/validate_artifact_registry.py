@@ -231,12 +231,27 @@ def _check_index_artifact(artifact: dict, index_pos: int, seen_ids: set,
             f"!= frozen ABI {expected_abi}")
 
     status = artifact.get("verification_status")
-    if status is not None and status not in VALID_VERIFICATION_STATUSES:
+    _check_verification_status(status, index_pos, reasons)
+
+    _check_local_artifact_digest(artifact, index_pos, reasons)
+
+
+def _check_verification_status(status, index_pos: int, reasons: list) -> None:
+    """Validate a row's verification_status against the real-gate policy.
+
+    Only 'pass' qualifies a candidate artifact for the real release gate;
+    a recorded pending/skip/fail status stays blocking (fail-closed).
+    """
+    if status is None:
+        return
+    if status not in VALID_VERIFICATION_STATUSES:
         reasons.append(
             f"malformed: artifacts[{index_pos}] verification_status "
             f"{status!r} not in {VALID_VERIFICATION_STATUSES}")
-
-    _check_local_artifact_digest(artifact, index_pos, reasons)
+    elif status != "pass":
+        reasons.append(
+            f"blocking-pending: artifacts[{index_pos}] verification_status "
+            f"{status!r} must be 'pass' for the real gate")
 
 
 def _check_local_artifact_digest(artifact: dict, index_pos: int,

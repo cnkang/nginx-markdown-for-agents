@@ -172,7 +172,7 @@ sandbox_conf() {
     event_type="kqueue"
   fi
   sed -E \
-    -e 's/^([[:space:]]*)listen[[:space:]]+80([[:space:];])/\1listen 18180\2/' \
+    -e 's/^([[:space:]]*)listen[[:space:]]+80([[:space:]]+[^;]*)?;/\1listen 18180;/' \
     -e 's/^([[:space:]]*)listen[[:space:]]+443([[:space:]]+[^;]*)?;/\1listen 18180;/' \
     -e '/^[[:space:]]*ssl_certificate_key[[:space:]]/s/^/#/' \
     -e '/^[[:space:]]*ssl_certificate[[:space:]]/s/^/#/' \

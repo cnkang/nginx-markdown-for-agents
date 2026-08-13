@@ -164,25 +164,37 @@ def check_canonical_identity(matrix: dict) -> None:
     errors = []
     if "matrix" in matrix:
         errors.append("top-level legacy 'matrix' array present (use 'entries')")
-    for index, entry in enumerate(matrix.get("entries", [])):
-        if not isinstance(entry, dict):
-            errors.append(f"entry {index}: not an object")
-            continue
-        for alias in LEGACY_ENTRY_KEYS:
-            if alias in entry:
-                errors.append(f"entry {index}: legacy alias {alias!r} must not be used")
-        for key in DROPPED_LEGACY_KEYS:
-            if key in entry:
-                errors.append(f"entry {index}: dropped legacy key {key!r} present")
+    entries = matrix.get("entries")
+    if not isinstance(entries, list) or not entries:
+        errors.append("entries collection is absent or empty")
+        raise SystemExit("ERROR: matrix is not canonical:\n  " + "\n  ".join(errors))
+    for index, entry in enumerate(entries):
+        _check_canonical_entry(entry, index, errors)
     if errors:
         raise SystemExit("ERROR: matrix is not canonical:\n  " + "\n  ".join(errors))
+
+
+def _check_canonical_entry(entry: dict, index: int, errors: list) -> None:
+    """Validate one canonical matrix entry against the frozen entry shape."""
+    if not isinstance(entry, dict):
+        errors.append(f"entry {index}: not an object")
+        return
+    for alias in LEGACY_ENTRY_KEYS:
+        if alias in entry:
+            errors.append(f"entry {index}: legacy alias {alias!r} must not be used")
+    for key in DROPPED_LEGACY_KEYS:
+        if key in entry:
+            errors.append(f"entry {index}: dropped legacy key {key!r} present")
 
 
 def check_bindings(normalized: dict) -> None:
     expected_digest = feature_manifest_digest()
     expected_abi = frozen_abi_version()
     errors = []
-    for index, entry in enumerate(normalized.get("entries", [])):
+    entries = normalized.get("entries")
+    if not isinstance(entries, list) or not entries:
+        raise SystemExit("ERROR: normalized matrix has no entries to validate")
+    for index, entry in enumerate(entries):
         digest = entry.get("feature_manifest_digest")
         abi = entry.get("abi_version")
         if digest != expected_digest:

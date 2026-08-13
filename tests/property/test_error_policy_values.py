@@ -45,8 +45,11 @@ def classify_policy(value):
     if isinstance(value, str) and value in ACCEPTED_SINGLE:
         return (ErrorPolicyKind.ACCEPTED, None)
     if isinstance(value, str) and value.startswith("status "):
+        suffix = value.split(" ", 1)[1]
+        if not suffix.isdigit():
+            return (ErrorPolicyKind.REJECTED, None)
         try:
-            code = int(value.split(" ", 1)[1])
+            code = int(suffix)
         except ValueError:
             return (ErrorPolicyKind.REJECTED, None)
         if code in ACCEPTED_STATUS_CODES:

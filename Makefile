@@ -193,7 +193,24 @@ test-e2e-rust:
 	@echo "Running e2e-harness migrated scenarios..."
 	cd $(E2E_HARNESS_DIR) && cargo run --locked -- suite --profile smoke
 
-test-all: build test-rust test-nginx-unit
+test-all: build test-rust test-nginx-unit test-property
+
+# Property-based test suites: Rust proptest + Python Hypothesis + shell.
+# Runs the proptest integration targets (tests/property_*.rs), the Python
+# Hypothesis property tests (tests/property/*.py), and the shell property
+# tests (tests/property/*.sh).
+test-property:
+	@echo "=== Property-based tests (Rust proptest) ==="
+	@cd $(RUST_DIR) && for t in tests/property_*.rs; do \
+		target="$$(basename "$$t" .rs)"; \
+		echo "  running $$target"; \
+		cargo test --locked --test "$$target" || exit 1; \
+	done
+	@echo "=== Property-based tests (Python Hypothesis) ==="
+	@python3 -m pytest tests/property/ -q
+	@echo "=== Property-based tests (shell) ==="
+	@bash tests/property/test_log_prefix_canonical.sh
+	@bash tests/property/test_log_prefix_preservation.sh
 
 sonar-compile-db:
 	./tools/sonar/generate_compile_commands.sh
@@ -996,6 +1013,8 @@ release-gates-check-092: release-gates-check-091
 	$(MAKE) test-e2e-rust-soak
 	@echo "  [13/13] Repository docs style baseline"
 	$(MAKE) docs-style-check-baseline
+	@echo "  Property-based test suites (Rust proptest + Python Hypothesis)"
+	$(MAKE) test-property
 	@echo "=== 0.9.2 Release Gates: PASS ==="
 
 # release-matrix-check: Canonical release-matrix gate.

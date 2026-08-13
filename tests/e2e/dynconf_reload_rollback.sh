@@ -585,6 +585,13 @@ write_dynconf_atomically() {
             TMP_WRITE_PATH=""
             return 1
         fi
+    else
+        if ! chmod 0644 "$TMP_WRITE_PATH"; then
+            echo "Error: failed to set readable dynconf file mode" >&2
+            rm -f -- "$TMP_WRITE_PATH" || true
+            TMP_WRITE_PATH=""
+            return 1
+        fi
     fi
     if ! mv -f -- "$TMP_WRITE_PATH" "$DYNCONF_FILE"; then
         echo "Error: failed to replace dynconf file $DYNCONF_FILE" >&2

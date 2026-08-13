@@ -3,8 +3,8 @@
   "candidate_sha": "9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d",
   "run_id": "soak-fixture-valid",
   "started_at": "2026-08-05T00:00:00Z",
-  "finished_at": "2026-08-05T00:30:30Z",
-  "duration_seconds": 1830.0,
+  "finished_at": "2026-08-05T00:34:00Z",
+  "duration_seconds": 2040.0,
   "concurrency": 16,
   "per_scenario": [
     {

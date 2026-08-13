@@ -362,7 +362,7 @@ fn metric_value(base_url: &str, name: &str) -> Result<u64> {
             Some("engine=\"full_buffer\""),
         ),
         "streaming_events" => ("nginx_markdown_streaming_events_total", None),
-        other => (other, None),
+        other => return Err(anyhow::anyhow!("unsupported metric name: {other}")),
     };
     let mut matched_samples = 0_u64;
     let value = response

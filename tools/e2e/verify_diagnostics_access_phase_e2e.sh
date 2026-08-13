@@ -258,7 +258,7 @@ EOF
         curl_cmd+=(-u "${AUTH_USER}:${AUTH_PASSWORD}")
       fi
       curl_cmd+=(-o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/${handler}")
-      auth_status="$("${curl_cmd[@]}")"
+      auth_status="$( "${curl_cmd[@]}" 2>/dev/null)" || auth_status=000
 
       if [[ "${auth_status}" != "${expected_auth}" ]]; then
         echo "FAIL: ${policy}/${handler}/${method}/authorized: expected=${expected_auth} actual=${auth_status}" >&2
@@ -276,6 +276,9 @@ EOF
       case "${policy}" in
         allow_deny)
           if [[ "${loopback_alias_available}" -eq 0 ]]; then
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+              "${policy}" "${handler}" "${method}" "unauthorized_skipped" \
+              "${expected_unauth}" "skipped" "${config_digest}" >> "${RESULT_TSV}"
             continue
           fi
           if ! unauth_status="$(curl -sS --interface 127.0.0.2 ${method_flag} \
@@ -291,7 +294,7 @@ EOF
             "${policy}" "${handler}" "${method}" "unauthorized" "${expected_unauth}" "${unauth_status}" "${config_digest}" >> "${RESULT_TSV}"
           ;;
         auth_basic)
-          unauth_status="$(curl -sS ${method_flag} -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/${handler}")"
+          unauth_status="$(curl -sS ${method_flag} -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/${handler}" 2>/dev/null)" || unauth_status=000
           if [[ "${unauth_status}" != "${expected_unauth}" ]]; then
             echo "FAIL: ${policy}/${handler}/${method}/unauthorized: expected=${expected_unauth} actual=${unauth_status}" >&2
             fail_count=$((fail_count + 1))
@@ -304,7 +307,7 @@ EOF
           # Omitting credentials verifies that the allow rule alone is sufficient.
           unauth_status="$(curl -sS ${method_flag} \
             -o /dev/null -w '%{http_code}' \
-            "http://127.0.0.1:${PORT}/${handler}")"
+            "http://127.0.0.1:${PORT}/${handler}" 2>/dev/null)" || unauth_status=000
           # satisfy any: allow 127.0.0.1 passes without credentials.
           # This confirms that at least one of the access checks (allow) passed
           printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \

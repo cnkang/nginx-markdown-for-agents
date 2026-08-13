@@ -76,7 +76,7 @@ fi
 
 # Step 1: Extract function names declared inside #ifdef GUARD_NAME blocks in the header
 # These are prototype-style declarations (end with ;)
-guarded_funcs=$(python3 - "${HEADER_FILE}" "${GUARD_NAME}" <<'PY'
+if ! guarded_funcs=$(python3 - "${HEADER_FILE}" "${GUARD_NAME}" <<'PY'
 import re
 import sys
 import os
@@ -111,7 +111,7 @@ def guard_expression(expression):
         return False
     return None
 
-for line in lines:
+for i, line in enumerate(lines, 1):
     stripped = line.strip()
     directive = re.match(r'#\s*(ifdef|ifndef|if|else|elif|endif)\b(.*)', stripped)
     if directive:
@@ -155,7 +155,10 @@ for line in lines:
 for f in sorted(funcs):
     print(f)
 PY
- 2>/dev/null)
+); then
+    echo "ERROR: Python parser failed while extracting guarded functions from ${HEADER_FILE}" >&2
+    exit 1
+fi
 
 if [[ -z "$guarded_funcs" ]]; then
     echo "OK: no functions found inside #ifdef ${GUARD_NAME} blocks"
@@ -175,7 +178,7 @@ for func in $guarded_funcs; do
         # Keep conditional nesting intact: an inner #ifdef must not make the
         # outer streaming guard appear closed.  Shadow debug is a streaming
         # sub-feature and therefore implies the requested guard.
-result=$(python3 - "${file}" "${func}" "${GUARD_NAME}" "${HEADER_FILE}" <<'PY'
+if ! result=$(python3 - "${file}" "${func}" "${GUARD_NAME}" "${HEADER_FILE}" <<'PY'
 import re
 import sys
 import os
@@ -266,7 +269,11 @@ for i, line in enumerate(lines, 1):
                 continue
             print(f'{i}:{line.strip()[:80]}')
 PY
- 2>/dev/null)
+); then
+            echo "ERROR: Python parser failed while checking ${func} visibility in ${file}" >&2
+            findings=$((findings + 1))
+            continue
+        fi
 
         if [[ -n "$result" ]]; then
             while IFS= read -r match_line; do
