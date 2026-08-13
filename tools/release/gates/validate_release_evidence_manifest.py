@@ -35,6 +35,8 @@ from lib.path_validation import validate_read_path  # noqa: E402
 
 SCHEMA_VERSION = "release.evidence-manifest.v1"
 
+FINAL_EVIDENCE_MANIFEST_LABEL = "final evidence manifest"
+
 CANDIDATE_SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
 
 REQUIRED_TOP_FIELDS = (
@@ -269,7 +271,7 @@ def _resolve_expected_sha(args) -> str | None:
     # Derive the release version from the selected manifest's parent
     # directory (artifacts/release/<version>/...) rather than hardcoding 0.9.2.
     manifest_path = validate_read_path(
-        args.manifest, purpose="final evidence manifest"
+        args.manifest, purpose=FINAL_EVIDENCE_MANIFEST_LABEL
     )
     candidate_path = manifest_path.parent / "release-candidate-sha-manifest.json"
     if not candidate_path.is_file():
@@ -282,10 +284,10 @@ def run_real_gate(args) -> int:
     """Validate the candidate-bound final evidence manifest and
     observation-state record against the release evidence schemas."""
     manifest_path = validate_read_path(
-        args.manifest, purpose="final evidence manifest"
+        args.manifest, purpose=FINAL_EVIDENCE_MANIFEST_LABEL
     )
 
-    manifest = load_json(manifest_path, "final evidence manifest")
+    manifest = load_json(manifest_path, FINAL_EVIDENCE_MANIFEST_LABEL)
     expected_sha = _resolve_expected_sha(args)
     reasons = validate_record(manifest, expected_sha=expected_sha)
     if not _require_jsonschema():
