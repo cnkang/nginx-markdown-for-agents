@@ -7,6 +7,8 @@
  * the request-path headers so standalone routing tests can exercise the same
  * production capability decision.
  */
+#ifdef MARKDOWN_STREAMING_ENABLED
+
 static int
 ngx_http_markdown_decompression_is_streamable(unsigned compression_type)
 {
@@ -22,5 +24,7 @@ ngx_http_markdown_decompression_is_streamable(unsigned compression_type)
 
     return 0;
 }
+
+#endif /* MARKDOWN_STREAMING_ENABLED */
 
 #endif /* NGX_HTTP_MARKDOWN_DECOMPRESSION_ROUTE_H */
