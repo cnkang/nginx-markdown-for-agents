@@ -2796,7 +2796,7 @@ ngx_http_markdown_streaming_handle_success_output(
 
     if (ctx->streaming.commit_state == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE) {
         rc = ngx_http_markdown_streaming_commit(r, ctx, conf);
-        if (rc != NGX_OK) {
+        if (rc != NGX_OK && rc != NGX_AGAIN) {
             markdown_streaming_output_free(out_data, out_len);
             return rc;
         }

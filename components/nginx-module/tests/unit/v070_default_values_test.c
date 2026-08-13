@@ -596,6 +596,75 @@ test_080_threshold_bridge_full_merge(void)
     TEST_PASS("stream threshold is internalized at 1 MiB");
 }
 
+/*
+ * Test: markdown_limits cross-key constraint is explicitness-aware.
+ *
+ * The 0.9.2 frozen contract constrains parser_* keys against conversion_*
+ * keys. A violation must fail nginx -t only when BOTH sides were
+ * explicitly configured; a default-resolved lower value that violates the
+ * constraint is clamped down instead of failing the config.
+ */
+static void
+test_limits_cross_key_explicitness_aware(void)
+{
+    ngx_conf_t cf;
+    ngx_http_markdown_conf_t *parent;
+    ngx_http_markdown_conf_t *child;
+    const char *rc;
+
+    TEST_SUBSECTION("markdown_limits cross-key explicitness-aware constraint");
+
+    /*
+     * Case 1: parent fully unset, child sets only conversion_memory=10m.
+     * parser_memory resolves to its 32m default, which exceeds 10m, but
+     * because parser_memory was never explicit the merge must succeed and
+     * clamp parser_memory down to 10m.
+     */
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+
+    parent = ngx_http_markdown_create_conf(&cf);
+    child = ngx_http_markdown_create_conf(&cf);
+    TEST_ASSERT(parent != NULL, "parent conf allocation (case 1)");
+    TEST_ASSERT(child != NULL, "child conf allocation (case 1)");
+
+    child->limits.conversion_memory = 10 * 1024 * 1024;
+
+    rc = ngx_http_markdown_merge_conf(&cf, parent, child);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+        "only conversion_memory=10m explicit must pass");
+    TEST_ASSERT(child->limits.parser_memory == 10 * 1024 * 1024,
+        "default parser_memory must clamp down to explicit conversion_memory");
+    TEST_ASSERT(child->decompress.parser_budget == 10 * 1024 * 1024,
+        "legacy parser_budget must reflect the clamp");
+
+    free(parent);
+    free(child);
+
+    /*
+     * Case 2: explicit parser_memory=64m + conversion_memory=10m -> reject.
+     */
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+
+    parent = ngx_http_markdown_create_conf(&cf);
+    child = ngx_http_markdown_create_conf(&cf);
+    TEST_ASSERT(parent != NULL, "parent conf allocation (case 2)");
+    TEST_ASSERT(child != NULL, "child conf allocation (case 2)");
+
+    child->limits.parser_memory = 64 * 1024 * 1024;
+    child->limits.conversion_memory = 10 * 1024 * 1024;
+
+    rc = ngx_http_markdown_merge_conf(&cf, parent, child);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "explicit parser_memory=64m > conversion_memory=10m must fail");
+
+    free(parent);
+    free(child);
+
+    TEST_PASS("cross-key constraint is explicitness-aware");
+}
+
 /* ── Main ─────────────────────────────────────────────────────────── */
 
 int
@@ -623,6 +692,7 @@ main(void)
     test_v070_directives_child_override();
     test_06x_defaults_unchanged();
     test_080_threshold_bridge_full_merge();
+    test_limits_cross_key_explicitness_aware();
 
     printf("\n========================================\n");
     printf("All v0.7.0 default value tests passed!\n");

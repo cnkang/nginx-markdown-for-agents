@@ -489,6 +489,11 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->limits.decompressed_size = NGX_CONF_UNSET_SIZE;
     conf->limits.decompression_ratio = NGX_CONF_UNSET_UINT;
     conf->limits.max_inflight = NGX_CONF_UNSET_UINT;
+    conf->limits.conversion_timeout_explicit = 0;
+    conf->limits.parser_timeout_explicit = 0;
+    conf->limits.conversion_memory_explicit = 0;
+    conf->limits.parser_memory_explicit = 0;
+    conf->limits.streaming_buffer_explicit = 0;
 
     conf->advanced.prune_noise = NGX_CONF_UNSET;
     conf->advanced.prune_selectors = NGX_CONF_UNSET_PTR;
@@ -539,37 +544,65 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
      *   parser_memory  <= conversion_memory
      *   streaming_buffer <= conversion_memory
      *
-     * Violation fails nginx -t atomically.
+     * Explicitness-aware semantics: a violation fails nginx -t only when
+     * BOTH sides were explicitly configured at this or a parent level.
+     * When the constrained (lower) key resolved from a default, or the
+     * upper key was not explicit, the lower value is clamped down to the
+     * upper bound instead of failing the config.
      */
     if (conf->limits.parser_timeout > conf->limits.conversion_timeout) {
-        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-            "markdown_limits cross-key constraint violated: "
-            "parser_timeout (%Mms) must not exceed "
-            "conversion_timeout (%Mms)",
-            conf->limits.parser_timeout,
-            conf->limits.conversion_timeout);
-        return NGX_CONF_ERROR;
+        if (conf->limits.parser_timeout_explicit
+            && conf->limits.conversion_timeout_explicit)
+        {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                "markdown_limits cross-key constraint violated: "
+                "parser_timeout (%Mms) must not exceed "
+                "conversion_timeout (%Mms)",
+                conf->limits.parser_timeout,
+                conf->limits.conversion_timeout);
+            return NGX_CONF_ERROR;
+        }
+        conf->limits.parser_timeout = conf->limits.conversion_timeout;
     }
 
     if (conf->limits.parser_memory > conf->limits.conversion_memory) {
-        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-            "markdown_limits cross-key constraint violated: "
-            "parser_memory (%uz) must not exceed "
-            "conversion_memory (%uz)",
-            conf->limits.parser_memory,
-            conf->limits.conversion_memory);
-        return NGX_CONF_ERROR;
+        if (conf->limits.parser_memory_explicit
+            && conf->limits.conversion_memory_explicit)
+        {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                "markdown_limits cross-key constraint violated: "
+                "parser_memory (%uz) must not exceed "
+                "conversion_memory (%uz)",
+                conf->limits.parser_memory,
+                conf->limits.conversion_memory);
+            return NGX_CONF_ERROR;
+        }
+        conf->limits.parser_memory = conf->limits.conversion_memory;
     }
 
     if (conf->limits.streaming_buffer > conf->limits.conversion_memory) {
-        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-            "markdown_limits cross-key constraint violated: "
-            "streaming_buffer (%uz) must not exceed "
-            "conversion_memory (%uz)",
-            conf->limits.streaming_buffer,
-            conf->limits.conversion_memory);
-        return NGX_CONF_ERROR;
+        if (conf->limits.streaming_buffer_explicit
+            && conf->limits.conversion_memory_explicit)
+        {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                "markdown_limits cross-key constraint violated: "
+                "streaming_buffer (%uz) must not exceed "
+                "conversion_memory (%uz)",
+                conf->limits.streaming_buffer,
+                conf->limits.conversion_memory);
+            return NGX_CONF_ERROR;
+        }
+        conf->limits.streaming_buffer = conf->limits.conversion_memory;
     }
+
+    /*
+     * Re-project the legacy compat fields after any clamp so downstream
+     * legacy readers observe the same effective values as the unified
+     * limits struct.
+     */
+    conf->decompress.parse_timeout = conf->limits.parser_timeout;
+    conf->decompress.parser_budget = conf->limits.parser_memory;
+    conf->stream.budget = conf->limits.streaming_buffer;
 
     ngx_http_markdown_apply_memory_budget_override(conf, prev, max_size_set);
 

@@ -433,6 +433,15 @@ ngx_http_markdown_diagnostics_method_not_allowed(ngx_http_request_t *r)
     ngx_chain_t   out;
     ngx_int_t     rc;
 
+    /*
+     * Discard any request body before sending the 405 response so a
+     * non-GET/HEAD client body is not left unread.
+     */
+    rc = ngx_http_discard_request_body(r);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
     b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
     if (b == NULL) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;

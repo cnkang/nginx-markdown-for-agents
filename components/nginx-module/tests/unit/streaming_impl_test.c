@@ -2207,8 +2207,9 @@ test_postcommit_and_precommit_error_paths(void)
     TEST_ASSERT(g_log_decision_calls == 2,
         "postcommit safe-finish should log classification and terminal reason");
     TEST_ASSERT(g_terminal_decision_calls == 1
-        && strcmp(g_last_terminal_reason,
-                  "converted") == 0
+        && g_last_terminal_reason != NULL
+        && strcmp(g_last_terminal_reason, "converted") == 0
+        && g_last_terminal_stage != NULL
         && strcmp(g_last_terminal_stage, "postcommit") == 0,
         "postcommit safe-finish should publish one converted terminal path");
 
