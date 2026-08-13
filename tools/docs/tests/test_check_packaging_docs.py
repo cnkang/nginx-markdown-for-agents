@@ -407,7 +407,7 @@ class TestCheckCompatibilityMatrix:
         """Verify no errors when the matrix section has the canonical reference and a table."""
         text = (
             "## 7. Compatibility Matrix\n"
-            "Canonical source: release-matrix.json\n"
+            "Canonical source: tools/release-matrix.json\n"
             "| NGINX Version | OS Type | Arch |\n"
             "|---|---|---|\n"
             "| 1.24.0 | glibc | x86_64 |\n"

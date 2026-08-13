@@ -277,7 +277,7 @@ import json
 import sys
 
 data = json.load(sys.stdin)
-assert data["schema_version"] == 1
+assert data["schema_version"] == 2
 assert "profile" not in data
 assert "streaming_config" not in data
 assert "metrics_snapshot" not in data

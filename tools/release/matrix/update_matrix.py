@@ -162,6 +162,11 @@ def _missing_required_keys(entry: dict, required_keys: tuple[str, ...]) -> list[
     return [key for key in required_keys if not _entry_has_required_key(entry, key)]
 
 
+def _is_canonical_document(data: dict) -> bool:
+    """Return whether one matrix document uses the canonical ``entries`` shape."""
+    return isinstance(data.get("entries"), list) and "matrix" not in data
+
+
 def _resolve_repo_write_path(path: Path) -> Path:
     """Resolve a filesystem path to its canonical absolute Path and ensure it is inside
     the repository root.
@@ -445,9 +450,14 @@ def _read_matrix_json(path: Path) -> dict:
     return data
 
 
-def _supported_dynamic_entry(entry: dict) -> dict | None:
-    """Project a documented canonical row into the updater's legacy shape."""
-    normalized = normalize_compatibility_entry(entry)
+def _source_only_entry(normalized: dict) -> dict | None:
+    """Project a source row for the legacy/doc-sync matrix vocabulary.
+
+    Source rows intentionally retain the historical ``source_only`` shape so
+    the canonical, legacy, and generated documentation consumers continue to
+    describe the same row.  Keep this projection separate from dynamic-module
+    handling so a future artifact type cannot accidentally inherit it.
+    """
     if (
         normalized.get("artifact_type") == "source"
         and normalized.get("support_tier") == "best-effort"
@@ -459,10 +469,22 @@ def _supported_dynamic_entry(entry: dict) -> dict | None:
             "os_type": normalized["libc"],
             "arch": normalized["target"],
             "support_tier": "source_only",
+            "artifact_type": "source",
             "managed_by": "manual",
         }
+    return None
+
+
+def _supported_dynamic_entry(entry: dict) -> dict | None:
+    """Project a canonical row into the updater's legacy shape.
+
+    Only ``dynamic-module`` rows are eligible for generated support entries;
+    source rows use the explicit doc-sync projection above and all other
+    artifact types are ignored.
+    """
+    normalized = normalize_compatibility_entry(entry)
     if normalized.get("artifact_type") != "dynamic-module":
-        return None
+        return _source_only_entry(normalized)
     if normalized.get("support_tier") != "supported":
         return None
     try:
@@ -482,7 +504,7 @@ def _supported_dynamic_entry(entry: dict) -> dict | None:
 def _matrix_entry_list(data: dict, path: Path) -> list:
     """Return the matrix entry list from supported schema variants."""
     raw_entries = data.get("entries")
-    canonical_entries_shape = isinstance(raw_entries, list) and "matrix" not in data
+    canonical_entries_shape = _is_canonical_document(data)
     if not canonical_entries_shape:
         raw_entries = data.get("matrix")
     if not isinstance(raw_entries, list):
@@ -832,6 +854,11 @@ def update_doc_table(doc_path: Path, matrix_entries: list[dict]) -> str:
     for entry in sorted_entries:
         version, os_type, arch = _matrix_entry_identity(entry)
         tier = entry["support_tier"].replace("_", " ").title()
+        if entry["support_tier"] == "source_only":
+            # The source fallback is for combinations absent from the
+            # generated binary cross-product, not a second platform row.
+            os_type = "unlisted"
+            arch = "unlisted"
         lines.append(
             f"| {version} | {os_type} | {arch} | {tier} |"
         )
@@ -1101,6 +1128,12 @@ def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
     if not isinstance(entries, list):
         _matrix_error("Canonical release matrix is missing an entries list")
 
+    merged_dynamic = [
+        entry
+        for entry in merged
+        if isinstance(entry, dict)
+        and entry.get("artifact_type", "dynamic-module") == "dynamic-module"
+    ]
     existing_dynamic = [
         entry
         for entry in entries
@@ -1108,7 +1141,7 @@ def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
         and entry.get("artifact_type") == "dynamic-module"
     ]
     _assert_unique_identities(existing_dynamic, "existing dynamic")
-    _assert_unique_identities(merged, "generated dynamic")
+    _assert_unique_identities(merged_dynamic, "generated dynamic")
     existing_by_key = {
         _matrix_entry_identity(entry): entry for entry in existing_dynamic
     }
@@ -1117,7 +1150,7 @@ def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
             legacy_entry,
             existing_by_key.get(_matrix_entry_identity(legacy_entry)),
         )
-        for legacy_entry in merged
+        for legacy_entry in merged_dynamic
     ]
     generated_keys = {
         _matrix_entry_identity(entry)
@@ -1161,14 +1194,20 @@ def _run_write_mode(
     except OSError:
         matrix_backup = None
 
-    if isinstance(data.get("entries"), list) and "matrix" not in data:
-        _replace_canonical_dynamic_entries(data, merged)
-    else:
-        data["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        data["matrix"] = merged
+    try:
+        if _is_canonical_document(data):
+            _replace_canonical_dynamic_entries(data, merged)
+        else:
+            data["updated_at"] = datetime.now(timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+            data["matrix"] = merged
 
-        # Update entries with the new version numbers if they exist
-        _update_entries_for_added_versions(data, diff)
+            # Update entries with the new version numbers if they exist
+            _update_entries_for_added_versions(data, diff)
+    except (TypeError, ValueError) as exc:
+        print(f"Error preparing matrix update: {exc}", file=sys.stderr)
+        return 1
 
     # Write matrix via crash-safe temp+rename
     try:

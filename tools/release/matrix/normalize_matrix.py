@@ -318,7 +318,7 @@ def normalize_compatibility_document(doc: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def load_and_normalize(path: str) -> Dict[str, Any]:
-    """Load a matrix file and normalize it; exits 1 on fail-closed errors."""
+    """Load and normalize a matrix, raising on fail-closed errors."""
     validated = validate_read_path(path, purpose="release-matrix normalization")
     try:
         with open(validated, encoding="utf-8") as handle:

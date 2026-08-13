@@ -89,14 +89,20 @@ def _cargo_default_features() -> set[str]:
 def _workflow_feature_assignments(path: pathlib.Path) -> list[str]:
     """Extract RUST_FEATURES assignment values from a workflow file."""
     text = path.read_text(encoding="utf-8")
-    return re.findall(r"RUST_FEATURES\s*:\s*([A-Za-z0-9_,]+)", text)
+    return re.findall(
+        r"RUST_FEATURES\s*:\s*['\"]?([A-Za-z0-9_,]+)['\"]?",
+        text,
+    )
 
 
 def _workflow_feature_flags(path: pathlib.Path) -> list[set[str]]:
     """Extract `--features X` or `--no-default-features` usage."""
     text = path.read_text(encoding="utf-8")
     no_default = "no-default-features" in text
-    flags = re.findall(r"--features\s+[\"']?([A-Za-z0-9_,]+)[\"']?", text)
+    flags = re.findall(
+        r"--features(?:=|\s+)[\"']?([A-Za-z0-9_,]+)[\"']?",
+        text,
+    )
     parsed = [set(f.split(",")) for f in flags]
     if no_default:
         parsed.append(set())

@@ -292,17 +292,7 @@ def check_limit_key(
     key: str, handler_src: str, docs: str, result: ValidationResult
 ) -> None:
     """Verify that a frozen markdown_limits key is implemented and documented."""
-    if not handler_src:
-        result.fail(
-            "limits-prerequisite:handler",
-            "config handler source not found; cannot validate markdown_limits keys",
-        )
-        return
-    if not docs:
-        result.fail(
-            "limits-prerequisite:docs",
-            "configuration documentation not found; cannot validate markdown_limits keys",
-        )
+    if not handler_src or not docs:
         return
     source_id = f"limits-source:{key}"
     if re.search(rf'"{re.escape(key)}"', handler_src):
@@ -462,6 +452,16 @@ def _check_directive_contract(
     result: ValidationResult,
 ) -> None:
     """Validate active, limit, and removed directive contracts."""
+    if not handler_src:
+        result.fail(
+            "limits-prerequisite:handler",
+            "config handler source not found; cannot validate markdown_limits keys",
+        )
+    if not docs:
+        result.fail(
+            "limits-prerequisite:docs",
+            "configuration documentation not found; cannot validate markdown_limits keys",
+        )
     for name in CURRENT_DIRECTIVES:
         check_directive_in_source(name, directives_src, directive_macros, result)
         check_directive_in_docs(name, name, docs, result)

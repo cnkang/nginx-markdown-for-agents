@@ -2553,6 +2553,44 @@ class TestEnvironmentCompatibility:
         assert has_baseline is True
         assert exit_rc is None
 
+    def test_release_gate_excluded_baseline_is_not_compared(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        """An explicitly excluded baseline is validated but not used for thresholds."""
+        baseline_path = (
+            tmp_path / "perf" / "baselines" / "module-baseline-092.json"
+        )
+        baseline_path.parent.mkdir(parents=True)
+        baseline_path.write_text(json.dumps({
+            "module_benchmark": {
+                "platform": "linux-x86_64",
+                "load_generator": "ab",
+                "nginx_version": "nginx version: nginx/1.24.0",
+                "scenarios": [],
+            },
+            "baseline_policy": {
+                "release_gate_eligible": False,
+                "release_gate_exclusion_reason": "remeasure first",
+            },
+        }), encoding="utf-8")
+        monkeypatch.setenv("MODULE_BASELINE_VERSION", "092")
+        monkeypatch.setattr(evidence_gate, "REPO_ROOT", tmp_path)
+        monkeypatch.setattr(
+            evidence_gate, "_validate_baseline_evidence",
+            lambda *_args: None,
+        )
+
+        metrics, has_baseline, exit_rc = evidence_gate._resolve_baseline(
+            {},
+            parse_args(["--output", str(tmp_path / "evidence.json")]),
+            blocking=True,
+        )
+
+        assert metrics == {}
+        assert has_baseline is False
+        assert exit_rc is None
+        assert "remeasure first" in capsys.readouterr().err
+
     def test_invalid_baseline_version_is_rejected(self, monkeypatch):
         """Unrecognized baseline versions must not become path components."""
         monkeypatch.setenv("MODULE_BASELINE_VERSION", "../../latest")

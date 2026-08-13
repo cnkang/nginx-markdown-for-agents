@@ -214,6 +214,10 @@ def _compare_field_sets(contract_names, schema_names) -> list[str]:
 def _compare_field_detail(field_name, contract_def, schema_field) -> list[str]:
     """Compare a single field's type, enum, and bounds."""
     errors = []
+    if not isinstance(contract_def, dict) or not isinstance(schema_field, dict):
+        return [
+            f"diagnostics field '{field_name}' definitions must be objects"
+        ]
     c_type = contract_def.get("type")
     s_type = schema_field.get("type")
     if c_type != s_type:
@@ -230,6 +234,10 @@ def _compare_field_detail(field_name, contract_def, schema_field) -> list[str]:
         )
     c_bounds = contract_def.get("bounds")
     if c_bounds is not None:
+        if not isinstance(c_bounds, dict):
+            return errors + [
+                f"diagnostics field '{field_name}' bounds must be an object"
+            ]
         if c_bounds.get("minimum") != schema_field.get("minimum"):
             errors.append(
                 f"diagnostics field '{field_name}' minimum mismatch: "
@@ -359,22 +367,16 @@ def _check_precedence_header_contract(contract: dict) -> list[str]:
         return [f"dynconf precedence header unreadable: {exc}"]
 
     matches = []
+    tier_line = re.compile(r"([1-5])\. ([^\s].*)")
     for line in content.splitlines():
         marker = line.lstrip(" \t")
         if not marker.startswith("*"):
             continue
         remainder = marker[1:].lstrip(" \t")
-        tier_text, separator, description = remainder.partition(".")
-        if (
-            not separator
-            or not tier_text
-            or tier_text[0] not in "123456789"
-            or not all(char in "0123456789" for char in tier_text)
-        ):
+        match = tier_line.fullmatch(remainder)
+        if match is None:
             continue
-        description = description.lstrip(" \t").rstrip()
-        if description:
-            matches.append((tier_text, description))
+        matches.append((match.group(1), match.group(2).rstrip()))
     expected = contract.get("five_tier_precedence_hierarchy", [])
     actual = [(int(tier), description) for tier, description in matches]
     expected_pairs = [

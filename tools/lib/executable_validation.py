@@ -112,6 +112,10 @@ def resolve_approved_executable(name: str) -> str | None:
         or not _is_rustup_tool_shim(candidate, resolved, name)
     ):
         return None
-    # Preserve Rustup shims so ``cargo +nightly`` and the paired rustfmt
-    # resolve through the selected toolchain; system tools return canonical.
-    return str(candidate if name in {"cargo", "rustfmt"} else resolved)
+    # Preserve a Rustup shim only after the dedicated shim check accepted it;
+    # every other executable is returned at its canonical resolved path.
+    if name in {"cargo", "rustfmt"} and _is_rustup_tool_shim(
+        candidate, resolved, name
+    ):
+        return str(candidate)
+    return str(resolved)

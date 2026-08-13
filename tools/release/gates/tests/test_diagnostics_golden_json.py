@@ -675,11 +675,33 @@ class TestLkgDigestEqualsActiveDigest:
             assert dynconf["lkg_digest"] == dynconf["active_digest"]
 
 
+def _iter_schema_nodes(node):
+    """Yield every mapping node in a nested JSON schema."""
+    if isinstance(node, dict):
+        yield node
+        for value in node.values():
+            yield from _iter_schema_nodes(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _iter_schema_nodes(value)
+
+
 class TestLastErrorBounds:
     """
     Property 29d: last_error <= 512 UTF-8 bytes with no paths, secrets,
     or raw configuration content.
     """
+
+    def test_schema_declares_utf8_byte_limit(self):
+        """The published schema must expose the byte, not only char, bound."""
+        found = [
+            node for node in _iter_schema_nodes(SCHEMA)
+            if node.get("type") == "string"
+            and "maxLength" in node
+            and node.get("x-maxUtf8Bytes") is not None
+        ]
+        assert len(found) == 2
+        assert all(item["x-maxUtf8Bytes"] == 512 for item in found)
 
     @settings(max_examples=100)
     @given(doc=_valid_diagnostics())

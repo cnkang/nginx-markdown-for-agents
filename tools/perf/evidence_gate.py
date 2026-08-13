@@ -1296,6 +1296,20 @@ def _baseline_policy_violations(  # pylint: disable=too-many-return-statements
     )
     violations.extend(_type_specific_violations(policy, role, policy_type))
     violations.extend(_source_artifact_violations(policy, role, exception_is_scoped))
+    release_gate_eligible = policy.get("release_gate_eligible", True)
+    if not isinstance(release_gate_eligible, bool):
+        violations.append((
+            f"{role}.baseline_policy",
+            "release_gate_eligible must be a boolean when present",
+        ))
+    elif not release_gate_eligible:
+        exclusion_reason = policy.get("release_gate_exclusion_reason")
+        if not isinstance(exclusion_reason, str) or not exclusion_reason.strip():
+            violations.append((
+                f"{role}.baseline_policy",
+                "release_gate_exclusion_reason is required when the baseline "
+                "is excluded from release gates",
+            ))
     return violations
 
 
@@ -2409,6 +2423,9 @@ def _resolve_baseline(
     An environment-incompatible baseline is never used for percentage
     comparisons.  Both modes report MISSING_EVIDENCE; blocking mode fails,
     while report-only mode preserves its informational exit status of zero.
+    A baseline explicitly marked ``release_gate_eligible: false`` is validated
+    for provenance but excluded from percentage comparisons until its stated
+    remeasurement condition is satisfied.
 
     Returns:
         (baseline_metrics, has_baseline, exit_rc):
@@ -2429,6 +2446,18 @@ def _resolve_baseline(
     )
     if integrity_rc is not None:
         return {}, False, integrity_rc
+
+    policy = baseline_report.get("baseline_policy")
+    if isinstance(policy, dict) and policy.get("release_gate_eligible") is False:
+        reason = policy.get(
+            "release_gate_exclusion_reason",
+            "no exclusion reason recorded",
+        )
+        _stderr(
+            "INFO: Checked-in module baseline is excluded from release-gate "
+            f"comparisons: {reason}"
+        )
+        return {}, False, None
 
     if env_violations := _check_environment_compatibility(
         report or {},

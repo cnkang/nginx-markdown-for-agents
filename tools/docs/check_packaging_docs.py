@@ -11,7 +11,7 @@ Checks performed:
   3.  All 9 troubleshooting SOPs with symptom/root-cause/resolution
   4.  Installation method sections contain tier labels
   5.  Operator Verification describes four module states
-  6.  Compatibility matrix references release-matrix.json
+  6.  Compatibility matrix references tools/release-matrix.json
   7.  Release artifact naming convention and exact version match
   8.  Environment-specific notes cover four environments
   9.  Installation guide references install-verify.yml CI workflow
@@ -187,15 +187,15 @@ def check_operator_verification(text: str) -> list[str]:
 
 
 def check_compatibility_matrix(text: str) -> list[str]:
-    """Check 6: Compatibility matrix exists and references release-matrix.json."""
+    """Check 6: Matrix references the canonical tools/release-matrix.json."""
     section = _section_text(text, r"7\.\s+Compatibility Matrix")
     if not section:
         return ["Cannot locate '## 7. Compatibility Matrix' section"]
     errors: list[str] = []
-    if "release-matrix.json" not in section:
+    if "tools/release-matrix.json" not in section:
         errors.append(
             "Compatibility Matrix section does not reference "
-            "'release-matrix.json'"
+            "'tools/release-matrix.json'"
         )
     # Check that a markdown table header row exists with NGINX and OS columns.
     # Use substring checks instead of regex to avoid backtracking concerns (S5852).

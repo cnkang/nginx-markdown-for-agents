@@ -423,7 +423,7 @@ grep -qi "${PATTERN_CT_MARKDOWN}" "${RAW_DIR}/case7.hdr" || {
 }
 echo "  PASS: Small response converts with 64k conversion_memory" >&2
 
-# --- Case 8: Small max_size fail-opens for larger response ---
+# --- Case 8: Small conversion_memory fail-opens for larger response ---
 echo "==> Case 8: Small conversion_memory (64k) fail-opens for larger response" >&2
 oversize_bytes="$(curl -sS --max-time 30 \
   "http://127.0.0.1:${UPSTREAM_PORT}/large" | wc -c | tr -d ' ')"

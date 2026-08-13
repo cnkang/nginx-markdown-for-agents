@@ -30,6 +30,7 @@ components/rust-converter/fuzz/corpus/*
 components/rust-converter/fuzz/corpus/*/*
 !components/rust-converter/fuzz/corpus/*/.gitkeep
 !components/rust-converter/fuzz/corpus/*/basic.*
+!components/rust-converter/fuzz/corpus/fuzz_multilayer_decode/seed-minimum-valid.txt
 components/rust-converter/fuzz/coverage/
 components/rust-converter/fuzz/target/
 

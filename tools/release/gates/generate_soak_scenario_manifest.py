@@ -18,6 +18,9 @@ MANIFEST_NAME = "short-soak-scenario-manifest.json"
 SCENARIO_IDS = ("small", "medium", "large")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
+UTC_TIMESTAMP_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$"
+)
 
 if str(REPO_ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "tools"))
@@ -76,8 +79,15 @@ def build_manifest(
     """Build the immutable scenario identity consumed by the soak gate."""
     if not SHA_RE.fullmatch(candidate_sha):
         raise ValueError("candidate SHA must be 40 lowercase hexadecimal characters")
-    if not isinstance(created_at, str) or not created_at:
-        raise ValueError("created_at must be a non-empty string")
+    if (
+        not isinstance(created_at, str)
+        or not UTC_TIMESTAMP_RE.fullmatch(created_at)
+    ):
+        raise ValueError("created_at must be an ISO-8601 UTC timestamp ending in Z")
+    try:
+        datetime.fromisoformat(created_at[:-1])
+    except ValueError as exc:
+        raise ValueError("created_at must be a valid ISO-8601 UTC timestamp") from exc
     _validate_scope(scope)
     return {
         "schema_version": "release.short-soak-scenario-manifest.v1",

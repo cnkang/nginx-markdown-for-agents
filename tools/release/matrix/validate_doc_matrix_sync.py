@@ -34,7 +34,7 @@ DOC_PATH = REPO_ROOT / "docs" / "guides" / "INSTALLATION.md"
 def _normalize_tier(tier: str) -> str:
     """
     Normalize a support tier string to a canonical form.
-    
+
     Returns:
         normalized_tier (str): The input string trimmed, lowercased, with spaces and hyphens replaced by underscores.
     """
@@ -53,10 +53,10 @@ def _normalize_tier(tier: str) -> str:
 def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
     """
     Load matrix entries from a release-matrix JSON file and normalize their support tier.
-    
+
     Parameters:
         path (Path): Path to the release-matrix.json file.
-    
+
     Returns:
         list[tuple[str, str, str, str]]: Sorted list of (nginx, os_type, arch, tier) tuples where `tier` has been normalized (lowercased, spaces/hyphens replaced with underscores).
     """
@@ -64,9 +64,8 @@ def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
     try:
         with open(validated, "r", encoding="utf-8") as f:
             data = normalize_compatibility_document(json.load(f))
-    except (OSError, json.JSONDecodeError, MatrixNormalizationError) as exc:
-        print(f"ERROR: unable to load matrix {path}: {exc}", file=sys.stderr)
-        return []
+    except (OSError, json.JSONDecodeError, MatrixNormalizationError):
+        raise
 
     entries = []
     entries.extend(
@@ -125,30 +124,41 @@ def _parse_table_row(line: str) -> tuple[str, str, str, str] | None:
     return None if len(cells) != 4 or "" in cells else tuple(cells)
 
 
-def parse_doc_matrix(path: Path) -> list[tuple[str, str, str, str]]:
-    """
-    Extract the Platform Compatibility Matrix entries from INSTALLATION.md.
-    
-    Parses the markdown table under the "Platform Compatibility Matrix" heading, skipping table header and separator rows, and normalizes the `tier` value to a canonical form.
-    
-    Parameters:
-        path (Path): Path to the INSTALLATION.md file to parse.
-    
-    Returns:
-        list[tuple[str, str, str, str]]: Sorted list of (nginx, os_type, arch, tier) tuples where `tier` is normalized (lowercased; spaces and hyphens replaced with underscores).
-    """
-    content = path.read_text(encoding="utf-8")
+def _normalize_doc_matrix_row(
+    row: tuple[str, str, str, str],
+) -> tuple[str, str, str, str] | None:
+    """Normalize one parsed documentation row, ignoring table scaffolding."""
+    nginx, os_type, arch, tier = row
+    if _is_table_header_or_separator(nginx):
+        return None
 
+    normalized_tier = _normalize_tier(tier)
+    if (
+        normalized_tier == "source_only"
+        and os_type.lower() == "unlisted"
+        and arch.lower() == "unlisted"
+    ):
+        # Human-facing docs avoid implying that the source fallback is a
+        # real platform. Compare its canonical n/a/any identity instead.
+        os_type, arch = "n/a", "any"
+
+    return nginx, os_type, arch, normalized_tier
+
+
+def _parse_doc_matrix_entries(
+    content: str,
+) -> list[tuple[str, str, str, str]]:
+    """Parse matrix rows from the document content."""
     entries = []
     in_matrix_section = False
 
     for line in content.splitlines():
-        # Detect the start of the Platform Compatibility Matrix section
+        # Detect the start of the Platform Compatibility Matrix section.
         if "Platform Compatibility Matrix" in line and line.strip().startswith("#"):
             in_matrix_section = True
             continue
 
-        # Stop at the next heading after the matrix section
+        # Stop at the next heading after the matrix section.
         if in_matrix_section and line.strip().startswith("#") and "Platform Compatibility Matrix" not in line:
             break
 
@@ -159,14 +169,30 @@ def parse_doc_matrix(path: Path) -> list[tuple[str, str, str, str]]:
         if row is None:
             continue
 
-        nginx, os_type, arch, tier = row
+        normalized = _normalize_doc_matrix_row(row)
+        if normalized is not None:
+            entries.append(normalized)
 
-        if _is_table_header_or_separator(nginx):
-            continue
+    return entries
 
-        entries.append((nginx, os_type, arch, _normalize_tier(tier)))
 
-    return sorted(entries)
+def parse_doc_matrix(path: Path) -> list[tuple[str, str, str, str]]:
+    """
+    Extract the Platform Compatibility Matrix entries from INSTALLATION.md.
+
+    Parses the markdown table under the "Platform Compatibility Matrix" heading,
+    skipping table header and separator rows, and normalizes the `tier` value to
+    a canonical form.
+
+    Parameters:
+        path (Path): Path to the INSTALLATION.md file to parse.
+
+    Returns:
+        list[tuple[str, str, str, str]]: Sorted list of (nginx, os_type, arch, tier) tuples where `tier` is normalized (lowercased; spaces and hyphens replaced with underscores).
+    """
+    content = path.read_text(encoding="utf-8")
+
+    return sorted(_parse_doc_matrix_entries(content))
 
 
 def compare_matrices(
@@ -246,7 +272,11 @@ def main() -> int:
         print(f"ERROR: Documentation file not found: {DOC_PATH}", file=sys.stderr)
         return 1
 
-    json_entries = load_matrix_entries(MATRIX_PATH)
+    try:
+        json_entries = load_matrix_entries(MATRIX_PATH)
+    except (OSError, json.JSONDecodeError, MatrixNormalizationError, ValueError) as exc:
+        print(f"ERROR: unable to load matrix {MATRIX_PATH}: {exc}", file=sys.stderr)
+        return 1
     doc_entries = parse_doc_matrix(DOC_PATH)
 
     if not doc_entries:

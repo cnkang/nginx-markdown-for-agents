@@ -71,9 +71,16 @@ def test_readme_frozen_numbers_are_rejected():
 
 def test_ffi_summary_drift_is_reported():
     inventory, contract, readme = _inputs()
+    expected_heading = (
+        f"## FFI Surface Summary ({len(inventory['ffi_exports'])} exports, "
+        f"ABI v{inventory['ffi_abi_version']})"
+    )
     contract = contract.replace(
-        "## FFI Surface Summary (45 exports, ABI v2)",
-        "## FFI Surface Summary (44 exports, ABI v2)",
+        expected_heading,
+        expected_heading.replace(
+            f"{len(inventory['ffi_exports'])} exports",
+            f"{len(inventory['ffi_exports']) - 1} exports",
+        ),
     )
     errors = checker.validate_contract(inventory, contract, readme)
     assert any("FFI: summary export count" in error for error in errors)

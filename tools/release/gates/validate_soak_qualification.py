@@ -753,7 +753,11 @@ def measure_drain(worker_pid: int) -> tuple[int | None, bool, list[int]]:
     drain_delta = None
     if len(drain) >= 2:
         drain_delta = max(drain) - min(drain)
-    monotonic = len(drain) >= 3 and drain[-1] > drain[0] + 1024
+    monotonic = (
+        len(drain) >= 3
+        and all(left < right for left, right in zip(drain, drain[1:]))
+        and drain[-1] > drain[0] + 1024
+    )
     return drain_delta, monotonic, drain
 
 
@@ -853,6 +857,27 @@ def _validated_module() -> pathlib.Path | None:
     if not resolved.is_file() or not os.access(resolved, os.R_OK):
         return None
     return resolved
+
+
+def _git_head_sha() -> str:
+    """Return the checked-out commit SHA used for candidate binding."""
+    git = resolve_approved_executable("git")
+    if git is None:
+        raise ValueError("unable to resolve git HEAD: approved git not found")
+    try:
+        result = subprocess.run(
+            [git, "rev-parse", "HEAD"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ValueError(f"unable to resolve git HEAD: {exc}") from exc
+    if result.returncode != 0:
+        raise ValueError(f"unable to resolve git HEAD: {result.stderr.strip()}")
+    return result.stdout.strip()
 
 
 def _runtime_directory() -> pathlib.Path:
@@ -966,6 +991,9 @@ def _run_soak_session(
                 f"{base_url}/{ready_fixture}"):
             ready_error = "nginx did not become ready"
         else:
+            # Do not charge NGINX startup/readiness time to the sustained-load
+            # duration recorded in the qualification evidence.
+            started = time.time()
             worker_pid = find_worker_pid(runtime_dir)
             duration = int(manifest["duration_minutes"] * 60)
             rss_series, scenario_metrics = run_load_loop(
@@ -1038,6 +1066,15 @@ def _soak_failures(
 
 def real_main(args: argparse.Namespace) -> int:
     manifest = load_manifest(args.manifest)
+    if getattr(args, "git_head", False):
+        actual_head = _git_head_sha()
+        if manifest["candidate_sha"] != actual_head:
+            print(
+                "ERROR: stale-digest: soak manifest candidate_sha "
+                f"{manifest['candidate_sha']} != git HEAD {actual_head}",
+                file=sys.stderr,
+            )
+            return 1
     skip_result = handle_missing_nginx(args, manifest)
     if skip_result is not None:
         return skip_result
@@ -1072,6 +1109,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--record-input", default=None)
     parser.add_argument("--output", default=None)
     parser.add_argument("--allow-skip-soak", action="store_true")
+    parser.add_argument(
+        "--git-head",
+        action="store_true",
+        help="require the candidate manifest SHA to equal git HEAD",
+    )
     return parser
 
 

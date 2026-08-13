@@ -93,6 +93,9 @@ def test_discriminant_is_valid_u8(entry):
     """
     disc = entry.get("discriminant")
     assert disc is not None, f"Entry missing discriminant: {entry}"
+    assert not isinstance(disc, bool), (
+        f"Discriminant must not be boolean: {entry}"
+    )
     assert isinstance(disc, int), (
         f"Discriminant must be int, got {type(disc).__name__}: {entry}"
     )

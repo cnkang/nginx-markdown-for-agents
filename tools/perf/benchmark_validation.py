@@ -577,9 +577,12 @@ def _path_metrics(
         and not isinstance(requests_total, bool)
         and isinstance(failopen_total, int)
         and not isinstance(failopen_total, bool)
-        and requests_total > 0
     ):
-        fallback_rate = failopen_total / requests_total
+        fallback_rate = (
+            failopen_total / requests_total
+            if requests_total > 0
+            else 0.0 if failopen_total == 0 else None
+        )
     else:
         fallback_rate = None
     return (
@@ -664,7 +667,10 @@ def _scenario_metrics(
         "fallback_rate": fallback_rate,
         "streaming_fallback_total": streaming.get("fallback_total", 0),
         "streaming_requests_total": requests_total,
-        "throughput_mbps": 0.0,
+        # The harness reports bytes per request and requests per second.  Keep
+        # the derived value tied to those measured fields instead of a
+        # placeholder so baseline evidence remains numerically meaningful.
+        "throughput_mbps": round(data.input_bytes * rps / 1_000_000.0, 6),
         "decompression_streaming_total": decomp_streaming,
         "decompression_fullbuffer_total": decomp_fullbuffer,
         "pending_output_high_watermark_bytes": perf.get(

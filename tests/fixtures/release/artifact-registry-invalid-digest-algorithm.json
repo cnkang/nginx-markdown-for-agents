@@ -9,7 +9,7 @@
       "storage_class": "candidate",
       "producer": "cargo-build",
       "consumer": "nginx-module-link",
-      "digest": "md5:abcdef0123456789",
+      "digest": "md5:abcdef0123456789abcdef0123456789",
       "retention": "release-lifetime"
     }
   ]

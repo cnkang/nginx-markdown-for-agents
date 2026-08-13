@@ -11,7 +11,7 @@ def test_symbol_hash_covers_every_ffi_export() -> None:
     """The hashed export set must cover all four Rust FFI modules."""
     names = symbol_export_names()
 
-    assert len(names) == 42
+    assert len(names) == 43
     assert {
         "markdown_sha256_hex",
         "markdown_dynconf_parse",

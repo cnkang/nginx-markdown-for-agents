@@ -16,6 +16,7 @@ on:
       - "perf/**"
       - "packaging/**"
       - "release/**"
+      - "artifacts/release/0.9.2/**"
       - "examples/nginx-configs/**"
       - "examples/kubernetes/**"
       - "examples/production/**"
@@ -45,6 +46,7 @@ on:
       - "perf/**"
       - "packaging/**"
       - "release/**"
+      - "artifacts/release/0.9.2/**"
       - "examples/nginx-configs/**"
       - "examples/kubernetes/**"
       - "examples/production/**"
@@ -169,6 +171,7 @@ jobs:
             perf:
               - 'components/rust-converter/**'
               - 'perf/**'
+              - 'release/performance/**'
               - 'tools/perf/**'
               - 'requirements-perf.txt'
               - 'requirements-release.txt'
@@ -197,6 +200,10 @@ jobs:
             contract_gates:
               - 'schemas/**'
               - 'release/**'
+              - 'artifacts/release/0.9.2/**'
+              - 'components/rust-converter/src/decision/reason_code.rs'
+              - 'tools/release/gates/**'
+              - 'tools/harness/**'
               - 'tools/reason-codegen/**'
             workflows:
               - '.github/workflows/**'
@@ -226,7 +233,7 @@ jobs:
 
       - name: Validate docs
         env:
-          STYLE_BASE: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+          STYLE_BASE: ${{ github.event.pull_request.base.sha || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || github.sha }}
         run: make docs-check
 
   harness-tooling:

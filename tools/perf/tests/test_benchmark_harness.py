@@ -167,6 +167,38 @@ def test_missing_diagnostics_counters_fail_closed_in_scenario_metrics():
     )
     assert result["metrics"]["fallback_rate"] is None
     assert "precommit_failopen_total" not in result["metrics"]
+    assert result["metrics"]["throughput_mbps"] == pytest.approx(0.0001)
+
+
+def test_zero_streaming_requests_report_zero_fallback_rate():
+    """A full-buffer-only scenario has zero fallback rate, not missing data."""
+    result = build_scenario_result(
+        ScenarioResultInput(
+            raw_content=VALID_AB_OUTPUT,
+            name="large-body",
+            profile="balanced",
+            compression="none",
+            transfer_encoding="identity",
+            concurrency=1,
+            worker_rss_kb=1,
+            load_generator="ab",
+            ttfb={"ttfb_p50_ms": 1.0, "ttfb_p95_ms": 2.0},
+            nginx_metrics={
+                "streaming": {
+                    "requests_total": 0,
+                    "precommit_failopen_total": 0,
+                },
+                "streaming_path_hits": 0,
+                "fullbuffer_path_hits": 10,
+            },
+            input_bytes=1,
+            baseline_rss_kb=1,
+            peak_rss_kb=1,
+            iterations=10,
+            load_exit_code=0,
+        )
+    )
+    assert result["metrics"]["fallback_rate"] == 0.0
 
 
 def test_endpoint_fetch_failure_fails_scenario_closed():

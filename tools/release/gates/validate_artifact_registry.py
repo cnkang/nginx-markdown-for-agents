@@ -196,7 +196,7 @@ def _check_index_artifact(artifact: dict, index_pos: int, seen_ids: set,
                           reasons: list) -> None:
     """Validate one candidate artifact index row."""
     for field in INDEX_REQUIRED_ARTIFACT_FIELDS:
-        if field not in artifact:
+        if artifact.get(field) is None:
             reasons.append(
                 f"missing-observation: artifacts[{index_pos}] missing "
                 f"{field}")
@@ -341,7 +341,11 @@ def _check_required_strings(artifact: dict, index: int, reasons: list) -> None:
     """Required registry string fields must be non-empty."""
     for field in ("id", "path_or_url", "producer", "consumer", "retention"):
         val = artifact.get(field)
-        if val is not None and (not isinstance(val, str) or not val):
+        if val is None:
+            reasons.append(
+                f"missing-observation: artifacts[{index}] missing {field}"
+            )
+        elif not isinstance(val, str) or not val:
             reasons.append(
                 f"malformed: artifacts[{index}].{field} must be "
                 f"a non-empty string")
@@ -366,18 +370,24 @@ def _check_registry_artifact(artifact: dict, index: int, seen_ids: set,
         seen_ids.add(artifact_id)
 
     storage_class = artifact.get("storage_class")
-    if (storage_class is not None
-            and storage_class not in VALID_STORAGE_CLASSES):
+    if storage_class is None:
+        reasons.append(
+            f"missing-observation: artifacts[{index}] missing storage_class"
+        )
+    elif storage_class not in VALID_STORAGE_CLASSES:
         reasons.append(
             f"malformed: artifacts[{index}] storage_class "
             f"{storage_class!r} not in {VALID_STORAGE_CLASSES}")
 
     digest = artifact.get("digest")
-    if digest is not None:
-        if not isinstance(digest, str) or not DIGEST_PATTERN.fullmatch(digest):
-            reasons.append(
-                f"below-threshold: artifacts[{index}] digest "
-                f"{digest!r} is not valid sha256 format")
+    if digest is None:
+        reasons.append(
+            f"missing-observation: artifacts[{index}] missing digest"
+        )
+    elif not isinstance(digest, str) or not DIGEST_PATTERN.fullmatch(digest):
+        reasons.append(
+            f"below-threshold: artifacts[{index}] digest "
+            f"{digest!r} is not valid sha256 format")
 
 
 def run_fixture_gate(args) -> int:
