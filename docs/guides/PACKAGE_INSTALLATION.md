@@ -13,14 +13,18 @@ They are not part of the current GA channel.
 
 Bare package-manager installation commands only work after an operator
 publishes and configures a real APT or YUM repository. Until then, download the
-matching package artifact and its `SHA256SUMS` file from the same GitHub
-Release.
+matching package artifact, `SHA256SUMS`, and `SHA256SUMS.asc` from the same
+GitHub Release. `SHA256SUMS` detects transfer corruption. It is not an
+authenticated trust anchor.
 
 > **Availability check:** A release candidate and its compatibility-matrix
 > entry do not make a DEB or RPM package downloadable. Before using the
 > commands below, confirm that the selected GitHub Release contains the exact
-> package and `SHA256SUMS`. Verify `SHA256SUMS.asc` with the project's
-> documented fingerprint. Otherwise use the
+> package, `SHA256SUMS`, and `SHA256SUMS.asc`. The current repository does not
+> publish an independently authenticated release-key fingerprint. Do not
+> treat a same-release key file, key ID, or checksum as project authenticity.
+> Obtain the complete fingerprint through an independently authenticated
+> operator/project channel before proceeding. Otherwise use the
 > [Manual Source Build](./INSTALLATION.md#6-secondary-manual-source-build).
 
 ## Select the Matching Artifact
@@ -72,8 +76,17 @@ BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/
 PKG="nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
 
 curl -fSLO "${BASE_URL}/SHA256SUMS"
+curl -fSLO "${BASE_URL}/SHA256SUMS.asc"
 curl -fSLO "${BASE_URL}/${PKG}"
+# Set TRUSTED_FINGERPRINT only from an independently authenticated channel.
+: "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated}"
+[[ "${TRUSTED_FINGERPRINT}" =~ ^[A-Fa-f0-9]{40}$ ]] || exit 1
+VALIDSIG="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
+    | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
+EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
+[[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1
 grep " ${PKG}$" SHA256SUMS | sha256sum -c -
+dpkg-sig --verify "${PKG}"
 sudo apt install "./${PKG}"
 ```
 
@@ -90,8 +103,17 @@ BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/
 PKG="nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
 
 curl -fSLO "${BASE_URL}/SHA256SUMS"
+curl -fSLO "${BASE_URL}/SHA256SUMS.asc"
 curl -fSLO "${BASE_URL}/${PKG}"
+# Set TRUSTED_FINGERPRINT only from an independently authenticated channel.
+: "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated}"
+[[ "${TRUSTED_FINGERPRINT}" =~ ^[A-Fa-f0-9]{40}$ ]] || exit 1
+VALIDSIG="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
+    | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
+EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
+[[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1
 grep " ${PKG}$" SHA256SUMS | sha256sum -c -
+rpm -Kv "${PKG}"
 sudo rpm -Uvh "./${PKG}"
 ```
 

@@ -318,7 +318,7 @@ Depth counts from the document root node (depth 0). A text node inside
 
 When the traversal output exceeds a size threshold, this optimization replaces
 the two-pass normalize-then-copy pattern with a single-pass fused normalizer.
-This eliminates one O(n) allocation and copy for the normalization result.
+This removes one O(n) allocation and copy for the normalization result.
 
 The optimization targets the normalization phase (after traversal), not the
 traversal itself. The default initial traversal buffer uses a 1 KB
@@ -332,20 +332,20 @@ the caller must provide the hint externally.
 
 ### Buffer estimation for the fused normalizer
 
-When the fused normalizer activates, its output buffer pre-allocates
-using `estimate_output_capacity`, which estimates the normalized output at 40%
-of the traversal output size (`OUTPUT_SIZE_ESTIMATE_FACTOR = 0.4`), clamped to
-\[4 KB, 4 MB\]:
+The 0.4 estimate applies to the initial traversal buffer when an input-size
+hint is available. It is not applied again to the fused normalizer. When the
+fused path activates, `converter.rs` passes the actual traversal output length
+(`output.len()`) to `FusedNormalizer::new`, so the normalizer starts with the
+already-converted Markdown size rather than an estimate of it:
 
-| Traversal Output Size | Normalizer Buffer Capacity |
-|-----------------------|---------------------------|
-| < ~10 KB | 4 KB (minimum) |
-| ~10 KB – ~10 MB | `output_size × 0.4` |
-| > ~10 MB | 4 MB (maximum) |
+| Stage | Capacity source |
+|-------|-----------------|
+| Initial traversal | `estimate_output_capacity(input_size_hint)` when the hint exceeds `LARGE_BODY_THRESHOLD`; otherwise the default 1 KB |
+| Fused normalizer | Actual traversal output length (`output.len()`) |
 
-Note: the estimate depends on the traversal output size (intermediate
-Markdown), not the input HTML size. This is a pragmatic choice — the input
-byte count is not available from the `RcDom` without a separate walk.
+The traversal code clamps its estimate to 4 KB–4 MB. The fused normalizer's
+capacity is not subject to that estimate because the complete traversal output
+is already complete when the normalizer receives it.
 
 ### Fused normalizer
 
@@ -394,11 +394,10 @@ standard `normalize_output` two-pass approach.
   traversal), it receives the actual traversal output length as its capacity,
   avoiding the underestimate that would result from applying the 0.4 factor
   to already-converted Markdown text.
-- Buffer estimation uses a fixed 0.4 factor applied to the input size hint
-  (for traversal pre-allocation) or the traversal output size (for the fused
-  normalizer). Pages with unusually high or low HTML-to-Markdown compression
-  ratios may over- or under-allocate, but the clamp bounds (4 KB–4 MB)
-  prevent pathological cases.
+- Buffer estimation uses a fixed 0.4 factor only for traversal pre-allocation
+  from the input size hint. The fused normalizer receives the actual traversal
+  output length, so it does not inherit an input/output compression-ratio
+  estimate. The traversal estimate remains bounded to 4 KB–4 MB.
 - The threshold is a hardcoded constant, not configurable via NGINX directives.
   It differs from `markdown_large_body_threshold` (retired in 0.9.0,
   historically controlled input HTML size limits), though both use 256 KB

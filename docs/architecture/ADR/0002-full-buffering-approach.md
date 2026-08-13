@@ -26,7 +26,9 @@ Version 1 uses a **full buffering approach**:
 2. Once complete, perform conversion
 3. Output the complete Markdown response
 
-Streaming conversion remains a possible later direction, but it is not part of the current architecture.
+This ADR is the historical v1 baseline. Streaming conversion was subsequently
+implemented and is now a second, policy-selected engine. This document does
+not describe the active routing contract.
 
 > **Note (v0.8.0+):** This ADR established the baseline full-buffer architecture. True streaming conversion arrived in v0.8.0 via [ADR-0004](0004-streaming-bounded-memory-conversion.md), [ADR-0011](0011-true-streaming-contract.md), and [ADR-0013](0013-streaming-default-policy.md). The dual-engine architecture (full-buffer + streaming) appears in [SYSTEM_ARCHITECTURE.md](../SYSTEM_ARCHITECTURE.md#dual-engine-full-buffering--streaming-since-v080) and [LARGE_RESPONSE_DESIGN.md](../LARGE_RESPONSE_DESIGN.md).
 
@@ -60,7 +62,7 @@ Streaming conversion remains a possible later direction, but it is not part of t
 
 1. **Memory Usage**: Requires buffering entire response
    - ~2x response size in memory (input + output)
-   - Mitigated by `markdown_max_size` limit (default 10MB)
+   - Mitigated by the then-current full-buffer size limit
 
 2. **Latency**: Must wait for complete response before conversion
    - Time to first byte (TTFB) increased
@@ -137,18 +139,18 @@ Streaming conversion remains a possible later direction, but it is not part of t
 
 ## Future Considerations
 
-### When to Reconsider Streaming
+### Historical Follow-up Context
 
-Consider streaming conversion if:
+The original v1 decision recorded these questions for future maintainers:
 1. Users frequently request very large documents (> 10MB)
 2. Latency becomes a significant issue
 3. Memory usage becomes problematic
 4. Streaming use cases become important
 
-### Potential Streaming Design
+### Implemented Successor
 
-This section preserves pre-v0.8 historical context. Streaming is already
-implemented through [ADR-0004](0004-streaming-bounded-memory-conversion.md),
+The implemented streaming design answers the historical questions in
+[ADR-0004](0004-streaming-bounded-memory-conversion.md),
 [ADR-0011](0011-true-streaming-contract.md), and
 [ADR-0013](0013-streaming-default-policy.md). Those ADRs supersede the design
 bullets that were originally listed here.

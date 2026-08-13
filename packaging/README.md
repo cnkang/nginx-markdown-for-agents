@@ -135,11 +135,16 @@ gpg --verify SHA256SUMS.asc SHA256SUMS
 ```
 
 Expected output includes `Good signature from ...` and the key fingerprint.
+Compare the fingerprint with the complete value published through an
+independently authenticated project/operator channel before trusting the
+signature. A key ID, keyserver result, or key file downloaded from the same
+release does not establish identity.
 
 No public signing-key fingerprint is published in this repository yet. Until
-the release includes the public key and `SHA256SUMS.asc`, only `SHA256SUMS`
-checksum verification is available; do not treat an unverifiable signature as
-project provenance.
+the release process publishes the complete fingerprint through an independent
+trust channel and includes `SHA256SUMS.asc`, package users must withhold
+project-signature trust. `SHA256SUMS` alone detects transfer corruption; it does
+not authenticate the release.
 
 ### Generating Checksums (CI / Maintainers)
 

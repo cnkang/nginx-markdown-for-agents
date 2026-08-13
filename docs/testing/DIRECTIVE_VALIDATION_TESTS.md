@@ -34,9 +34,9 @@ markdown_filter;            # Error: missing value
 
 **Valid configurations:**
 ```nginx
-markdown_limits conversion_memory=10m;      # 10 megabytes
-markdown_limits conversion_memory=5120k;    # 5120 kilobytes
-markdown_limits conversion_memory=1048576;  # 1048576 bytes
+markdown_limits conversion_memory=64m;       # 64 megabytes (frozen default)
+markdown_limits conversion_memory=65536k;    # 65536 kilobytes
+markdown_limits conversion_memory=67108864;  # 67108864 bytes
 ```
 
 **Invalid configurations:**
@@ -48,7 +48,7 @@ markdown_limits conversion_memory;          # Error: missing value
 ```
 
 **Expected behavior:**
-- Default: 10m (10 megabytes)
+- Default: 64m (64 megabytes)
 - Context: http, server, location
 - Validation: must be positive integer with optional suffix (k, m, g)
 
@@ -60,9 +60,9 @@ markdown_limits conversion_memory;          # Error: missing value
 
 **Valid configurations:**
 ```nginx
-markdown_limits conversion_timeout=5s;        # 5 seconds
-markdown_limits conversion_timeout=5000ms;    # 5000 milliseconds
-markdown_limits conversion_timeout=5000;      # 5000 milliseconds (default unit)
+markdown_limits conversion_timeout=30s;       # 30 seconds (frozen default)
+markdown_limits conversion_timeout=30000ms;   # 30000 milliseconds
+markdown_limits conversion_timeout=30000;     # 30000 milliseconds (default unit)
 ```
 
 **Invalid configurations:**
@@ -74,7 +74,7 @@ markdown_limits conversion_timeout;           # Error: missing value
 ```
 
 **Expected behavior:**
-- Default: 5s (5000 milliseconds)
+- Default: 30s (30000 milliseconds)
 - Context: http, server, location
 - Validation: must be positive integer with optional suffix (ms, s, m, h)
 
@@ -422,13 +422,20 @@ All directive handlers provide clear error messages:
 
 ## Configuration Validation at Startup
 
-NGINX validates all configuration parameters at startup:
+NGINX validates static directive syntax and fixed configuration values at
+startup. Runtime variables cannot be fully validated until a request resolves
+them:
 
 1. **Flag directives** (on|off): Validated by ngx_conf_set_flag_slot
 2. **Size directives**: Validated by ngx_conf_set_size_slot (must be positive)
 3. **Time directives**: Validated by ngx_conf_set_msec_slot (must be positive)
 4. **Enum directives**: Validated by custom handlers with explicit value checks
 5. **Array directives**: Validated by custom handlers with format checks
+
+For example, configuration loading checks `markdown_filter $convert_html` as a
+valid complex value. NGINX resolves `$convert_html` and evaluates its resulting
+value for each request. Startup validation does not
+claim that every runtime value is valid.
 
 If validation fails, NGINX will refuse to start and log the specific error.
 
@@ -528,15 +535,16 @@ This implementation satisfies the following requirements:
 - **FR-12.1**: Configuration directives for all features
 - **FR-12.2**: Configuration validation at startup
 - **FR-12.3**: Clear error messages for invalid configurations
-- **FR-12.4**: Resource limit configuration (max_size, timeout)
-- **FR-12.5**: Failure strategy configuration (on_error)
+- **FR-12.4**: Resource limit configuration (conversion_memory, conversion_timeout)
+- **FR-12.5**: Failure strategy configuration (markdown_error_policy)
 - **FR-12.6**: Markdown flavor configuration
 - **FR-12.7**: Agent-friendly extensions configuration (token_estimate, front_matter)
-- **FR-12.8**: Accept header behavior configuration (on_wildcard)
+- **FR-12.8**: Accept header behavior configuration (markdown_accept)
 - **FR-12.9**: Authentication policy configuration (auth_policy, auth_cookies)
-- **FR-12.10**: ETag configuration (generate_etag)
-- **FR-06.6**: Conditional request configuration (conditional_requests)
-- **FR-02.9**: Chunked response handling configuration (buffer_chunked, stream_types)
+- **FR-12.10**: ETag configuration (markdown_etag)
+- **FR-06.6**: Conditional request configuration (markdown_cache_validation)
+- **FR-02.9**: Chunked response handling configuration (historical
+  markdown_buffer_chunked and markdown_stream_types behavior)
 
 
 ## Document Updates

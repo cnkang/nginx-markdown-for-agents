@@ -108,7 +108,7 @@ Frozen v1 registry. `bounded` = labeled with bounded-cardinality values.
 | 25 | `bypass_no_transform` | `nginx_markdown_requests_total` |
 | 26 | `encoding_header_invalid` | `nginx_markdown_requests_total` |
 
-## FFI Surface Summary (45 exports, ABI v2)
+## FFI Surface Summary (46 exports, ABI v2)
 
 - **ABI version:** 2 (frozen for 0.9.2)
 - **Classification:** all `INTERNAL_ONLY`

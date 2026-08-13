@@ -56,9 +56,9 @@ The following topics are explicitly out of scope for 0.5.0 (referenced from `doc
 
 ## Scope Expansion Record Template
 
-| Date | Proposal Description | Evaluation Result | Rationale | Affected Sub-Specs |
-|------|---------------------|-------------------|-----------|-------------------|
-| — | — | Accept/Reject | — | — |
+| Date | Proposal Description | Evaluation Result | Rationale | Affected Sub-Specs | Affected Streaming Path | Streaming Test | Rollback Boundary |
+|------|---------------------|-------------------|-----------|-------------------|-------------------------|----------------|------------------|
+| — | — | Accept/Reject | — | — | — | — | — |
 
 ## Document Updates
 

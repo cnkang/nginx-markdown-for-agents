@@ -32,7 +32,7 @@ register runs **first** when a response flows through the chain.
 
 | Phase | Modules (in registration order) |
 |-------|--------------------------------|
-| Standard (compiled-in) | `ngx_http_proxy_module` → `gunzip` → `gzip` → `brotli` (ngx_brotli) |
+| Standard (compiled-in) | `gzip` → `gunzip` → `brotli` (ngx_brotli) |
 | Dynamic (load_module) | `markdown_filter` (this module) |
 
 The runtime initialises the loaded module according to the effective NGINX
@@ -41,6 +41,12 @@ own bounded decompressor before conversion.  It does not depend on the
 optional `gunzip` filter.  When operators configure an external decompressor,
 they must verify its effective position for that NGINX build and set
 `markdown_auto_decompress off`.
+
+The standard decompression/compression registration order is `gzip` before
+`gunzip`. Because each filter prepends itself, `gunzip` runs before `gzip` at
+runtime. `ngx_http_proxy_module` supplies upstream content and is not an
+output-filter stage in this diagram. Cache handling is likewise outside the
+conversion/output-filter sequence shown below.
 
 ### 1.2 Data Flow Diagram
 
@@ -76,13 +82,6 @@ Upstream response (HTML, possibly Content-Encoding: gzip/br)
 │ brotli body filter (if present) │  ← compresses response for client
 │  · compresses Markdown output    │
 │  · adds Content-Encoding: br     │
-└─────────────────────────────────┘
-  │
-  ▼
-┌─────────────────────────────────┐
-│ proxy_cache header/body filter  │  ← caches the final response
-│  · caches converted Markdown     │
-│  · serves cached Markdown on hit │
 └─────────────────────────────────┘
   │
   ▼

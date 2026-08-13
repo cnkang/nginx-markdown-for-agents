@@ -30,13 +30,13 @@ flowchart LR
         LV["markdown_log_verbosity"]
         SP["markdown_streaming"]
         AD["markdown_auto_decompress"]
+        SE["markdown_stream_excluded_types"]
     end
 
     subgraph BodyPhase["Body Filter Phase"]
         ML["markdown_limits"]
         OE["markdown_error_policy"]
         FL["markdown_flavor"]
-        SE["markdown_stream_excluded_types"]
         TF["markdown_trusted_proxies"]
     end
 

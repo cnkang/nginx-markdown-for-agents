@@ -231,6 +231,11 @@ Rust/C layout, signature, or numeric-constant change must update that contract,
 the generated header, all in-repository callers, and the release notes in one
 change. No external append-only promise applies to the FFI export set.
 
+The registry below is the complete in-repository production registry, not a
+third-party SDK list. Production C callers use the dynamic-configuration,
+incremental/streaming, and encoding/hash helpers, so the registry includes
+them.
+
 | Group | Entrypoints |
 |-------|-------------|
 | Conversion ownership | `markdown_converter_new`, `markdown_convert`, `markdown_result_free`, `markdown_converter_free` |
@@ -238,7 +243,7 @@ change. No external append-only promise applies to the FFI export set.
 | Accept/eligibility/decision | `markdown_negotiate_accept`, `markdown_decide_eligibility`, `markdown_decide_conditional` |
 | Header and URL planning | `markdown_build_header_plan`, `markdown_header_plan_free`, `markdown_decide_base_url` |
 | Trusted proxy ownership | `markdown_trusted_proxies_new`, `markdown_trusted_proxies_push`, `markdown_trusted_proxies_free` |
-| Initialization helpers | `markdown_options_init`, `markdown_result_init`, `markdown_header_plan_init`, `markdown_decomp_result_init` |
+| Initialization helpers | `markdown_options_init`, `markdown_result_init`, `markdown_header_plan_init`, `markdown_decomp_result_init`, `markdown_base_url_input_init` |
 | Bounded decompression | `markdown_decompress_bounded`, `markdown_decompress_free` |
 | Error classification | `markdown_classify_error_code` |
 | Dynamic configuration | `markdown_dynconf_parse`, `markdown_dynconf_result_init`, `markdown_dynconf_result_free` |

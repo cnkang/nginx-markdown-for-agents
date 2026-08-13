@@ -70,7 +70,10 @@ The following patterns alone do **not** constitute true streaming:
 - Receiving input in batches but buffering the complete body internally before
   producing output on finalize.
 - Passing chunked responses through without conversion.
-- Skipping conversion for responses exceeding a size threshold. The module skips conversion for oversized responses.
+- Treating a response-shape heuristic as a guarantee that the module will skip
+  conversion. In 0.9.2 the internal heuristic only selects a candidate path.
+  Hard eligibility and configured resource limits still decide conversion or
+  policy-driven fallback.
 
 True streaming MUST produce valid Markdown output **before** the module
 buffers the complete upstream body. The module emits output while the body still streams in.
@@ -119,31 +122,33 @@ markdown_streaming auto;
 
 **Default**: `auto`
 
-### 2.2 Automatic Streaming Threshold (historical 0.8.0 contract)
+### 2.2 Automatic Streaming Heuristic (active 0.9.2 contract)
 
 ```nginx
 markdown_stream_threshold 1m;
 ```
 
-**Default in the historical 0.8.0 contract**: `1m`. The directive is not
-active in 0.9.2. Current selection uses `markdown_streaming auto` and the
-bounded internal response-shape heuristic.
+The old `markdown_stream_threshold` directive is historical and is not active
+in 0.9.2. Current selection uses `markdown_streaming auto` and a bounded
+internal response-shape heuristic. There is no replacement threshold
+directive.
 
 In `auto` mode, a response becomes a **streaming candidate** when ANY of the
 following is true:
 
 - `Content-Length` header is absent.
 - Upstream uses chunked transfer encoding.
-- `Content-Length` >= `markdown_stream_threshold`.
+- known `Content-Length` is at or above the internal 1 MiB candidate boundary.
 
 Absence of `Content-Length` only makes the response a streaming candidate. It
 does not force streaming. The engine MUST still verify content type, feature
 compatibility, parser readiness, and configured rollout policy before selecting
 true streaming.
 
-Responses below the threshold with a known `Content-Length` default to the
-full-buffer path, reducing regression risk from the new streaming code path in
-0.8.0.
+Responses below that internal candidate boundary with a known
+`Content-Length` default to the full-buffer path. Missing length and chunked
+responses are only candidates. Content type, cache validation, codec support,
+parser readiness, and resource policy still gate true streaming.
 
 ### 2.3 Pre-commit Replay Buffer
 
@@ -265,9 +270,10 @@ the response has transitioned to committed state (see §3.4).
 
 If the raw replay buffer can no longer cover all upstream bytes read so far
 but the module has not yet committed headers, HTML passthrough fallback is no
-longer available. The module MUST either continue with a safe conversion path,
-switch to full-buffer conversion within configured resource limits, or reject
-the response before the module commits headers according to `markdown_error_policy`.
+longer available. Full-buffer conversion may run only when a complete body
+buffer retains every upstream byte read so far and remains within its
+configured resource limits. Otherwise the module MUST continue safe streaming
+conversion or apply `markdown_error_policy` before committing headers.
 
 #### `markdown_error_policy pass`
 

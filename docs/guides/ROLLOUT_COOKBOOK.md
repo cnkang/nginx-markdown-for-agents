@@ -693,7 +693,7 @@ If you later want wildcard Accept values (for example `text/*`) to trigger conve
 
 ### Bot / User-Agent-Based Enablement
 
-Enable conversion for specific AI bots or crawlers identified by User-Agent. Combine UA detection with an Accept header override so bots that do not send `Accept: text/markdown` still receive Markdown.
+Enable conversion for specific AI bots or crawlers identified by User-Agent. Combine UA detection with the module's `markdown_accept force` policy so bots that do not send `Accept: text/markdown` still receive Markdown.
 
 #### Configuration
 
@@ -707,22 +707,7 @@ http {
         "~*Googlebot"   on;
     }
 
-    # Override Accept header for detected bots
-    map $http_user_agent $bot_accept_override {
-        default         "";
-        "~*ClaudeBot"   "text/markdown, text/html;q=0.9";
-        "~*GPTBot"      "text/markdown, text/html;q=0.9";
-        "~*Googlebot"   "text/markdown, text/html;q=0.9";
-    }
-
-    # Use the override when present, otherwise keep original Accept
-    map $bot_accept_override $final_accept {
-        ""      $http_accept;
-        default $bot_accept_override;
-    }
-
     markdown_error_policy pass;
-    markdown_accept strict;
 
     server {
         listen 80;
@@ -730,8 +715,7 @@ http {
 
         location / {
             markdown_filter $is_ai_bot;
-            markdown_accept wildcard;
-            proxy_set_header Accept $final_accept;
+            markdown_accept force;
             proxy_pass http://backend;
         }
 
@@ -745,7 +729,7 @@ http {
 
 UA-based targeting depends on clients sending accurate User-Agent strings. It is not a security boundary — any client can spoof a User-Agent. Use this pattern for convenience, not access control.
 
-Note: `proxy_set_header Accept` only modifies the header sent upstream to the backend — it does not change the incoming request header that the module evaluates. You need the `markdown_accept wildcard` directive here. Without it, bots whose original `Accept` header does not include `text/markdown` stay ineligible when you enable the filter via `$is_ai_bot`. You need this directive for the pattern to work. Without it, such bots stay ineligible.
+Note: the module evaluates the incoming request header itself. `proxy_set_header Accept` only modifies the header sent upstream. The `markdown_accept force` directive in this pattern is therefore the part that lets matching bots through when their original `Accept` header does not include `text/markdown`.
 
 #### Verification
 

@@ -38,10 +38,12 @@ New consolidating directives (additive-only after 1.0):
 
 Retained EXISTING stable directives keep their names and semantics, notably:
 `markdown_filter on|off` (the module enable directive — there is **no**
-`markdown on|off`), `markdown_streaming_engine` (implementation selector,
-distinct from the `markdown_streaming` policy enum — **not** an alias),
+`markdown on|off`), `markdown_streaming` (the sole processing selector),
 `markdown_content_types`, `markdown_stream_types`, and the
 metrics/diagnostics/otel/parser-budget families.
+
+The 0.9.1 contract treated `markdown_streaming_engine` as reject-only. Version
+0.9.2 removed it, so it is not a stable 1.0 configuration directive.
 
 ### Reject-only legacy stubs (no aliases)
 

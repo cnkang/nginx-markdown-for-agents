@@ -97,9 +97,9 @@ but does not block a runtime override. When a candidate contains a blocked
 key, the watcher logs a warning. Diagnostics exposes the key in
 `configuration.dynconf.masked_keys`. The static value remains effective.
 
-The configuration-cycle validation index reserves space for at most 4096
-merged locations. A configuration that would register a 4097th location
-fails during `nginx -t` rather than growing the index without a bound.
+The configuration cycle aggregates the minimum applicable conversion-memory
+value and the union of dynconf block masks across merged locations. This
+summary is cycle-owned and does not maintain a fixed-size per-location index.
 
 ### Migrating legacy line-format files
 

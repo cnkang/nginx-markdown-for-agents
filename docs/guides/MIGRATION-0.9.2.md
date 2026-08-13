@@ -41,9 +41,11 @@ memory_budget=64m
 ```
 
 The watcher emits `legacy line format detected - migrate to JSON v1` once
-per worker when the first byte of the watched file is not `{`. Do not treat a
-legacy file as a successful JSON reload. Migrate it and verify the next reload
-through the diagnostics endpoint.
+per worker when the first non-whitespace byte of the watched file is not `{`.
+Leading whitespace before a JSON object therefore reaches JSON parsing instead
+of triggering the legacy-file classification. Do not treat a legacy file as a
+successful JSON reload. Migrate it and verify the next reload through the
+diagnostics endpoint.
 
 The JSON contract is fail-closed: unknown keys, duplicate keys, unsupported
 schema versions, invalid types, and out-of-range values reject the entire

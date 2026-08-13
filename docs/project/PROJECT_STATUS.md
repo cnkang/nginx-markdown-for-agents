@@ -742,7 +742,7 @@ The 0.8.1 through 0.8.3 patch releases harden streaming atomicity, FFI cleanup,
 OWS compliance, backpressure resume, streaming decompression, implied-closure
 correctness, release-gate naming, and documentation
 consistency without changing the 0.8.x configuration contract. They also
-includes streaming observability (metrics and tracing), streaming security
+includes streaming observability metrics, streaming security
 enforcement (policy validation and alerts), streaming configuration directives, Prometheus-compatible
 metrics, decision reason codes, rollout and rollback guides, parity and
 evidence workflows for streaming rollout safety, dynamic configuration

@@ -147,23 +147,22 @@ cache validation, or `markdown_accept wildcard` with
 
 ## Serve Markdown to Specific Bots
 
-Most AI crawlers do not send `Accept: text/markdown`. They use standard browser-like Accept headers. You can use NGINX's `map` directive to rewrite the Accept header for specific User-Agent strings. Matching bots then receive Markdown without any changes on their side.
+Most AI crawlers do not send `Accept: text/markdown`. They use standard
+browser-like Accept headers. Use NGINX's `map` directive to enable the module
+for specific User-Agent strings. Set `markdown_accept force` for that scope.
+`proxy_set_header Accept` changes only the request sent to the upstream. It does
+not change the header evaluated by this module.
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
 
 http {
-    # Rewrite Accept for known AI bots
-    map $http_user_agent $bot_accept_override {
-        default         "";
-        "~*ClaudeBot"   "text/markdown, text/html;q=0.9";
-        "~*GPTBot"      "text/markdown, text/html;q=0.9";
-        "~*Googlebot"   "text/markdown, text/html;q=0.9";
-    }
-
-    map $bot_accept_override $final_accept {
-        ""      $http_accept;
-        default $bot_accept_override;
+    # Enable Markdown for known AI bots without rewriting the upstream request
+    map $http_user_agent $markdown_for_bot {
+        default         off;
+        "~*ClaudeBot"   on;
+        "~*GPTBot"      on;
+        "~*Googlebot"   on;
     }
 
     upstream backend {
@@ -174,8 +173,8 @@ http {
         listen 80;
 
         location /docs/ {
-            markdown_filter on;
-            proxy_set_header Accept $final_accept;
+            markdown_filter $markdown_for_bot;
+            markdown_accept force;
             proxy_pass http://backend;
         }
     }
@@ -419,7 +418,7 @@ v0.9.1 is the **final pre-v1.0 baseline consolidation and compatibility reset**.
 - **Single streaming control**: `markdown_streaming off|auto|force` is now the sole processing-path selector. The duplicate `markdown_streaming_engine` directive is absent. Use the standard NGINX unknown-directive error to identify stale configuration.
 - **Supported flavors clarified**: `markdown_flavor` supports `commonmark` and `gfm`. The module rejects the experimental `mdx` and `org-mode` values because they never had distinct production conversion semantics.
 - **Automatic zero-copy streaming output**: buffer ownership and backpressure select the safe delivery path internally. v0.9.1 removed the explicit zero-copy directive; `markdown_streaming_zero_copy` no longer exists in the 0.9.2 configuration surface.
-- **Streaming decompression routing (gzip + deflate + Brotli)**: set `markdown_streaming force`, `markdown_auto_decompress on`, and `markdown_cache_validation` not `full`. The streaming engine then decompresses gzip, deflate, and Brotli responses incrementally. It handles zlib-wrapped RFC 1950 and raw RFC 1951 deflate forms. It does not force full-buffer accumulation. The engine validates gzip member boundaries and trailers across chunks. Brotli streaming requires `libbrotlidec` at build time. `NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off` controls this. Official artifacts enable it by default.
+- **Streaming decompression routing (gzip + deflate + Brotli)**: set `markdown_streaming force`, `markdown_auto_decompress on`, and `markdown_cache_validation` not `full`. The streaming engine then decompresses gzip, zlib-wrapped RFC 1950 deflate, and Brotli responses incrementally. The module rejects raw RFC 1951 deflate under the frozen 0.9.2 contract. It does not force full-buffer accumulation. The engine validates gzip member boundaries and trailers across chunks. Brotli streaming requires `libbrotlidec` at build time. `NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off` controls this. Official artifacts enable it by default.
 - **Full-buffer copy reduction**: an internal optimization (default on, no configuration surface) eliminates redundant memcpy in the full-buffer compressed path. It passes contiguous buffers directly to the decompressor and swaps output via pointer assignment.
 - **`markdown_auto_decompress` directive**: now officially registered as a configurable directive (default on). Previously an internal field not settable via `nginx.conf`.
 - **Performance evidence gate**: a module-level benchmark harness (`tools/perf/run_module_benchmark.sh`) produces the evidence. An automated release gate (`make release-gates-check-091`) enforces latency, TTFB, memory slope, and fallback rate thresholds before release promotion.

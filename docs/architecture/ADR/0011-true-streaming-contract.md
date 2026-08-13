@@ -48,7 +48,8 @@ as "true streaming."
 ### Negative Consequences
 
 - Post-commit irreversibility means conversion errors discovered late cannot
-  retract once the output has flushed downstream
+  retract bytes that downstream filters have already accepted. The request
+  must finish through the configured safe-finish or abort path
 - Increases implementation complexity for the converter state machine
 - Requires careful handling of HTML structures that span chunk boundaries
 

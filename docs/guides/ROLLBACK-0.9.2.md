@@ -41,13 +41,20 @@ Publication and artifact availability are separate release gates.
    fingerprint through an independent trusted source, before copying or
    installing the binary.
 
-3. **Validate configuration:**
+3. **Restore the matching 0.9.1 configuration:**
+
+   Restore the versioned 0.9.1 `nginx.conf` and any 0.9.1 dynamic-configuration
+   file from the same backup or release-controlled configuration bundle. Do not
+   validate a 0.9.2 configuration with the 0.9.1 binary. The 25-directive
+   surface and dynconf schema are not compatible.
+
+4. **Validate configuration:**
 
    ```bash
    sudo nginx -t
    ```
 
-4. **Start NGINX:**
+5. **Start NGINX:**
 
    ```bash
    sudo nginx
@@ -64,11 +71,12 @@ Publication and artifact availability are separate release gates.
    # Rebuild NGINX module per your build procedure
    ```
 
-2. **Install, validate, and start:**
+2. **Restore the matching 0.9.1 configuration, install, validate, and start:**
 
    ```bash
    sudo nginx -s quit
    timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
+   # Restore the versioned 0.9.1 nginx.conf and dynamic-configuration file here.
    sudo cp objs/ngx_http_markdown_filter_module.so /usr/lib/nginx/modules/
    sudo nginx -t && sudo nginx
    ```
@@ -119,6 +127,8 @@ Key reversions:
 ```bash
 sudo nginx -s quit
 while sudo systemctl is-active --quiet nginx; do sleep 1; done
+# Restore the versioned 0.9.0 nginx.conf and dynamic-configuration file before
+# installing the 0.9.0 binary. The 0.9.1 configuration is not compatible.
 sudo cp /path/to/ngx_http_markdown_filter_module.so.0.9.0 \
     /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
 sudo nginx -t && sudo nginx
@@ -150,7 +160,7 @@ cat > "$tmp" <<'EOF'
   "schema_version": 1,
   "filter": "off",
   "error_policy": "pass",
-  "streaming_buffer": 1048576
+  "streaming_budget": 1048576
 }
 EOF
 mv -f "$tmp" "$path"

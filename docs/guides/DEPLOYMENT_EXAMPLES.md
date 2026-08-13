@@ -215,44 +215,43 @@ http {
 }
 ```
 
-If you are using a reverse proxy upstream instead of PHP-FPM, keep
-`markdown_auto_decompress on` whenever the module must convert compressed
-upstream responses. `proxy_set_header Accept-Encoding "";` offers an optional
+If you are using a reverse proxy upstream instead of PHP-FPM, the default
+`markdown_auto_decompress on` keeps compressed upstream responses eligible for
+conversion. `proxy_set_header Accept-Encoding "";` offers an optional
 first-step simplification. It asks the upstream for an uncompressed response,
 but it does not substitute for the module's decompression policy when
 compression remains enabled end to end.
 
 ### Bot-Targeted Conversion (User-Agent Based)
 
-AI crawlers and agent bots typically do not send `Accept: text/markdown`. They use standard browser-like Accept headers when fetching pages. If you want specific bots to receive Markdown automatically, you can rewrite the Accept header at the NGINX layer. You match by User-Agent and rewrite the incoming request `Accept` header in a request phase before module content negotiation.
+AI crawlers and agent bots typically do not send `Accept: text/markdown`. They
+use standard browser-like Accept headers when fetching pages. If you want
+specific bots to receive Markdown automatically, enable the module for those
+User-Agents. Set the module's `markdown_accept force` policy for that scope.
+`proxy_set_header Accept` changes only the request sent to the upstream. It does
+not replace the module policy.
 
-This is a practical pattern because it requires no application or module code changes. The module's existing content negotiation handles the conversion once it sees `text/markdown` in the Accept header. Operators can manage the bot list entirely through NGINX configuration.
+This is a practical pattern because it requires no application or module code changes. Operators can manage the bot list entirely through NGINX configuration while the module keeps the selection decision in its own request path.
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
 
 http {
-    # Rewrite Accept header for known AI bots
-    map $http_user_agent $bot_accept_override {
-        default         "";
-        "~*ClaudeBot"   "text/markdown, text/html;q=0.9";
-        "~*GPTBot"      "text/markdown, text/html;q=0.9";
-        "~*Googlebot"   "text/markdown, text/html;q=0.9";
-    }
-
-    # Use the override when present, otherwise keep the original Accept
-    map $bot_accept_override $final_accept {
-        ""      $http_accept;
-        default $bot_accept_override;
+    # Enable the filter only for known AI bots
+    map $http_user_agent $is_ai_bot {
+        default         off;
+        "~*ClaudeBot"   on;
+        "~*GPTBot"      on;
+        "~*Googlebot"   on;
     }
 
     server {
         listen 8080;
 
         location / {
-            markdown_filter on;
+            markdown_filter $is_ai_bot;
+            markdown_accept force;
             markdown_error_policy pass;
-            proxy_set_header Accept $final_accept;
             proxy_pass http://backend;
         }
 

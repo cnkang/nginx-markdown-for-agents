@@ -22,11 +22,11 @@ decompression via the Rust FFI path.
 | Encoding | Streaming-eligible conditions | 0.9.2 path |
 |----------|-------------------------------|------------|
 | identity | streaming selected | streaming conversion |
-| deflate (RFC 1950 zlib-wrapped) | auto decompress on; cache validation not `full` | streaming decompression |
-| gzip | auto decompress on; cache validation not `full` | member-aware streaming decompression |
-| Brotli (`br`) | auto decompress on; cache validation not `full`; `NGX_HTTP_BROTLI` defined | streaming decompression |
+| deflate (RFC 1950 zlib-wrapped) | automatic decompression on; streaming selected; cache validation not `full` | streaming decompression |
+| gzip | automatic decompression on; streaming selected; cache validation not `full` | member-aware streaming decompression |
+| Brotli (`br`) | automatic decompression on; streaming selected; cache validation not `full`; `NGX_HTTP_BROTLI` defined | streaming decompression |
 | Brotli (`br`) | `NGX_HTTP_BROTLI` not defined | bounded full-buffer decompression (Rust FFI) |
-| unknown/unsupported | none | existing passthrough/error-policy behavior |
+| unknown/unsupported | no supported decoder | passthrough unchanged; no conversion policy is applied |
 
 ## Routing Decision
 
@@ -62,7 +62,7 @@ Upstream response
   │         ├─ Brotli (not compiled) or full cache validation
   │         │    └─ Bounded full-buffer decompression → conversion
   │         └─ unknown encoding
-  │              └─ Passthrough/error-policy behavior
+  │              └─ Passthrough unchanged (no conversion policy)
   │
   └─ No Content-Encoding
        └─ Eligible for streaming conversion

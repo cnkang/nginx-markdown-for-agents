@@ -1,7 +1,7 @@
 # ADR-0013: Streaming Default Policy
 
 > Historical decision for the pre-Config-V2 selector. ADR-0023 supersedes its
-> active configuration recommendation in v0.9.1. The current directive is
+> active configuration recommendation in v0.9.2. The current directive is
 > `markdown_streaming off|auto|force`. The former engine selector is not an
 > active configuration surface.
 
@@ -85,3 +85,4 @@ conversion enter the streaming path targeted by the 0.8.0 release.
 
 - [RFC 0008 sections 2.1–2.2](../RFC-0008-streaming-conversion-support-contract.md)
 - [ADR-0007: Streaming Engine as Default (auto mode)](0007-streaming-default.md)
+- [ADR-0023: Streaming Selector Contract](0023-single-streaming-policy.md)

@@ -7,7 +7,7 @@
 
 ## Summary
 
-- Findings: 27 (High 2 / Medium 12 / Low 13)
+- Findings: 27 (High 2 / Medium 14 / Low 11)
 - Categories: stale/outdated 9, misleading 8, signature/return-code mismatch 4, FFI boundary mismatch 3, duplicate/orphan blocks 2, placeholder 1
 - Tests (tests/unit) sampled clean, no independent high/medium comment drift found in test files.
 

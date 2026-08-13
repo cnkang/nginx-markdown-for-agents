@@ -1,4 +1,4 @@
-# Parser Interrupt Feasibility (v0.7.0)
+# Parser Interrupt Feasibility (current contract)
 
 > **Canonical reference**: See [PARSER_BUDGET.md](./PARSER_BUDGET.md) for the
 > comprehensive parser budget documentation including implementation status,

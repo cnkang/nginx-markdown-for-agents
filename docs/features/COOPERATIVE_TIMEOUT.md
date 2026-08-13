@@ -142,7 +142,9 @@ markdown_options_t options = {
 markdown_convert(handle, html, html_len, &options, &result);
 ```
 
-If `timeout_ms = 0`, the converter enforces no timeout.
+The overall conversion deadline is authoritative. A zero value disables that
+deadline, while a nonzero `parser_timeout` may add an earlier parser
+checkpoint deadline but can never extend the overall deadline.
 
 ## Public Configuration Surface
 

@@ -64,10 +64,12 @@ as permitted exceptions, each justified and listed:
 |------|---------------|
 | Metrics endpoint (`metrics_impl.h`) | full-response synthesis (subrequest) |
 | Diagnostics endpoint (`diagnostics.c`) | full-response synthesis (subrequest) |
-| Stream error response (`stream_error.c`) | full-response synthesis (error path) |
+| Stream post-commit error response (`stream_postcommit.c`) | full-response synthesis (error path) |
 
-Any **new** exception requires ADR justification and an entry here. New in-place
-`headers_out` mutation outside HeaderPlan is forbidden.
+Any **new** exception requires ADR justification and an entry here. The named
+post-plan ETag, Vary, token, and authentication-header operations are the
+explicit existing exceptions. No other code may mutate `headers_out` in place
+outside HeaderPlan.
 
 ### Post-commit error boundary
 

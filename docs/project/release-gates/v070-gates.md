@@ -29,9 +29,12 @@ Gate 6: Fuzz & Packaging Infrastructure (depends on Gate 1; validates specs 29-3
 
 **Release-blocking scope**: Gates 1 through 6 are blocking for 0.7.0 GA as
 defined in this document. The tag package workflow satisfies Gate 3 via its
-build, install-layout, checksum, and smoke-test chain. Gate 4 passes via
-chart lint/render validation, promoted cluster smoke, and F5 assessment
-evidence. Final Go requires all three records.
+build, install-layout, checksum, package-signature, and smoke-test chain, but
+the release record must also attach independent upgrade/rollback evidence.
+Gate 4 passes via chart lint/render validation, promoted cluster smoke, and F5
+assessment evidence. Final Go requires the package-signature and
+upgrade/rollback records in addition to the Gate 4 records. Missing records
+remain blocking even when the workflow itself is green.
 
 ---
 
