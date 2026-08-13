@@ -213,13 +213,19 @@ def _audit_tracked(manifest: dict[str, dict[str, Any]]) -> tuple[int, int]:
     misleading read error.
     """
     files = _run_git_ls_files()
-    text_files = [
-        p for p in files
-        if _is_text_file(p)
-        and not _should_skip_path(p)
-        and (_resolve_repository_path(p, "Tracked path").is_file())
-    ]
     failures: list[str] = []
+    text_files: list[Path] = []
+
+    for path in files:
+        if not _is_text_file(path) or _should_skip_path(path):
+            continue
+        try:
+            abs_path = _resolve_repository_path(path, "Tracked path")
+        except RuntimeError as exc:
+            failures.append(str(exc))
+            continue
+        if abs_path.is_file():
+            text_files.append(path)
 
     for path in text_files:
         try:

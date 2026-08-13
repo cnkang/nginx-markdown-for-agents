@@ -219,6 +219,11 @@ def main() -> int:
     validate_schema(matrix)
     check_canonical_identity(matrix)
     normalized = run_normalization()
+    if matrix != normalized:
+        raise SystemExit(
+            "ERROR: matrix differs from its canonical normalization; "
+            "remove legacy aliases and dropped metadata"
+        )
     check_bindings(normalized)
 
     digest = "sha256:" + hashlib.sha256(MATRIX_PATH.read_bytes()).hexdigest()

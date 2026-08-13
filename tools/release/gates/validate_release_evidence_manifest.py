@@ -237,7 +237,7 @@ def _validate_evidence_schema(manifest: dict, reasons: list) -> None:
         reasons.append(f"malformed: instance schema violation: {exc.message}")
 
 
-def _validate_observation_state(reasons: list) -> None:
+def _validate_observation_state(reasons: list, expected_sha: str | None) -> None:
     """Validate the observation-state record against its schema when
     present."""
     obs_state_path = (
@@ -255,6 +255,11 @@ def _validate_observation_state(reasons: list) -> None:
         obs = load_json(obs_state_path, "observation state")
         obs_schema = load_json(obs_schema_path, "observation state schema")
         jsonschema.validate(instance=obs, schema=obs_schema)
+        if expected_sha and obs.get("candidate_sha") != expected_sha:
+            reasons.append(
+                "stale-digest: observation-state candidate_sha "
+                f"{obs.get('candidate_sha')} != frozen candidate {expected_sha}"
+            )
     except ValueError as exc:
         reasons.append(f"malformed: observation-state invalid: {exc}")
     except jsonschema.ValidationError as exc:
@@ -275,7 +280,10 @@ def _resolve_expected_sha(args) -> str | None:
     )
     candidate_path = manifest_path.parent / "release-candidate-sha-manifest.json"
     if not candidate_path.is_file():
-        return None
+        raise ValueError(
+            "missing-observation: release candidate manifest is required "
+            "for real final-evidence validation"
+        )
     candidate = load_json(candidate_path, "release candidate manifest")
     return candidate.get("candidate_sha")
 
@@ -289,11 +297,20 @@ def run_real_gate(args) -> int:
 
     manifest = load_json(manifest_path, FINAL_EVIDENCE_MANIFEST_LABEL)
     expected_sha = _resolve_expected_sha(args)
-    reasons = validate_record(manifest, expected_sha=expected_sha)
+    reasons = []
+    candidate_sha = manifest.get("candidate_sha")
+    if not isinstance(candidate_sha, str) or not CANDIDATE_SHA_PATTERN.fullmatch(
+        candidate_sha
+    ):
+        reasons.append("malformed: candidate_sha must be 40 lowercase hex")
+    elif expected_sha and candidate_sha != expected_sha:
+        reasons.append(
+            f"stale-digest: candidate_sha {candidate_sha} != expected {expected_sha}"
+        )
     if not _require_jsonschema():
         return 1
     _validate_evidence_schema(manifest, reasons)
-    _validate_observation_state(reasons)
+    _validate_observation_state(reasons, expected_sha)
 
     if reasons:
         for reason in reasons:

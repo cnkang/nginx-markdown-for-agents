@@ -52,7 +52,8 @@ def load_matrix(path: Path) -> list[dict]:
     are projected into the legacy artifact-name fields used by install.sh.
     
     Returns:
-        list[dict]: The list of matrix entry dictionaries.
+        list[dict]: Projected install.sh-compatible rows with ``nginx``,
+            ``os_type``, ``arch``, and ``support_tier`` fields.
     
     Raises:
         ValueError: If the parsed JSON is not an object, the ``entries`` key is
@@ -84,6 +85,8 @@ def load_matrix(path: Path) -> list[dict]:
             arch = {"amd64": "x86_64", "arm64": "aarch64"}.get(
                 entry.get("target"), entry.get("target")
             )
+            if arch not in INSTALL_DETECTABLE_ARCHS:
+                continue
             matrix.append(
                 {
                     "nginx": entry.get("nginx_version"),

@@ -62,7 +62,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
 .PHONY: all build rust-lib rust-lib-debug copy-headers check-headers \
         install \
         test test-rust test-rust-doc test-nginx-unit test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
-        test-nginx-integration test-e2e test-e2e-rust test-all test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
+        test-nginx-integration test-e2e test-e2e-rust test-e2e-contract-scripts test-all test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
         test-corpus-determinism reason-codegen-generate reason-codegen-check \
         official-feature-manifest-generate \
@@ -192,6 +192,19 @@ test-e2e-rust:
 	cd $(E2E_HARNESS_DIR) && cargo build --locked
 	@echo "Running e2e-harness migrated scenarios..."
 	cd $(E2E_HARNESS_DIR) && cargo run --locked -- suite --profile smoke
+
+test-e2e-contract-scripts:
+	@case "$${NGINX_BIN:-}" in \
+		'') NGINX_BIN="$$(command -v nginx 2>/dev/null || true)" ;; \
+		*) ;; \
+	esac; \
+	if test -z "$${NGINX_BIN:-}"; then echo "ERROR: set NGINX_BIN or install a module-enabled nginx" >&2; exit 2; fi; \
+	NGINX_BIN="$${NGINX_BIN}" bash tests/compatibility/test_error_policy_values.sh
+	@if test -n "$${NGINX_URL:-}"; then \
+		bash tests/e2e/filter_ordering_test.sh; \
+	else \
+		echo "SKIP: filter ordering requires NGINX_URL and a running fixture" >&2; \
+	fi
 
 test-all: build test-rust test-nginx-unit test-property
 
@@ -355,6 +368,7 @@ official-feature-manifest-generate:
 	@echo "  Official Build Feature Manifest Generation: PASSED"
 
 harness-security-checks:
+	python3 tools/harness/check_removed_directive_registry.py
 	bash tools/harness/detect_cwe190_casts.sh
 	PYTHONPATH=. python3 tools/harness/detect_cwe22_paths.py tools/ --strict
 	bash tools/harness/detect_live_conf_reads.sh
@@ -904,7 +918,9 @@ perf-evidence-check:
 #                                           benchmarks (non-release only)
 #
 # Classification: BLOCKING (fails on NO_GO/MISSING_EVIDENCE; fail-closed when
-# NGINX_BIN is absent unless an explicit skip is authorized)
+# NGINX_BIN is absent unless an explicit skip is authorized). A baseline whose
+# policy explicitly sets release_gate_eligible=false is provenance-validated
+# and intentionally excluded until its recorded remeasurement condition is met.
 .PHONY: release-perf-evidence-blocking
 release-perf-evidence-blocking:
 	@if [ -z "$(BASELINE_VERSION)" ]; then \

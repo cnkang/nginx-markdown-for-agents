@@ -345,6 +345,64 @@ def test_normalize_macos_uses_darwin_libc():
     assert entry["arch"] == "arm64"
 
 
+def test_normalize_legacy_arch_only_entry():
+    """Legacy rows that carry only ``arch`` still normalize deterministically."""
+    entry = rmd.normalize_entry(
+        {
+            "nginx": "1.26.3",
+            "os_type": "glibc",
+            "arch": "aarch64",
+            "artifact_type": "dynamic-module",
+            "support_tier": "full",
+        }
+    )
+    assert entry["nginx_version"] == "1.26.3"
+    assert entry["libc"] == "glibc"
+    assert entry["arch"] == "arm64"
+
+
+def test_validate_schema_rejects_malformed_entry():
+    """Malformed matrix rows must fail validation rather than render partial docs."""
+    errors = rmd.validate_schema(
+        {
+            "schema_version": "1.0.0",
+            "matrix": [{"nginx": "1.26.3", "os_type": "glibc"}],
+        }
+    )
+    assert errors
+
+
+def test_check_file_reports_missing_registered_target():
+    """A registered but absent target is a check failure."""
+    original_root = rmd.ROOT
+    original_registry = rmd.SECTION_REGISTRY
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            rmd.ROOT = Path(temp_dir)
+            rmd.SECTION_REGISTRY = {"missing.md": ["support-matrix"]}
+            errors = rmd.check_file("missing.md", [], MINIMAL_MATRIX)
+            assert errors == ["missing.md: target file not found"]
+    finally:
+        rmd.ROOT = original_root
+        rmd.SECTION_REGISTRY = original_registry
+
+
+def test_check_file_reports_target_without_markers():
+    """A registered target without markers cannot be considered synchronized."""
+    original_root = rmd.ROOT
+    original_registry = rmd.SECTION_REGISTRY
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            rmd.ROOT = Path(temp_dir)
+            rmd.SECTION_REGISTRY = {"plain.md": ["support-matrix"]}
+            Path(temp_dir, "plain.md").write_text("# no generated section\n")
+            errors = rmd.check_file("plain.md", [], MINIMAL_MATRIX)
+            assert errors == ["plain.md: no release-matrix markers"]
+    finally:
+        rmd.ROOT = original_root
+        rmd.SECTION_REGISTRY = original_registry
+
+
 # ---------------------------------------------------------------------------
 # Section registry tests
 # ---------------------------------------------------------------------------
@@ -539,6 +597,10 @@ def run_tests():
         test_tier_mapping_resolved,
         test_tier_mapping_passthrough,
         test_normalize_macos_uses_darwin_libc,
+        test_normalize_legacy_arch_only_entry,
+        test_validate_schema_rejects_malformed_entry,
+        test_check_file_reports_missing_registered_target,
+        test_check_file_reports_target_without_markers,
         test_section_registry_coverage,
         test_known_sections_complete,
         test_section_registry_matches_task_spec,

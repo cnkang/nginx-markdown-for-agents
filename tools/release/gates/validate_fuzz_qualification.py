@@ -111,12 +111,38 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--allow-skip-fuzz", action="store_true",
                         help="exit 0 when cargo +nightly is unavailable")
+    parser.add_argument(
+        "--git-head",
+        action="store_true",
+        help="require the candidate manifest SHA to equal git HEAD",
+    )
     return parser
 
 
 def _utc_now() -> str:
     """Return the current UTC time as an ISO-8601 string."""
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _git_head_sha() -> str:
+    """Return the checked-out commit SHA used for candidate binding."""
+    git = resolve_approved_executable("git")
+    if git is None:
+        raise ValueError("unable to resolve git HEAD: approved git not found")
+    try:
+        result = subprocess.run(
+            [git, "rev-parse", "HEAD"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ValueError(f"unable to resolve git HEAD: {exc}") from exc
+    if result.returncode != 0:
+        raise ValueError(f"unable to resolve git HEAD: {result.stderr.strip()}")
+    return result.stdout.strip()
 
 
 def _run_id_from(started_at: str) -> str:
@@ -358,6 +384,14 @@ def _classify_finding(finding: str) -> tuple[int, int]:
     """Return (crashes, sanitizer_findings) counts for a failure finding."""
     if not finding:
         return 0, 0
+    if finding.startswith((
+        "fuzz run failed with exit code",
+        "fuzz run produced no statistics",
+        "spawn failed:",
+        "timed out:",
+        "threshold not reached within",
+    )):
+        return 0, 0
     if any(marker in finding for marker in (
             "AddressSanitizer", "UndefinedBehaviorSanitizer", "runtime error:")):
         return 0, 1
@@ -572,6 +606,13 @@ def run_real_gate(args) -> int:
     corpus_data = load_json(args.corpus_manifest, "corpus-seed manifest")
     seeds = validate_corpus_seeds(corpus_data, manifest["candidate_sha"],
                                   blocking_names)
+    if getattr(args, "git_head", False):
+        actual_head = _git_head_sha()
+        if manifest["candidate_sha"] != actual_head:
+            raise ValueError(
+                "stale-digest: blocking fuzz manifest candidate_sha "
+                f"{manifest['candidate_sha']} != git HEAD {actual_head}"
+            )
     if not _cargo_fuzz_available():
         return _handle_cargo_missing(args, manifest["candidate_sha"], targets)
 

@@ -111,8 +111,6 @@ jobs:
           }
           if row.get("ci") != expected_ci:
               raise SystemExit(f"sanitizer row {row_id!r} has invalid CI binding")
-          if any(row.get(key) != value for key, value in expected_ci.items()):
-              raise SystemExit(f"sanitizer row {row_id!r} has invalid CI identity")
           expected_commands = {
               "asan-ubsan": "make test-nginx-unit-sanitize-smoke",
               "lsan": "ASAN_OPTIONS=detect_leaks=1 make test-nginx-unit-sanitize-smoke",

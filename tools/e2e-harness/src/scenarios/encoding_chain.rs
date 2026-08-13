@@ -329,9 +329,16 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     push_assertion(
         &mut assertions,
         "truncated_pass_original_response",
-        truncated.status == 200,
-        "truncated stream degrades to the original response under PASS",
-        format!("status={} bytes={}", truncated.status, truncated.body.len()),
+        truncated.status == 200
+            && truncated.headers.contains_key("Content-Encoding")
+            && !truncated.body.is_empty(),
+        "truncated stream preserves status, Content-Encoding, and body under PASS",
+        format!(
+            "status={} content_encoding={} bytes={}",
+            truncated.status,
+            truncated.headers.contains_key("Content-Encoding"),
+            truncated.body.len()
+        ),
     );
 
     Ok(common::finalize_report(SCENARIO, start, assertions))
@@ -345,7 +352,9 @@ fn request_markdown(base_url: &str, path: &str) -> Result<HttpResponse> {
 }
 
 fn request_raw(base_url: &str, path: &str) -> Result<HttpResponse> {
-    crate::http::get(&format!("{base_url}{path}"))
+    let mut headers = HashMap::new();
+    headers.insert("Accept".to_string(), "text/markdown".to_string());
+    crate::http::get_with_headers(&format!("{base_url}{path}"), &headers)
         .with_context(|| format!("request failed for {path}"))
 }
 

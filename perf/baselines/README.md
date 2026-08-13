@@ -43,6 +43,10 @@ Its retained raw artifact has SHA-256
 `ebcd73ec55c4e85a6cdbc85371832342d97b2edcdf06c56cf5bb7a91f0ab5c92`.
 The validator requires this source commit, run attempt, timestamp, retained
 raw artifact, and digest to remain mutually consistent.
+That run used Rust 1.93.1 while the project requires Rust 1.97 or newer, so
+its policy explicitly sets `release_gate_eligible: false` with a remeasurement
+reason. It remains auditable regression context; the release evidence gate
+skips percentage comparisons until a current-toolchain baseline is checked in.
 
 Provenance layers by object: `baseline_policy` carries policy provenance,
 top-level `module_benchmark` carries `platform`, `load_generator`,

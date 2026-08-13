@@ -59,7 +59,8 @@ RUST_REASON_AS_STR = "            let s = rc.as_str();"
 RUST_OUT_LEN_GUARD = "            if !out_len.is_null() {"
 RUST_TEST_ATTRIBUTE = "    #[test]"
 RUST_ALL_LOOP = "        for rc in &ALL {"
-REASON_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+REASON_KEY_RE = re.compile(r"^[a-z](?:[a-z0-9]|_(?=[a-z0-9]))*$")
+LEGACY_KEY_RE = re.compile(r"^[A-Z](?:[A-Z0-9]|_(?=[A-Z0-9]))*$")
 VALID_STAGES = frozenset({
     "eligibility", "decompression", "parsing", "conversion",
     "precommit", "postcommit", "delivery", "dynconf",
@@ -83,8 +84,12 @@ def _validate_legacy_keys(index: int, entry: dict) -> list[str]:
     aliases = entry.get("legacy_keys", [])
     if not isinstance(aliases, list):
         return [f"reasons[{index}] legacy_keys must be an array"]
-    invalid = [alias for alias in aliases
-               if not isinstance(alias, str) or not alias]
+    invalid = [
+        alias
+        for alias in aliases
+        if not isinstance(alias, str)
+        or LEGACY_KEY_RE.fullmatch(alias) is None
+    ]
     if invalid:
         return [
             f"reasons[{index}] legacy_keys contains invalid values: {invalid!r}"
@@ -998,7 +1003,8 @@ def generate_c_header(reasons, hash_hex: str) -> str:
         " * Reason metadata table (index = discriminant).",
         " * Entry MARKDOWN_REASON_META_COUNT is the unknown sentinel.",
         " */",
-        "static const markdown_reason_meta_t",
+        "#ifdef MARKDOWN_REASON_META_DEFINE",
+        "const markdown_reason_meta_t",
         "    markdown_reason_meta[MARKDOWN_REASON_META_COUNT + 1] = {",
     ])
 
@@ -1021,6 +1027,10 @@ def generate_c_header(reasons, hash_hex: str) -> str:
 
     lines.extend([
         "};",
+        "#else",
+        "extern const markdown_reason_meta_t",
+        "    markdown_reason_meta[MARKDOWN_REASON_META_COUNT + 1];",
+        "#endif",
         "",
         "/*",
         " * Legacy uppercase aliases retained for diagnostics compatibility.",
@@ -1033,8 +1043,10 @@ def generate_c_header(reasons, hash_hex: str) -> str:
         "",
         f"#define MARKDOWN_REASON_ALIAS_COUNT {len(aliases)}",
         "",
-        "static const markdown_reason_alias_t",
-        "    markdown_reason_aliases[MARKDOWN_REASON_ALIAS_COUNT] = {",
+        "#ifdef MARKDOWN_REASON_META_DEFINE",
+        "const markdown_reason_alias_t",
+        "    markdown_reason_aliases[MARKDOWN_REASON_ALIAS_COUNT > 0 ? "
+        "MARKDOWN_REASON_ALIAS_COUNT : 1] = {",
     ])
 
     for alias, code in aliases:
@@ -1042,6 +1054,11 @@ def generate_c_header(reasons, hash_hex: str) -> str:
 
     lines.extend([
         "};",
+        "#else",
+        "extern const markdown_reason_alias_t",
+        "    markdown_reason_aliases[MARKDOWN_REASON_ALIAS_COUNT > 0 ? "
+        "MARKDOWN_REASON_ALIAS_COUNT : 1];",
+        "#endif",
         "",
         "#endif /* MARKDOWN_REASON_META_H */",
         "",

@@ -1385,7 +1385,7 @@ check_prometheus_response() {
   local -a curl_args
 
   curl_args=(-sS -D "${header_file}" -o "${body_file}")
-  if [[ -n "${accept_header}" ]]; then
+  if [[ $# -ge 2 ]]; then
     curl_args+=(-H "${accept_header}")
   fi
   if ! status="$(curl "${curl_args[@]}" \
@@ -1419,7 +1419,7 @@ check_prometheus_response "openmetrics" 'Accept: text/plain; version=0.0.4'
 check_prometheus_response "arbitrary-accept" 'Accept: application/openmetrics-text; version=1.0.0'
 
 # Prometheus: no Accept header
-check_prometheus_response "no-accept"
+check_prometheus_response "no-accept" ''
 
 # Prometheus: after streaming conversion (populates streaming metrics)
 curl -sS -H "${ACCEPT_MARKDOWN}" \

@@ -32,6 +32,7 @@ decompression_events_total, dynconf_reloads_total) and request counts.
 
 from __future__ import annotations
 
+import json
 import sys
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -46,6 +47,11 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parent.parent.parent.parent)
 )
 
+METRICS_REGISTRY = json.loads(
+    (Path(__file__).resolve().parents[4] / "schemas" / "metrics-v1.registry.json")
+    .read_text(encoding="utf-8")
+)
+
 
 # --- Request outcome model ---
 
@@ -56,6 +62,25 @@ class RequestOutcome(Enum):
     FAILED_OPEN = auto()     # Conversion failed, original HTML delivered
     FAILED_CLOSED = auto()   # Conversion failed, error response delivered
     ABORTED = auto()         # Client abort during conversion
+
+
+def _registry_outcomes() -> set[str]:
+    family = next(
+        item
+        for item in METRICS_REGISTRY["families"]
+        if item["name"] == "nginx_markdown_requests_total"
+    )
+    return next(
+        label["values"]
+        for label in family["labels"]
+        if label["name"] == "outcome"
+    )
+
+
+def test_request_outcomes_match_registry_allowlist() -> None:
+    assert {outcome.name.lower() for outcome in RequestOutcome} == set(
+        _registry_outcomes()
+    )
 
 
 class RequestScenario(Enum):

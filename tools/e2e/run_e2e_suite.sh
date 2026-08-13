@@ -34,6 +34,8 @@ STREAMING_FAILURE_CACHE_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_streaming_fai
 SECURITY_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_security_e2e.sh"
 ERROR_HANDLING_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_error_handling_e2e.sh"
 CONFIG_MERGE_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_config_merge_e2e.sh"
+FILTER_ORDERING_SCRIPT="${WORKSPACE_ROOT}/tests/e2e/filter_ordering_test.sh"
+ERROR_POLICY_VALUES_SCRIPT="${WORKSPACE_ROOT}/tests/compatibility/test_error_policy_values.sh"
 E2E_HARNESS_BIN="${WORKSPACE_ROOT}/tools/e2e-harness/target/debug/e2e-harness"
 E2E_HARNESS_MANIFEST="${WORKSPACE_ROOT}/tools/e2e-harness/Cargo.toml"
 SUITE_BUILDROOT=""
@@ -204,6 +206,16 @@ fi
 "${E2E_HARNESS_BIN}" scenario auth-cache "${e2e_harness_args[@]}"
 "${E2E_HARNESS_BIN}" scenario status-codes "${e2e_harness_args[@]}"
 
+# These two contract scripts are intentionally wired into the canonical suite:
+# the error-policy script is binary-only, while filter ordering additionally
+# needs a caller-provided running NGINX_URL and fixture paths.
+env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${ERROR_POLICY_VALUES_SCRIPT}"
+if [[ -n "${NGINX_URL:-}" ]]; then
+  env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${FILTER_ORDERING_SCRIPT}"
+else
+  echo "  filter_ordering=skipped (set NGINX_URL for a running fixture)"
+fi
+
 echo "Canonical E2E suite summary:"
 echo "  proxy_tls_backend=passed"
 echo "  chunked_native_smoke=passed"
@@ -216,5 +228,9 @@ echo "  metrics_endpoint=passed"
 echo "  conditional_requests=passed"
 echo "  config_merge=passed"
 echo "  auth_cache=passed"
-echo "  status_codes=passed"
+  echo "  status_codes=passed"
+  echo "  error_policy_values=passed"
+  if [[ -n "${NGINX_URL:-}" ]]; then
+    echo "  filter_ordering=passed"
+  fi
 echo "  reusable_nginx_bin=${SUITE_NGINX_BIN}"

@@ -16,7 +16,6 @@ REPO="cnkang/nginx-markdown-for-agents"
 RELEASE_VERSION="${VERSION:-}"
 DOWNLOAD_URL_OVERRIDE="${DOWNLOAD_URL_OVERRIDE:-}"
 DOWNLOAD_SHA256="${DOWNLOAD_SHA256:-}"
-ALLOW_INSECURE_NO_CHECKSUM="${ALLOW_INSECURE_NO_CHECKSUM:-0}"
 AUTO_DISABLE_STALE_MODULE="${AUTO_DISABLE_STALE_MODULE:-0}"
 MIN_SUPPORTED_NGINX_VERSION="1.24.0"
 SOURCE_BUILD_URL="https://github.com/cnkang/nginx-markdown-for-agents/tree/main/docs/guides/INSTALLATION.md#6-secondary-manual-source-build"
@@ -869,11 +868,11 @@ if [[ -n "$RELEASE_VERSION" ]]; then
   source_ref="$RELEASE_VERSION"
 fi
 
-if [[ -n "$DOWNLOAD_URL_OVERRIDE" ]] && [[ -z "$DOWNLOAD_SHA256" ]] && [[ "${ALLOW_INSECURE_NO_CHECKSUM}" != "1" ]]; then
+if [[ -n "$DOWNLOAD_URL_OVERRIDE" ]] && [[ -z "$DOWNLOAD_SHA256" ]]; then
   die_with_error "checksum" \
-    "DOWNLOAD_URL_OVERRIDE requires DOWNLOAD_SHA256 unless ALLOW_INSECURE_NO_CHECKSUM=1 is set." \
+    "DOWNLOAD_URL_OVERRIDE requires DOWNLOAD_SHA256; checksumless installation is not supported." \
     "Set DOWNLOAD_SHA256 to the trusted SHA-256 digest of the override artifact." \
-    "Or set ALLOW_INSECURE_NO_CHECKSUM=1 only in trusted, controlled environments."
+    "If no independently authenticated digest is available, build and install from source."
 fi
 
 RELEASE_JSON=""
@@ -967,14 +966,10 @@ if [[ -n "$EXPECTED_SHA256" ]]; then
   fi
   echo "[+] SHA256 checksum verified"
 else
-  if [[ "${ALLOW_INSECURE_NO_CHECKSUM}" = "1" ]]; then
-    echo "[!] Release asset does not provide a SHA256 digest; proceeding because ALLOW_INSECURE_NO_CHECKSUM=1" >&2
-  else
-    die_with_error "checksum" \
-      "Release asset does not provide a SHA256 digest; refusing to install unsigned artifact by default." \
-      "Set ALLOW_INSECURE_NO_CHECKSUM=1 only in trusted, controlled environments if you must bypass this guard." \
-      "Or provide DOWNLOAD_SHA256 together with DOWNLOAD_URL_OVERRIDE."
-  fi
+  die_with_error "checksum" \
+    "Release asset does not provide a SHA256 digest; refusing to install unsigned artifact." \
+    "Provide DOWNLOAD_SHA256 together with DOWNLOAD_URL_OVERRIDE, or use a release asset with a digest." \
+    "If no independently authenticated digest is available, build and install from source."
 fi
 
 cd "$TMP_DIR"

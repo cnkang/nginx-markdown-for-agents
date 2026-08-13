@@ -363,8 +363,9 @@ http {
             # The 1 MiB Brotli fixture can expand from one very small wire
             # chunk. Keep both conversion and pre-commit replay buffers large
             # enough for that valid first batch while retaining hard caps.
-            markdown_limits conversion_memory=64m conversion_timeout=2s
-                parser_timeout=2s streaming_buffer=16m max_inflight=64;
+            markdown_limits conversion_memory=64m parser_memory=64m
+                conversion_timeout=2s parser_timeout=2s streaming_buffer=16m
+                max_inflight=64;
             $profile_directives
         }
 
@@ -373,7 +374,7 @@ http {
         }
 
         location = /nginx-markdown/diagnostics {
-            markdown_diagnostics;
+            markdown_diagnostics on;
         }
     }
 }

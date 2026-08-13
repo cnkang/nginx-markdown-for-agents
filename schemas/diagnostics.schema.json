@@ -247,6 +247,7 @@
             "null"
           ],
           "maxLength": 512,
+          "x-maxUtf8Bytes": 512,
           "description": "Validation failure description. Max 512 UTF-8 bytes. No raw file paths, no secrets, no raw config content. Null when no error."
         },
         "masked_keys": {
@@ -357,7 +358,8 @@
               "last_error": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 512
+                "maxLength": 512,
+                "x-maxUtf8Bytes": 512
               }
             }
           }
@@ -437,7 +439,8 @@
               "last_error": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 512
+                "maxLength": 512,
+                "x-maxUtf8Bytes": 512
               }
             }
           }

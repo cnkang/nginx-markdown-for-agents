@@ -470,6 +470,7 @@ PY
       else
         BLOCK_CONTEXT="server"
       fi
+      RAW_PREPARED_CONF="${RUNTIME_DIR}/migration_raw_${block_name}"
       {
         echo "worker_processes 1;"
         echo "error_log logs/error.log crit;"
@@ -497,7 +498,14 @@ PY
             exit 1
             ;;
         esac
-      } > "${PREPARED_CONF}"
+      } > "${RAW_PREPARED_CONF}"
+      PREPARED_CONF="${RUNTIME_DIR}/migration_${block_name}"
+      sandbox_conf "${RAW_PREPARED_CONF}" "${PREPARED_CONF}"
+      if has_load_module "${RAW_PREPARED_CONF}"; then
+        PREPARED_HANDLE=1
+      else
+        PREPARED_HANDLE=0
+      fi
       check_conf "migration-guide ${label}" "${expect}" || true
     done < "${MANIFEST}"
   fi

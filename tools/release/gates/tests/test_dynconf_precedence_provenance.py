@@ -40,10 +40,14 @@ PRECEDENCE_SOURCES = tuple(
 )
 
 # Assert the complete precedence source order at module load so silent
-# schema drift (e.g. a missing fifth tier) is caught immediately.
-assert len(PRECEDENCE_SOURCES) == 5, (
-    f"expected 5 precedence sources, got {len(PRECEDENCE_SOURCES)}"
-)
+# schema drift (e.g. a reordered tier) is caught immediately.
+assert PRECEDENCE_SOURCES == (
+    "request_variable",
+    "static",
+    "dynconf",
+    "http_baseline",
+    "default",
+), f"unexpected precedence source order: {PRECEDENCE_SOURCES!r}"
 
 
 # --- Model types ---

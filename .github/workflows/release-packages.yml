@@ -733,6 +733,13 @@ jobs:
         with:
           python-version: '3.14.6'
 
+      - name: Generate candidate-bound release gate inputs
+        run: |
+          python3 tools/release/gates/generate_release_gate_manifests.py \
+            --phase inputs \
+            --candidate-sha "$(git rev-parse HEAD)"
+        shell: bash
+
       - name: Verify tag SHA is main CI-approved
         if: github.ref_type == 'tag'
         env:
@@ -790,11 +797,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             apache2-utils \
+            build-essential \
             dpkg-dev \
             file \
             gzip \
+            libbrotli-dev \
+            pkg-config \
             rpm \
-            tar
+            tar \
+            zlib1g-dev
           python3 -m pip install --requirement requirements-release.txt
         shell: bash
 
@@ -809,14 +820,23 @@ jobs:
           echo "Python release dependencies ${dependency_versions} are available."
         shell: bash
 
-      - name: Download all DEB artifacts
+      - name: Download signed packages (tag)
+        if: github.ref_type == 'tag'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: signed-packages
+          path: release-assets/
+
+      - name: Download all DEB artifacts (workflow dispatch)
+        if: github.ref_type != 'tag'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-deb-*
           path: dist/
           merge-multiple: true
 
-      - name: Download all RPM artifacts
+      - name: Download all RPM artifacts (workflow dispatch)
+        if: github.ref_type != 'tag'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-rpm-*
@@ -857,10 +877,18 @@ jobs:
           name: module-so-${{ steps.bench-nginx.outputs.bench_nginx_version }}-amd64
           path: module-runtime
 
+      - name: Generate candidate-bound artifact index
+        run: |
+          python3 tools/release/gates/generate_release_gate_manifests.py \
+            --phase artifact \
+            --candidate-sha "$(git rev-parse HEAD)" \
+            --artifact-root dist
+        shell: bash
+
       - name: Install nightly Rust toolchain for fuzz qualification
         run: |
           rustup toolchain install nightly --profile minimal --no-self-update
-          cargo install cargo-fuzz --locked
+          cargo install cargo-fuzz --version 0.13.1 --locked
         shell: bash
 
       - name: Run release gates
@@ -901,8 +929,7 @@ jobs:
           # gate enforces; publish hard-depends on this job's success.
           python3 tools/release/gates/validate_release_candidate_evidence.py --mode real --git-head
           python3 tools/release/gates/validate_artifact_registry.py --mode real
-          python3 tools/release/gates/validate_release_evidence_manifest.py --mode real
-          python3 tools/release/gates/validate_fuzz_qualification.py --mode real
+          python3 tools/release/gates/validate_fuzz_qualification.py --mode real --git-head
           make -C components/nginx-module/tests unit-streaming_impl
           make docs-check
           bash tools/harness/detect_version_consistency.sh
@@ -952,8 +979,12 @@ jobs:
           make release-perf-evidence-blocking BASELINE_VERSION=092
           # Short-soak qualification (Makefile stage [12/13]) against the
           # module-enabled EL9 nginx binary.
-          python3 tools/release/gates/validate_soak_qualification.py --mode real
+          python3 tools/release/gates/validate_soak_qualification.py --mode real --git-head
           CONTAINER_SCRIPT
+          python3 tools/release/gates/generate_release_gate_manifests.py \
+            --phase final \
+            --candidate-sha "$(git rev-parse HEAD)"
+          python3 tools/release/gates/validate_release_evidence_manifest.py --mode real
         shell: bash
 
   # ─────────────────────────────────────────────────────────────────────────────
@@ -963,7 +994,13 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   integrity-checksums:
     name: Integrity - SHA256SUMS
-    needs: smoke-test
+    needs: [smoke-test, integrity-signing]
+    if: >-
+      always()
+      && needs.smoke-test.result == 'success'
+      && (needs.integrity-signing.result == 'success'
+          || (needs.integrity-signing.result == 'skipped'
+              && github.ref_type != 'tag'))
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -974,14 +1011,23 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Download all DEB artifacts
+      - name: Download signed package artifacts (tag)
+        if: github.ref_type == 'tag'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: signed-packages
+          path: artifacts/
+
+      - name: Download all DEB artifacts (workflow dispatch)
+        if: github.ref_type != 'tag'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-deb-*
           path: artifacts/
           merge-multiple: true
 
-      - name: Download all RPM artifacts
+      - name: Download all RPM artifacts (workflow dispatch)
+        if: github.ref_type != 'tag'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-rpm-*
@@ -1081,7 +1127,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   integrity-signing:
     name: Integrity - GPG Sign
-    needs: [integrity-checksums, release-gate]
+    needs: [smoke-test, release-gate]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     permissions:
@@ -1108,6 +1154,105 @@ jobs:
             exit 1
           fi
           echo "Preflight OK: all GPG secrets present in release-signing environment." >&2
+        shell: bash
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+
+      - name: Download package artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: pkg-*
+          path: artifacts/
+          merge-multiple: true
+
+      - name: Install package signing tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dpkg-sig rpm gnupg-utils
+        shell: bash
+
+      - name: Sign DEB and RPM packages
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+        run: |
+          set -euo pipefail
+          export GNUPGHOME="${RUNNER_TEMP}/package-signing-gnupg"
+          mkdir -p "${GNUPGHOME}"
+          chmod 700 "${GNUPGHOME}"
+          trap 'rm -rf "${GNUPGHOME}"' EXIT
+          printf '%s' "${GPG_PRIVATE_KEY}" | gpg --batch --yes --import >/dev/null 2>&1
+          key_fp="$(gpg --list-keys --with-colons "${GPG_KEY_ID}" \
+            | awk -F: '$1 == "fpr" {print $10; exit}')"
+          [[ -n "${key_fp}" ]] || {
+            echo "ERROR: GPG_KEY_ID does not resolve to an imported key" >&2
+            exit 1
+          }
+          printf '%s:6:\n' "${key_fp}" | gpg --import-ownertrust >/dev/null 2>&1
+          printf 'allow-preset-passphrase\n' > "${GNUPGHOME}/gpg-agent.conf"
+          gpgconf --kill gpg-agent
+          gpgconf --launch gpg-agent
+          keygrip="$(gpg --list-keys --with-colons --with-keygrip "${GPG_KEY_ID}" \
+            | awk -F: '$1 == "grp" {print $10; exit}')"
+          preset_passphrase="$(command -v gpg-preset-passphrase || true)"
+          if [[ -z "${preset_passphrase}" ]] \
+              && [[ -x /usr/lib/gnupg/gpg-preset-passphrase ]]; then
+            preset_passphrase=/usr/lib/gnupg/gpg-preset-passphrase
+          fi
+          if [[ -n "${keygrip}" ]] && [[ -n "${preset_passphrase}" ]]; then
+            printf '%s' "${GPG_PASSPHRASE}" \
+              | "${preset_passphrase}" --preset "${keygrip}"
+          else
+            echo "ERROR: gpg-preset-passphrase is required for non-interactive package signing" >&2
+            exit 1
+          fi
+          GPG_KEY_ID="${GPG_KEY_ID}" \
+            packaging/scripts/sign-packages.sh --require-packages -d artifacts
+        shell: bash
+
+      - name: Upload signed packages
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signed-packages
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 5
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Integrity Signature Job: Sign the checksum file after package signing.
+  # Package signatures change package bytes, so SHA256SUMS is generated by the
+  # preceding integrity-checksums job from the signed package artifact.
+  # ─────────────────────────────────────────────────────────────────────────────
+  integrity-signature:
+    name: Integrity - Sign SHA256SUMS
+    needs: [integrity-checksums, release-gate]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    environment: release-signing
+
+    steps:
+      - name: Preflight - validate GPG secrets
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+        run: |
+          set -euo pipefail
+          MISSING=()
+          [[ -z "${GPG_PRIVATE_KEY}" ]] && MISSING+=(GPG_PRIVATE_KEY)
+          [[ -z "${GPG_PASSPHRASE}" ]] && MISSING+=(GPG_PASSPHRASE)
+          [[ -z "${GPG_KEY_ID}" ]] && MISSING+=(GPG_KEY_ID)
+          if [[ ${#MISSING[@]} -gt 0 ]]; then
+            echo "ERROR: Missing required GPG secrets in release-signing:" >&2
+            printf '  - %s\n' "${MISSING[@]}" >&2
+            exit 1
+          fi
         shell: bash
 
       - name: Checkout
@@ -1150,22 +1295,31 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   publish:
     name: Publish
-    needs: [release-gate, integrity-checksums, integrity-signing]
+    needs: [release-gate, integrity-checksums, integrity-signature]
     # Tag releases: signing always runs, so signing must succeed for publish.
     # workflow_dispatch: signing is skipped, publish proceeds without it.
     if: >-
       always()
       && needs.integrity-checksums.result == 'success'
       && needs.release-gate.result == 'success'
-      && (needs.integrity-signing.result == 'success'
-          || (needs.integrity-signing.result == 'skipped'
+      && (needs.integrity-signature.result == 'success'
+          || (needs.integrity-signature.result == 'skipped'
               && github.ref_type != 'tag'))
     runs-on: ubuntu-24.04
     permissions:
       contents: write
 
     steps:
+      - name: Download signed package artifacts (tag)
+        if: github.ref_type == 'tag'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: signed-packages
+          path: release-assets/
+          merge-multiple: true
+
       - name: Download all DEB artifacts
+        if: github.ref_type != 'tag'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-deb-*
@@ -1173,6 +1327,7 @@ jobs:
           merge-multiple: true
 
       - name: Download all RPM artifacts
+        if: github.ref_type != 'tag'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-rpm-*

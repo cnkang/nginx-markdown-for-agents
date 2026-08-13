@@ -898,19 +898,74 @@ get_metric_value() {
     "http://127.0.0.1:${PORT}/markdown-metrics" 2>/dev/null || echo '{}')"
   METRIC_FAMILY="${metric_family}" METRIC_SELECTOR="${metric_selector}" \
     python3 -c '
+import json
 import os
+import re
 import sys
 
 family = os.environ["METRIC_FAMILY"]
 selector = os.environ.get("METRIC_SELECTOR", "")
 total = 0.0
+sample_re = re.compile(
+    r"^(?P<name>[A-Za-z_:][A-Za-z0-9_:]*)"
+    r"(?:\{(?P<labels>.*)\})?\s+"
+    r"(?P<value>[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|NaN|[+-]?Inf)"
+    r"(?:\s+\d+)?$"
+)
+label_re = re.compile(
+    r"(?P<key>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*"
+    r"\"(?P<value>(?:\\.|[^\"\\])*)\""
+)
+
+def parse_labels(raw):
+    if raw is None:
+        return {}
+    labels = {}
+    position = 0
+    while position < len(raw):
+        while position < len(raw) and raw[position] in " ,\t":
+            position += 1
+        if position == len(raw):
+            break
+        match = label_re.match(raw, position)
+        if match is None:
+            return None
+        labels[match.group("key")] = json.loads("\"" + match.group("value") + "\"")
+        position = match.end()
+        while position < len(raw) and raw[position] in " ,\t":
+            position += 1
+    return labels
+
+def selector_matches(labels, raw_selector):
+    if not raw_selector:
+        return True
+    for item in raw_selector.split(","):
+        key, separator, expected = item.partition("=")
+        if not separator:
+            return False
+        key = key.strip()
+        expected = expected.strip()
+        prefix = expected.startswith("\"") and not expected.endswith("\"")
+        if expected.startswith("\""):
+            expected = expected[1:]
+        if expected.endswith("\""):
+            expected = expected[:-1]
+        actual = labels.get(key)
+        if actual is None or (actual.startswith(expected) if prefix else actual != expected):
+            return False
+    return True
+
 for line in sys.stdin:
-    if not line.startswith(family) or line.startswith("#"):
+    if not line.strip() or line.lstrip().startswith("#"):
         continue
-    if selector and selector not in line:
+    match = sample_re.fullmatch(line.strip())
+    if match is None or match.group("name") != family:
+        continue
+    labels = parse_labels(match.group("labels"))
+    if labels is None or not selector_matches(labels, selector):
         continue
     try:
-        total += float(line.rsplit(None, 1)[1])
+        total += float(match.group("value"))
     except (IndexError, ValueError):
         continue
 print(int(total) if total >= 0 else 0)

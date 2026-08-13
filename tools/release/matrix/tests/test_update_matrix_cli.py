@@ -70,7 +70,12 @@ def _expected_doc_table_tuples(entries: list[dict]) -> set[tuple[str, str, str, 
     expected: set[tuple[str, str, str, str]] = set()
     for entry in entries:
         tier = entry["support_tier"].replace("_", " ").title()
-        expected.add((entry["nginx"], entry["os_type"], entry["arch"], tier))
+        os_type = entry["os_type"]
+        arch = entry["arch"]
+        if entry["support_tier"] == "source_only":
+            os_type = "unlisted"
+            arch = "unlisted"
+        expected.add((entry["nginx"], os_type, arch, tier))
     return expected
 
 

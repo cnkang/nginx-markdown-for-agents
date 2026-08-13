@@ -397,7 +397,9 @@ def test_non_delivery_outcomes_no_double_count(requests):
 
 @settings(max_examples=200)
 @given(
-    non_delivery_outcome=st.sampled_from(list(NON_DELIVERY_OUTCOMES))
+    non_delivery_outcome=st.sampled_from(
+        sorted(NON_DELIVERY_OUTCOMES, key=lambda item: item.value)
+    )
 )
 def test_each_non_delivery_outcome_excluded_individually(
     non_delivery_outcome,
