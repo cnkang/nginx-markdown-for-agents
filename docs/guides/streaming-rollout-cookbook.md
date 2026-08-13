@@ -88,7 +88,7 @@ Continue when:
 
 Pause and investigate when:
 
-- `failed_closed`, `aborted`, or `resume_failure` grows unexpectedly,
+- `failed_closed`, `abort_start`, or `resume_failure` grows unexpectedly,
 - compressed responses show repeated `truncated_input`, `format_error`, or
   `io_error` outcomes,
 - conversion attempts exceed the request population,

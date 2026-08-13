@@ -155,7 +155,7 @@ This is distinct from the legacy Rust `incremental` API: that API still
 receives the complete NGINX-side buffer and accumulates bytes in Rust, so it is
 not true per-upstream-chunk streaming.
 
-See [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md) and [ADR-0002](architecture/ADR/0002-full-buffering-approach.md) for the reasoning behind this design.
+See [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md) and [ADR-0007](architecture/ADR/0007-streaming-default.md) for the reasoning behind this design.
 
 ---
 

@@ -79,8 +79,9 @@ and **cooperative checkpoints** (during DOM traversal, after parsing).
 **Directive**: `markdown_limits conversion_memory=<size>` (Config V2, `markdown_max_size` retired in 0.9.0)
 
 Before any parsing occurs, the C module checks the response body size
-against the configured maximum. Documents exceeding this limit are never
-passed to the Rust converter.
+against the configured maximum. This is a hard cumulative input-size cap
+applied to both buffered and streaming paths. Documents exceeding this
+limit are never passed to the Rust converter.
 
 - **Default**: 64 MiB
 - **Effect**: Prevents the parser from receiving unbounded input
@@ -227,12 +228,12 @@ Request arrives
     │
     ├─ DOM traversal with cooperative checkpoints
     │   ├─ Every 100 nodes: check_timeout()
-    │   │   └─ FAIL → pass-through, reason: PARSE_TIMEOUT
+    │   │   └─ FAIL → pass-through, reason: timeout
     │   └─ Memory budget checks (streaming path)
     │       └─ FAIL → pass-through, reason: budget_exceeded
     │
     └─ Output normalization + final timeout check
-        └─ FAIL → pass-through, reason: PARSE_TIMEOUT
+        └─ FAIL → pass-through, reason: timeout
 ```
 
 ### Limit Priority

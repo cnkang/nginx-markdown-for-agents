@@ -19,7 +19,8 @@ Release.
 > **Availability check:** A release candidate and its compatibility-matrix
 > entry do not make a DEB or RPM package downloadable. Before using the
 > commands below, confirm that the selected GitHub Release contains the exact
-> package and `SHA256SUMS`. Otherwise use the
+> package and `SHA256SUMS`. Verify `SHA256SUMS.asc` with the project's
+> documented fingerprint. Otherwise use the
 > [Manual Source Build](./INSTALLATION.md#6-secondary-manual-source-build).
 
 ## Select the Matching Artifact

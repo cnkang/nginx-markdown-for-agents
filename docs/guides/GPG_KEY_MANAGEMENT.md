@@ -68,7 +68,7 @@ repository signing key for a future APT/YUM repository channel.
 
 ## 2. Key Distribution
 
-The project distributes the public key through multiple channels to ensure availability
+The project plans to distribute the public key through multiple channels to ensure availability
 and verifiability.
 
 ### Distribution Channels

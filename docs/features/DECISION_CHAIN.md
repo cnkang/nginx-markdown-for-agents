@@ -71,7 +71,7 @@ The decision chain evaluates checks in a fixed order. The first check that fails
 | 3 | Response status | Is the upstream response status `200 OK`? A `206 Partial Content` status is classified as a range request (same reason code as check 4). Other non-200 responses (redirects, errors, etc.) are not eligible. | `not_eligible` |
 | 4 | Range request | Is this a range request (`Range` header present)? Range requests are not eligible because partial content cannot be converted. | `not_eligible` |
 | 5 | Content-Type | Is the upstream `Content-Type` header `text/html` (with any charset parameter)? Non-HTML content types are not eligible. | `not_eligible` |
-| 6 | Response size | Is the response body size within the configured `markdown_limits conversion_memory=` budget? Oversized responses are not eligible. | `not_eligible` |
+| 6 | Response size | Is the response body size within the configured `markdown_limits conversion_memory=` budget? This is a hard cumulative input-size cap applied to both buffered and streaming paths. Oversized responses are not eligible. | `not_eligible` |
 | 7 | Auth policy | Is the request authenticated and `markdown_auth_policy` set to `deny`? Authenticated requests are detected through the existing `Authorization` header and auth-cookie checks. | `not_eligible` |
 | 8 | Accept negotiation | Does the `Accept` header indicate the client wants Markdown? Evaluated per `markdown_accept` (`strict` | `wildcard` | `force`). | `skipped_accept_reject` / `skipped_no_accept` / `skipped_accept` (see below) |
 | 9 | Conversion attempt | All checks passed. The module attempts HTML-to-Markdown conversion. | _(see outcome determination below)_ |

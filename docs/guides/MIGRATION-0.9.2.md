@@ -84,7 +84,8 @@ response. `fail_closed` and status policies reject it.
 |----------|-------|--------|
 | Reject-only migration stubs removed | 19 | Already caused `nginx -t` failure; now produce standard "unknown directive" |
 | Active directives removed | 14 | Replace with equivalents (see below) |
-| Directives unified into `markdown_limits` | 4 | Use `markdown_limits key=value` syntax. `markdown_stream_flush_min` has no replacement |
+| Directives unified into `markdown_limits` | 4 | Use `markdown_limits key=value` syntax |
+| Active directives removed (no replacement) | 1 | `markdown_stream_flush_min` — flushing uses an internal heuristic |
 | Total retained directives | 25 | No change needed |
 
 ---
@@ -228,7 +229,11 @@ markdown_token_estimate on;
 
 ### `markdown_stream_types` → replaced by `markdown_stream_excluded_types`
 
-The positive allowlist no longer exists. Use the exclusion list instead.
+No direct equivalent exists because the old positive allowlist and the new
+exclusion list have different semantics. Use the exclusion list instead.
+
+> **Note:** `markdown_stream_types` is a removed directive name. It appears
+> here only in migration documentation that shows before/after examples.
 
 ```nginx
 # BEFORE (0.9.1)

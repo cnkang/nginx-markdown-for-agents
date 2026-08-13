@@ -106,9 +106,8 @@ It should not yet be understood as a true streaming or peak-memory-reduction pat
 > **To safely support GB-scale responses in the future**, the architecture must be fundamentally shifted from DOM-tree building to a **Streaming SAX Parser**. True stream processing maintains $O(1)$ memory by discarding parsed chunks instantly. It is the only safe way to surpass the 64 MiB limit without unbounded memory amplification.
 
 The incremental API and its threshold router are historical pre-0.9.0
-material. The current 0.9.2 binary does not expose
-`markdown_large_body_threshold`. That directive is unavailable. Use
-`markdown_streaming` and `markdown_limits streaming_buffer=` for the active
+material. The 0.9.2 binary does not expose `markdown_large_body_threshold`.
+Use `markdown_streaming` and `markdown_limits streaming_buffer=` for the active
 path.
 
 ## Historical pre-0.9.0 threshold router

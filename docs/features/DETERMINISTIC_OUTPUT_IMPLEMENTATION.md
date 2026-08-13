@@ -324,7 +324,7 @@ cargo run --example deterministic_output
 
 ## Conclusion
 
-The deterministic output normalization implementation is **complete and fully tested**. All 136 unit tests pass, including 13 new tests specifically for deterministic output. The implementation ensures that converting identical HTML input multiple times produces byte-for-byte identical Markdown output. This is critical for stable ETag generation and predictable HTTP caching behavior.
+The deterministic output normalization implementation is **complete and fully tested**. All 136 unit tests pass, including 14 new tests specifically for deterministic output. The implementation ensures that converting identical HTML input multiple times produces byte-for-byte identical Markdown output. This is critical for stable ETag generation and predictable HTTP caching behavior.
 
 The implementation is complete for the current design scope and supports stable, byte-for-byte deterministic Markdown output for identical HTML input.
 

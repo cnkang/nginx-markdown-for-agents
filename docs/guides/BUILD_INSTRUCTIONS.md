@@ -90,8 +90,7 @@ Available targets include:
 
 CI generates release and performance evidence under `artifacts/` and
 ignored by Git. CI validates generated evidence against checked-in source and
-schema before upload. Do not commit local copies of those files. The canonical
-the module benchmark environment stays tracked as source configuration in
+schema before upload. Do not commit local copies of those files. The canonical module benchmark environment stays tracked as source configuration in
 `release/performance/canonical-environment.json`.
 
 ## SonarQube C/C++ Compilation Database

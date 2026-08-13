@@ -1338,7 +1338,7 @@ The upstream response for those pages does not meet the eligibility criteria. Co
 The module fails to convert responses that the upstream compressed. The error log may show conversion failures. Alternatively, the response passes through as HTML despite meeting all other eligibility requirements.
 
 **Root Cause:**
-The upstream server sends a compressed response (gzip, brotli, or deflate). The module cannot decompress it before conversion. This can happen when the module's built-in decompression is not handling the encoding. It can also happen when NGINX's own compression interacts with the module's pipeline.
+The upstream server sends a compressed response (gzip, brotli, or deflate). The module supports automatic gzip, Brotli, and deflate decompression. Conversion failures can happen when the module's built-in decompression is not enabled or not handling the encoding correctly. It can also happen when NGINX's own compression interacts with the module's pipeline.
 
 **Resolution Steps:**
 

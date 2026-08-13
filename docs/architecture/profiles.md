@@ -36,9 +36,9 @@ Design constraints:
   visibility into what each profile sets and can override most fields.
 - Profiles do not introduce new runtime behavior. They only set existing
   Config V2 directive defaults.
-- The profile set is small (three profiles) and frozen at 1.0.0. New profiles
-  the project may add them after 1.0 (additive-only), but existing profile semantics must
-  not change.
+- The profile set is small (three profiles) and frozen at 1.0.0. The project
+  may add new profiles after 1.0 (additive-only), but existing profile
+  semantics must not change.
 
 ---
 

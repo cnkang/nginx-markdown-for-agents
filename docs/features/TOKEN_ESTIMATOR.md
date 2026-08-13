@@ -146,8 +146,8 @@ All tests pass successfully.
 ### Recommendations
 
 - Use the fixed 4.0 default for English prose
-- For CJK- or code-heavy workloads, treat the estimate as an upper/lower
-  bound per the error-margin table above rather than a precise count
+- For CJK- or code-heavy workloads, treat the estimate as an uncertainty
+  range per the error-margin table above rather than a precise count
 - The Rust API remains configurable (`with_chars_per_token`) for
   programmatic callers that embed the converter directly
 

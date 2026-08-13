@@ -29,8 +29,8 @@ release-gates wave (final wave).
 (`Makefile:568`), extended with 0.9.0-specific steps (Config V2 reject-only
 golden errors, HeaderPlan fault-injection, reason-registry/diagnostics renderer
 contract, production-examples smoke, version-consistency). It MUST NOT
-recursively invoke `release-gates-check-080` from inside its own recipe. Reused
-the gate directly invokes prior-version validators, which remain
+recursively invoke `release-gates-check-080` from inside its own recipe. The
+gate directly invokes prior-version validators, which remain
 **caller-parameterized**
 for the active version
 (`RELEASE_GATE_EXPECTED_CARGO_VERSION=0.9.0`), per AGENTS.md Rule 13.

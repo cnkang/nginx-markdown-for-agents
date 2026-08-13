@@ -32,7 +32,9 @@ That restriction is historical and ADR-0024 superseded it. ADR-0024 adds
 Brotli under the same runtime gates in the final 0.9.1 implementation.
 
 The deflate inflater sniffs the first two bytes to distinguish zlib-wrapped
-(RFC 1950, RFC 9110-compliant) from raw deflate (RFC 1951). The gzip inflater
+(RFC 1950, RFC 9110-compliant) from raw deflate (RFC 1951). Raw deflate
+(RFC 1951) support is a legacy implementation detail; the frozen 0.9.2 public
+deflate contract is zlib-wrapped RFC 1950 only. The gzip inflater
 uses gzip framing and treats each valid `Z_STREAM_END` as a member boundary.
 It resets the inflater while preserving remaining compressed input, accepts a
 member boundary between feed calls, and consumes later members exactly once.

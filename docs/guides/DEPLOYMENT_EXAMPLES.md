@@ -224,7 +224,7 @@ compression remains enabled end to end.
 
 ### Bot-Targeted Conversion (User-Agent Based)
 
-AI crawlers and agent bots typically do not send `Accept: text/markdown`. They use standard browser-like Accept headers when fetching pages. If you want specific bots to receive Markdown automatically, you can rewrite the Accept header at the NGINX layer. You match by User-Agent.
+AI crawlers and agent bots typically do not send `Accept: text/markdown`. They use standard browser-like Accept headers when fetching pages. If you want specific bots to receive Markdown automatically, you can rewrite the Accept header at the NGINX layer. You match by User-Agent and rewrite the incoming request `Accept` header in a request phase before module content negotiation.
 
 This is a practical pattern because it requires no application or module code changes. The module's existing content negotiation handles the conversion once it sees `text/markdown` in the Accept header. Operators can manage the bot list entirely through NGINX configuration.
 

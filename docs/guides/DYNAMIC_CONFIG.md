@@ -134,9 +134,9 @@ first byte is not `{`, the watcher logs
 
 The dynconf timer performs a three-phase staged commit:
 
-1. **Parse phase:** The module parses the entire file into a staging snapshot.
-2. **Validate phase:** The module validates every key and value.
-3. **Promote phase:** If all fields pass, the staging snapshot atomically
+1. **Parse stage:** The module parses the entire file into a staging snapshot.
+2. **Validate stage:** The module validates every key and value.
+3. **Promote stage:** If all fields pass, the staging snapshot atomically
    replaces the active snapshot.
 
 On any parse or validation error, the module discards the staging snapshot.

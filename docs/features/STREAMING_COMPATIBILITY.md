@@ -70,7 +70,7 @@ itself.
 Use **full-buffer** when:
 
 - You need ETag-based caching and conditional requests
-- Response sizes are moderate (within `markdown_limits conversion_memory=<size>`)
+- Response sizes are moderate (within `markdown_limits conversion_memory=<size>`, the hard cumulative input-size cap shared by both buffered and streaming paths)
 - Downstream consumers require token estimation headers
 
 Use **streaming** when:

@@ -35,7 +35,7 @@ For arm64 systems, replace `arch=amd64` with `arch=arm64`.
 
 ```bash
 sudo apt-get update
-sudo apt-get install <self-hosted-module-package-name>
+sudo apt-get install nginx-module-markdown-for-agents
 ```
 
 ### 4. Enable the module
