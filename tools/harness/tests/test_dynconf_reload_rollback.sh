@@ -734,6 +734,10 @@ echo "PASS: harness-owned NGINX reloads correctly" >&2
 # Cleanup failure exit-code contract tests
 # ---------------------------------------------------------------------------
 
+if [[ "$(id -u)" -eq 0 ]]; then
+    echo "SKIP: permission-based cleanup failure cases are not meaningful as root" >&2
+else
+
 # Case: original rc == 0 + restore fails → exit 70.
 # Make the target directory read-only so mv cannot replace the file.  The
 # cleanup trap runs WITHOUT restoring perms first, so restore fails.
@@ -788,6 +792,7 @@ exit 41
 chmod 755 "${cleanup_fail2_target%/*}" 2>/dev/null || true
 rm -f -- "${cleanup_fail2_target%/*}/.markdown-dynconf-backup."* 2>/dev/null || true
 echo "PASS: original nonzero rc preserved when cleanup also fails" >&2
+fi
 
 # Case: original rc == 0 + cleanup succeeds → exit 0 (covered by existing
 # existing-file test above which asserts rc 41 with successful restore).

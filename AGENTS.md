@@ -206,7 +206,9 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Metric names match actual semantics; unit suffix matches resolution [8]
 - Format string specifiers match argument list in all renderers (count and type) [8]
 - ngx_log_debugN / ngx_log_errorN suffix digit matches actual argument count [8]
-- `bash tools/harness/detect_ngx_log_arg_count.sh` — harness gate (make harness-security-checks) for suffix-digit mismatch [8]
+- `bash tools/harness/detect_ngx_log_arg_count.sh` — blocking harness-tooling CI
+  check via `make harness-security-checks` when the `harness_tooling` path
+  filter selects the change; also required locally for the full gate [8]
 
 **FFI & Cross-Language** (C, R)
 - Rust struct changes → both C headers + all init sites + cleanup helpers [15]
@@ -230,10 +232,12 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Forward declarations match definitions (same changeset) [24]
 - Forward declarations appear after all typedefs they reference; at file scope [24]
 - NOSONAR annotations include reason + rule ref; bare `/* NOSONAR */` forbidden; only for NGINX API contract [24]
-- `bash tools/harness/detect_nosonar_discipline.sh` — harness gate (make harness-security-checks) for bare NOSONAR [24]
+- `bash tools/harness/detect_nosonar_discipline.sh` — blocking harness-tooling CI
+  check via `make harness-security-checks` for selected `harness_tooling` paths;
+  also required locally for the full gate [24]
 - No unguarded ops on NULL/uninitialized/invalid values [Baseline]
-- Orphan comment closers: every */ must have a matching /*; `python3 tools/harness/detect_orphan_comment_close.py` — harness gate (make harness-security-checks) [56]
-- #ifdef-guarded function visibility: code outside must not reference functions declared inside #ifdef GUARD. `bash tools/harness/detect_ifdef_guard_visibility.sh` — harness gate (make harness-security-checks) [57]
+- Orphan comment closers: every */ must have a matching /*; `python3 tools/harness/detect_orphan_comment_close.py` — blocking harness-tooling CI check via `make harness-security-checks` for selected `harness_tooling` paths, and a local full-gate check [56]
+- #ifdef-guarded function visibility: code outside must not reference functions declared inside #ifdef GUARD. `bash tools/harness/detect_ifdef_guard_visibility.sh` — blocking harness-tooling CI check via `make harness-security-checks` for selected `harness_tooling` paths, and a local full-gate check [57]
 
 **NGINX Idioms** (C)
 - Full ngx_list_part_t chain iteration (part→next) [28]
@@ -277,7 +281,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   before extraction or execution [13]
 - Release source builds require a full reviewed commit ID and verify the fetched
   commit exactly before executing repository code [13]
-- Workflow input injection: route ${{ inputs.* }} through env: before use in shell run blocks. `bash tools/harness/detect_workflow_input_injection.sh` — harness gate (make harness-security-checks) [58]
+- Workflow input injection: route ${{ inputs.* }} through env: before use in shell run blocks. `bash tools/harness/detect_workflow_input_injection.sh` — blocking harness-tooling CI check via `make harness-security-checks` for selected `harness_tooling` paths, and a local full-gate check [58]
 - Workflow secrets are step-scoped to their minimal consumer. Repository build,
   test, setup, and coverage steps must not inherit unrelated credentials [48]
 - Validator/gate regex patterns match actual struct field paths [13]

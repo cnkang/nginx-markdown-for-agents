@@ -35,12 +35,16 @@ Historical issues: e76c1584, 13189d71, b9e5fe4d.
 
 Required:
 - Supported streaming content codings must match production routing and test
-  payload formats.  In 0.9.1, gzip and deflate are streaming-eligible under
+  payload formats.  In the frozen 0.9.2 contract, gzip and deflate are
+  streaming-eligible under
   the configured decompression/cache gates.  Brotli additionally requires a
   successful `libbrotlidec` probe under
-  `NGX_MARKDOWN_BROTLI_STREAMING=auto|on`, `off` or an `auto` probe failure
-  selects bounded full-buffer decompression instead of defining
-  `NGX_HTTP_BROTLI`.  Brotli streaming reuses the same codec/member
+  `NGX_MARKDOWN_BROTLI_STREAMING=auto|on`.  `off` disables the streaming
+  integration.  An `on`-mode probe failure for either the Brotli header or
+  `libbrotlidec` is a configuration error; it must not silently fall back to
+  buffered decompression.  In `auto`, a failed probe leaves the build on the
+  bounded full-buffer path instead of defining `NGX_HTTP_BROTLI`.  Brotli
+  streaming reuses the same codec/member
   lifecycle invariants as gzip/deflate: the module must reject tail data,
   detect and reject truncated final streams, guard no-progress,
   and keep decompression accounting response-wide.

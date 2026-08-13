@@ -144,6 +144,9 @@ def test_live_inventory_matches_all_extracted_surfaces() -> None:
     assert detector.check_dynconf_keys(
         inventory, detector.extract_dynconf_keys_from_c()
     ) == []
+    assert detector.check_dynconf_contract(
+        inventory, detector.extract_dynconf_contract_from_c()
+    ) == []
     assert detector.check_metrics(
         inventory, detector.extract_metric_names_from_c()
     ) == []

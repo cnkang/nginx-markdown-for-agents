@@ -597,6 +597,16 @@
       "abi_version": 2,
       "classification": "INTERNAL_ONLY",
       "generated_header": "components/rust-converter/include/markdown_converter.h",
+      "name": "markdown_base_url_input_init",
+      "params": "result: *mut FFIBaseUrlInput",
+      "return_type": "()",
+      "safety": "unsafe",
+      "signature": "markdown_base_url_input_init(result: *mut FFIBaseUrlInput) -> ()"
+    },
+    {
+      "abi_version": 2,
+      "classification": "INTERNAL_ONLY",
+      "generated_header": "components/rust-converter/include/markdown_converter.h",
       "name": "markdown_build_header_plan",
       "params": "content_type: *const u8, content_type_len: usize, has_etag: u8, result: *mut FFIHeaderPlan",
       "return_type": "()",

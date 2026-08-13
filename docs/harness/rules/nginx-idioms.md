@@ -73,8 +73,10 @@ Required:
 - Prefer length-bounded NGINX APIs (`ngx_strncasecmp`, `ngx_strlchr`,
   `ngx_strnstr`) when the length is known, avoiding the copy entirely.
 - When a length-bounded API is not available and a copy becomes needed, use
-  `ngx_pnalloc(pool, len + 1)` and `ngx_memcpy` + NUL-terminate.  Free the
-  buffer from the pool when the pool lifetime covers the usage.
+  `ngx_pnalloc(pool, len + 1)` and `ngx_memcpy` + NUL-terminate. The owning
+  pool reclaims the copy. Use `ngx_pfree()` only for a buffer that the pool
+  tracks as a large allocation; do not apply it to
+  ordinary pool allocations or `ngx_alloc()`-backed storage.
 - Line-oriented parsers that read files or buffers must handle the final
   line that lacks a trailing `\n`.  Treating `\n` as the sole line delimiter
   silently drops the last line if the file does not end with a newline.

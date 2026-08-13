@@ -802,9 +802,17 @@ def extract_dynconf_keys_from_c():
         ROOT, "components", "rust-converter", "src", "dynconf", "schema.rs"))
     if "ngx_http_markdown_dynconf_apply_ffi_result" not in c_text:
         raise ValueError("C dynconf path does not apply the typed FFI result")
-    if "KNOWN_KEYS" not in rust_text or "schema_version" not in rust_text:
+    match = re.search(
+        r"const\s+KNOWN_KEYS\s*:\s*&\[&str\]\s*=\s*&\[(?P<body>.*?)\];",
+        rust_text,
+        re.DOTALL,
+    )
+    if match is None:
         raise ValueError("Rust dynconf schema does not declare KNOWN_KEYS")
-    return sorted(DYNCONF_KEYS)
+    keys = re.findall(r'"([^"\\]+)"', match.group("body"))
+    if not keys or "schema_version" not in keys:
+        raise ValueError("Rust dynconf KNOWN_KEYS is empty or incomplete")
+    return sorted(keys)
 
 
 def _dynconf_type_allowed(key):
@@ -854,10 +862,16 @@ def extract_dynconf_contract_from_c():
         raise ValueError("dynconf schema_version is not required")
     if "DYNCONF_ERR_DUPLICATE_KEY" not in ffi or "DuplicateKey" not in parser:
         raise ValueError("dynconf parser does not reject duplicate keys")
+    apply_helpers = (
+        "streaming_buffer", "filter", "prune_noise", "log_verbosity",
+        "error_policy",
+    )
     has_per_key_staging = (
-        "watcher->staging_snapshot = watcher->active_snapshot" in text
-        and "snapshot->" in text
-        and "ngx_http_markdown_dynconf_apply" in text
+        "candidate = *snapshot;" in text
+        and all(
+            "ngx_http_markdown_dynconf_apply_{}".format(field) in text
+            for field in apply_helpers
+        )
     )
     required = True
     duplicate = "reject"

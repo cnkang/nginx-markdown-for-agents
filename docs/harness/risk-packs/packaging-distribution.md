@@ -121,6 +121,7 @@ make release-gates-check
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-13 | Codex | Bound package dependency constraints to distro-resolvable versions and kept Homebrew formula URLs, version, commit, and checksum tied to one release source. |
 | 0.7.7 | 2026-05-27 | Codex | Added public package install docs channel-state coverage before APT/YUM repositories exist |
 | 0.7.6 | 2026-05-27 | Codex | Added Helm metrics directive gating coverage for stock-image-safe chart renders |
 | 0.7.5 | 2026-05-26 | Codex | Added package dependency satisfiability, version-input validation, distro-specific RPM repo selection, package script lifecycle args, module path/glibc runtime compatibility, and local K8s smoke context/module safety coverage |

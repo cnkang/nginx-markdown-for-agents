@@ -78,13 +78,16 @@ Required:
   acquiring the resource, the Drop guard must release it so the caller
   does not leak or double-free.  Do not rely on the C caller to clean up
   after a failed FFI call — the C side may not know which resources the C side acquired before the failure.
+  When ownership is successfully transferred to C, disarm the corresponding
+  Drop guard immediately. Keep it armed through panic and error paths; it must
+  never release a resource after C has taken ownership.
 - **FFI enum layout safety**: All enums that cross the FFI boundary must
   use an explicit `#[repr(u8)]`, `#[repr(i32)]`, or similar fixed-width
   representation.  Rust's default enum layout is implementation-defined
   and can change between compiler versions, causing silent discriminant
   truncation when C reads the wrong width.  When exposing a new enum via
   FFI, add a compile-time assertion (`const _: () = assert!(size_of::<E>()
-  == expected),`) or a debug guard that verifies the discriminant fits the
+  == expected);`) or a debug guard that verifies the discriminant fits the
   expected width.
 - **FFI handle consumption contract**: When an FFI handle (for example
   `MarkdownConverterHandle`, `HeaderPlanHandle`) passes to a

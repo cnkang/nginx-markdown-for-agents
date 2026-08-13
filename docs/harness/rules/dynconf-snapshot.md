@@ -92,9 +92,11 @@ Required:
   reload returns `RELOAD_APPLIED` or `RELOAD_NO_CHANGE`.
   `applied_mtime` is also updated to `last_mtime` on
   `RELOAD_DRY_RUN_OK` / `RELOAD_DRY_RUN_FAIL` to suppress repeated
-  re-validation of the same file content; it must not advance on
-  `RELOAD_INVALID_FILE` / `RELOAD_IO_ERROR` so the timer retries the
-  reload on the next poll cycle.
+  re-validation of the same file content. The complete update set is exactly
+  `{RELOAD_APPLIED, RELOAD_NO_CHANGE, RELOAD_DRY_RUN_OK,
+  RELOAD_DRY_RUN_FAIL}`. It must remain unchanged for exactly
+  `{RELOAD_INVALID_FILE, RELOAD_IO_ERROR}` so the timer retries the reload on
+  the next poll cycle.
 - When `last_mtime != applied_mtime`, the timer handler must retry
   the reload on the next poll cycle, regardless of whether
   `dynconf_check()` detects a new mtime change.
@@ -147,10 +149,9 @@ Required:
   non-streaming (full-buffer) path, not dereference NULL.
 
 Verification:
-- `grep -rn 'effective_conf\|eff->' components/nginx-module/src/ | grep -v '/\*'`
-  — verify no effective_conf dereference without NULL guard in paths that
-  the code can call it before snapshot binding.
-- `grep -rn 'effective_body_buffer_limit' components/nginx-module/src/`
-  — verify declaration is in a shared header, not a source file.
-- `make test-nginx-unit` — eligibility tests cover non-NULL eff markdown_limits
-  path and NULL-eff fallback.
+- `bash tools/harness/detect_live_conf_reads.sh components/nginx-module/src/`
+  — run the guard-aware detector for effective-conf access, early snapshot
+  binding, and allocation-failure paths. Do not rely on a comment-blind grep.
+- `make test-nginx-unit` — the effective-conf and dynconf tests exercise the
+  NULL fallback, early binding, allocation-failure behavior, and the
+  non-NULL/NULL `markdown_limits` eligibility paths.
