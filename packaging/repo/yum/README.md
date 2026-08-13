@@ -51,10 +51,10 @@ sudo dnf config-manager --add-repo \
 
 ```bash
 # YUM (RHEL/CentOS/AlmaLinux/Amazon Linux)
-sudo yum install <self-hosted-module-package-name>
+sudo yum install nginx-module-markdown-for-agents
 
 # DNF (Fedora)
-sudo dnf install <self-hosted-module-package-name>
+sudo dnf install nginx-module-markdown-for-agents
 ```
 
 ### 4. Enable the module

@@ -55,14 +55,14 @@ For detailed installation and configuration instructions, see:
 
 ## Compatibility Warning
 
-> **IMPORTANT**: This prebuilt package compiles against a specific
+> **IMPORTANT**: This prebuilt package is compiled against a specific
 > nginx.org stable release. It is **ONLY** compatible with the exact
 > nginx.org version indicated in the package filename.
 
-NGINX dynamic modules are **NOT** universal shared libraries. Each module
-compiles against a specific NGINX source version and validates via a
-binary compatibility signature at load time. If the signature does not
-match, NGINX will refuse to load the module.
+NGINX dynamic modules are **NOT** universal shared libraries. The module is
+compiled against a specific NGINX source version. NGINX validates the binary
+compatibility signature at load time and may refuse to load it if the
+signature does not match.
 
 This package does **NOT** support:
 

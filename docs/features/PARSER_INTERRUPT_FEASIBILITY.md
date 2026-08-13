@@ -39,9 +39,9 @@ The Rust conversion engine uses html5ever 0.38 in two modes:
 | Memory budget via allocation hook | Partial | Rust global allocator hooks can track but not interrupt |
 | Bound input size pre-parse | **Yes** (implemented) | Limits worst-case parse time indirectly |
 
-### v0.7.0 Approach
+### v0.9.2 Approach
 
-Since mid-parse interruption is not feasible, v0.7.0 uses:
+Since mid-parse interruption is not feasible, the current implementation uses:
 
 1. **Input size bounding** (`markdown_limits conversion_memory=<size>`): Prevents unbounded input
    from reaching the parser.

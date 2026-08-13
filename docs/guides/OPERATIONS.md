@@ -579,7 +579,7 @@ watch -n 30 'curl -s -H "Accept: text/plain; version=0.0.4" "${METRICS_URL:-http
 
 1. **Verify issue:**
 ```bash
-# Check average conversion time
+# Check p95 conversion time
 curl -H "Accept: text/plain; version=0.0.4" "${METRICS_URL:-http://localhost/markdown-metrics}"
 # Use histogram_quantile over nginx_markdown_conversion_duration_seconds.
 ```

@@ -26,7 +26,7 @@ Publication and artifact availability are separate release gates.
 
    ```bash
    sudo nginx -s quit
-   while sudo systemctl is-active --quiet nginx; do sleep 1; done
+   timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
    ```
 
 2. **Restore the 0.9.1 module binary:**
@@ -36,7 +36,10 @@ Publication and artifact availability are separate release gates.
        /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
    ```
 
-   Or download the 0.9.1 binary from the GitHub release archive.
+   Or download the 0.9.1 binary from the GitHub release archive. Verify the
+   `SHA256SUMS` and `SHA256SUMS.asc` files, confirming the signing key's
+   fingerprint through an independent trusted source, before copying or
+   installing the binary.
 
 3. **Validate configuration:**
 
@@ -65,7 +68,7 @@ Publication and artifact availability are separate release gates.
 
    ```bash
    sudo nginx -s quit
-   while sudo systemctl is-active --quiet nginx; do sleep 1; done
+   timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
    sudo cp objs/ngx_http_markdown_filter_module.so /usr/lib/nginx/modules/
    sudo nginx -t && sudo nginx
    ```
@@ -77,6 +80,9 @@ helm rollback nginx-markdown --namespace nginx-markdown
 ```
 
 ### Docker
+
+Before restarting, restore the 0.9.1-compatible `docker-compose.yml` and
+any configuration files. Then restart:
 
 ```bash
 # Update image tag to v0.9.1 and restart

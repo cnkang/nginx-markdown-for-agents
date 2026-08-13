@@ -60,12 +60,15 @@ This is correct behavior according to the HTML5 specification.
 
 ### Entities in Different Contexts
 
-The parser decodes entities consistently across all HTML contexts:
+The parser decodes entities in supported text and attribute contexts:
 - **In text content**: `<p>&lt;tag&gt;</p>` → `<tag>`
 - **In attributes**: `<a href="?a=1&amp;b=2">` → `?a=1&b=2`
 - **In headings**: `<h1>&amp; Title</h1>` → `& Title`
 - **In code blocks**: `<code>&lt;html&gt;</code>` → `<html>`
 - **In lists**: `<li>&amp; item</li>` → `& item`
+
+Raw-text elements such as `<script>` and `<style>` are not decoded — their
+content is passed through as-is.
 
 Literal angle brackets in source text must be written as `&lt;` (and may be
 written as `&gt;` for `>`). The parser treats a literal `<tag>` as HTML markup, not as

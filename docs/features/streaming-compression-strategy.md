@@ -34,7 +34,8 @@ When the header filter detects a `Content-Encoding` header on an otherwise
 eligible response, the following logic applies:
 
 1. If `markdown_auto_decompress` is **off**, or the module does not support the encoding,
-   the response passes through unchanged (no conversion attempted).
+   the response passes through unchanged (no conversion attempted). Responses with an
+   unsupported encoding are not subject to `markdown_error_policy`.
 2. If `markdown_auto_decompress` is **on** and the module selects streaming with cache
    validation not `full`:
    - **Deflate** (zlib-wrapped RFC 1950) decompresses incrementally.

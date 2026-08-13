@@ -105,12 +105,15 @@ headers are sent).
 | `Accept-Ranges` removal | Scalar assignment — cannot fail |
 | Auth `Cache-Control` modify | `NGX_ERROR` — abort before send |
 
-**Rationale**: Expanding the plan to cover these operations would require
-adding ETag set/clear, Vary add, and token header to the Rust
+**Rationale**: The atomicity invariant above applies only to core in-place
+mutations covered by HeaderPlan (Content-Type, Content-Encoding, and
+Content-Length). Expanding the plan to cover these post-plan operations would
+require adding ETag set/clear, Vary add, and token header to the Rust
 `markdown_build_header_plan` FFI, increasing the FFI surface and coupling Rust
 to NGINX-specific list-push semantics. The current design keeps Rust
 plan-building pure (core wire-critical mutations only) and handles
-NGINX-lifecycle-specific header operations in C post-plan. This is a pragmatic
+NGINX-lifecycle-specific header operations (ETag, Vary, token, and
+authentication headers) in C post-plan. This is a pragmatic
 0.9.0 contract, if future requirements demand full atomicity for these
 operations, they should migrate into the Rust plan with corresponding FFI
 expansion.

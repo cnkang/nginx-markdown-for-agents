@@ -136,7 +136,9 @@ and spawns new worker processes. New requests in the new workers evaluate the
 directive at the body-filter entry point. When set to `off`, the hybrid
 decision logic unconditionally selects the pool-copy path for all output
 chunks, bypassing the buffer factory entirely. In-flight requests on old
-workers complete with their existing configuration. The reload interrupts no request.
+workers complete with their existing configuration. Graceful reloads normally
+preserve active requests, but NGINX may terminate old workers when
+`worker_shutdown_timeout` expires.
 
 **Memory Lifecycle and Safety Invariants:**
 
