@@ -303,7 +303,7 @@ done
 
 if "${NGINX_EXECUTABLE}" -p "${RUNTIME}" \
     -c conf/invalid-strict-streaming.conf -t >/dev/null 2>&1; then
-    fail "full cache validation rejects explicit streaming=force"
+    fail "full cache validation accepted explicit streaming=force"
 else
     pass "full cache validation rejects explicit streaming=force"
 fi

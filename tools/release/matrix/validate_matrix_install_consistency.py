@@ -65,7 +65,11 @@ def load_matrix(path: Path) -> list[dict]:
     except (OSError, json.JSONDecodeError, MatrixNormalizationError) as exc:
         raise ValueError(f"Invalid matrix file {path}: {exc}") from exc
 
-    entries = data["entries"]
+    entries = data.get("entries")
+    if not isinstance(entries, list):
+        raise ValueError(
+            f"Invalid matrix file {path}: 'entries' key is missing or not a list"
+        )
 
     matrix = []
     for i, entry in enumerate(entries):

@@ -593,17 +593,18 @@ def _path_metrics(
 
 
 def _normalise_path_hits(value: object) -> int | float:
-    """Return a non-negative numeric path count, treating invalid input as 0."""
+    """Return a non-negative finite numeric path count, treating invalid or
+    non-finite input (NaN, infinity) as 0."""
     if isinstance(value, bool):
         return 0
     if isinstance(value, (int, float)):
-        return value if value >= 0 else 0
+        return value if value >= 0 and math.isfinite(value) else 0
     if isinstance(value, str):
         try:
             parsed = float(value)
         except ValueError:
             return 0
-        return parsed if parsed >= 0 else 0
+        return parsed if parsed >= 0 and math.isfinite(parsed) else 0
     return 0
 
 

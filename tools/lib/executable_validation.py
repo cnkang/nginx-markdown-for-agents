@@ -34,8 +34,12 @@ def _is_under(path: Path, roots: tuple[Path, ...]) -> bool:
 
 def _is_rustup_tool_shim(candidate: Path, resolved: Path, name: str) -> bool:
     """Allow only a standard Rustup shim targeting its toolchain."""
-    tool_shim = Path.home() / ".cargo" / "bin" / name
-    rustup_toolchains = Path.home() / ".rustup" / "toolchains"
+    try:
+        home = Path.home()
+    except (RuntimeError, KeyError):
+        return False
+    tool_shim = home / ".cargo" / "bin" / name
+    rustup_toolchains = home / ".rustup" / "toolchains"
     if candidate != tool_shim:
         return False
     if resolved.name == name and rustup_toolchains.resolve() in resolved.parents:

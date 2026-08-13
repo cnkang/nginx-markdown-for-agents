@@ -266,7 +266,10 @@ def validate_corpus_seeds(data: dict, expected_sha: str,
         error = _validate_seed_entry(entry, index)
         if error:
             raise ValueError(error)
-        by_target[entry["target"]] = entry
+        target = entry["target"]
+        if target in by_target:
+            raise ValueError(f"duplicate corpus seed target: {target!r}")
+        by_target[target] = entry
     missing_seeds = sorted(blocking_names - set(by_target))
     if missing_seeds:
         raise ValueError("blocking targets missing corpus seed entries: "

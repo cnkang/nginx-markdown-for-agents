@@ -736,6 +736,7 @@ def run_load_loop(
     while worker_pid > 0 and len(rss_series) < MIN_RSS_SAMPLES:
         rss_series.append([round(time.time() - started, 1),
                            read_worker_rss(worker_pid)])
+        time.sleep(0.1)
     return rss_series, scenario_metrics
 
 

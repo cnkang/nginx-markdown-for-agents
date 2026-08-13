@@ -517,7 +517,7 @@ def _read_directive_source(project_root: Path, errors: List[str]) -> str | None:
 
 
 def check_public_config_contract(project_root: Path) -> List[str]:
-    """Validate the frozen v0.9.1 operator-facing configuration contract."""
+    """Validate the frozen v0.9.2 operator-facing configuration contract."""
     errors: List[str] = []
     directives = _read_directive_source(project_root, errors)
     handlers = _read_required(project_root, HANDLERS_PATH, errors)

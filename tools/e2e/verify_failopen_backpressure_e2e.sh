@@ -256,6 +256,11 @@ units = {"": 1, "k": 1024, "m": 1024**2, "g": 1024**3, "t": 1024**4}
 limit = int(match.group(1)) * units[match.group(2)]
 target = limit + 1
 data = path.read_bytes()
+if len(data) >= target:
+    raise SystemExit(
+        f"fixture HTML already {len(data)} bytes >= target {target}; "
+        "cannot size a bounded fail-open fixture"
+    )
 padding = b"<p>padding for the bounded fail-open fixture</p>\n"
 while len(data) < target:
     data += padding
