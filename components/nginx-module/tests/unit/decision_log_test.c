@@ -102,34 +102,34 @@ is_failure_outcome(const ngx_str_t *reason_code)
         return 1;
     }
 
-    if (reason_code->len == 27
+    if (reason_code->len == 29
         && ngx_strncmp(reason_code->data,
                        (u_char *) "decompression_budget_exceeded",
-                       27) == 0)
+                       29) == 0)
     {
         return 1;
     }
 
-    if (reason_code->len == 25
+    if (reason_code->len == 26
         && ngx_strncmp(reason_code->data,
                        (u_char *) "decompression_format_error",
-                       25) == 0)
+                       26) == 0)
     {
         return 1;
     }
 
-    if (reason_code->len == 28
+    if (reason_code->len == 29
         && ngx_strncmp(reason_code->data,
                        (u_char *) "decompression_truncated_input",
-                       28) == 0)
+                       29) == 0)
     {
         return 1;
     }
 
-    if (reason_code->len == 23
+    if (reason_code->len == 22
         && ngx_strncmp(reason_code->data,
                        (u_char *) "decompression_io_error",
-                       23) == 0)
+                       22) == 0)
     {
         return 1;
     }

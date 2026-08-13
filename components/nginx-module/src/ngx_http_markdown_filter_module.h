@@ -509,6 +509,12 @@ typedef struct {
     ngx_uint_t    decompression_ratio;  /* NGX_CONF_UNSET_UINT */
     ngx_uint_t    max_inflight;         /* NGX_CONF_UNSET_UINT */
     ngx_flag_t    configured;            /* directive present in this block */
+    /* Per-key explicit flags (0 = not set at this or any parent level). */
+    ngx_flag_t    conversion_timeout_explicit; /* operator set conversion_timeout */
+    ngx_flag_t    parser_timeout_explicit;     /* operator set parser_timeout */
+    ngx_flag_t    conversion_memory_explicit;  /* operator set conversion_memory */
+    ngx_flag_t    parser_memory_explicit;      /* operator set parser_memory */
+    ngx_flag_t    streaming_buffer_explicit;   /* operator set streaming_buffer */
 } ngx_http_markdown_limits_t;
 
 /*

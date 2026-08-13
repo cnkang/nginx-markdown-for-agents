@@ -162,11 +162,26 @@ ngx_http_markdown_merge_inherited_values(ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_conf_t *prev)
 {
     ngx_flag_t  max_size_set;
+    ngx_flag_t  conversion_timeout_explicit;
+    ngx_flag_t  parser_timeout_explicit;
+    ngx_flag_t  conversion_memory_explicit;
+    ngx_flag_t  parser_memory_explicit;
+    ngx_flag_t  streaming_buffer_explicit;
 #ifdef MARKDOWN_STREAMING_ENABLED
     ngx_flag_t  stream_budget_set;
 #endif
 
     max_size_set = (conf->max_size != NGX_CONF_UNSET_SIZE);
+    conversion_timeout_explicit =
+        (conf->limits.conversion_timeout != NGX_CONF_UNSET_MSEC);
+    parser_timeout_explicit =
+        (conf->limits.parser_timeout != NGX_CONF_UNSET_MSEC);
+    conversion_memory_explicit =
+        (conf->limits.conversion_memory != NGX_CONF_UNSET_SIZE);
+    parser_memory_explicit =
+        (conf->limits.parser_memory != NGX_CONF_UNSET_SIZE);
+    streaming_buffer_explicit =
+        (conf->limits.streaming_buffer != NGX_CONF_UNSET_SIZE);
 #ifdef MARKDOWN_STREAMING_ENABLED
     stream_budget_set =
         (conf->limits.streaming_buffer != NGX_CONF_UNSET_SIZE);
@@ -211,6 +226,25 @@ ngx_http_markdown_merge_inherited_values(ngx_http_markdown_conf_t *conf,
     ngx_conf_merge_uint_value(conf->limits.max_inflight,
                               prev->limits.max_inflight,
                               NGX_HTTP_MARKDOWN_LIMITS_MAX_INFLIGHT_DEFAULT);
+
+    /*
+     * Propagate per-key explicitness: a key is explicit when set at this
+     * level or inherited from an explicit parent.  Captured before the
+     * ngx_conf_merge_* calls above overwrote the UNSET sentinels.
+     */
+    conf->limits.conversion_timeout_explicit =
+        conversion_timeout_explicit
+        || prev->limits.conversion_timeout_explicit;
+    conf->limits.parser_timeout_explicit =
+        parser_timeout_explicit || prev->limits.parser_timeout_explicit;
+    conf->limits.conversion_memory_explicit =
+        conversion_memory_explicit
+        || prev->limits.conversion_memory_explicit;
+    conf->limits.parser_memory_explicit =
+        parser_memory_explicit || prev->limits.parser_memory_explicit;
+    conf->limits.streaming_buffer_explicit =
+        streaming_buffer_explicit
+        || prev->limits.streaming_buffer_explicit;
 
     conf->timeout = conf->limits.conversion_timeout;
     conf->decompress.parse_timeout = conf->limits.parser_timeout;

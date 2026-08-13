@@ -1906,7 +1906,7 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
         NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_total);
 
         /* Watermark gauge: CAS loop for pending output high-water */
-        if (b->last > b->pos) {
+        if (b->pos != NULL && b->last > b->pos) {
             NGX_HTTP_MARKDOWN_METRIC_WATERMARK(
                 perf.pending_output_high_watermark_bytes,
                 (ngx_atomic_t) (b->last - b->pos));
