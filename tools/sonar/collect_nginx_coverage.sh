@@ -1388,8 +1388,11 @@ check_prometheus_response() {
   if [[ -n "${accept_header}" ]]; then
     curl_args+=(-H "${accept_header}")
   fi
-  status="$(curl "${curl_args[@]}" \
-    "http://127.0.0.1:${PORT}/metrics-prometheus" -w '%{http_code}')"
+  if ! status="$(curl "${curl_args[@]}" \
+    "http://127.0.0.1:${PORT}/metrics-prometheus" -w '%{http_code}' 2>/dev/null)"; then
+    echo "ERROR: Prometheus ${case_label} curl request failed" >&2
+    return 1
+  fi
   if [[ "${status}" != "200" ]]; then
     echo "ERROR: Prometheus ${case_label} returned HTTP ${status}" >&2
     return 1

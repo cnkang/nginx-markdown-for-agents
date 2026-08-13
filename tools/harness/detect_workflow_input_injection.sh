@@ -71,20 +71,25 @@ while IFS= read -r -d '' file; do
 
         # Detect start/end of run: blocks (line starts with "run:" or contains "run: |")
         # YAML structure: we look for lines with "run:" that start a multiline block
-        # or inline run: command
+        # or inline run: command.  Recognize all YAML block scalar indicators:
+        # |, |-, |+, >, >-, >+
+        block_scalar_re='^[[:space:]]*-?run:[[:space:]]*[|>][-+]?[[:space:]]*$'
         if [[ "$line" =~ ^[[:space:]]*run:[[:space:]]*$ ]] || \
-           [[ "$line" =~ ^[[:space:]]*run:[[:space:]]*\|[[:space:]]*$ ]] || \
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*run:[[:space:]]*$ ]] || \
-           [[ "$line" =~ ^[[:space:]]*-[[:space:]]*run:[[:space:]]*\|[[:space:]]*$ ]]; then
+           [[ "$line" =~ $block_scalar_re ]]; then
             in_run_block=1
             in_env_block=0
             continue
         fi
 
         # An inline run command is also shell source and needs the same
-        # interpolation checks as a multiline run block.
-        if [[ "$line" =~ ^[[:space:]]*run:[[:space:]]+.+ ]] || \
-           [[ "$line" =~ ^[[:space:]]*-[[:space:]]*run:[[:space:]]+.+ ]]; then
+        # interpolation checks as a multiline run block.  Exclude YAML block
+        # scalar indicators (|, |-, |+, >, >-) which are handled above as
+        # block starts, not inline commands.
+        inline_run_re='^[[:space:]]*run:[[:space:]]+[^|>]'
+        inline_run_dash_re='^[[:space:]]*-[[:space:]]*run:[[:space:]]+[^|>]'
+        if [[ "$line" =~ $inline_run_re ]] || \
+           [[ "$line" =~ $inline_run_dash_re ]]; then
             inline_run_command=1
             in_env_block=0
         fi

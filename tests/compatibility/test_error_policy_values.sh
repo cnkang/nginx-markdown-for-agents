@@ -161,8 +161,10 @@ EOF
       log_fail "expected rejection, but nginx -t accepted the value"
     fi
   else
-    if [[ "${expected}" == "reject" ]]; then
+    if [[ "${expected}" == "reject" ]] && grep -q 'markdown_error_policy' "${log_file}" 2>/dev/null; then
       log_pass
+    elif [[ "${expected}" == "reject" ]]; then
+      log_fail "expected rejection for markdown_error_policy, but nginx -t failed for another reason: $(tail -n 2 "${log_file}" 2>/dev/null || echo 'see log')"
     else
       log_fail "$(tail -n 2 "${log_file}" 2>/dev/null || echo 'see log')"
     fi

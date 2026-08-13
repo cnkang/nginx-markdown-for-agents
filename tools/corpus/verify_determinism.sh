@@ -51,8 +51,11 @@ if [[ ! -x "$CONVERTER_BIN" ]]; then
 fi
 
 CORPUS_DIR="$ROOT/tests/corpus"
-find "$CORPUS_DIR" -name '*.html' -type f -print0 2>/dev/null \
-    > "$TMP_DIR/fixtures.list" || true
+if ! find "$CORPUS_DIR" -name '*.html' -type f -print0 2>/dev/null \
+    > "$TMP_DIR/fixtures.list"; then
+    echo "ERROR: find failed while discovering HTML fixtures under $CORPUS_DIR" >&2
+    exit 1
+fi
 if [[ ! -s "$TMP_DIR/fixtures.list" ]]; then
     echo "ERROR: no HTML fixtures found under $CORPUS_DIR" >&2
     exit 1

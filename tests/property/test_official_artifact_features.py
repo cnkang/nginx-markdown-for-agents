@@ -31,9 +31,26 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 OFFICIAL_FEATURES = frozenset({"incremental", "streaming", "prune_noise_regions"})
 
-MANIFEST_PATH = (
-    REPO_ROOT / "artifacts" / "release" / "0.9.2" / "official-build-feature-manifest.json"
-)
+
+def _resolve_manifest_path() -> pathlib.Path:
+    """Resolve the official-build-feature-manifest.json under artifacts/release.
+
+    The release version directory is not hardcoded: pick the highest semver
+    version directory that ships the manifest, so bumping the release version
+    does not silently point this test at a stale artifact.
+    """
+    release_dir = REPO_ROOT / "artifacts" / "release"
+    manifests = list(release_dir.glob("*/official-build-feature-manifest.json"))
+    assert manifests, (
+        "no official-build-feature-manifest.json under artifacts/release/"
+    )
+
+    def _version_key(path: pathlib.Path) -> tuple[int, ...]:
+        return tuple(int(part) for part in re.findall(r"\d+", path.parent.name))
+
+    return sorted(manifests, key=_version_key, reverse=True)[0]
+
+
 CARGO_TOML_PATH = REPO_ROOT / "components" / "rust-converter" / "Cargo.toml"
 
 WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
@@ -59,7 +76,7 @@ CUSTOM_BUILD_WORKFLOWS = (
 
 
 def _load_manifest() -> dict:
-    return json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    return json.loads(_resolve_manifest_path().read_text(encoding="utf-8"))
 
 
 def _cargo_default_features() -> set[str]:

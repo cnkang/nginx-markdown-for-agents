@@ -39,6 +39,12 @@ PRECEDENCE_SOURCES = tuple(
     for entry in PRECEDENCE_CONTRACT["five_tier_precedence_hierarchy"]
 )
 
+# Assert the complete precedence source order at module load so silent
+# schema drift (e.g. a missing fifth tier) is caught immediately.
+assert len(PRECEDENCE_SOURCES) == 5, (
+    f"expected 5 precedence sources, got {len(PRECEDENCE_SOURCES)}"
+)
+
 
 # --- Model types ---
 

@@ -109,7 +109,7 @@ def _parse_table(text: str, heading_pattern: str) -> tuple[list[str], list[dict[
 
 def _clean(value: object) -> str:
     if isinstance(value, list):
-        return ", ".join(str(item) for item in value)
+        value = ", ".join(str(item) for item in value)
     return re.sub(r"\s+", " ", str(value).replace("`", "").strip())
 
 

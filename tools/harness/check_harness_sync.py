@@ -364,20 +364,42 @@ def _missing_make_targets(command: str, tokens: list[str], targets: set[str]) ->
     """Return undeclared Make targets in one tokenized command."""
     missing: list[str] = []
     make_index = tokens.index("make")
+    after_make = tokens[make_index + 1 :]
+    # Honor a -f/--file selection; otherwise validate against the
+    # repository-root Makefile resolved by the caller.
+    effective_targets, file_error = _resolve_makefile_targets(after_make, targets)
+    if file_error:
+        missing.append(file_error)
+        return missing
     skip_next = False
-    for candidate in tokens[make_index + 1 :]:
+    for candidate in after_make:
         if skip_next:
             skip_next = False
-        elif candidate in {"-C", "-f", "--file"}:
+            continue
+        if candidate in {"-C", "-f", "--file"}:
             skip_next = True
-        elif "=" in candidate:
+            continue
+        if "=" in candidate:
             # VAR=value overrides are Make options, not target names.
             continue
-        elif not candidate.startswith("-") and candidate not in targets:
+        if not candidate.startswith("-") and candidate not in effective_targets:
             missing.append(
                 f"{command!r}: Make target {candidate!r} is not declared"
             )
     return missing
+
+
+def _resolve_makefile_targets(after_make: list[str],
+                              targets: set[str]) -> tuple[set[str], str | None]:
+    """Resolve the effective Make targets, honoring a -f/--file selection.
+
+    Returns ``(targets, error)``: ``error`` is a non-empty string when the
+    selected Makefile cannot be parsed, else ``None``.
+    """
+    for i, flag in enumerate(after_make):
+        if flag in {"-f", "--file"} and i + 1 < len(after_make):
+            return _make_targets(REPO_ROOT / after_make[i + 1])
+    return targets, None
 
 
 def _missing_command_paths(command: str, tokens: list[str], start: int) -> list[str]:

@@ -6,6 +6,8 @@
 
 set -e
 
+FAIL_COUNT=0
+
 SCRIPT="$(cd "$(dirname "$0")/../../.." && pwd -P)/tests/e2e/dynconf_reload_rollback.sh"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/dynconf-ownership-test.XXXXXX")"
 
@@ -49,7 +51,9 @@ run_case() {
     else
         actual_rc=$?
     fi
-    assert_rc "$expected_rc" "$actual_rc" "$name preserves exit status"
+    if ! assert_rc "$expected_rc" "$actual_rc" "$name preserves exit status"; then
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
     return 0
 }
 
@@ -283,7 +287,9 @@ run_pid_case() {
         source "$1"
         '"$code"'
     ' bash "$SCRIPT" >"$log_path" 2>&1 || actual_rc=$?
-    assert_rc "$expected_rc" "$actual_rc" "$name preserves exit status"
+    if ! assert_rc "$expected_rc" "$actual_rc" "$name preserves exit status"; then
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    fi
     return 0
 }
 
@@ -811,3 +817,8 @@ echo "PASS: cleanup file-remove failure with rc0 exits 70" >&2
 echo "PASS: PID ownership and cleanup failure regression tests" >&2
 
 echo "PASS: dynconf ownership and polling regression tests" >&2
+
+if [[ "$FAIL_COUNT" -gt 0 ]]; then
+    echo "FAIL: $FAIL_COUNT exit-status assertion(s) failed" >&2
+    exit 1
+fi

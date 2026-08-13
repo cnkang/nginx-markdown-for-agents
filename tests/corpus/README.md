@@ -11,6 +11,7 @@ tests/corpus/
 ├── malformed/       # Invalid HTML to test error handling
 ├── edge-cases/      # Boundary conditions and unusual inputs
 ├── encoding/        # Character encoding test cases
+├── streaming/       # Streaming-specific edge cases and flush-boundary fixtures
 └── README.md        # This file
 ```
 
@@ -82,6 +83,19 @@ Character encoding test cases to verify correct handling of various encodings.
 | `mixed-entities.html` | Mix of entities and Unicode | Decode entities, preserve Unicode |
 | `special-chars.html` | Markdown special characters in content | Escape properly in Markdown output |
 | `rtl-text.html` | Right-to-left text (Arabic, Hebrew) | Preserve RTL text correctly |
+
+### 6. Streaming (`streaming/`)
+
+Streaming-specific fixtures that exercise flush-point and chunk-boundary
+edges, charset mismatches under streaming, and high-risk table structures
+for streaming parity testing. Each fixture has a matching `.meta.json` file
+with the following schema fields:
+
+| Field | Description |
+|-------|-------------|
+| `expected_fallback` | Whether streaming is expected to fall back to full-buffer |
+| `known_diff_ids` | Known parity diff identifiers for this fixture |
+| `high_risk_structures` | List of HTML structures that are high-risk for streaming |
 
 ## Usage
 

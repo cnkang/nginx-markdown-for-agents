@@ -203,9 +203,15 @@ test_markdown_brotli() {
 test_markdown_proxy_cache() {
     echo "--- Test 4: markdown + proxy_cache ---" >&2
 
+    # Unique cache-busting query parameter so both requests share one fresh
+    # cache entry instead of reusing a stale entry from a previous run.
+    local cache_buster
+    cache_buster="?cb=$$-$(date +%s%N 2>/dev/null || date +%s)"
+    local cache_path="${TEST_PATH}${cache_buster}"
+
     # First request: should convert and cache
     local response1 headers1 content_type1 cache_status1 status1
-    response1="$(curl -sS -D - -o /dev/null -H "Accept: text/markdown" "${NGINX_URL}${TEST_PATH}" 2>&1)" || true
+    response1="$(curl -sS -D - -o /dev/null -H "Accept: text/markdown" "${NGINX_URL}${cache_path}" 2>&1)" || true
     headers1="$response1"
     status1="$(echo "$headers1" | head -1 | awk '{print $2}')"
     content_type1="$(get_header "$headers1" "Content-Type")"
@@ -224,7 +230,7 @@ test_markdown_proxy_cache() {
 
     # Second request: should serve from cache with same Content-Type
     local response2 headers2 content_type2 cache_status2 status2
-    response2="$(curl -sS -D - -o /dev/null -H "Accept: text/markdown" "${NGINX_URL}${TEST_PATH}" 2>&1)" || true
+    response2="$(curl -sS -D - -o /dev/null -H "Accept: text/markdown" "${NGINX_URL}${cache_path}" 2>&1)" || true
     headers2="$response2"
     status2="$(echo "$headers2" | head -1 | awk '{print $2}')"
     content_type2="$(get_header "$headers2" "Content-Type")"
@@ -267,7 +273,8 @@ test_markdown_no_compression() {
     response="$(curl -sS -D - -H "Accept: text/markdown" "${NGINX_URL}${TEST_PATH}" 2>&1)" || true
 
     # Split headers (headers end at first empty line)
-    headers="$(echo "$response" | sed '/^$/q')"
+    # Normalize CRLF line endings so header splitting works correctly
+    headers="$(echo "$response" | tr -d '\r' | sed '/^$/q')"
 
     status="$(echo "$headers" | head -1 | awk '{print $2}')"
     content_type="$(get_header "$headers" "Content-Type")"
