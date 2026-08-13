@@ -24,19 +24,22 @@ OUTPUT_ROOT = REPO_ROOT / "artifacts" / "release" / "0.9.2"
 FEATURE_MANIFEST = OUTPUT_ROOT / "official-build-feature-manifest.json"
 ABI_HEADER = REPO_ROOT / "components" / "rust-converter" / "include" / "markdown_converter.h"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+FINAL_EVIDENCE_SCHEMA = "schemas/final-evidence-manifest.schema.json"
+OBSERVATION_STATE_SCHEMA = "schemas/observation-state.schema.json"
+SHORT_SOAK_SCOPE = "release/scope/short-soak-scope.json"
 
 TRACKED_RELEASE_INPUTS = (
     "artifacts/release/0.9.2/official-build-feature-manifest.json",
     "docs/releases/release-matrix.json",
     "schemas/release-matrix.schema.json",
-    "schemas/final-evidence-manifest.schema.json",
-    "schemas/observation-state.schema.json",
+    FINAL_EVIDENCE_SCHEMA,
+    OBSERVATION_STATE_SCHEMA,
     "release/signing-policy.json",
     "release/provenance-policy.json",
     "release/scope/sanitizer-support-matrix.json",
     "release/scope/fuzz-scope.json",
     "release/scope/corpus-scope.json",
-    "release/scope/short-soak-scope.json",
+    SHORT_SOAK_SCOPE,
     "components/rust-converter/include/markdown_converter.h",
 )
 
@@ -144,7 +147,7 @@ def build_candidate_manifest(candidate_sha: str, created_at: str) -> dict:
     feature_digest = _canonical_digest(FEATURE_MANIFEST)
     matrix_digest = _sha256_file(REPO_ROOT / "docs/releases/release-matrix.json")
     ffi_digest = _sha256_file(ABI_HEADER)
-    performance_digest = _sha256_file(REPO_ROOT / "release/scope/short-soak-scope.json")
+    performance_digest = _sha256_file(REPO_ROOT / SHORT_SOAK_SCOPE)
     return {
         "schema_version": "release.candidate-sha-manifest.v1",
         "candidate_sha": candidate_sha,
@@ -158,12 +161,8 @@ def build_candidate_manifest(candidate_sha: str, created_at: str) -> dict:
         "canonical_performance_environment_digest": performance_digest,
         "release_matrix_digest": matrix_digest,
         "evidence_schema_digests": {
-            "schemas/final-evidence-manifest.schema.json": input_digests[
-                "schemas/final-evidence-manifest.schema.json"
-            ],
-            "schemas/observation-state.schema.json": input_digests[
-                "schemas/observation-state.schema.json"
-            ],
+            FINAL_EVIDENCE_SCHEMA: input_digests[FINAL_EVIDENCE_SCHEMA],
+            OBSERVATION_STATE_SCHEMA: input_digests[OBSERVATION_STATE_SCHEMA],
         },
         "freeze_rule": (
             "Candidate-bound evidence is valid only for this exact checkout "
@@ -354,7 +353,7 @@ def build_final_evidence(candidate_sha: str, generated_at: str) -> tuple[dict, d
             "domain": "documentation",
             "blocking": True,
             "status": "pass",
-            "artifact_ref": "schemas/final-evidence-manifest.schema.json",
+            "artifact_ref": FINAL_EVIDENCE_SCHEMA,
         },
     ]
     blocking_statuses = [entry["status"] for entry in entries if entry["blocking"]]
@@ -363,10 +362,10 @@ def build_final_evidence(candidate_sha: str, generated_at: str) -> tuple[dict, d
         "schema_version": 1,
         "candidate_sha": candidate_sha,
         "evidence_schema_digest": _sha256_file(
-            REPO_ROOT / "schemas/final-evidence-manifest.schema.json"
+            REPO_ROOT / FINAL_EVIDENCE_SCHEMA
         ),
         "observation_schema_digest": _sha256_file(
-            REPO_ROOT / "schemas/observation-state.schema.json"
+            REPO_ROOT / OBSERVATION_STATE_SCHEMA
         ),
         "generated_at": generated_at,
         "entries": entries,
@@ -412,7 +411,7 @@ def build_final_evidence(candidate_sha: str, generated_at: str) -> tuple[dict, d
             },
             "documentation": {
                 "open_items": 0,
-                "audit_ref": "schemas/final-evidence-manifest.schema.json",
+                "audit_ref": FINAL_EVIDENCE_SCHEMA,
             },
             "residual-risk": {"records": []},
         },
@@ -441,8 +440,8 @@ def main(argv: list[str] | None = None) -> int:
             _write_json(OUTPUT_ROOT / "corpus-seed-manifest.json", corpus)
             from generate_soak_scenario_manifest import build_manifest
 
-            soak_scope_path = REPO_ROOT / "release/scope/short-soak-scope.json"
-            soak_scope = _load_json("release/scope/short-soak-scope.json")
+            soak_scope_path = REPO_ROOT / SHORT_SOAK_SCOPE
+            soak_scope = _load_json(SHORT_SOAK_SCOPE)
             _write_json(
                 OUTPUT_ROOT / "short-soak-scenario-manifest.json",
                 build_manifest(soak_scope, candidate_sha, soak_scope_path, created_at),

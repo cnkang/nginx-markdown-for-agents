@@ -61,11 +61,8 @@ def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
         list[tuple[str, str, str, str]]: Sorted list of (nginx, os_type, arch, tier) tuples where `tier` has been normalized (lowercased, spaces/hyphens replaced with underscores).
     """
     validated = validate_read_path(path, purpose="doc matrix")
-    try:
-        with open(validated, "r", encoding="utf-8") as f:
-            data = normalize_compatibility_document(json.load(f))
-    except (OSError, json.JSONDecodeError, MatrixNormalizationError):
-        raise
+    with open(validated, "r", encoding="utf-8") as f:
+        data = normalize_compatibility_document(json.load(f))
 
     entries = []
     entries.extend(
@@ -274,7 +271,7 @@ def main() -> int:
 
     try:
         json_entries = load_matrix_entries(MATRIX_PATH)
-    except (OSError, json.JSONDecodeError, MatrixNormalizationError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         print(f"ERROR: unable to load matrix {MATRIX_PATH}: {exc}", file=sys.stderr)
         return 1
     doc_entries = parse_doc_matrix(DOC_PATH)
