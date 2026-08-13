@@ -16,7 +16,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -86,7 +86,7 @@ jobs:
         row_id: [asan-ubsan, lsan, msan]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -122,7 +122,7 @@ jobs:
           if not isinstance(row.get("blocking"), bool):
               raise SystemExit(f"sanitizer row {row_id!r} blocking must be boolean")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"blocking={row['blocking']}\n")
+              output.write(f"blocking={'true' if row['blocking'] else 'false'}\n")
               output.write(f"skip_reason={row.get('skip_reason', '')}\n")
               output.write(f"policy_reference={row.get('policy_reference', '')}\n")
               output.write(f"sanitize_type={','.join(row.get('sanitizer', []))}\n")

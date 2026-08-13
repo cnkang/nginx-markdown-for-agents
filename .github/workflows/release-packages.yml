@@ -857,6 +857,12 @@ jobs:
           name: module-so-${{ steps.bench-nginx.outputs.bench_nginx_version }}-amd64
           path: module-runtime
 
+      - name: Install nightly Rust toolchain for fuzz qualification
+        run: |
+          rustup toolchain install nightly --profile minimal --no-self-update
+          cargo install cargo-fuzz --locked
+        shell: bash
+
       - name: Run release gates
         env:
           RELEASE_GATE_EXPECTED_CARGO_VERSION: "0.9.2"
@@ -889,6 +895,14 @@ jobs:
           # legacy validator chain above.
           python3 tools/harness/detect_public_surface_drift.py
           PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
+          # 0.9.2 blocking qualification mirroring Makefile
+          # `release-gates-check-092` stages [8/13]-[12/13].  The tag release
+          # path MUST run the same candidate-bound qualification the local
+          # gate enforces; publish hard-depends on this job's success.
+          python3 tools/release/gates/validate_release_candidate_evidence.py --mode real --git-head
+          python3 tools/release/gates/validate_artifact_registry.py --mode real
+          python3 tools/release/gates/validate_release_evidence_manifest.py --mode real
+          python3 tools/release/gates/validate_fuzz_qualification.py --mode real
           make -C components/nginx-module/tests unit-streaming_impl
           make docs-check
           bash tools/harness/detect_version_consistency.sh
@@ -936,6 +950,9 @@ jobs:
           # to skip module evidence when it is present.
           make release-perf-evidence-blocking BASELINE_VERSION=091
           make release-perf-evidence-blocking BASELINE_VERSION=092
+          # Short-soak qualification (Makefile stage [12/13]) against the
+          # module-enabled EL9 nginx binary.
+          python3 tools/release/gates/validate_soak_qualification.py --mode real
           CONTAINER_SCRIPT
         shell: bash
 
