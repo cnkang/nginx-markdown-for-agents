@@ -42,20 +42,19 @@ pub(crate) fn normalize_line_whitespace(line: &str) -> String {
     let mut at_start = true;
     let mut in_inline_code = false;
     let mut fence_len: usize = 0;
-    let chars: Vec<char> = line.chars().collect();
-    let len = chars.len();
-    let mut i = 0;
+    let mut chars = line.char_indices().peekable();
 
-    while i < len {
-        let ch = chars[i];
-
+    while let Some((_, ch)) = chars.next() {
         if ch == '`' {
             /* Count the run of consecutive backticks. */
-            let run_start = i;
-            while i < len && chars[i] == '`' {
-                i += 1;
+            let mut run_len = 1;
+            while let Some(&(_, next)) = chars.peek() {
+                if next != '`' {
+                    break;
+                }
+                chars.next();
+                run_len += 1;
             }
-            let run_len = i - run_start;
 
             if !in_inline_code {
                 in_inline_code = true;
@@ -77,12 +76,10 @@ pub(crate) fn normalize_line_whitespace(line: &str) -> String {
                 result.push(ch);
                 prev_space = true;
             }
-            i += 1;
         } else {
             result.push(ch);
             prev_space = false;
             at_start = false;
-            i += 1;
         }
     }
 

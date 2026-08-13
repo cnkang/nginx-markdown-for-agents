@@ -158,6 +158,10 @@ pub const ENCODING_CHAIN_UNKNOWN_TOKEN: u8 = 2;
 /// Content-Encoding chain parse classification: more than 3 non-identity
 /// layers; precommit depth bypass (passthrough).
 pub const ENCODING_CHAIN_DEPTH_EXCEEDED: u8 = 3;
+/// Content-Encoding chain parse classification: invalid pointer arguments.
+/// This is kept in the u8 encoding-chain family; decompression's u32 error
+/// categories must not be truncated at this boundary.
+pub const ENCODING_CHAIN_INVALID_ARGS: u8 = 4;
 
 /// Conversion options passed from C to Rust.
 ///
@@ -311,6 +315,7 @@ pub struct MarkdownResult {
 /// when using a handle across multiple FFI calls.
 pub struct MarkdownConverterHandle {
     pub(crate) etag_generator: ETagGenerator,
+    owner_thread: std::thread::ThreadId,
 }
 
 impl MarkdownConverterHandle {
@@ -318,7 +323,17 @@ impl MarkdownConverterHandle {
     pub(crate) fn new() -> Self {
         Self {
             etag_generator: ETagGenerator::new(),
+            owner_thread: std::thread::current().id(),
         }
+    }
+
+    /// Assert the NGINX worker-local ownership contract in debug builds.
+    pub(crate) fn assert_thread_owner(&self) {
+        debug_assert_eq!(
+            self.owner_thread,
+            std::thread::current().id(),
+            "MarkdownConverterHandle must remain on its creating worker thread"
+        );
     }
 }
 
@@ -370,6 +385,8 @@ pub const NEGOTIATE_REASON_LOWER_Q: u8 = 2;
 pub const NEGOTIATE_REASON_EXPLICIT_REJECT: u8 = 3;
 /// Reason code: Accept header is malformed.
 pub const NEGOTIATE_REASON_MALFORMED: u8 = 4;
+/// Reason code: negotiation encountered an internal panic or invariant failure.
+pub const NEGOTIATE_REASON_INTERNAL_ERROR: u8 = 5;
 
 /// Wildcard mode: strict — wildcard MIME type does NOT match text/markdown.
 #[allow(dead_code)]
@@ -987,6 +1004,7 @@ mod layout_tests {
             NEGOTIATE_REASON_LOWER_Q,
             NEGOTIATE_REASON_EXPLICIT_REJECT,
             NEGOTIATE_REASON_MALFORMED,
+            NEGOTIATE_REASON_INTERNAL_ERROR,
         ];
 
         for i in 0..reasons.len() {
@@ -1054,13 +1072,14 @@ mod layout_tests {
 
     #[test]
     fn test_negotiate_reason_count_matches_c_defines() {
-        let rust_reason_count = 5;
+        let rust_reason_count = 6;
         let reasons = [
             NEGOTIATE_REASON_CONVERT,
             NEGOTIATE_REASON_NO_ACCEPT,
             NEGOTIATE_REASON_LOWER_Q,
             NEGOTIATE_REASON_EXPLICIT_REJECT,
             NEGOTIATE_REASON_MALFORMED,
+            NEGOTIATE_REASON_INTERNAL_ERROR,
         ];
         assert_eq!(
             reasons.len(),

@@ -1966,11 +1966,19 @@ mod tests {
         // than triggering full-buffer fallback. This verifies no error is
         // returned — the form tags are stripped and content is preserved.
         let mut conv = make_converter();
-        let result = conv.feed_chunk(b"<form action='/submit'><input type='text'/></form>");
+        let result = conv
+            .feed_chunk(b"<form action='/submit'><input type='text' placeholder='Search'/></form>");
         assert!(
             result.is_ok(),
             "Form should be handled by stripping, not fallback"
         );
+        let chunk = result.unwrap();
+        let final_result = conv.finalize().expect("form conversion should finalize");
+        let mut output = chunk.markdown;
+        output.extend_from_slice(&final_result.final_markdown);
+        let output = String::from_utf8(output).expect("streaming output should be UTF-8");
+        assert!(output.contains("Search"));
+        assert!(!output.contains("<input"));
     }
 
     #[test]

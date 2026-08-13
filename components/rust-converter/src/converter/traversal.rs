@@ -406,7 +406,7 @@ impl MarkdownConverter {
     /// [`crate::security::escape_link_label`] so all label-escaping sites
     /// share a single implementation (AGENTS.md Rule 27).
     pub(super) fn escape_link_label(label: &str) -> String {
-        crate::security::escape_link_label(label)
+        crate::security::escape_link_label(label).into_owned()
     }
 
     /// Emit a Markdown link `[label](url)\n` into `output`.

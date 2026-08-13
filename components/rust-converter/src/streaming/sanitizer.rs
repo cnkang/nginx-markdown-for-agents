@@ -14,6 +14,9 @@
 //! - Nesting depth is limited to prevent stack exhaustion
 
 use crate::converter::pruning::{PruneConfig, should_prune_with_config};
+use crate::security::URL_ATTRIBUTES;
+use crate::security::escape_markdown_text;
+use crate::security::is_dangerous_url_value;
 use crate::streaming::emitter::escape_markdown_destination;
 use crate::streaming::types::StreamEvent;
 
@@ -103,9 +106,6 @@ const FORM_ELEMENTS: &[&str] = &[
 
 /// Void form controls that have no children.
 const VOID_FORM_CONTROLS: &[&str] = &["input"];
-
-/// URL schemes that are blocked for security.
-const DANGEROUS_URL_SCHEMES: &[&str] = &["javascript:", "data:", "vbscript:", "file:", "about:"];
 
 /// Maximum nesting depth (matches SecurityValidator).
 const MAX_NESTING_DEPTH: usize = 1000;
@@ -364,10 +364,42 @@ impl StreamingSanitizer {
     fn process_form_start(
         &mut self,
         tag: &str,
+        attrs: &[(String, String)],
         effectively_self_closing: bool,
     ) -> Option<SanitizeDecision> {
         if !FORM_ELEMENTS.contains(&tag) && !VOID_FORM_CONTROLS.contains(&tag) {
             return None;
+        }
+        if tag == "input" {
+            let input_type = attrs
+                .iter()
+                .find(|(name, _)| name == "type")
+                .map(|(_, value)| value.to_ascii_lowercase())
+                .unwrap_or_else(|| "text".to_string());
+            let text = if matches!(input_type.as_str(), "hidden" | "image") {
+                None
+            } else if matches!(input_type.as_str(), "submit" | "reset") {
+                attrs
+                    .iter()
+                    .find(|(name, _)| name == "value")
+                    .map(|(_, value)| value.as_str())
+            } else {
+                attrs
+                    .iter()
+                    .find(|(name, _)| name == "aria-label")
+                    .or_else(|| attrs.iter().find(|(name, _)| name == "placeholder"))
+                    .or_else(|| attrs.iter().find(|(name, _)| name == "value"))
+                    .map(|(_, value)| value.as_str())
+            };
+            return Some(
+                match text.map(str::trim).filter(|value| !value.is_empty()) {
+                    Some(value) => SanitizeDecision::PassGenerated(StreamEvent::Text(format!(
+                        "{} ",
+                        escape_markdown_text(value)
+                    ))),
+                    None => SanitizeDecision::Skip,
+                },
+            );
         }
         if !effectively_self_closing && !VOID_FORM_CONTROLS.contains(&tag) {
             self.strip_stack.push(tag.to_string());
@@ -383,7 +415,7 @@ impl StreamingSanitizer {
     ) -> Option<SanitizeDecision> {
         self.process_embedded_start(tag, attrs, effectively_self_closing)
             .or_else(|| self.process_media_start(tag, attrs, effectively_self_closing))
-            .or_else(|| self.process_form_start(tag, effectively_self_closing))
+            .or_else(|| self.process_form_start(tag, attrs, effectively_self_closing))
     }
 
     fn process_start_tag(
@@ -679,35 +711,7 @@ impl Default for StreamingSanitizer {
 ///
 /// `true` if the trimmed, lowercased URL begins with any dangerous scheme prefix, `false` otherwise.
 pub(crate) fn is_dangerous_url(url: &str) -> bool {
-    let trimmed = url.trim();
-    if trimmed.chars().any(|ch| ch == '\0' || ch.is_control()) {
-        return true;
-    }
-
-    // Reject percent-encoded control characters (%00-%1f, %7f).
-    // These can bypass the raw control-character check above but are
-    // decoded by user agents and can enable script injection.
-    let bytes = trimmed.as_bytes();
-    let mut i = 0;
-    while i + 2 < bytes.len() {
-        if bytes[i] == b'%' && bytes[i + 1].is_ascii_hexdigit() && bytes[i + 2].is_ascii_hexdigit()
-        {
-            let hi = (bytes[i + 1] as char).to_digit(16).unwrap_or(0) as u8;
-            let lo = (bytes[i + 2] as char).to_digit(16).unwrap_or(0) as u8;
-            let decoded = hi << 4 | lo;
-            if decoded <= 0x1f || decoded == 0x7f {
-                return true;
-            }
-            i += 3;
-        } else {
-            i += 1;
-        }
-    }
-
-    let lower = trimmed.to_ascii_lowercase();
-    DANGEROUS_URL_SCHEMES
-        .iter()
-        .any(|scheme| lower.starts_with(scheme))
+    is_dangerous_url_value(url)
 }
 
 /// Filters an attribute list, removing event-handler attributes (names starting
@@ -745,8 +749,8 @@ fn sanitize_attributes(attrs: &[(String, String)]) -> Vec<(String, String)> {
             if name == "style" {
                 return false;
             }
-            // Remove dangerous URLs from href/src
-            if (name == "href" || name == "src") && is_dangerous_url(value) {
+            // Remove dangerous URLs from every URL-bearing attribute.
+            if URL_ATTRIBUTES.contains(&name.as_str()) && is_dangerous_url(value) {
                 return false;
             }
             true
@@ -787,6 +791,32 @@ mod tests {
                 .collect(),
             self_closing: false,
         }
+    }
+
+    #[test]
+    fn all_url_attributes_reject_dangerous_schemes() {
+        let attrs: Vec<(String, String)> = URL_ATTRIBUTES
+            .iter()
+            .map(|name| ((*name).to_string(), "javascript:alert(1)".to_string()))
+            .collect();
+        assert!(sanitize_attributes(&attrs).is_empty());
+    }
+
+    #[test]
+    fn input_control_text_matches_full_buffer_policy() {
+        let mut sanitizer = StreamingSanitizer::new();
+        let decision = sanitizer.process_event(start_tag(
+            "input",
+            vec![
+                ("type", "text"),
+                ("placeholder", "*search*"),
+                ("value", "fallback"),
+            ],
+        ));
+        assert_eq!(
+            decision,
+            SanitizeDecision::PassGenerated(StreamEvent::Text(r"\*search\* ".to_string(),))
+        );
     }
 
     /// Creates a `StreamEvent::EndTag` for the given element name.
@@ -1146,6 +1176,12 @@ mod tests {
     fn test_dangerous_url_case_insensitive() {
         assert!(is_dangerous_url("JavaScript:alert(1)"));
         assert!(is_dangerous_url("JAVASCRIPT:alert(1)"));
+    }
+
+    #[test]
+    fn test_non_ascii_scheme_prefix_is_rejected() {
+        assert!(is_dangerous_url("java\u{0455}cript:alert(1)"));
+        assert!(is_dangerous_url("\u{fffd}:payload"));
     }
 
     #[test]

@@ -482,3 +482,27 @@ fn error_message_for_code(code: u32) -> &'static str {
         _ => "dynamic configuration parser failed internally",
     }
 }
+
+#[cfg(test)]
+mod layout_tests {
+    use super::FFIDynconfResult;
+    use std::mem::{align_of, offset_of, size_of};
+
+    #[test]
+    fn dynconf_result_layout_matches_c_contract() {
+        assert_eq!(size_of::<FFIDynconfResult>(), 72);
+        assert_eq!(align_of::<FFIDynconfResult>(), 8);
+        assert_eq!(offset_of!(FFIDynconfResult, error_code), 0);
+        assert_eq!(offset_of!(FFIDynconfResult, error_message), 8);
+        assert_eq!(offset_of!(FFIDynconfResult, error_message_len), 16);
+        assert_eq!(offset_of!(FFIDynconfResult, source_digest), 24);
+        assert_eq!(offset_of!(FFIDynconfResult, source_digest_len), 32);
+        assert_eq!(offset_of!(FFIDynconfResult, active_digest), 40);
+        assert_eq!(offset_of!(FFIDynconfResult, active_digest_len), 48);
+        assert_eq!(offset_of!(FFIDynconfResult, filter), 56);
+        assert_eq!(offset_of!(FFIDynconfResult, prune_noise), 57);
+        assert_eq!(offset_of!(FFIDynconfResult, log_verbosity), 58);
+        assert_eq!(offset_of!(FFIDynconfResult, error_policy), 59);
+        assert_eq!(offset_of!(FFIDynconfResult, streaming_buffer), 64);
+    }
+}

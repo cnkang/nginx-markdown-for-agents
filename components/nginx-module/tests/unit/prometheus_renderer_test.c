@@ -401,7 +401,13 @@ test_known_values(void)
         contains((char *) buf,
             "nginx_markdown_streaming_budget_exceeded_total 2"),
         "streaming budget exceeded should be 2");
-    /* streaming shadow metrics removed in 0.9.2 (production builds) */
+    TEST_ASSERT(
+        !contains((char *) buf, "nginx_markdown_streaming_shadow_total"),
+        "streaming shadow total must stay out of the default renderer");
+    TEST_ASSERT(
+        !contains((char *) buf,
+            "nginx_markdown_streaming_shadow_diff_total"),
+        "streaming shadow diff total must stay out of the default renderer");
     /* TTFB: 1234ms = 1.234s */
     TEST_ASSERT(
         contains((char *) buf,

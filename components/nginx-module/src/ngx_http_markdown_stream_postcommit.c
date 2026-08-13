@@ -347,8 +347,8 @@ ngx_http_markdown_stream_postcommit_abort(
          *   1. Abort metric already recorded (independent latch)
          *   2. Terminal output already delivered for this request type
          *
-         * The latch is independent of stream_sm.state because callers
-         * (stream_on_error) may pre-transition the state to
+         * The latch is independent of stream_sm.state because callers in
+         * the post-commit error path may pre-transition the state to
          * POST_COMMIT_ABORT before invoking this function.  Using
          * state as the guard would cause the first real abort to be
          * missed (Rule 23: delivery ≠ decision counters).
@@ -566,7 +566,6 @@ ngx_http_markdown_stream_postcommit_capture_pending(
         &ctx->streaming.pending_output, out);
     ctx->streaming.pending_meta.has_data = has_data;
     ctx->streaming.pending_meta.bytes = output_bytes;
-    ctx->streaming.pending_meta.zero_copy = 0;
     ctx->streaming.pending_meta.main_terminal =
         (r == r->main && out->buf->last_buf);
     ctx->streaming.pending_meta.subrequest_terminal =

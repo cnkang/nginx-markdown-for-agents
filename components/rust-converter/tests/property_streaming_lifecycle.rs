@@ -140,6 +140,18 @@ fn error_event(reason: &str) -> EventEnvelope {
     }
 }
 
+fn required_event(kind: EventKind) -> EventEnvelope {
+    EventEnvelope {
+        kind,
+        failure_record: Some(FailureRecord {
+            stage: "streaming".to_string(),
+            reason: "test".to_string(),
+            error_origin: ErrorOrigin::Internal,
+            failure_site: None,
+        }),
+    }
+}
+
 fn no_record_event(kind: EventKind) -> EventEnvelope {
     EventEnvelope {
         kind,
@@ -243,7 +255,7 @@ fn prop_20_plan_returns_deterministic_result() {
         for event in all_19_events() {
             let ctx = default_ctx();
             let env = match event_failure_policy(event) {
-                EventFailurePolicy::Required => error_event("test"),
+                EventFailurePolicy::Required => required_event(event),
                 EventFailurePolicy::ReusePersisted => no_record_event(event),
                 EventFailurePolicy::Forbidden => no_record_event(event),
             };
@@ -619,7 +631,7 @@ fn prop_30_every_valid_pair_has_unique_plan_decision() {
     for state in all_15_states() {
         for event in all_19_events() {
             let env = match event_failure_policy(event) {
-                EventFailurePolicy::Required => error_event("test"),
+                EventFailurePolicy::Required => required_event(event),
                 EventFailurePolicy::ReusePersisted => no_record_event(event),
                 EventFailurePolicy::Forbidden => no_record_event(event),
             };
@@ -1262,7 +1274,7 @@ fn proto_no_undocumented_state_event_acceptance() {
     for state in all_15_states() {
         for event in all_19_events() {
             let env = match event_failure_policy(event) {
-                EventFailurePolicy::Required => error_event("test"),
+                EventFailurePolicy::Required => required_event(event),
                 EventFailurePolicy::ReusePersisted => no_record_event(event),
                 EventFailurePolicy::Forbidden => no_record_event(event),
             };
@@ -2083,7 +2095,7 @@ fn proto_plan_ids_are_unique() {
     for state in all_15_states() {
         for event in all_19_events() {
             let env = match event_failure_policy(event) {
-                EventFailurePolicy::Required => error_event("test"),
+                EventFailurePolicy::Required => required_event(event),
                 EventFailurePolicy::ReusePersisted => no_record_event(event),
                 EventFailurePolicy::Forbidden => no_record_event(event),
             };

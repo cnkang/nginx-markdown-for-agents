@@ -253,6 +253,8 @@ _Static_assert(NEGOTIATE_REASON_LOWER_Q != NEGOTIATE_REASON_EXPLICIT_REJECT,
     "negotiate reason codes must be distinct");
 _Static_assert(NEGOTIATE_REASON_EXPLICIT_REJECT != NEGOTIATE_REASON_MALFORMED,
     "negotiate reason codes must be distinct");
+_Static_assert(NEGOTIATE_REASON_MALFORMED != NEGOTIATE_REASON_INTERNAL_ERROR,
+    "negotiate reason codes must be distinct");
 
 /* ----------------------------------------------------------------
  * FFIDecompResult layout (24 bytes on LP64).

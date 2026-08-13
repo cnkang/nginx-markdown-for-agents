@@ -30,6 +30,7 @@
 //!   length to 0, preventing double-free.
 
 use std::ptr;
+use std::ptr::NonNull;
 
 use super::abi::{ConversionOutput, ERROR_SUCCESS, MarkdownResult};
 
@@ -98,10 +99,16 @@ pub(crate) fn set_success_result(result: &mut MarkdownResult, output: Conversion
 /// Free one heap buffer previously exported through the C ABI.
 pub(crate) fn free_buffer(ptr_field: &mut *mut u8, len_field: &mut usize) {
     if (*ptr_field).is_null() {
+        debug_assert_eq!(
+            *len_field, 0,
+            "an exported FFI buffer cannot have a length without a pointer"
+        );
         return;
     }
 
-    let raw = ptr::slice_from_raw_parts_mut(*ptr_field, *len_field);
+    debug_assert!(*len_field > 0);
+    let data = NonNull::new(*ptr_field).expect("non-NULL FFI buffer pointer after the NULL guard");
+    let raw = ptr::slice_from_raw_parts_mut(data.as_ptr(), *len_field);
     // SAFETY: `raw` is a reconstructed fat-pointer from the thin pointer that
     // was originally obtained via `leak_boxed_slice_to_raw` / `as_mut_ptr`
     // + `mem::forget`, and `len_field` is the original buffer length.

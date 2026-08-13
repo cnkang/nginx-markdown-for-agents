@@ -293,6 +293,7 @@ static ngx_shm_zone_t  g_shm_zone;
 ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = &g_shm_zone;
 
 #define MARKDOWN_STREAMING_ENABLED 1
+#define MARKDOWN_METRICS_PER_PATH_DEBUG 1
 #define NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED 1
 
 #include "../../src/ngx_http_markdown_prometheus_impl.h" /* SONAR_NOTE */

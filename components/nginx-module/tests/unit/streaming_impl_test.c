@@ -1786,6 +1786,7 @@ test_select_processing_path(void)
         "SSE should preserve excluded_content_type reason");
 
     r.headers_out.content_type = (ngx_str_t) { 9, (u_char *) "text/html" };
+    ngx_memzero(&arr, sizeof(arr));
     excluded[0] = (ngx_str_t) { 9, (u_char *) "text/html" };
     arr.elts = excluded;
     arr.nelts = 1;
@@ -2007,6 +2008,13 @@ test_send_output_and_resume_paths(void)
         "main-request terminal should latch main_terminal_sent");
     TEST_ASSERT(ctx.streaming.subrequest_terminal_sent == 0,
         "main-request terminal must not latch subrequest terminal state");
+    TEST_ASSERT(g_next_body_filter_last_in != NULL
+        && g_next_body_filter_last_in->buf != NULL
+        && g_next_body_filter_last_in->buf->pos
+           == (u_char *) g_next_body_filter_last_in->buf
+        && g_next_body_filter_last_in->buf->last
+           == g_next_body_filter_last_in->buf->pos,
+        "empty terminal buffers must have explicit zero-length bounds");
 
     TEST_PASS("send_output/resume_pending branches covered");
 }
@@ -3102,6 +3110,51 @@ test_header_commit_backpressure_retry_is_atomic(void)
                 "header commit latches publish atomically after NGX_OK");
 
     TEST_PASS("header commit NGX_AGAIN retry is atomic");
+}
+
+/* Feed-path regression: a pending header commit must resume the downstream
+ * header filter without replaying the transactional header mutation. */
+static void
+test_feed_path_resumes_pending_header_commit(void)
+{
+    ngx_http_request_t      r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t              pool;
+    ngx_connection_t        conn;
+    ngx_log_t               log;
+    ngx_event_t             read_event;
+    ngx_http_markdown_metrics_t metrics;
+    ngx_int_t                rc;
+
+    TEST_SUBSECTION("feed path resumes pending header commit");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+
+    g_next_header_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_AGAIN && ctx.stream_sm.headers_pending == 1,
+        "initial feed-path commit should retain pending headers");
+
+    g_stream_commit_headers_rc = NGX_ERROR;
+    g_stream_commit_headers_called = 0;
+    g_next_header_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK,
+        "feed-path retry should accept downstream headers");
+    TEST_ASSERT(g_stream_commit_headers_called == 0,
+        "feed-path retry must not replay header mutations");
+    TEST_ASSERT(ctx.stream_sm.headers_pending == 0
+                && ctx.streaming.commit_state
+                   == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST
+                && ctx.headers_forwarded == 1
+                && metrics.streaming.commit_total == 1,
+        "feed-path retry should publish the commit atomically");
+
+    TEST_PASS("feed path resumes pending header commit");
 }
 
 /*
@@ -5244,7 +5297,7 @@ test_failopen_active_enqueue_failure_aborts_safely(void)
     free_calls = g_output_free_calls;
     rc = ngx_http_markdown_streaming_save_pending(
         &r, &ctx, &future, future_buf.pos,
-        ngx_http_markdown_buf_len_safe(&future_buf), 0, terminal);
+        ngx_http_markdown_buf_len_safe(&future_buf), terminal);
     TEST_ASSERT(rc == NGX_ERROR,
         "P1-2: save_pending must reject re-entry");
     TEST_ASSERT(ctx.streaming.pending_output == &pending_output,
@@ -5965,7 +6018,6 @@ test_postcommit_existing_pending_rejects_second_submission(void)
     ctx.streaming.pending_output = &old_pending;
     ctx.streaming.pending_meta.has_data = 1;
     ctx.streaming.pending_meta.bytes = 37;
-    ctx.streaming.pending_meta.zero_copy = 1;
     ctx.streaming.pending_meta.main_terminal = 0;
     ctx.streaming.pending_meta.subrequest_terminal = 1;
     r.buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
@@ -5982,7 +6034,6 @@ test_postcommit_existing_pending_rejects_second_submission(void)
         "postcommit pending guard: old pending anchor must remain unchanged");
     TEST_ASSERT(ctx.streaming.pending_meta.has_data == 1
         && ctx.streaming.pending_meta.bytes == 37
-        && ctx.streaming.pending_meta.zero_copy == 1
         && ctx.streaming.pending_meta.main_terminal == 0
         && ctx.streaming.pending_meta.subrequest_terminal == 1,
         "postcommit pending guard: old pending metadata must remain unchanged");
@@ -6282,6 +6333,7 @@ test_postcommit_abort_outcome_across_backpressure(void)
     TEST_ASSERT(ctx.streaming.main_terminal_sent == 1,
         "successful abort resume must latch main terminal delivery");
     TEST_ASSERT(g_terminal_decision_calls == 1
+                && g_last_terminal_reason != NULL
                 && strcmp(g_last_terminal_reason,
                           "streaming_mid_flight_error") == 0,
         "successful abort resume must publish one aborted terminal path");
@@ -6319,6 +6371,7 @@ test_postcommit_abort_outcome_across_backpressure(void)
                 && metrics.streaming.postcommit_error_total == 1,
         "failed abort resume must record one failed-closed outcome");
     TEST_ASSERT(g_terminal_decision_calls == 1
+                && g_last_terminal_reason != NULL
                 && strcmp(g_last_terminal_reason, "failed_closed") == 0,
         "failed abort resume must publish one failed-closed path");
 
@@ -6779,6 +6832,7 @@ main(void)
     test_init_handle_and_chunk_result_helpers();
     test_commit_feed_and_finalize_core_paths();
     test_header_commit_backpressure_retry_is_atomic();
+    test_feed_path_resumes_pending_header_commit();
     test_postcommit_output_construction_failures();
     test_postcommit_ngx_done_is_delivery_success();
     test_postcommit_downstream_failure_classification();

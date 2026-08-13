@@ -655,6 +655,10 @@ test_atomic_fetch_add(ngx_atomic_uint_t *value, ngx_atomic_int_t add)
 #define ngx_atomic_fetch_add test_atomic_fetch_add
 #endif
 
+/* The production allocator rejects a missing logger before calling
+ * ngx_alloc(); provide the test logger to the convenience create wrapper. */
+#define NGX_HTTP_MARKDOWN_STREAMING_DECOMP_DEFAULT_LOG (&test_log)
+
 /* Include the production streaming decompression implementation so that
  * its functions are compiled against the stubs defined above. */
 #include "../src/ngx_http_markdown_streaming_decomp_impl.h"
@@ -4283,6 +4287,15 @@ test_create_helper_and_limit_branches(void)
     TEST_ASSERT(
         ngx_http_markdown_streaming_decomp_check_limit(&local, 7) == 0,
         "check_limit should pass on boundary");
+
+    local.total_decompressed = 8;
+    local.max_decompressed_size = 10;
+    rc = ngx_http_markdown_streaming_decomp_apply_limits(
+        &local, 3, NULL, &test_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
+        "apply_limits should reject an over-budget produced chunk");
+    TEST_ASSERT(local.total_decompressed == 8,
+        "over-budget apply_limits must not inflate cumulative total");
 
     heap_buf = malloc(8);
     TEST_ASSERT(heap_buf != NULL, "heap allocation should succeed");

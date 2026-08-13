@@ -587,12 +587,15 @@ impl IncrementalEmitter {
             return Ok(());
         }
 
-        let escaped_text = escape_link_label(&text);
         if href.trim().is_empty() || is_dangerous_url(href) {
-            self.write_str(&escaped_text)?;
+            /* `link_text` is assembled from escaped ordinary text plus
+             * trusted structural markers (for example `**` from <strong>).
+             * Escaping the complete buffer here would corrupt those markers
+             * and change the intended inline formatting. */
+            self.write_str(&text)?;
         } else {
             let escaped = escape_markdown_destination(href);
-            self.write_str(&format!("[{}]({})", escaped_text, escaped))?;
+            self.write_str(&format!("[{}]({})", text, escaped))?;
         }
         Ok(())
     }
@@ -749,7 +752,14 @@ impl IncrementalEmitter {
     ) -> Result<(), ConversionError> {
         if self.in_link && !self.in_inline_code {
             self.last_text_ended_whitespace = false;
-            self.append_link_text(text);
+            if escape_plain_text {
+                let escaped = escape_link_label(text);
+                self.append_link_text(&escaped);
+            } else {
+                /* Only sanitizer-generated Markdown reaches this path with
+                 * escaping disabled. */
+                self.append_link_text(text);
+            }
             return Ok(());
         }
 
@@ -3014,6 +3024,22 @@ mod tests {
     #[test]
     fn test_escape_link_label_with_newline() {
         assert_eq!(escape_link_label("a\nb"), "a b");
+    }
+
+    #[test]
+    fn test_raw_text_inside_link_escapes_markdown_delimiters() {
+        let output = emit_html(&[
+            start_tag("p"),
+            start_tag_with_attrs("a", vec![("href", "https://example.com")]),
+            text("*raw* _text_ `code` ~strike~"),
+            end_tag("a"),
+            end_tag("p"),
+        ]);
+        assert!(
+            output.contains(r"[\*raw\* \_text\_ \`code\` \~strike\~](https://example.com)"),
+            "raw link text must not activate Markdown delimiters: {}",
+            output
+        );
     }
 
     // ── Nested inline formatting tests ─────────────────

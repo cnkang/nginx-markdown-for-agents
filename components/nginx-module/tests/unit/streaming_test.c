@@ -3752,6 +3752,12 @@ test_precommit_memory_limit_budget_parity(void)
 }
 
 
+/*
+ * Shadow-mode tests are retained as an opt-in historical fixture.  The
+ * production directive and runtime path were removed from the 0.9.2
+ * contract, so the fixture must not participate in the default unit suite.
+ */
+#ifdef MARKDOWN_STREAMING_SHADOW_DEBUG
 /* ================================================================
  * Shadow Mode Configuration Tests (shadow mode and TTFB)
  *
@@ -4085,6 +4091,8 @@ test_shadow_error_isolation(void)
         "Shadow errors isolated from client response");
 }
 
+
+#endif /* MARKDOWN_STREAMING_SHADOW_DEBUG */
 
 /* ================================================================
  * TTFB Gauge Regression Tests (shadow mode and TTFB)
@@ -5155,6 +5163,7 @@ main(void)
     test_metrics_deferred_lastbuf_again_then_ok();
     test_metrics_deferred_lastbuf_again_then_error();
 
+#ifdef MARKDOWN_STREAMING_SHADOW_DEBUG
     TEST_SECTION(
         "17.1 streaming_shadow Config Parsing");
     test_config_shadow_legal_values();
@@ -5167,6 +5176,7 @@ main(void)
     test_shadow_metrics_increment();
     test_shadow_diff_metrics();
     test_shadow_error_isolation();
+#endif /* MARKDOWN_STREAMING_SHADOW_DEBUG */
 
     TEST_SECTION(
         "17.3 TTFB Gauge Regression");

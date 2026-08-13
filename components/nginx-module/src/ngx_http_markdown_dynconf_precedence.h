@@ -39,7 +39,7 @@
  *
  * Each bit corresponds to one dynconf-mutable field.  When set,
  * the dynconf overlay for that field is blocked — the static
- * server/location value takes precedence.
+ * explicit static value takes precedence.
  */
 #ifndef NGX_HTTP_MARKDOWN_BLOCK_FILTER
 #define NGX_HTTP_MARKDOWN_BLOCK_FILTER           (1 << 0)

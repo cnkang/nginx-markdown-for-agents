@@ -217,6 +217,12 @@ ngx_http_markdown_brotli_alloc(void *opaque, size_t size)
         return NULL;
     }
 
+    if (decomp->brotli_log == NULL) {
+        (void) ngx_atomic_fetch_add(
+            counter, -((ngx_atomic_int_t) size));
+        return NULL;
+    }
+
     allocation = ngx_alloc(
         sizeof(ngx_http_markdown_brotli_allocation_t) + size,
         decomp->brotli_log);
@@ -631,9 +637,16 @@ ngx_http_markdown_streaming_decomp_create(
     ngx_http_markdown_compression_type_e type,
     size_t max_decompressed_size)
 {
+#ifdef NGX_HTTP_MARKDOWN_STREAMING_DECOMP_DEFAULT_LOG
+    ngx_log_t  *default_log =
+        NGX_HTTP_MARKDOWN_STREAMING_DECOMP_DEFAULT_LOG;
+#else
+    ngx_log_t  *default_log = NULL;
+#endif
+
     return ngx_http_markdown_streaming_decomp_create_with_origin(
         pool, type, max_decompressed_size, NULL,
-        NGX_HTTP_MARKDOWN_BROTLI_WORKSPACE_LIMIT, NULL, NULL);
+        NGX_HTTP_MARKDOWN_BROTLI_WORKSPACE_LIMIT, default_log, NULL);
 }
 
 
@@ -2109,6 +2122,8 @@ ngx_http_markdown_streaming_decomp_apply_limits(
     u_char **buf_ptr,
     ngx_log_t *log)
 {
+    size_t  projected;
+
     (void) buf_ptr;
 
     if (decomp->total_decompressed > NGX_MAX_SIZE_T_VALUE - produced) {
@@ -2122,18 +2137,19 @@ ngx_http_markdown_streaming_decomp_apply_limits(
         return NGX_ERROR;
     }
 
-    decomp->total_decompressed += produced;
+    projected = decomp->total_decompressed + produced;
     if (decomp->max_decompressed_size > 0
-        && decomp->total_decompressed
-           > decomp->max_decompressed_size)
+        && projected > decomp->max_decompressed_size)
     {
         ngx_log_error(NGX_LOG_WARN, log, 0,
             "markdown: "
             "decompressed size %uz exceeds limit %uz",
-            decomp->total_decompressed,
+            projected,
             decomp->max_decompressed_size);
         return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
+
+    decomp->total_decompressed = projected;
 
     return NGX_OK;
 }

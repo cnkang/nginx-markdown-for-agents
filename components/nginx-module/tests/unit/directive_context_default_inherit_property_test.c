@@ -706,9 +706,8 @@ create_unset_conf(void)
 {
     ngx_http_markdown_conf_t *conf;
     conf = calloc(1, sizeof(ngx_http_markdown_conf_t));
-    if (conf == NULL) {
-        return NULL;
-    }
+    TEST_ASSERT(conf != NULL,
+        "create_unset_conf allocation must succeed before initialization");
 
     conf->enabled = NGX_CONF_UNSET;
     conf->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;

@@ -350,6 +350,16 @@ markdown_result_init(struct MarkdownResult *result)
     memset(result, 0, sizeof(*result));
 }
 
+/* FFI lifecycle stub for the borrowed base-URL input snapshot. */
+static void
+markdown_base_url_input_init(struct FFIBaseUrlInput *result)
+{
+    if (result == NULL) {
+        return;
+    }
+    memset(result, 0, sizeof(*result));
+}
+
 const ngx_str_t *
 ngx_http_markdown_reason_streaming_shadow(void)
 {

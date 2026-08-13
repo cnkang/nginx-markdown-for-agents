@@ -24,6 +24,102 @@
 /* Conditionally include brotli header if support is compiled in */
 #ifdef NGX_HTTP_BROTLI
 #include <brotli/decode.h>
+
+typedef struct {
+    ngx_atomic_uint_t  *counter;
+    size_t              limit;
+    ngx_log_t          *log;
+} ngx_http_markdown_full_brotli_alloc_ctx_t;
+
+typedef struct {
+    ngx_atomic_uint_t  *counter;
+    size_t              size;
+} ngx_http_markdown_full_brotli_allocation_t;
+
+
+static ngx_int_t
+ngx_http_markdown_full_brotli_reserve(
+    ngx_atomic_uint_t *counter, size_t limit, size_t size)
+{
+    ngx_atomic_uint_t  current;
+    ngx_atomic_uint_t  next;
+
+    if (counter == NULL || limit == 0) {
+        return NGX_ERROR;
+    }
+
+    current = *counter;
+    for ( ;; ) {
+        if (current > (ngx_atomic_uint_t) limit
+            || size > limit - (size_t) current)
+        {
+            return NGX_ERROR;
+        }
+
+        next = current + (ngx_atomic_uint_t) size;
+        if (ngx_atomic_cmp_set(counter, current, next)) {
+            return NGX_OK;
+        }
+        current = *counter;
+    }
+}
+
+
+static void *
+ngx_http_markdown_full_brotli_alloc(void *opaque, size_t size)
+{
+    ngx_http_markdown_full_brotli_alloc_ctx_t  *ctx;
+    ngx_http_markdown_full_brotli_allocation_t  *allocation;
+
+    ctx = opaque;
+    if (ctx == NULL || ctx->log == NULL || size == 0
+        || size > (size_t) -1
+            - sizeof(ngx_http_markdown_full_brotli_allocation_t))
+    {
+        return NULL;
+    }
+
+    if (ngx_http_markdown_full_brotli_reserve(
+            ctx->counter, ctx->limit, size) != NGX_OK)
+    {
+        return NULL;
+    }
+
+    allocation = ngx_alloc(
+        sizeof(ngx_http_markdown_full_brotli_allocation_t) + size,
+        ctx->log);
+    if (allocation == NULL) {
+        (void) ngx_atomic_fetch_add(
+            ctx->counter, -((ngx_atomic_int_t) size));
+        return NULL;
+    }
+
+    allocation->counter = ctx->counter;
+    allocation->size = size;
+    return allocation + 1;
+}
+
+
+static void
+ngx_http_markdown_full_brotli_free(void *opaque, void *address)
+{
+    ngx_http_markdown_full_brotli_allocation_t  *allocation;
+    ngx_atomic_uint_t                           *counter;
+    size_t                                       size;
+
+    (void) opaque;
+    if (address == NULL) {
+        return;
+    }
+
+    allocation =
+        ((ngx_http_markdown_full_brotli_allocation_t *) address) - 1;
+    counter = allocation->counter;
+    size = allocation->size;
+    ngx_free(allocation);
+    (void) ngx_atomic_fetch_add(
+        counter, -((ngx_atomic_int_t) size));
+}
 #endif
 
 #include "ngx_http_markdown_filter_module.h"
@@ -41,7 +137,7 @@ static ngx_int_t ngx_http_markdown_measure_content_encoding(
     ngx_uint_t *match_count, size_t *total_len);
 static ngx_int_t ngx_http_markdown_add_content_encoding_length(
     size_t value_len, ngx_uint_t match_count, size_t *total_len);
-static void ngx_http_markdown_copy_content_encoding(
+static size_t ngx_http_markdown_copy_content_encoding(
     ngx_http_request_t *r, u_char *data);
 
 
@@ -126,19 +222,25 @@ ngx_http_markdown_measure_content_encoding(
 }
 
 
-static void
+static size_t
 ngx_http_markdown_copy_content_encoding(ngx_http_request_t *r, u_char *data)
 {
     ngx_flag_t        first;
+    size_t             written;
+
+    if (r == NULL || data == NULL) {
+        return 0;
+    }
 
     first = 1;
+    written = 0;
     for (ngx_list_part_t *part = &r->headers_out.headers.part;
          part != NULL;
          part = part->next)
     {
         const ngx_table_elt_t *headers = part->elts;
         if (headers == NULL && part->nelts != 0) {
-            return;
+            return written;
         }
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
             if (headers[i].hash == 0) {
@@ -148,16 +250,19 @@ ngx_http_markdown_copy_content_encoding(ngx_http_request_t *r, u_char *data)
                 continue;
             }
             if (!first) {
-                *data++ = ',';
-                *data++ = ' ';
+                data[written++] = ',';
+                data[written++] = ' ';
             }
             if (headers[i].value.len > 0) {
-                ngx_memcpy(data, headers[i].value.data, headers[i].value.len);
+                ngx_memcpy(data + written, headers[i].value.data,
+                           headers[i].value.len);
             }
-            data += headers[i].value.len;
+            written += headers[i].value.len;
             first = 0;
         }
     }
+
+    return written;
 }
 
 /*
@@ -169,8 +274,8 @@ ngx_http_markdown_copy_content_encoding(ngx_http_request_t *r, u_char *data)
  * header storage.
  *
  * No separate per-header cap is applied: the total is bounded by the
- * header storage NGINX itself accepted (large_client_header_buffers and
- * the module's accepted header size limits).
+ * upstream response-header buffering accepted by the active upstream module
+ * (for example, proxy_buffer_size) and the module's accepted header limits.
  *
  * Returns NGX_OK with `out` populated, NGX_DECLINED when no Content-Encoding
  * field exists, or NGX_ERROR for allocation failure.
@@ -210,7 +315,11 @@ ngx_http_markdown_collect_content_encoding(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    ngx_http_markdown_copy_content_encoding(r, data);
+    if (ngx_http_markdown_copy_content_encoding(r, data) != total_len) {
+        out->data = NULL;
+        out->len = 0;
+        return NGX_ERROR;
+    }
 
     out->data = data;
     out->len = total_len;
@@ -1082,6 +1191,113 @@ ngx_http_markdown_decomp_brotli_fail(BrotliDecoderState *decoder,
     ngx_free(output_data);
     return rc;
 }
+
+
+static ngx_int_t
+ngx_http_markdown_full_brotli_prepare_alloc_ctx(
+    ngx_http_request_t *r,
+    ngx_http_markdown_full_brotli_alloc_ctx_t *alloc_ctx)
+{
+    ngx_http_markdown_main_conf_t  *main_conf;
+
+    if (r == NULL || r->connection == NULL || r->connection->log == NULL
+        || alloc_ctx == NULL)
+    {
+        return NGX_ERROR;
+    }
+
+    main_conf = ngx_http_get_module_main_conf(
+        r, ngx_http_markdown_filter_module);
+    if (main_conf == NULL) {
+        return NGX_ERROR;
+    }
+
+    alloc_ctx->counter = &main_conf->brotli_workspace_bytes;
+    alloc_ctx->limit = (size_t) main_conf->brotli_workspace_limit;
+    if (alloc_ctx->limit == 0
+        || alloc_ctx->limit > NGX_HTTP_MARKDOWN_BROTLI_WORKSPACE_LIMIT)
+    {
+        alloc_ctx->limit = NGX_HTTP_MARKDOWN_BROTLI_WORKSPACE_LIMIT;
+    }
+    alloc_ctx->log = r->connection->log;
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_decomp_brotli_stream(
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
+    BrotliDecoderState *decoder, const u_char *input_data, size_t input_size,
+    u_char **output_data, size_t *output_size, size_t *total_out)
+{
+    BrotliDecoderResult  result;
+    size_t               available_in;
+    size_t               available_out;
+    size_t               used;
+    const uint8_t       *next_in;
+    uint8_t             *next_out;
+    ngx_int_t             grow_rc;
+
+    *total_out = 0;
+    available_in = input_size;
+    next_in = input_data;
+    available_out = *output_size;
+    next_out = *output_data;
+
+    for ( ;; ) {
+        result = BrotliDecoderDecompressStream(
+            decoder, &available_in, &next_in, &available_out,
+            &next_out, total_out);
+
+        if (result == BROTLI_DECODER_RESULT_SUCCESS) {
+            *total_out = *output_size - available_out;
+            return NGX_OK;
+        }
+
+        if (result == BROTLI_DECODER_RESULT_ERROR) {
+            BrotliDecoderErrorCode  error_code;
+            const char              *error_str;
+
+            error_code = BrotliDecoderGetErrorCode(decoder);
+            error_str = BrotliDecoderErrorString(error_code);
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                          "markdown: brotli decompression failed, "
+                          "error: %s, category=conversion", error_str);
+            return ngx_http_markdown_decomp_brotli_fail(
+                decoder, *output_data,
+                NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR);
+        }
+
+        if (result == BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT) {
+            used = *output_size - available_out;
+            grow_rc = ngx_http_markdown_grow_output_buffer(
+                r, conf, output_data, output_size, used);
+            if (grow_rc != NGX_OK) {
+                return ngx_http_markdown_decomp_brotli_fail(
+                    decoder, *output_data, grow_rc);
+            }
+            available_out = *output_size - used;
+            next_out = *output_data + used;
+            continue;
+        }
+
+        if (result == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                          "markdown: brotli decompression incomplete, "
+                          "truncated input, category=conversion");
+            return ngx_http_markdown_decomp_brotli_fail(
+                decoder, *output_data,
+                NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT);
+        }
+
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown: brotli decompression incomplete, "
+                      "result=%d, category=conversion", result);
+        return ngx_http_markdown_decomp_brotli_fail(
+            decoder, *output_data, NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR);
+    }
+}
 #endif
 
 
@@ -1416,22 +1632,26 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
                                     const ngx_chain_t *in,
                                     ngx_chain_t **out)
 {
+    if (r == NULL || r->connection == NULL || r->connection->log == NULL) {
+        return NGX_ERROR;
+    }
+
 #ifdef NGX_HTTP_BROTLI
     /* Brotli support is compiled in */
     BrotliDecoderState          *decoder;
-    BrotliDecoderResult          result;
     u_char                      *input_data;
     size_t                       input_size;
     u_char                      *output_data;
     size_t                       output_size;
-    size_t                       available_in;
-    size_t                       available_out;
-    const uint8_t               *next_in;
-    uint8_t                     *next_out;
     size_t                       total_out;
     const ngx_http_markdown_conf_t    *conf;
+    ngx_http_markdown_full_brotli_alloc_ctx_t  alloc_ctx;
+    ngx_int_t                   rc;
     
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
+    if (conf == NULL) {
+        return NGX_ERROR;
+    }
     /* Log that we're using brotli library for decompression (brotli decompression path) */
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown: using brotli library for decompression");
@@ -1443,8 +1663,17 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
     {
         return NGX_ERROR;
     }
+
+    if (ngx_http_markdown_full_brotli_prepare_alloc_ctx(r, &alloc_ctx)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
     /* Create brotli decoder instance (brotli decoder instance creation) */
-    decoder = BrotliDecoderCreateInstance(NULL, NULL, NULL);
+    decoder = BrotliDecoderCreateInstance(
+        ngx_http_markdown_full_brotli_alloc,
+        ngx_http_markdown_full_brotli_free, &alloc_ctx);
     if (decoder == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown: failed to create brotli decoder, "
@@ -1465,85 +1694,13 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
     if (output_data == NULL) {
         return NGX_ERROR;
     }
-    /* Set up decompression parameters */
-    available_in = input_size;
-    next_in = input_data;
-    available_out = output_size;
-    next_out = output_data;
-    total_out = 0;
-    
-    /*
-     * Perform decompression in a loop. If the decoder signals
-     * NEEDS_MORE_OUTPUT, reallocate the output buffer (up to
-     * decompress.max_size) and continue, rather than immediately
-     * classifying as budget_exceeded. This avoids misclassifying
-     * high-compression-ratio payloads that exceed the 10x heuristic
-     * estimate but are still within budget.
-     */
-    for ( ;; ) {
-        result = BrotliDecoderDecompressStream(
-            decoder,
-            &available_in,
-            &next_in,
-            &available_out,
-            &next_out,
-            &total_out
-        );
-
-        if (result == BROTLI_DECODER_RESULT_SUCCESS) {
-            break;
-        }
-
-        if (result == BROTLI_DECODER_RESULT_ERROR) {
-            BrotliDecoderErrorCode error_code = BrotliDecoderGetErrorCode(decoder);
-            const char *error_str = BrotliDecoderErrorString(error_code);
-
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown: brotli decompression failed, "
-                         "error: %s, category=conversion",
-                         error_str);
-            return ngx_http_markdown_decomp_brotli_fail(
-                decoder, output_data,
-                NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR);
-        }
-
-        if (result == BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT) {
-            size_t     used;
-            ngx_int_t  grow_rc;
-
-            used = output_size - available_out;
-            grow_rc = ngx_http_markdown_grow_output_buffer(
-                r, conf, &output_data, &output_size, used);
-            if (grow_rc != NGX_OK) {
-                return ngx_http_markdown_decomp_brotli_fail(
-                    decoder, output_data, grow_rc);
-            }
-            available_out = output_size - used;
-            next_out = output_data + used;
-            continue;
-        }
-
-        if (result == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown: brotli decompression "
-                         "incomplete, truncated input, "
-                         "category=conversion");
-            return ngx_http_markdown_decomp_brotli_fail(
-                decoder, output_data,
-                NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT);
-        }
-
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown: brotli decompression "
-                     "incomplete, result=%d, category=conversion",
-                     result);
-        return ngx_http_markdown_decomp_brotli_fail(
-            decoder, output_data, NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR);
+    rc = ngx_http_markdown_decomp_brotli_stream(
+        r, conf, decoder, input_data, input_size, &output_data,
+        &output_size, &total_out);
+    if (rc != NGX_OK) {
+        return rc;
     }
-    
-    /* Calculate actual decompressed size */
-    total_out = output_size - available_out;
-    
+
     /* Check if decompressed size exceeds decompression budget */
     if (total_out > conf->decompress.max_size) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
