@@ -550,9 +550,17 @@ ngx_http_markdown_streaming_decomp_create_with_origin(
         decomp->brotli_workspace_limit =
             NGX_HTTP_MARKDOWN_BROTLI_WORKSPACE_LIMIT;
     }
-    /* The Brotli allocator refuses NULL logs; fall back to the cycle log
-     * so every creation path (including init_buffers) yields a valid log. */
+    /*
+     * The Brotli allocator refuses NULL logs. Standalone tests provide a
+     * default logger through the macro; production requests use the cycle
+     * log when the caller does not provide one.
+     */
+#ifdef NGX_HTTP_MARKDOWN_STREAMING_DECOMP_DEFAULT_LOG
+    decomp->brotli_log = (log != NULL)
+        ? log : NGX_HTTP_MARKDOWN_STREAMING_DECOMP_DEFAULT_LOG;
+#else
     decomp->brotli_log = (log != NULL) ? log : ngx_cycle->log;
+#endif
 #else
     (void) brotli_workspace_bytes;
     (void) brotli_workspace_limit;
