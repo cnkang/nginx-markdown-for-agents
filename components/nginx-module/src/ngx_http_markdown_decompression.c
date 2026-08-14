@@ -398,7 +398,8 @@ ngx_http_markdown_parse_encoding_chain_ffi(const ngx_http_request_t *r,
 
     layer_capacity = sizeof(ctx->decompression.layers)
                      / sizeof(ctx->decompression.layers[0]);
-    if (result.layer_count > layer_capacity) {
+    if (result.layer_count > layer_capacity
+        || result.layer_count > MAX_DECODER_DEPTH) {
         ctx->decompression.layer_count = 0;
         ctx->decompression.needed = 0;
         ctx->decompression.done = 0;
