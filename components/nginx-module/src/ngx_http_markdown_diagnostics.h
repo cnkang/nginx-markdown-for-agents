@@ -179,7 +179,13 @@ void ngx_http_markdown_diagnostics_record_reason(
     const char *error_category,
     ngx_msec_t duration_ms);
 
-/* Record a length-bounded reason with explicit stage and error provenance. */
+/*
+ * Record a length-bounded reason with explicit stage and error provenance.
+ *
+ * error_category is retained only for ABI stability: the emitted
+ * error_origin value is derived from the resolved reason code, not from
+ * this parameter.
+ */
 void ngx_http_markdown_diagnostics_record_reason_at_stage(
     ngx_http_markdown_diag_state_t *state,
     const u_char *reason,
@@ -264,7 +270,8 @@ ngx_int_t ngx_http_markdown_diagnostics_recording_active(void);
  *   reason_len - exact byte length; the input need not be NUL-terminated
  *
  * Returns:
- *   Canonical discriminant (0..26), or -1 for NULL/unknown strings.
+ *   Canonical discriminant (reason_registry.toml range), or -1 for
+ *   NULL/unknown strings.
  */
 ngx_int_t ngx_http_markdown_diagnostics_reason_to_code(
     const u_char *reason, size_t reason_len);
