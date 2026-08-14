@@ -97,9 +97,12 @@ def main() -> int:
         r"\"(markdown_[a-z0-9_]+)\"",
         PROPERTY.read_text(encoding="utf-8"),
     )
-    removed = [name for name in removed if name not in production]
+    # The production-table invariant checks the RAW matches first: an
+    # active name listed among the removed candidates must fail loudly
+    # even before filtering.
     if any(name in production for name in removed):
         raise AssertionError("a removed directive is present in the production table")
+    removed = [name for name in removed if name not in production]
     print(
         "removed-directive registry: production ngx_http_markdown_filter_commands "
         f"matches {len(production)} canonical entries; removed set is absent"

@@ -1232,15 +1232,11 @@ def check_file(
                 file=sys.stderr,
             )
 
-    # Check expected sections
+    # Check expected sections (missing ones are already reported as errors
+    # by _missing_expected_sections above).
     expected_sections = SECTION_REGISTRY.get(rel_path, [])
     for section_name in expected_sections:
         if section_name not in sections:
-            print(
-                f"WARNING: {rel_path}: expected section '{section_name}' "
-                f"not found (markers not yet added)",
-                file=sys.stderr,
-            )
             continue
 
         _, _, existing = sections[section_name]

@@ -8,7 +8,7 @@
 
 > HTML 保持原样，Markdown 按需返回——客户端主动请求，或者你指定哪些 bot 自动获得。
 
-客户端发送 `Accept: text/markdown` 时得到 Markdown；浏览器和普通调用方仍然拿到原始 HTML。你也可以通过 `$markdown_for_bot` 按 User-Agent 精确控制哪些爬虫走 `markdown_filter`，配合 `markdown_accept` 完成内容协商——匹配的 bot 即使没有主动请求 Markdown 也能收到转换后的内容，模块不会改写 Accept 请求头。你不需要改造业务应用，不需要额外维护一套抓取器，也不需要单独部署一个转换服务。
+客户端发送 `Accept: text/markdown` 时得到 Markdown；浏览器和普通调用方仍然拿到原始 HTML。你也可以通过 `$markdown_for_bot` 按 User-Agent 精确控制哪些爬虫走 `markdown_filter`；`markdown_accept` 只参与模块内部的内容协商与 Markdown 选择，模块不会改写 Accept 请求头。匹配的 bot 即使没有主动请求 Markdown，也能在模块内部协商后收到转换后的内容。你不需要改造业务应用，不需要额外维护一套抓取器，也不需要单独部署一个转换服务。
 
 这是一种很务实的接入方式：在不动现有站点内容生产流程的前提下，把 Agent 友好能力放到团队已经熟悉的 NGINX 层里完成。
 

@@ -122,6 +122,10 @@ jobs:
           def _safe_output(value: object) -> str:
               # GITHUB_OUTPUT is a single key=value line per entry; any
               # embedded newline would corrupt the key=value framing.
+              # Missing metadata (None) becomes an empty value so downstream
+              # -z checks still detect absent justifications.
+              if value is None:
+                  return ""
               return str(value).replace("\n", " ").replace("\r", " ")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"blocking={'true' if row['blocking'] else 'false'}\n")
