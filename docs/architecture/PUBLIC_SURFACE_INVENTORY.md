@@ -247,7 +247,7 @@ them.
 | Bounded decompression | `markdown_decompress_bounded`, `markdown_decompress_free` |
 | Error classification | `markdown_classify_error_code` |
 | Dynamic configuration | `markdown_dynconf_parse`, `markdown_dynconf_result_init`, `markdown_dynconf_result_free` |
-| Incremental conversion | `markdown_incremental_new_with_code`, `markdown_incremental_feed`, `markdown_incremental_finalize`, `markdown_incremental_free` |
+| Incremental conversion | `markdown_incremental_new_with_code`, `markdown_incremental_feed`, `markdown_incremental_finalize`, `markdown_incremental_free` — symbols remain in the production FFI registry, but the threshold-routed incremental path retired in 0.9.0 (see [FFI_MIGRATION_CONTRACT.md](FFI_MIGRATION_CONTRACT.md) and [LARGE_RESPONSE_DESIGN.md](LARGE_RESPONSE_DESIGN.md)). The removed `markdown_incremental_new` (NULL-only constructor) is not listed here. |
 | Streaming conversion | `markdown_streaming_new_with_code`, `markdown_streaming_feed`, `markdown_streaming_finalize`, `markdown_streaming_abort`, `markdown_streaming_safe_finish`, `markdown_streaming_output_free` |
 | Reason registry | `markdown_reason_code_str`, `markdown_reason_code_metric_key`, `markdown_reason_code_count` |
 | Encoding chain and hash helpers | `markdown_chain_decode_free`, `markdown_chain_decode_result_init`, `markdown_decode_encoding_chain`, `markdown_parse_encoding_chain`, `markdown_sha256_hex` |

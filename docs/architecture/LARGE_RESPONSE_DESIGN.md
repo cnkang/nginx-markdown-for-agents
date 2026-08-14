@@ -65,12 +65,20 @@ tokenization, sanitization, state management, and emission. The
 memory. Its backpressure state preserves ownership across `NGX_AGAIN`. It is
 the supported large-response path in 0.9.2.
 
-### Historical Incremental Path (pre-0.9.0)
+### Historical Incremental Path (retired in 0.9.0)
 
-When the feature-gated incremental conversion path handles a request, the NGINX
-module still buffers the complete response body. It decompresses the body if
-needed and hands the full buffer to the Rust `IncrementalConverter` via FFI.
-The call sequence is:
+> ⚠️ **RETIRED IN 0.9.0** — The incremental conversion path described below is
+> a historical record, not a current feature claim. The 0.9.2 binary does not
+> expose `markdown_large_body_threshold`. The `markdown_incremental_*` FFI
+> functions remain in the production FFI registry (see
+> [FFI_MIGRATION_CONTRACT.md](FFI_MIGRATION_CONTRACT.md)) but no operator
+> threshold selects this path. Use `markdown_streaming` and
+> `markdown_limits streaming_buffer=` for the active path.
+
+When the feature-gated incremental conversion path handled a request, the NGINX
+module still buffered the complete response body. It decompressed the body if
+needed and handed the full buffer to the Rust `IncrementalConverter` via FFI.
+The historical call sequence was:
 
 1. `markdown_incremental_new_with_code()` — create a converter instance with the current `ConversionOptions` and retain the status code
 2. `markdown_incremental_feed()` — called once with the complete buffered body (`ctx->buffer.data`)
@@ -80,10 +88,9 @@ The call sequence is:
    non-NULL arguments, `finalize` consumes the handle regardless of its
    return code
 
-True per-upstream-chunk feeding from NGINX was not implemented by this retired
-path. It remains historical context, not a 0.9.2 feature claim.
-The current implementation buffers first, then delegates to the incremental
-Rust API. No current operator threshold selects this path.
+True per-upstream-chunk feeding from NGINX was never implemented by this retired
+path. The current implementation buffers first, then delegates to the incremental
+Rust API. No operator threshold selects this path.
 
 In historical terms, the retired incremental path represented:
 
@@ -128,6 +135,11 @@ path.
 > reference for pre-0.9.0 deployments.
 
 The Threshold Router is the decision point in the NGINX C module that selects which processing path a request follows.
+
+> The configuration directive, path selection logic, and data model below
+> describe **pre-0.9.0 behavior**. They do not apply to 0.9.2 or later. The
+> 0.9.2 binary removed `markdown_large_body_threshold` and the threshold
+> router. Use `markdown_streaming` for path selection.
 
 ### Configuration Directive (pre-0.9.0)
 

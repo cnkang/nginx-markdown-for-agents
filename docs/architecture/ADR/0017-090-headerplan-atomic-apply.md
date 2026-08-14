@@ -40,11 +40,14 @@ succeeds.**
   `content_length` header entry (`hash = 0`, Rule 40).
 - Set `Content-Type`: update `content_type`, `content_type_len`,
   `content_type_lowcase` (NULL), and `charset` (clear) together.
-- Delete `ETag`: clear `etag` pointer + `hash = 0`.
-- `Vary: Accept`: dedup (no duplicate append).
 - `status`, `last_modified_time` handled in commit.
 - Multi-step modification is atomic: abort on first prepare failure, no partial
   apply (Rule 39).
+
+ETag, `Vary: Accept`, token, and authentication-header operations are **not**
+handled in the HeaderPlan commit. They are C-side post-plan operations (see
+the atomic scope boundary below). This keeps them consistent with the
+rationale: ETag set/clear and Vary add execute in C after the plan commits.
 
 ### Streaming vs full-buffer header matrix
 
@@ -55,10 +58,14 @@ succeeds.**
   representation is computable, generates a transformed ETag.
 - HEAD / 304 / no-body / error-status paths follow a documented matrix.
 
-### Documented exception table (NOT in-place mutation → bypass allowed)
+### Documented exceptions (NOT in-place mutation → bypass allowed)
 
-These synthesize a **complete** response (no upstream response to mutate) and count
-as permitted exceptions, each justified and listed:
+Two categories of exceptions exist and remain distinct. Do not conflate
+them.
+
+**Category 1 — Full-response synthesis (no upstream response to mutate):**
+These paths build a complete response from scratch. There is no upstream
+`headers_out` to mutate, so HeaderPlan does not apply. Each exception carries a justification and is listed:
 
 | Path | Justification |
 |------|---------------|
@@ -66,10 +73,19 @@ as permitted exceptions, each justified and listed:
 | Diagnostics endpoint (`diagnostics.c`) | full-response synthesis (subrequest) |
 | Stream post-commit error response (`stream_postcommit.c`) | full-response synthesis (error path) |
 
-Any **new** exception requires ADR justification and an entry here. The named
-post-plan ETag, Vary, token, and authentication-header operations are the
-explicit existing exceptions. No other code may mutate `headers_out` in place
-outside HeaderPlan.
+**Category 2 — Post-plan mutation of an upstream response:**
+These operations mutate headers on an existing upstream response after the
+HeaderPlan commit. They are not full-response synthesis. They execute after
+the core plan commits and fall within the atomic scope boundary below
+(pre-send best-effort with hard abort):
+
+- ETag set/clear
+- `Vary: Accept` add
+- `X-Markdown-Tokens` header
+- Auth `Cache-Control` modify
+
+Any **new** exception requires ADR justification and an entry here. No other
+code may mutate `headers_out` in place outside HeaderPlan.
 
 ### Post-commit error boundary
 
@@ -92,7 +108,7 @@ directly affect wire-level correctness:
 The following **post-plan operations** execute after the plan commits
 successfully. They are **pre-send best-effort with hard abort**: a failure in
 any of them returns `NGX_ERROR` before the module calls `ngx_http_send_header()`, so
-no partially-mutated headers reach the wire. However, they are not covered by
+no partially-mutated headers reach the wire. However, they fall outside
 the plan's rollback guarantee — a failure here leaves the already-committed
 core mutations in place (which is safe: Content-Type/Content-Encoding/old
 Content-Length are already correct, and the request will error out before
