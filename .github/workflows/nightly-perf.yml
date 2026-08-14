@@ -103,14 +103,16 @@ jobs:
 
       - name: Run threshold engine
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.bootstrap_baseline == 'true') }}
+        env:
+          PLATFORM: ${{ steps.platform.outputs.name }}
         run: |
           python3 tools/perf/threshold_engine.py \
-            --baseline perf/baselines/${{ steps.platform.outputs.name }}.json \
-            --current perf/reports/perf-measurement-${{ steps.platform.outputs.name }}.json \
+            --baseline "perf/baselines/${PLATFORM}.json" \
+            --current "perf/reports/perf-measurement-${PLATFORM}.json" \
             --thresholds perf/thresholds.json \
             --metrics-schema perf/metrics-schema.json \
-            --platform ${{ steps.platform.outputs.name }} \
-            > perf/reports/perf-verdict-${{ steps.platform.outputs.name }}.json
+            --platform "${PLATFORM}" \
+            > "perf/reports/perf-verdict-${PLATFORM}.json"
 
       - name: Upload measurement report
         if: always()
@@ -138,6 +140,8 @@ jobs:
 
       - name: Run corpus benchmark comparison
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.bootstrap_baseline == 'true') }}
+        env:
+          PLATFORM: ${{ steps.platform.outputs.name }}
         run: |
           BASELINE="perf/baselines/corpus-baseline.json"
           if [ ! -f "$BASELINE" ]; then
@@ -150,7 +154,7 @@ jobs:
             --baseline "$BASELINE" \
             --current perf/reports/corpus-report.json \
             --thresholds perf/quality-thresholds.json \
-            --output perf/reports/corpus-verdict-${{ steps.platform.outputs.name }}.json
+            --output "perf/reports/corpus-verdict-${PLATFORM}.json"
 
       - name: Generate PR benchmark summary
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.bootstrap_baseline == 'true') }}

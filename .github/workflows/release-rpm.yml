@@ -206,9 +206,9 @@ jobs:
       - name: Build RPM package
         env:
           PKG_VERSION: ${{ inputs.version }}
+          NGINX_VERSION: ${{ steps.nginx_version.outputs.version }}
         run: |
           . "$HOME/.cargo/env"
-          NGINX_VERSION="${{ steps.nginx_version.outputs.version }}"
           NGINX_MAJOR="$(printf '%s\n' "${NGINX_VERSION}" | cut -d. -f1)"
           NGINX_MINOR="$(printf '%s\n' "${NGINX_VERSION}" | cut -d. -f2)"
           NGINX_VERSION_FLOOR="${NGINX_MAJOR}.${NGINX_MINOR}.0"

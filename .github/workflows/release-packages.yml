@@ -611,31 +611,38 @@ jobs:
         shell: bash
 
       - name: Generate DEB package
+        env:
+          DEB_FILENAME: ${{ steps.pkg-env.outputs.deb_filename }}
         run: |
           mkdir -p dist
           nfpm package \
             --config "${NFPM_TMP}/nfpm.yaml" \
             --packager deb \
-            --target "dist/${{ steps.pkg-env.outputs.deb_filename }}"
-          echo "Generated: dist/${{ steps.pkg-env.outputs.deb_filename }}" >&2
-          ls -la "dist/${{ steps.pkg-env.outputs.deb_filename }}"
+            --target "dist/${DEB_FILENAME}"
+          echo "Generated: dist/${DEB_FILENAME}" >&2
+          ls -la "dist/${DEB_FILENAME}"
         shell: bash
 
       - name: Generate RPM package
+        env:
+          RPM_FILENAME: ${{ steps.pkg-env.outputs.rpm_filename }}
         run: |
           nfpm package \
             --config "${NFPM_TMP}/nfpm.yaml" \
             --packager rpm \
-            --target "dist/${{ steps.pkg-env.outputs.rpm_filename }}"
-          echo "Generated: dist/${{ steps.pkg-env.outputs.rpm_filename }}" >&2
-          ls -la "dist/${{ steps.pkg-env.outputs.rpm_filename }}"
+            --target "dist/${RPM_FILENAME}"
+          echo "Generated: dist/${RPM_FILENAME}" >&2
+          ls -la "dist/${RPM_FILENAME}"
         shell: bash
 
       - name: Validate install layout
+        env:
+          DEB_FILENAME: ${{ steps.pkg-env.outputs.deb_filename }}
+          RPM_FILENAME: ${{ steps.pkg-env.outputs.rpm_filename }}
         run: |
           bash tools/release/gates/check_install_layout.sh \
-            "dist/${{ steps.pkg-env.outputs.deb_filename }}" \
-            "dist/${{ steps.pkg-env.outputs.rpm_filename }}"
+            "dist/${DEB_FILENAME}" \
+            "dist/${RPM_FILENAME}"
         shell: bash
 
       - name: Upload DEB artifact

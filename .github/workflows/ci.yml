@@ -797,10 +797,12 @@ jobs:
           tools/perf/run_perf_baseline.sh --tier medium --json-output perf/reports/perf-measurement-medium.json
 
       - name: Merge measurement reports
+        env:
+          PLATFORM: ${{ steps.platform.outputs.name }}
         run: |
           python3 tools/perf/report_utils.py merge-measurements \
             --glob-pattern 'perf/reports/perf-measurement-*.json' \
-            --output perf/reports/perf-measurement-${{ steps.platform.outputs.name }}.json
+            --output "perf/reports/perf-measurement-${PLATFORM}.json"
 
       - name: Run perf gate Python tests
         run: python3 -m pytest tools/perf/tests/ -v
@@ -809,14 +811,16 @@ jobs:
         run: tools/perf/tests/test_local_runner_output_paths.sh
 
       - name: Run threshold engine
+        env:
+          PLATFORM: ${{ steps.platform.outputs.name }}
         run: |
           python3 tools/perf/threshold_engine.py \
-            --baseline perf/baselines/${{ steps.platform.outputs.name }}.json \
-            --current perf/reports/perf-measurement-${{ steps.platform.outputs.name }}.json \
+            --baseline "perf/baselines/${PLATFORM}.json" \
+            --current "perf/reports/perf-measurement-${PLATFORM}.json" \
             --thresholds perf/thresholds.json \
             --metrics-schema perf/metrics-schema.json \
-            --platform ${{ steps.platform.outputs.name }} \
-            > perf/reports/perf-verdict-${{ steps.platform.outputs.name }}.json
+            --platform "${PLATFORM}" \
+            > "perf/reports/perf-verdict-${PLATFORM}.json"
 
       - name: Upload measurement report
         if: always()
@@ -970,6 +974,8 @@ jobs:
           echo "name=$(python3 tools/perf/report_utils.py detect-platform)" >> "$GITHUB_OUTPUT"
 
       - name: Run corpus benchmark comparison
+        env:
+          PLATFORM: ${{ steps.platform.outputs.name }}
         run: |
           BASELINE="perf/baselines/corpus-baseline.json"
           if [ ! -f "$BASELINE" ]; then
@@ -982,7 +988,7 @@ jobs:
             --baseline "$BASELINE" \
             --current perf/reports/corpus-report.json \
             --thresholds perf/quality-thresholds.json \
-            --output perf/reports/corpus-verdict-${{ steps.platform.outputs.name }}.json
+            --output "perf/reports/corpus-verdict-${PLATFORM}.json"
 
       - name: Generate PR benchmark summary
         run: make test-benchmark-summary
