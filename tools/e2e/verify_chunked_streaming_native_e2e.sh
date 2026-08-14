@@ -955,12 +955,14 @@ def selector_matches(labels, raw_selector):
             return False
     return True
 
+found = 0
 for line in sys.stdin:
     if not line.strip() or line.lstrip().startswith("#"):
         continue
     match = sample_re.fullmatch(line.strip())
     if match is None or match.group("name") != family:
         continue
+    found += 1
     labels = parse_labels(match.group("labels"))
     if labels is None or not selector_matches(labels, selector):
         continue
@@ -968,6 +970,9 @@ for line in sys.stdin:
         total += float(match.group("value"))
     except (IndexError, ValueError):
         continue
+if found == 0:
+    print(f"ERROR: metric family {family!r} not found in metrics output", file=sys.stderr)
+    sys.exit(1)
 print(int(total) if total >= 0 else 0)
 ' <<< "${metrics_text}" 2>/dev/null || echo 0
   return 0

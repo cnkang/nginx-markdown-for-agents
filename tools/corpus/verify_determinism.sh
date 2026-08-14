@@ -77,13 +77,13 @@ while IFS= read -r -d '' fixture; do
     TOTAL=$((TOTAL + 1))
     rel="${fixture#"$ROOT"/}"
 
-    if ! "$CONVERTER_BIN" "$fixture" > "$TMP_DIR/run1.md" 2> "$TMP_DIR/run1.err"; then
+    if ! "$CONVERTER_BIN" "$fixture" < /dev/null > "$TMP_DIR/run1.md" 2> "$TMP_DIR/run1.err"; then
         echo "FAIL: $rel: conversion run 1 failed ($(cat "$TMP_DIR/run1.err"))" >&2
         FAILED=$((FAILED + 1))
         record_failed_fixture "$rel"
         continue
     fi
-    if ! "$CONVERTER_BIN" "$fixture" > "$TMP_DIR/run2.md" 2> "$TMP_DIR/run2.err"; then
+    if ! "$CONVERTER_BIN" "$fixture" < /dev/null > "$TMP_DIR/run2.md" 2> "$TMP_DIR/run2.err"; then
         echo "FAIL: $rel: conversion run 2 failed ($(cat "$TMP_DIR/run2.err"))" >&2
         FAILED=$((FAILED + 1))
         record_failed_fixture "$rel"

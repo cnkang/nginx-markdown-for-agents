@@ -23,6 +23,7 @@ fi
 DYNCONF_DIR=""
 ORIGINAL_FILE_EXISTED=0
 DYNCONF_FILE_CREATED_BY_TEST=0
+DYNCONF_OWNED_BY_TEST=0
 ORIGINAL_FILE_MODE=""
 ORIGINAL_FILE_UID=""
 ORIGINAL_FILE_GID=""
@@ -553,12 +554,17 @@ wait_for_diagnostics_field() {
 write_dynconf_atomically() {
     local contents="$1"
 
+    # The test now owns this path for race-guard purposes, whether or not
+    # the file existed before; CREATED_BY_TEST below tracks actual creation
+    # for cleanup deletion.
+    DYNCONF_OWNED_BY_TEST=1
+
     if [[ -L "$DYNCONF_FILE" ]]; then
         echo "Error: dynconf target became a symlink" >&2
         return 1
     fi
     if [[ "$ORIGINAL_FILE_EXISTED" -eq 0 \
-        && "$DYNCONF_FILE_CREATED_BY_TEST" -eq 0 \
+        && "$DYNCONF_OWNED_BY_TEST" -eq 0 \
         && -e "$DYNCONF_FILE" ]]; then
         echo "Error: dynconf target appeared after ownership check" >&2
         return 1
