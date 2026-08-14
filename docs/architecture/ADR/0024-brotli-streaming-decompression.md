@@ -75,10 +75,23 @@ charges live allocations to an atomic counter in the main configuration and
 caps the total at `NGX_HTTP_MARKDOWN_BROTLI_WORKSPACE_LIMIT` (32 MiB) per
 worker. Concurrent requests in that worker share the counter, and the
 allocator releases each reservation from its allocation header before NGINX
-reclaims the request pool. If reservation fails, the allocator reports an
-allocation failure and follows the existing
-pre-commit error policy. Decoded output remains governed separately by the
-cumulative `markdown_decompress_max_size` budget.
+reclaims the request pool.
+
+Reservation failures fall into two cases depending on whether the decoder
+has consumed input:
+
+- **Before input consumption (pre-commit)**: The decoder has not yet
+  processed any compressed chunk. The allocator reports an allocation
+  failure and the module follows the existing pre-commit replay strategy
+  (same as other decompression failures before output commitment).
+- **After input consumption (post-commit)**: The decoder has already
+  consumed one or more chunks. The workspace expansion failure places the
+  decoder in a terminal abort state. The module does not re-feed the
+  consumed chunk. Existing terminal/error state fields enforce this
+  non-retryable invariant (see the State Machine section below).
+
+Decoded output remains governed separately by the cumulative
+`markdown_decompress_max_size` budget.
 
 ### Error Code Semantics — Two-Layer Model
 

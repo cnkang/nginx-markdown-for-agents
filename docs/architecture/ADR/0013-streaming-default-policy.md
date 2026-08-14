@@ -50,8 +50,8 @@ conversion enter the streaming path targeted by the 0.8.0 release.
 
 - Large responses target bounded-memory streaming automatically
   without operator intervention
-- Small responses retain the simpler full-buffer path, avoiding state machine
-  overhead for trivial conversions
+- With the default profile, small responses retain the simpler full-buffer
+  path, avoiding state machine overhead for trivial conversions
 - Backward-compatible: operators who use `markdown_streaming off|auto|force`
   see no change
 - Aligns with the 0.6.0 auto-mode precedent (ADR-0007) and extends it with

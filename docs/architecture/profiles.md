@@ -178,7 +178,9 @@ The project can add new profiles following these rules:
 If a future directive should be profile-controlled, add it to
 `ProfileDefaults` and update all three profile `defaults()` implementations.
 The merge logic handles new fields automatically via the "profile value as
-default argument" pattern.
+default argument" pattern. The removed `FFIProfile`, conflict-list, and
+profile snapshot types are not a future extension point. They remain as
+historical context only (see the Former FFI Boundary Design section above).
 
 ---
 
