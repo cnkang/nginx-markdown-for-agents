@@ -34,6 +34,12 @@ def _normalize_tier(tier: str) -> str:
     """
     Normalize a support tier string to a canonical form.
 
+    In addition to trimming, lowercasing, and replacing spaces and
+    hyphens with underscores, this function maps the presentation labels
+    that INSTALLATION.md retains for historical reasons to their canonical
+    matrix tier: ``supported`` maps to ``full`` and ``best_effort`` maps
+    to ``source_only``.
+
     Returns:
         normalized_tier (str): The input string trimmed, lowercased, with spaces and hyphens replaced by underscores.
     """
@@ -57,7 +63,7 @@ def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
         path (Path): Path to the release-matrix.json file.
 
     Returns:
-        list[tuple[str, str, str, str]]: Sorted list of (nginx, os_type, arch, tier) tuples where `tier` has been normalized (lowercased, spaces/hyphens replaced with underscores).
+        list[tuple[str, str, str, str]]: Sorted list of (nginx, os_type, arch, tier) tuples where `tier` has been normalized: trimmed, lowercased, spaces/hyphens replaced with underscores, and the supported/full and best_effort/source_only mappings applied.
     """
     validated = validate_read_path(path, purpose="doc matrix")
     with open(validated, "r", encoding="utf-8") as f:
