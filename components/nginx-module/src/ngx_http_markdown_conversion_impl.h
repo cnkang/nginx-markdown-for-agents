@@ -1918,12 +1918,19 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
      * Step 6: Forward headers downstream (idempotent via headers_forwarded).
      */
     rc = ngx_http_markdown_forward_headers(r, ctx);
-    if (rc != NGX_OK) {
-        if (rc != NGX_AGAIN) {
-            ngx_http_markdown_record_buffered_delivery_failure(ctx);
-        }
+    if (rc != NGX_OK && rc != NGX_AGAIN) {
+        ngx_http_markdown_record_buffered_delivery_failure(ctx);
         return rc;
     }
+    /*
+     * Header-chain NGX_AGAIN means "headers accepted": the write filter
+     * queued the header block and owns delivery (NGINX core model —
+     * header-chain NGX_AGAIN = queued by write filter; proceed with body
+     * output).  Returning early here would strand the body: the re-entry
+     * sees conversion.attempted && !pending_has_data, clears r->buffered
+     * and the client receives headers with Content-Length but zero body
+     * bytes (full-buffer truncation under slow clients).
+     */
 
     /*
      * Step 7: Emit body downstream.

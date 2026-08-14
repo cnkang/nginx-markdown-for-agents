@@ -540,7 +540,8 @@ ngx_http_markdown_is_excluded_stream_type(
                            sse_type, sizeof(sse_type) - 1) == 0
         && (r->headers_out.content_type.len == sizeof(sse_type) - 1
             || r->headers_out.content_type.data[sizeof(sse_type) - 1] == ';'
-            || r->headers_out.content_type.data[sizeof(sse_type) - 1] == ' '))
+            || r->headers_out.content_type.data[sizeof(sse_type) - 1] == ' '
+            || r->headers_out.content_type.data[sizeof(sse_type) - 1] == '\t'))
     {
         return 1;
     }
@@ -551,7 +552,8 @@ ngx_http_markdown_is_excluded_stream_type(
                            ndjson_type, sizeof(ndjson_type) - 1) == 0
         && (r->headers_out.content_type.len == sizeof(ndjson_type) - 1
             || r->headers_out.content_type.data[sizeof(ndjson_type) - 1] == ';'
-            || r->headers_out.content_type.data[sizeof(ndjson_type) - 1] == ' '))
+            || r->headers_out.content_type.data[sizeof(ndjson_type) - 1] == ' '
+            || r->headers_out.content_type.data[sizeof(ndjson_type) - 1] == '\t'))
     {
         return 1;
     }
@@ -1457,6 +1459,16 @@ ngx_http_markdown_streaming_record_postcommit_failure(
 }
 
 
+/*
+ * Record a post-commit abort (streaming mid-flight failure after the
+ * response was committed).  NOTE on raw-counter semantics: the outcome
+ * recorder below increments conversions_failed / streaming.failed_total for
+ * these aborts, so raw counters classify aborted-but-delivered requests as
+ * failed.  The metrics v1 renderer reclassifies them (metrics_impl.h
+ * subtracts terminal_aborted_total from failed_closed and reports
+ * requests.aborted separately); consumers of the raw counters must apply
+ * the same reclassification.
+ */
 static void
 ngx_http_markdown_streaming_record_postcommit_aborted(
     ngx_http_request_t *r,
@@ -1541,18 +1553,14 @@ ngx_http_markdown_streaming_send_deferred_lastbuf(
      * send paths.
      */
     if (rc == NGX_OK || rc == NGX_DONE) {
-        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.succeeded_total);
-        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
-        NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count);
-
-        ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
-            ngx_http_markdown_reason_streaming_convert());
-        ngx_http_markdown_log_streaming_terminal_decision(
-            r, ctx, conf, NGX_HTTP_MARKDOWN_CONV_SUCCESS,
-            "converted", "postcommit");
-
-        ngx_http_markdown_record_per_path_metrics(r, conf, 0);
-
+        /*
+         * Route through the guarded post-commit recorder so delivery
+         * accounting stays single-sourced (the direct-increment duplicate
+         * bypassed the terminal_decision_recorded guard and could silently
+         * double-count from a future call site).
+         */
+        ngx_http_markdown_streaming_record_postcommit_success(
+            r, ctx, conf);
     } else {
         /*
          * Deferred last_buf send failed with a definitive
@@ -2473,6 +2481,15 @@ ngx_http_markdown_streaming_commit(
  * The header mutation phase is not repeated: it already completed before the
  * first downstream call. Publish all commit latches atomically after the
  * retry accepts the headers.
+ *
+ * NOTE: this re-entry assumes the downstream
+ * header filter chain tolerates being invoked a second time. The built-in
+ * ngx_http_header_filter guards on r->header_sent and returns NGX_OK, so no
+ * duplicate header block reaches the wire; intermediate filters (e.g. gzip)
+ * DO re-run their header-filter code on the retry. This matches the module's
+ * documented deferral design; the canonical NGINX model (header NGX_AGAIN =
+ * accepted, no re-entry) is tracked as a follow-up unification with the
+ * full-buffer path.
  */
 static ngx_int_t
 ngx_http_markdown_streaming_resume_header_commit(
@@ -2704,8 +2721,21 @@ ngx_http_markdown_streaming_handle_success_output(
              * re-entry.
              */
             if (ctx->streaming.pending_meta.pending_header_output != NULL) {
+                /*
+                 * State-machine invariant violation: a second converted
+                 * output arrived while the previous one is still waiting for
+                 * the header retry.  This must not happen by construction;
+                 * when it does it signals a missed NGX_AGAIN handling at a
+                 * call site (fix the call site, do not relax this guard).
+                 * Fail-open is not an option here: the headers were already
+                 * mutated and queued by the write filter, so delivering the
+                 * original body would produce a mismatched response.
+                 * The error log entry below is the production signal for
+                 * this invariant violation.
+                 */
                 ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                    "markdown: pending header output re-entry");
+                    "markdown: pending header output re-entry "
+                    "(state-machine invariant violation)");
                 markdown_streaming_output_free(out_data, out_len);
                 return NGX_ERROR;
             }
@@ -4016,7 +4046,15 @@ ngx_http_markdown_streaming_failopen_passthrough(
 
         cloned = ngx_http_markdown_streaming_clone_chain_links(r, in);
         if (cloned == NULL && in != NULL) {
-            return NGX_ERROR;
+            /* Uniform error classification (Rule 38): replay-buffer
+             * allocation failure is a resource-limit failure, not a bare
+             * internal error. */
+            const ngx_http_markdown_conf_t  *conf;
+
+            conf = ngx_http_get_module_loc_conf(
+                r, ngx_http_markdown_filter_module);
+            return ngx_http_markdown_streaming_precommit_error(
+                r, ctx, conf, ERROR_MEMORY_LIMIT);
         }
         return ngx_http_markdown_streaming_send_failopen_chain(r, ctx, cloned);
     }
@@ -4459,24 +4497,21 @@ ngx_http_markdown_streaming_abort_failopen_after_pending(
 
 
 /*
- * Resume pending output when the body filter is re-entered with NULL input.
+ * Resume a header-only backpressure retry before body output.
  *
- * NULL input is used by NGINX filter re-entry to give the module a chance to
- * flush data saved after downstream NGX_AGAIN.  If finalization was deferred
- * behind pending output, finalize only after that chain has drained.
+ * Finishes the header commit and then resumes pending header output.  Returns
+ * NGX_OK when both resumed cleanly, otherwise propagates the delivery rc.
+ * Extracted from ngx_http_markdown_streaming_handle_null_input() to bound
+ * cognitive complexity (Rule 17).
  */
 static ngx_int_t
-ngx_http_markdown_streaming_handle_null_input(
+ngx_http_markdown_streaming_null_input_resume_header(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf)
 {
-    ngx_int_t      rc;
-    ngx_flag_t     last_buf;
-    ngx_chain_t   *fallback_cl;
-    ngx_chain_t   *input_chain;
+    ngx_int_t  rc;
 
-    /* Step 1: Finish a header-only backpressure retry before body output. */
     rc = ngx_http_markdown_streaming_resume_header_commit(r, ctx);
     if (rc == NGX_AGAIN) {
         return rc;
@@ -4495,9 +4530,114 @@ ngx_http_markdown_streaming_handle_null_input(
         return rc;
     }
 
+    return NGX_OK;
+}
+
+
+/*
+ * Terminate a fail-open request once pending input has drained.
+ *
+ * The caller has verified the fail-open terminal condition (fail-open active,
+ * pending input empty, upstream terminal seen) and cleared the latch.  This
+ * helper applies the request-type-aware terminal-delivered latch: main
+ * requests check main_terminal_sent (last_buf delivered); subrequests check
+ * subrequest_terminal_sent (last_in_chain delivered).  If the matching
+ * terminal has already been confirmed downstream (e.g. via a backpressured
+ * fail-open chain that carried last_in_chain in its tail), return without
+ * synthesizing a duplicate terminal.  (Rule 47: the latch is only set after
+ * confirmed delivery, never on NGX_AGAIN.)
+ *
+ * Extracted from ngx_http_markdown_streaming_handle_null_input() to bound
+ * cognitive complexity (Rule 17).
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_null_input_failopen_terminal(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_int_t rc)
+{
+    if (ngx_http_markdown_streaming_terminal_sent_for_request(r, ctx)) {
+        ngx_http_markdown_streaming_sync_buffered(r, ctx);
+        return rc;
+    }
+    return ngx_http_markdown_streaming_send_output(
+        r, ctx, NULL, 0, /* last_buf */ 1);
+}
+
+
+/*
+ * Process any enqueued pending input after downstream output has drained.
+ *
+ * Detaches the pending_input chain and feeds it through process_chain, which
+ * re-enqueues any remainder that hits NGX_AGAIN back to pending_input.
+ * Extracted from ngx_http_markdown_streaming_handle_null_input() to bound
+ * cognitive complexity (Rule 17).
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_handle_null_input_pending(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf)
+{
+    ngx_int_t    rc;
+    ngx_flag_t   last_buf;
+    ngx_chain_t *fallback_cl;
+    ngx_chain_t *input_chain;
+
+    input_chain = ctx->streaming.pending_input.head;
+    ctx->streaming.pending_input.head = NULL;
+    ctx->streaming.pending_input.tail = NULL;
+    ctx->streaming.pending_input.bytes = 0;
+    ctx->streaming.pending_input.links = 0;
+    if (ctx->streaming.completion.failopen_active) {
+        return ngx_http_markdown_streaming_continue_failopen_input(
+            r, ctx, input_chain);
+    }
+    rc = ngx_http_markdown_streaming_process_chain(
+        r, ctx, conf, input_chain, &last_buf, &fallback_cl);
+
+    if (rc == NGX_AGAIN) {
+        /* process_chain re-enqueued remainder + set terminal_seen */
+        ngx_http_markdown_streaming_sync_buffered(r, ctx);
+        return NGX_AGAIN;
+    }
+    if (rc == NGX_DONE) {
+        ngx_http_markdown_streaming_sync_buffered(r, ctx);
+        return ngx_http_markdown_streaming_reenter_fullbuffer_after_fallback(
+            r, fallback_cl, last_buf);
+    }
+    if (rc != NGX_OK) {
+        ngx_http_markdown_streaming_sync_buffered(r, ctx);
+        return rc;
+    }
+
+    return NGX_OK;
+}
+
+
+/*
+ * Resume pending output when the body filter is re-entered with NULL input.
+ *
+ * NULL input is used by NGINX filter re-entry to give the module a chance to
+ * flush data saved after downstream NGX_AGAIN.  If finalization was deferred
+ * behind pending output, finalize only after that chain has drained.
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_handle_null_input(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf)
+{
+    ngx_int_t  rc;
+
+    /* Step 1: Finish a header-only backpressure retry before body output. */
+    rc = ngx_http_markdown_streaming_null_input_resume_header(r, ctx, conf);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
     /* Step 2: Drain pending output (backpressure recovery) */
-    rc = ngx_http_markdown_streaming_resume_pending(
-        r, ctx, conf);
+    rc = ngx_http_markdown_streaming_resume_pending(r, ctx, conf);
     if (rc == NGX_AGAIN || rc == NGX_ERROR) {
         return rc;
     }
@@ -4536,22 +4676,8 @@ ngx_http_markdown_streaming_handle_null_input(
         && ctx->streaming.completion.upstream_terminal_seen)
     {
         ctx->streaming.completion.upstream_terminal_seen = 0;
-        /*
-         * Check the request-type-aware terminal-delivered latch.
-         * Main requests check main_terminal_sent (last_buf delivered);
-         * subrequests check subrequest_terminal_sent (last_in_chain
-         * delivered).  If the matching terminal has already been
-         * confirmed downstream (e.g. via a backpressured fail-open chain
-         * that carried last_in_chain in its tail), return without
-         * synthesizing a duplicate terminal.  (Rule 47: the latch is
-         * only set after confirmed delivery, never on NGX_AGAIN.)
-         */
-        if (ngx_http_markdown_streaming_terminal_sent_for_request(r, ctx)) {
-            ngx_http_markdown_streaming_sync_buffered(r, ctx);
-            return rc;
-        }
-        return ngx_http_markdown_streaming_send_output(
-            r, ctx, NULL, 0, /* last_buf */ 1);
+        return ngx_http_markdown_streaming_null_input_failopen_terminal(
+            r, ctx, rc);
     }
 
     if (ctx->streaming.classify.input_disposition == NGX_HTTP_MD_INPUT_TERMINAL) {
@@ -4563,35 +4689,9 @@ ngx_http_markdown_streaming_handle_null_input(
 
     /* Step 3: Process pending input if any */
     if (!ngx_http_markdown_streaming_pending_input_is_empty(ctx)) {
-        /*
-         * Detach the pending_input chain and feed it through
-         * process_chain.  process_chain will re-enqueue any remainder
-         * that hits NGX_AGAIN back to pending_input.
-         */
-        input_chain = ctx->streaming.pending_input.head;
-        ctx->streaming.pending_input.head = NULL;
-        ctx->streaming.pending_input.tail = NULL;
-        ctx->streaming.pending_input.bytes = 0;
-        ctx->streaming.pending_input.links = 0;
-        if (ctx->streaming.completion.failopen_active) {
-            return ngx_http_markdown_streaming_continue_failopen_input(
-                r, ctx, input_chain);
-        }
-        rc = ngx_http_markdown_streaming_process_chain(
-            r, ctx, conf, input_chain, &last_buf, &fallback_cl);
-
-        if (rc == NGX_AGAIN) {
-            /* process_chain re-enqueued remainder + set terminal_seen */
-            ngx_http_markdown_streaming_sync_buffered(r, ctx);
-            return NGX_AGAIN;
-        }
-        if (rc == NGX_DONE) {
-            ngx_http_markdown_streaming_sync_buffered(r, ctx);
-            return ngx_http_markdown_streaming_reenter_fullbuffer_after_fallback(
-                r, fallback_cl, last_buf);
-        }
+        rc = ngx_http_markdown_streaming_handle_null_input_pending(
+            r, ctx, conf);
         if (rc != NGX_OK) {
-            ngx_http_markdown_streaming_sync_buffered(r, ctx);
             return rc;
         }
         /* rc == NGX_OK: all pending_input consumed */
