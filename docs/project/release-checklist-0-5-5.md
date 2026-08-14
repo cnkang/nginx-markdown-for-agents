@@ -110,6 +110,8 @@ contain all four required fields:
 | `approver` | Identity string | Person approving the waiver |
 | `date` | ISO 8601 | Date of waiver approval |
 | `justification` | Non-empty string | Rationale for the waiver |
+| `risk_assessment` | Non-empty string | Description of the risk introduced by the waiver |
+| `mitigation_strategy` | Non-empty string | Plan to mitigate the risk described in `risk_assessment` |
 
 Waiver entries missing any field or with a duplicate `waiver_id` are invalid.
 
