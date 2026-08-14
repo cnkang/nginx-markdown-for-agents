@@ -237,12 +237,13 @@ def _validate_evidence_schema(manifest: dict, reasons: list) -> None:
         reasons.append(f"malformed: instance schema violation: {exc.message}")
 
 
-def _validate_observation_state(reasons: list, expected_sha: str | None) -> None:
+def _validate_observation_state(
+    reasons: list, expected_sha: str | None, release_dir: pathlib.Path
+) -> None:
     """Validate the observation-state record against its schema when
-    present."""
-    obs_state_path = (
-        REPO_ROOT / "artifacts" / "release" / "0.9.2" / "observation-state.json"
-    )
+    present, resolving the record from the manifest's own release
+    directory rather than a hardcoded version."""
+    obs_state_path = release_dir / "observation-state.json"
     if not obs_state_path.is_file():
         return
     obs_schema_path = REPO_ROOT / "schemas" / "observation-state.schema.json"
@@ -310,7 +311,7 @@ def run_real_gate(args) -> int:
     if not _require_jsonschema():
         return 1
     _validate_evidence_schema(manifest, reasons)
-    _validate_observation_state(reasons, expected_sha)
+    _validate_observation_state(reasons, expected_sha, manifest_path.parent)
 
     if reasons:
         for reason in reasons:

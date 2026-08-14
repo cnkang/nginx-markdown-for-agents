@@ -351,9 +351,11 @@ def build_final_evidence(candidate_sha: str, generated_at: str) -> tuple[dict, d
         },
         {
             "domain": "documentation",
-            "blocking": True,
+            "blocking": False,
             "status": "pass",
             "artifact_ref": FINAL_EVIDENCE_SCHEMA,
+            "justification": "Documentation synchronization is enforced by make docs-check in CI, not by this gate.",
+            "policy_reference": "docs/harness/rules/documentation-quality.md",
         },
     ]
     blocking_statuses = [entry["status"] for entry in entries if entry["blocking"]]
@@ -438,7 +440,17 @@ def main(argv: list[str] | None = None) -> int:
             blocking, corpus = build_fuzz_manifests(candidate_sha, created_at)
             _write_json(OUTPUT_ROOT / "blocking-fuzz-target-manifest.json", blocking)
             _write_json(OUTPUT_ROOT / "corpus-seed-manifest.json", corpus)
-            from generate_soak_scenario_manifest import build_manifest
+            import importlib.util
+
+            _soak_module_path = (
+                Path(__file__).resolve().parent / "generate_soak_scenario_manifest.py"
+            )
+            _soak_spec = importlib.util.spec_from_file_location(
+                "generate_soak_scenario_manifest", _soak_module_path
+            )
+            _soak_module = importlib.util.module_from_spec(_soak_spec)
+            _soak_spec.loader.exec_module(_soak_module)
+            build_manifest = _soak_module.build_manifest
 
             soak_scope_path = REPO_ROOT / SHORT_SOAK_SCOPE
             soak_scope = _load_json(SHORT_SOAK_SCOPE)

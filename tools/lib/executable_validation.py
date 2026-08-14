@@ -31,8 +31,14 @@ def _trusted_roots() -> tuple[Path, ...]:
 
 
 def _is_under(path: Path, roots: tuple[Path, ...]) -> bool:
-    """Return whether a path is below one of the trusted roots."""
-    return any(path == root or root in path.parents for root in roots)
+    """Return whether a resolved path is below one of the trusted roots.
+
+    Containment compares the RESOLVED candidate path against the resolved
+    trusted roots so symlinked or ``..``-containing candidates cannot escape
+    the allowlist.
+    """
+    resolved = path.resolve()
+    return any(resolved == root or root in resolved.parents for root in roots)
 
 
 def _is_rustup_tool_shim(candidate: Path, resolved: Path, name: str) -> bool:

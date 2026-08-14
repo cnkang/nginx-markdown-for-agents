@@ -1172,6 +1172,19 @@ def _rn_detect_tier_changes(
 # ---------------------------------------------------------------------------
 
 
+def _missing_expected_sections(rel_path: str, sections: set) -> list:
+    """Return registry sections expected for ``rel_path`` that are absent.
+
+    A partial render that silently drops a section is a failure, not a
+    warning (missing-section regression guard).
+    """
+    return [
+        f"{rel_path}: missing expected section '{name}'"
+        for name in SECTION_REGISTRY.get(rel_path, [])
+        if name not in sections
+    ]
+
+
 def check_file(
     rel_path: str,
     entries: list[dict[str, Any]],
@@ -1205,6 +1218,11 @@ def check_file(
     if not sections:
         errors.append(f"{rel_path}: no release-matrix markers")
         return errors
+
+    # Every section the registry expects for this file must be present;
+    # a partial render that silently drops a section is a failure, not a
+    # warning (missing-section regression guard).
+    errors.extend(_missing_expected_sections(rel_path, sections))
 
     # Warn about unknown sections
     for section_name in sections:

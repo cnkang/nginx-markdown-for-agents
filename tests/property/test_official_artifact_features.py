@@ -87,12 +87,23 @@ def _cargo_default_features() -> set[str]:
 
 
 def _workflow_feature_assignments(path: pathlib.Path) -> list[str]:
-    """Extract RUST_FEATURES assignment values from a workflow file."""
+    """Extract RUST_FEATURES assignment values from a workflow file.
+
+    Each assignment is captured in full (including spaces) and normalized
+    to a sorted, comma-joined feature list, so equivalent assignments that
+    differ only in spacing or order compare equal.
+    """
     text = path.read_text(encoding="utf-8")
-    return re.findall(
-        r"RUST_FEATURES\s*:\s*['\"]?([A-Za-z0-9_,]+)['\"]?",
-        text,
-    )
+    return [
+        ",".join(
+            sorted(f.strip() for f in match.split(",") if f.strip())
+        )
+        for match in re.findall(
+            r"RUST_FEATURES\s*:\s*['\"]?([A-Za-z0-9_, ]+)['\"]?",
+            text,
+        )
+        if match.strip()
+    ]
 
 
 def _workflow_feature_flags(path: pathlib.Path) -> list[set[str]]:

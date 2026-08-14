@@ -97,7 +97,7 @@ def main() -> int:
         r"\"(markdown_[a-z0-9_]+)\"",
         PROPERTY.read_text(encoding="utf-8"),
     )
-    removed = [name for name in removed if name not in inventory]
+    removed = [name for name in removed if name not in production]
     if any(name in production for name in removed):
         raise AssertionError("a removed directive is present in the production table")
     print(

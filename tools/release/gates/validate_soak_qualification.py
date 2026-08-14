@@ -734,7 +734,12 @@ def run_load_loop(
         remaining = finished - time.time()
         if remaining <= 0:
             break
-        chunk_seconds = min(60, int(remaining) + 1)
+        # Divide the remaining time budget across the corpus scenarios so
+        # sequential per-scenario chunks cannot exceed the manifest
+        # duration.
+        chunk_seconds = max(
+            1, min(60, int(remaining / max(1, len(corpus))) + 1)
+        )
         for sid in corpus:
             url = f"http://127.0.0.1:{SOAK_PORT}/{corpus[sid]}"
             report = run_ab_chunk(url, concurrency, chunk_seconds, runtime_dir)
@@ -1096,6 +1101,14 @@ def real_main(args: argparse.Namespace) -> int:
     elapsed = time.time() - session["started"]
     record = _build_soak_record(manifest, elapsed, per_scenario, session)
     failures = _soak_failures(record, manifest, elapsed, session["ready_error"])
+    try:
+        # Real-mode records must satisfy the same scenario-row checks as
+        # fixture records (missing scenarios, non-pass status, error_rate,
+        # positive completed_requests); findings are accumulated alongside
+        # the soak failures rather than replacing them.
+        _check_scenario_rows(record, manifest)
+    except SystemExit as exc:
+        failures = failures + [str(exc)]
     if failures:
         record["status"] = "fail"
         record["errors"] = failures
