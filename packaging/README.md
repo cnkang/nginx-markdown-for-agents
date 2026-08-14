@@ -143,8 +143,10 @@ release does not establish identity.
 No public signing-key fingerprint is published in this repository yet. Until
 the release process publishes the complete fingerprint through an independent
 trust channel and includes `SHA256SUMS.asc`, package users must withhold
-project-signature trust. `SHA256SUMS` alone detects transfer corruption; it does
-not authenticate the release.
+project-signature trust. `SHA256SUMS` detects accidental corruption during
+transfer and storage, but it is not a tamper-proof security boundary. A
+malicious actor who can replace packages can also replace the checksums file.
+Authenticate the release through a verified signature instead.
 
 ### Generating Checksums (CI / Maintainers)
 

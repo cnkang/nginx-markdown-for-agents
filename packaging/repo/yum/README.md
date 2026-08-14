@@ -181,7 +181,7 @@ sudo rpm --import https://pkg.example.com/nginx-markdown/gpg.key
 6. After the transition period, only the new key signs artifacts
 
 The project documents key rotation in its
-[PACKAGE_DISTRIBUTION.md](../../docs/guides/PACKAGE_DISTRIBUTION.md) guide.
+[PACKAGE_DISTRIBUTION.md](../../../docs/guides/PACKAGE_DISTRIBUTION.md) guide.
 
 ---
 
