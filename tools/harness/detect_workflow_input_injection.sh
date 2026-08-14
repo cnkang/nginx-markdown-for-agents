@@ -72,8 +72,9 @@ while IFS= read -r -d '' file; do
         # Detect start/end of run: blocks (line starts with "run:" or contains "run: |")
         # YAML structure: we look for lines with "run:" that start a multiline block
         # or inline run: command.  Recognize all YAML block scalar indicators:
-        # |, |-, |+, >, >-, >+
-        block_scalar_re='^[[:space:]]*(-[[:space:]]*)?run:[[:space:]]*[|>][-+]?[[:space:]]*$'
+        # |, |-, |+, >, >-, >+, plus YAML indentation indicators in
+        # either order (|2, |2-, |-2) and trailing comments.
+        block_scalar_re='^[[:space:]]*(-[[:space:]]*)?run:[[:space:]]*[|>][-+]?([0-9][-+]?)?([[:space:]]*#.*)?$'
         if [[ "$line" =~ ^[[:space:]]*run:[[:space:]]*$ ]] || \
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*run:[[:space:]]*$ ]] || \
            [[ "$line" =~ $block_scalar_re ]]; then
@@ -134,8 +135,9 @@ while IFS= read -r -d '' file; do
 
             # Command outputs are executable data and must use a fixed
             # allowlist rather than entering the shell source text.
-            if [[ "$line" =~ \$\{\{[[:space:]]*steps\.[a-zA-Z_][a-zA-Z0-9_-]*\.outputs\.command[[:space:]]*\}\} ]]; then
-                echo "ERROR: ${rel_path}:${line_num}: command output directly interpolated in run block" >&2
+            if [[ "$line" =~ \$\{\{[[:space:]]*steps\.[a-zA-Z_][a-zA-Z0-9_-]*\.outputs\.[a-zA-Z_][a-zA-Z0-9_-]*[[:space:]]*\}\} ]] || \
+               [[ "$line" =~ \$\{\{[[:space:]]*steps\[[^]]*\]\.outputs\[[^]]*\][[:space:]]*\}\} ]]; then
+                echo "ERROR: ${rel_path}:${line_num}: step output directly interpolated in run block" >&2
                 echo "  ${line}" >&2
                 echo "  Fix: map a fixed identifier through env and a shell case statement" >&2
                 findings=$((findings + 1))

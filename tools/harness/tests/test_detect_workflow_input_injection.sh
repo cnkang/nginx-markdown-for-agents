@@ -142,6 +142,99 @@ else
     fail "empty workflows dir passes" "exit code ${exit_code}"
 fi
 
+
+# Test 5: Block scalar with trailing comment and indentation indicators -> FAIL
+cat >"${wf_dir}/scalar-comment.yml" <<'Y'
+name: scalar-comment
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build
+        run: >- # trailing comment hides the block
+          PKG_VERSION="${{ inputs.version }}"
+          echo "Building ${PKG_VERSION}"
+Y
+
+${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 1 ]]; then
+    pass "block scalar with trailing comment detected"
+else
+    fail "block scalar with trailing comment detected" "expected exit 1, got ${exit_code}"
+    cat "${output_file}" >&2
+fi
+rm -f "${wf_dir}/scalar-comment.yml"
+
+# Test 6: Indentation-indicator block scalar (run: |2 and run: |-2) -> FAIL
+cat >"${wf_dir}/indent-indicator.yml" <<'Y'
+name: indent-indicator
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build
+        run: |2
+          PKG_VERSION="${{ inputs.version }}"
+          echo "Building ${PKG_VERSION}"
+Y
+
+${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 1 ]]; then
+    pass "indentation-indicator block scalar detected"
+else
+    fail "indentation-indicator block scalar detected" "expected exit 1, got ${exit_code}"
+    cat "${output_file}" >&2
+fi
+rm -f "${wf_dir}/indent-indicator.yml"
+
+# Test 6b: Chomping-then-indentation indicator order (run: |-2) -> FAIL
+cat >"${wf_dir}/indent-indicator-2.yml" <<'Y'
+name: indent-indicator-2
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build
+        run: |-2
+          PKG_VERSION="${{ inputs.version }}"
+          echo "Building ${PKG_VERSION}"
+Y
+
+${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 1 ]]; then
+    pass "chomping+indentation indicator order detected"
+else
+    fail "chomping+indentation indicator order detected" "expected exit 1, got ${exit_code}"
+    cat "${output_file}" >&2
+fi
+rm -f "${wf_dir}/indent-indicator-2.yml"
+
+# Test 7: Bracket-notation step outputs in run block -> FAIL
+cat >"${wf_dir}/bracket-output.yml" <<'Y'
+name: bracket-output
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - id: resolve
+        run: echo 'result=make test' >> "$GITHUB_OUTPUT"
+      - name: Run
+        run: echo "${{ steps['resolve'].outputs['result'] }}"
+Y
+
+${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 1 ]]; then
+    pass "bracket-notation step output interpolation detected"
+else
+    fail "bracket-notation step output interpolation detected" "expected exit 1, got ${exit_code}"
+    cat "${output_file}" >&2
+fi
+rm -f "${wf_dir}/bracket-output.yml"
+
 printf '\n%d passed, %d failed\n' "${PASS_COUNT}" "${FAIL_COUNT}"
 if [[ ${FAIL_COUNT} -gt 0 ]]; then
     exit 1
