@@ -829,7 +829,7 @@ test_property1b_duplicate_directive_rejected(void)
     g_args[1].data = second;
     g_args[1].len = sizeof(second) - 1;
     rc = ngx_http_markdown_limits(&g_cf, &g_cmd, &mcf);
-    TEST_ASSERT(strcmp(rc, "is duplicate") == 0,
+    TEST_ASSERT(rc != NULL && strcmp(rc, "is duplicate") == 0,
         "second markdown_limits directive must be rejected");
 
     TEST_PASS("Property 1b: repeated markdown_limits is rejected");

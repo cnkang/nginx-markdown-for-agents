@@ -206,6 +206,53 @@ fn abi_accessors_return_correct_constants() {
     );
 }
 
+/// Parse a `#define NAME <value>` line from the canonical C header into u64.
+///
+/// Handles decimal, `0x`-prefixed hexadecimal, and `u`/`ull` integer
+/// suffixes as emitted by the header generator.
+fn c_define_value(header: &str, name: &str) -> u64 {
+    let needle = format!("#define {name} ");
+    let value = header
+        .lines()
+        .find(|line| line.trim_start().starts_with(&needle))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap_or_else(|| panic!("{name} not found in markdown_converter.h"))
+        .trim_end_matches(|c: char| c == 'u' || c == 'l' || c == 'L');
+    if let Some(hex) = value.strip_prefix("0x") {
+        u64::from_str_radix(hex, 16).expect("valid hex define")
+    } else {
+        value.parse::<u64>().expect("valid decimal define")
+    }
+}
+
+/// Verify the Rust ABI constants match the canonical C header #defines, so
+/// the handshake simulation cannot pass with self-consistent but stale
+/// constants (run12 MAJOR: property_abi_handshake C-header anchoring).
+#[test]
+fn rust_constants_match_c_header_defines() {
+    let header = include_str!("../include/markdown_converter.h");
+    assert_eq!(
+        u64::from(MARKDOWN_ABI_VERSION),
+        c_define_value(header, "MARKDOWN_ABI_VERSION"),
+        "MARKDOWN_ABI_VERSION diverges from markdown_converter.h"
+    );
+    assert_eq!(
+        MARKDOWN_HEADER_HASH,
+        c_define_value(header, "MARKDOWN_HEADER_HASH"),
+        "MARKDOWN_HEADER_HASH diverges from markdown_converter.h"
+    );
+    assert_eq!(
+        MARKDOWN_SYMBOL_SET_HASH,
+        c_define_value(header, "MARKDOWN_SYMBOL_SET_HASH"),
+        "MARKDOWN_SYMBOL_SET_HASH diverges from markdown_converter.h"
+    );
+    assert_eq!(
+        MARKDOWN_LAYOUT_FINGERPRINT,
+        c_define_value(header, "MARKDOWN_LAYOUT_FINGERPRINT"),
+        "MARKDOWN_LAYOUT_FINGERPRINT diverges from markdown_converter.h"
+    );
+}
+
 /// Verify that the full correct tuple passes the handshake.
 #[test]
 fn correct_tuple_passes_handshake() {

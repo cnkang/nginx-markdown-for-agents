@@ -698,7 +698,7 @@ main(void)
     printf("All v0.7.0 default value tests passed!\n");
     printf("========================================\n");
     printf("\nVerified defaults summary:\n");
-    printf("  decompress_max_size : inherits max_size (10MB default)\n");
+    printf("  decompress_max_size : inherits decompressed_size\n");
     printf("  parse_timeout       : 10000ms (10 seconds)\n");
     printf("  parser_budget       : 33554432 bytes (32MB)\n");
     printf("  dynconf_dry_run     : 0 (off)\n");

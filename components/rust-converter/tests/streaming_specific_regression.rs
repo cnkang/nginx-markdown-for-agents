@@ -402,11 +402,22 @@ fn large_pre_block_preserves_following_tail_marker() {
     )
     .expect("large pre block should convert through the full-buffer path");
     let escaped_end_token = END_TOKEN.replace('_', r"\_");
+    /* Character-aware suffix for diagnostics: byte-indexing a String can
+     * panic on a UTF-8 boundary, and chars().rev() must be reversed again
+     * to preserve the original tail order (run12 MINOR). */
+    let suffix: String = full
+        .chars()
+        .rev()
+        .take(256)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
     assert!(
         full.contains(&escaped_end_token),
         "full output lost the tail marker: len={}, suffix={:?}",
         full.len(),
-        &full[full.len().saturating_sub(256)..]
+        suffix
     );
 
     let budget = MemoryBudget::for_total(16 * 1024 * 1024);

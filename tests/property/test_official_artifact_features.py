@@ -163,6 +163,11 @@ def test_official_producer_feature_assignments_consistent(workflow: str) -> None
     assert len(set(assignments)) <= 1, (
         f"{workflow} has divergent RUST_FEATURES assignments: {assignments}"
     )
+    for assignment in assignments:
+        assert set(assignment.split(",")) == set(OFFICIAL_FEATURES), (
+            f"{workflow} must set RUST_FEATURES to exactly "
+            f"{sorted(OFFICIAL_FEATURES)}, got {assignment!r}"
+        )
 
 
 def test_custom_builds_never_disable_required_feature_via_no_default() -> None:
