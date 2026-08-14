@@ -71,13 +71,12 @@ function_contains_line() {
               "${candidate_text}" == *";"* ]]; then
             continue
         fi
-        # Reset the per-candidate match state so a non-definition candidate
-        # (call site / declaration) cannot leave a stale earlier definition.
-        start=""
         # A C definition may put the return type, name, parameters, and
         # opening brace on separate lines. Walk forward until the first
         # statement terminator or opening brace so multiline definitions are
-        # recognized while ordinary call sites are not.
+        # recognized while ordinary call sites are not.  `start` is changed
+        # only by a successful definition scan; candidates that are call
+        # sites or declarations leave the last found definition intact.
         for ((offset = 0; offset <= 64; offset++)); do
             probe="$(sed -n "$((candidate + offset))p" "${file}" \
                 2>/dev/null || true)"
