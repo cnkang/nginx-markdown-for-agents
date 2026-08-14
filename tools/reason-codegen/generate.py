@@ -317,8 +317,9 @@ def get_metric_family(key: str) -> str:
     for family, members in METRIC_FAMILIES.items():
         if key in members:
             return family
-    # Default fallback for unknown keys
-    return "markdown_errors_total"
+    # Fail closed: an unregistered reason key would otherwise ship silently
+    # under the wrong Prometheus family with no gate signal.
+    raise ValueError(f"unknown reason key {key!r}: no metric family registered")
 
 
 # Log callsite descriptions for the generated Rust projection.
@@ -1053,8 +1054,10 @@ def generate_c_header(reasons, hash_hex: str) -> str:
         "};",
         "#else",
         "extern const markdown_reason_alias_t",
-        "    markdown_reason_aliases[MARKDOWN_REASON_ALIAS_COUNT > 0 ? "
-        "MARKDOWN_REASON_ALIAS_COUNT : 1];",
+        (
+            "    markdown_reason_aliases[MARKDOWN_REASON_ALIAS_COUNT > 0 ? "
+            + "MARKDOWN_REASON_ALIAS_COUNT : 1];"
+        ),
         "#endif",
         "",
         "#endif /* MARKDOWN_REASON_META_H */",

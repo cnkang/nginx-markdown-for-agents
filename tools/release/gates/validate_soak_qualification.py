@@ -303,6 +303,15 @@ def _check_scenario_rows(record: dict, manifest: dict) -> None:
                 "ERROR: blocking-pending: scenario "
                 f"{scenario.get('id')!r} status {scenario.get('status')!r}"
             )
+        completed = scenario.get("completed_requests")
+        if (not isinstance(completed, int) or isinstance(completed, bool)
+                or completed <= 0):
+            raise SystemExit(
+                "ERROR: below-threshold: scenario "
+                f"{scenario.get('id')!r} completed_requests "
+                f"{scenario.get('completed_requests')!r} must be a "
+                "positive integer"
+            )
         error_rate = scenario.get("error_rate", 0.0)
         if (type(error_rate) not in (int, float)
                 or not math.isfinite(error_rate)
