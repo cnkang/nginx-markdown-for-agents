@@ -212,7 +212,7 @@ This assessment rests on:
 - Shared native-build helper logic for Rust/NGINX verification scripts, including aligned macOS deployment-target handling
 - Delegated runtime validations now reuse an exported module-enabled `NGINX_BIN` only when it has a reusable runtime layout. Otherwise they fall back to self-building their own native NGINX runtime
 - The GitHub Actions `runtime-regressions` job now retains the validated IMS runtime and reuses its `NGINX_BIN` for chunked and large-response checks. This avoids rebuilding native NGINX three times
-- Canonical E2E coverage now lives under `tools/e2e/`. `make test-e2e` delegates to a focused proxy/TLS, chunked, and large-response suite instead of maintaining a second full inline runner
+- Canonical E2E coverage for migrated scenarios now lives under `tools/e2e/`. The `make test-e2e` target delegates to a focused proxy/TLS, chunked, and large-response suite instead of maintaining a second full inline runner. Native and not-yet-migrated scenarios stay in the inline runner until they move to `tools/e2e/`
 - The Rust converter now keeps the public `ffi.rs` and `metadata.rs` entrypoints. It pushes ABI decoding, memory handling, export wiring, metadata traversal, and URL resolution into focused submodules
 - `cargo-fuzz` targets and nightly fuzz workflow for parser, FFI, and security-validator paths
 - A separate non-blocking Darwin/macOS smoke workflow validates native Rust build plus real-nginx runtime checks on GitHub-hosted macOS
@@ -742,7 +742,7 @@ The 0.8.1 through 0.8.3 patch releases harden streaming atomicity, FFI cleanup,
 OWS compliance, backpressure resume, streaming decompression, implied-closure
 correctness, release-gate naming, and documentation
 consistency without changing the 0.8.x configuration contract. They also
-includes streaming observability metrics, streaming security
+include streaming observability metrics, streaming security
 enforcement (policy validation and alerts), streaming configuration directives, Prometheus-compatible
 metrics, decision reason codes, rollout and rollback guides, parity and
 evidence workflows for streaming rollout safety, dynamic configuration
