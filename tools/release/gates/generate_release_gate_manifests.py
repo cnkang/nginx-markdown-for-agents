@@ -352,9 +352,9 @@ def build_final_evidence(candidate_sha: str, generated_at: str) -> tuple[dict, d
         {
             "domain": "documentation",
             "blocking": False,
-            "status": "pass",
-            "artifact_ref": FINAL_EVIDENCE_SCHEMA,
-            "justification": "Documentation synchronization is enforced by make docs-check in CI, not by this gate.",
+            "status": "skip",
+            "artifact_ref": ".github/workflows/ci.yml (docs-check job)",
+            "justification": "Documentation synchronization is enforced by make docs-check in CI, not by this gate; the check is not executed here and must not report pass.",
             "policy_reference": "docs/harness/rules/documentation-quality.md",
         },
     ]

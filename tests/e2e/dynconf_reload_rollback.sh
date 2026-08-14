@@ -554,11 +554,6 @@ wait_for_diagnostics_field() {
 write_dynconf_atomically() {
     local contents="$1"
 
-    # The test now owns this path for race-guard purposes, whether or not
-    # the file existed before; CREATED_BY_TEST below tracks actual creation
-    # for cleanup deletion.
-    DYNCONF_OWNED_BY_TEST=1
-
     if [[ -L "$DYNCONF_FILE" ]]; then
         echo "Error: dynconf target became a symlink" >&2
         return 1
@@ -606,6 +601,10 @@ write_dynconf_atomically() {
         return 1
     fi
     TMP_WRITE_PATH=""
+    # Ownership for the race guard is claimed only after the first
+    # successful atomic write; before that, an externally appearing file
+    # must still trip the guard (ORIGINAL_FILE_EXISTED=0).
+    DYNCONF_OWNED_BY_TEST=1
     DYNCONF_FILE_CREATED_BY_TEST=1
     return 0
 }

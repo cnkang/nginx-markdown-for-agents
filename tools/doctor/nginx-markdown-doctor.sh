@@ -528,6 +528,12 @@ check_rust_toolchain() {
     rustc_version=$(rustc --version 2>/dev/null | awk '{print $2}' || true)
 
     local msrv_ok="false"
+    if [[ -z "$rustc_version" ]]; then
+        emit_check "rust_toolchain" "fail" \
+            "rustc version could not be determined" \
+            '{"msrv_ok":null}'
+        return 1
+    fi
     if [[ -n "$rustc_version" ]]; then
         local min="${expected_msrv%.*}"
         local ver_major ver_minor

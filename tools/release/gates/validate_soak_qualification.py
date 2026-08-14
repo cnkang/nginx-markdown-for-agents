@@ -736,11 +736,15 @@ def run_load_loop(
             break
         # Divide the remaining time budget across the corpus scenarios so
         # sequential per-scenario chunks cannot exceed the manifest
-        # duration.
-        chunk_seconds = max(
-            1, min(60, int(remaining / max(1, len(corpus))) + 1)
-        )
+        # duration; re-check the remaining time immediately before each
+        # chunk so the budget is not overshot.
         for sid in corpus:
+            remaining_now = finished - time.time()
+            if remaining_now <= 0:
+                break
+            chunk_seconds = max(
+                1, min(60, int(remaining_now / max(1, len(corpus))))
+            )
             url = f"http://127.0.0.1:{SOAK_PORT}/{corpus[sid]}"
             report = run_ab_chunk(url, concurrency, chunk_seconds, runtime_dir)
             scenario_metrics[sid].append(report)
@@ -1065,7 +1069,11 @@ def _soak_failures(
         failures.append(ready_error)
     if elapsed < manifest["duration_minutes"] * 60 * 0.95:
         failures.append(f"duration {elapsed}s below floor")
-    if any(s.get("error_rate", 0.0) > 0.0 for s in record["per_scenario"]):
+    if any(
+        not isinstance(s.get("error_rate"), (int, float))
+        or s.get("error_rate", 0.0) > 0.0
+        for s in record["per_scenario"]
+    ):
         failures.append("error_rate != 0")
     if record["monotonic_growth_after_drain"]:
         failures.append("monotonic RSS growth after drain")
@@ -1100,15 +1108,19 @@ def real_main(args: argparse.Namespace) -> int:
     per_scenario = build_scenario_metrics(session["scenario_metrics"])
     elapsed = time.time() - session["started"]
     record = _build_soak_record(manifest, elapsed, per_scenario, session)
-    failures = _soak_failures(record, manifest, elapsed, session["ready_error"])
+    failures = []
     try:
         # Real-mode records must satisfy the same scenario-row checks as
         # fixture records (missing scenarios, non-pass status, error_rate,
-        # positive completed_requests); findings are accumulated alongside
-        # the soak failures rather than replacing them.
+        # positive completed_requests); run BEFORE the soak-failure pass so
+        # malformed error_rate values are classified here instead of
+        # surfacing as TypeError inside _soak_failures.
         _check_scenario_rows(record, manifest)
     except SystemExit as exc:
-        failures = failures + [str(exc)]
+        failures.append(str(exc))
+    failures.extend(
+        _soak_failures(record, manifest, elapsed, session["ready_error"])
+    )
     if failures:
         record["status"] = "fail"
         record["errors"] = failures
