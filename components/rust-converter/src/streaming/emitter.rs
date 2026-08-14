@@ -787,7 +787,25 @@ impl IncrementalEmitter {
                 };
             }
             self.check_inline_code_budget(text.len())?;
-            self.inline_code_buffer.push_str(text);
+            /* Normalize CR/LF to spaces before buffering so inline-code
+             * content follows the same whitespace semantics as plain text.
+             * CRLF is treated as one logical line ending (single space),
+             * not two (run12 MAJOR + follow-up). */
+            let mut normalized_text = String::with_capacity(text.len());
+            let mut chars = text.chars().peekable();
+            while let Some(c) = chars.next() {
+                match c {
+                    '\r' => {
+                        normalized_text.push(' ');
+                        if chars.peek() == Some(&'\n') {
+                            chars.next();
+                        }
+                    }
+                    '\n' => normalized_text.push(' '),
+                    _ => normalized_text.push(c),
+                }
+            }
+            self.inline_code_buffer.push_str(&normalized_text);
             self.last_was_newline = text.ends_with('\n');
             return Ok(());
         }
