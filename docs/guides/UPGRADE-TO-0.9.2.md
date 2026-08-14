@@ -34,6 +34,7 @@ Choose the upgrade method matching your deployment:
 ### 1. Download the 0.9.2 module binary
 
 ```bash
+set -euo pipefail
 # Replace <nginx-version>, <os>, and <arch> with your target (for example,
 # 1.26.3, glibc, and x86_64). The archive contains the module .so.
 MODULE_ARCHIVE="ngx_http_markdown_filter_module-<nginx-version>-<os>-<arch>.tar.gz"

@@ -328,7 +328,7 @@ produces its standard "unknown directive" error.
 | `markdown_streaming_engine` | `markdown_streaming off\|auto\|force` |
 | `markdown_memory_budget` | `markdown_limits conversion_memory=<size>` |
 | `markdown_otel_tracing` | Removed (use NGINX native OTel) |
-| `markdown_otel_metrics` | `markdown_metrics` |
+| `markdown_otel_metrics` | Removed (use NGINX native OTel) |
 | `markdown_otel_service_name` | Removed, no replacement |
 | `markdown_otel_span_buffer_size` | Removed, no replacement |
 | `markdown_otel_export_timeout` | Removed, no replacement |

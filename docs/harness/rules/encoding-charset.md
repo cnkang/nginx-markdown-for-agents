@@ -66,7 +66,8 @@ Required:
   deflate with `windowBits = 15` (`MAX_WBITS`) when a zlib header is present,
   and with `-MAX_WBITS` (raw) otherwise. Raw probes count as supported
   behavior and must keep passing on both the streaming and full-buffer paths.
-- Truncated gzip members and zlib-wrapped deflate streams must be
+- Truncated gzip members, zlib-wrapped deflate streams, and raw RFC 1951
+  deflate streams must be
   explicitly rejected
   with a budget or integrity error, not silently accepted.  When
   `inflate()` returns `Z_BUF_ERROR` or `Z_DATA_ERROR` on a terminal
