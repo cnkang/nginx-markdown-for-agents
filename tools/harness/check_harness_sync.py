@@ -356,6 +356,8 @@ def _manifest_path_candidate(token: str) -> Path | None:
     if token.startswith(("tools/", "packaging/", "charts/", ".github/workflows/")):
         if any(char in token for char in ";&|<>*?"):
             return None
+        if ".." in token.split("/"):
+            return None
         return REPO_ROOT / token
     return None
 
