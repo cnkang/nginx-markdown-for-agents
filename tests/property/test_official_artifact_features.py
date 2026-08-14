@@ -45,8 +45,12 @@ def _resolve_manifest_path() -> pathlib.Path:
         "no official-build-feature-manifest.json under artifacts/release/"
     )
 
-    def _version_key(path: pathlib.Path) -> tuple[int, ...]:
-        return tuple(int(part) for part in re.findall(r"\d+", path.parent.name))
+    def _version_key(path: pathlib.Path) -> tuple:
+        name = path.parent.name
+        nums = tuple(int(part) for part in re.findall(r"\d+", name))
+        # Prerelease suffixes (0.9.2-rc.1) must sort AFTER the stable
+        # release (0.9.2) so the stable manifest wins the selection.
+        return (1 if "-" in name else 0, nums)
 
     return sorted(manifests, key=_version_key, reverse=True)[0]
 

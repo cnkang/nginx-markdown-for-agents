@@ -10,7 +10,11 @@ NATIVE_STREAMING_E2E = (
 
 
 def _location_block(source: str, location: str) -> str:
-    start = source.index(f"location {location} {{")
+    marker = f"location {location} {{"
+    assert marker in source, (
+        f"location block {location!r} not found in NATIVE_STREAMING_E2E"
+    )
+    start = source.index(marker)
     end = source.index("\n        }", start)
     return source[start:end]
 
