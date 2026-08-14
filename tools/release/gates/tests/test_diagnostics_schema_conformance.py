@@ -89,7 +89,7 @@ def _dynconf_disabled():
         "last_success": None,
         "last_error": None,
         "masked_keys": [],
-    }).map(lambda d: dict(d)).map(lambda d: dict(d))
+    }).map(dict)
 
 
 def _dynconf_no_file():
