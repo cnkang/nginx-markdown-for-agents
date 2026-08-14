@@ -167,7 +167,7 @@ the actual timeout overshoot depends on input size:
 | < 1 MB | < 100 ms | Negligible |
 | 1-5 MB | 100-500 ms | Low |
 | 5-10 MB | 500 ms - 1 s | Moderate |
-| > 64 MiB | Blocked by `markdown_limits conversion_memory=` | N/A |
+| > 64 MiB | Blocked (not truncated) by `markdown_limits conversion_memory=` | N/A |
 
 The `markdown_limits conversion_memory=<size>` directive (default 64 MiB)
 bounds the input and associated full-buffer work. It does not promise a
@@ -246,13 +246,31 @@ When multiple limits are hit simultaneously, the first detected wins:
 
 ### Fail-Open Behavior
 
-When any limit is hit:
+The fail-open behavior depends on when the limit is hit relative to the
+commit boundary (when response headers are sent):
 
-- With `markdown_error_policy pass`, the module passes the original HTML
-  content through to the client unchanged.
-- With `markdown_error_policy fail_closed`, the module returns the configured
-  error status instead of the original content. `status N` follows the
-  configured status policy.
+**Pre-commit failures** (before the module sends response headers):
+
+These include the input-size check, the pre-parse timeout check, and any
+limit hit before output begins. With `markdown_error_policy pass`, the module
+preserves the original HTML content and passes it through to the client
+unchanged. The original content is still available because no transformation
+has committed yet. With `markdown_error_policy fail_closed`, the module
+returns the configured error status instead of the original content. `status N`
+follows the configured status policy.
+
+**Post-commit failures** (after response headers are sent):
+
+These include timeout or budget failures during DOM traversal, output
+normalization, or streaming output production after the module has already
+committed headers and begun sending the converted body. At this point the
+module cannot roll back to the original content because headers are already
+on the wire. The module stops output, closes the downstream connection, and
+logs the reason code. The original content is not available for pass-through
+because the response is mid-flight.
+
+Additional notes:
+
 - The internal converter constants are uppercase (`PARSE_TIMEOUT` and
   `PARSE_BUDGET_EXCEEDED`). The public request reason labels are lowercase
   `timeout` and `budget_exceeded`.

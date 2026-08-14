@@ -129,7 +129,7 @@ The implementation:
 - ✅ Decodes common named entities (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&#39;`)
 - ✅ Handles numeric entities (decimal and hexadecimal)
 - ✅ Supports all Unicode characters
-- ✅ Works correctly in all HTML contexts (text, attributes, code, and so on)
+- ✅ Works correctly in supported HTML contexts (text, attributes, code, and so on)
 - ✅ Has comprehensive test coverage
 
 ## References
