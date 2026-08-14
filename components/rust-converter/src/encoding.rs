@@ -261,7 +261,11 @@ pub fn decode_chain(
     layers: &[Encoding],
     limits: DecodeLimits,
 ) -> Result<Vec<u8>, ChainDecodeError> {
-    let mut current = encoded.to_vec();
+    /* The initial layer borrows the caller's compressed buffer instead of
+     * cloning it; ownership transfers only after the first decoder layer
+     * produces its owned output (run12 F-7 / supp-27 M3: avoids the
+     * full-input copy that made peak memory unpredictable). */
+    let mut current: std::borrow::Cow<'_, [u8]> = std::borrow::Cow::Borrowed(encoded);
     let mut cumulative = 0usize;
     let mut has_decoded_layer = false;
 
@@ -286,11 +290,11 @@ pub fn decode_chain(
         };
         let decoded = decode_layer(&current, *enc, layer_limits)?;
         validate_decoded_layer(input_len, decoded.len(), &mut cumulative, limits)?;
-        current = decoded;
+        current = std::borrow::Cow::Owned(decoded);
         has_decoded_layer = true;
     }
 
-    Ok(current)
+    Ok(current.into_owned())
 }
 
 fn decode_layer(
