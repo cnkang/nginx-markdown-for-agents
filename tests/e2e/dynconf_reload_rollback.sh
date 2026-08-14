@@ -521,6 +521,10 @@ wait_for_diagnostics_field() {
             ;;
         equals:*)
             expected="${predicate#equals:}"
+            if [[ -z "$expected" ]]; then
+                echo "Error: equals predicate requires a non-empty value: $predicate" >&2
+                return 1
+            fi
             ;;
         nonempty)
             ;;

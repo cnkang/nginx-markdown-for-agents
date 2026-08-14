@@ -176,6 +176,15 @@ resolve_nginx_bin || exit 2
 
 TMPDIR_BASE="$(mktemp -d /tmp/error-policy-values.XXXXXX)"
 
+cleanup_tmpdir() {
+  if [[ "${KEEP_ARTIFACTS}" -eq 0 ]]; then
+    rm -rf "${TMPDIR_BASE}"
+  else
+    echo "Artifacts kept in: ${TMPDIR_BASE}" >&2
+  fi
+}
+trap cleanup_tmpdir EXIT
+
 # Preflight: verify the resolved NGINX binary accepts a minimal
 # markdown-module configuration before running any expectation, so an
 # unavailable or unusable module cannot count as a passing rejection
@@ -204,15 +213,6 @@ if ! "${NGINX_BIN}" -t -c "${preflight_conf}" >"${preflight_log}" 2>&1; then
   tail -n 5 "${preflight_log}" >&2
   exit 2
 fi
-
-cleanup_tmpdir() {
-  if [[ "${KEEP_ARTIFACTS}" -eq 0 ]]; then
-    rm -rf "${TMPDIR_BASE}"
-  else
-    echo "Artifacts kept in: ${TMPDIR_BASE}" >&2
-  fi
-}
-trap cleanup_tmpdir EXIT
 
 echo "==========================================================" >&2
 echo " Error Policy Value Acceptance Test (Property 26)" >&2
