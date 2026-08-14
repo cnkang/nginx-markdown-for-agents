@@ -106,9 +106,9 @@ pub use abi::{
 };
 pub use exports::{
     markdown_abi_header_hash, markdown_abi_layout_fingerprint, markdown_abi_symbol_set_hash,
-    markdown_abi_version, markdown_build_header_plan, markdown_chain_decode_free,
-    markdown_chain_decode_result_init, markdown_classify_error_code, markdown_convert,
-    markdown_converter_free, markdown_converter_new, markdown_decide_base_url,
+    markdown_abi_version, markdown_base_url_input_init, markdown_build_header_plan,
+    markdown_chain_decode_free, markdown_chain_decode_result_init, markdown_classify_error_code,
+    markdown_convert, markdown_converter_free, markdown_converter_new, markdown_decide_base_url,
     markdown_decide_conditional, markdown_decide_eligibility, markdown_decode_encoding_chain,
     markdown_decomp_result_init, markdown_decompress_bounded, markdown_decompress_free,
     markdown_header_plan_free, markdown_header_plan_init, markdown_negotiate_accept,

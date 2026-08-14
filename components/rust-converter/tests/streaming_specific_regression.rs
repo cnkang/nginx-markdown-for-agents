@@ -421,9 +421,21 @@ fn large_pre_block_preserves_following_tail_marker() {
     );
 
     let budget = MemoryBudget::for_total(16 * 1024 * 1024);
+    /* Split sizes derived from the final document length so every byte is
+     * covered exactly once (fixed 64 x 16 KiB chunks could fall short of
+     * the actual document size). */
+    let chunk_sizes: Vec<usize> = {
+        let n = html.len() / (16 * 1024);
+        let mut sizes = vec![16 * 1024; n];
+        let rem = html.len() - n * (16 * 1024);
+        if rem > 0 {
+            sizes.push(rem);
+        }
+        sizes
+    };
     let streamed = convert_streaming_chunked(
         html.as_bytes(),
-        &[16 * 1024; 64],
+        &chunk_sizes,
         Some("text/html; charset=UTF-8"),
         default_streaming_options(),
         budget,
