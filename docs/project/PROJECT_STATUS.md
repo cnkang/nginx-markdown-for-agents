@@ -728,8 +728,8 @@ See `examples/docker/` for Docker build examples.
 
 ## Summary
 
-**NGINX Markdown for Agents** is on the 0.9.x release line (latest patch:
-0.9.2). The project provides
+**NGINX Markdown for Agents** is on the 0.9.x line: 0.9.2 is the current
+development line and 0.9.1 is the latest released patch. The project provides
 HTML-to-Markdown conversion through NGINX content negotiation with a
 streaming-default conversion model, with bounded-memory streaming as the
 default path and full-buffer conversion as the fallback. Version 0.8.0

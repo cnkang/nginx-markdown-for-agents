@@ -8,7 +8,7 @@
 
 > HTML 保持原样，Markdown 按需返回——客户端主动请求，或者你指定哪些 bot 自动获得。
 
-客户端发送 `Accept: text/markdown` 时得到 Markdown；浏览器和普通调用方仍然拿到原始 HTML。你也可以通过 NGINX 配置针对特定的 AI 爬虫（如 ClaudeBot、GPTBot）按 User-Agent 自动改写 Accept 头，让这些 bot 即使没有主动请求 Markdown 也能收到转换后的内容。你不需要改造业务应用，不需要额外维护一套抓取器，也不需要单独部署一个转换服务。
+客户端发送 `Accept: text/markdown` 时得到 Markdown；浏览器和普通调用方仍然拿到原始 HTML。你也可以通过 `$markdown_for_bot` 按 User-Agent 精确控制哪些爬虫走 `markdown_filter`，配合 `markdown_accept` 完成内容协商——匹配的 bot 即使没有主动请求 Markdown 也能收到转换后的内容，模块不会改写 Accept 请求头。你不需要改造业务应用，不需要额外维护一套抓取器，也不需要单独部署一个转换服务。
 
 这是一种很务实的接入方式：在不动现有站点内容生产流程的前提下，把 Agent 友好能力放到团队已经熟悉的 NGINX 层里完成。
 
@@ -400,7 +400,7 @@ v0.9.1 是 **v1.0 前最后一次基线收敛与兼容性重置**。它在性能
 - **Rust 基线重置**：源码构建现在要求 Rust 1.97+；仓库、CI 和发布构建使用精确的 Rust 1.97.0 (MSRV 1.97)。预构建模块的用户不需要安装 Rust。
 - **单一流式控制**：`markdown_streaming off|auto|force` 现在是唯一处理路径选择器。重复的 `markdown_streaming_engine` 已移除；旧配置由 NGINX 标准 unknown-directive 错误识别。
 - **明确支持的 flavor**：`markdown_flavor` 仅支持 `commonmark` 和 `gfm`。实验性的 `mdx` 与 `org-mode` 从未有独立生产语义，现会被明确拒绝。
-- **自动零拷贝流式输出**：由缓冲区所有权和背压状态在内部选择安全的交付路径，不暴露零拷贝指令。
+- **自动零拷贝流式输出**：由缓冲区所有权和背压状态在内部选择安全的交付路径。显式 `markdown_streaming_zero_copy` 指令于 v0.9.1 引入、v0.9.2 移除，交付路径选择改为内部实现。
 - **流式解压路由（gzip + deflate + Brotli）**：设置 `markdown_streaming force`、`markdown_auto_decompress on`，且 `markdown_cache_validation` 不为 `full`。
   此时流式引擎会增量解压 gzip、zlib 封装 RFC 1950 deflate 及 Brotli 响应。模块同时接受 zlib 封装 RFC 1950 与原始 RFC 1951 deflate（raw 帧为兼容旧服务器的回退支持），不会强制全缓冲积攒。gzip member 边界和 trailer 会跨分块校验。Brotli 流式解压需要构建时的 `libbrotlidec`。`NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off` 控制该依赖。官方构件默认启用。
 - **全缓冲拷贝减少**：内部优化（默认开启，无配置项），通过将连续缓冲区直接传递给解压器并通过指针赋值交换输出，消除全缓冲压缩路径中冗余的 memcpy。

@@ -304,7 +304,7 @@ prevention.
 ### Bounded Decompression
 The `markdown_limits decompressed_size=` key limits decompressed output
 independently from `markdown_limits conversion_memory=`, preventing zip-bomb
-attacks. C classifies `DecompressionBudgetExceeded` (FFI code 9) as
+attacks. C classifies `DecompressionBudgetExceeded` (FFI code 5) as
 `resource_limit`.
 
 ### Parser Timeout and Budget
