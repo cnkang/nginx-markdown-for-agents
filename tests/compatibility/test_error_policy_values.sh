@@ -176,6 +176,35 @@ resolve_nginx_bin || exit 2
 
 TMPDIR_BASE="$(mktemp -d /tmp/error-policy-values.XXXXXX)"
 
+# Preflight: verify the resolved NGINX binary accepts a minimal
+# markdown-module configuration before running any expectation, so an
+# unavailable or unusable module cannot count as a passing rejection
+# (run12 MAJOR: test_error_policy_values.sh preflight).
+preflight_conf="${TMPDIR_BASE}/preflight.conf"
+preflight_log="${TMPDIR_BASE}/preflight.log"
+cat > "${preflight_conf}" <<EOF
+worker_processes 1;
+error_log /dev/null crit;
+pid ${TMPDIR_BASE}/preflight.pid;
+
+events { worker_connections 64; }
+
+http {
+    markdown_filter on;
+    server {
+        listen 127.0.0.1:19998;
+        location / {
+            return 200 'ok';
+        }
+    }
+}
+EOF
+if ! "${NGINX_BIN}" -t -c "${preflight_conf}" >"${preflight_log}" 2>&1; then
+  echo "ERROR: NGINX binary '${NGINX_BIN}' cannot load the markdown module:" >&2
+  tail -n 5 "${preflight_log}" >&2
+  exit 2
+fi
+
 cleanup_tmpdir() {
   if [[ "${KEEP_ARTIFACTS}" -eq 0 ]]; then
     rm -rf "${TMPDIR_BASE}"
