@@ -25,7 +25,7 @@ The Go/No-Go decision must rest on the following verifiable artifacts:
 - Any P0 sub-spec DoD fails → **No-Go** (fix and re-evaluate)
 - Any Streaming Evidence insufficient → **No-Go** (design intent does not substitute for actual evidence)
 - P1 status does not affect the Go/No-Go decision
-- Gate items that cannot pass must have explicit exceptions recorded
+- Gate items that cannot pass must have explicit exceptions recorded. A recorded exception does not override a failed P0 gate. The exception documents the failure but does not authorize release. Overriding a failed P0 gate requires explicit, written authorization from the release owner. The authorization must name the gate, the candidate, and the scope of the override
 
 ## Decision Record Template
 
