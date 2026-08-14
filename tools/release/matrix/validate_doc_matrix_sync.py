@@ -20,7 +20,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from lib.path_validation import validate_read_path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from normalize_matrix import (  # noqa: E402
-    MatrixNormalizationError,
     normalize_compatibility_document,
 )
 

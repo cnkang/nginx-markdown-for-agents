@@ -21,6 +21,9 @@ _APPROVED_EXECUTABLE_DIRS = (
     Path("/usr/local/Cellar"),
 )
 
+# Executables that may be Rustup tool shims (resolved through ~/.cargo/bin).
+_RUSTUP_SHIM_TOOLS = frozenset({"cargo", "rustfmt"})
+
 
 def _trusted_roots() -> tuple[Path, ...]:
     """Return the fixed system directories allowed for tool executables."""
@@ -107,15 +110,13 @@ def resolve_approved_executable(name: str) -> str | None:
 
     candidate_is_trusted = _is_under(candidate, trusted_roots)
     resolved_is_trusted = _is_under(resolved, trusted_roots)
-    if not (candidate_is_trusted and resolved_is_trusted) and (
-        name not in {"cargo", "rustfmt"}
-        or not _is_rustup_tool_shim(candidate, resolved, name)
-    ):
+    is_rustup_shim = name in _RUSTUP_SHIM_TOOLS and _is_rustup_tool_shim(
+        candidate, resolved, name
+    )
+    if not (candidate_is_trusted and resolved_is_trusted) and not is_rustup_shim:
         return None
     # Preserve a Rustup shim only after the dedicated shim check accepted it;
     # every other executable is returned at its canonical resolved path.
-    if name in {"cargo", "rustfmt"} and _is_rustup_tool_shim(
-        candidate, resolved, name
-    ):
+    if is_rustup_shim:
         return str(candidate)
     return str(resolved)

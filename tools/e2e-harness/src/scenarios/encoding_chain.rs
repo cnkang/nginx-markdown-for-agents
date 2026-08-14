@@ -253,7 +253,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
 
     /* Malformed grammar with PASS policy: the original encoded response is
      * returned unchanged, no decoder runs (Requirement 12.1). */
-    let malformed = request_raw(&base_url, "/chain/malformed-grammar")?;
+    let malformed = request_markdown(&base_url, "/chain/malformed-grammar")?;
     push_assertion(
         &mut assertions,
         "malformed_pass_original_response",
@@ -264,7 +264,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
 
     /* Malformed grammar with fail_closed policy: resolved reject status
      * (502). */
-    let malformed_closed = request_raw(&base_url, "/chain-fail-closed/malformed-grammar")?;
+    let malformed_closed = request_markdown(&base_url, "/chain-fail-closed/malformed-grammar")?;
     push_assertion(
         &mut assertions,
         "malformed_fail_closed_status",
@@ -276,8 +276,8 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     /* Unknown token: route through the configured error policy
      * (Requirement 12.7). PASS forwards the original response; fail_closed
      * returns the resolved reject status. */
-    let unknown_pass = request_raw(&base_url, "/chain/unknown-token")?;
-    let unknown_baseline = request_raw(&base_url, "/chain-raw/unknown-token-baseline")?;
+    let unknown_pass = request_markdown(&base_url, "/chain/unknown-token")?;
+    let unknown_baseline = request_markdown(&base_url, "/chain-raw/unknown-token-baseline")?;
     push_assertion(
         &mut assertions,
         "unknown_pass",
@@ -291,7 +291,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             unknown_baseline.headers
         ),
     );
-    let unknown_closed = request_raw(&base_url, "/chain-fail-closed/unknown-token")?;
+    let unknown_closed = request_markdown(&base_url, "/chain-fail-closed/unknown-token")?;
     push_assertion(
         &mut assertions,
         "unknown_closed",
@@ -302,8 +302,8 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
 
     /* Depth overflow (4+ non-identity layers) follows the same configured
      * error policy as an unknown token. */
-    let depth_pass = request_raw(&base_url, "/chain/depth-overflow")?;
-    let depth_baseline = request_raw(&base_url, "/chain-raw/depth-overflow-baseline")?;
+    let depth_pass = request_markdown(&base_url, "/chain/depth-overflow")?;
+    let depth_baseline = request_markdown(&base_url, "/chain-raw/depth-overflow-baseline")?;
     push_assertion(
         &mut assertions,
         "depth_pass",
@@ -314,7 +314,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             depth_pass.status, depth_baseline.status, depth_pass.headers, depth_baseline.headers
         ),
     );
-    let depth_closed = request_raw(&base_url, "/chain-fail-closed/depth-overflow")?;
+    let depth_closed = request_markdown(&base_url, "/chain-fail-closed/depth-overflow")?;
     push_assertion(
         &mut assertions,
         "depth_closed",
@@ -325,7 +325,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
 
     /* Truncated outer layer: full-buffer decode fails cleanly and the
      * PASS policy returns the original response. */
-    let truncated = request_raw(&base_url, "/chain/truncated")?;
+    let truncated = request_markdown(&base_url, "/chain/truncated")?;
     push_assertion(
         &mut assertions,
         "truncated_pass_original_response",
@@ -345,13 +345,6 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
 }
 
 fn request_markdown(base_url: &str, path: &str) -> Result<HttpResponse> {
-    let mut headers = HashMap::new();
-    headers.insert("Accept".to_string(), "text/markdown".to_string());
-    crate::http::get_with_headers(&format!("{base_url}{path}"), &headers)
-        .with_context(|| format!("request failed for {path}"))
-}
-
-fn request_raw(base_url: &str, path: &str) -> Result<HttpResponse> {
     let mut headers = HashMap::new();
     headers.insert("Accept".to_string(), "text/markdown".to_string());
     crate::http::get_with_headers(&format!("{base_url}{path}"), &headers)

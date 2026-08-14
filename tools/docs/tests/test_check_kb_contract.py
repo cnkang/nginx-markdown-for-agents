@@ -92,4 +92,7 @@ def test_ffi_heading_values_are_literal_not_regular_expressions():
 
     errors = checker.validate_contract(inventory, contract, readme)
 
-    assert any("FFI: summary export count" in error for error in errors)
+    assert any(
+        "FFI: summary export count or ABI heading does not match inventory" in error
+        for error in errors
+    )
