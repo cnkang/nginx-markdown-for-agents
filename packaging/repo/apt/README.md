@@ -173,7 +173,7 @@ curl -fsSL https://pkg.example.com/nginx-markdown/gpg.key | \
 4. Remove the old key only after the overlap migration is complete.
 
 The project documents key rotation in its
-[PACKAGE_DISTRIBUTION.md](../../docs/guides/PACKAGE_DISTRIBUTION.md) guide.
+[PACKAGE_DISTRIBUTION.md](../../../docs/guides/PACKAGE_DISTRIBUTION.md) guide.
 
 ---
 
