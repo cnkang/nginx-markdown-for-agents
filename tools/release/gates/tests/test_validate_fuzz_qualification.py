@@ -271,3 +271,50 @@ def test_classify_finding_distinguishes_crashes_and_sanitizers() -> None:
         "SUMMARY: UndefinedBehaviorSanitizer: signed integer overflow") == (0, 1)
     assert validator._classify_finding(
         "runtime error: load of misaligned address") == (0, 1)
+
+
+def test_soak_excludes_startup_overhead_from_executions(
+        tmp_path: Path, monkeypatch) -> None:
+    """Startup-corpus replay and the empty-input callback must not count
+    toward the required-executions floor (libFuzzer reports them inside
+    stat::number_of_executed_units on every launch)."""
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    corpus_dir = tmp_path / "fuzz_target"
+    corpus_dir.mkdir()
+    (corpus_dir / "seed-a").write_bytes(b"a")
+    (corpus_dir / "seed-b").write_bytes(b"b")
+
+    reported = "stat::number_of_executed_units: 100003\n" \
+        "stat::seconds_since_epoch: 0\n"
+    monkeypatch.setattr(validator, "CORPUS_ROOT", tmp_path)
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path.parent)
+    monkeypatch.setattr(
+        validator, "_invoke_fuzz",
+        lambda target, flags, timeout: {
+            "returncode": 0,
+            "stdout": reported,
+            "stderr": "",
+            "wall_elapsed": 1.0,
+        })
+
+    result = validator._run_target_soak(
+        "fuzz_target", seed=1, required_executions=100000,
+        required_seconds=0, log_path=tmp_path / "soak.log")
+
+    assert result["executions_total"] == 100000
+    assert result["status"] == "pass"
+
+
+def test_startup_corpus_size_counts_seed_files(tmp_path: Path) -> None:
+    """_startup_corpus_size counts files, and reports 0 for absent dirs."""
+    import tools.release.gates.validate_fuzz_qualification as validator
+
+    corpus_dir = tmp_path / "corpus"
+    corpus_dir.mkdir()
+    (corpus_dir / "seed-a").write_bytes(b"a")
+    (corpus_dir / "seed-b").write_bytes(b"b")
+    (corpus_dir / "seed-c").write_bytes(b"c")
+
+    assert validator._startup_corpus_size(corpus_dir) == 3
+    assert validator._startup_corpus_size(tmp_path / "absent") == 0

@@ -415,6 +415,19 @@ def _soak_outcome(invocation: dict) -> tuple[int, float, str | None]:
     return executions, elapsed, None
 
 
+def _startup_corpus_size(corpus_dir: Path) -> int:
+    """Count seed inputs in the target corpus directory (0 when absent).
+
+    libFuzzer replays every startup-corpus seed plus the empty-input
+    callback before mutation begins; those executions are launch
+    overhead, not mutation budget, and must not count toward the
+    required-executions floor.
+    """
+    if not corpus_dir.is_dir():
+        return 0
+    return sum(1 for entry in corpus_dir.iterdir() if entry.is_file())
+
+
 def _run_target_soak(target: str, seed: int, required_executions: int,
                      required_seconds: int, log_path: Path) -> dict:
     """Run libFuzzer until both floors are met or a finding terminates the run.
@@ -428,6 +441,7 @@ def _run_target_soak(target: str, seed: int, required_executions: int,
     total_elapsed = 0.0
     log_parts = []
     failure = None
+    target_corpus_dir = CORPUS_ROOT / validated_target
     for _index in range(MAX_FUZZ_INVOCATIONS):
         runs_remaining = max(0, required_executions - total_executions)
         seconds_remaining = max(
@@ -444,6 +458,11 @@ def _run_target_soak(target: str, seed: int, required_executions: int,
             validated_target, flags, timeout=time_cap + INVOCATION_TIMEOUT_MARGIN)
         log_parts.append(invocation["stdout"] + "\n" + invocation["stderr"])
         executions, elapsed, failure = _soak_outcome(invocation)
+        # Exclude the empty-input callback and the startup-corpus replay
+        # from the mutation-budget accounting: they are launch overhead
+        # repeated on every invocation, not new executions.
+        startup_overhead = _startup_corpus_size(target_corpus_dir) + 1
+        executions = max(0, executions - startup_overhead)
         total_executions += executions
         total_elapsed += elapsed
         if failure:
