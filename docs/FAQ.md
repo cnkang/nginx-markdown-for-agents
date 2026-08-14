@@ -305,7 +305,7 @@ Yes, the module includes multiple security protections:
 
 ### Does it expose sensitive information?
 
-No, the module only converts HTML to Markdown. It does not add or expose information not already in the HTML response.
+No, the module only converts HTML to Markdown. It does not expose information that is not already present in the HTML response. The module changes response headers as part of conversion, including setting `Content-Type` to `text/markdown`, updating `ETag`, and adding `Cache-Control: private` for authenticated responses. These header changes reflect the converted content, not new information.
 
 ### Should I convert authenticated requests?
 
