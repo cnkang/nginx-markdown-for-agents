@@ -64,10 +64,10 @@ verification families: 3
 
 ## Definition of Done
 
-- `resolve_spec.py` returns `PASS` or explicitly documented `WARN_*`
-- matched verification families have been run and outcomes recorded
-- repeated drift has either converged or escalated with concrete evidence
-- the repo updates truth surfaces when harness behavior changes
+- `resolve_spec.py` returns `PASS` for every checked spec or returns an explicitly documented `WARN_*` code with a recorded reason
+- matched verification families have been run and their outcomes are recorded in the evidence directory
+- repeated drift has either converged on the spec or escalated with concrete evidence attached to the escalation record
+- the repo truth surfaces (`AGENTS.md`, `docs/harness/`, `tools/harness/`, `Makefile`, CI workflow) are updated in the same change set when harness behavior changes
 
 ## References
 
