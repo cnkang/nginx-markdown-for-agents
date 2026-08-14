@@ -219,7 +219,31 @@ fn decompress_gzip(input: &[u8], budget: usize) -> Result<DecompResult, DecompEr
     Ok(DecompResult { output })
 }
 
-/// Decompress zlib-wrapped deflate data with budget enforcement.
+/// True when `input` begins with a valid zlib header (RFC 1950).
+///
+/// A raw deflate stream (RFC 1951) can never be misdetected: its first byte
+/// is a deflate block header whose low nibble is 0..7 (stored/fixed/dynamic
+/// block type bits), so `CM == 8` is impossible. The FLG checksum provides a
+/// second guard. This mirrors the C streaming decompressor's sniffing
+/// decision (zlib header present -> MAX_WBITS, otherwise -MAX_WBITS).
+fn has_zlib_header(input: &[u8]) -> bool {
+    if input.len() < 2 {
+        return false;
+    }
+    let cmf = input[0];
+    let flg = input[1];
+    (cmf & 0x0F) == 8 && (cmf >> 4) <= 7 && ((u16::from(cmf) << 8) | u16::from(flg)) % 31 == 0
+}
+
+/// Decompress deflate data (zlib-wrapped RFC 1950 or raw RFC 1951) with
+/// budget enforcement.
+///
+/// The deflate layer accepts both framings: zlib-wrapped (RFC 1950, the
+/// HTTP-standard form) is selected when the input begins with a valid zlib
+/// header; otherwise the input is decoded as raw deflate (RFC 1951) for
+/// compatibility with legacy servers. This matches the C streaming
+/// decompressor's sniffing behavior so the three decoding paths (C
+/// streaming, C full-buffer, Rust chain/FFI) accept the same inputs.
 fn decompress_deflate(input: &[u8], budget: usize) -> Result<DecompResult, DecompError> {
     use flate2::{Decompress, FlushDecompress, Status};
 
@@ -229,7 +253,7 @@ fn decompress_deflate(input: &[u8], budget: usize) -> Result<DecompResult, Decom
         ));
     }
 
-    let mut decoder = Decompress::new(true);
+    let mut decoder = Decompress::new(has_zlib_header(input));
     let mut output = Vec::new();
     let chunk_size = 8192.min(budget.saturating_add(1)).max(1);
     let mut buf = vec![0u8; chunk_size];
@@ -321,6 +345,17 @@ mod tests {
         use std::io::Write;
 
         let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(data).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    /// Helper: compress data with raw deflate (RFC 1951, no zlib header).
+    fn raw_deflate_compress(data: &[u8]) -> Vec<u8> {
+        use flate2::Compression;
+        use flate2::write::DeflateEncoder;
+        use std::io::Write;
+
+        let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(data).unwrap();
         encoder.finish().unwrap()
     }
@@ -483,6 +518,58 @@ mod tests {
     fn deflate_format_error_on_invalid_input() {
         let garbage = b"\xff\xfe\xfd\xfc\xfb\xfa";
         let result = decompress_bounded(garbage, Format::Deflate, 1024);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.error_category() == 102 || err.error_category() == 103,
+            "Expected format_error(102) or truncated(103), got {}",
+            err.error_category()
+        );
+    }
+
+    #[test]
+    fn deflate_accepts_raw_rfc1951_input() {
+        let original = b"<html><body>legacy raw deflate payload</body></html>";
+        let raw = raw_deflate_compress(original);
+        // Sanity: the raw stream must not carry a zlib header.
+        assert!(!has_zlib_header(&raw), "raw deflate must not look zlib-wrapped");
+        let result = decompress_bounded(&raw, Format::Deflate, 4096).unwrap();
+        assert_eq!(result.output, original);
+    }
+
+    #[test]
+    fn deflate_still_accepts_zlib_wrapped_rfc1950_input() {
+        let original = b"<html><body>standard zlib-wrapped payload</body></html>";
+        let zlib = deflate_compress(original);
+        assert!(has_zlib_header(&zlib), "zlib-wrapped must carry a zlib header");
+        let result = decompress_bounded(&zlib, Format::Deflate, 4096).unwrap();
+        assert_eq!(result.output, original);
+    }
+
+    #[test]
+    fn has_zlib_header_rejects_raw_block_headers() {
+        // Raw deflate first bytes are block headers with low nibble 0..7;
+        // CM==8 (deflate) in the low nibble is structurally impossible, so
+        // sniffing can never misclassify a raw stream as zlib-wrapped.
+        let cases: [&[u8]; 4] = [b"\x00abc", b"\x01abc", b"\x03abc", b"\x78\x9c"];
+        for raw in cases {
+            if raw.starts_with(b"\x78\x9c") {
+                assert!(has_zlib_header(raw));
+                continue;
+            }
+            assert!(!has_zlib_header(raw), "{raw:02x?} must not look zlib-wrapped");
+        }
+        // Too-short input cannot be classified as zlib-wrapped.
+        assert!(!has_zlib_header(b""));
+        assert!(!has_zlib_header(b"\x78"));
+    }
+
+    #[test]
+    fn deflate_raw_truncated_input() {
+        let original = b"payload that gets cut off mid-stream";
+        let raw = raw_deflate_compress(original);
+        let truncated = &raw[..raw.len() / 2];
+        let result = decompress_bounded(truncated, Format::Deflate, 4096);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(

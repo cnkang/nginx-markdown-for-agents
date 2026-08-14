@@ -402,7 +402,7 @@ v0.9.1 是 **v1.0 前最后一次基线收敛与兼容性重置**。它在性能
 - **明确支持的 flavor**：`markdown_flavor` 仅支持 `commonmark` 和 `gfm`。实验性的 `mdx` 与 `org-mode` 从未有独立生产语义，现会被明确拒绝。
 - **自动零拷贝流式输出**：由缓冲区所有权和背压状态在内部选择安全的交付路径，不暴露零拷贝指令。
 - **流式解压路由（gzip + deflate + Brotli）**：设置 `markdown_streaming force`、`markdown_auto_decompress on`，且 `markdown_cache_validation` 不为 `full`。
-  此时流式引擎会增量解压 gzip、zlib 封装 RFC 1950 deflate 及 Brotli 响应。冻结的 0.9.2 公共契约拒绝原始 RFC 1951 deflate，不会强制全缓冲积攒。gzip member 边界和 trailer 会跨分块校验。Brotli 流式解压需要构建时的 `libbrotlidec`。`NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off` 控制该依赖。官方构件默认启用。
+  此时流式引擎会增量解压 gzip、zlib 封装 RFC 1950 deflate 及 Brotli 响应。模块同时接受 zlib 封装 RFC 1950 与原始 RFC 1951 deflate（raw 帧为兼容旧服务器的回退支持），不会强制全缓冲积攒。gzip member 边界和 trailer 会跨分块校验。Brotli 流式解压需要构建时的 `libbrotlidec`。`NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off` 控制该依赖。官方构件默认启用。
 - **全缓冲拷贝减少**：内部优化（默认开启，无配置项），通过将连续缓冲区直接传递给解压器并通过指针赋值交换输出，消除全缓冲压缩路径中冗余的 memcpy。
 - **`markdown_auto_decompress` 指令**：现已正式注册为可配置指令（默认开启）。此前仅为内部字段，无法通过 `nginx.conf` 设置。
 - **性能证据门禁**：模块级基准测试工具（`tools/perf/run_module_benchmark.sh`）与自动化发布门禁（`make release-gates-check-091`）在发布前强制验证延迟、TTFB、内存斜率和回退率阈值。

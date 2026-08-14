@@ -10,8 +10,8 @@ set -euo pipefail
 #     without truncation.
 #  3) Gzip streaming decompression converts and strips Content-Encoding.
 #  4) Legacy raw deflate C-compatibility coverage converts to Markdown and
-#     strips Content-Encoding. Raw RFC 1951 is outside the frozen 0.9.2
-#     public contract.
+#     strips Content-Encoding. Raw RFC 1951 deflate is supported as a
+#     compatibility fallback (part of the 0.9.2 public contract).
 #  5) Large gzip streaming survives real downstream backpressure with exact
 #     output equivalence and terminal-once evidence.
 #  6) Truncated gzip streaming decompression fails open before commit.

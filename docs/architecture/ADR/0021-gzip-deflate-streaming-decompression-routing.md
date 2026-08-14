@@ -5,9 +5,9 @@
 Accepted — Brotli full-buffer section superseded by [ADR-0024](0024-brotli-streaming-decompression.md)
 
 > **0.9.2 contract note:** This ADR records the 0.9.1 routing decision. The
-> frozen 0.9.2 public deflate contract is zlib-wrapped RFC 1950 only. Raw RFC
-> 1951 compatibility details below are historical and do not define behavior
-> that new callers may rely on.
+> 0.9.2 public deflate contract accepts zlib-wrapped RFC 1950 (the
+> HTTP-standard form) and raw RFC 1951 as a legacy-server compatibility
+> fallback. The sniffing decision below is the contract on every decode path.
 
 ## Context
 
@@ -32,9 +32,10 @@ That restriction is historical and ADR-0024 superseded it. ADR-0024 adds
 Brotli under the same runtime gates in the final 0.9.1 implementation.
 
 The deflate inflater sniffs the first two bytes to distinguish zlib-wrapped
-(RFC 1950, RFC 9110-compliant) from raw deflate (RFC 1951). Raw deflate
-(RFC 1951) support is a legacy implementation detail. The frozen 0.9.2 public
-deflate contract is zlib-wrapped RFC 1950 only. The gzip inflater
+(RFC 1950, RFC 9110-compliant) from raw deflate (RFC 1951). The 0.9.2
+public contract supports both framings: zlib-wrapped RFC 1950 is the
+HTTP-standard form, and raw RFC 1951 is a compatibility fallback for legacy
+servers. The gzip inflater
 uses gzip framing and treats each valid `Z_STREAM_END` as a member boundary.
 It resets the inflater while preserving remaining compressed input, accepts a
 member boundary between feed calls, and consumes later members exactly once.
@@ -70,9 +71,9 @@ when earlier output exactly fills that budget.
 
 ### Positive Consequences
 - Extends incremental decompression and streaming TTFB benefits to gzip, the
-  common HTTP content coding, while keeping the public deflate contract on
-  zlib-wrapped RFC 1950. Raw RFC 1951 support is historical compatibility
-  coverage only.
+  common HTTP content coding, with the public deflate contract covering
+  zlib-wrapped RFC 1950 plus raw RFC 1951 as a legacy-server compatibility
+  fallback.
 - Preserves gzip member/trailer integrity across arbitrary chunks and resumes.
 - Gives streaming, Rust full-buffer, and C fallback paths the same
   concatenated-member and cumulative-budget contract.

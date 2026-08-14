@@ -61,11 +61,11 @@ Required:
 - Decompression size accounting is response-wide.  Inflater reset at a gzip
   member boundary must not reset `total_decompressed` or independently grant
   another `max_decompressed_size` budget.
-- The frozen 0.9.2 public contract supports zlib-wrapped deflate (RFC 1950)
-  only. The decoder must initialize deflate with `windowBits = 15`
-  (`MAX_WBITS`) and must not promise a raw RFC 1951 fallback. Older C
-  compatibility tests keep raw probes as historical coverage. Mark those
-  probes explicitly and do not use them to define new public behavior.
+- The 0.9.2 public contract supports zlib-wrapped deflate (RFC 1950) and raw
+  RFC 1951 deflate as a compatibility fallback. The decoder must initialize
+  deflate with `windowBits = 15` (`MAX_WBITS`) when a zlib header is present,
+  and with `-MAX_WBITS` (raw) otherwise. Raw probes count as supported
+  behavior and must keep passing on both the streaming and full-buffer paths.
 - Truncated gzip members and zlib-wrapped deflate streams must be
   explicitly rejected
   with a budget or integrity error, not silently accepted.  When

@@ -22,7 +22,7 @@ decompression via the Rust FFI path.
 | Encoding | Streaming-eligible conditions | 0.9.2 path |
 |----------|-------------------------------|------------|
 | identity | streaming selected | streaming conversion |
-| deflate (RFC 1950 zlib-wrapped) | automatic decompression on; streaming selected; cache validation not `full` | streaming decompression |
+| deflate (RFC 1950 zlib-wrapped, raw RFC 1951 fallback) | automatic decompression on; streaming selected; cache validation not `full` | streaming decompression |
 | gzip | automatic decompression on; streaming selected; cache validation not `full` | member-aware streaming decompression |
 | Brotli (`br`) | automatic decompression on; streaming selected; cache validation not `full`; `NGX_HTTP_BROTLI` defined | streaming decompression |
 | Brotli (`br`) | `NGX_HTTP_BROTLI` not defined | bounded full-buffer decompression (Rust FFI) |
@@ -38,7 +38,7 @@ eligible response, the following logic applies:
    unsupported encoding are not subject to `markdown_error_policy`.
 2. If `markdown_auto_decompress` is **on** and the module selects streaming with cache
    validation not `full`:
-   - **Deflate** (zlib-wrapped RFC 1950) decompresses incrementally.
+   - **Deflate** (zlib-wrapped RFC 1950, with raw RFC 1951 compatibility fallback) decompresses incrementally.
    - **Gzip** decompresses incrementally with gzip member/trailer validation.
    - **Brotli** decompresses incrementally (single-stream, trailing-data
      rejection, no-progress guard) when the build defines `NGX_HTTP_BROTLI`.
@@ -111,8 +111,10 @@ The 0.9.2 boundary rests on validated decoder lifecycles:
 - Preserves backpressure semantics (NGX_AGAIN handling) while decompression
   state is in-flight.
 
-- Deflate uses the fixed zlib-wrapped RFC 1950 framing. Raw RFC 1951 framing
-  and raw fallback are outside the frozen 0.9.2 public contract.
+- Deflate uses the zlib-wrapped RFC 1950 framing and also accepts raw RFC 1951
+  framing as a compatibility fallback for legacy servers. Both the streaming
+  and full-buffer paths apply the same sniffing decision (zlib header present
+  or not).
 - Gzip uses zlib's gzip wrapper plus member-aware reset, cumulative budget,
   truncation, backpressure, and terminal-once validation.
 - Brotli uses the official `BrotliDecoderDecompressStream` C API with
