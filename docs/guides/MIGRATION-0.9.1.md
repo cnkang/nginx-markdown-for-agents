@@ -163,7 +163,7 @@ unimplemented values had no distinct production effect:
 
 ---
 
-### 6. `markdown_trusted_proxies` Now Main-Only
+### 6. `markdown_trusted_proxies` Now HTTP-Context Only
 
 `markdown_trusted_proxies` is now accepted only in the `http` context.
 `server` and `location` uses fail `nginx -t` instead of creating a Rust-owned
