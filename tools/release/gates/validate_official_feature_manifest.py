@@ -92,6 +92,10 @@ def _forbidden_feature_dict(
         child_path = (*path, str(key))
         if key == "features" and isinstance(child, list):
             yield from _forbidden_feature_values(child, child_path)
+            continue
+        if isinstance(child, dict) and key in ("features", "options"):
+            yield from _forbidden_feature_dict(child, child_path)
+            continue
         yield from _forbidden_feature_consumers(child, child_path)
 
 

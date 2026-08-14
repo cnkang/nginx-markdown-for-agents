@@ -37,6 +37,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -577,7 +578,8 @@ def wait_for_ready(url: str, timeout: int = 30) -> bool:
                 if response.status == 200:
                     return True
         except (urllib.error.URLError, OSError):
-            time.sleep(0.5)
+            pass
+        time.sleep(0.25)
     return False
 
 

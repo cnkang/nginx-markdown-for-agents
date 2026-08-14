@@ -130,13 +130,14 @@ def _validate_family_identity(
 
     if not isinstance(prefix, str) or not prefix:
         errors.append("constraints.family_prefix must be a non-empty string")
-    elif not isinstance(name, str) or not name.startswith(prefix):
-        errors.append(f"Family '{name}' missing {prefix} prefix")
-    if family_type not in valid_types:
-        errors.append(f"Family '{name}' has invalid type '{family_type}'")
-    if name in seen_names:
-        errors.append(f"Duplicate family name: {name}")
-    seen_names.add(name)
+    else:
+        if not isinstance(name, str) or not name.startswith(prefix):
+            errors.append(f"Family '{name}' missing {prefix} prefix")
+        if family_type not in valid_types:
+            errors.append(f"Family '{name}' has invalid type '{family_type}'")
+        if name in seen_names:
+            errors.append(f"Duplicate family name: {name}")
+        seen_names.add(name)
     return errors, name
 
 

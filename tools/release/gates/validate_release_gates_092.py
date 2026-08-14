@@ -168,7 +168,8 @@ def _parse_reason_metric_map(body):
             continue
         match = re.match(r"[ \t]*\"([^\"]*)\"", rhs)
         if match is None:
-            continue
+            return None, "Rust metric registry contains a malformed match arm"
+
         for name in pending:
             if name in values:
                 return None, f"Rust metric registry contains duplicate entry: {name}"
