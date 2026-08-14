@@ -794,11 +794,6 @@ rm -f -- "${cleanup_fail2_target%/*}/.markdown-dynconf-backup."* 2>/dev/null || 
 echo "PASS: original nonzero rc preserved when cleanup also fails" >&2
 fi
 
-# Case: original rc == 0 + cleanup succeeds → exit 0 (covered by existing
-# existing-file test above which asserts rc 41 with successful restore).
-
-# Case: signal rc (129) + cleanup → preserve 129 (covered by signal test).
-
 # Case: deleting a test-created file fails → exit 70 when rc==0.
 cleanup_rmdir_target="$TMP_ROOT/cleanup-rmdir/markdown-dynamic.conf"
 mkdir -p -- "${cleanup_rmdir_target%/*}"
@@ -818,6 +813,11 @@ exit 0
 chmod 755 "${cleanup_rmdir_target%/*}" 2>/dev/null || true
 rm -f -- "$cleanup_rmdir_target" 2>/dev/null || true
 echo "PASS: cleanup file-remove failure with rc0 exits 70" >&2
+
+# Case: original rc == 0 + cleanup succeeds → exit 0 (covered by existing
+# existing-file test above which asserts rc 41 with successful restore).
+
+# Case: signal rc (129) + cleanup → preserve 129 (covered by signal test).
 
 echo "PASS: PID ownership and cleanup failure regression tests" >&2
 
