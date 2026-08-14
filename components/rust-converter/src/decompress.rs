@@ -7,7 +7,8 @@
 //! # Supported Formats
 //!
 //! - `0` = gzip (RFC 1952)
-//! - `1` = zlib-wrapped deflate (RFC 1950 carrying RFC 1951 data)
+//! - `1` = deflate: zlib-wrapped (RFC 1950) by default, with legacy raw
+//!   RFC 1951 compatibility fallback (sniffed heuristically)
 //! - `2` = brotli (RFC 7932)
 //!
 //! # Error Categories
@@ -30,7 +31,8 @@ use std::io::Read;
 pub enum Format {
     /// gzip (RFC 1952)
     Gzip = 0,
-    /// zlib-wrapped deflate (RFC 1950 carrying RFC 1951 data)
+    /// deflate: zlib-wrapped (RFC 1950) by default, with legacy raw
+    /// RFC 1951 compatibility fallback
     Deflate = 1,
     /// brotli (RFC 7932)
     Brotli = 2,
@@ -219,13 +221,17 @@ fn decompress_gzip(input: &[u8], budget: usize) -> Result<DecompResult, DecompEr
     Ok(DecompResult { output })
 }
 
-/// True when `input` begins with a valid zlib header (RFC 1950).
+/// True when `input` begins with a plausible zlib header (RFC 1950).
 ///
-/// A raw deflate stream (RFC 1951) can never be misdetected: its first byte
-/// is a deflate block header whose low nibble is 0..7 (stored/fixed/dynamic
-/// block type bits), so `CM == 8` is impossible. The FLG checksum provides a
-/// second guard. This mirrors the C streaming decompressor's sniffing
-/// decision (zlib header present -> MAX_WBITS, otherwise -MAX_WBITS).
+/// This is a heuristic, not a proof: a raw deflate stream (RFC 1951) whose
+/// first byte carries non-zero alignment padding bits can legally begin with
+/// `0x78 0x9c` (a stored block), which also satisfies the CMF/FLG check.
+/// Callers therefore treat a wrapped-mode decode failure with zero output as
+/// a signal to retry in raw mode (see [`decompress_deflate`]).  This mirrors
+/// the C decompressor's sniffing decision (zlib header present -> MAX_WBITS,
+/// otherwise -MAX_WBITS); the C full-buffer path applies the same
+/// wrapped-then-raw retry, while the C streaming path documents the sniff as
+/// heuristic without retry.
 fn has_zlib_header(input: &[u8]) -> bool {
     if input.len() < 2 {
         return false;
@@ -239,22 +245,55 @@ fn has_zlib_header(input: &[u8]) -> bool {
 /// budget enforcement.
 ///
 /// The deflate layer accepts both framings: zlib-wrapped (RFC 1950, the
-/// HTTP-standard form) is selected when the input begins with a valid zlib
-/// header; otherwise the input is decoded as raw deflate (RFC 1951) for
-/// compatibility with legacy servers. This matches the C streaming
-/// decompressor's sniffing behavior so the three decoding paths (C
-/// streaming, C full-buffer, Rust chain/FFI) accept the same inputs.
+/// HTTP-standard form) is selected when the input begins with a plausible
+/// zlib header; otherwise the input is decoded as raw deflate (RFC 1951) for
+/// compatibility with legacy servers.  Because the header sniff is a
+/// heuristic (see [`has_zlib_header`]), a wrapped-mode decode that fails with
+/// a format error before producing any output is retried as raw RFC 1951.
+/// The retry is skipped once output has been produced (the framing was
+/// effectively confirmed) or when the failure is truncation/budget/I/O, so
+/// error classification stays intact.  This matches the C full-buffer
+/// decompressor's FORMAT_ERROR fallback so the decoding paths accept the
+/// same inputs.
 fn decompress_deflate(input: &[u8], budget: usize) -> Result<DecompResult, DecompError> {
-    use flate2::{Decompress, FlushDecompress, Status};
-
     if input.is_empty() {
         return Err(DecompError::TruncatedInput(
             "empty input for deflate decompression".to_string(),
         ));
     }
 
-    let mut decoder = Decompress::new(has_zlib_header(input));
     let mut output = Vec::new();
+    let zlib_wrapped = has_zlib_header(input);
+
+    match deflate_decode_into(input, budget, zlib_wrapped, &mut output) {
+        Ok(()) => Ok(DecompResult { output }),
+        Err(e) => {
+            let retry_as_raw =
+                zlib_wrapped && output.is_empty() && matches!(e, DecompError::FormatError(_));
+            if !retry_as_raw {
+                return Err(e);
+            }
+            // The sniff was fooled by a raw stream whose first bytes satisfy
+            // the CMF/FLG check (e.g. `78 9c` stored-block padding bits).
+            // The wrapped attempt produced no output, so nothing committed is
+            // discarded by restarting the decode in raw mode.
+            output.clear();
+            deflate_decode_into(input, budget, false, &mut output)?;
+            Ok(DecompResult { output })
+        }
+    }
+}
+
+/// Run a bounded flate2 decode (wrapped or raw) appending into `output`.
+fn deflate_decode_into(
+    input: &[u8],
+    budget: usize,
+    zlib_wrapped: bool,
+    output: &mut Vec<u8>,
+) -> Result<(), DecompError> {
+    use flate2::{Decompress, FlushDecompress, Status};
+
+    let mut decoder = Decompress::new(zlib_wrapped);
     let chunk_size = 8192.min(budget.saturating_add(1)).max(1);
     let mut buf = vec![0u8; chunk_size];
 
@@ -298,7 +337,7 @@ fn decompress_deflate(input: &[u8], budget: usize) -> Result<DecompResult, Decom
         }
 
         match status {
-            Status::StreamEnd => return Ok(DecompResult { output }),
+            Status::StreamEnd => return Ok(()),
             Status::Ok | Status::BufError => {
                 if consumed_now == 0 && produced_now == 0 {
                     return Err(DecompError::TruncatedInput(
@@ -426,7 +465,9 @@ mod tests {
 
     #[test]
     fn deflate_large_output_decompresses_across_internal_chunks() {
-        let original = vec![b'D'; 65_536];
+        // Integer literals per AGENTS.md Rule 17 (byte-char literals confuse
+        // lizard's brace counting).
+        let original = vec![68u8; 65_536];
         let compressed = deflate_compress(&original);
         let result = decompress_bounded(&compressed, Format::Deflate, original.len()).unwrap();
         assert_eq!(result.output, original);
@@ -443,7 +484,7 @@ mod tests {
     #[test]
     fn gzip_budget_exceeded() {
         // Create data larger than budget
-        let original = vec![b'A'; 10_000];
+        let original = vec![65u8; 10_000];
         let compressed = gzip_compress(&original);
         let result = decompress_bounded(&compressed, Format::Gzip, 100);
         assert!(result.is_err());
@@ -454,7 +495,7 @@ mod tests {
 
     #[test]
     fn deflate_budget_exceeded() {
-        let original = vec![b'B'; 10_000];
+        let original = vec![66u8; 10_000];
         let compressed = deflate_compress(&original);
         let result = decompress_bounded(&compressed, Format::Deflate, 100);
         assert!(result.is_err());
@@ -532,7 +573,10 @@ mod tests {
         let original = b"<html><body>legacy raw deflate payload</body></html>";
         let raw = raw_deflate_compress(original);
         // Sanity: the raw stream must not carry a zlib header.
-        assert!(!has_zlib_header(&raw), "raw deflate must not look zlib-wrapped");
+        assert!(
+            !has_zlib_header(&raw),
+            "raw deflate must not look zlib-wrapped"
+        );
         let result = decompress_bounded(&raw, Format::Deflate, 4096).unwrap();
         assert_eq!(result.output, original);
     }
@@ -541,27 +585,67 @@ mod tests {
     fn deflate_still_accepts_zlib_wrapped_rfc1950_input() {
         let original = b"<html><body>standard zlib-wrapped payload</body></html>";
         let zlib = deflate_compress(original);
-        assert!(has_zlib_header(&zlib), "zlib-wrapped must carry a zlib header");
+        assert!(
+            has_zlib_header(&zlib),
+            "zlib-wrapped must carry a zlib header"
+        );
         let result = decompress_bounded(&zlib, Format::Deflate, 4096).unwrap();
         assert_eq!(result.output, original);
     }
 
     #[test]
-    fn has_zlib_header_rejects_raw_block_headers() {
-        // Raw deflate first bytes are block headers with low nibble 0..7;
-        // CM==8 (deflate) in the low nibble is structurally impossible, so
-        // sniffing can never misclassify a raw stream as zlib-wrapped.
-        let cases: [&[u8]; 4] = [b"\x00abc", b"\x01abc", b"\x03abc", b"\x78\x9c"];
-        for raw in cases {
-            if raw.starts_with(b"\x78\x9c") {
-                assert!(has_zlib_header(raw));
-                continue;
-            }
-            assert!(!has_zlib_header(raw), "{raw:02x?} must not look zlib-wrapped");
-        }
+    fn has_zlib_header_is_heuristic_for_raw_block_headers() {
+        // Standard compressors zero the alignment padding bits of the first
+        // stored-block header byte, so their raw output starts with 0x00-0x07
+        // and cannot satisfy CMF == 8.  A non-compliant encoder may set those
+        // padding bits, making the first byte 0x78 with BTYPE=00 stored —
+        // which, followed by 0x9c, satisfies the CMF/FLG check.  The sniff is
+        // therefore a heuristic: `78 9c` IS classified as zlib-wrapped here,
+        // and decompress_deflate recovers via the raw retry (see
+        // raw_deflate_with_zlib_like_prefix_is_retried_as_raw).
+        // Standard-compressor raw output starts with 0x00-0x07 (padding bits
+        // zeroed), so the sniff must reject those; 78 9c is classified as
+        // zlib-wrapped and recovered by the raw retry.  Asserted one by one
+        // (no `&[` slice-literal arrays — they confuse lizard's brace
+        // counting, AGENTS.md Rule 17).
+        assert!(!has_zlib_header(b"\x00abc"));
+        assert!(!has_zlib_header(b"\x01abc"));
+        assert!(!has_zlib_header(b"\x03abc"));
+        assert!(has_zlib_header(b"\x78\x9c"));
         // Too-short input cannot be classified as zlib-wrapped.
         assert!(!has_zlib_header(b""));
         assert!(!has_zlib_header(b"\x78"));
+    }
+
+    #[test]
+    fn raw_deflate_with_zlib_like_prefix_is_retried_as_raw() {
+        // A legal raw RFC 1951 stored-block stream whose first bytes 78 9c
+        // satisfy the zlib CMF/FLG check:
+        //   0x78    = BFINAL=0, BTYPE=00 (stored), padding bits 0b01111
+        //   9c 00   = LEN 156 (little-endian)
+        //   63 ff   = NLEN = 0xff63 = 65535 - 156
+        // followed by the 156-byte payload and a final empty stored block.
+        // The heuristic sniff must not reject it: the wrapped decode fails
+        // before producing any output and the raw retry must succeed.
+        let payload = vec![65u8; 156];
+        let mut stream = Vec::with_capacity(166);
+        stream.push(0x78);
+        stream.push(0x9c);
+        stream.push(0x00);
+        stream.push(0x63);
+        stream.push(0xff);
+        stream.extend_from_slice(&payload);
+        stream.push(0x01);
+        stream.push(0x00);
+        stream.push(0x00);
+        stream.push(0xff);
+        stream.push(0xff);
+        assert!(
+            has_zlib_header(&stream),
+            "fixture must satisfy the CMF/FLG sniff"
+        );
+        let result = decompress_bounded(&stream, Format::Deflate, 4096).unwrap();
+        assert_eq!(result.output, payload);
     }
 
     #[test]
