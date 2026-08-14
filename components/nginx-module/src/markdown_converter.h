@@ -1835,8 +1835,10 @@ void markdown_decomp_result_init(struct FFIDecompResult *result);
  * `ENCODING_HEADER_INVALID` reason (`stage=decompression`,
  * `error_origin=format`) during outer precommit routing, start no decoder,
  * and mutate no response header. `ENCODING_CHAIN_UNKNOWN_TOKEN` and
- * `ENCODING_CHAIN_DEPTH_EXCEEDED` are capability bypasses: the entire
- * conversion is bypassed in precommit with no error-policy dispatch.
+ * `ENCODING_CHAIN_DEPTH_EXCEEDED` are parser classifications routed by
+ * the C precommit router through the configured error policy (reject or
+ * fail-open), like the malformed case, using the decompression-format
+ * reason code.
  *
  * # Return Value
  *
