@@ -309,6 +309,9 @@ def run_real_gate(args) -> int:
             f"stale-digest: candidate_sha {candidate_sha} != expected {expected_sha}"
         )
     if not _require_jsonschema():
+        if reasons:
+            for reason in reasons:
+                print(f"ERROR: {reason}", file=sys.stderr)
         return 1
     _validate_evidence_schema(manifest, reasons)
     _validate_observation_state(reasons, expected_sha, manifest_path.parent)
