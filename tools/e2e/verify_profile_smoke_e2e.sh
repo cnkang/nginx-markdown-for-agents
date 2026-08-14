@@ -301,6 +301,30 @@ for path in /strict/diagnostics /balanced/diagnostics /streaming/diagnostics; do
     assert_diag_field "${path}" configuration.effective.error_policy pass
 done
 
+# Every explicitly configured replacement setting must surface in the
+# effective configuration for each profile.
+assert_diag_field /strict/diagnostics configuration.effective.cache_validation full
+assert_diag_field /strict/diagnostics configuration.effective.streaming off
+assert_diag_field /strict/diagnostics configuration.effective.conversion_memory 134217728
+assert_diag_field /strict/diagnostics configuration.effective.conversion_timeout 10000
+assert_diag_field /strict/diagnostics configuration.effective.parser_timeout 10000
+assert_diag_field /strict/diagnostics configuration.effective.max_inflight 32
+
+assert_diag_field /balanced/diagnostics configuration.effective.cache_validation ims_only
+assert_diag_field /balanced/diagnostics configuration.effective.streaming auto
+assert_diag_field /balanced/diagnostics configuration.effective.conversion_memory 67108864
+assert_diag_field /balanced/diagnostics configuration.effective.conversion_timeout 30000
+assert_diag_field /balanced/diagnostics configuration.effective.parser_timeout 10000
+assert_diag_field /balanced/diagnostics configuration.effective.max_inflight 64
+
+assert_diag_field /streaming/diagnostics configuration.effective.accept wildcard
+assert_diag_field /streaming/diagnostics configuration.effective.cache_validation off
+assert_diag_field /streaming/diagnostics configuration.effective.streaming force
+assert_diag_field /streaming/diagnostics configuration.effective.conversion_memory 268435456
+assert_diag_field /streaming/diagnostics configuration.effective.conversion_timeout 30000
+assert_diag_field /streaming/diagnostics configuration.effective.parser_timeout 10000
+assert_diag_field /streaming/diagnostics configuration.effective.max_inflight 128
+
 if "${NGINX_EXECUTABLE}" -p "${RUNTIME}" \
     -c conf/invalid-strict-streaming.conf -t >/dev/null 2>&1; then
     fail "full cache validation accepted explicit streaming=force"

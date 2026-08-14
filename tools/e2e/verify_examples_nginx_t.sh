@@ -390,6 +390,10 @@ if [[ -f "${CONFIGMAP_YAML}" ]]; then
     echo "    }"
     echo "}"
   } > "${PREPARED_CONF}"
+  if [[ ! -s "${CM_MAIN}" && ! -s "${CM_HTTP}" ]]; then
+    echo "FAIL: configmap extraction produced no directives (CM_MAIN and CM_HTTP empty)" >&2
+    exit 1
+  fi
   if [[ -n "${MODULE_SO}" ]]; then
     escaped_module_so="$(escape_sed_replacement "${MODULE_SO}")"
     sed_in_place "s|^([[:space:]]*)load_module[[:space:]]+[^;]*;|\1load_module ${escaped_module_so};|" \
