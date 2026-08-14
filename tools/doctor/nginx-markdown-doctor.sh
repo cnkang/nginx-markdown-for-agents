@@ -584,9 +584,17 @@ check_rust_toolchain() {
     fi
 
     if [[ -z "$doctor_root" || "$checkout_root" != "$doctor_root" ]]; then
-        emit_check "rust_toolchain" "skip" \
-            "repository checkout unavailable; skipped pinned toolchain check" \
-            '{"repository_checkout":false}'
+        # The MSRV verdict still applies without a checkout; only the
+        # pinned-channel validation needs repository metadata.
+        if [[ "$msrv_ok" == "true" ]]; then
+            emit_check "rust_toolchain" "warn" \
+                "rustc ${rustc_version} meets MSRV ${expected_msrv}; repository checkout unavailable, pinned-channel check skipped" \
+                '{"repository_checkout":false,"msrv_ok":true}'
+        else
+            emit_check "rust_toolchain" "fail" \
+                "rustc ${rustc_version} below MSRV ${expected_msrv}; repository checkout unavailable, pinned-channel check skipped" \
+                '{"repository_checkout":false,"msrv_ok":false}'
+        fi
         return 0
     fi
 
