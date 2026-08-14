@@ -67,8 +67,8 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
 The module achieves impressive results:
 
-- **70-85% token reduction** compared to raw HTML
-- **<50ms latency** for typical pages
+- **70\-85% token reduction** compared to raw HTML
+- **\<50ms latency** for typical pages
 - **Zero crashes** thanks to Rust's memory safety
 
 "This module has transformed how our AI agents consume web content. The token savings alone justify the implementation effort."
