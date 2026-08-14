@@ -36,7 +36,10 @@ inflight requests are intentionally unlabelled to keep series cardinality
 bounded. Rust helper-event names and enums are implementation details and do
 not expand this Prometheus label contract.
 
-The six series currently map to the following snapshot counters:
+The `nginx_markdown_streaming_events_total` counter uses `transition` and
+`reason` labels. The six rows below are the label-value combinations emitted by
+this single metric family, not six independent events. Each row corresponds to
+one `transition`/`reason` pair:
 
 | Transition | Fixed reason | Snapshot source | Contract note |
 |---|---|---|---|
