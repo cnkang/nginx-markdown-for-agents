@@ -1131,10 +1131,12 @@ select a legacy JSON or human-readable representation.
 The primary rollout ratios come from the frozen families:
 
 ```text
-conversion_delivery_rate = sum(nginx_markdown_conversion_deliveries_total)
-                            / sum(nginx_markdown_conversion_attempts_total)
-failure_rate = sum(nginx_markdown_requests_total{outcome=~"failed_.*"})
-               / sum(nginx_markdown_requests_total)
+# clamp_min(..., 1e-9) is a divide-by-zero guard only; it does not change
+# the rate units, so low-traffic ratios keep their true magnitude.
+conversion_delivery_rate = sum(rate(nginx_markdown_conversion_deliveries_total[5m]))
+                            / clamp_min(sum(rate(nginx_markdown_conversion_attempts_total[5m])), 1e-9)
+failure_rate = sum(rate(nginx_markdown_requests_total{outcome=~"failed_.*"}[5m]))
+               / clamp_min(sum(rate(nginx_markdown_requests_total[5m])), 1e-9)
 ```
 
 A healthy rollout keeps `failure_rate` within the pre-rollout baseline and
@@ -1299,8 +1301,8 @@ A rollout is healthy when all of the following hold true during the observation 
 
 | Indicator | Threshold | How to Check |
 |-----------|-----------|--------------|
-| Conversion delivery rate | Stable vs baseline | `sum(nginx_markdown_conversion_deliveries_total) / sum(nginx_markdown_conversion_attempts_total)` from Prometheus |
-| Failed request rate | Within baseline | `sum(nginx_markdown_requests_total{outcome=~"failed_.*"}) / sum(nginx_markdown_requests_total)` from Prometheus |
+| Conversion delivery rate | Stable vs baseline | `sum(rate(nginx_markdown_conversion_deliveries_total[5m])) / clamp_min(sum(rate(nginx_markdown_conversion_attempts_total[5m])), 1e-9)` from Prometheus |
+| Failed request rate | Within baseline | `sum(rate(nginx_markdown_requests_total{outcome=~"failed_.*"}[5m])) / clamp_min(sum(rate(nginx_markdown_requests_total[5m])), 1e-9)` from Prometheus |
 | Conversion latency | Within configured `markdown_limits` | Latency buckets show the vast majority of conversions completing before the timeout threshold |
 | Failed request trend | Stable or decreasing | Compare `requests_total{outcome=~"failed_.*"}` snapshots over the observation period |
 | Upstream error rate | No increase correlated with enablement | Compare upstream 5xx rates before and after enabling the module |

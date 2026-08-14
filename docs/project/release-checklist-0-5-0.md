@@ -11,6 +11,7 @@ or review action.
 - [ ] All 7 sub-specs have requirements documents — Verify: `make release-gates-check-strict` or `tools/release/gates/validate_release_gates.py --mode strict --check docs-exist`
 - [ ] All 7 sub-specs have design documents — Verify: `make release-gates-check-strict` or `tools/release/gates/validate_release_gates.py --mode strict --check docs-exist`
 - [ ] All new operator-facing surfaces appear in docs — Verify: manual review + `make docs-check`
+- [ ] Documentation is accurate and complete, including defaults, behavior, failure modes, and migration guidance — Verify: manual review against current docs plus `make docs-check`
 - [ ] Streaming configuration guide is complete — Verify: document existence check in `docs/guides/`
 - [ ] Rollout cookbook is complete (streaming enable, shadow mode, gradual expansion) — Verify: document existence check
 - [ ] Compatibility matrix documentation is complete — Verify: `docs/project/compatibility-matrix-0-5-0.md` exists with all capabilities classified

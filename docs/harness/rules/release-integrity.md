@@ -79,7 +79,7 @@ own objects. Do not copy provenance into every scenario record:
    Mixed-environment baselines are split or rejected.
 
 **Verification:**
-- `RELEASE_GATE_ALLOW_SKIP_MODULE=1 make release-gates-check-091` — blocking
+- `RELEASE_GATE_ALLOW_SKIP_MODULE=1 make release-gates-check-092` — blocking
   gate (requires `NGINX_BIN` or `RELEASE_GATE_ALLOW_SKIP_MODULE=1`), validates
   `baseline_policy`, top-level `module_benchmark` environment/identity,
   and each scenario's evidence objects at their respective levels.
@@ -87,7 +87,7 @@ own objects. Do not copy provenance into every scenario record:
   same invariant for PR visibility.
 - `python3 -m pytest tools/perf/tests/` — perf tooling test suite
   (692 tests), must pass.
-- Inspect `perf/baselines/module-baseline-091.json` `baseline_policy` and
+- Inspect `perf/baselines/module-baseline-092.json` `baseline_policy` and
   confirm it carries the six policy provenance fields above, inspect
   `module_benchmark` and scenario records for their separate schemas.
 

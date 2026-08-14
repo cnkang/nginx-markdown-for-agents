@@ -882,7 +882,7 @@ curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/test
 
 ## Reason Code Reference for Operators
 
-Every request that enters the module's decision chain receives a reason code that explains the outcome. These reason codes appear in decision log entries and Prometheus metrics labels using the same strings. You can correlate a log entry directly with a metric counter without translation.
+Every request that enters the module's decision chain receives a reason code that explains the outcome. These reason codes appear in decision log entries using the `reason=` field and in Prometheus metrics as label values. The decision-log `reason=` field and the Prometheus label value use the same string for each reason code. You can correlate a log entry directly with a metric counter without translation. Decision-log failure categories (such as `failed_open` and `failed_closed`) appear in request-level Prometheus metrics as both `outcome` and `reason` label values. For example, `outcome="failed_open",reason="failed_open"`. The labels remain distinct dimensions even when their values match.
 
 For the full decision chain model (check order, flowchart, and outcome determination logic), see [Decision Chain Model](../features/DECISION_CHAIN.md).
 
@@ -996,13 +996,13 @@ grep "markdown decision:" /var/log/nginx/error.log | grep -c "reason=disabled"
 
 # Count SKIPPED from logs (excluding the disabled/NOT_ENABLED state)
 grep "markdown decision:" /var/log/nginx/error.log | \
-  grep -E "reason=(not_eligible|skipped_accept|skipped_no_accept|skipped_conditional|skipped_accept_reject|bypass_no_transform)"
+  grep -cE "reason=(not_eligible|skipped_accept|skipped_no_accept|skipped_conditional|skipped_accept_reject|bypass_no_transform)"
 
 # Count CONVERTED from logs
 grep "markdown decision:" /var/log/nginx/error.log | grep -c "reason=converted"
 
 # Count FAILED from logs
-grep "markdown decision:" /var/log/nginx/error.log | grep -E 'reason=(failed_open|failed_closed)'
+grep "markdown decision:" /var/log/nginx/error.log | grep -cE 'reason=(failed_open|failed_closed)'
 ```
 
 ### Reason Code and Metrics Label Alignment

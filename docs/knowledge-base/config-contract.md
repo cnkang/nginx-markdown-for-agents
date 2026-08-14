@@ -119,10 +119,12 @@ Frozen v1 registry. `bounded` = labeled with bounded-cardinality values.
 
 ## markdown_limits Keys
 
-`markdown_limits key=value ...` — each key at most once. Unknown keys, zero
-values, overflow, and malformed entries fail `nginx -t` or the atomic
-dynconf validation path. Defaults are inheritance-based (`NGX_CONF_UNSET`).
-0.9.2 documents no explicit defaults.
+`markdown_limits key=value ...` — each key at most once. Unknown keys, overflow,
+and malformed entries fail `nginx -t` or the atomic dynconf validation path.
+Explicit zero values fail validation. This includes `max_inflight=0`.
+Configured `max_inflight` values must be integers greater than 0. The internal zero value
+for an unset or inherited `max_inflight` means unlimited. Defaults are
+inheritance-based (`NGX_CONF_UNSET`). 0.9.2 documents no explicit defaults.
 
 | Key | Meaning |
 |---|---|

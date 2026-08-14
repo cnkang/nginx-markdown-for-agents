@@ -68,7 +68,7 @@ Content-Type: text/html
 ...
 ```
 
-The install script auto-enables `markdown_filter on` and wires the `load_module` directive. You do not need to edit the configuration manually. The NGINX default welcome page (`/usr/share/nginx/html/index.html`) serves as the demo content source — no upstream or proxy configuration needed.
+The install script auto-enables `markdown_filter on` and wires the `load_module` directive. When automatic wiring completes successfully, you do not need to edit the configuration manually. If the installer reports manual actions, follow its instructions to finish the wiring. The NGINX default welcome page (`/usr/share/nginx/html/index.html`) serves as the demo content source — no upstream or proxy configuration needed.
 
 > **Note:** If you need a standalone demo configuration file, see [`examples/nginx-configs/00-minimal-demo.conf`](../../examples/nginx-configs/00-minimal-demo.conf).
 

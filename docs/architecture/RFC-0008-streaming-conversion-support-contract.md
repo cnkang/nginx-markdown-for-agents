@@ -124,12 +124,8 @@ markdown_streaming auto;
 
 ### 2.2 Automatic Streaming Heuristic (active 0.9.2 contract)
 
-```nginx
-markdown_stream_threshold 1m;
-```
-
-The old `markdown_stream_threshold` directive is historical and is not active
-in 0.9.2. Current selection uses `markdown_streaming auto` and a bounded
+The retired `markdown_stream_threshold` directive is historical and is not
+active in 0.9.2. Current selection uses `markdown_streaming auto` and a bounded
 internal response-shape heuristic. There is no replacement threshold
 directive.
 

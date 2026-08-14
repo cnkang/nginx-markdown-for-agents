@@ -36,14 +36,14 @@ This project draws inspiration from Cloudflare's announcement but provides a sel
 - **Operating System**: macOS or Linux (x86_64 or aarch64)
 - **Memory**: Minimum 512MB RAM per worker (more for large documents)
 
-If your distro ships an older NGINX (for example 1.22.x or earlier), upgrade NGINX first. Alternatively, maintain a custom build for that version.
+Your distro may ship an older NGINX, such as 1.22.x or earlier. Upgrade NGINX to 1.24.0 or higher first. Custom source builds below 1.24.0 are not supported.
 
 ### Do I need to rebuild NGINX?
 
 Not always.
 
 - If you use one of the supported official NGINX builds and a matching release artifact exists, you can install the published dynamic module. You do not need to rebuild NGINX. Check the release assets for your version.
-- Use a custom NGINX build or a runtime without an exact version match? Compile the module against your NGINX source tree. The source tree provides the matching ABI. This applies to custom builds and unsupported versions.
+- Use a custom NGINX build or a runtime without an exact version match? Compile the module against your NGINX source tree. The source tree provides the matching ABI. This applies to custom builds of NGINX 1.24.0 or higher.
 
 You can integrate the module as either:
 - **Dynamic module** (recommended): Load with `load_module`

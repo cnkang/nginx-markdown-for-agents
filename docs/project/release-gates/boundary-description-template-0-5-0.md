@@ -12,8 +12,8 @@ Each sub-spec must include at least one boundary description for any capability 
 | Field | Description |
 |-------|-------------|
 | Capability | [Capability name] |
-| 0.5.0 Scope | [What is delivered — factual, specific] |
-| 0.6.x+ Scope | [What is deferred — factual, no commitments] |
+| 0.5.0 Scope | [What ships now — factual, specific] |
+| 0.6.x+ Scope | [What defers — factual, no commitments] |
 | Boundary Placement Rationale | [Why the boundary is placed here] |
 | Prerequisites for Deferred Work | [What must exist before deferred work can begin] |
 ```

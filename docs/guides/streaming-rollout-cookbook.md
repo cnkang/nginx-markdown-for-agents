@@ -11,7 +11,7 @@ Validate the binary and configuration:
 
 ```bash
 nginx -t
-nginx -T 2>/dev/null | grep -E 'markdown_(filter|streaming|auto_decompress|cache_validation|limits)'
+nginx -T 2>/dev/null | grep -E 'markdown_(filter|streaming|auto_decompress|cache_validation|limits|error_policy)'
 curl -s -H 'Accept: text/plain; version=0.0.4' \
   http://localhost/markdown-metrics > /tmp/markdown-metrics.baseline
 curl -s -H 'Accept: application/json' \

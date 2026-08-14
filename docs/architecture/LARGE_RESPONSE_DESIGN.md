@@ -85,13 +85,13 @@ path. It remains historical context, not a 0.9.2 feature claim.
 The current implementation buffers first, then delegates to the incremental
 Rust API. No current operator threshold selects this path.
 
-In practical terms, the current incremental path should be understood as:
+In historical terms, the retired incremental path represented:
 
 - a threshold-routed conversion path with independent metrics and rollout control
 - an API/ABI scaffold for future chunk-oriented processing
 - semantic groundwork for proving equivalence between full-buffer and future streaming variants
 
-It should not yet be understood as a true streaming or peak-memory-reduction path. The request body still exists as a full NGINX-side buffer. The Rust incremental API currently accumulates fed bytes internally before parsing.
+It was not a true streaming or peak-memory-reduction path. The request body still existed as a full NGINX-side buffer, and the Rust incremental API accumulated fed bytes internally before parsing. The active streaming engine supersedes this path in 0.9.2.
 
 > [!NOTE]
 > **Historical pre-0.9.0 limit**: Before the bounded streaming path was
@@ -246,7 +246,7 @@ When `markdown_large_body_threshold` is set to `off`, all requests follow the fu
 
 ### Small Response P50 Latency
 
-The introduction of the threshold router and incremental path must not degrade small-response P50 latency by more than 5%. [PERFORMANCE_BASELINES.md](../testing/PERFORMANCE_BASELINES.md) records the comparison baseline.
+The introduction of the active streaming engine must not degrade small-response P50 latency by more than 5%. [PERFORMANCE_BASELINES.md](../testing/PERFORMANCE_BASELINES.md) records the comparison baseline.
 
 Validation steps:
 
@@ -258,7 +258,7 @@ This 5% threshold is specific to the large-response optimization validation. It 
 
 ### Functional Consistency
 
-For all inputs that produce correct results through the full-buffer path, the incremental path must produce byte-identical output. The input is a single `feed_chunk` of the complete input plus `finalize`. Property-based testing (proptest) verifies this. The tests generate random HTML inputs and compare both paths.
+For all inputs that produce correct results through the full-buffer path, the active streaming engine must produce byte-identical output. Property-based testing (proptest) verifies this by feeding random HTML inputs through the streaming engine's chunked feed path and comparing the output against the full-buffer path.
 
 ## Error Handling
 

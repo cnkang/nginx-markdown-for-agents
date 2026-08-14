@@ -32,7 +32,8 @@ register runs **first** when a response flows through the chain.
 
 | Phase | Modules (in registration order) |
 |-------|--------------------------------|
-| Standard (compiled-in) | `gzip` → `gunzip` → `brotli` (ngx_brotli) |
+| Standard (compiled-in) | `gzip` → `gunzip` |
+| Optional (ngx_brotli, load_module or compiled-in) | `brotli` |
 | Dynamic (load_module) | `markdown_filter` (this module) |
 
 The runtime initialises the loaded module according to the effective NGINX

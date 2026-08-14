@@ -294,10 +294,11 @@ Depth counts from the document root node (depth 0). A text node inside
 
 ### Known limitations
 
-- The pre-scan walks the entire DOM tree, adding O(n) overhead. For documents
-  that do not qualify, this wastes work. In practice, the scan is
-  lightweight (tag-name comparison only) and terminates early on the first
-  disqualifying node.
+- The pre-scan walks the full DOM tree only when no disqualifying node is
+  found. Otherwise, it exits immediately at the first disqualifying node,
+  avoiding unnecessary traversal of the remaining tree. In practice, the
+  scan is lightweight (tag-name comparison, maximum-depth tracking, and
+  should_prune evaluation only).
 - The allowed element set is intentionally conservative. Some elements that
   the fast path could handle (for example `<dl>`, `<dt>`, `<dd>`) stay
   excluded to keep the qualification logic simple.

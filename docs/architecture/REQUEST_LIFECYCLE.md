@@ -41,7 +41,10 @@ directive. `force` requests streaming after the hard eligibility gates pass.
 
 Full cache validation, unsupported encodings, excluded content types, and
 build-disabled streaming features can still select full-buffer or passthrough.
-The module latches the selected engine before the first conversion attempt.
+Combining `markdown_cache_validation full` with `markdown_streaming force`
+fails during `nginx -t` with a configuration error, since streaming cannot
+guarantee cache-validation semantics. The module latches the selected engine
+before the first conversion attempt.
 The attempt metric increments at most once per request.
 
 ## Body filter and decompression
