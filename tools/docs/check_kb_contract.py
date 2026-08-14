@@ -267,9 +267,25 @@ def _validate_readme(errors: list[str], readme_text: str) -> None:
             errors.append(f"README must reference {required_reference}")
 
 
+def _check_duplicate_keys(errors: list[str], domain: str, keys: list[str]) -> None:
+    """Detect duplicate keys before a dict comprehension silently overwrites
+    them (run12 MINOR: duplicate-key detection in contract map construction)."""
+    seen: set[str] = set()
+    for key in keys:
+        if key in seen:
+            errors.append(f"duplicate {domain} key {key!r} in contract tables")
+        seen.add(key)
+
+
 def _validate_metrics(
     errors: list[str], inventory: dict, metric_rows: list[dict[str, str]]
 ) -> None:
+    _check_duplicate_keys(
+        errors, "metric", [item["name"] for item in inventory["metrics"]]
+    )
+    _check_duplicate_keys(
+        errors, "metric", [row["metric"].strip("`") for row in metric_rows]
+    )
     expected_metrics = {
         item["name"]: {
             "type": _clean(item["type"]),
@@ -301,6 +317,12 @@ def _validate_reasons_and_limits(
     reason_rows: list[dict[str, str]],
     limit_rows: list[dict[str, str]],
 ) -> None:
+    _check_duplicate_keys(
+        errors,
+        "reason code",
+        [str(item["discriminant"]) for item in inventory["reason_codes"]],
+    )
+    _check_duplicate_keys(errors, "reason code", [row["#"] for row in reason_rows])
     expected_reasons = {
         str(item["discriminant"]): {
             "string": _clean(item["string"]),
@@ -323,6 +345,9 @@ def _validate_reasons_and_limits(
         ("string", METRIC_KEY_FIELD),
     )
 
+    _check_duplicate_keys(
+        errors, "markdown_limits", [row["key"].strip("`") for row in limit_rows]
+    )
     expected_limits = {key: {} for key in _current_limit_keys()}
     actual_limits = {row["key"].strip("`"): {} for row in limit_rows}
     _compare_maps(errors, "markdown_limits", expected_limits, actual_limits, ())

@@ -1015,14 +1015,12 @@ def generate_c_header(reasons, hash_hex: str) -> str:
         stage = r["default_stage"]
         origin = r["default_origin"]
         lines.append(
-            f'    [{disc}] = {{ "{key}", "{outcome}", "{stage}", '
-            f'"{origin}" }},'
+            f'    [{disc}] = {{ "{key}", "{outcome}", "{stage}", "{origin}" }},'
         )
 
     # Unknown sentinel
     lines.append(
-        f'    [{len(reasons)}] = {{ "unknown", "failed_closed", '
-        f'"delivery", "internal" }},'
+        f'    [{len(reasons)}] = {{ "unknown", "failed_closed", "delivery", "internal" }},'
     )
 
     lines.extend([
@@ -1045,8 +1043,7 @@ def generate_c_header(reasons, hash_hex: str) -> str:
         "",
         "#ifdef MARKDOWN_REASON_META_DEFINE",
         "const markdown_reason_alias_t",
-        "    markdown_reason_aliases[MARKDOWN_REASON_ALIAS_COUNT > 0 ? "
-        "MARKDOWN_REASON_ALIAS_COUNT : 1] = {",
+        "    markdown_reason_aliases[MARKDOWN_REASON_ALIAS_COUNT > 0 ? MARKDOWN_REASON_ALIAS_COUNT : 1] = {",
     ])
 
     for alias, code in aliases:
