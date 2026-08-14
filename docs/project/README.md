@@ -6,7 +6,7 @@ This directory contains project-level status and maintenance-oriented documentat
 
 - [PROJECT_STATUS.md](PROJECT_STATUS.md) - current implementation and validation status (aligned to code and recent verification)
 - [HARNESS_HISTORY.md](HARNESS_HISTORY.md) - why the repo-owned harness exists, which failures it is meant to prevent, and what remains intentionally out of scope
-- [VERSION_PLANNING.md](VERSION_PLANNING.md) - recommended release framing and version cut lines for `0.4.0` through `0.6.x+`
+- [VERSION_PLANNING.md](VERSION_PLANNING.md) - active v0.9.2 development release-line planning and the v1.0 frozen compatibility contract that follows it
 - 0.5.0 release-gate working set (canonical `release-gates-check` inputs):
   - [release-gates-0-5-0.md](release-gates-0-5-0.md)
   - [release-checklist-0-5-0.md](release-checklist-0-5-0.md)
@@ -39,7 +39,7 @@ This directory contains project-level status and maintenance-oriented documentat
   copy): `GO_NO_GO_0.4.0.md`, `RELEASE_CHECKLIST_0.4.0.md`.
 
 `PROJECT_STATUS.md` and the dedicated pages summarize the harness-related
-repository posture. The details live in `HARNESS_HISTORY.md`, `docs/harness/`,
+repository posture. The details live in `docs/project/HARNESS_HISTORY.md`, `docs/harness/`,
 `docs/architecture/HARNESS_ARCHITECTURE.md`, and
 `docs/guides/HARNESS_MAINTENANCE.md`.
 
