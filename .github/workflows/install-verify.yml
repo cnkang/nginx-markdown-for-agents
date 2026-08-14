@@ -495,9 +495,9 @@ jobs:
           EXPECTED_INSTALL_SUCCESS: ${{ matrix.target.expected_install_success && 'true' || 'false' }}
           TARGET_NGINX: ${{ matrix.target.nginx }}
           TARGET_VARIANT: ${{ matrix.target.variant }}
+          INSTALL_EXIT: ${{ steps.install.outputs.install_exit }}
         run: |
           RESULTS_DIR="${{ runner.temp }}/install-verify"
-          INSTALL_EXIT="${{ steps.install.outputs.install_exit }}"
           JSON_PATH="${RESULTS_DIR}/install-stdout.json"
 
           SUCCESS=""
@@ -738,14 +738,14 @@ jobs:
           EXPECTED_INSTALL_SUCCESS: ${{ matrix.target.expected_install_success && 'true' || 'false' }}
           SUMMARY_REF: ${{ github.event.inputs.ref || github.ref }}
           SUMMARY_VERSION: ${{ github.event.inputs.version || 'latest' }}
+          INSTALL_EXIT: ${{ steps.install.outputs.install_exit }}
+          VALIDATE_OUTCOME: ${{ steps.validate_outcome.conclusion }}
+          NGINX_TEST_EXIT: ${{ steps.nginx_test.outputs.nginx_test_exit }}
+          MODULE_FOUND: ${{ steps.module_check.outputs.module_found }}
+          SMOKE_PASS: ${{ steps.smoke_test.outputs.smoke_test_pass }}
         run: |
           RESULTS_DIR="${{ runner.temp }}/install-verify"
           mkdir -p "${RESULTS_DIR}"
-          INSTALL_EXIT="${{ steps.install.outputs.install_exit }}"
-          VALIDATE_OUTCOME="${{ steps.validate_outcome.conclusion }}"
-          NGINX_TEST_EXIT="${{ steps.nginx_test.outputs.nginx_test_exit }}"
-          MODULE_FOUND="${{ steps.module_check.outputs.module_found }}"
-          SMOKE_PASS="${{ steps.smoke_test.outputs.smoke_test_pass }}"
 
           {
             echo "========================================"
