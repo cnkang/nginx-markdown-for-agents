@@ -44,7 +44,7 @@ Required:
   `(size_t)(last - pos)`) is forbidden unless:
   a. The subtraction appears in a comparison context (`>=`, `<=`, `==`) that
      self-guards, or
-  b. A bounds check on the pointers (for example `if (last <= p)`) precedes the
+  b. A bounds check on the pointers (for example `if (pos <= last)`) precedes the
      cast, or
   c. The code uses the safe wrapper `ngx_http_markdown_buf_len_safe(buf)` instead.
   The `detect_cwe190_casts.sh` Pattern (d) flags all other cases.

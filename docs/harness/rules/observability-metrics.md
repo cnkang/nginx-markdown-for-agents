@@ -93,9 +93,9 @@ Required:
   limitations, or (c) defer the metric to a future release when the proper
   data source is available.
 - **The module must increment counter metrics that track delivery outcomes (for
-  example `results.failopen_count`) only after the delivery operation succeeds
-  (downstream filter returns `NGX_OK`), not at the decision point that initiates
-  the delivery.**
+  example `results.failopen_count`) only after the downstream delivery succeeds
+  (the downstream filter returns `NGX_OK` or `NGX_DONE`), not at the decision
+  point that initiates the delivery.**
   Separate "decision" counters (for example `streaming.precommit_failopen_total`)
   from "delivery" counters (for example `results.failopen_count`) to prevent
   inflating the delivery count when the downstream send later fails (header

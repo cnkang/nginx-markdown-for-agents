@@ -67,7 +67,7 @@ own objects. Do not copy provenance into every scenario record:
    Subsequent regeneration does not overwrite it; the old pack stays preserved
    with its own digest.
 4. **Fail closed on missing provenance.** The blocking gate
-   (`make release-gates-check-091`) must reject any baseline policy that is
+   (`make release-gates-check-092`) must reject any baseline policy that is
    missing any required provenance field, rather than skipping it silently.
 5. **Raw artifact binding.** For `verbatim_run` baselines, the gate
    recomputes the SHA-256 of the raw artifact file and verifies it matches
