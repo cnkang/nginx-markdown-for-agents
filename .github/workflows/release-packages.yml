@@ -820,23 +820,20 @@ jobs:
           echo "Python release dependencies ${dependency_versions} are available."
         shell: bash
 
-      - name: Download signed packages (tag)
-        if: github.ref_type == 'tag'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: signed-packages
-          path: release-assets/
-
-      - name: Download all DEB artifacts (workflow dispatch)
-        if: github.ref_type != 'tag'
+      - name: Download all DEB artifacts
+        # The release gate validates the UNSIGNED package artifacts on BOTH
+        # tag and workflow_dispatch triggers. Signed packages are produced
+        # only after the gate passes (integrity-signing job), so the gate
+        # must never try to consume `signed-packages` — that artifact does
+        # not exist yet when this job runs and the layout/artifact checks
+        # below consume dist/.
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-deb-*
           path: dist/
           merge-multiple: true
 
-      - name: Download all RPM artifacts (workflow dispatch)
-        if: github.ref_type != 'tag'
+      - name: Download all RPM artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-rpm-*

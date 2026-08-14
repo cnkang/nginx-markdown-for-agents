@@ -32,6 +32,7 @@ on:
       - "rust-toolchain.toml"
       - "requirements-perf.txt"
       - "requirements-release.txt"
+      - "requirements-dev.txt"
   push:
     branches: [main, master]
     paths:
@@ -62,6 +63,7 @@ on:
       - "rust-toolchain.toml"
       - "requirements-perf.txt"
       - "requirements-release.txt"
+      - "requirements-dev.txt"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -175,11 +177,13 @@ jobs:
               - 'tools/perf/**'
               - 'requirements-perf.txt'
               - 'requirements-release.txt'
+              - 'requirements-dev.txt'
             matrix_release:
               - 'tools/release/matrix/**'
               - 'tools/release-matrix.json'
               - 'tools/release/gates/**'
               - 'tests/fixtures/**'
+              - 'requirements-dev.txt'
             corpus_tools:
               - 'tools/corpus/**'
             harness_tooling:
