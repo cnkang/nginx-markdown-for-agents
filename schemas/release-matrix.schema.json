@@ -88,7 +88,7 @@
     },
     "legacy_entry": {
       "type": "object",
-      "description": "A legacy-format matrix row using the sole accepted legacy aliases. Normalization maps nginx->nginx_version, os_type->os, arch->target.",
+      "description": "A legacy-format matrix row using either the full canonical key set or the full legacy alias set. Mixing canonical and legacy keys in a single row is not allowed. Normalization maps nginx->nginx_version, os_type->os, arch->target.",
       "oneOf": [
         {
           "required": ["nginx_version", "os", "libc", "target", "artifact_type", "feature_manifest_digest", "abi_version"],
