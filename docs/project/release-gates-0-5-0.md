@@ -66,7 +66,7 @@ verifiable gate items:
 ### Documentation Gates
 
 - All 7 sub-specs have requirements and design documents
-- All new operator-facing surfaces appear in documentation
+- Documentation covers all new operator-facing surfaces
 - Streaming configuration guide is complete
 - Rollout cookbook is complete (including streaming enable, shadow mode, gradual expansion)
 - Compatibility matrix documentation is complete
