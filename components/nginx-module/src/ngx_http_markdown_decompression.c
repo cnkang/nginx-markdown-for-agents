@@ -345,6 +345,15 @@ ngx_http_markdown_collect_content_encoding(ngx_http_request_t *r,
  * ENCODING_CHAIN_INVALID_ARGS for NULL/empty argument violations and
  * capacity failures) on error.
  */
+/*
+ * FFI encoding-chain layer codes.  These mirror the Rust `Format` enum
+ * (Gzip = 0, Deflate = 1, Br = 2) in decompress.rs; the C switch below must
+ * use these names so a Rust renumbering cannot silently misroute layers.
+ */
+#define NGX_HTTP_MARKDOWN_FFI_LAYER_GZIP    0
+#define NGX_HTTP_MARKDOWN_FFI_LAYER_DEFLATE 1
+#define NGX_HTTP_MARKDOWN_FFI_LAYER_BROTLI  2
+
 u_char
 ngx_http_markdown_parse_encoding_chain_ffi(const ngx_http_request_t *r,
                                            ngx_http_markdown_ctx_t *ctx,
@@ -414,15 +423,17 @@ ngx_http_markdown_parse_encoding_chain_ffi(const ngx_http_request_t *r,
     }
 
     /* Map the first layer to the legacy type enum for routing
-     * compatibility (single-layer streaming path). */
+     * compatibility (single-layer streaming path).  The layer codes are the
+     * Rust `Format` enum values (Gzip=0, Deflate=1, Br=2); keep them in
+     * named constants so a renumbering cannot silently misroute. */
     switch (result.layers[0]) {
-    case 0:
+    case NGX_HTTP_MARKDOWN_FFI_LAYER_GZIP:
         ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_GZIP;
         break;
-    case 1:
+    case NGX_HTTP_MARKDOWN_FFI_LAYER_DEFLATE:
         ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE;
         break;
-    case 2:
+    case NGX_HTTP_MARKDOWN_FFI_LAYER_BROTLI:
         ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI;
         break;
     default:
@@ -1420,6 +1431,67 @@ ngx_http_markdown_decomp_build_output_chain(ngx_http_request_t *r,
 }
 
 
+/*
+ * Deflate compatibility fallback: retry a failed zlib-wrapped (RFC 1950)
+ * decode as raw RFC 1951 (-MAX_WBITS).  Raw RFC 1951 deflate is part of the
+ * 0.9.2 public contract as a compatibility fallback for legacy servers
+ * (Microsoft IIS 5/6, older Java servlets send raw RFC 1951 under
+ * Content-Encoding: deflate).  The caller invokes this only after a
+ * FORMAT_ERROR with zero output produced, so a partial decode (already
+ * committed with zlib framing) is never replayed.  The retry result is
+ * propagated to the caller: on failure it returns the raw attempt's own
+ * classification (budget, truncation, or format), which is more informative
+ * than the original wrapped-mode error; only an inflateInit2 failure (raw
+ * mode could not even start) returns the original format error.
+ */
+static ngx_int_t
+ngx_http_markdown_deflate_raw_retry(ngx_http_request_t *r,
+                                    const ngx_http_markdown_conf_t *conf,
+                                    z_stream *stream,
+                                    u_char *input_data, size_t input_size,
+                                    u_char **output_data, size_t *output_size,
+                                    size_t *total_decompressed)
+{
+    ngx_int_t  loop_rc;
+    int        zrc;
+
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "markdown: deflate zlib-wrapped failed, "
+                   "retrying with raw deflate (-MAX_WBITS)");
+
+    inflateEnd(stream);
+
+    ngx_memzero(stream, sizeof(z_stream));
+    stream->next_in = input_data;
+    stream->avail_in = (uInt) input_size;
+
+    zrc = inflateInit2(stream, -MAX_WBITS);
+    if (zrc != Z_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown: raw deflate inflateInit2 "
+                      "error: %d, category=conversion", zrc);
+        ngx_free(*output_data);
+        return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+    }
+
+    stream->next_out = *output_data;
+    stream->avail_out = (uInt) *output_size;
+
+    loop_rc = ngx_http_markdown_inflate_loop(r, conf, stream,
+                                             output_data, output_size,
+                                             NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE,
+                                             total_decompressed);
+    if (loop_rc != NGX_OK) {
+        inflateEnd(stream);
+        ngx_free(*output_data);
+        /* Propagate the raw attempt's own classification (budget,
+         * truncation, or format) rather than masking it. */
+        return loop_rc;
+    }
+    return loop_rc;
+}
+
+
 ngx_int_t
 ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
                                    ngx_http_markdown_compression_type_e type,
@@ -1431,12 +1503,12 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
     size_t                             input_size;
     u_char                            *output_data;
     size_t                             output_size;
-    size_t                             total_decompressed;
+    size_t                             total_decompressed = 0;
     ngx_int_t                          loop_rc;
     int                                zrc;
     int                                window_bits;
     const ngx_http_markdown_conf_t    *conf;
-    
+
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
     
     /* Log that we're using zlib for decompression (zlib decompression path) */
@@ -1513,39 +1585,20 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
          * contract as a compatibility fallback for legacy servers
          * (Microsoft IIS 5/6, older Java servlets send raw RFC 1951 under
          * Content-Encoding: deflate).  For gzip, no fallback is attempted.
+         *
+         * The retry is allowed only when NO output was produced before the
+         * format error: a partial decode has already committed
+         * bytes with zlib framing and cannot be replayed as raw without
+         * mismatched output accounting.
          */
         if (loop_rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR
-            && type == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE)
+            && type == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
+            && total_decompressed == 0)
         {
-            ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                           "markdown: deflate zlib-wrapped failed, "
-                           "retrying with raw deflate (-MAX_WBITS)");
-
-            inflateEnd(&stream);
-
-            ngx_memzero(&stream, sizeof(z_stream));
-            stream.next_in = input_data;
-            stream.avail_in = (uInt) input_size;
-
-            zrc = inflateInit2(&stream, -MAX_WBITS);
-            if (zrc != Z_OK) {
-                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                             "markdown: raw deflate inflateInit2 "
-                             "error: %d, category=conversion", zrc);
-                ngx_free(output_data);
-                return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
-            }
-
-            stream.next_out = output_data;
-            stream.avail_out = (uInt) output_size;
-
-            loop_rc = ngx_http_markdown_inflate_loop(r, conf, &stream,
-                                                     &output_data,
-                                                     &output_size, type,
-                                                     &total_decompressed);
-            if (loop_rc != NGX_OK) {
-                inflateEnd(&stream);
-                ngx_free(output_data);
+            loop_rc = ngx_http_markdown_deflate_raw_retry(
+                r, conf, &stream, input_data, input_size,
+                &output_data, &output_size, &total_decompressed);
+            if (loop_rc != NGX_OK && loop_rc != NGX_DONE) {
                 return loop_rc;
             }
             /* fallthrough to success path below */

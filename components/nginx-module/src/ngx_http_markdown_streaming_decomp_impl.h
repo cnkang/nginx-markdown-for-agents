@@ -121,6 +121,16 @@ typedef struct ngx_http_markdown_streaming_decomp_s {
      * The sniff is heuristic but matches the common-cases approach
      * used by zlib's own `uncompress()` and by curl/libcurl.
      *
+     * Adversarial note: a raw stream whose first byte carries
+     * non-zero stored-block alignment padding bits can legally begin with
+     * `78 9c` (CMF/FLG-valid), so this two-byte decision can misclassify
+     * such a stream as zlib-wrapped and the decode then fails with a
+     * format error.  The full-buffer paths (C and Rust) recover by
+     * retrying as raw RFC 1951; the streaming path cannot replay consumed
+     * chunks, so a misclassified stream fails closed (format error) rather
+     * than emitting wrong output.  Encoders that set padding bits are
+     * rare in practice; standard raw RFC 1951 output starts 0x00-0x07.
+     *
      * ``zlib_header_pending`` is 1 when we are still collecting the
      * first 2 bytes.  ``pending_header`` accumulates up to 2 bytes.
      * ``pending_header_len`` tracks how many we have so far.
