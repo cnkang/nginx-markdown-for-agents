@@ -1153,6 +1153,14 @@ typedef struct {
              * result.
              */
             ngx_flag_t                        pending_abort_terminal;
+
+            /*
+             * Rust output produced before header commit completed.  This
+             * buffer is module-owned, not downstream-owned, and must be
+             * delivered only after the deferred header filter succeeds.
+             */
+            u_char                            *pending_header_output;
+            size_t                             pending_header_output_len;
         } pending_meta;
 
         /* Pre-Commit prebuffer for fallback */

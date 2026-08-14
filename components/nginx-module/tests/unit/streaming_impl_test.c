@@ -1637,6 +1637,14 @@ test_cleanup_paths(void)
         "streaming_cleanup walking pending_output");
     TEST_ASSERT(b.pos != NULL && b.last != NULL,
         "cleanup must not clear/free buffer fields it does not own");
+
+    ctx.streaming.pending_meta.pending_header_output =
+        (u_char *) "deferred-output";
+    ctx.streaming.pending_meta.pending_header_output_len = 15;
+    ngx_http_markdown_streaming_cleanup(&ctx);
+    TEST_ASSERT(ctx.streaming.pending_meta.pending_header_output == NULL
+                && g_output_free_calls == 1,
+        "cleanup must release Rust output deferred behind header backpressure");
     TEST_PASS("cleanup paths covered");
 }
 
@@ -3155,6 +3163,109 @@ test_feed_path_resumes_pending_header_commit(void)
         "feed-path retry should publish the commit atomically");
 
     TEST_PASS("feed path resumes pending header commit");
+}
+
+/*
+ * Regression (run12 P1-1): handle_success_output must NOT send body output
+ * when the header commit returns NGX_AGAIN.
+ *
+ * The feed path calls ngx_http_markdown_streaming_commit while still in
+ * COMMIT_PRE. A backpressure NGX_AGAIN leaves headers_pending set; sending
+ * conversion output in that state would let the body run ahead of the
+ * headers. The success-output handler must propagate NGX_AGAIN immediately,
+ * retain the unconsumed output, and preserve the pending commit state until
+ * the header-only retry can deliver it.
+ *
+ * Covers: ngx_http_markdown_streaming_handle_success_output,
+ *         ngx_http_markdown_streaming_handle_feed_result
+ */
+static void
+test_success_output_defers_body_when_commit_again(void)
+{
+    ngx_http_request_t      r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t              pool;
+    ngx_connection_t        conn;
+    ngx_log_t               log;
+    ngx_event_t             read_event;
+    ngx_http_markdown_metrics_t metrics;
+    ngx_chain_t             future;
+    ngx_buf_t                future_buf;
+    u_char                  out_data[] = "body-must-wait";
+    ngx_buf_t              *sent_buf;
+    ngx_int_t               rc;
+    ngx_uint_t              free_before;
+
+    TEST_SUBSECTION("success output defers body while header commit is pending");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_memzero(&future, sizeof(future));
+    ngx_memzero(&future_buf, sizeof(future_buf));
+    ngx_http_markdown_metrics = &metrics;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+    future.buf = &future_buf;
+    future_buf.pos = (u_char *) "future";
+    future_buf.last = future_buf.pos + 6;
+
+    g_next_header_filter_rc = NGX_AGAIN;
+    free_before = g_output_free_calls;
+    rc = ngx_http_markdown_streaming_handle_feed_result(
+        &r, &ctx, &conf, ERROR_SUCCESS, out_data, sizeof(out_data) - 1);
+
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "feed path must propagate the commit NGX_AGAIN");
+    TEST_ASSERT(ctx.stream_sm.headers_pending == 1,
+        "pending header commit state must be preserved");
+    TEST_ASSERT(g_next_body_filter_calls == 0,
+        "body output must not run ahead of the pending header commit");
+    TEST_ASSERT(ctx.streaming.pending_meta.pending_header_output == out_data
+                && ctx.streaming.pending_meta.pending_header_output_len
+                   == sizeof(out_data) - 1,
+        "conversion output must remain owned while headers are pending");
+    TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
+        "header backpressure must keep the request buffered for re-entry");
+    TEST_ASSERT(g_output_free_calls == free_before,
+        "pending conversion output must not be freed before header retry");
+
+    rc = ngx_http_markdown_streaming_handle_new_input_with_pending(
+        &r, &ctx, &conf, &future);
+    TEST_ASSERT(rc == NGX_AGAIN
+                && ctx.streaming.pending_input.head != NULL,
+        "future input must queue while header output is pending");
+    ngx_http_markdown_streaming_pending_input_clear(&ctx);
+
+    g_next_header_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_handle_null_input(
+        &r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "blocked header retry must keep conversion output pending");
+    TEST_ASSERT(ctx.streaming.pending_meta.pending_header_output == out_data
+                && (r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0
+                && g_next_body_filter_calls == 0,
+        "body output must remain deferred across repeated header NGX_AGAIN");
+
+    g_next_header_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_handle_null_input(
+        &r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK,
+        "successful header retry must release the deferred body");
+    sent_buf = g_next_body_filter_last_in == NULL
+        ? NULL : g_next_body_filter_last_in->buf;
+    TEST_ASSERT(ctx.streaming.pending_meta.pending_header_output == NULL
+                && g_next_body_filter_calls == 1
+                && (r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0
+                && sent_buf != NULL
+                && (size_t) (sent_buf->last - sent_buf->pos)
+                   == sizeof(out_data) - 1
+                && ngx_memcmp(sent_buf->pos, out_data,
+                              sizeof(out_data) - 1) == 0,
+        "deferred conversion output must be delivered exactly once");
+    TEST_ASSERT(g_output_free_calls == free_before + 1,
+        "deferred conversion output must be freed after delivery");
+
+    TEST_PASS("success output defers body until headers commit");
 }
 
 /*
@@ -6833,6 +6944,7 @@ main(void)
     test_commit_feed_and_finalize_core_paths();
     test_header_commit_backpressure_retry_is_atomic();
     test_feed_path_resumes_pending_header_commit();
+    test_success_output_defers_body_when_commit_again();
     test_postcommit_output_construction_failures();
     test_postcommit_ngx_done_is_delivery_success();
     test_postcommit_downstream_failure_classification();
