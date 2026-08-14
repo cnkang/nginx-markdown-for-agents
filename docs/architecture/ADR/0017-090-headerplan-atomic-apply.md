@@ -65,7 +65,7 @@ them.
 
 **Category 1 — Full-response synthesis (no upstream response to mutate):**
 These paths build a complete response from scratch. There is no upstream
-`headers_out` to mutate, so HeaderPlan does not apply. Each exception carries a justification and is listed:
+`headers_out` to mutate, so HeaderPlan does not apply. Each exception carries a justification. The table below lists each one:
 
 | Path | Justification |
 |------|---------------|
