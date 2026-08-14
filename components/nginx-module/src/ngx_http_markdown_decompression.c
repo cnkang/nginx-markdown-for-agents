@@ -1450,8 +1450,7 @@ ngx_http_markdown_deflate_raw_retry(ngx_http_request_t *r,
                                     const ngx_http_markdown_conf_t *conf,
                                     z_stream *stream,
                                     u_char *input_data, size_t input_size,
-                                    u_char **output_data, size_t *output_size,
-                                    size_t *total_decompressed)
+                                    ngx_http_markdown_inflate_ctx_t *ctx)
 {
     ngx_int_t  loop_rc;
     int        zrc;
@@ -1471,20 +1470,27 @@ ngx_http_markdown_deflate_raw_retry(ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown: raw deflate inflateInit2 "
                       "error: %d, category=conversion", zrc);
-        ngx_free(*output_data);
+        ngx_free(*ctx->output_data);
         return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
     }
 
-    stream->next_out = *output_data;
-    stream->avail_out = (uInt) *output_size;
+    stream->next_out = *ctx->output_data;
+    stream->avail_out = (uInt) *ctx->output_size;
 
     loop_rc = ngx_http_markdown_inflate_loop(r, conf, stream,
-                                             output_data, output_size,
+                                             ctx->output_data, ctx->output_size,
                                              NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE,
-                                             total_decompressed);
+                                             &ctx->completed_out);
     if (loop_rc != NGX_OK) {
+        /*
+         * The retry owns the output buffer on failure: free it here and
+         * let the caller propagate the error without touching the
+         * (possibly freed) buffer again.  NGX_DONE is not a success code
+         * for the full-buffer inflate path, so any non-NGX_OK return
+         * takes this branch.
+         */
         inflateEnd(stream);
-        ngx_free(*output_data);
+        ngx_free(*ctx->output_data);
         /* Propagate the raw attempt's own classification (budget,
          * truncation, or format) rather than masking it. */
         return loop_rc;
@@ -1596,11 +1602,24 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
             && type == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
             && total_decompressed == 0)
         {
-            loop_rc = ngx_http_markdown_deflate_raw_retry(
-                r, conf, &stream, input_data, input_size,
-                &output_data, &output_size, &total_decompressed);
-            if (loop_rc != NGX_OK && loop_rc != NGX_DONE) {
-                return loop_rc;
+            {
+                ngx_http_markdown_inflate_ctx_t  retry_ctx;
+
+                ngx_memzero(&retry_ctx, sizeof(retry_ctx));
+                retry_ctx.output_data = &output_data;
+                retry_ctx.output_size = &output_size;
+
+                loop_rc = ngx_http_markdown_deflate_raw_retry(
+                    r, conf, &stream, input_data, input_size, &retry_ctx);
+                if (loop_rc != NGX_OK) {
+                    /*
+                     * The retry frees the output buffer on any non-NGX_OK
+                     * return (Rule 43); propagate the error without
+                     * touching the possibly-freed buffer again.
+                     */
+                    return loop_rc;
+                }
+                total_decompressed = retry_ctx.completed_out;
             }
             /* fallthrough to success path below */
         } else {

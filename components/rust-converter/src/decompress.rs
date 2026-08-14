@@ -321,19 +321,7 @@ fn deflate_decode_into(
             .map_err(|_| DecompError::BudgetExceeded)?;
 
         if produced_now > 0 {
-            let needed = output
-                .len()
-                .checked_add(produced_now)
-                .ok_or(DecompError::BudgetExceeded)?;
-            if needed > budget {
-                return Err(DecompError::BudgetExceeded);
-            }
-            if output.capacity() < needed {
-                output
-                    .try_reserve_exact(needed - output.len())
-                    .map_err(|_| DecompError::BudgetExceeded)?;
-            }
-            output.extend_from_slice(&buf[..produced_now]);
+            append_deflate_output(output, &buf[..produced_now], budget)?;
         }
 
         match status {
@@ -347,6 +335,29 @@ fn deflate_decode_into(
             }
         }
     }
+}
+
+/// Append `produced` bytes to `output` under the cumulative decompression
+/// budget. Grows the buffer only when the budget allows it.
+fn append_deflate_output(
+    output: &mut Vec<u8>,
+    produced: &[u8],
+    budget: usize,
+) -> Result<(), DecompError> {
+    let needed = output
+        .len()
+        .checked_add(produced.len())
+        .ok_or(DecompError::BudgetExceeded)?;
+    if needed > budget {
+        return Err(DecompError::BudgetExceeded);
+    }
+    if output.capacity() < needed {
+        output
+            .try_reserve_exact(needed - output.len())
+            .map_err(|_| DecompError::BudgetExceeded)?;
+    }
+    output.extend_from_slice(produced);
+    Ok(())
 }
 
 /// Decompress brotli data with budget enforcement.
