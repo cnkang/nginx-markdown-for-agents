@@ -132,10 +132,10 @@ make -C components/nginx-module/tests unit-config_merge
 
 **Status:** ✅ Implemented (0.9.1)
 
-> The suite keeps the raw RFC 1951 cases below as legacy C compatibility
-> regression coverage from 0.9.1. They do not expand the frozen 0.9.2 public
-> contract. New Rust fixtures, e2e fixtures, and public documentation use
-> zlib-wrapped RFC 1950 deflate.
+> The suite keeps the raw RFC 1951 cases below as supported compatibility
+> coverage: raw deflate is part of the 0.9.2 public contract (a fallback for
+> legacy servers) and must keep passing on the streaming, full-buffer, and
+> Rust chain decoder paths alongside zlib-wrapped RFC 1950 deflate.
 
 **Coverage:**
 - zlib-wrapped deflate + trailing garbage in same chunk → `FORMAT_ERROR`

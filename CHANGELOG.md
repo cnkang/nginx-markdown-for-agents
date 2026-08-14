@@ -67,11 +67,12 @@ before/after examples.
   `markdown_stream_flush_min` have no replacement.
 - **Content-Encoding policy.** Malformed, unknown, and excessively deep
   encoding chains follow `markdown_error_policy`. Only `pass` forwards the
-  original response. The supported `deflate` coding is strictly RFC 1950
-  zlib-wrapped. The supported converter rejects raw RFC 1951 and never retries
-  it through a raw fallback. The project keeps a legacy C streaming
-  compatibility branch only for historical fixtures. Callers must not rely on
-  that branch.
+  original response. The supported `deflate` coding uses the zlib-wrapped
+  RFC 1950 format and additionally accepts raw RFC 1951 deflate as a
+  compatibility fallback for legacy servers. All three decode paths
+  (streaming, full-buffer, and the Rust chain decoder) apply the same
+  sniffing decision: a valid zlib header selects zlib-wrapped, otherwise
+  raw.
 - **Diagnostics JSON schema v2.** The endpoint now declares
   `schema_version: 2`. Migrate consumers from the old `config_snapshot`,
   `metrics_snapshot`, `dynconf_state`, `streaming_config`, and profile-oriented

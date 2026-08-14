@@ -341,8 +341,9 @@ ngx_http_markdown_collect_content_encoding(ngx_http_request_t *r,
  *   DEPTH_EXCEEDED   - unsupported chain depth; the caller routes it through
  *                      the configured error policy without starting a decoder
  *
- * Returns the ENCODING_CHAIN_* classification, or DECOMP_CATEGORY_INVALID_ARGS
- * on FFI contract failure.
+ * Returns the ENCODING_CHAIN_* classification (including
+ * ENCODING_CHAIN_INVALID_ARGS for NULL/empty argument violations and
+ * capacity failures) on error.
  */
 u_char
 ngx_http_markdown_parse_encoding_chain_ffi(const ngx_http_request_t *r,
@@ -368,7 +369,7 @@ ngx_http_markdown_parse_encoding_chain_ffi(const ngx_http_request_t *r,
             ngx_memzero(ctx->decompression.layers,
                         sizeof(ctx->decompression.layers));
         }
-        return DECOMP_CATEGORY_INVALID_ARGS;
+        return ENCODING_CHAIN_INVALID_ARGS;
     }
 
     classification = markdown_parse_encoding_chain(
@@ -395,7 +396,7 @@ ngx_http_markdown_parse_encoding_chain_ffi(const ngx_http_request_t *r,
         ctx->decompression.type = NGX_HTTP_MARKDOWN_COMPRESSION_NONE;
         ngx_memzero(ctx->decompression.layers,
                     sizeof(ctx->decompression.layers));
-        return DECOMP_CATEGORY_INVALID_ARGS;
+        return ENCODING_CHAIN_INVALID_ARGS;
     }
 
     ctx->decompression.layer_count = result.layer_count;
@@ -1506,15 +1507,12 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
                                              type, &total_decompressed);
     if (loop_rc != NGX_OK) {
         /*
-         * Legacy C compatibility fallback: if deflate decompression fails
-         * with FORMAT_ERROR, retry with raw deflate
-         * (-MAX_WBITS). This path is retained for historical C coverage;
-         * the frozen 0.9.2 public contract is zlib-wrapped RFC 1950 only.
-         *
-         * Some legacy servers (Microsoft IIS 5/6, older Java servlets)
-         * send raw deflate
-         * (RFC 1951 only) under Content-Encoding: deflate instead of
-         * zlib-wrapped (RFC 1950).  For gzip, no fallback is attempted.
+         * Deflate compatibility fallback: if the zlib-wrapped (RFC 1950)
+         * decode fails with FORMAT_ERROR, retry with raw deflate
+         * (-MAX_WBITS). Raw RFC 1951 deflate is part of the 0.9.2 public
+         * contract as a compatibility fallback for legacy servers
+         * (Microsoft IIS 5/6, older Java servlets send raw RFC 1951 under
+         * Content-Encoding: deflate).  For gzip, no fallback is attempted.
          */
         if (loop_rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR
             && type == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE)
