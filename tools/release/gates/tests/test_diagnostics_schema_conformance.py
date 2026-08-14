@@ -77,6 +77,9 @@ _masked_keys = st.lists(
 
 def _dynconf_disabled():
     """Generate a disabled dynconf state."""
+    # map to a fresh copy so each draw gets its own dict (st.just shares
+    # the same object across draws, which would let one test mutate the
+    # state seen by others).
     return st.just({
         "state": "disabled",
         "generation": None,
@@ -86,7 +89,7 @@ def _dynconf_disabled():
         "last_success": None,
         "last_error": None,
         "masked_keys": [],
-    })
+    }).map(lambda d: dict(d)).map(lambda d: dict(d))
 
 
 def _dynconf_no_file():
