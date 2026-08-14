@@ -366,7 +366,7 @@ Conversion latency approaches or exceeds the configured `markdown_limits convers
 
 ```bash
 curl -s http://localhost/markdown-metrics | \
-  grep "conversion_latency"
+  grep "nginx_markdown_conversion_duration_seconds_bucket"
 ```
 
 If conversions are clustering in the highest latency buckets or you see timeout-related failures in logs, roll back.

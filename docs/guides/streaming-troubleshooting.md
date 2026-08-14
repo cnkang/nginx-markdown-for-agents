@@ -93,8 +93,9 @@ the request solely because streaming is unavailable.
 
 Streaming can fall back before the module commits headers when the bounded replay
 or parser pre-commit work cannot complete. This is safe fail-open behavior.
-The original response remains available and the request-level metric records
-the terminal outcome.
+The fail-open path preserves the original response content. The pre-commit
+fallback returns the original HTML without modification. The request-level
+metric records the terminal outcome.
 
 Inspect these transitions:
 

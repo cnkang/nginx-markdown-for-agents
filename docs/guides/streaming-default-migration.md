@@ -5,7 +5,7 @@
 
 > **v0.9.1+ operators:** the 0.9.1 release removed `markdown_streaming_engine` and replaced it with `markdown_streaming`. If you are reading this guide for the streaming behavior changes, please replace `markdown_streaming_engine off;` with `markdown_streaming off;` in your configuration files. The configuration examples in this guide use the 0.8.0-era directive names.
 >
-> **v0.9.2 operators:** the 0.9.2 release also removed `markdown_stream_threshold`. The auto-route threshold is now fixed internally at 1 MiB and is not operator-configurable. The table below describing `markdown_stream_threshold` is historical and no longer applies.
+> **v0.9.2 operators:** the 0.9.2 release also removed `markdown_stream_threshold` and `markdown_streaming_zero_copy`. The auto-route threshold is now fixed internally at 1 MiB and is not operator-configurable. The historical sections below that reference `markdown_stream_threshold` and `markdown_streaming_engine` remain for background only. They describe directives that no longer exist, and operators must not use them in current configurations.
 
 ## Overview
 

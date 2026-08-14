@@ -1030,7 +1030,7 @@ When you see a spike in a metric, use the same reason code string to find the co
 ```bash
 # Example: you see failed request samples increasing in the metrics endpoint
 # Find the matching log entries:
-grep "markdown decision:" /var/log/nginx/error.log | grep "category=FAIL_CONVERSION"
+grep "markdown decision:" /var/log/nginx/error.log | grep -E "category=(conversion_error|resource_limit|system_error)"
 
 # Example: you see failed_open or failed_closed samples increasing
 # Find the matching log entries:
@@ -1051,7 +1051,7 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 
 ## Decision Logging
 
-The module emits structured decision log entries to the NGINX error log for every request that enters the [decision chain](../features/DECISION_CHAIN.md). Each entry records the reason code and request context. It gives operators a per-request view of why the module converted, skipped, or failed a request.
+The module emits structured decision log entries to the NGINX error log for requests that enter the [decision chain](../features/DECISION_CHAIN.md). Not every request produces a log entry. The `markdown_log_verbosity` directive gates which outcomes produce entries, so logging follows the decision chain processing rather than emitting unconditionally. Each entry records the reason code and request context, giving operators a per-decision view of why the module converted, skipped, or failed a request.
 
 The `markdown_log_verbosity` directive controls decision logging. You need no separate directive. The existing verbosity knob gates which outcomes produce log entries and how much detail they contain. The directive name reflects this control. Set it to `debug` for full detail. The knob controls both presence and verbosity of entries.
 
@@ -1129,7 +1129,7 @@ The `markdown_log_verbosity` directive controls which decision outcomes produce 
 | `info` (default) | All outcomes | Base | Recommended for rollout — full visibility into every decision |
 | `debug` | All outcomes | Extended (adds `filter_value`, `accept`, `status`) | Troubleshooting — maximum detail for diagnosing specific requests |
 
-At `error` and `warn` levels, non-failure outcomes (`not_eligible`, `skipped_*`, `disabled`, and `converted`) are silently suppressed. Both levels only emit failure outcomes such as `failed_open` and `failed_closed`. At `info` and `debug` levels, the full bounded outcome set is available. Decision logs retain specific reason codes such as `memory_budget_exceeded`, `timeout`, or `ffi_panic`. The Prometheus `nginx_markdown_requests_total` family carries those values in its `reason` label.
+At `error` and `warn` levels, non-failure outcomes (`not_eligible`, `skipped_*`, `disabled`, and `converted`) are silently suppressed. Both levels only emit failure outcomes such as `failed_open` and `failed_closed`. At `info` and `debug` levels, the full bounded outcome set is available. Decision logs retain specific reason codes such as `memory_budget_exceeded`, `timeout`, or `ffi_panic`. The Prometheus `nginx_markdown_requests_total` family carries outcome-level reason values (for example `failed_open` and `failed_closed`) in its `reason` label. Specific failure reason codes such as `memory_budget_exceeded` and `timeout` appear in decision log entries, not in the `requests_total` `reason` label.
 
 #### Configuration examples
 

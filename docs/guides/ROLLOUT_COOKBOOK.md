@@ -1044,7 +1044,7 @@ http {
 }
 ```
 
-The `map` approach is easier to maintain as your rollout scope grows. You add or remove paths in the `map` block without creating new `location` blocks. Combine it with explicit `location` overrides for critical exclusions (like `/api`) as a safety net.
+The `map` approach is easier to maintain as your rollout scope grows. You add or remove paths in the `map` block without creating new `location` blocks. Combine it with explicit `location` overrides for critical exclusions (like `/api`) as a safety net. Place critical map exclusions before wider regex entries. NGINX `map` directives match in order. A specific exclusion that appears after a broad regex never reaches its branch.
 
 Note: Even if a risky page type is accidentally included in your conversion scope, the module's eligibility checks provide a safety net. The module skips API endpoints via `not_eligible`, streaming endpoints via `not_eligible`. However, relying on eligibility checks alone adds noise to your decision logs and metrics. Explicit exclusions keep your rollout scope clean and your observation data meaningful. The safety net catches accidental scope mistakes. It does not replace explicit scope control.
 

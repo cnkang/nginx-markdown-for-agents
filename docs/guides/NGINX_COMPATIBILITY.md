@@ -15,7 +15,7 @@ The minimum supported NGINX version is **1.24.0**. The compatibility matrix
 lists the selected nginx.org official stable and mainline releases targeted by
 the release workflows. A matrix entry does not guarantee that a package asset
 the project publishes for a particular tag. Verify the GitHub Release assets before
-downloading or building from source.
+you download or build from source.
 
 > **Canonical source:** [`tools/release-matrix.json`](../../tools/release-matrix.json)
 > is the machine-readable source of truth. The table below is a human-readable
