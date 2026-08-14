@@ -649,10 +649,10 @@ nginx_markdown_conversion_duration_seconds_sum{{engine=\"full_buffer\"}} 0\n\
 nginx_markdown_conversion_duration_seconds_count{{engine=\"full_buffer\"}} {}\n\
 # HELP nginx_markdown_input_bytes_total Input bytes\n\
 # TYPE nginx_markdown_input_bytes_total counter\n\
-nginx_markdown_input_bytes_total {}\n\
+nginx_markdown_input_bytes_total 1024\n\
 # HELP nginx_markdown_output_bytes_total Output bytes\n\
 # TYPE nginx_markdown_output_bytes_total counter\n\
-nginx_markdown_output_bytes_total {}\n\
+nginx_markdown_output_bytes_total 1024\n\
 # HELP nginx_markdown_inflight_requests In-flight conversions\n\
 # TYPE nginx_markdown_inflight_requests gauge\n\
 nginx_markdown_inflight_requests 0\n\
@@ -668,7 +668,7 @@ nginx_markdown_dynconf_reloads_total{{outcome=\"success\",reason=\"ok\"}} 0\n\
 # HELP nginx_markdown_build_info Build information\n\
 # TYPE nginx_markdown_build_info gauge\n\
 nginx_markdown_build_info{{version=\"test\",nginx_version=\"test\",features=\"\"}} 1\n",
-        converted, skipped, converted, converted, converted, converted, converted, converted,
+        converted, skipped, converted, converted, converted, converted,
     );
     plain_response(
         method,

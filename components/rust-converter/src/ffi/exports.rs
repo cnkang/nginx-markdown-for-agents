@@ -1276,13 +1276,15 @@ fn write_encoding_chain_layers(
         if *encoding == crate::encoding::Encoding::Identity {
             result.identity_present = 1;
         } else {
-            if non_identity < 3 {
+            if non_identity < crate::encoding::MAX_DECODER_DEPTH as u32 {
                 result.layers[non_identity as usize] = encoding_to_u8(*encoding);
             }
             non_identity += 1;
         }
     }
-    result.layer_count = non_identity;
+    // Clamp to the fixed FFI array capacity so C callers never read beyond
+    // the last element.
+    result.layer_count = non_identity.min(crate::encoding::MAX_DECODER_DEPTH as u32);
 }
 
 fn encoding_chain_error_code(error: crate::encoding::ChainParseError) -> u8 {
