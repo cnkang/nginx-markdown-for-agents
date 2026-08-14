@@ -94,7 +94,7 @@ Required:
 ### 20. Spec task-completion and evidence-drift guardrails
 
 Required:
-- Do not mark a spec task as complete based only on file/code presence, run the
+- Do not mark a spec task as complete based only on file/code presence and run the
   corresponding verification path at least once in the current session.
 - For any newly added `#[ignore]` tests (for example large-fixture or evidence
   pack tests), execute them explicitly with `-- --ignored` before closing the
