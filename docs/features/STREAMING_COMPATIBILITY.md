@@ -24,7 +24,7 @@ mode. Use it to understand behavioral differences before enabling streaming.
 | Dynamic configuration | ✅ | ✅ | Runtime engine switching supported |
 | Shadow mode | ✅ | N/A | Runs streaming in background against full-buffer result |
 | Streaming decompression (gzip) | N/A | ✅ | Member-aware; since 0.9.1 |
-| Streaming decompression (deflate) | N/A | ✅ | RFC 1950 zlib-wrapped; raw RFC 1951 is outside the frozen 0.9.2 public contract |
+| Streaming decompression (deflate) | N/A | ✅ | RFC 1950 zlib-wrapped plus raw RFC 1951 compatibility fallback |
 | Streaming decompression (Brotli) | N/A | ✅ | Requires `NGX_HTTP_BROTLI`; since 0.9.1 |
 
 ## Legend
@@ -51,7 +51,10 @@ the response to the client (pre-commit) handle the same way. With
 error status and do not pass through the original body. `status N` uses that
 explicit status policy.
 Errors that occur after headers have already been sent (post-commit) cannot
-roll back — the client receives a truncated Markdown response.
+roll back. When a later gzip member fails, the module preserves earlier
+decompressed output and appends Markdown closing bytes to safely close the
+partial response. The client receives a truncated but structurally valid
+Markdown response.
 
 ### Token estimation
 

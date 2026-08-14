@@ -30,7 +30,7 @@ You must update these configurations before the upgrade. The removed directives 
 
 No configuration changes needed (if not using removed directives). You get:
 
-- **Auto mode**: responses >= 1 MiB or chunked use streaming. Smaller responses use full-buffer
+- **Auto mode**: responses >= 1 MiB or chunked use streaming when no hard incompatibility applies (see exceptions: `markdown_cache_validation full`, excluded content types, unsupported encodings, and Brotli builds without streaming support). Smaller responses use full-buffer
 - **Noise pruning**: nav, footer, aside, ads, cookie banners removed from output
 
 Monitor the new reason codes in logs:

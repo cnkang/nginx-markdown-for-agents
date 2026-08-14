@@ -581,9 +581,10 @@ remediation:
    final status: `fixed`, `intentionally deferred`, or
    `not applicable after review`.
 5. Route the work through `docs/harness/risk-packs/harness-remediation.md` and
-   run `make harness-check`, if a
-   `docs/project/recent-git-harness-steering-analysis-*.md` report exists, the
-   harness checker must validate its closeout evidence.
+   run `make harness-check` to validate closeout evidence. If a
+   `docs/project/recent-git-harness-steering-analysis-*.md` report exists,
+   the harness checker must validate its closeout evidence; the command itself
+   runs regardless.
 
 ## Document Updates
 

@@ -192,7 +192,7 @@ When the NGINX C module calls the Rust converter:
 
 ### Error Handling
 
-- Invalid UTF-8 in Content-Type: Falls back to HTML meta tag detection
+- Missing or malformed charset parameter in Content-Type: Falls back to HTML meta tag detection
 - Invalid UTF-8 in HTML: Returns `ConversionError::EncodingError`
 - Empty input: Returns `ConversionError::InvalidInput`
 - Charset detection never fails (always returns UTF-8 as fallback), but

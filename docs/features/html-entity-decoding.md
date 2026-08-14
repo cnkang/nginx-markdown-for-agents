@@ -2,13 +2,13 @@
 
 ## Overview
 
-The NGINX Markdown for Agents converter handles HTML entity decoding automatically through the html5ever parser library. The converter code itself needs no additional implementation.
+The NGINX Markdown for Agents converter handles HTML entity decoding automatically through the html5ever parser library. Entity decoding applies to normal text content and attribute values. The converter code itself needs no additional implementation.
 
 ## How It Works
 
 ### Automatic Decoding by html5ever
 
-The html5ever parser implements the HTML5 specification's entity decoding algorithm. When the parser processes HTML, it automatically decodes all HTML entities before constructing the DOM tree. This means:
+The html5ever parser implements the HTML5 specification's entity decoding algorithm. When the parser processes HTML, it automatically decodes HTML entities in text content and attribute values before constructing the DOM tree. This means:
 
 1. **Named Entities**: Common entities like `&amp;`, `&lt;`, `&gt;`, `&quot;`, `&#39;`, `&nbsp;` decode to their corresponding characters
 2. **Decimal Numeric Entities**: Entities like `&#65;` (A), `&#48;` (0) decode to their Unicode characters

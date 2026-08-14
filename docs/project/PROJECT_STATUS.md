@@ -25,11 +25,11 @@ implemented and tested the core feature set. The codebase includes unit, integra
 fuzz-oriented validation entrypoints, and harness-specific validation
 entrypoints, along with documentation covering installation, configuration,
 operations, architecture, and contributor-facing harness maintenance.
-The project implements and tests the core feature set. It ships working features with verified behavior.
 
 ### Current Release Line 0.9.2
 
-**Status:** Development release line. 0.9.2 is the final pre-1.0 breaking
+**Status:** Development release line. 0.9.1 is the latest released patch.
+0.9.2 is the current development line. 0.9.2 is the final pre-1.0 breaking
 release, with the public configuration surface reduced from 63 directives to
 25, retired profile/conflict FFI snapshots removed, and the bundled FFI ABI at
 version 2. Development version metadata is

@@ -15,8 +15,9 @@ Content-Encoding header
 ```
 
 Gzip uses zlib gzip framing, and deflate uses the zlib-wrapped RFC 1950 format
-required by HTTP. Raw RFC 1951 input is outside the frozen 0.9.2 public
-contract, so callers must not rely on a raw fallback. Deflate rejects trailing
+required by HTTP. Raw RFC 1951 deflate is additionally accepted as a
+compatibility fallback for legacy servers (RFC 2616-era implementations),
+matching the C streaming and full-buffer decompressors. Deflate rejects trailing
 bytes. Gzip validates trailers and supports concatenated members while
 retaining one response-wide budget. Brotli uses the native streaming decoder
 when the build compiles `NGX_HTTP_BROTLI` in.

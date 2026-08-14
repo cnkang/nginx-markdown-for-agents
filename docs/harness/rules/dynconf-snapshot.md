@@ -89,7 +89,7 @@ Required:
 - `ngx_http_markdown_dynconf_watcher_t` must maintain separate
   `last_mtime` (observed) and `applied_mtime` (confirmed after
   successful reload).  `applied_mtime` must update only after
-  reload returns `RELOAD_APPLIED` or `RELOAD_NO_CHANGE`.
+  reload returns one of the outcomes in the complete update set below.
   `applied_mtime` is also updated to `last_mtime` on
   `RELOAD_DRY_RUN_OK` / `RELOAD_DRY_RUN_FAIL` to suppress repeated
   re-validation of the same file content. The complete update set is exactly

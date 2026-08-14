@@ -119,7 +119,7 @@ not describe the active routing contract.
 ### Buffering Strategy
 
 1. **Check eligibility first**: Before buffering, verify response is eligible
-2. **Enforce size limit**: Stop buffering if exceeds `markdown_max_size`
+2. **Enforce size limit**: Stop buffering if exceeds the full-buffer size limit (historically `markdown_max_size`, now `markdown_limits conversion_memory=`)
 3. **Use NGINX buffer chain**: Leverage NGINX's existing buffer management
 4. **Single allocation**: Allocate output buffer once conversion size is known
 

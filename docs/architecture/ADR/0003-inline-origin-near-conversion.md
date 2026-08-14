@@ -30,7 +30,7 @@ The key properties of this positioning:
 
 3. **HTTP content negotiation alignment**: The origin (or its reverse proxy) is the natural place for representation selection. This matches the HTTP model. Managing `Vary: Accept` and variant ETags stays straightforward here. The server picks the best representation.
 
-4. **Simpler cache semantics**: The CDN caches the converted Markdown variant like any other response. This works when conversion happens at the origin. The origin controls `Vary`, `ETag`, and `Cache-Control` directly. It does not require the CDN to manage conversion-aware cache keys. The CDN stays cache-key agnostic.
+4. **Simpler cache semantics**: The CDN caches the converted Markdown variant like any other response. This works when conversion happens at the origin. The origin controls `Vary`, `ETag`, and `Cache-Control` directly. The CDN must honor representation variants declared by `Vary: Accept` when matching cached responses, so that clients receive the correct representation.
 
 5. **Variable-driven flexibility**: Because the module runs inside NGINX, operators can use `map` directives and variables to control conversion per request. This includes User-Agent-based bot targeting.
 

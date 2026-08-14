@@ -130,7 +130,7 @@ The current implementation focuses on the three core non-content elements. Futur
 
 1. **Navigation elements**: `<nav>`, `<header>`, `<footer>` (optional for v1, mentioned in design)
 2. **Other non-content elements**: `<svg>`, `<canvas>` (if needed)
-3. **Inline event handlers**: Removal of all `on*` attributes via prefix matching (handled by `security.rs`)
+3. **Inline event handlers**: Removal of all `on*` attributes via prefix matching — **complete**, already covered by `security.rs` and `test_inline_script_removal`.
 
 ## Related: Form Element Content Preservation
 

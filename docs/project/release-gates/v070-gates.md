@@ -93,7 +93,7 @@ remain blocking even when the workflow itself is green.
 | # | Check Item | Verification Command | Pass Criteria |
 |---|-----------|---------------------|---------------|
 | 4.1 | Helm chart lint | `helm lint charts/nginx-markdown` | Exit 0, no errors |
-| 4.2 | Helm chart render | `helm template gate4-test charts/nginx-markdown --namespace gate4-smoke` | Exit 0 and rendered security checks pass |
+| 4.2 | Helm chart render | `helm template gate4-test charts/nginx-markdown --namespace gate4-smoke` and `tools/release/gates/validate_helm_render.py release-evidence/gate4/<candidate-sha>/rendered-manifests/` | Exit 0 and rendered security checks pass (run the validator against the rendered manifests or assert required fields explicitly) |
 | 4.3 | Promoted cluster smoke | `tools/release/gates/gate4_local_k8s_smoke.sh` or the promoted-cluster equivalent | Evidence at `release-evidence/gate4/<candidate-sha>/cluster-smoke.json`; conversion, Accept, and metrics checks pass |
 | 4.4 | F5 feasibility assessment | Review `docs/guides/F5_INGRESS_FEASIBILITY.md` and record assessment | Evidence at `release-evidence/gate4/<candidate-sha>/f5-assessment.md` is complete |
 

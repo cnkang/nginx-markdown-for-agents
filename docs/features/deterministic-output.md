@@ -221,7 +221,7 @@ fn normalize_output(&self, output: String) -> String {
             }
         } else {
             // Normalize whitespace (skip inside code blocks)
-            if in_code_block {
+            if active_fence_len.is_some() {
                 result.push_str(trimmed);
             } else {
                 let normalized = self.normalize_line_whitespace(trimmed);

@@ -46,6 +46,8 @@ curl --fail --location --remote-name "${RELEASE_BASE}/SHA256SUMS.asc"
 ### 2. Verify checksum
 
 ```bash
+set -euo pipefail
+
 # Import and verify the trusted project release key before this step; see
 # docs/guides/GPG_KEY_MANAGEMENT.md for the key fingerprint contract.
 gpg --verify SHA256SUMS.asc SHA256SUMS

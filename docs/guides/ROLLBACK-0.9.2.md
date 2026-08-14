@@ -27,6 +27,10 @@ Publication and artifact availability are separate release gates.
    ```bash
    sudo nginx -s quit
    timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
+   if sudo systemctl is-active --quiet nginx; then
+     echo "NGINX did not stop within 30s — investigate before continuing" >&2
+     exit 1
+   fi
    ```
 
 2. **Restore the 0.9.1 module binary:**
@@ -76,6 +80,10 @@ Publication and artifact availability are separate release gates.
    ```bash
    sudo nginx -s quit
    timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
+   if sudo systemctl is-active --quiet nginx; then
+     echo "NGINX did not stop within 30s — investigate before continuing" >&2
+     exit 1
+   fi
    # Restore the versioned 0.9.1 nginx.conf and dynamic-configuration file here.
    sudo cp objs/ngx_http_markdown_filter_module.so /usr/lib/nginx/modules/
    sudo nginx -t && sudo nginx
@@ -84,7 +92,11 @@ Publication and artifact availability are separate release gates.
 ### Helm
 
 ```bash
-helm rollback nginx-markdown --namespace nginx-markdown
+# Identify the revision corresponding to 0.9.1
+helm history nginx-markdown --namespace nginx-markdown
+
+# Verify the target revision, then rollback with an explicit revision and --wait
+helm rollback nginx-markdown <0.9.1-revision> --namespace nginx-markdown --wait
 ```
 
 ### Docker

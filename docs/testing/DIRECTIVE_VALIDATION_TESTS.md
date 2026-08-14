@@ -541,7 +541,7 @@ This implementation satisfies the following requirements:
 - **FR-12.7**: Agent-friendly extensions configuration (token_estimate, front_matter)
 - **FR-12.8**: Accept header behavior configuration (markdown_accept)
 - **FR-12.9**: Authentication policy configuration (auth_policy, auth_cookies)
-- **FR-12.10**: ETag configuration (markdown_etag)
+- **FR-12.10**: ETag configuration (markdown_etag — historical, non-applicable; retired in 0.9.0, see FR-06.6 markdown_cache_validation)
 - **FR-06.6**: Conditional request configuration (markdown_cache_validation)
 - **FR-02.9**: Chunked response handling configuration (historical
   markdown_buffer_chunked and markdown_stream_types behavior)

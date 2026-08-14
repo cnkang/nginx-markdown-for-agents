@@ -72,7 +72,7 @@ internal implementation detail of the frozen contract.
 Verify the upstream encoding and the decompression policy:
 
 ```bash
-curl -sI http://localhost/target-path | grep -iE 'content-(encoding|type|length)'
+curl -sD - -o /dev/null -H 'Accept: text/markdown' http://localhost/target-path | grep -iE 'content-(encoding|type|length)'
 nginx -T 2>/dev/null | grep -E 'markdown_(auto_decompress|streaming|cache_validation)'
 ```
 
