@@ -83,10 +83,11 @@ fn build_payload(kind: u8, src: &[u8]) -> (Vec<u8>, Option<Vec<u8>>) {
         2 => (deflate_compress(src), Some(src.to_vec())),
         3 => (brotli_compress(src), Some(src.to_vec())),
         4 => {
-            /* Expansion bomb: a few hundred KB of highly repetitive data
-             * compress to a few hundred bytes, exercising the ratio and
-             * cumulative-budget paths with bounded memory. */
-            let size = 100_000
+            /* Expansion bomb: highly repetitive data whose decoded size
+             * always exceeds MAX_OUTPUT (budget path) while its compressed
+             * representation stays above RATIO_ACTIVATION_THRESHOLD (ratio
+             * path), so the single-layer case exercises both limits. */
+            let size = MAX_OUTPUT
                 + u32::from_le_bytes([
                     src.first().copied().unwrap_or(0),
                     src.get(1).copied().unwrap_or(0),
