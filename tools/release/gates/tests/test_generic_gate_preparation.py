@@ -105,7 +105,7 @@ class TestArtifactRegistry:
         assert result.returncode == 1
         assert "stale-digest" in result.stderr
 
-    def test_blocking_pending_fails(self):
+    def test_duplicate_artifact_registry_id_fails(self):
         result = _run_gate(self.SCRIPT, "artifact-registry-duplicate-id.json")
         assert result.returncode == 1
         assert "duplicate" in result.stderr

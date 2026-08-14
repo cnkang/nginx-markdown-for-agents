@@ -119,10 +119,14 @@ jobs:
               raise SystemExit(f"unexpected command for blocking row {row_id!r}")
           if not isinstance(row.get("blocking"), bool):
               raise SystemExit(f"sanitizer row {row_id!r} blocking must be boolean")
+          def _safe_output(value: object) -> str:
+              # GITHUB_OUTPUT is a single key=value line per entry; any
+              # embedded newline would corrupt the key=value framing.
+              return str(value).replace("\n", " ").replace("\r", " ")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"blocking={'true' if row['blocking'] else 'false'}\n")
-              output.write(f"skip_reason={row.get('skip_reason', '')}\n")
-              output.write(f"policy_reference={row.get('policy_reference', '')}\n")
+              output.write(f"skip_reason={_safe_output(row.get('skip_reason', ''))}\n")
+              output.write(f"policy_reference={_safe_output(row.get('policy_reference', ''))}\n")
               output.write(f"sanitize_type={','.join(row.get('sanitizer', []))}\n")
               output.write(f"platform={row.get('platform', '')}\n")
               output.write(f"compiler={row.get('compiler', '')}\n")

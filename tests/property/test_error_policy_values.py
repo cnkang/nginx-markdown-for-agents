@@ -46,7 +46,8 @@ def classify_policy(value):
         return (ErrorPolicyKind.ACCEPTED, None)
     if isinstance(value, str) and value.startswith("status "):
         suffix = value.split(" ", 1)[1]
-        if not suffix.isdigit():
+        # Reject non-ASCII digits too, matching ngx_http_markdown_parse_uint.
+        if not (suffix.isascii() and suffix.isdigit()):
             return (ErrorPolicyKind.REJECTED, None)
         try:
             code = int(suffix)

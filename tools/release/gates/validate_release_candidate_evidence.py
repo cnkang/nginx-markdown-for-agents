@@ -325,6 +325,9 @@ def _check_evidence_schemas(manifest: dict, reasons: list) -> None:
     """Validate evidence schema digests when declared."""
     evidence_schema_digests = manifest.get("evidence_schema_digests")
     if evidence_schema_digests is None:
+        reasons.append(
+            "malformed: evidence_schema_digests present but None"
+        )
         return
     if not isinstance(evidence_schema_digests, dict):
         reasons.append("malformed: evidence_schema_digests must be an object")

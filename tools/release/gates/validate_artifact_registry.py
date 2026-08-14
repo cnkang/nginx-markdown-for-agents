@@ -167,7 +167,7 @@ def validate_index(index: dict, candidate_sha: str | None) -> list[str]:
     try:
         expected_digest = frozen_feature_digest()
         expected_abi = frozen_abi_version()
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
         reasons.append(f"malformed: cannot resolve official bindings: {exc}")
         return reasons
 

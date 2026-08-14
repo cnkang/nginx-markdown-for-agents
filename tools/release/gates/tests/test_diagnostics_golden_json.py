@@ -844,5 +844,3 @@ class TestHeadResponseBehavior:
         body = json.dumps(doc, separators=(",", ":"), ensure_ascii=False)
         content_length = len(body.encode("utf-8"))
         assert content_length > 0
-        # HEAD would report this content_length with no body
-        assert content_length == len(body.encode("utf-8"))

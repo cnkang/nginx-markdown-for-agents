@@ -1047,8 +1047,13 @@ def generate_c_header(reasons, hash_hex: str) -> str:
         "    markdown_reason_aliases[MARKDOWN_REASON_ALIAS_COUNT > 0 ? MARKDOWN_REASON_ALIAS_COUNT : 1] = {",
     ])
 
-    for alias, code in aliases:
-        lines.append(f'    {{ "{alias}", {code} }},')
+    if aliases:
+        for alias, code in aliases:
+            lines.append(f'    {{ "{alias}", {code} }},')
+    else:
+        # A C99/C11 array of size 1 needs one initializer element; emit a
+        # zero-initialized sentinel for the reserved element.
+        lines.append('    { "", 0 },')
 
     lines.extend([
         "};",

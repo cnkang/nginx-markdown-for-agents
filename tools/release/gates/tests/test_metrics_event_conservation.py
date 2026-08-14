@@ -64,7 +64,7 @@ class RequestOutcome(Enum):
     ABORTED = auto()         # Client abort during conversion
 
 
-def _registry_outcomes() -> set[str]:
+def _registry_outcomes() -> list[str]:
     family = next(
         item
         for item in METRICS_REGISTRY["families"]
