@@ -768,49 +768,60 @@ impl IncrementalEmitter {
         }
 
         if self.in_inline_code {
-            self.last_text_ended_whitespace = false;
-            let backtick_run = longest_backtick_run(text);
-            let leading_run = leading_backtick_run(text);
-            let trailing_run = trailing_backtick_run(text);
-            let bridged_run = self
-                .inline_code_trailing_backticks
-                .saturating_add(leading_run);
-            self.inline_code_backtick_max = self
-                .inline_code_backtick_max
-                .max(backtick_run)
-                .max(bridged_run);
-            if !text.is_empty() {
-                self.inline_code_trailing_backticks = if leading_run == text.len() {
-                    bridged_run
-                } else {
-                    trailing_run
-                };
-            }
-            self.check_inline_code_budget(text.len())?;
-            /* Normalize CR/LF to spaces before buffering so inline-code
-             * content follows the same whitespace semantics as plain text.
-             * CRLF is treated as one logical line ending (single space),
-             * not two (run12 MAJOR + follow-up). */
-            let mut normalized_text = String::with_capacity(text.len());
-            let mut chars = text.chars().peekable();
-            while let Some(c) = chars.next() {
-                match c {
-                    '\r' => {
-                        normalized_text.push(' ');
-                        if chars.peek() == Some(&'\n') {
-                            chars.next();
-                        }
-                    }
-                    '\n' => normalized_text.push(' '),
-                    _ => normalized_text.push(c),
-                }
-            }
-            self.inline_code_buffer.push_str(&normalized_text);
-            self.last_was_newline = text.ends_with('\n');
-            return Ok(());
+            return self.handle_inline_code_text(text);
         }
 
         self.handle_plain_text(text, escape_plain_text)
+    }
+
+    /// Process a text event while an inline code span is open.
+    ///
+    /// Tracks the maximum backtick run (bridging any trailing backticks from
+    /// the previous chunk so a later closing fence never collides), normalizes
+    /// CR/LF to single spaces (CRLF counts as one logical line ending),
+    /// buffers the normalized text, and enforces the inline-code budget.
+    fn handle_inline_code_text(&mut self, text: &str) -> Result<(), ConversionError> {
+        self.last_text_ended_whitespace = false;
+        let backtick_run = longest_backtick_run(text);
+        let leading_run = leading_backtick_run(text);
+        let trailing_run = trailing_backtick_run(text);
+        let bridged_run = self
+            .inline_code_trailing_backticks
+            .saturating_add(leading_run);
+        self.inline_code_backtick_max = self
+            .inline_code_backtick_max
+            .max(backtick_run)
+            .max(bridged_run);
+        if !text.is_empty() {
+            self.inline_code_trailing_backticks = if leading_run == text.len() {
+                bridged_run
+            } else {
+                trailing_run
+            };
+        }
+        self.check_inline_code_budget(text.len())?;
+        /* Normalize CR/LF to spaces before buffering so inline-code
+         * content follows the same whitespace semantics as plain text.
+         * CRLF is treated as one logical line ending (single space),
+         * not two (run12 MAJOR + follow-up). */
+        let mut normalized_text = String::with_capacity(text.len());
+        let mut chars = text.chars().peekable();
+        while let Some(c) = chars.next() {
+            match c {
+                '\r' => {
+                    normalized_text.push(' ');
+                    if chars.peek() == Some(&'\n') {
+                        chars.next();
+                    }
+                }
+                '\n' => normalized_text.push(' '),
+                _ => normalized_text.push(c),
+            }
+        }
+        self.inline_code_buffer.push_str(&normalized_text);
+        /* The flag tracks the normalized output, where CR/LF became spaces. */
+        self.last_was_newline = normalized_text.ends_with('\n');
+        Ok(())
     }
 
     fn handle_code_block_text(&mut self, text: &str) -> Result<(), ConversionError> {
