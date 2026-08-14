@@ -85,7 +85,7 @@ NON_DELIVERY_OUTCOMES: Set[TerminalOutcome] = {
 # --- streaming_events_total transition label model ---
 
 # The closed allowlist for the `transition` label on streaming_events_total
-TRANSITION_ALLOWLIST: Set[str] = _canonical_transition_allowlist()
+TRANSITION_ALLOWLIST: frozenset[str] = _canonical_transition_allowlist()
 
 # The 19 State Machine Events (DIFFERENT from transition label values)
 # These must NEVER appear as streaming_events_total transition labels

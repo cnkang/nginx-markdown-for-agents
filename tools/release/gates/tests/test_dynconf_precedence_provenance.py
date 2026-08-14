@@ -562,22 +562,23 @@ def test_server_block_bit_propagates_to_child(
     dynconf=dynconf_snapshot_st,
     request_vars=request_vars_st,
     location_value=field_value_st,
-    field_idx=st.integers(min_value=0, max_value=4),
+    field_name=st.sampled_from(DYNCONF_FIELDS),
 )
 def test_child_explicit_overrides_server_block_with_own_value(
     http_conf: ConfigLevel,
     server_conf: ConfigLevel,
+    
     dynconf: Optional[DynconfSnapshot],
     request_vars: RequestVariables,
     location_value: int,
-    field_idx: int,
+    field_name: str,
 ):
     """A child location that explicitly configures a field keeps the block bit
     set with the child's own value (not the server's value).
 
     **Validates: Requirements 3.15**
     """
-    f = DYNCONF_FIELDS[field_idx]
+    f = field_name
 
     # Ensure server has an explicit value for this field
     assume(server_conf.get(f) is not None)

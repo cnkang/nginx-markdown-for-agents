@@ -90,7 +90,7 @@ def test_rejected_named_status_values(status_code):
 
 
 @settings(max_examples=200)
-@given(st.text(alphabet="abcdefghijklmnopqrstuvwxyz ", min_size=1, max_size=24))
+@given(st.text(alphabet="abcdefghijklmnopqrstuvwxyz 0123456789", min_size=1, max_size=24))
 def test_any_other_value_rejected(value):
     """Any value outside the accepted set is rejected."""
     if value in ACCEPTED_SINGLE:

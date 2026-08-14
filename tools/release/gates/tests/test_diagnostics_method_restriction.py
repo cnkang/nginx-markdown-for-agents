@@ -297,7 +297,7 @@ def test_access_check_precedes_method_guard():
     405 branch, while allowed requests still reject unsupported methods before
     discarding a request body.
     """
-    method_check_pos = _HANDLER_BODY.find("r->method & (NGX_HTTP_GET")
+    method_check_pos = _HANDLER_BODY.find("r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD)")
     access_check_pos = _HANDLER_BODY.find("diagnostics_check_access")
     discard_body_pos = _HANDLER_BODY.find("ngx_http_discard_request_body")
 
