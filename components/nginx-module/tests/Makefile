@@ -32,10 +32,9 @@ build/unit build/integration build/generated:
 #                      Rust FFI headers, streaming enabled, and -lz for decomp.
 #   config_handlers_impl / config_core_impl - config-layer unit tests; need
 #                      nginx_stubs for NGINX API redefinitions and -ffunction-sections
-#                      for dead-code elimination of unused stubs.
-#   config_handlers_impl / profile - directly include broad production
-#                      implementation headers; suppress only the resulting
-#                      unreferenced static-function warnings in these test TUs.
+#                      for dead-code elimination of unused stubs; directly include
+#                      broad production implementation headers, suppressing only
+#                      the resulting unreferenced static-function warnings.
 #   dynconf_impl     - dynamic config hot-reload; needs nginx_stubs for
 #                      NGINX API redefinitions, streaming enabled, and
 #                      -ffunction-sections for dead-code elimination.
@@ -63,7 +62,6 @@ build/unit/%: unit/%_test.c include/test_common.h include/test_metrics_snapshot.
 	  streaming_impl) extra_cflags="-I../src -Iinclude/nginx_stubs -I../../rust-converter/include -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS) -lz" ;; \
 	  conversion_impl_base_url) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  config_handlers_impl|limits_parsing_property) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections -Wno-unused-function" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
-	  profile) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections -Wno-unused-function" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  streaming_config_contract|directive_context_default_inherit_property|context_negative_property) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  eligibility_impl|hard_excluded_params_case|hard_excluded_types_security|status_code_excluded_security) extra_cflags="-Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  config_core_impl) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \

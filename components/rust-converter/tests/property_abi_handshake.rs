@@ -217,7 +217,7 @@ fn c_define_value(header: &str, name: &str) -> u64 {
         .find(|line| line.trim_start().starts_with(&needle))
         .and_then(|line| line.split_whitespace().nth(2))
         .unwrap_or_else(|| panic!("{name} not found in markdown_converter.h"))
-        .trim_end_matches(|c: char| c == 'u' || c == 'l' || c == 'L');
+        .trim_end_matches(['u', 'l', 'L']);
     if let Some(hex) = value.strip_prefix("0x") {
         u64::from_str_radix(hex, 16).expect("valid hex define")
     } else {
