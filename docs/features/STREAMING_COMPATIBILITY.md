@@ -23,9 +23,9 @@ mode. Use it to understand behavioral differences before enabling streaming.
 | Noise pruning | ✅ | ✅ | Applied during parsing |
 | Dynamic configuration | ✅ | ✅ | Runtime engine switching supported |
 | Shadow mode | ✅ | N/A | Runs streaming in background against full-buffer result |
-| Streaming decompression (gzip) | N/A | ✅ | Member-aware; since 0.9.1 |
-| Streaming decompression (deflate) | N/A | ✅ | RFC 1950 zlib-wrapped plus raw RFC 1951 compatibility fallback |
-| Streaming decompression (Brotli) | N/A | ✅ | Requires `NGX_HTTP_BROTLI`; since 0.9.1 |
+| Decompression (gzip) | ✅ | ✅ | Member-aware; streaming since 0.9.1 |
+| Decompression (deflate) | ✅ | ✅ | RFC 1950 zlib-wrapped plus raw RFC 1951 fallback: full-buffer retries as raw after a zero-output format error; streaming detects once on the first two bytes and fails closed on misclassified streams; streaming since 0.9.1 |
+| Decompression (Brotli) | ✅ | ✅ | Requires `NGX_HTTP_BROTLI`; streaming since 0.9.1 |
 
 ## Legend
 
