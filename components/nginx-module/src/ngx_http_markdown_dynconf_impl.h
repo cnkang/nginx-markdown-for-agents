@@ -3426,14 +3426,6 @@ ngx_http_markdown_dynconf_publish_candidate(
         NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED;
     ngx_http_markdown_record_dynconf_reload(DYNCONF_OK);
     ngx_http_markdown_dynconf_clear_last_error(watcher);
-    if (!watcher->digest_state.lkg_valid) {
-        watcher->last_known_good = watcher->active_snapshot;
-        ngx_memcpy(watcher->digest_state.lkg_digest,
-                   watcher->digest_state.active_digest,
-                   sizeof(watcher->digest_state.lkg_digest));
-        watcher->digest_state.lkg_mtime = watcher->file_state.applied_mtime;
-        watcher->digest_state.lkg_valid = 1;
-    }
 }
 
 /* Reload the bounded file, validate its JSON result, and publish it atomically.
