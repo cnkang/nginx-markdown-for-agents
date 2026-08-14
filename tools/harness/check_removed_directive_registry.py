@@ -102,7 +102,6 @@ def main() -> int:
     # even before filtering.
     if any(name in production for name in removed):
         raise AssertionError("a removed directive is present in the production table")
-    removed = [name for name in removed if name not in production]
     print(
         "removed-directive registry: production ngx_http_markdown_filter_commands "
         f"matches {len(production)} canonical entries; removed set is absent"

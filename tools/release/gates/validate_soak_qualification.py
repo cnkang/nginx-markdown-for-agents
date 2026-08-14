@@ -578,6 +578,8 @@ def wait_for_ready(url: str, timeout: int = 30) -> bool:
                 if response.status == 200:
                     return True
         except (urllib.error.URLError, OSError):
+            # NGINX may still be starting, so transient connection failures
+            # are expected while the readiness loop continues.
             pass
         time.sleep(0.25)
     return False
