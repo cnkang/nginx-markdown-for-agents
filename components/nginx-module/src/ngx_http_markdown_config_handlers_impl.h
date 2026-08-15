@@ -1621,9 +1621,22 @@ ngx_http_markdown_diagnostics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void
         ngx_conf_log_error(NGX_LOG_INFO, cf, 0,
                            "markdown: diagnostics endpoint enabled at this location");
     } else if (ngx_http_markdown_arg_equals(&value[1],
-                                             off_str, sizeof(off_str) - 1))
+                                            off_str, sizeof(off_str) - 1))
     {
         mcf->ops.diagnostics_enabled = 0;
+
+        /* Clear only the module's own diagnostics content handler.  A
+         * handler installed by another directive in this location is
+         * preserved.  (An inherited handler from a parent level is
+         * cleared at directive-parse time only when it is already the
+         * module's handler; a parent `on` plus child `off` combination
+         * is not supported for the endpoint.) */
+        clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
+        if (clcf != NULL
+            && clcf->handler == ngx_http_markdown_diagnostics_handler)
+        {
+            clcf->handler = NULL;
+        }
     } else {
         return "invalid value";
     }

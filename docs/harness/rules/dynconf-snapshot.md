@@ -155,3 +155,27 @@ Verification:
 - `make test-nginx-unit` — the effective-conf and dynconf tests exercise the
   NULL fallback, early binding, allocation-failure behavior, and the
   non-NULL/NULL `markdown_limits` eligibility paths.
+
+---
+
+### 46. Static explicit settings block dynamic overrides and propagate to child levels
+
+Historical context: the dynconf precedence question (whether an http-level
+explicit setting locks the field for every location) resolves as follows.
+
+Required:
+
+- A directive set explicitly in static configuration marks its field in
+  `dynconf_block_mask`.  The mask propagates down the configuration tree:
+  an explicit http-level setting blocks the dynamic override of that field
+  in every child location, because locations inherit the http block's
+  explicit configuration.
+- The dynconf API rejects a mutation of a field whose block bit is set.
+  Static explicit settings win over dynamic configuration at every level.
+- A field left unset in static configuration stays dynamic.  The dynamic
+  snapshot applies to it at the location that owns the request.
+
+Verification:
+
+- `make test-nginx-unit` — the dynconf production tests assert the block
+  mask propagation from an explicit http-level setting.

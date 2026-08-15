@@ -1576,6 +1576,8 @@ test_streaming_full_auto_warns_but_succeeds(void)
     printf("  \xe2\x9c\x93 full + auto warns but merge succeeds\n");
 }
 
+static void test_dynconf_block_mask_propagates_from_parent(void);
+
 int
 main(void)
 {
@@ -1589,6 +1591,7 @@ main(void)
     test_merge_conf_default_cache_validation();
     test_merge_conf();
     test_dynconf_owner_uses_merged_config();
+    test_dynconf_block_mask_propagates_from_parent();
     test_merge_conf_double_unset();
     test_stream_budget_explicit_maps_to_stream();
     test_stream_preserves_explicit_defaults();
@@ -1607,4 +1610,60 @@ main(void)
     printf("========================================\n\n");
 
     return 0;
+}
+
+/*
+ * Verify dynconf block-mask propagation (Rule 46): an explicit
+ * http-level setting blocks the dynamic override of that field in every
+ * child location, because locations inherit the http block's explicit
+ * configuration.
+ */
+static void
+test_dynconf_block_mask_propagates_from_parent(void)
+{
+    ngx_conf_t                     cf;
+    ngx_http_markdown_conf_t      *parent;
+    ngx_http_markdown_conf_t      *child;
+    char                          *rc;
+
+    TEST_SUBSECTION("dynconf block mask propagation from explicit parent");
+
+    cf.pool = &g_pool;
+    cf.log = &g_log;
+
+    parent = ngx_http_markdown_create_conf(&cf);
+    child = ngx_http_markdown_create_conf(&cf);
+    TEST_ASSERT(parent != NULL && child != NULL,
+        "create_conf should allocate merge inputs");
+
+    /* Explicit http-level settings must set the corresponding block bits.
+     * Merge the parent against an empty ancestor first: the block-mark
+     * pass runs inside merge and inspects the explicit fields. */
+    parent->limits.streaming_buffer = 2 * 1024 * 1024;
+    parent->advanced.prune_noise = 1;
+
+    {
+        ngx_http_markdown_conf_t *ancestor;
+
+        ancestor = ngx_http_markdown_create_conf(&cf);
+        TEST_ASSERT(ancestor != NULL,
+            "create_conf should allocate ancestor");
+        rc = ngx_http_markdown_merge_conf(&cf, ancestor, parent);
+        TEST_ASSERT(rc == NGX_CONF_OK,
+            "merge with explicit parent should succeed");
+    }
+
+    rc = ngx_http_markdown_merge_conf(&cf, parent, child);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+        "merge with explicit parent should succeed");
+    TEST_ASSERT(
+        (child->advanced.dynconf_block_mask
+         & NGX_HTTP_MARKDOWN_BLOCK_STREAMING_BUFFER) != 0,
+        "explicit parent streaming_buffer must block child dynamic override");
+    TEST_ASSERT(
+        (child->advanced.dynconf_block_mask
+         & NGX_HTTP_MARKDOWN_BLOCK_PRUNE_NOISE) != 0,
+        "explicit parent prune_noise must block child dynamic override");
+
+    TEST_PASS("dynconf block mask propagation covered");
 }
