@@ -772,16 +772,24 @@ pub unsafe extern "C" fn markdown_decide_base_url(
 
         let source_ip = unsafe { optional_str(inp.source_ip, inp.source_ip_len) }.unwrap_or("");
         let forwarded = unsafe { optional_str_present(inp.forwarded, inp.forwarded_len) }.ok()?;
+        // Auxiliary forwarded fields tolerate malformed UTF-8: an invalid
+        // x_forwarded_* / host value is treated as absent so a single bad
+        // header cannot abort the whole decision.  `forwarded` and
+        // `direct_scheme` remain fail-closed above because they carry the
+        // trusted-proxy precedence contract.
         let x_forwarded_for =
-            unsafe { optional_str_present(inp.x_forwarded_for, inp.x_forwarded_for_len) }.ok()?;
+            unsafe { optional_str_present(inp.x_forwarded_for, inp.x_forwarded_for_len) }
+                .unwrap_or(None);
         let x_forwarded_proto =
             unsafe { optional_str_present(inp.x_forwarded_proto, inp.x_forwarded_proto_len) }
-                .ok()?;
+                .unwrap_or(None);
         let x_forwarded_host =
-            unsafe { optional_str_present(inp.x_forwarded_host, inp.x_forwarded_host_len) }.ok()?;
+            unsafe { optional_str_present(inp.x_forwarded_host, inp.x_forwarded_host_len) }
+                .unwrap_or(None);
         let x_forwarded_port =
-            unsafe { optional_str_present(inp.x_forwarded_port, inp.x_forwarded_port_len) }.ok()?;
-        let host = unsafe { optional_str_present(inp.host, inp.host_len) }.ok()?;
+            unsafe { optional_str_present(inp.x_forwarded_port, inp.x_forwarded_port_len) }
+                .unwrap_or(None);
+        let host = unsafe { optional_str_present(inp.host, inp.host_len) }.unwrap_or(None);
         let direct_scheme =
             unsafe { optional_str_present(inp.direct_scheme, inp.direct_scheme_len) }.ok()?;
 
@@ -1726,6 +1734,70 @@ mod tests {
         assert_eq!(decision.base_url_len, 0);
         assert_eq!(decision.reason, BaseUrlReason::FallbackToDefault.as_u8());
         assert_eq!(decision.source, BaseUrlSource::Default.as_u8());
+    }
+
+    #[test]
+    fn decide_base_url_invalid_utf8_aux_fields_are_absent() {
+        // Auxiliary forwarded fields (x_forwarded_*, host) tolerate invalid
+        // UTF-8 by treating the malformed value as absent; the decision must
+        // still complete (fail-soft).
+        let mut buf = [0u8; 64];
+        let mut decision = empty_decision();
+        let invalid: &[u8] = &[0xff, 0xfe, 0x80];
+        let mut input = empty_base_url_input();
+        input.x_forwarded_for = invalid.as_ptr();
+        input.x_forwarded_for_len = invalid.len();
+        input.x_forwarded_proto = invalid.as_ptr();
+        input.x_forwarded_proto_len = invalid.len();
+        input.x_forwarded_host = invalid.as_ptr();
+        input.x_forwarded_host_len = invalid.len();
+        input.x_forwarded_port = invalid.as_ptr();
+        input.x_forwarded_port_len = invalid.len();
+        input.host = invalid.as_ptr();
+        input.host_len = invalid.len();
+
+        let rc =
+            unsafe { markdown_decide_base_url(&input, buf.as_mut_ptr(), buf.len(), &mut decision) };
+        assert_eq!(rc, DECIDE_BASE_URL_OK);
+        // Fail-soft: the decision completes with the safe default instead of
+        // aborting, and no auxiliary header value leaked into the URL.
+        use crate::forwarded::{BaseUrlReason, BaseUrlSource};
+        assert_eq!(decision.reason, BaseUrlReason::FallbackToDefault.as_u8());
+        assert_eq!(decision.source, BaseUrlSource::Default.as_u8());
+    }
+
+    #[test]
+    fn decide_base_url_invalid_utf8_forwarded_is_fail_closed() {
+        // The `forwarded` field carries the trusted-proxy precedence
+        // contract: malformed UTF-8 there must abort the decision.
+        let mut buf = [0u8; 64];
+        let mut decision = empty_decision();
+        let invalid: &[u8] = &[0xff, 0xfe, 0x80];
+        let mut input = empty_base_url_input();
+        input.forwarded = invalid.as_ptr();
+        input.forwarded_len = invalid.len();
+
+        let rc =
+            unsafe { markdown_decide_base_url(&input, buf.as_mut_ptr(), buf.len(), &mut decision) };
+        assert_eq!(rc, DECIDE_BASE_URL_INVALID);
+        assert_safe_base_url_default(&decision);
+    }
+
+    #[test]
+    fn decide_base_url_invalid_utf8_direct_scheme_is_fail_closed() {
+        // direct_scheme is part of the trusted-proxy contract and must stay
+        // fail-closed on malformed UTF-8.
+        let mut buf = [0u8; 64];
+        let mut decision = empty_decision();
+        let invalid: &[u8] = &[0xff, 0xfe, 0x80];
+        let mut input = empty_base_url_input();
+        input.direct_scheme = invalid.as_ptr();
+        input.direct_scheme_len = invalid.len();
+
+        let rc =
+            unsafe { markdown_decide_base_url(&input, buf.as_mut_ptr(), buf.len(), &mut decision) };
+        assert_eq!(rc, DECIDE_BASE_URL_INVALID);
+        assert_safe_base_url_default(&decision);
     }
 
     #[test]

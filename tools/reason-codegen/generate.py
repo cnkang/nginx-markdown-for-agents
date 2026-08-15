@@ -288,6 +288,7 @@ METRIC_FAMILIES = {
         "not_eligible",
         "disabled",
         "bypass_no_transform",
+        "overload",
     ],
     "markdown_errors_total": [
         "decompression_error",
@@ -305,7 +306,6 @@ METRIC_FAMILIES = {
         "streaming_mid_flight_error",
         "invalid_dynconf",
         "degraded_snapshot",
-        "overload",
         "encoding_header_invalid",
     ],
     "markdown_failed_open_total": ["failed_open"],
