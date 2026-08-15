@@ -3496,7 +3496,7 @@ ngx_http_markdown_streaming_finalize_send_markdown(
                 return NGX_ERROR;
             }
             *ctx->streaming.completion.finalize_pending_result = *result;
-            ngx_memzero(result, sizeof(*result));
+            markdown_result_init(result);
             ngx_http_markdown_streaming_sync_buffered(r, ctx);
             return NGX_AGAIN;
         }
@@ -4091,10 +4091,12 @@ ngx_http_markdown_streaming_failopen_passthrough(
             conf = ngx_http_get_module_loc_conf(
                 r, ngx_http_markdown_filter_module);
             if (conf == NULL) {
-                /* Location configuration unavailable; fall back to the
-                 * request-level effective configuration so the error
-                 * path always has a policy to evaluate. */
-                conf = ctx->effective_conf;
+                /* Location configuration unavailable: fail closed.
+                 * In practice the request path always has a loc conf
+                 * (allocated during configuration parsing); this guard
+                 * keeps the resource-limit error path from dereferencing
+                 * a NULL policy pointer. */
+                return NGX_ERROR;
             }
             return ngx_http_markdown_streaming_precommit_error(
                 r, ctx, conf, ERROR_MEMORY_LIMIT);
