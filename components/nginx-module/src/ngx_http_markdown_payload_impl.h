@@ -604,9 +604,13 @@ ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
     ctx->eligible = 0;
     r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
     rc = ngx_http_markdown_forward_headers(r, ctx);
-    if (rc != NGX_OK) {
+    if (rc != NGX_OK && rc != NGX_AGAIN) {
         return rc;
     }
+    /* Header-chain NGX_AGAIN = headers queued by the write filter (NGINX
+     * core model).  Proceed so the buffered prefix and the original body
+     * are always emitted; returning early here sends headers only under
+     * backpressure and truncates the fail-open response. */
 
     rc = ngx_http_markdown_fail_open_with_buffered_prefix(r, ctx, cl);
 

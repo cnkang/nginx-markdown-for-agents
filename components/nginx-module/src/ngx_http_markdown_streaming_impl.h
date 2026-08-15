@@ -490,6 +490,14 @@ ngx_http_markdown_streaming_cleanup(void *data)
      */
     ngx_http_markdown_streaming_release_pending_header_output(ctx);
 
+    /* Release a deferred finalize result when the header NGX_AGAIN
+     * retry never completed on this request. */
+    if (ctx->streaming.completion.finalize_pending_result != NULL) {
+        markdown_result_free(
+            ctx->streaming.completion.finalize_pending_result);
+        ctx->streaming.completion.finalize_pending_result = NULL;
+    }
+
     /*
      * Clear the pending_output anchor/state.
      *
@@ -3467,7 +3475,32 @@ ngx_http_markdown_streaming_finalize_send_markdown(
     {
         rc = ngx_http_markdown_streaming_commit(
             r, ctx, conf);
-        if (rc != NGX_OK && rc != NGX_AGAIN) {
+        if (rc == NGX_AGAIN) {
+            /* Header chain owns delivery (headers_pending).  Defer the
+             * finalize output until the header retry succeeds, matching
+             * the feed path's pending_header_output handling: body
+             * output must not run ahead of headers.  The null-input
+             * re-entry path sends the deferred chunk after the retry. */
+            if (ctx->streaming.completion.finalize_pending_result != NULL) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                    "markdown: finalize output re-entry while a previous "
+                    "finalize output waits for the header retry "
+                    "(state-machine invariant violation)");
+                markdown_result_free(result);
+                return NGX_ERROR;
+            }
+            ctx->streaming.completion.finalize_pending_result =
+                ngx_palloc(r->pool, sizeof(struct MarkdownResult));
+            if (ctx->streaming.completion.finalize_pending_result == NULL) {
+                markdown_result_free(result);
+                return NGX_ERROR;
+            }
+            *ctx->streaming.completion.finalize_pending_result = *result;
+            ngx_memzero(result, sizeof(*result));
+            ngx_http_markdown_streaming_sync_buffered(r, ctx);
+            return NGX_AGAIN;
+        }
+        if (rc != NGX_OK) {
             markdown_result_free(result);
             return rc;
         }
@@ -4034,9 +4067,13 @@ ngx_http_markdown_streaming_failopen_passthrough(
 
     if (!ctx->headers_forwarded) {
         rc = ngx_http_markdown_forward_headers(r, ctx);
-        if (rc != NGX_OK) {
+        if (rc != NGX_OK && rc != NGX_AGAIN) {
             return rc;
         }
+        /* Header-chain NGX_AGAIN = headers queued by the write filter
+         * (NGINX core model).  Continue so the fail-open replay body is
+         * always delivered; returning early here sends headers only
+         * under backpressure. */
     }
 
     if (!ctx->streaming.failopen_replay_initialized
@@ -4528,6 +4565,30 @@ ngx_http_markdown_streaming_null_input_resume_header(
     }
     if (!ngx_http_markdown_streaming_delivery_ok(rc)) {
         return rc;
+    }
+
+    /* A header NGX_AGAIN may also have deferred the finalize output on
+     * the finalize path.  Send it now that the header retry succeeded,
+     * then deliver the terminal last_buf.  The output-bytes accounting
+     * already ran on the first pass (before the deferral), so this path
+     * sends directly instead of re-running finalize_send_markdown. */
+    if (ctx->streaming.completion.finalize_pending_result != NULL) {
+        struct MarkdownResult  *pending;
+        ngx_int_t               final_send_rc = NGX_OK;
+
+        pending = ctx->streaming.completion.finalize_pending_result;
+        ctx->streaming.completion.finalize_pending_result = NULL;
+        rc = ngx_http_markdown_streaming_send_output(
+            r, ctx, pending->markdown, pending->markdown_len,
+            /* last_buf */ 0);
+        if (rc != NGX_OK && rc != NGX_DONE && rc != NGX_AGAIN) {
+            return ngx_http_markdown_streaming_handle_output_loss(
+                r, ctx, conf);
+        }
+        final_send_rc = rc;
+        ngx_http_markdown_streaming_record_finalize_stats(r, ctx, pending);
+        return ngx_http_markdown_streaming_finish_terminal(
+            r, ctx, conf, final_send_rc);
     }
 
     return NGX_OK;
@@ -5050,6 +5111,14 @@ ngx_http_markdown_streaming_handle_new_input_with_pending(
         rc = ngx_http_markdown_streaming_precommit_error(
             r, ctx, conf, enqueue_error);
         if (rc == NGX_DECLINED && !ctx->eligible) {
+            if (ctx->stream_sm.headers_pending) {
+                /* The header block was already mutated and queued for
+                 * the header retry.  Fail-open here would pair
+                 * Markdown-contract headers with the original HTML
+                 * body, a mismatched response.  Fail closed instead;
+                 * the request terminates with an error. */
+                return NGX_ERROR;
+            }
             return ngx_http_markdown_streaming_failopen_passthrough(
                 r, ctx, in);
         }
