@@ -1,6 +1,6 @@
 ---
 domain: observability-metrics
-rules: [7, 8, 8b, 8c, 23]
+rules: [7, 8, 8b, 8c, 23, 67]
 paths:
   - "components/nginx-module/src/**"
   - "components/rust-converter/src/**"
@@ -301,6 +301,39 @@ Required:
   output. NGINX provides `ngx_log_error` for error logging. Validate the
   suffix argument count only for `ngx_log_debug0` through `ngx_log_debug8`;
   error logging has no numbered suffix to validate.
+
+---
+
+### Rule 67 — v1 terminal-outcome conservation in the metrics renderer
+
+Historical issues: terminal-outcome conservation regressed repeatedly —
+mutually-exclusive terminal outcomes, conservation across backpressure
+resume, and latency-bucket population all drifted at different times
+because the renderer arithmetic had no standing guard.
+
+Required:
+- `ngx_http_markdown_metrics_to_v1` must partition the conversion-failure
+  space without double counting:
+  `conversions_failed = failed_open + failed_closed + aborted`.
+- `v1->requests.failed_open` reads `results.failopen_count`; the derived
+  `failed_closed` must deduct `failopen_count` and (streaming build)
+  `terminal_aborted_total` from `conversions_failed`; `v1->requests.aborted`
+  must read `terminal_aborted_total`, never the per-path counter
+  `streaming_failure_postcommit_abort` (that counter classifies the failure
+  path, it is not a terminal outcome).
+- Multi-statement derivations (subtract each outcome independently) must
+  deduct every classified outcome before the saturating floor; a missing
+  deduction silently re-classifies failures as `failed_closed`.
+- `v1->requests.aborted = 0` is correct only in the non-streaming build.
+
+Verification:
+- `PYTHONPATH=. python3 tools/harness/detect_metrics_event_conservation.py`
+  — blocking harness-tooling CI check via `make harness-security-checks`
+  for selected `harness_tooling` paths, and a local full-gate check.
+- `PYTHONPATH=tools/harness python3 -m pytest
+  tools/harness/tests/test_detect_metrics_event_conservation.py -q --tb=short`
+  — detector regression tests (clean renderer, stale aborted source,
+  missing failopen deduction, missing renderer).
 
 ---
 

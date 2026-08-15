@@ -423,6 +423,7 @@ harness-security-checks:
 	bash tools/harness/detect_decompression_budget.sh
 	PYTHONPATH=. python3 tools/harness/detect_test_assertion_coverage.py
 	PYTHONPATH=. python3 tools/harness/detect_html_sanitizer_invariants.py
+	PYTHONPATH=. python3 tools/harness/detect_metrics_event_conservation.py
 	PYTHONPATH=. python3 tools/harness/detect_doc_sync.py
 
 release-supply-chain-check:
