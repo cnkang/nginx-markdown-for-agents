@@ -112,7 +112,7 @@ pub struct DynconfValue {
     pub streaming_buffer: Option<u64>,
 }
 
-/// The complete set of known dynconf keys (excluding schema_version).
+/// The complete set of known dynconf keys, including schema_version.
 const KNOWN_KEYS: &[&str] = &[
     "schema_version",
     "filter",

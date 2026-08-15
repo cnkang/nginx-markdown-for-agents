@@ -190,13 +190,13 @@ fn apply_none(
 /// PASS_HTML: deliver original upstream HTML unchanged.
 fn apply_pass_html(
     _state: StreamingState,
-    _frame: &TransitionFrame,
+    frame: &TransitionFrame,
 ) -> Result<ApplyResult, StateMachineError> {
     Ok(ApplyResult {
         new_state: StreamingState::Passthrough,
         next_frame: None,
         side_effects: vec![SideEffectCommand {
-            command_id: "CMD_APASS-CLR".to_string(),
+            command_id: format!("CMD_A{}-CLR", frame.transition_id.replace("PLAN-", "")),
             kind: SideEffectKind::ClearInflightAndPending,
             execute_if: OwnerPredicate::Always,
             payload: SideEffectPayload::None,
@@ -209,13 +209,13 @@ fn apply_pass_html(
 /// REJECT_STATUS: emit the resolved reject status and stop.
 fn apply_reject_status(
     _state: StreamingState,
-    _frame: &TransitionFrame,
+    frame: &TransitionFrame,
 ) -> Result<ApplyResult, StateMachineError> {
     Ok(ApplyResult {
         new_state: StreamingState::FailedClosed,
         next_frame: None,
         side_effects: vec![SideEffectCommand {
-            command_id: "CMD_AREJECT-CLR".to_string(),
+            command_id: format!("CMD_A{}-CLR", frame.transition_id.replace("PLAN-", "")),
             kind: SideEffectKind::ClearInflightAndPending,
             execute_if: OwnerPredicate::Always,
             payload: SideEffectPayload::None,
@@ -296,13 +296,13 @@ fn apply_switch_full_buffer(
 /// PASSTHROUGH: bypass conversion entirely.
 fn apply_passthrough(
     _state: StreamingState,
-    _frame: &TransitionFrame,
+    frame: &TransitionFrame,
 ) -> Result<ApplyResult, StateMachineError> {
     Ok(ApplyResult {
         new_state: StreamingState::Passthrough,
         next_frame: None,
         side_effects: vec![SideEffectCommand {
-            command_id: "CMD_APT-CLR".to_string(),
+            command_id: format!("CMD_A{}-CLR", frame.transition_id.replace("PLAN-", "")),
             kind: SideEffectKind::ClearInflightAndPending,
             execute_if: OwnerPredicate::Always,
             payload: SideEffectPayload::None,
@@ -528,7 +528,10 @@ fn apply_send_closing_output(
                 next_frame: None,
                 side_effects: vec![
                     SideEffectCommand {
-                        command_id: "CMD_ACLOSE-LOSS".to_string(),
+                        command_id: format!(
+                            "CMD_A{}-CLOSE-LOSS",
+                            frame.transition_id.replace("PLAN-", "")
+                        ),
                         kind: SideEffectKind::SetSafeFinishOutputLoss,
                         execute_if: OwnerPredicate::Always,
                         payload: SideEffectPayload::None,
@@ -649,7 +652,10 @@ fn apply_send_terminal(
                 next_frame: None,
                 side_effects: vec![
                     SideEffectCommand {
-                        command_id: "CMD_ATERM-FAIL".to_string(),
+                        command_id: format!(
+                            "CMD_A{}-TERM-FAIL",
+                            frame.transition_id.replace("PLAN-", "")
+                        ),
                         kind: SideEffectKind::SetSafeFinishTerminalSendFailed,
                         execute_if: OwnerPredicate::Always,
                         payload: SideEffectPayload::None,
@@ -936,7 +942,10 @@ fn apply_resume_closing_output(
                 next_frame: None,
                 side_effects: vec![
                     SideEffectCommand {
-                        command_id: "CMD_ARCLOSE-LOSS".to_string(),
+                        command_id: format!(
+                            "CMD_A{}-RCLOSE-LOSS",
+                            frame.transition_id.replace("PLAN-", "")
+                        ),
                         kind: SideEffectKind::SetSafeFinishOutputLoss,
                         execute_if: OwnerPredicate::Always,
                         payload: SideEffectPayload::None,
