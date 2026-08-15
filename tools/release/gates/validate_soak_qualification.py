@@ -466,7 +466,7 @@ def read_module_peak_memory(base_url: str) -> int | None:
             if response.status != 200:
                 return None
             payload = response.read(METRICS_RESPONSE_MAX_BYTES + 1)
-    except (OSError, UnicodeError, urllib.error.URLError):
+    except (OSError, UnicodeError):
         return None
     if len(payload) > METRICS_RESPONSE_MAX_BYTES:
         return None
@@ -577,7 +577,7 @@ def wait_for_ready(url: str, timeout: int = 30) -> bool:
             with urllib.request.urlopen(validated_url, timeout=2) as response:
                 if response.status == 200:
                     return True
-        except (urllib.error.URLError, OSError):
+        except OSError:
             # NGINX may still be starting, so transient connection failures
             # are expected while the readiness loop continues.
             pass
@@ -1029,6 +1029,7 @@ def _run_soak_session(
 
     return {
         "started": started,
+        "ended": time.time(),
         "rss_series": rss_series,
         "scenario_metrics": scenario_metrics,
         "drain_delta": drain_delta,
@@ -1110,7 +1111,7 @@ def real_main(args: argparse.Namespace) -> int:
     session = _run_soak_session(base_url, manifest, module_so)
 
     per_scenario = build_scenario_metrics(session["scenario_metrics"])
-    elapsed = time.time() - session["started"]
+    elapsed = session["ended"] - session["started"]
     record = _build_soak_record(manifest, elapsed, per_scenario, session)
     failures = []
     try:

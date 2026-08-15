@@ -47,10 +47,17 @@ def _resolve_manifest_path() -> pathlib.Path:
 
     def _version_key(path: pathlib.Path) -> tuple:
         name = path.parent.name
-        nums = tuple(int(part) for part in re.findall(r"\d+", name))
-        # Prerelease suffixes (0.9.2-rc.1) must sort AFTER the stable
-        # release (0.9.2) so the stable manifest wins the selection.
-        return (1 if "-" in name else 0, nums)
+        base, separator, pre = name.partition("-")
+        main = tuple(int(part) for part in re.findall(r"\d+", base))
+        pre_nums = (
+            tuple(int(part) for part in re.findall(r"\d+", pre))
+            if separator
+            else ()
+        )
+        # With reverse=True: the highest main version wins; among equal
+        # main versions a stable release (1) ranks above a prerelease
+        # (0); prerelease numbers break ties between prereleases.
+        return (main, 0 if separator else 1, pre_nums)
 
     return sorted(manifests, key=_version_key, reverse=True)[0]
 
@@ -111,14 +118,21 @@ def _workflow_feature_assignments(path: pathlib.Path) -> list[str]:
 
 
 def _workflow_feature_flags(path: pathlib.Path) -> list[set[str]]:
-    """Extract `--features X` or `--no-default-features` usage."""
+    """Extract `--features X` / `--all-features` / `--no-default-features`.
+
+    `--all-features` is represented by the sentinel `*all*` so callers
+    can distinguish it from an explicit feature list.
+    """
     text = path.read_text(encoding="utf-8")
     no_default = "no-default-features" in text
+    all_features = bool(re.search(r"--all-features(?:\s|$)", text))
     flags = re.findall(
         r"--features(?:=|\s+)[\"']?([A-Za-z0-9_,]+)[\"']?",
         text,
     )
     parsed = [set(f.split(",")) for f in flags]
+    if all_features:
+        parsed.append({"*all*"})
     if no_default:
         parsed.append(set())
     return parsed
@@ -142,8 +156,7 @@ def test_official_producer_uses_fixed_feature_set(workflow: str) -> None:
     """Every official artifact producer builds with the same fixed feature
     set; no producer may add, omit, or disable a feature."""
     path = WORKFLOW_DIR / workflow
-    if not path.is_file():
-        pytest.skip(f"{workflow} not present in this checkout")
+    assert path.is_file(), f"{workflow} must exist in this checkout"
     feature_sets = _workflow_feature_flags(path)
     if not feature_sets:
         return  # producer relies on Cargo defaults, which the other tests pin
@@ -159,8 +172,7 @@ def test_official_producer_no_feature_flag_matrix(workflow: str) -> None:
     """No official producer workflow runs a feature-flag combination
     matrix; a single fixed feature set is used."""
     path = WORKFLOW_DIR / workflow
-    if not path.is_file():
-        pytest.skip(f"{workflow} not present in this checkout")
+    assert path.is_file(), f"{workflow} must exist in this checkout"
     feature_sets = _workflow_feature_flags(path)
     assert len(set(frozenset(s) for s in feature_sets)) <= 1, (
         f"{workflow} varies feature flags across jobs/matrix entries"
@@ -172,8 +184,7 @@ def test_official_producer_feature_assignments_consistent(workflow: str) -> None
     """RUST_FEATURES env assignments in official producers are consistent
     across the file (no per-matrix divergence)."""
     path = WORKFLOW_DIR / workflow
-    if not path.is_file():
-        pytest.skip(f"{workflow} not present in this checkout")
+    assert path.is_file(), f"{workflow} must exist in this checkout"
     assignments = _workflow_feature_assignments(path)
     assert len(set(assignments)) <= 1, (
         f"{workflow} has divergent RUST_FEATURES assignments: {assignments}"
@@ -186,15 +197,20 @@ def test_official_producer_feature_assignments_consistent(workflow: str) -> None
 
 
 def test_custom_builds_never_disable_required_feature_via_no_default() -> None:
-    """Custom build surfaces must not use --no-default-features (which would
-    disable the official set)."""
+    """Custom build surfaces that use --no-default-features must still
+    declare the complete official feature set explicitly."""
     for workflow in CUSTOM_BUILD_WORKFLOWS:
         path = WORKFLOW_DIR / workflow
         if not path.is_file():
             continue
         text = path.read_text(encoding="utf-8")
-        assert "no-default-features" not in text, (
-            f"{workflow} disables default features, breaking the official set"
+        if "no-default-features" not in text:
+            continue
+        flags = _workflow_feature_flags(path)
+        explicit = [s for s in flags if s]
+        assert any(s == set(OFFICIAL_FEATURES) for s in explicit), (
+            f"{workflow} uses --no-default-features without the full "
+            f"official feature set {sorted(OFFICIAL_FEATURES)}"
         )
 
 
@@ -202,8 +218,7 @@ def test_custom_builds_never_disable_required_feature_via_no_default() -> None:
 def test_official_producer_does_not_disable_required_features(workflow: str) -> None:
     """Every explicit feature list contains the complete official set."""
     path = WORKFLOW_DIR / workflow
-    if not path.is_file():
-        pytest.skip(f"{workflow} not present in this checkout")
+    assert path.is_file(), f"{workflow} must exist in this checkout"
     text = path.read_text(encoding="utf-8")
     assert "no-default-features" not in text
     for features in _workflow_feature_flags(path):

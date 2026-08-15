@@ -346,7 +346,7 @@ def _gate_1_items(sources: dict[str, str]) -> BlockingItems:
         ("make test-nginx-unit-streaming", "`make test-nginx-unit-streaming`" in sources["gates"] and "test-nginx-unit-streaming" in sources["mk"]),
         ("make test-rust", "`make test-rust`" in sources["gates"] and re.search(r"\btest-rust:", sources["mk"]) is not None),
         ("make build && make check-headers", "check-headers" in sources["mk"] and "make check-headers" in sources["docs"]),
-        ("bounded decompression", "markdown_decompress_max_size" in sources["cfg"] and "DecompressionBudgetExceeded" in sources["err"]),
+        ("bounded decompression", "decompressed_size" in sources["cfg"] and "DecompressionBudgetExceeded" in sources["err"]),
         ("accept negotiation", "FFIAcceptResult" in sources["abi"] and "markdown_negotiate_accept" in sources["exports"]),
         ("decomp budget exceeded metric write", "NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total)" in sources["payload"]),
         ("decomp budget exceeded return code", "NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED" in sources["filter_h"] and "NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED" in sources["decomp"]),
@@ -387,7 +387,7 @@ def _gate_3_items(release_packages: str) -> BlockingItems:
             "tag package workflow gate",
             "release-gate:" in release_packages
             and "github.ref_type == 'tag'" in release_packages
-            and "needs: smoke-test" in release_packages,
+            and "needs: [prepare, smoke-test]" in release_packages,
         ),
         (
             "release gate package tools",
@@ -407,7 +407,7 @@ def _gate_3_items(release_packages: str) -> BlockingItems:
         ),
         (
             "publish waits for release gate",
-            "needs: [release-gate, integrity-checksums, integrity-signing]" in release_packages
+            "needs: [release-gate, integrity-checksums, integrity-signature]" in release_packages
             and "needs.release-gate.result == 'success'" in release_packages,
         ),
     ]
@@ -418,8 +418,9 @@ def _gate_4_items(gates: str, docs: str) -> BlockingItems:
         (
             "helm lint/render final scope",
             "helm lint charts/nginx-markdown" in gates
-            and "helm template test charts/nginx-markdown" in gates
-            and "Chart lint/render validation passes for 0.7.0 GA" in gates,
+            and "helm template gate4-test charts/nginx-markdown" in gates
+            and "all pass for the" in gates
+            and "0.7.0 GA candidate" in gates,
         ),
         (
             "k8s release matrix final scope",

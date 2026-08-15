@@ -538,13 +538,6 @@ def _validate_module_enabled_render(
             f"{_truncate_output(rendered.stdout.strip())}",
         )
         return
-    if rendered.returncode != 0:
-        result.fail(
-            _CHECK_HELM_RENDER_MODULE_ENABLED,
-            "module-enabled Helm render must succeed (helm template "
-            f"returned {rendered.returncode})",
-        )
-        return
     limits_lines = [
         line.strip()
         for line in rendered.stdout.splitlines()

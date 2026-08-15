@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import itertools
 import json
 import os
@@ -56,6 +57,14 @@ except ImportError:
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent.parent
 MATRIX_PATH = REPO_ROOT / "tools" / "release-matrix.json"
+FEATURE_MANIFEST_PATH = (
+    REPO_ROOT / "artifacts" / "release" / "0.9.2"
+    / "official-build-feature-manifest.json"
+)
+ABI_HEADER_PATH = (
+    REPO_ROOT / "components" / "rust-converter" / "include"
+    / "markdown_converter.h"
+)
 INSTALL_SCRIPT_PATH = REPO_ROOT / "tools" / "install.sh"
 DOC_PATH = REPO_ROOT / "docs" / "guides" / "INSTALLATION.md"
 DIFF_PATH = MATRIX_PATH.parent / "matrix-diff.json"
@@ -1091,35 +1100,73 @@ def _canonical_dynamic_entry(
         raise ValueError(f"unsupported matrix architecture: {normalized_arch}")
     if existing is not None:
         entry = dict(existing)
-        # The compatibility matrix writes canonical presentation keys.  Do
-        # not carry legacy updater aliases or the internal target identity
-        # into the persisted row.
+        # The compatibility matrix writes canonical presentation keys.
+        # Strip legacy updater aliases and dropped legacy keys; keep the
+        # canonical target and the frozen binding keys intact.
         entry.pop("nginx", None)
         entry.pop("os_type", None)
-        entry.pop("target", None)
+        entry.pop("nginx_channel", None)
+        entry.pop("test_level", None)
+        entry.pop("support_tier", None)
+        entry.pop("release_blocking", None)
+        entry.pop("owner_workflow", None)
+        entry.pop("managed_by", None)
         entry["nginx_version"] = version
-        entry["nginx_channel"] = classify_version(version)
         entry["libc"] = libc
-        entry["arch"] = arch
-        entry["support_tier"] = "supported"
         return entry
 
+    normalized = normalize_entry_aliases(legacy_entry)
+    target_env = {"glibc": "gnu", "musl": "musl"}.get(libc)
+    if target_env is None:
+        raise ValueError(f"unsupported libc for target construction: {libc}")
+    target = normalized.get("target")
+    if not target or "-unknown-" not in target:
+        # A bare arch value (for example "aarch64" via the arch alias)
+        # is not a canonical target triple; construct the full triple.
+        target = f"{normalized_arch}-unknown-linux-{target_env}"
     return {
         "nginx_version": version,
-        "nginx_channel": classify_version(version),
         "os": "linux",
         "libc": libc,
-        "arch": arch,
+        "target": target,
         "artifact_type": "dynamic-module",
-        "test_level": "smoke-test" if libc == "glibc" else "docker-validation",
-        "support_tier": "supported",
-        "release_blocking": libc == "glibc",
-        "owner_workflow": (
-            ".github/workflows/release-packages.yml"
-            if libc == "glibc"
-            else ".github/workflows/release-binaries.yml"
-        ),
+        "feature_manifest_digest": _feature_manifest_digest(),
+        "abi_version": _frozen_abi_version(),
     }
+
+
+def _feature_manifest_digest() -> str:
+    """Official feature-manifest digest for the canonical release matrix.
+
+    The digest convention for official artifacts is the SHA-256 of the
+    canonical UTF-8 JSON serialization of the manifest content (sorted
+    keys, compact separators).  The release-matrix validator binds the
+    same canonical-content digest.
+    """
+    if not FEATURE_MANIFEST_PATH.is_file():
+        raise FileNotFoundError(
+            f"official feature manifest missing: {FEATURE_MANIFEST_PATH}"
+        )
+    doc = json.loads(
+        FEATURE_MANIFEST_PATH.read_text(encoding="utf-8")
+    )
+    canonical = json.dumps(doc, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
+    return "sha256:" + hashlib.sha256(canonical).hexdigest()
+
+
+def _frozen_abi_version() -> int:
+    """Read the frozen ABI version from the generated header."""
+    if not ABI_HEADER_PATH.is_file():
+        raise FileNotFoundError(f"ABI header missing: {ABI_HEADER_PATH}")
+    match = re.search(
+        r"#define\s+MARKDOWN_ABI_VERSION\s+(\d+)",
+        ABI_HEADER_PATH.read_text(encoding="utf-8"),
+    )
+    if not match:
+        raise ValueError("MARKDOWN_ABI_VERSION not found in ABI header")
+    return int(match.group(1))
 
 
 def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:

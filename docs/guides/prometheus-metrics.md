@@ -147,6 +147,28 @@ twelve families above. Do not carry old family names into a
 new 0.9.2 deployment. The detailed public compatibility inventory is
 [`docs/architecture/PUBLIC_SURFACE_INVENTORY.md`](../architecture/PUBLIC_SURFACE_INVENTORY.md).
 
+The four legacy decompression family names below merged into
+`nginx_markdown_decompression_events_total` with the `reason` label.
+Update any dashboard or alert that references a name in the left column.
+
+| Legacy family name | Merged into |
+|---|---|
+| `nginx_markdown_decompression_budget_exceeded_total` | `nginx_markdown_decompression_events_total` |
+| `nginx_markdown_decompression_format_error_total` | `nginx_markdown_decompression_events_total` |
+| `nginx_markdown_decompression_truncated_input_total` | `nginx_markdown_decompression_events_total` |
+| `nginx_markdown_decompression_io_error_total` | `nginx_markdown_decompression_events_total` |
+
+The parse and replay families (`nginx_markdown_parse_timeouts_total`,
+`nginx_markdown_parse_budget_exceeded_total`, and
+`nginx_markdown_replay_buffer_errors_total`) no longer appear in the
+Prometheus output. Remove dashboards and alerts that query them.
+
+The 0.9.1 release renamed the conversion latency histogram to
+`nginx_markdown_conversion_duration_seconds` with `_bucket`, `_sum`, and
+`_count` suffixes. The legacy name `nginx_markdown_conversion_latency`
+and its `_bucket_total` series are gone. Update dashboards and alerts
+that reference the old name.
+
 ## Stability policy
 
 The twelve-family set is frozen for 0.9.2. A future 1.x family addition

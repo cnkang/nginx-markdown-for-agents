@@ -93,7 +93,7 @@ def _dynconf_disabled():
 
 
 def _dynconf_no_file():
-    """Generate a no_file dynconf state."""
+    """Generate a no_file dynconf state as a fresh copy per draw."""
     return st.just({
         "state": "no_file",
         "generation": None,
@@ -103,7 +103,7 @@ def _dynconf_no_file():
         "last_success": None,
         "last_error": None,
         "masked_keys": [],
-    })
+    }).map(dict)
 
 
 @st.composite

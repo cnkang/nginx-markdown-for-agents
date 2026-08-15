@@ -725,10 +725,11 @@ def test_replace_canonical_dynamic_entries_normalizes_alias_rows():
     assert len(dynamic) == 1
     assert dynamic[0]["nginx_version"] == "1.26.3"
     assert dynamic[0]["libc"] == "glibc"
-    assert dynamic[0]["arch"] == "amd64"
+    assert dynamic[0]["target"] == "amd64"
     assert "nginx" not in dynamic[0]
     assert "os_type" not in dynamic[0]
-    assert "target" not in dynamic[0]
+    assert "arch" not in dynamic[0]
+    assert "support_tier" not in dynamic[0]
 
 
 def test_replace_canonical_dynamic_entries_rejects_duplicate_identities():
@@ -1026,3 +1027,87 @@ def test_write_matrix_cleans_up_temp_on_failure(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # Helper for doc-marker tests
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Canonical dynamic entry shape (release-matrix validator contract)
+# ---------------------------------------------------------------------------
+
+
+DROPPED_CANONICAL_KEYS = {
+    "nginx_channel",
+    "test_level",
+    "support_tier",
+    "release_blocking",
+    "owner_workflow",
+    "managed_by",
+}
+
+LEGACY_ALIAS_KEYS = {"nginx", "os_type", "arch"}
+
+CANONICAL_REQUIRED_KEYS = {
+    "nginx_version",
+    "os",
+    "libc",
+    "target",
+    "artifact_type",
+    "feature_manifest_digest",
+    "abi_version",
+}
+
+
+def test_canonical_dynamic_entry_new_row_binds_frozen_artifacts():
+    """A new dynamic-module row carries the frozen binding keys and no
+    dropped legacy keys, matching the release-matrix validator contract."""
+    row = um._canonical_dynamic_entry(
+        {
+            "nginx_version": "1.28.0",
+            "libc": "glibc",
+            "target": "x86_64-unknown-linux-gnu",
+        }
+    )
+    assert set(row) == CANONICAL_REQUIRED_KEYS
+    assert not DROPPED_CANONICAL_KEYS.intersection(row)
+    assert not LEGACY_ALIAS_KEYS.intersection(row)
+    assert row["feature_manifest_digest"] == um._feature_manifest_digest()
+    assert row["abi_version"] == um._frozen_abi_version()
+    assert row["target"] == "x86_64-unknown-linux-gnu"
+
+
+def test_canonical_dynamic_entry_new_row_constructs_target_from_arch():
+    """An aarch64 identity without an explicit target still produces a
+    valid canonical target string."""
+    row = um._canonical_dynamic_entry(
+        {
+            "nginx_version": "1.28.0",
+            "libc": "musl",
+            "arch": "aarch64",
+        }
+    )
+    assert row["target"] == "aarch64-unknown-linux-musl"
+
+
+def test_canonical_dynamic_entry_existing_row_preserves_bindings():
+    """An existing canonical row keeps its binding keys and gains no
+    dropped legacy keys or legacy aliases."""
+    existing = {
+        "nginx_version": "1.24.0",
+        "os": "debian12",
+        "libc": "glibc",
+        "target": "x86_64-unknown-linux-gnu",
+        "artifact_type": "dynamic-module",
+        "feature_manifest_digest": "sha256:abc",
+        "abi_version": 2,
+    }
+    row = um._canonical_dynamic_entry(
+        {
+            "nginx_version": "1.24.0",
+            "libc": "glibc",
+            "target": "x86_64-unknown-linux-gnu",
+        },
+        existing,
+    )
+    assert row["feature_manifest_digest"] == "sha256:abc"
+    assert row["abi_version"] == 2
+    assert not DROPPED_CANONICAL_KEYS.intersection(row)
+    assert not LEGACY_ALIAS_KEYS.intersection(row)
