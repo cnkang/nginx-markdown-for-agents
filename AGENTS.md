@@ -142,6 +142,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 64 | streaming-backpressure | NGX_AGAIN call-site audit: every call to a known NGX_AGAIN-returning API must branch NGX_AGAIN explicitly and never fold it into the NGX_ERROR path or an immediate return; new APIs that may return NGX_AGAIN must register in the detector's known-API list; `bash tools/harness/detect_ngx_again_call_sites.sh` — blocking harness-tooling CI check via `make harness-security-checks` for selected `harness_tooling` paths, and a local full-gate check |
 | 65 | c-safety | Whole-struct initialization for stack config-holder types: `ngx_conf_t` and config-holder structs must be fully zeroed (memset/zero-init/init helper) before field assignment; partial field assignment without whole-init can carry stack garbage past production NULL guards; `bash tools/harness/detect_uninitialized_stack_struct.sh` — advisory local gate |
 | 66 | ci-gating | Local GCC parity gate: C test/module changes must pass the unit suite under real GCC before push (`make test-c-unit-gcc`, Ubuntu GCC in Docker); local `gcc` on macOS is an Apple clang alias that masks GCC -Werror hard errors and GCC -O0 uninitialized-stack crashes |
+| 67 | observability-metrics | v1 terminal-outcome conservation in the metrics renderer: conversion-failure space partitions without double counting (`conversions_failed = failed_open + failed_closed + aborted`); `failed_open` reads `results.failopen_count`; derived `failed_closed` deducts `failopen_count` and (streaming build) `terminal_aborted_total`; `aborted` reads `terminal_aborted_total`, never the per-path counter `streaming_failure_postcommit_abort`; every classified outcome deducted before the saturating floor; `aborted = 0` only in the non-streaming build; `PYTHONPATH=. python3 tools/harness/detect_metrics_event_conservation.py` — blocking harness-tooling CI check via `make harness-security-checks` for selected `harness_tooling` paths, and a local full-gate check |
 | FUZZ-001..007 | fuzz-infrastructure | Fuzz target determinism, corpus/repo tracking, ClusterFuzzLite workflows, guided fuzz smoke, batch/prune pairing, and gitignore hygiene (see fuzz-infrastructure.md) |
 
 ## Required Agent Workflow
@@ -213,6 +214,16 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - `bash tools/harness/detect_ngx_log_arg_count.sh` — blocking harness-tooling CI
   check via `make harness-security-checks` when the `harness_tooling` path
   filter selects the change; also required locally for the full gate [8]
+- v1 metrics renderer partitions conversion failures without double counting:
+  `conversions_failed = failed_open + failed_closed + aborted`; `failed_open`
+  reads `results.failopen_count`; derived `failed_closed` deducts
+  `failopen_count` and (streaming build) `terminal_aborted_total`; `aborted`
+  reads `terminal_aborted_total`, never the per-path counter
+  `streaming_failure_postcommit_abort`; every classified outcome deducted
+  before the saturating floor; `aborted = 0` only in the non-streaming build;
+  `PYTHONPATH=. python3 tools/harness/detect_metrics_event_conservation.py` —
+  blocking harness-tooling CI check via `make harness-security-checks` for
+  selected `harness_tooling` paths, and a local full-gate check [67]
 
 **FFI & Cross-Language** (C, R)
 - Rust struct changes → both C headers + all init sites + cleanup helpers [15]
@@ -596,6 +607,7 @@ remediation:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Kang | Added Rule 67: v1 terminal-outcome conservation in the metrics renderer (observability-metrics) — conversion-failure partition without double counting, failed_open/failed_closed/aborted source correctness; blocking detector detect_metrics_event_conservation.py wired into `make harness-security-checks`; index row + checklist sync; README mapping and rule doc updated |
 | 0.9.2 | 2026-08-15 | Kang | Added Rules 64–66 with index rows and checklist sync: Rule 64 NGX_AGAIN call-site audit (streaming-backpressure) with blocking detector detect_ngx_again_call_sites.sh; Rule 65 whole-struct initialization for stack config-holder types (c-safety) with advisory detector detect_uninitialized_stack_struct.sh; Rule 66 local GCC parity gate for C test/module changes (ci-gating, make test-c-unit-gcc) |
 | 0.9.2 | 2026-08-09 | Codex | Rule 63 ownership clarified: routine `make docs-check` runs the changed-file regression gate; the repository-wide baseline runs through full harness/release validation (`make docs-style-check-baseline`), with the rule and docs-tooling guidance aligned to those owners |
 | 0.9.2 | 2026-08-08 | Kang | Rule 63 (docs-tooling): STE-inspired non-native-reader writing style gate — `check_writing_style.py` gains `--changed` (changed files must introduce zero new warnings) and `--baseline` (total warning budget must not grow); fixed LATIN_RE so e.g./i.e./etc. are actually detected; full cleanup pass 295→0 warnings (Latin abbreviations, semicolons, passive voice, long sentences across 100+ files), checker exempts structural surfaces (rule-checklist items, allowlisted formal titles, reference lines, quoted source citations); routine `make docs-check` owns docs-style-check-regression, while the baseline is owned by full harness/release validation; Rule 63 index row + tests added |
