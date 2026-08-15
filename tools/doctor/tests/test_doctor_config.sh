@@ -67,7 +67,7 @@ chmod +x "$tmpdir/uname" "$tmpdir/ldd" "$tmpdir/nm"
 : > "$tmpdir/ngx_http_markdown_filter_module.so"
 cat > "$tmpdir/rustc" <<'STUB'
 #!/usr/bin/env bash
-printf '%s\n' 'rustc 1.97.0 (contract toolchain)'
+printf '%s\n' 'rustc 1.97.1 (contract toolchain)'
 STUB
 chmod +x "$tmpdir/rustc"
 
@@ -92,6 +92,6 @@ grep -Fq '"artifact":"ngx_http_markdown_filter_module-1.26.3-glibc-x86_64.tar.gz
 grep -Fq '"name":"rust_linkage","status":"pass"' "$tmpdir/output.json"
 grep -Fq '"markdown_abi_version"' "$tmpdir/output.json"
 grep -Fq '"name":"rust_toolchain","status":"pass"' "$tmpdir/output.json"
-grep -Fq '"pinned_channel":"1.97.0"' "$tmpdir/output.json"
+grep -Fq '"pinned_channel":"1.97.1"' "$tmpdir/output.json"
 
 printf '%s\n' 'doctor config test passed'

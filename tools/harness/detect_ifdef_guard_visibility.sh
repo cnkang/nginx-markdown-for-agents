@@ -111,6 +111,9 @@ def guard_expression(expression):
         return False
     return None
 
+pending_definition = False
+pending_decl = None
+
 for i, line in enumerate(lines, 1):
     stripped = line.strip()
     directive = re.match(r'#\s*(ifdef|ifndef|if|else|elif|endif)\b(.*)', stripped)
@@ -151,8 +154,19 @@ for i, line in enumerate(lines, 1):
         if stripped.startswith(('//', '/*', '*')):
             continue
         m = re.search(r'\b(ngx_http_markdown_\w+)\s*\(', stripped)
-        if m and ';' in line:
-            funcs.add(m.group(1))
+        if m:
+            if ';' in line:
+                funcs.add(m.group(1))
+            elif re.search(r'\(\s*$', stripped):
+                # Multi-line declaration: name( on this line, arguments
+                # and semicolon on the following lines.
+                pending_decl = m.group(1)
+            elif pending_decl is not None and ';' in line:
+                funcs.add(pending_decl)
+                pending_decl = None
+        elif pending_decl is not None and ';' in line:
+            funcs.add(pending_decl)
+            pending_decl = None
 
 for f in sorted(funcs):
     print(f)
@@ -214,6 +228,8 @@ def guard_expression(expression):
         return False
     return None
 
+pending_definition = False
+
 for i, line in enumerate(lines, 1):
     stripped = line.strip()
     directive = re.match(r'#\s*(ifdef|ifndef|if|else|elif|endif)\b(.*)', stripped)
@@ -255,6 +271,19 @@ for i, line in enumerate(lines, 1):
         # the same parser in this script.
         if stripped.startswith(('//', '/*', '*')):
             continue
+        if pending_definition:
+            # Inside a multi-line function signature: the definition ends
+            # at the opening brace or at a prototype semicolon.  A closing
+            # paren without a brace means the candidate was a cross-line
+            # call, not a definition: exit pending and re-examine the
+            # line normally.
+            if re.search(r'\)\s*\{\s*$', line) or ';' in line:
+                pending_definition = False
+                continue
+            if re.search(r'\)\s*$', line):
+                pending_definition = False
+            else:
+                continue
         # A call can contain a declaration-like return type (for example
         # ``const ngx_str_t *r = func()``).  Only skip an actual definition;
         # calls must remain visible to the guard check.
@@ -268,6 +297,12 @@ for i, line in enumerate(lines, 1):
         if func_name + '(' in line:
             # Skip a prototype in the owning header only.
             if same_file(header_path, source_path) and ';' in line:
+                continue
+            # A signature fragment that ends with the opening paren (no
+            # closing paren on this line) can be a multi-line definition
+            # whose parameter list and opening brace follow.
+            if re.search(r'\b' + re.escape(func_name) + r'\s*\(\s*$', line):
+                pending_definition = True
                 continue
             print(f'{i}:{line.strip()[:80]}')
 PY

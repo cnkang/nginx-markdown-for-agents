@@ -894,8 +894,11 @@ get_metric_value() {
       ;;
   esac
 
-  metrics_text="$(curl -s -H 'Accept: text/plain; version=0.0.4' \
-    "http://127.0.0.1:${PORT}/markdown-metrics" 2>/dev/null || echo '{}')"
+  metrics_text="$(curl -fsS -H 'Accept: text/plain; version=0.0.4' \
+    "http://127.0.0.1:${PORT}/markdown-metrics")" || {
+    echo "ERROR: get_metric_value: metrics fetch failed for ${metric_path} (family ${metric_family})" >&2
+    return 1
+  }
   METRIC_FAMILY="${metric_family}" METRIC_SELECTOR="${metric_selector}" \
     python3 -c '
 import json
@@ -974,14 +977,17 @@ if found == 0:
     print(f"ERROR: metric family {family!r} not found in metrics output", file=sys.stderr)
     sys.exit(1)
 print(int(total) if total >= 0 else 0)
-' <<< "${metrics_text}" 2>/dev/null || echo 0
+' <<< "${metrics_text}" || {
+    echo "ERROR: get_metric_value: metrics parse failed for ${metric_path} (family ${metric_family})" >&2
+    return 1
+  }
   return 0
 }
 
 # Compatibility wrapper for the existing performance metric assertions.
 get_perf_metric() {
   get_metric_value "perf.$1"
-  return 0
+  return $?
 }
 
 # Assert one truncated streaming response updates only the truncated-input

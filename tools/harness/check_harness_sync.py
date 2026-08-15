@@ -424,6 +424,10 @@ def _missing_command_paths(command: str, tokens: list[str], start: int) -> list[
     for candidate in tokens[start:]:
         if candidate.startswith("-"):
             continue
+        # A pytest node id ("tests/foo.py::test_bar") carries a "::"
+        # suffix that is not a filesystem path; strip it before the
+        # repository-path check.
+        candidate = candidate.split("::", 1)[0]
         path = _manifest_path_candidate(candidate)
         if path is not None and not path.exists():
             missing.append(
