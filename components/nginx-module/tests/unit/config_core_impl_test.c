@@ -1628,6 +1628,7 @@ test_dynconf_block_mask_propagates_from_parent(void)
 
     TEST_SUBSECTION("dynconf block mask propagation from explicit parent");
 
+    memset(&cf, 0, sizeof(cf));
     cf.pool = &g_pool;
     cf.log = &g_log;
 
