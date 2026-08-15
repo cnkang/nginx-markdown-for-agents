@@ -549,6 +549,18 @@ def _load_result(data: ScenarioResultInput) -> tuple[dict, float, float, float, 
     return load, rps, p50, p95, p99
 
 
+def _is_numeric_count(value) -> bool:
+    """A finite, non-negative counter; int or float, never bool."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        finite = math.isfinite(value)
+    except OverflowError:
+        # An oversized Python int overflows float conversion.
+        return False
+    return finite and value >= 0
+
+
 def _path_metrics(
     nginx_metrics: Mapping[str, Any],
 ) -> tuple[
@@ -572,12 +584,10 @@ def _path_metrics(
     fullbuffer_ratio = fullbuffer_hits / total_hits if total_hits > 0 else None
     requests_total = streaming.get("requests_total")
     failopen_total = streaming.get("precommit_failopen_total")
-    if (
-        isinstance(requests_total, int)
-        and not isinstance(requests_total, bool)
-        and isinstance(failopen_total, int)
-        and not isinstance(failopen_total, bool)
-    ):
+
+    if _is_numeric_count(requests_total) and _is_numeric_count(failopen_total):
+        # _is_numeric_count rejects None; narrow for static analysis.
+        assert requests_total is not None and failopen_total is not None
         if requests_total > 0:
             fallback_rate = failopen_total / requests_total
         elif failopen_total == 0:

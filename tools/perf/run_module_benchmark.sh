@@ -1212,7 +1212,11 @@ for scenario in scenarios:
 
 
 def aggregate_metric(rows, metric):
-    values = [row.get("metrics", {}).get(metric) for row in rows]
+    values = [
+        row.get("metrics", {}).get(metric)
+        for row in rows
+        if row.get("status") != "skipped"
+    ]
     if not values:
         return None
     if not all(isinstance(value, (int, float)) and not isinstance(value, bool)
