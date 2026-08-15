@@ -1,0 +1,150 @@
+#!/bin/bash
+#
+# detect_ngx_again_call_sites.sh — NGX_AGAIN Call-Site Branch Audit
+#                                  (streaming-backpressure NGX_AGAIN call-site rule)
+#
+# Scans every call site of the module's known NGX_AGAIN-returning APIs and
+# requires an explicit branch for NGX_AGAIN that is NOT folded into the
+# NGX_ERROR handling path.  A call site that treats NGX_AGAIN like an error
+# (return rc / free output / advance without save) silently truncates the
+# response under downstream backpressure.
+#
+# The known-API list is the single registry for "may return NGX_AGAIN"
+# functions.  Adding a new API that can return NGX_AGAIN requires registering
+# it here (and in the rule document) so every call site is audited.
+#
+# Usage:
+#   bash tools/harness/detect_ngx_again_call_sites.sh [directory]
+#     directory defaults to components/nginx-module/src
+#
+# Exit codes:
+#   0 — no violations found
+#   1 — one or more violations detected
+#   2 — usage/argument error
+
+set -eu
+
+SCRIPT_DIR="$(dirname "$0")"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+SRC_DIR="${1:-${REPO_ROOT}/components/nginx-module/src}"
+
+if [[ ! -d "$SRC_DIR" ]]; then
+    echo "ERROR: Source directory not found: $SRC_DIR" >&2
+    exit 2
+fi
+
+# Known APIs that may return NGX_AGAIN.  Keep sorted.
+NGX_AGAIN_APIS=(
+    ngx_http_markdown_forward_headers
+    ngx_http_markdown_streaming_commit
+    ngx_http_markdown_streaming_send_feed_output
+    ngx_http_markdown_streaming_send_failopen_chain
+    ngx_http_markdown_streaming_send_pending
+    ngx_http_markdown_streaming_resume_pending
+)
+
+tmp_violations=$(mktemp)
+trap 'rm -f "$tmp_violations"' EXIT
+
+while IFS= read -r -d '' file; do
+    for api in "${NGX_AGAIN_APIS[@]}"; do
+        # Find every call site of this API (matches "api(" as a call)
+        grep -n "${api}[[:space:]]*(" "$file" 2>/dev/null | \
+            while IFS=: read -r line_num content; do
+            [[ -z "$line_num" ]] && continue
+            [[ -z "$content" ]] && continue
+
+            # Skip comment-only lines and documentation
+            echo "$content" | grep -qE '^[[:space:]]*//|^[[:space:]]*\*|@return|@param' && continue
+
+            # Skip the API's own definition / declaration (name followed by ( at
+            # start or after return type on the same line is ambiguous; the
+            # definition normally has the name at line start or after a type).
+            # Heuristic: a definition line has no leading whitespace before the
+            # name when the return type is on the same line; declarations end
+            # with ';' while calls end with ')' or ';' too — so instead skip
+            # lines whose function body starts on this line (contains '{' after
+            # the name) or that are declarations in headers ending with ';'
+            # without an argument expression context.
+            if echo "$content" | grep -qE "${api}[[:space:]]*\([^)]*\)[[:space:]]*\{"; then
+                continue
+            fi
+
+            # Examine a window around the call site (before and after)
+            window_start=$((line_num - 25))
+            [[ $window_start -lt 1 ]] && window_start=1
+            window_end=$((line_num + 12))
+            surrounding_code=$(sed -n "${window_start},${window_end}p" "$file")
+
+            # The call must be inside a function (not a header declaration).
+            # Header declarations end with ';' immediately after the parameter
+            # list.  Calls are followed by more statements.  Skip lines that
+            # look like declarations: name(...) followed only by ';' on the
+            # same line AND the surrounding window has no assignment/return.
+            if echo "$content" | grep -qE "${api}[[:space:]]*\([^;]*\)[[:space:]]*;"; then
+                # Still may be a call statement `rc = api(...);` — allowlist
+                # assignment/return forms, skip bare declarations.
+                if ! echo "$content" | grep -qE '(=|return|->|\.)'; then
+                    continue
+                fi
+            fi
+
+            # Ignore the API definition body (the function that IS the API)
+            if echo "$surrounding_code" | grep -qE "^${api}[[:space:]]*\(|^[a-z_]+[[:space:]]*\*?[a-z_]*[[:space:]]*${api}[[:space:]]*\("; then
+                # Definition detected only if the body starts within the window
+                if echo "$surrounding_code" | grep -qE "${api}[[:space:]]*\([^)]*\)[[:space:]]*\{"; then
+                    continue
+                fi
+            fi
+
+            # Heuristic: skip when the call is the definition's first line.
+            # Definitions typically have the opening brace on the same or next
+            # line; calls inside bodies do not start the window with the api.
+            first_line=$(echo "$surrounding_code" | head -1)
+            if echo "$first_line" | grep -qE "${api}[[:space:]]*\("; then
+                continue
+            fi
+
+            # ===== Violation checks =====
+
+            # 1. NGX_AGAIN must be explicitly branched, not folded into error.
+            #    Look at the code after the call site: an explicit branch has
+            #    'NGX_AGAIN' within the next ~20 lines.
+            tail_code=$(echo "$surrounding_code" | tail -12)
+            has_again_branch=0
+            if echo "$tail_code" | grep -q 'NGX_AGAIN'; then
+                has_again_branch=1
+            fi
+
+            # 2. If the call result is assigned and the very next statements
+            #    treat non-NGX_OK as error (rc != NGX_OK / rc == NGX_ERROR),
+            #    that is a violation when NGX_AGAIN is not distinguished.
+            fold_pattern=''
+            if echo "$tail_code" | grep -qE 'rc[[:space:]]*!=[[:space:]]*NGX_OK|rc[[:space:]]*==[[:space:]]*NGX_ERROR|!= NGX_OK'; then
+                fold_pattern='error-fold'
+            fi
+
+            # 3. A return immediately after the call without NGX_AGAIN mention.
+            immediate_return=0
+            next_lines=$(echo "$surrounding_code" | sed -n "$(($(echo "$surrounding_code" | wc -l | tr -d ' ') - 6)),\$p")
+            if echo "$next_lines" | grep -qE '^[[:space:]]*return[[:space:]]+(rc|[a-z_]+);'; then
+                immediate_return=1
+            fi
+
+            if [[ "$has_again_branch" -eq 0 && ( -n "$fold_pattern" || "$immediate_return" -eq 1 ) ]]; then
+                echo "VIOLATION: $file:$line_num — call to $api() returns NGX_AGAIN but the call site has no explicit NGX_AGAIN branch (folded into error path or immediate return)" >> "$tmp_violations"
+            fi
+        done
+    done
+done < <(find "$SRC_DIR" -name "*.c" -type f -print0)
+
+violations=$(wc -l < "$tmp_violations" | tr -d '[:space:]')
+
+if [[ "$violations" -gt 0 ]]; then
+    cat "$tmp_violations" >&2
+    echo "ERROR: Found $violations NGX_AGAIN call-site violation(s)" >&2
+    exit 1
+else
+    echo "OK: No NGX_AGAIN call-site violations detected"
+    exit 0
+fi
