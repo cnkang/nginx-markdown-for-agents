@@ -842,6 +842,17 @@ ngx_http_markdown_streaming_pending_input_abandon_and_clear(
 }
 
 
+static void
+ngx_http_markdown_streaming_release_finalize_pending(
+    ngx_http_markdown_ctx_t *ctx)
+{
+    if (ctx->streaming.completion.finalize_pending_result != NULL) {
+        markdown_result_free(ctx->streaming.completion.finalize_pending_result);
+        ctx->streaming.completion.finalize_pending_result = NULL;
+    }
+}
+
+
 /*
  * Abandon every module-owned continuation after irrecoverable output loss.
  *
@@ -866,6 +877,7 @@ ngx_http_markdown_streaming_abandon_pending_after_fatal(
     ctx->streaming.completion.finalize_after_pending = 0;
     ctx->streaming.completion.finalize_pending_lastbuf = 0;
     ctx->streaming.completion.pending_terminal_metrics = 0;
+    ngx_http_markdown_streaming_release_finalize_pending(ctx);
     ctx->streaming.completion.pending_failopen_delivery = 0;
     ctx->streaming.completion.postcommit_error_after_pending = 0;
     ctx->streaming.completion.postcommit_error_code = ERROR_SUCCESS;
@@ -4563,6 +4575,7 @@ ngx_http_markdown_streaming_null_input_resume_header(
     }
     if (!ngx_http_markdown_streaming_delivery_ok(rc)) {
         ngx_http_markdown_streaming_release_pending_header_output(ctx);
+        ngx_http_markdown_streaming_release_finalize_pending(ctx);
         return rc;
     }
 
@@ -4572,6 +4585,7 @@ ngx_http_markdown_streaming_null_input_resume_header(
         return rc;
     }
     if (!ngx_http_markdown_streaming_delivery_ok(rc)) {
+        ngx_http_markdown_streaming_release_finalize_pending(ctx);
         return rc;
     }
 
@@ -4590,6 +4604,10 @@ ngx_http_markdown_streaming_null_input_resume_header(
             r, ctx, pending->markdown, pending->markdown_len,
             /* last_buf */ 0);
         if (rc != NGX_OK && rc != NGX_DONE && rc != NGX_AGAIN) {
+            /* The deferred finalize result owns Rust-allocated buffers;
+             * release it before the hard-abort path so a definitive
+             * delivery error does not leak the finalize output. */
+            markdown_result_free(pending);
             return ngx_http_markdown_streaming_handle_output_loss(
                 r, ctx, conf);
         }

@@ -7,14 +7,15 @@
  * staging snapshot.  Only if the entire file parses successfully
  * is the active snapshot replaced, guaranteeing atomicity.
  *
- * Architecture (v0.6.2 effective-conf model):
+ * Architecture (0.9.2 JSON schema v1 / LKG / request-snapshot model):
  *   - Dedicated file watcher per worker process
  *   - Coarse-grained polling (1s interval via ngx_event_t timer)
  *   - On mtime change, the timer handler reads and parses the
- *     entire file into a staging snapshot.  If the JSON schema parses
- *     and applies successfully, the staging snapshot atomically
- *     replaces the active snapshot.  On any parse error the
- *     staging is discarded and the active snapshot is preserved.
+ *     entire file into a staging snapshot.  If the JSON schema v1
+ *     parses and applies successfully, the staging snapshot atomically
+ *     replaces the active snapshot (last-known-good, LKG).  On any
+ *     parse error the staging is discarded and the active snapshot
+ *     is preserved.
  *   - The request path NEVER performs file I/O.  The header_filter
  *     copies the active snapshot into request-pool memory and
  *     builds an effective_conf view from that copy, so that the

@@ -57,12 +57,28 @@ if [ -z "$ngx_markdown_rust_lib" ] || [ ! -f "$ngx_markdown_rust_lib" ]; then
 fi
 
 if [ ! -f "$ngx_markdown_rust_lib" ]; then
-    for candidate in "$ngx_addon_dir"/../rust-converter/target/*/release/libnginx_markdown_converter.a; do
-        if [ -f "$candidate" ]; then
-            ngx_markdown_rust_lib="$candidate"
-            break
-        fi
-    done
+    # Fall back to an existing release archive only when its target triple
+    # matches the current platform: a shared repo checkout (e.g. a mounted
+    # volume in a container, or a multi-arch local build) may contain
+    # archives for other platforms, and the first glob hit could otherwise
+    # select a foreign archive (macOS .a inside a Linux build, etc.).
+    ngx_markdown_uname_s=$(uname -s 2>/dev/null || echo unknown)
+    ngx_markdown_uname_m=$(uname -m 2>/dev/null || echo unknown)
+    case "$ngx_markdown_uname_s:$ngx_markdown_uname_m" in
+        Linux:aarch64)   ngx_markdown_platform_glob="aarch64-unknown-linux-$ngx_markdown_libc" ;;
+        Linux:x86_64)    ngx_markdown_platform_glob="x86_64-unknown-linux-$ngx_markdown_libc" ;;
+        Darwin:arm64)    ngx_markdown_platform_glob="aarch64-apple-darwin" ;;
+        Darwin:x86_64)   ngx_markdown_platform_glob="x86_64-apple-darwin" ;;
+        *)               ngx_markdown_platform_glob="" ;;
+    esac
+    if [ -n "$ngx_markdown_platform_glob" ]; then
+        for candidate in "$ngx_addon_dir"/../rust-converter/target/$ngx_markdown_platform_glob/release/libnginx_markdown_converter.a; do
+            if [ -f "$candidate" ]; then
+                ngx_markdown_rust_lib="$candidate"
+                break
+            fi
+        done
+    fi
 fi
 
 # Libraries required by the Rust FFI converter.
