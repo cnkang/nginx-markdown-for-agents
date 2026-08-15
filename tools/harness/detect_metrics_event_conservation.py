@@ -124,6 +124,28 @@ def _directive_kind(stripped: str) -> str:
     return "other"
 
 
+def _emit_open_block(
+    blocks: list[str], stack: list[list[str]], directives: list[str]
+) -> None:
+    """Emit the innermost open block with its ancestor directives.
+
+    The block itself already carries its own opening directive line, so
+    only the ancestors (directives[:-1]) are prepended as context.
+    """
+    if stack[-1]:
+        blocks.append("".join(directives[:-1]) + "".join(stack.pop()))
+    else:
+        stack.pop()
+
+
+def _close_preprocessor_block(
+    blocks: list[str], stack: list[list[str]], directives: list[str]
+) -> None:
+    """Close one conditional level at #endif: emit, pop stack and directive."""
+    _emit_open_block(blocks, stack, directives)
+    directives.pop()
+
+
 def _split_preprocessor_blocks(text: str) -> list[str]:
     """Split C preprocessor conditionals into independent blocks.
 
@@ -145,19 +167,12 @@ def _split_preprocessor_blocks(text: str) -> list[str]:
             directives.append(line)
             continue
         if kind == "endif" and len(stack) > 1:
-            if stack[-1]:
-                # Ancestors (directives[:-1]) prefix the block; the block
-                # itself already carries its own opening directive line.
-                blocks.append("".join(directives[:-1]) + "".join(stack.pop()))
-            else:
-                stack.pop()
-            directives.pop()
+            _close_preprocessor_block(blocks, stack, directives)
             continue
         if kind == "else" and len(stack) > 1:
-            if stack[-1]:
-                blocks.append("".join(directives[:-1]) + "".join(stack.pop()))
-            else:
-                stack.pop()
+            # Emit the #if block, then replace its directive with the #else
+            # line so the else branch inherits the same ancestors.
+            _emit_open_block(blocks, stack, directives)
             directives[-1] = line
             stack.append([line])
             continue
