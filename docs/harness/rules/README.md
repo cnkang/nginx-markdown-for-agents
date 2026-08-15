@@ -7,7 +7,7 @@ related rules by domain with YAML frontmatter for path-scoped loading.
 
 | Rule IDs | Domain | File | Primary Surfaces |
 |----------|--------|------|-----------------|
-| 1, 2, 38, 47, 51, 52 | Streaming & Backpressure | [streaming-backpressure.md](streaming-backpressure.md) | backpressure, fail-open, replay buffer, auth cache-control, derived-state reconciliation |
+| 1, 2, 38, 47, 51, 52, 64 | Streaming & Backpressure | [streaming-backpressure.md](streaming-backpressure.md) | backpressure, fail-open, replay buffer, auth cache-control, derived-state reconciliation, NGX_AGAIN call-site audit |
 | 3, 43 | Memory & Budget | [memory-budget.md](memory-budget.md) | allocations, budget enforcement, pool vs heap |
 | 4, 44 | Encoding & Charset | [encoding-charset.md](encoding-charset.md) | UTF-8 chunk boundaries, gzip/deflate/Brotli streaming lifecycle |
 | 5, 6, 27 | HTML Sanitizer & Output Safety | [html-sanitizer.md](html-sanitizer.md) | void elements, emitter, escaping, fence language |
@@ -16,13 +16,13 @@ related rules by domain with YAML frontmatter for path-scoped loading.
 | 10 | Parser & Regex | [parser-regex.md](parser-regex.md) | ReDoS, deterministic parsing |
 | 11, 18, 41 | Shell | [shell.md](shell.md) | portability, hygiene, POSIX ERE |
 | 12, 32, 33 | Security & CWE | [security-cwe.md](security-cwe.md) | path traversal, integer overflow |
-| 13, 54 | CI Gating | [ci-gating.md](ci-gating.md) | workflow filters, artifact upload, Homebrew formula, release artifact path traversal |
+| 13, 54, 66 | CI Gating | [ci-gating.md](ci-gating.md) | workflow filters, artifact upload, Homebrew formula, release artifact path traversal, local GCC parity gate |
 | 14, 16, 20, 22, 25 | Testing & Coverage | [testing-coverage.md](testing-coverage.md) | regression, dead stores, Rust infra |
 | 15, 46, 53 | FFI & Cross-Language | [ffi-crosslang.md](ffi-crosslang.md) | ABI, header sync, lifecycle, panic safety, handle ownership, fat-pointer safety |
 | 17 | Cognitive Complexity | [complexity.md](complexity.md) | function complexity limits |
 | 19 | Python Tooling | [python-tooling.md](python-tooling.md) | binary prerequisites, harness guards |
 | 21 | Warning Triage | [warnings-triage.md](warnings-triage.md) | warning classification, repro |
-| 24, 42 | C Safety | [c-safety.md](c-safety.md) | C99, narrowing casts, const, volatile/atomic, forward decl ordering |
+| 24, 42, 65 | C Safety | [c-safety.md](c-safety.md) | C99, narrowing casts, const, volatile/atomic, forward decl ordering, whole-struct initialization |
 | 26 | Naming & Docs | [naming-docs.md](naming-docs.md) | names, comments, doc comments |
 | 28, 29, 30, 31, 39, 40, 50 | NGINX Idioms | [nginx-idioms.md](nginx-idioms.md) | list iteration, flag clearing, NUL-term, OWS separator |
 | 34, 35, 45 | Dynconf & Snapshot | [dynconf-snapshot.md](dynconf-snapshot.md) | effective_conf, reload retry, NULL-safe access |
