@@ -279,7 +279,7 @@ For all inputs that produce correct results through the full-buffer path, the ac
 | `feed_chunk()` failure | Returns `ConversionError`; C module applies `markdown_error_policy` | fail-open: original HTML; fail-closed: 502 |
 | `finalize()` failure | Same as above | Same as above |
 | Missing `Content-Length` | Buffer first, decide path after threshold comparison | Transparent to client |
-| `incremental` feature not compiled but threshold configured | Ignore threshold, use full-buffer path, log warning | `error.log` warning; conversion still works |
+| `incremental` feature not compiled but threshold configured (pre-0.9.0) | Ignore threshold, use full-buffer path, log warning | `error.log` warning; conversion still works |
 
 ## Rollback
 

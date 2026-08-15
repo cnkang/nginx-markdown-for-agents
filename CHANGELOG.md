@@ -130,8 +130,8 @@ completing before the long-lived contract begins.
 
 - **Rust source-build baseline raised from 1.91 to 1.97.** All first-party
   crates now declare MSRV 1.97 and repository/CI/release builds use exact Rust
-  1.97.0. Source builders must update their toolchain (for rustup users,
-  `rustup toolchain install 1.97.0`). Prebuilt module users do not need Rust.
+  1.97.1. Source builders must update their toolchain (for rustup users,
+  `rustup toolchain install 1.97.1`). Prebuilt module users do not need Rust.
   their runtime compatibility remains governed by the published NGINX,
   OS/libc, architecture, and exact dynamic-module compatibility matrix.
 - **Streaming configuration consolidated.** `markdown_streaming off|auto|force`

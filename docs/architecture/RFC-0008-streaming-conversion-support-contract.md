@@ -387,9 +387,12 @@ If the module selects true streaming:
   `content_length` header where applicable).
 - Chunked downstream follows standard NGINX output behavior.
 - The module MUST NOT generate output-derived ETag before streaming commit.
-- If the module cannot produce a correct Markdown-variant ETag, it MUST remove
-  the upstream ETag or downgrade it to weak semantics / disabled for this
-  response. The module drops or weakens the ETag to stay correct.
+- If the module cannot compute the exact Markdown-variant ETag for the
+  response, it MUST remove the upstream ETag from the outgoing headers for
+  this response. The module MUST NOT weaken the upstream ETag (for example
+  by downgrading it to weak semantics) and MUST NOT reuse the upstream HTML
+  validator: any retained ETag must derive from the converted Markdown
+  bytes, or the validator removes the ETag entirely.
 
 ---
 

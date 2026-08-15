@@ -149,6 +149,21 @@ gpg --verify /var/lib/apt/lists/*nginx-markdown*Release.gpg
 
 # Check package integrity after download
 apt-get download nginx-module-markdown-for-agents
+```
+
+**Canonical 0.9.2 verification**: verify the release signature over
+`SHA256SUMS.asc`, then check the downloaded artifacts against the checksums
+file:
+
+```bash
+gpg --verify SHA256SUMS.asc SHA256SUMS
+sha256sum -c SHA256SUMS
+```
+
+**Per-package signatures** (only for releases whose workflow produces them;
+not part of the canonical 0.9.2 path):
+
+```bash
 dpkg-sig --verify nginx-module-markdown-for-agents_*.deb
 ```
 

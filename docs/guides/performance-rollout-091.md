@@ -26,9 +26,12 @@
 ## Overview
 
 The 0.9.1 release introduces three performance optimizations to the NGINX
-Markdown filter module. Each optimization has an independent rollback path
-that requires only configuration changes and a graceful reload — no binary
-rebuild, no NGINX restart, and no downtime.
+Markdown filter module. Two of them (zero-copy output and streaming
+decompression) roll back with a configuration change and a graceful reload —
+no binary rebuild, no NGINX restart, and no downtime. The third
+(full-buffer copy reduction) is an internal implementation detail with no
+operator toggle. Rolling it back requires a code revert, a binary rebuild,
+and an NGINX restart.
 
 ### Key Principle
 
@@ -41,7 +44,8 @@ does not have an operator toggle:
 - **Streaming decompression**: disabled via profile switch or
   `markdown_auto_decompress off`
 - **Full-buffer copy reduction**: internal implementation detail with no
-  configuration surface. Rollback happens only via code revert and rebuild
+  operator toggle — rolling it back requires a code revert and a binary
+  rebuild (plus NGINX restart), not a configuration change
 
 ### Related Documents
 

@@ -180,6 +180,7 @@
       "phase": "focused-semantic",
       "commands": [
         "make release-gates-check-080",
+        "make release-gates-check-092",
         "make release-gates-check",
         "make release-gates-check-strict"
       ]

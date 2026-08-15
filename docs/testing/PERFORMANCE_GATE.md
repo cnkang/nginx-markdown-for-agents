@@ -134,6 +134,14 @@ the retained raw artifact SHA-256
 Machine validation recomputes that digest and requires the finalized report to
 match the raw report exactly apart from `baseline_policy`.
 
+**Release-status note**: this checked-in baseline is `release_gate_eligible:
+false` (measured with Rust 1.93.1, not the current 1.97.1 toolchain). It
+serves as **regression-only** evidence — compare against it to detect
+regressions, but do **not** use it for release-threshold comparisons. A
+release-eligible baseline must be re-measured from the final candidate SHA
+with the project Rust 1.97.1 toolchain and then pass
+`make release-gates-check-092` in blocking mode.
+
 The evidence objects remain layered: `baseline_policy` carries policy
 provenance, top-level `module_benchmark` carries platform/load-generator/NGINX
 environment plus `git_commit` and `timestamp`, and each scenario carries its

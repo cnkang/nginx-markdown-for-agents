@@ -36,6 +36,15 @@ register runs **first** when a response flows through the chain.
 | Optional (ngx_brotli, load_module or compiled-in) | `brotli` |
 | Dynamic (load_module) | `markdown_filter` (this module) |
 
+Because each module prepends itself, the **runtime** chain is the reverse of
+the registration order: `markdown_filter` → `brotli` → `gunzip` → `gzip`.
+`gunzip` is conditional: it decompresses only gzip-encoded upstream
+responses, and only when the client does not accept gzip (when the client
+accepts gzip, gunzip passes the content through untouched so the gzip
+filter can re-compress the converted output). `brotli` and `gzip` do not
+stack: the response receives a single `Content-Encoding` — whichever
+compression filter runs first for the negotiated encoding.
+
 The runtime initialises the loaded module according to the effective NGINX
 module configuration.  The supported default path uses the markdown filter's
 own bounded decompressor before conversion.  It does not depend on the
@@ -73,16 +82,23 @@ Upstream response (HTML, possibly Content-Encoding: gzip/br)
   │ (Markdown body downstream)
   ▼
 ┌─────────────────────────────────┐
-│ gzip body filter                │  ← compresses response for client
+│ brotli body filter (if present) │  ← compresses response for client
 │  · compresses Markdown output    │
-│  · adds Content-Encoding: gzip   │
+│  · adds Content-Encoding: br     │
 └─────────────────────────────────┘
   │
   ▼
 ┌─────────────────────────────────┐
-│ brotli body filter (if present) │  ← compresses response for client
+│ gunzip body filter (conditional)│  ← decompresses gzip-encoded upstream
+│  · only when client rejects gzip│     responses for clients that do not
+│  · strips Content-Encoding: gzip│     accept gzip; passes through otherwise
+└─────────────────────────────────┘
+  │
+  ▼
+┌─────────────────────────────────┐
+│ gzip body filter                │  ← compresses response for client
 │  · compresses Markdown output    │
-│  · adds Content-Encoding: br     │
+│  · adds Content-Encoding: gzip   │
 └─────────────────────────────────┘
   │
   ▼
@@ -182,14 +198,20 @@ decompression is always handled by markdown's `auto_decompress`.
 
 | Property | Value |
 |----------|-------|
-| First request | Upstream HTML → markdown converts → Markdown stored in cache |
-| Subsequent requests | Cache hit → Markdown served directly (no re-conversion) |
-| Client receives | `Content-Type: text/markdown; charset=utf-8` (cached) |
+| First request | Upstream HTML → markdown converts → Markdown delivered to client; the cache stores the upstream response as received (original HTML, before output filters) |
+| Subsequent requests | Cache hit → the stored upstream HTML is replayed through the output-filter chain, so markdown converts it again → Markdown delivered |
+| Client receives | `Content-Type: text/markdown; charset=utf-8` on every request (converted on first request and on each cache hit) |
 
-**Key invariant:** `proxy_cache` caches the response according to its
-effective position in the filter chain. When markdown runs before
-`proxy_cache`, the cache stores converted Markdown rather than original HTML.
-Subsequent cache hits serve Markdown directly without re-conversion.
+**Key invariant:** `proxy_cache` stores the response at the proxy-module
+level — the upstream HTML as received, before the markdown body filter (and
+other output filters) transform it. A cache hit replays those stored bytes
+through the same filter chain, so the markdown filter runs again on every
+request. The cache never serves Markdown without re-conversion. Because the
+cached body is the original HTML, the response still varies by the same
+request properties (such as `Accept` and any bot-targeting variables) as a
+non-cached response, so `proxy_cache_key` must include those properties to
+keep HTML and Markdown variants separated (see
+[CACHE_AWARE_RESPONSES.md](../features/CACHE_AWARE_RESPONSES.md)).
 
 **cache_validation interaction (Requirement 15.3):**
 - `cache_validation full` requires full-buffer conversion to compute the
@@ -222,5 +244,5 @@ E2E test script: `tests/e2e/filter_ordering_test.sh`
 | 1 | markdown + gzip | Client sends `Accept-Encoding: gzip`, receives `Content-Encoding: gzip` + `Content-Type: text/markdown` |
 | 2 | markdown + gunzip | Upstream sends gzip, gunzip decompresses, markdown converts, client receives `text/markdown` uncompressed |
 | 3 | markdown + Brotli | Client sends `Accept-Encoding: br`, receives `Content-Encoding: br` + `Content-Type: text/markdown` |
-| 4 | markdown + proxy_cache | First request converts + caches, second request serves cached Markdown with correct Content-Type |
+| 4 | markdown + proxy_cache | First request converts and caches the upstream HTML; a cache hit replays the stored HTML through the markdown filter chain and converts it again, so the client receives fresh Markdown with correct Content-Type — the cache never serves pre-converted Markdown |
 | 5 | markdown + no compression | Client sends no Accept-Encoding, receives `text/markdown` uncompressed |

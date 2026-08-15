@@ -914,7 +914,8 @@ Vary: Accept
 
 #### 3. HTML Passthrough Curl
 
-Confirms that requests without `Accept: text/markdown` pass through unchanged:
+Confirms that requests without `Accept: text/markdown` pass through unchanged
+under the default `markdown_accept strict` policy:
 
 ```bash
 curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/
@@ -1572,7 +1573,7 @@ sudo nginx -s reload
 **Solution:**
 ```nginx
 # Increase timeout in nginx.conf
-markdown_limits conversion_timeout=10s;  # Set a tighter bound than the frozen 30s default
+markdown_limits conversion_timeout=60s;  # Increase beyond the 30s default
 
 # Or increase max size if large pages are timing out
 markdown_limits conversion_memory=20m;  # Unified override; path-specific limits still win

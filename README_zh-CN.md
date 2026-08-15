@@ -184,7 +184,7 @@ curl -sD - -o /dev/null -A "ClaudeBot/1.0" http://localhost/docs/
 curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/docs/
 ```
 
-原理是模块的内容协商逻辑看到改写后的 Accept 头中包含 `text/markdown`，就会对符合条件的 `text/html` 响应进行转换。所有其他准入检查（状态码、Content-Type、大小限制等）仍然正常生效。浏览器和不匹配的客户端完全不受影响。
+原理是模块的内容协商逻辑看到客户端 Accept 头中包含 `text/markdown`，就会对符合条件的 `text/html` 响应进行转换；模块不会改写 Accept 请求头，只参与模块内部的协商与 Markdown 选择。所有其他准入检查（状态码、Content-Type、大小限制等）仍然正常生效。浏览器和不匹配的客户端完全不受影响。
 
 完整的配置模板（包含更多 bot 模式）见 [examples/nginx-configs/06-bot-targeted-conversion.conf](examples/nginx-configs/06-bot-targeted-conversion.conf)。详细说明见 [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md#bot-targeted-conversion-user-agent-based)。
 

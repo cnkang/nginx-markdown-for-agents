@@ -189,8 +189,9 @@ When the NGINX C module calls the Rust converter:
 1. Extract Content-Type header from upstream response
 2. Pass Content-Type to `MarkdownOptions.content_type` field
 3. Rust converter uses charset detection cascade
-4. The parser uses the detected charset to select the UTF-8-only acceptance
-   path. It does not transcode a non-UTF-8 body
+4. Detected charset metadata affects **diagnostics only**. The parser always
+   receives UTF-8 bytes, does not transcode, and does not parse according to
+   a non-UTF-8 declaration
 
 ### Error Handling
 
@@ -198,9 +199,9 @@ When the NGINX C module calls the Rust converter:
 - Invalid UTF-8 bytes in HTML: Returns `ConversionError::EncodingError`
 - Empty input: Returns `ConversionError::InvalidInput`
 - Charset detection never fails (always returns UTF-8 as fallback). Parsing
-  rejects only invalid UTF-8 bytes. Valid UTF-8 bytes remain parseable even
-  when the declared charset is not UTF-8. The fallback and conversion-error
-  behavior stay unchanged
+  rejects only invalid UTF-8 bytes and empty input. Valid UTF-8 bytes remain
+  parseable even when the declared charset is not UTF-8. The fallback and
+  conversion-error behavior stay unchanged
 
 ## Dependencies
 

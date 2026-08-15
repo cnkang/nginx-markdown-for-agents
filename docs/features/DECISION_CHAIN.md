@@ -131,7 +131,7 @@ unchanged fail-open HTML response.
 
 ### Failure with `markdown_error_policy fail_closed`: failed_closed
 
-The module attempted conversion but it failed. Because `markdown_error_policy` is set to `fail_closed`, the module returns a `502 Bad Gateway` error. The reason code is `failed_closed` and the request state becomes FAILED.
+The module attempted conversion but it failed. Because `markdown_error_policy` is set to `fail_closed`, the module returns the configured error status (`ngx_http_markdown_conf_t.error_status`), which defaults to `502 Bad Gateway` and operators may customize it. The reason code is `failed_closed` and the request state becomes FAILED.
 
 Use `fail_closed` only when you need strict guarantees that clients never receive HTML when they requested Markdown. This is not recommended during initial rollout.
 
@@ -143,7 +143,7 @@ When conversion fails (either `failed_open` or `failed_closed`), the module reco
 |---------------------|---------|
 | `conversion_error` | HTML parse or conversion error — the input HTML could not be processed |
 | `memory_budget_exceeded` | Conversion-memory limit reached (`markdown_limits conversion_memory=`) |
-| `timeout` | Parser execution exceeded `markdown_limits parser_timeout=` |
+| `timeout` | The request exceeded the authoritative overall conversion deadline `markdown_limits conversion_timeout=`; `parser_timeout=` is the per-checkpoint parser budget and is subsumed by `conversion_timeout=` (the latter wins) |
 | `budget_exceeded` | Parser memory exceeded `markdown_limits parser_memory=`; this is distinct from `memory_budget_exceeded` and takes precedence for parser allocations |
 | `ffi_panic` | Internal/system error (unexpected Rust↔C panic) |
 | `decompression_error` / `decompression_budget_exceeded` / `decompression_format_error` / `decompression_truncated_input` / `decompression_io_error` | Decompression failures (see [Automatic Decompression](../features/AUTOMATIC_DECOMPRESSION.md)) |
