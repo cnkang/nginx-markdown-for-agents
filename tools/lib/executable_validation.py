@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -41,8 +42,65 @@ def _is_under(path: Path, roots: tuple[Path, ...]) -> bool:
     return any(resolved == root or root in resolved.parents for root in roots)
 
 
+def _active_rustup_toolchain() -> str | None:
+    """Resolve the active Rustup toolchain name.
+
+    Priority follows Rustup's own selection rules:
+    1. the RUSTUP_TOOLCHAIN environment variable;
+    2. a `rust-toolchain.toml` / `rust-toolchain` file found from the
+       current working directory upward (directory-scoped override);
+    3. the `default_toolchain` recorded in ``~/.rustup/settings.toml``.
+    Returns None when none is available.
+    """
+    env_toolchain = os.environ.get("RUSTUP_TOOLCHAIN")
+    if env_toolchain:
+        return env_toolchain
+
+    try:
+        cwd = Path.cwd()
+    except OSError:
+        cwd = None
+    if cwd is not None:
+        for directory in (cwd, *cwd.parents):
+            for name in ("rust-toolchain.toml", "rust-toolchain"):
+                candidate = directory / name
+                if not candidate.is_file():
+                    continue
+                try:
+                    content = candidate.read_text(encoding="utf-8")
+                except (OSError, UnicodeError):
+                    continue
+                # TOML form: `channel = "1.97.1"`; legacy form: bare channel.
+                match = re.search(
+                    r"^\s*channel\s*=\s*[\"']([^\"']+)[\"']",
+                    content, re.MULTILINE)
+                if match:
+                    return match.group(1)
+                first = content.strip().splitlines()
+                if first and first[0].strip():
+                    return first[0].strip()
+                break
+
+    settings = Path.home() / ".rustup" / "settings.toml"
+    try:
+        content = settings.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None
+    match = re.search(
+        r"^\s*default_toolchain\s*=\s*[\"']([^\"']+)[\"']",
+        content, re.MULTILINE)
+    return match.group(1) if match else None
+
+
 def _is_rustup_tool_shim(candidate: Path, resolved: Path, name: str) -> bool:
-    """Allow only a standard Rustup shim targeting its toolchain."""
+    """Allow only a standard Rustup shim targeting its toolchain.
+
+    The concrete executable must come from the *active* toolchain per
+    Rustup's own selection rules (RUSTUP_TOOLCHAIN env, then
+    settings.toml default_toolchain) — never from an arbitrary toolchain
+    the dispatcher happens to have installed, which could resolve the
+    wrong version for the current invocation.
+    """
     try:
         home = Path.home()
     except (RuntimeError, KeyError):
@@ -55,34 +113,31 @@ def _is_rustup_tool_shim(candidate: Path, resolved: Path, name: str) -> bool:
         return True
 
     # Current Rustup installs use a small ``.cargo/bin/rustup`` dispatcher
-    # rather than a direct symlink into the selected toolchain.  Keep that
-    # exact dispatcher path narrow, and require a matching executable under
-    # the real Rustup toolchain root before accepting it.
-    rustup_dispatcher = Path.home() / ".cargo" / "bin" / "rustup"
+    # rather than a direct symlink into the selected toolchain.  Resolve the
+    # active toolchain name and require the matching executable under that
+    # specific toolchain root, not any installed toolchain.
+    rustup_dispatcher = home / ".cargo" / "bin" / "rustup"
     try:
         if resolved != rustup_dispatcher.resolve(strict=True):
             return False
         toolchain_root = rustup_toolchains.resolve(strict=True)
-        for toolchain in toolchain_root.iterdir():
-            tool = toolchain / "bin" / name
-            try:
-                tool_resolved = tool.resolve(strict=True)
-            except FileNotFoundError:
-                # A partial toolchain is normal; keep looking for a usable one.
-                continue
-            except OSError:
-                # An unreadable entry must not hide other toolchains.
-                continue
-            if (
-                tool_resolved.name == name
-                and toolchain_root in tool_resolved.parents
-                and tool_resolved.is_file()
-                and os.access(tool_resolved, os.X_OK)
-            ):
-                return True
+        active = _active_rustup_toolchain()
+        if not active:
+            return False
+        toolchain = toolchain_root / active
+        tool = toolchain / "bin" / name
+        try:
+            tool_resolved = tool.resolve(strict=True)
+        except (FileNotFoundError, OSError):
+            return False
+        return (
+            tool_resolved.name == name
+            and toolchain_root in tool_resolved.parents
+            and tool_resolved.is_file()
+            and os.access(tool_resolved, os.X_OK)
+        )
     except OSError:
         return False
-    return False
 
 
 def resolve_approved_executable(name: str) -> str | None:

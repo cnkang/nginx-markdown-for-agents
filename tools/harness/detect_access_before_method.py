@@ -121,6 +121,17 @@ def audit_dir(directory: Path, strict: bool) -> tuple[list[str], list[str]]:
     return violations, reviews
 
 
+def _strip_literals_and_comments(text: str) -> str:
+    """Blank out comments, string literals, and char literals in-place.
+
+    Keeps every character position (replaced with spaces) so regex match
+    offsets stay aligned with the original text.  Audit patterns must not
+    fire on comments or literals that merely mention access-control or
+    method-rejection identifiers.
+    """
+    return _TOKEN_RE.sub(lambda m: " " * len(m.group(0)), text)
+
+
 def audit_file(path: Path, strict: bool) -> tuple[list[str], list[str]]:
     """Return (violations, reviews) for one file."""
     violations: list[str] = []
@@ -128,13 +139,14 @@ def audit_file(path: Path, strict: bool) -> tuple[list[str], list[str]]:
     resolved = validate_read_path(path, purpose="source file")
     text = resolved.read_text(encoding="utf-8", errors="replace")
     for name, body in _iter_functions(text):
-        if not METHOD_REF_RE.search(body):
+        code = _strip_literals_and_comments(body)
+        if not METHOD_REF_RE.search(code):
             continue  # not an HTTP handler
-        has_method_reject = bool(METHOD_REJECT_RE.search(body))
+        has_method_reject = bool(METHOD_REJECT_RE.search(code))
         if not has_method_reject:
             continue  # no 405 path — ordering contract not applicable
-        access_pos = ACCESS_CALL_RE.search(body)
-        reject_pos = METHOD_REJECT_RE.search(body)
+        access_pos = ACCESS_CALL_RE.search(code)
+        reject_pos = METHOD_REJECT_RE.search(code)
         assert reject_pos is not None  # guarded by has_method_reject above
         if access_pos is None:
             reviews.append(

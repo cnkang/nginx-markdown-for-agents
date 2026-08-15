@@ -91,14 +91,13 @@ def _audit_aborted(
     saw_terminal_source = False
     for expr in abort_matches:
         expr = expr.strip()
-        last_field = expr.split(".")[-1].strip()
         if STALE_ABORT_SRC in expr:
             violations.append(
                 f"{name}: v1->requests.aborted reads stale "
                 f"{STALE_ABORT_SRC}; must read {ABORTED_SOURCE_FIELD} "
                 "(terminal-outcome conservation)"
             )
-        elif last_field == ABORTED_SOURCE_FIELD:
+        elif re.search(rf"\b{re.escape(ABORTED_SOURCE_FIELD)}\b", expr):
             saw_terminal_source = True
         elif expr != "0":
             reviews.append(
@@ -114,10 +113,71 @@ def _audit_aborted(
     return violations, reviews
 
 
+def _directive_kind(stripped: str) -> str:
+    """Classify a preprocessor directive line: if | endif | else | other."""
+    if stripped.startswith("#if"):
+        return "if"
+    if stripped.startswith("#endif"):
+        return "endif"
+    if stripped.startswith("#else") or stripped.startswith("#elif"):
+        return "else"
+    return "other"
+
+
+def _split_preprocessor_blocks(text: str) -> list[str]:
+    """Split C preprocessor conditionals into independent blocks.
+
+    Returns each region between #if/#ifdef/#ifndef and its matching
+    #endif as its own block, plus the top-level region.  Nested blocks
+    carry their active ancestor directives as a prefix so a block's
+    failed_closed derivation is still associated with e.g.
+    MARKDOWN_STREAMING_ENABLED even when nested inside another guard.
+    Deductions are verified per block so a missing counter in one branch
+    cannot be masked by another branch still naming it.
+    """
+    blocks: list[str] = []
+    stack: list[list[str]] = [[]]        # one entry per nesting level
+    directives: list[str] = []           # active ancestor directive lines
+    for line in text.splitlines(keepends=True):
+        kind = _directive_kind(line.lstrip())
+        if kind == "if":
+            stack.append([line])
+            directives.append(line)
+            continue
+        if kind == "endif" and len(stack) > 1:
+            if stack[-1]:
+                # Ancestors (directives[:-1]) prefix the block; the block
+                # itself already carries its own opening directive line.
+                blocks.append("".join(directives[:-1]) + "".join(stack.pop()))
+            else:
+                stack.pop()
+            directives.pop()
+            continue
+        if kind == "else" and len(stack) > 1:
+            if stack[-1]:
+                blocks.append("".join(directives[:-1]) + "".join(stack.pop()))
+            else:
+                stack.pop()
+            directives[-1] = line
+            stack.append([line])
+            continue
+        stack[-1].append(line)
+    if stack[0]:
+        blocks.append("".join(stack[0]))
+    return [b for b in blocks if b.strip()]
+
+
 def _audit_failed_closed(
     text: str, name: str
 ) -> tuple[list[str], list[str]]:
-    """Check failed_closed derivation deductions."""
+    """Check failed_closed derivation deductions.
+
+    The renderer assigns failed_closed in each preprocessor branch, often
+    as a sequence of stepwise deductions (failopen, then aborted).  Each
+    branch block is evaluated independently so a missing deduction in one
+    branch is not masked by another branch still containing the counter
+    name.
+    """
     violations: list[str] = []
     reviews: list[str] = []
     failed_closed_stmts = FAILED_CLOSED_ASSIGN_RE.findall(text)
@@ -128,21 +188,34 @@ def _audit_failed_closed(
         )
         return violations, reviews
 
-    union_has_failopen = any("failopen_count" in stmt
-                             for stmt in failed_closed_stmts)
-    union_has_aborted = any("terminal_aborted_total" in stmt
-                            for stmt in failed_closed_stmts)
-    if not union_has_failopen:
-        violations.append(
-            f"{name}: failed_closed derivation does not deduct "
-            "failopen_count (failed_open must partition conversions_failed)"
-        )
-    if not union_has_aborted:
-        reviews.append(
-            f"{name}: failed_closed derivation does not deduct "
-            "terminal_aborted_total in the streaming branch; "
-            "aborted may be double counted"
-        )
+    for block in _split_preprocessor_blocks(text):
+        block_stmts = FAILED_CLOSED_ASSIGN_RE.findall(block)
+        if not block_stmts:
+            continue
+        # Only deduction statements that source from the snapshot renderer
+        # participate in conservation; a declaration-scope `failed_closed =
+        # 0` initializer in an include guard or struct block is not a
+        # derivation branch.
+        if not any("snapshot" in stmt for stmt in block_stmts):
+            continue
+        if not any("failopen_count" in stmt for stmt in block_stmts):
+            violations.append(
+                f"{name}: failed_closed derivation does not deduct "
+                "failopen_count in this branch; failed_open must "
+                "partition conversions_failed in every branch"
+            )
+        # terminal_aborted_total only exists under the streaming build; the
+        # non-streaming branch assigns aborted = 0 and legitimately has no
+        # aborted deduction.
+        if "#ifdef MARKDOWN_STREAMING_ENABLED" in block \
+                or "#if MARKDOWN_STREAMING_ENABLED" in block:
+            if not any("terminal_aborted_total" in stmt
+                       for stmt in block_stmts):
+                reviews.append(
+                    f"{name}: failed_closed derivation does not deduct "
+                    "terminal_aborted_total in the streaming branch; "
+                    "aborted may be double counted"
+                )
     return violations, reviews
 
 

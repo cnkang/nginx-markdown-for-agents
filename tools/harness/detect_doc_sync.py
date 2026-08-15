@@ -471,13 +471,17 @@ def _check_active_directive_inventory(
 
 def _check_prometheus_catalog(renderer: str, guide: str) -> List[str]:
     """Require every production renderer family to appear in the guide."""
-    raw_families = set(re.findall(r"nginx_markdown_[a-z0-9_]+", renderer))
+    raw_families = set(re.findall(r"nginx_markdown_[a-z0-9_]+\b", renderer))
     histogram_suffixes = ("_bucket", "_sum", "_count")
     families = set()
     for name in raw_families:
         base = name
+        # Derive the histogram base name from the "_bucket" family alone:
+        # a renderer commonly emits only histogram suffix families (e.g.
+        # `foo_bucket`) without the unsuffixed base metric, so requiring the
+        # bare base to exist in raw_families would mis-flag legitimate docs.
         for suffix in histogram_suffixes:
-            if name.endswith(suffix) and name[: -len(suffix)] in raw_families:
+            if name.endswith(suffix) and len(name) > len(suffix):
                 base = name[: -len(suffix)]
                 break
         families.add(base)
