@@ -237,7 +237,9 @@ class TestSoakQualification:
         assert result.returncode == 0
         assert "PASS:" in result.stdout
 
-    def test_malformed_fails(self):
+    def test_schema_invalid_fails(self):
+        # The schema-invalid fixture omits required record fields, so the
+        # validator reports them as missing-observation.
         result = _run_gate(
             self.SCRIPT, "soak-qualification-schema-invalid.json",
             self.MANIFEST_ARGS)

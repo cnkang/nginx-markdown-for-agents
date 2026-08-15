@@ -1083,6 +1083,14 @@ def read_diagnostics_file(path):
         return {}
 
 
+def read_ttfb_file(path):
+    try:
+        value = json.loads(Path(path).read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
 nginx_metrics = read_metrics_file(sys.argv[10])
 merge_diagnostics_metrics(nginx_metrics, read_diagnostics_file(sys.argv[11]))
 
@@ -1096,7 +1104,7 @@ result = build_scenario_result(ScenarioResultInput(
     concurrency=int(sys.argv[6]),
     worker_rss_kb=int(sys.argv[7]),
     load_generator=sys.argv[8],
-    ttfb=json.loads(Path(sys.argv[9]).read_text(encoding="utf-8")),
+    ttfb=read_ttfb_file(sys.argv[9]),
     nginx_metrics=nginx_metrics,
     input_bytes=int(sys.argv[12]),
     baseline_rss_kb=int(sys.argv[13]),

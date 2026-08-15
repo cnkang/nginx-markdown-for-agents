@@ -82,10 +82,15 @@ def _production_names() -> list[str]:
 def main() -> int:
     production = _production_names()
     macro_values = _macro_values()
-    inventory = [macro_values[name] for name in re.findall(
+    names = NAMES.read_text(encoding="utf-8")
+    macro_names = re.findall(
         r"X\((NGX_HTTP_MARKDOWN_DIRECTIVE_[A-Z0-9_]+)\)",
-        NAMES.read_text(encoding="utf-8"),
-    )]
+        names,
+    )
+    try:
+        inventory = [macro_values[name] for name in macro_names]
+    except KeyError as exc:
+        raise AssertionError(f"inventory references undefined name {exc}") from exc
     if production != inventory:
         raise AssertionError(
             "production command table differs from the canonical directive inventory:\n"

@@ -167,7 +167,7 @@ def test_missing_diagnostics_counters_fail_closed_in_scenario_metrics():
     )
     assert result["metrics"]["fallback_rate"] is None
     assert "precommit_failopen_total" not in result["metrics"]
-    assert result["metrics"]["throughput_mbps"] == pytest.approx(0.0001)
+    assert result["metrics"]["throughput_mbytes_per_sec"] == pytest.approx(0.0001)
 
 
 def test_zero_streaming_requests_report_zero_fallback_rate():
@@ -807,7 +807,7 @@ def _build_valid_mock_report():
                     "status": "completed",
                     "metrics": {
                         "rps": 1500.0,
-                        "throughput_mbps": 12.5,
+                        "throughput_mbytes_per_sec": 12.5,
                         "latency_p50_ms": 2.1,
                         "latency_p95_ms": 5.3,
                         "latency_p99_ms": 8.7,
@@ -829,7 +829,7 @@ def _build_valid_mock_report():
                     "status": "completed",
                     "metrics": {
                         "rps": 1200.0,
-                        "throughput_mbps": 10.0,
+                        "throughput_mbytes_per_sec": 10.0,
                         "latency_p50_ms": 3.0,
                         "latency_p95_ms": 7.1,
                         "latency_p99_ms": 12.0,
@@ -851,7 +851,7 @@ def _build_valid_mock_report():
                     "status": "completed",
                     "metrics": {
                         "rps": 800.0,
-                        "throughput_mbps": 6.0,
+                        "throughput_mbytes_per_sec": 6.0,
                         "latency_p50_ms": 5.5,
                         "latency_p95_ms": 12.0,
                         "latency_p99_ms": 20.0,
@@ -873,7 +873,7 @@ def _build_valid_mock_report():
                     "status": "completed",
                     "metrics": {
                         "rps": 200.0,
-                        "throughput_mbps": 50.0,
+                        "throughput_mbytes_per_sec": 50.0,
                         "latency_p50_ms": 25.0,
                         "latency_p95_ms": 40.0,
                         "latency_p99_ms": 55.0,
@@ -895,7 +895,7 @@ def _build_valid_mock_report():
                     "status": "completed",
                     "metrics": {
                         "rps": 900.0,
-                        "throughput_mbps": 8.0,
+                        "throughput_mbytes_per_sec": 8.0,
                         "latency_p50_ms": 4.0,
                         "latency_p95_ms": 9.0,
                         "latency_p99_ms": 15.0,
@@ -1015,7 +1015,7 @@ class TestSchemaWellFormedness:
         assert metrics.get("type") == "object"
         props = metrics.get("properties", {})
         expected_metrics = [
-            "rps", "throughput_mbps", "latency_p50_ms", "latency_p95_ms",
+            "rps", "throughput_mbytes_per_sec", "latency_p50_ms", "latency_p95_ms",
             "latency_p99_ms", "ttfb_p50_ms", "ttlb_p50_ms", "worker_rss_mb",
             "streaming_ratio", "fullbuffer_ratio", "fallback_rate",
         ]

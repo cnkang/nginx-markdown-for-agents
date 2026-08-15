@@ -327,7 +327,7 @@ while IFS= read -r rs_file; do
                 if (codeline ~ /[A-Z_][A-Z0-9_]+/) has_static_read = 1
                 if (codeline ~ /Box::new|Box::into_raw|Vec::with_capacity|Vec::new|alloc/) has_alloc = 1
                 if (codeline ~ /unsafe[[:space:]]*\{[[:space:]]*\*/) has_deref_ffi_input = 1
-                if (codeline ~ /panic!?[[:space:]]*\(|unwrap[[:space:]]*\(|expect[[:space:]]*\(|assert!?[[:space:]]*\(/) has_panic_source = 1
+                if (codeline ~ /panic!?[[:space:]]*\(|panic_any[[:space:]]*\(|unwrap[[:space:]]*\(|expect[[:space:]]*\(|assert_eq![[:space:]]*\(|assert_ne![[:space:]]*\(|assert!?[[:space:]]*\(|unreachable![[:space:]]*\(|todo![[:space:]]*\(|unimplemented![[:space:]]*\(/) has_panic_source = 1
                 # Detect calls to any other known FFI export name
                 line = codeline
                 for (sib in global_has_catch) {

@@ -378,7 +378,7 @@ def audit(text: str, path: Path, limit: int | None) -> list[str]:
     """Return warning lines for one file."""
     prose = _prose_only(text)
     warnings: list[str] = []
-    rel = str(path.relative_to(ROOT)) if path.is_absolute() else str(path)
+    rel = path.relative_to(ROOT).as_posix() if path.is_absolute() else path.as_posix()
     warnings.extend(_sentence_warnings(prose, rel))
     warnings.extend(_pattern_warnings(prose, rel))
     if limit is None:
@@ -418,7 +418,7 @@ def _lines_with_offsets(text: str) -> Iterator[tuple[int, str]]:
 
 
 def _changed_md_files(base: str) -> list[Path]:
-    """Maintained .md files changed since base (working tree + staged)."""
+    """Maintained .md files changed since base (working tree + staged + untracked)."""
     out = subprocess.run(
         ["git", "diff", "--name-only", base, "--", "*.md"],
         cwd=ROOT,
@@ -431,11 +431,19 @@ def _changed_md_files(base: str) -> list[Path]:
         capture_output=True,
         text=True,
     )
+    untracked = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard", "--", "*.md"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
     rels: set[str] = set()
     if out.returncode == 0:
         rels.update(out.stdout.splitlines())
     if cached.returncode == 0:
         rels.update(cached.stdout.splitlines())
+    if untracked.returncode == 0:
+        rels.update(untracked.stdout.splitlines())
     return sorted(
         ROOT / rel
         for rel in rels

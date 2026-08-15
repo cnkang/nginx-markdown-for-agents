@@ -8,6 +8,7 @@ the two surfaces together so they cannot drift.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -35,7 +36,13 @@ def _workflow_release_gate_body() -> str:
 def _workflow_publish_body() -> str:
     text = WORKFLOW.read_text(encoding="utf-8")
     start = text.index("  publish:")
-    return text[start:]
+    rest = text[start:]
+    # Stop at the next top-level job marker so a later job cannot leak
+    # into the publish job's own configuration.
+    next_job = re.search(r"\n  [a-z][a-z0-9-]*:$", rest)
+    if next_job is not None:
+        rest = rest[: next_job.start()]
+    return rest
 
 
 def _makefile_092_target() -> str:
@@ -68,4 +75,3 @@ def test_publish_hard_depends_on_release_gate() -> None:
     # The qualification validators run inside release-gate, so publish's
     # success condition on release-gate carries the qualification.
     assert "needs.release-gate.result == 'success'" in body
-    assert "release-gate" in body

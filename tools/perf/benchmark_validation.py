@@ -222,6 +222,11 @@ def parse_prometheus_metrics(content: str) -> dict[str, Any]:
             "decompression_events_total": _prometheus_total(
                 families, "nginx_markdown_decompression_events_total"
             ),
+            "decompression_success_total": _prometheus_total(
+                families,
+                "nginx_markdown_decompression_events_total",
+                outcome="success",
+            ),
             "decompression_budget_exceeded_total": _prometheus_total(
                 families,
                 "nginx_markdown_decompression_events_total",
@@ -629,7 +634,12 @@ def _decompression_path_metrics(
     fullbuffer_hits: float,
 ) -> tuple[float | None, float | None]:
     """Map decompression events to the benchmark's path fields."""
-    events = perf.get("decompression_events_total", 0)
+    # The aggregate counter also carries outcome="failure" samples; only
+    # successful decompressions may populate the path totals. Fall back to
+    # the aggregate when the success-labeled total is unavailable.
+    events = perf.get(
+        "decompression_success_total", perf.get("decompression_events_total", 0)
+    )
     if compression != "none" and events:
         if streaming_hits == 0 and fullbuffer_hits == 0:
             return None, None
@@ -681,7 +691,7 @@ def _scenario_metrics(
         # The harness reports bytes per request and requests per second.  Keep
         # the derived value tied to those measured fields instead of a
         # placeholder so baseline evidence remains numerically meaningful.
-        "throughput_mbps": round(data.input_bytes * rps / 1_000_000.0, 6),
+        "throughput_mbytes_per_sec": round(data.input_bytes * rps / 1_000_000.0, 6),
         "decompression_streaming_total": decomp_streaming,
         "decompression_fullbuffer_total": decomp_fullbuffer,
         "pending_output_high_watermark_bytes": perf.get(
@@ -734,7 +744,10 @@ def build_scenario_result(data: ScenarioResultInput) -> dict:
     if result["status"] == "failed":
         reasons = []
         if load.get("verdict") != "pass":
-            reasons.append(f"load_integrity_failed: {load['failure_reason']}")
+            reasons.append(
+                "load_integrity_failed: "
+                + str(load.get("failure_reason", "no failure reason recorded"))
+            )
         reasons.extend(
             f"endpoint_integrity_failed: {failure}"
             for failure in endpoint_failures

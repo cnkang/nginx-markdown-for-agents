@@ -425,7 +425,7 @@
                         "minimum": 0,
                         "description": "Requests per second"
                       },
-                      "throughput_mbps": {
+                      "throughput_mbytes_per_sec": {
                         "type": "number",
                         "minimum": 0,
                         "description": "Throughput in MB/s"

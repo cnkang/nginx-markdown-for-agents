@@ -323,6 +323,8 @@ def _record_evidence_schema_digest(
 
 def _check_evidence_schemas(manifest: dict, reasons: list) -> None:
     """Validate evidence schema digests when declared."""
+    if "evidence_schema_digests" not in manifest:
+        return
     evidence_schema_digests = manifest.get("evidence_schema_digests")
     if evidence_schema_digests is None:
         reasons.append(

@@ -12,6 +12,9 @@ SCRIPT="$(cd "$(dirname "$0")/../../.." && pwd -P)/tests/e2e/dynconf_reload_roll
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/dynconf-ownership-test.XXXXXX")"
 
 cleanup_test_files() {
+    # Fixture directories may be made read-only by the ownership checks;
+    # restore write permissions first so rm -rf can remove them.
+    chmod -R u+w -- "$TMP_ROOT" 2>/dev/null || true
     rm -rf -- "$TMP_ROOT"
     return 0
 }

@@ -4,6 +4,7 @@
 This standalone tool is the single code-generation entry point for all
 reason-code-derived artifacts. It reads the declarative registry and writes:
   - Rust enum + metadata (reason_code.rs)
+  - Generated C header (markdown_reason_meta.h)
   - Count/hash manifest JSON (reason-registry-report.json)
   - Generated-artifacts listing (generated-reason-artifacts.json)
 
@@ -523,9 +524,9 @@ def _append_rust_metric_key(lines, reasons):
     lines.append("    pub fn metric_key(self) -> &'static str {")
     lines.append(RUST_MATCH_SELF)
 
-    # Emit one arm per registry entry.  This keeps the Rust match exhaustive
-    # when a new reason is temporarily absent from METRIC_FAMILIES; the
-    # central classifier still supplies the safe error-family fallback.
+    # Emit one arm per registry entry. The generator fails closed when a
+    # reason is absent from METRIC_FAMILIES: get_metric_family raises
+    # ValueError and aborts generation instead of an error-family fallback.
     for reason in reasons:
         variant = snake_to_pascal(reason["key"])
         family = get_metric_family(reason["key"])

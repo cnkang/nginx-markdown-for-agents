@@ -683,14 +683,25 @@ def test_replace_canonical_dynamic_entries_preserves_stale_supported_rows():
 
     um._replace_canonical_dynamic_entries(data, merged)
 
-    keys = {
-        (entry.get("nginx_version"), entry.get("libc"), entry.get("arch"))
+    dynamic = [
+        entry
         for entry in data["entries"]
         if entry.get("artifact_type") == "dynamic-module"
+    ]
+    # One generated row replaces the canonical 1.26.3 row; the two stale
+    # supported/candidate rows (1.24.0, 1.22.1) must survive untouched.
+    assert len(dynamic) == 3
+
+    keys = {
+        (entry.get("nginx_version"), entry.get("libc"), entry.get("arch"))
+        for entry in dynamic
     }
     assert ("1.26.3", "glibc", "amd64") in keys
     assert ("1.24.0", "glibc", "amd64") in keys
     assert ("1.22.1", "glibc", "amd64") in keys
+
+    # Non-generated artifacts must pass through unchanged.
+    assert {"artifact_type": "source-archive", "name": "source"} in data["entries"]
 
 
 def test_replace_canonical_dynamic_entries_normalizes_alias_rows():

@@ -146,7 +146,9 @@ trust channel and includes `SHA256SUMS.asc`, package users must withhold
 project-signature trust. `SHA256SUMS` detects accidental corruption during
 transfer and storage, but it is not a tamper-proof security boundary. A
 malicious actor who can replace packages can also replace the checksums file.
-Authenticate the release through a verified signature instead.
+Verify the release signature only after the release process publishes the
+complete fingerprint through an independent trust channel and includes
+`SHA256SUMS.asc`.
 
 ### Generating Checksums (CI / Maintainers)
 
