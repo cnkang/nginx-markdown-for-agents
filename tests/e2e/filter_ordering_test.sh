@@ -129,7 +129,7 @@ test_markdown_gunzip() {
     # Request with Accept: text/markdown; upstream may send gzip-encoded HTML.
     # With gunzip on or markdown_auto_decompress on, the client should receive
     # uncompressed Markdown.
-    local response headers content_type content_encoding status
+    local response headers content_type content_encoding status upstream_encoding
     response="$(curl -sS -D - -o /dev/null -H "Accept: text/markdown" -H "Accept-Encoding: gzip" "${NGINX_URL}${GUNZIP_TEST_PATH}" 2>&1)" || true
     headers="$response"
 
@@ -206,8 +206,13 @@ test_markdown_proxy_cache() {
     # Unique cache-busting query parameter so both requests share one fresh
     # cache entry instead of reusing a stale entry from a previous run.
     local cache_buster
-    cache_buster="?cb=$$-$(date +%s%N 2>/dev/null || date +%s)"
-    local cache_path="${TEST_PATH}${cache_buster}"
+    cache_buster="cb=$$-$(date +%s%N 2>/dev/null || date +%s)"
+    local cache_path
+    if [[ "$TEST_PATH" == *\?* ]]; then
+        cache_path="${TEST_PATH}&${cache_buster}"
+    else
+        cache_path="${TEST_PATH}?${cache_buster}"
+    fi
 
     # First request: should convert and cache
     local response1 headers1 content_type1 cache_status1 status1

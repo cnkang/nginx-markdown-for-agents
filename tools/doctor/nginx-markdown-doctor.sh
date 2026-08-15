@@ -553,7 +553,7 @@ check_rust_toolchain() {
     # Resolve symlinked installations before looking for repository metadata.
     # A packaged or copied doctor script must not accidentally inspect the
     # caller's current directory and report a repository toolchain as active.
-    local doctor_source="${BASH_SOURCE[0]}"
+    local doctor_source="${BASH_SOURCE[0]:-}"
     local doctor_dir doctor_link symlink_hops=0
     local max_symlink_hops=40
     while [[ -n "$doctor_source" && -L "$doctor_source" ]]; do

@@ -222,6 +222,25 @@ def _require_jsonschema() -> bool:
     return True
 
 
+_FORMAT_CHECKER = None
+
+
+def _format_checker():
+    """Return the shared jsonschema FormatChecker instance.
+
+    The checker is created lazily so the optional jsonschema dependency is
+    only imported when a schema validation actually runs.  Passing it to
+    validate() makes formats such as "date-time" reject malformed values
+    instead of silently ignoring them.
+    """
+    global _FORMAT_CHECKER
+    if _FORMAT_CHECKER is None:
+        from jsonschema import FormatChecker
+
+        _FORMAT_CHECKER = FormatChecker()
+    return _FORMAT_CHECKER
+
+
 def _validate_evidence_schema(manifest: dict, reasons: list) -> None:
     """Validate the manifest instance against the release evidence schema."""
     schema_path = REPO_ROOT / "schemas" / "final-evidence-manifest.schema.json"
@@ -232,13 +251,15 @@ def _validate_evidence_schema(manifest: dict, reasons: list) -> None:
     import jsonschema
     try:
         schema = load_json(schema_path, "final evidence manifest schema")
-        jsonschema.validate(instance=manifest, schema=schema)
+        jsonschema.validate(
+            instance=manifest, schema=schema, format_checker=_format_checker()
+        )
     except jsonschema.ValidationError as exc:
         reasons.append(f"malformed: instance schema violation: {exc.message}")
 
 
 def _validate_observation_state(
-    reasons: list, expected_sha: str | None, release_dir: pathlib.Path
+    reasons: list, expected_sha: str | None, release_dir: Path
 ) -> None:
     """Validate the observation-state record against its schema when
     present, resolving the record from the manifest's own release
@@ -255,7 +276,9 @@ def _validate_observation_state(
     try:
         obs = load_json(obs_state_path, "observation state")
         obs_schema = load_json(obs_schema_path, "observation state schema")
-        jsonschema.validate(instance=obs, schema=obs_schema)
+        jsonschema.validate(
+            instance=obs, schema=obs_schema, format_checker=_format_checker()
+        )
         if expected_sha and obs.get("candidate_sha") != expected_sha:
             reasons.append(
                 "stale-digest: observation-state candidate_sha "

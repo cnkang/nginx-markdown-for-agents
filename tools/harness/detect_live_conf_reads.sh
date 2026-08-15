@@ -372,8 +372,9 @@ if [[ -f "$request_impl" ]]; then
         call_content="$(echo "$call_match" | cut -d: -f2-)"
         # Check if the call passes NULL as the eff argument
         # Pattern: handle_ctx_alloc_failure(r, conf, NULL) or handle_ctx_alloc_failure(r, conf) (2-arg old form)
-        if echo "$call_content" | grep -qE 'handle_ctx_alloc_failure\([^)]*,[[:space:]]*NULL[[:space:]]*\);[[:space:]]*$' \
-            || echo "$call_content" | grep -qE 'handle_ctx_alloc_failure\([^)]*,[[:space:]]*conf[[:space:]]*\);[[:space:]]*$'; then
+        # Arguments may contain nested parentheses before the final argument.
+        if echo "$call_content" | grep -qE 'handle_ctx_alloc_failure\(.*,[[:space:]]*NULL[[:space:]]*\);[[:space:]]*$' \
+            || echo "$call_content" | grep -qE 'handle_ctx_alloc_failure\(.*,[[:space:]]*conf[[:space:]]*\);[[:space:]]*$'; then
             echo "  ERROR   ${request_impl}:${call_line} — handle_ctx_alloc_failure called with NULL/missing eff: ${call_content}" >&2
             errors=$((errors + 1))
         else

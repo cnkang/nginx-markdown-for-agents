@@ -205,7 +205,7 @@ match = re.fullmatch(r"([0-9]+)([kmgt]?)", raw)
 if match is None:
     raise SystemExit(f"invalid MARKDOWN_MAX_SIZE: {raw!r}")
 units = {"": 1, "k": 1024, "m": 1024**2, "g": 1024**3, "t": 1024**4}
-print(int(match.group(1)) * units[match.group(2)] + 1)
+print(int(match.group(1)) * units[match.group(2)] + 4096)
 ')"; then
     echo "ERROR: unable to parse MARKDOWN_MAX_SIZE=${MARKDOWN_MAX_SIZE}" >&2
     exit 1
@@ -254,7 +254,7 @@ if match is None:
     raise SystemExit(f"invalid MARKDOWN_MAX_SIZE: {raw_limit!r}")
 units = {"": 1, "k": 1024, "m": 1024**2, "g": 1024**3, "t": 1024**4}
 limit = int(match.group(1)) * units[match.group(2)]
-target = limit + 1
+target = limit + 4096
 data = path.read_bytes()
 padding = b"<p>padding for the bounded fail-open fixture</p>\n"
 while len(data) < target:
@@ -332,7 +332,7 @@ http {
             proxy_http_version 1.1;
 
             markdown_filter on;
-            markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_memory=${MARKDOWN_MAX_SIZE} streaming_buffer=64k conversion_timeout=120s;
+            markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_memory=${MARKDOWN_MAX_SIZE} streaming_buffer=${MARKDOWN_MAX_SIZE} conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_streaming force;
         }

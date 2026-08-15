@@ -116,6 +116,14 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _format_utc_timestamp(timestamp: float) -> str:
+    return (
+        datetime.fromtimestamp(timestamp, timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
 def load_json(path: str | pathlib.Path, label: str) -> dict:
     validated_path = validate_read_path(path, purpose=label)
     try:
@@ -965,17 +973,23 @@ def handle_missing_nginx(args: argparse.Namespace, manifest: dict) -> int | None
 def prepare_runtime(base_url: str, manifest: dict, module_so: str) -> tuple:
     """Create the runtime dir, corpus, nginx config, and start nginx."""
     runtime_dir = _runtime_directory()
-    corpus = build_corpus(runtime_dir, manifest)
-    port = int(base_url.rsplit(":", 1)[1])
-    write_nginx_conf(runtime_dir, port, str(runtime_dir / "html"), module_so or None)
-    nginx_bin = _validated_nginx_binary()
-    if nginx_bin is None:
-        raise ValueError("NGINX_BIN is not a readable executable")
-    nginx = subprocess.Popen(
-        [str(nginx_bin), "-p", str(runtime_dir), "-c", "nginx.conf"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    try:
+        corpus = build_corpus(runtime_dir, manifest)
+        port = int(base_url.rsplit(":", 1)[1])
+        write_nginx_conf(runtime_dir, port, str(runtime_dir / "html"), module_so or None)
+        nginx_bin = _validated_nginx_binary()
+        if nginx_bin is None:
+            raise ValueError("NGINX_BIN is not a readable executable")
+        nginx = subprocess.Popen(
+            [str(nginx_bin), "-p", str(runtime_dir), "-c", "nginx.conf"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        # Any failure after the runtime directory exists must not leave it
+        # behind; remove it before re-raising.
+        _cleanup_runtime_directory(runtime_dir)
+        raise
     return runtime_dir, corpus, nginx
 
 
@@ -1050,8 +1064,8 @@ def _build_soak_record(
         "schema_version": RECORD_SCHEMA_VERSION,
         "candidate_sha": manifest["candidate_sha"],
         "run_id": f"soak-{int(time.time())}",
-        "started_at": utc_now(),
-        "finished_at": utc_now(),
+        "started_at": _format_utc_timestamp(session["started"]),
+        "finished_at": _format_utc_timestamp(session["ended"]),
         "duration_seconds": round(elapsed, 1),
         "concurrency": manifest["concurrency"],
         "per_scenario": per_scenario,

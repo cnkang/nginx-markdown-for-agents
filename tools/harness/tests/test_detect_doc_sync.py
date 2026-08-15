@@ -175,7 +175,7 @@ def test_flavor_handler_cannot_reactivate_mdx(tmp_path: Path) -> None:
     assert any("explicitly reject both mdx" in error for error in errors)
 
 
-def test_configuration_guide_requires_exact_on_to_force_mapping(tmp_path: Path) -> None:
+def test_configuration_guide_requires_frozen_streaming_policy_fragment(tmp_path: Path) -> None:
     """The configuration guide must keep the frozen streaming policy
     fragment exactly; replacing `force` with `on` violates the contract."""
     _write_valid_fixture(tmp_path)

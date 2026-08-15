@@ -475,11 +475,12 @@ def _check_prometheus_catalog(renderer: str, guide: str) -> List[str]:
     histogram_suffixes = ("_bucket", "_sum", "_count")
     families = set()
     for name in raw_families:
+        base = name
         for suffix in histogram_suffixes:
-            if name.endswith(suffix):
-                name = name[: -len(suffix)]
+            if name.endswith(suffix) and name[: -len(suffix)] in raw_families:
+                base = name[: -len(suffix)]
                 break
-        families.add(name)
+        families.add(base)
     return [
         f"{PROMETHEUS_GUIDE_PATH}: production metric family {name} is missing"
         for name in sorted(families)

@@ -19,6 +19,14 @@
       "blocking": true,
       "evidence_ref": "artifacts/release/0.9.2/fuzz-qualification-record.json",
       "observed_at": "2026-08-05T12:30:00Z"
+    },
+    {
+      "id": "evidence-soak-qualification",
+      "category": "performance",
+      "status": "pass",
+      "blocking": true,
+      "evidence_ref": "artifacts/release/0.9.2/soak-qualification-record.json",
+      "observed_at": "2026-08-05T13:00:00Z"
     }
   ]
 }

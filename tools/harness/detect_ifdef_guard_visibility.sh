@@ -184,6 +184,7 @@ fi
 # Step 2: For each guarded function, search for references outside #ifdef blocks
 # in all .c and .h files in SRC_DIR
 findings=0
+parse_errors=0
 
 for func in $guarded_funcs; do
     # Search all .c and .h files for this function name
@@ -308,7 +309,7 @@ for i, line in enumerate(lines, 1):
 PY
 ); then
             echo "ERROR: Python parser failed while checking ${func} visibility in ${file}" >&2
-            findings=$((findings + 1))
+            parse_errors=$((parse_errors + 1))
             continue
         fi
 
@@ -325,8 +326,8 @@ PY
     done < <(find "$SRC_DIR" -type f \( -name '*.c' -o -name '*.h' \) -print0)
 done
 
-if [[ $findings -gt 0 ]]; then
-    echo "FAIL: found ${findings} #ifdef guard visibility gap(s)" >&2
+if [[ $findings -gt 0 || $parse_errors -gt 0 ]]; then
+    echo "FAIL: found ${findings} #ifdef guard visibility gap(s), ${parse_errors} parse error(s)" >&2
     exit 1
 fi
 

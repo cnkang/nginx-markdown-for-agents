@@ -373,12 +373,13 @@ def classify_exports(
     results: list[dict[str, Any]] = []
 
     for name in exports:
-        classification, callsite_count, callsite_files = _classify_one(
+        classification, callsite_count, callsite_files, inferred = _classify_one(
             name, production_callsites, test_references
         )
         record: dict[str, Any] = {
             "name": name,
             "classification": classification,
+            "inferred": inferred,
             "production_callsite_count": callsite_count,
             "callsite_files": callsite_files,
             "in_test_stubs": name in test_references,
@@ -400,27 +401,36 @@ def _classify_one(
     name: str,
     production_callsites: dict[str, list[dict[str, Any]]],
     test_references: set[str],
-) -> tuple[str, int, list[str]]:
-    """Classify a single export name into (classification, count, files)."""
+) -> tuple[str, int, list[str], bool]:
+    """Classify a single export name into (classification, count, files, inferred)."""
     if name in LOADER_ABI_FUNCTIONS:
-        return _callsite_classification("loader_abi", production_callsites.get(name, []))
+        classification, count, files = _callsite_classification(
+            "loader_abi", production_callsites.get(name, [])
+        )
+        return classification, count, files, False
 
     if name in production_callsites and production_callsites[name]:
-        return _callsite_classification(
+        classification, count, files = _callsite_classification(
             "production_called", production_callsites[name]
         )
+        return classification, count, files, False
 
     if name in test_references:
-        return "test_only", 0, []
+        return "test_only", 0, [], False
 
     # Lifecycle pair: if the paired counterpart is production-called, infer
     # this function is also production-called and reuse the paired evidence.
+    # The inferred flag lets downstream consumers distinguish direct
+    # callsite evidence from pair-based inference.
     paired = LIFECYCLE_PAIRS.get(name)
     paired_callsites = production_callsites.get(paired, []) if paired else []
     if paired and paired_callsites:
-        return _callsite_classification("production_called", paired_callsites)
+        classification, count, files = _callsite_classification(
+            "production_called", paired_callsites
+        )
+        return classification, count, files, True
 
-    return "dead", 0, []
+    return "dead", 0, [], False
 
 
 def _callsite_classification(

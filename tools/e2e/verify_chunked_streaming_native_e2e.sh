@@ -9,9 +9,10 @@ set -euo pipefail
 #  2) Chunked body above markdown_limits conversion_memory triggers fail-open
 #     without truncation.
 #  3) Gzip streaming decompression converts and strips Content-Encoding.
-#  4) Legacy raw deflate C-compatibility coverage converts to Markdown and
-#     strips Content-Encoding. Raw RFC 1951 deflate is supported as a
-#     compatibility fallback (part of the 0.9.2 public contract).
+#  4) Legacy deflate C-compatibility coverage converts to Markdown and
+#     strips Content-Encoding. The 0.9.2 public contract covers
+#     zlib-wrapped RFC 1950 deflate and does not promise a raw RFC 1951
+#     fallback.
 #  5) Large gzip streaming survives real downstream backpressure with exact
 #     output equivalence and terminal-once evidence.
 #  6) Truncated gzip streaming decompression fails open before commit.
@@ -1107,7 +1108,7 @@ fi
 echo "  decompression_streaming_total: ${gzip_decompression_before} -> ${gzip_decompression_after}"
 
 # Legacy C compatibility coverage. The frozen 0.9.2 public contract is
-# zlib-wrapped RFC 1950 and does not promise raw fallback.
+# zlib-wrapped RFC 1950 and does not promise a raw RFC 1951 fallback.
 echo "==> Case 4: legacy raw deflate streaming compatibility should convert to Markdown"
 deflate_line="$(curl -sS -D "${RAW_DIR}/deflate.hdr" -o "${RAW_DIR}/deflate.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
