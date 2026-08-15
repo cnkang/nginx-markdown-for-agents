@@ -167,10 +167,9 @@ def validate_index(index: dict, candidate_sha: str | None) -> list[str]:
     try:
         expected_digest = frozen_feature_digest()
         expected_abi = frozen_abi_version()
-    except (OSError, json.JSONDecodeError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         reasons.append(f"malformed: cannot resolve official bindings: {exc}")
         return reasons
-
     artifacts = index.get("artifacts")
     if not isinstance(artifacts, list):
         reasons.append("malformed: artifacts must be an array")

@@ -4,6 +4,7 @@
   "frozen_at": "2026-08-05",
   "owner": "release engineering",
   "status": "frozen",
+  "trust_anchor_published": false,
   "note": "Private keys and key material are NEVER included in this policy or any repository artifact. This policy defines the mechanism, identity binding, and verification contract only.",
   "artifact_types": {
     "source_archive": {
@@ -84,7 +85,8 @@
   "key_management": {
     "reference": "docs/guides/GPG_KEY_MANAGEMENT.md",
     "secret_storage": "GitHub Actions environment 'release-signing' secrets (GPG_PRIVATE_KEY, GPG_PASSPHRASE, GPG_KEY_ID); job-scoped to a dedicated signing job, injected only into the signing step and never exposed to build or test steps",
-    "rotation": "Key rotation follows docs/guides/GPG_KEY_MANAGEMENT.md; rotated keys remain valid for verification of prior releases"
+    "rotation": "Key rotation follows docs/guides/GPG_KEY_MANAGEMENT.md; rotated keys remain valid for verification of prior releases",
+    "revocation": "Revocation certificate location and announcement channel follow docs/guides/GPG_KEY_MANAGEMENT.md; artifacts previously signed by a compromised key are re-signed with the current key after fingerprint re-authentication"
   },
   "policy_reference_notes": [
     "Requirement 14 criterion 4: GPG for source/DEB/RPM after the pinned-key trust anchor is published; OCI signatures are a future Cosign/Sigstore requirement; checksum/provenance covers Homebrew without detached GPG",

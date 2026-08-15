@@ -296,7 +296,18 @@ def build_final_evidence(candidate_sha: str, generated_at: str) -> tuple[dict, d
     fuzz_pass = _record_value(root / "fuzz-qualification-record.json", "blocking_pass")
     soak_status = _record_value(root / "soak-qualification-record.json")
     performance_path = root / "performance-qualification-report.json"
-    performance_pass = performance_path.is_file()
+    performance_pass = False
+    if performance_path.is_file():
+        try:
+            performance_report = json.loads(
+                performance_path.read_text(encoding="utf-8")
+            )
+            performance_pass = (
+                isinstance(performance_report, dict)
+                and performance_report.get("conclusion") == "pass"
+            )
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+            performance_pass = False
 
     entries = [
         {

@@ -567,7 +567,6 @@ def test_server_block_bit_propagates_to_child(
 def test_child_explicit_overrides_server_block_with_own_value(
     http_conf: ConfigLevel,
     server_conf: ConfigLevel,
-    
     dynconf: Optional[DynconfSnapshot],
     request_vars: RequestVariables,
     location_value: int,

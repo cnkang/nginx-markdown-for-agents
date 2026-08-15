@@ -263,25 +263,25 @@ PACKAGE_DOC_REQUIRED_SNIPPETS = {
     INSTALLATION_DOC: [
         "## 4.2 Linux Package Artifacts",
         "**Tier: Secondary** (v0.7.0+)",
-        "APT/YUM repository publishing is planned",
+        "The project plans APT/YUM repository publishing",
         CANONICAL_PACKAGE_NAME,
         CANONICAL_MODULE_SO,
     ],
     PACKAGE_INSTALLATION_DOC: [
         "GitHub Releases are the current distribution channel",
-        "Public APT/YUM repositories are planned but not available yet",
+        "The project plans public APT/YUM repositories but has not launched them yet",
         CANONICAL_PACKAGE_NAME,
         CANONICAL_MODULE_SO,
         "SHA256SUMS",
     ],
     PACKAGE_DISTRIBUTION_DOC: [
         "GitHub Releases",
-        "Active for v0.7.0+ release artifacts",
+        "Active for published release artifacts",
         "APT/YUM repository publishing is intentionally tracked as a future",
     ],
     GPG_KEY_MANAGEMENT_DOC: [
         "Public APT/YUM repositories are not available yet",
-        "future self-hosted repository publication",
+        "GPG key publication for repository metadata applies to future self-hosted",
         "PACKAGE_INSTALLATION.md",
     ],
 }
