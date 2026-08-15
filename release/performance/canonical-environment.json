@@ -3,7 +3,7 @@
   "nginx_version": "1.30.4",
   "runner": "ubuntu-24.04",
   "architecture": "x86_64",
-  "rust_toolchain": "1.97.0",
+  "rust_toolchain": "1.97.1",
   "identity_contract": {
     "candidate_sha_source": "git rev-parse HEAD",
     "runner_identity_source": "uname -a and /etc/os-release captured in baseline evidence",
