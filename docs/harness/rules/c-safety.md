@@ -1,6 +1,6 @@
 ---
 domain: c-safety
-rules: [24, 42]
+rules: [24, 42, 65]
 paths:
   - "components/nginx-module/src/**"
   - "components/nginx-module/include/**"
@@ -107,3 +107,23 @@ Required:
   1. `grep -rn 'volatile' components/nginx-module/src/` should return zero
      hits, OR each hit must have an adjacent comment justifying single-threaded use.
   2. `bash tools/harness/detect_volatile_atomic.sh` exits 0.
+
+### Rule 65 — whole-struct initialization for stack config-holder types
+
+- Stack-declared config-holder structs (`ngx_conf_t`,
+  `ngx_http_markdown_conf_t`, `ngx_http_markdown_main_conf_t`,
+  `ngx_http_markdown_loc_conf_t`) must be fully initialized before any field
+  assignment: `memset(&x, 0, sizeof(x))`, `= {0}`, or a dedicated init helper
+  (`init_conf(&x)` / `_init(&x)`).
+- Partial field assignment without whole-init is forbidden: uninitialized
+  members carry stack garbage that can bypass production NULL guards.  A
+  `cf.ctx` wild-pointer from a partially-initialized `ngx_conf_t` caused a
+  SIGSEGV under GCC -O0 that clang and -O2 masked by chance.
+- This applies to tests and production code alike; tests must exercise the
+  same initialization discipline as the code they validate.
+- New config-holder structs must register in
+  `detect_uninitialized_stack_struct.sh` `WHOLE_INIT_TYPES`.
+- Verification: `bash tools/harness/detect_uninitialized_stack_struct.sh`
+  (advisory local gate) and
+  `bash tools/harness/tests/test_detect_uninitialized_stack_struct.sh`
+  (detector regression tests).

@@ -1,6 +1,6 @@
 ---
 domain: streaming-backpressure
-rules: [1, 2, 38, 47, 51, 52]
+rules: [1, 2, 38, 47, 51, 52, 64]
 paths:
   - "components/nginx-module/src/**"
   - "components/rust-converter/src/streaming/**"
@@ -428,6 +428,36 @@ review cycle, the agent must evaluate whether `AGENTS.md` needs updating:
    is written.  Avoid vague aspirational statements.  Every rule should
    answer: "What specific check does the agent perform, and what does
    failure look like?"
+
+### 64. NGX_AGAIN call-site audit (known-API registry)
+Historical issues: NGX_AGAIN truncation recurred across review rounds — feed
+path, `handle_success_output`, full-buffer header `NGX_AGAIN`, buffered
+fail-open, and replay-exhaustion all silently dropped the body when a
+known NGX_AGAIN-returning API was handled like an error.
+
+Required:
+- Every call to a known NGX_AGAIN-returning API must branch `NGX_AGAIN`
+  explicitly (`rc != NGX_OK && rc != NGX_AGAIN` for header-chain semantics,
+  or an equivalent dedicated branch).  Folding `NGX_AGAIN` into the
+  `NGX_ERROR` path or returning immediately without preserving pending
+  output truncates the response under downstream backpressure.
+- A new function that may return `NGX_AGAIN` must register in
+  `detect_ngx_again_call_sites.sh` `NGX_AGAIN_APIS` so every call site is
+  audited; the detector's known-API list is the single registry.
+- Header-chain `NGX_AGAIN` means "headers accepted" (write filter queued
+  them); continue body output and do not re-drive the header chain.
+- Buffer/body-path `NGX_AGAIN` means suspend-and-resume: preserve pending
+  state and resume later, never free or advance past unconsumed data.
+
+Verification:
+- `bash tools/harness/detect_ngx_again_call_sites.sh` — blocking
+  harness-tooling CI check via `make harness-security-checks` for selected
+  `harness_tooling` paths, and a local full-gate check.
+- `bash tools/harness/tests/test_detect_ngx_again_call_sites.sh` — detector
+  regression tests (folded-error, immediate-return, clean branch, definition
+  skip).
+
+---
 
 ## Recent Git Analysis and Remediation Closeout
 

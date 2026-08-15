@@ -1,6 +1,6 @@
 ---
 domain: ci-gating
-rules: [13, 54]
+rules: [13, 54, 66]
 paths:
   - ".github/workflows/**"
   - "Makefile"
@@ -261,3 +261,20 @@ Required:
 
 Verification:
 - `grep -rn 'relative_to\|startswith.*resolve' packaging/scripts/validate-release-manifest.py` — verify path traversal guards exist.
+
+---
+
+### Rule 66 — local GCC parity gate for C test/module changes
+
+- C module and C unit-test changes must pass the unit suite under real GCC
+  before push.  Local `gcc` on macOS is an Apple clang alias, which masks two
+  CI-only failure classes: GCC `-Werror` hard errors on
+  incompatible-pointer-types (clang only warns) and uninitialized-stack
+  crashes that reproduce only at GCC `-O0` (clang and `-O2` pass by chance).
+- The gate runs the same unit suite in an Ubuntu container with GCC:
+  `make test-c-unit-gcc`.  Clean container artifacts afterwards
+  (`make clean` in `components/nginx-module/tests`), because Linux ELF
+  binaries cannot execute on macOS.
+- This gate is additive to the local clang run (`make test-nginx-unit`) and
+  does not replace it; both must pass before push when the change touches C.
+- Verification: `make test-c-unit-gcc` exits 0 (requires Docker).

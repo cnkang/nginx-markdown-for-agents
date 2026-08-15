@@ -61,7 +61,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
 
 .PHONY: all build rust-lib rust-lib-debug copy-headers check-headers \
         install \
-        test test-rust test-rust-doc test-nginx-unit test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
+        test test-rust test-rust-doc test-nginx-unit test-c-unit-gcc test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
         test-nginx-integration test-e2e test-e2e-rust test-e2e-contract-scripts test-all test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
         test-corpus-determinism reason-codegen-generate reason-codegen-check \
@@ -168,6 +168,22 @@ fuzz-smoke:
 
 test-nginx-unit:
 	$(MAKE) -C $(NGINX_TEST_DIR) unit
+
+# Run the NGINX C unit suite under real GCC (Ubuntu) inside Docker.  Local
+# `gcc` on macOS is an Apple clang alias, which masks two CI-only failure
+# classes: GCC -Werror hard errors on incompatible-pointer-types, and
+# uninitialized stack structs that crash only at GCC -O0 (clang/O2 pass by
+# chance).  Run this before pushing any C test/module change; the container
+# output dir must be cleaned afterwards because Linux ELF binaries cannot
+# execute on macOS (make clean in $(NGINX_TEST_DIR) reuses the shared build/).
+test-c-unit-gcc:
+	@command -v docker >/dev/null 2>&1 || { echo "FAIL: docker is required for test-c-unit-gcc" >&2; exit 1; }
+	@echo "=== C unit suite under Ubuntu GCC (Docker) ==="
+	@docker run --rm -v "$(CURDIR)":/repo -w /repo/components/nginx-module/tests \
+	    ubuntu:24.04 bash -c "apt-get update -qq && apt-get install -y -qq gcc make libz-dev libbrotli-dev python3 valgrind && make clean && make unit"
+	@echo "=== Cleaning container artifacts from local build dir ==="
+	@$(MAKE) -C $(NGINX_TEST_DIR) clean || true
+	@echo "OK: C unit suite passed under Ubuntu GCC"
 
 test-nginx-unit-streaming:
 	$(MAKE) -C $(NGINX_TEST_DIR) unit-streaming
@@ -402,6 +418,8 @@ harness-security-checks:
 	PYTHONPATH=. python3 tools/harness/detect_auto_generated_naming.py --strict
 	bash tools/harness/detect_version_consistency.sh
 	bash tools/harness/detect_backpressure_resume.sh
+	bash tools/harness/detect_ngx_again_call_sites.sh
+	bash tools/harness/detect_uninitialized_stack_struct.sh
 	bash tools/harness/detect_decompression_budget.sh
 	PYTHONPATH=. python3 tools/harness/detect_test_assertion_coverage.py
 	PYTHONPATH=. python3 tools/harness/detect_html_sanitizer_invariants.py
@@ -444,6 +462,8 @@ test-harness:
 	bash tools/harness/tests/test_detect_regex_safety.sh
 	bash tools/harness/tests/test_dynconf_reload_rollback.sh
 	bash tools/harness/tests/test_detect_live_conf_reads.sh
+	bash tools/harness/tests/test_detect_ngx_again_call_sites.sh
+	bash tools/harness/tests/test_detect_uninitialized_stack_struct.sh
 	python3 -m pytest tools/harness/tests/ -q --tb=short -k "not check_harness_sync"
 
 license-check:
