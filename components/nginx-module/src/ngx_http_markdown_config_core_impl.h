@@ -562,6 +562,11 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
                 conf->limits.conversion_timeout);
             return NGX_CONF_ERROR;
         }
+        ngx_conf_log_error(NGX_LOG_WARN, cf, 0,
+            "markdown_limits parser_timeout clamped from %Mms to "
+            "conversion_timeout %Mms (only one side explicit)",
+            conf->limits.parser_timeout,
+            conf->limits.conversion_timeout);
         conf->limits.parser_timeout = conf->limits.conversion_timeout;
     }
 
@@ -577,6 +582,11 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
                 conf->limits.conversion_memory);
             return NGX_CONF_ERROR;
         }
+        ngx_conf_log_error(NGX_LOG_WARN, cf, 0,
+            "markdown_limits parser_memory clamped from %uz to "
+            "conversion_memory %uz (only one side explicit)",
+            conf->limits.parser_memory,
+            conf->limits.conversion_memory);
         conf->limits.parser_memory = conf->limits.conversion_memory;
     }
 
@@ -592,6 +602,11 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
                 conf->limits.conversion_memory);
             return NGX_CONF_ERROR;
         }
+        ngx_conf_log_error(NGX_LOG_WARN, cf, 0,
+            "markdown_limits streaming_buffer clamped from %uz to "
+            "conversion_memory %uz (only one side explicit)",
+            conf->limits.streaming_buffer,
+            conf->limits.conversion_memory);
         conf->limits.streaming_buffer = conf->limits.conversion_memory;
     }
 

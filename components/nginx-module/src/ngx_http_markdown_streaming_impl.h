@@ -4090,6 +4090,12 @@ ngx_http_markdown_streaming_failopen_passthrough(
 
             conf = ngx_http_get_module_loc_conf(
                 r, ngx_http_markdown_filter_module);
+            if (conf == NULL) {
+                /* Location configuration unavailable; fall back to the
+                 * request-level effective configuration so the error
+                 * path always has a policy to evaluate. */
+                conf = ctx->effective_conf;
+            }
             return ngx_http_markdown_streaming_precommit_error(
                 r, ctx, conf, ERROR_MEMORY_LIMIT);
         }

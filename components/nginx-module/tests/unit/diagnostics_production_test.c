@@ -492,6 +492,7 @@ reset_test_state(void)
     g_discard_rc = NGX_OK;
     g_alloc_fail_after = -1;
     g_dynconf_override = NULL;
+    g_effective_streaming_buffer = 2 * 1024 * 1024;
     ngx_current_msec = 1000;
     memset(&ngx_http_markdown_g_diag_state, 0,
            sizeof(ngx_http_markdown_g_diag_state));
@@ -932,7 +933,6 @@ test_json_preserves_effective_streaming_buffer(void)
                        "\"streaming_buffer\":65535") != NULL,
                 "diagnostics must not replace the effective buffer value");
 
-    g_effective_streaming_buffer = 2 * 1024 * 1024;
     TEST_PASS("Diagnostics preserve the effective streaming buffer");
 }
 

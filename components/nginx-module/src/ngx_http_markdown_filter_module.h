@@ -595,10 +595,15 @@ typedef enum {
 } ngx_http_markdown_compression_type_e;
 
 /*
- * Module configuration structure
+ * Active location configuration structure
  *
- * This structure holds configuration directives for the Markdown filter.
- * It supports NGINX's configuration inheritance model (http, server, location).
+ * This structure holds the effective configuration directives for the
+ * Markdown filter at a location scope. It supports NGINX's
+ * configuration inheritance model (http, server, location); the merged
+ * values are the active ones used for request handling. Zero-value
+ * compatibility fields for the internal Config V2 FFI are limited to
+ * the legacy fields (max_size, timeout, and the corresponding fields
+ * in decompress), documented on the compat bundle below.
  *
  * Configuration defaults (defined in ngx_http_markdown_create_loc_conf):
  * - enabled: NGX_CONF_UNSET (inherit from parent)
@@ -836,7 +841,8 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
                 ? prev->stream.excluded_types : NULL;
     }
 
-    NGX_MD_MERGE_STREAM(budget, size_t, -1, 2 * 1024 * 1024);
+    NGX_MD_MERGE_STREAM(budget, size_t, -1,
+                        NGX_HTTP_MARKDOWN_LIMITS_STREAMING_BUFFER_DEFAULT);
     NGX_MD_MERGE_STREAM(budget_explicit, ngx_flag_t, -1, 0);
 
 #undef NGX_MD_MERGE_STREAM

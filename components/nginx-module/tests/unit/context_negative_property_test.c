@@ -989,11 +989,12 @@ test_trusted_proxies_http_only(void)
 }
 
 /* ================================================================
- * Test 5: Req 15.10 — dynconf directives context finding
+ * Test 5: Req 15.10 — dynconf directives context enforcement
  *
  * Requirement 15.10 states dynconf SHALL only be accepted in http.
- * The implementation currently allows H/S/L. This test documents
- * the finding and verifies the actual state.
+ * The implementation enforces this http-only surface: each dynconf
+ * directive allows the http context and rejects both server and
+ * location contexts, as verified by the assertions below.
  * ================================================================ */
 static void
 test_dynconf_context_finding(void)
