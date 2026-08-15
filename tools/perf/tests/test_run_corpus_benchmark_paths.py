@@ -152,7 +152,14 @@ def test_approved_rustfmt_accepts_rustup_toolchain_shim(monkeypatch, tmp_path):
 def test_approved_rustfmt_accepts_standard_rustup_dispatcher(
     monkeypatch, tmp_path
 ):
-    """The standard Rustup dispatcher is accepted only with a real toolchain."""
+    """The standard Rustup dispatcher is accepted only with a real toolchain.
+
+    The resolved executable must come from the *active* toolchain per
+    Rustup's selection rules (RUSTUP_TOOLCHAIN env, then
+    rust-toolchain.toml from cwd upward, then settings.toml
+    default_toolchain).  The fixture pins the active toolchain via
+    settings.toml so the dispatcher resolves to that toolchain's rustfmt.
+    """
     rustup_bin = tmp_path / ".cargo" / "bin"
     rustup_bin.mkdir(parents=True)
     dispatcher = rustup_bin / "rustup"
@@ -166,6 +173,16 @@ def test_approved_rustfmt_accepts_standard_rustup_dispatcher(
     toolchain_rustfmt.parent.mkdir(parents=True)
     toolchain_rustfmt.write_text("#!/bin/sh\n", encoding="utf-8")
     toolchain_rustfmt.chmod(0o755)
+
+    # Pin the active toolchain to `stable` so the dispatcher resolves to the
+    # toolchain's rustfmt (Rustup selection rule 3: settings default).  Run
+    # from the fixture directory so no repository rust-toolchain.toml can
+    # shadow the settings default via the directory-scoped override.
+    settings_path = tmp_path / ".rustup" / "settings.toml"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(
+        'default_toolchain = "stable"\n', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
 
     monkeypatch.setattr(executable_validation.Path, "home", lambda: tmp_path)
     monkeypatch.setattr(
