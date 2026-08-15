@@ -369,8 +369,18 @@ fn metric_value(base_url: &str, name: &str) -> Result<u64> {
         .body
         .lines()
         .filter(|line| line.starts_with(family) && !line.starts_with('#'))
-        .filter(|line| label.map_or(true, |required| line.contains(required)))
-        .filter_map(|line| line.split_whitespace().last())
+        // Match required labels independently: each required fragment must
+        // appear in the sample's label set.  Relying on one combined label
+        // string breaks if the renderer orders labels differently.
+        .filter(|line| {
+            label.map_or(true, |required| {
+                required.split(',').all(|part| line.contains(part.trim()))
+            })
+        })
+        // The sample value is the field immediately following the metric
+        // identifier (family + label set); never the last whitespace field,
+        // which may be a trailing artifact.
+        .filter_map(|line| line.split_whitespace().nth(1))
         .filter_map(|sample| {
             let value = sample.parse::<f64>().ok()?;
             if !value.is_finite() || value < 0.0 {

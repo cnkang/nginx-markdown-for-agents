@@ -248,7 +248,7 @@ impl ReasonCode {
             ReasonCode::FailedClosed => "markdown_failed_closed_total",
             ReasonCode::ConversionError => "markdown_errors_total",
             ReasonCode::MemoryBudgetExceeded => "markdown_errors_total",
-            ReasonCode::Overload => "markdown_errors_total",
+            ReasonCode::Overload => "markdown_skipped_total",
             ReasonCode::InvalidDynconf => "markdown_errors_total",
             ReasonCode::DegradedSnapshot => "markdown_errors_total",
             ReasonCode::HeaderPlanApplyError => "markdown_errors_total",
