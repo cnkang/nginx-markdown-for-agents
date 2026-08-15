@@ -276,6 +276,7 @@ proptest! {
 
         // Generate formatting variants (different bytes, same semantics)
         let variants = formatting_variants_of(&base);
+        let mut exercised_variants = 0;
 
         for (i, variant) in variants.iter().enumerate() {
             // Skip variants that don't actually parse (malformed JSON)
@@ -320,7 +321,16 @@ proptest! {
                 &initial_active_digest,
                 "formatting variant must produce same active_digest"
             );
+
+            exercised_variants += 1;
         }
+
+        // The property must exercise at least one real formatting variant;
+        // a vacuous pass (no variant parsed) is a test harness failure.
+        prop_assert!(
+            exercised_variants > 0,
+            "at least one formatting variant must reach the assertions"
+        );
     }
 
     /// Property: Cross-worker convergence uses active_digest, not generation.

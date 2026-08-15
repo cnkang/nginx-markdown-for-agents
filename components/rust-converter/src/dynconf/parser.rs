@@ -96,6 +96,8 @@ struct ParseState {
     pos: usize,
     /// The input bytes.
     input: Vec<u8>,
+    /// Configured token budget (retained for diagnostics).
+    token_budget: usize,
 }
 
 impl ParseState {
@@ -105,6 +107,7 @@ impl ParseState {
             max_depth,
             pos: 0,
             input,
+            token_budget,
         }
     }
 
@@ -112,7 +115,7 @@ impl ParseState {
         if self.tokens_remaining == 0 {
             return Err(DynconfParseError::new(
                 DynconfParseErrorKind::TokenBudgetExceeded,
-                "parse token budget (10000) exceeded".to_string(),
+                format!("parse token budget ({}) exceeded", self.token_budget),
             ));
         }
         self.tokens_remaining -= 1;

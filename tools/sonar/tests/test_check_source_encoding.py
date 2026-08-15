@@ -214,12 +214,14 @@ class TestCheckerAdversarialInputs:
 
     def test_binary_multilayer_fuzz_seed_is_excluded(self) -> None:
         checker = load_checker_module()
-        assert checker._should_skip_path(
-            Path(
-                "components/rust-converter/fuzz/corpus/"
-                "fuzz_multilayer_decode/basic.txt"
-            )
+        seed_path = Path(
+            "components/rust-converter/fuzz/corpus/"
+            "fuzz_multilayer_decode/seed-minimum-valid.txt"
         )
+        assert seed_path.exists(), (
+            "fuzz seed must exist; the exclusion must cover the real seed"
+        )
+        assert checker._should_skip_path(seed_path)
 
 
 class TestSonarConfiguration:
