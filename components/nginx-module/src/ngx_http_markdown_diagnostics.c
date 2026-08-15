@@ -429,6 +429,7 @@ ngx_http_markdown_diagnostics_method_not_allowed(ngx_http_request_t *r)
     static u_char body[] =
         "Method Not Allowed. Use GET or HEAD; rollback is available through "
         "the dynamic-config file watcher.\n";
+    ngx_table_elt_t  *allow_hdr;
     ngx_buf_t    *b;
     ngx_chain_t   out;
     ngx_int_t     rc;
@@ -441,6 +442,23 @@ ngx_http_markdown_diagnostics_method_not_allowed(ngx_http_request_t *r)
     if (rc != NGX_OK) {
         return rc;
     }
+
+    /*
+     * Add Allow: GET, HEAD header per RFC 9110 Section 15.5.6.
+     * NGINX does not automatically add the Allow header for 405
+     * responses from content handlers, so we set it explicitly.
+     *
+     * The header and the response body are constructed transactionally:
+     * if the Allow header allocation fails, abort with 500 instead of
+     * emitting a 405 that violates the Allow contract.
+     */
+    allow_hdr = ngx_list_push(&r->headers_out.headers);
+    if (allow_hdr == NULL) {
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+    allow_hdr->hash = 1;
+    ngx_str_set(&allow_hdr->key, "Allow");
+    ngx_str_set(&allow_hdr->value, "GET, HEAD");
 
     b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
     if (b == NULL) {
@@ -488,20 +506,12 @@ ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
 
     /* Only allow read-only GET and HEAD requests. */
     if (!(r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD))) {
-        ngx_table_elt_t  *allow_hdr;
-
         /*
-         * Add Allow: GET, HEAD header per RFC 9110 Section 15.5.6.
-         * NGINX does not automatically add the Allow header for 405
-         * responses from content handlers, so we set it explicitly.
+         * The 405 response (including the mandatory Allow: GET, HEAD
+         * header per RFC 9110 Section 15.5.6) is constructed
+         * transactionally inside method_not_allowed: any allocation
+         * failure yields 500 instead of an incomplete 405.
          */
-        allow_hdr = ngx_list_push(&r->headers_out.headers);
-        if (allow_hdr != NULL) {
-            allow_hdr->hash = 1;
-            ngx_str_set(&allow_hdr->key, "Allow");
-            ngx_str_set(&allow_hdr->value, "GET, HEAD");
-        }
-
         return ngx_http_markdown_diagnostics_method_not_allowed(r);
     }
 

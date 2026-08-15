@@ -201,6 +201,7 @@ static int g_output_filter_calls;
 static ngx_chain_t *g_last_output_chain;
 static ngx_table_elt_t g_allow_header;
 static int g_discard_rc;
+static int g_list_push_fail;
 static int g_alloc_fail_after = -1;
 static size_t g_effective_streaming_buffer = 2 * 1024 * 1024;
 
@@ -234,6 +235,9 @@ void *
 ngx_list_push(ngx_list_t *list)
 {
     UNUSED(list);
+    if (g_list_push_fail) {
+        return NULL;
+    }
     memset(&g_allow_header, 0, sizeof(g_allow_header));
     return &g_allow_header;
 }
@@ -490,6 +494,7 @@ reset_test_state(void)
     g_last_output_chain = NULL;
     memset(&g_allow_header, 0, sizeof(g_allow_header));
     g_discard_rc = NGX_OK;
+    g_list_push_fail = 0;
     g_alloc_fail_after = -1;
     g_dynconf_override = NULL;
     g_effective_streaming_buffer = 2 * 1024 * 1024;
@@ -1172,6 +1177,18 @@ test_handler_get_head_and_denials(void)
                 "denied mutation requests must not disclose 405");
     TEST_ASSERT(g_allow_header.hash == 0,
                 "denied mutation requests must not receive Allow");
+
+    reset_test_state();
+    init_request(&r, &c, &conf, &addr);
+    r.method = 0;
+    g_list_push_fail = 1;
+    rc = ngx_http_markdown_diagnostics_handler(&r);
+    TEST_ASSERT(rc == NGX_HTTP_INTERNAL_SERVER_ERROR,
+                "405 Allow header allocation failure must yield 500");
+    TEST_ASSERT(r.headers_out.status != NGX_HTTP_NOT_ALLOWED,
+                "a failed Allow allocation must not emit a 405");
+    TEST_ASSERT(g_send_header_calls == 0 && g_output_filter_calls == 0,
+                "no response may be sent when Allow allocation fails");
 
     TEST_PASS("Handler paths covered");
 }

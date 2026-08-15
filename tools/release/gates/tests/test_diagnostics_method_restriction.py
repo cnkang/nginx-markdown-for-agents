@@ -230,8 +230,8 @@ def test_rejected_methods_get_allow_header(method):
     """
     assert method not in ALLOWED_METHODS
 
-    assert has_allow_header_set(_HANDLER_BODY), (
-        'Handler must set Allow header value to "GET, HEAD"'
+    assert has_allow_header_set(_METHOD_NOT_ALLOWED_BODY), (
+        '405 helper must set Allow header value to "GET, HEAD"'
     )
 
 
@@ -284,7 +284,7 @@ def test_head_method_allowed():
 
 def test_allow_header_value_exact():
     """The Allow header value must be exactly 'GET, HEAD'."""
-    assert has_allow_header_set(_HANDLER_BODY), (
+    assert has_allow_header_set(_METHOD_NOT_ALLOWED_BODY), (
         'Allow header must be set to exactly "GET, HEAD"'
     )
 
@@ -319,7 +319,7 @@ def test_allow_header_uses_visible_hash():
 
     NGINX filters out headers with hash == 0 (invalidated).
     """
-    # Find the method-rejection block and verify hash = 1
-    assert "allow_hdr->hash = 1" in _HANDLER_BODY, (
+    # Find the method-rejection helper and verify hash = 1
+    assert "allow_hdr->hash = 1" in _METHOD_NOT_ALLOWED_BODY, (
         "Allow header must have hash = 1 to be visible in response"
     )
