@@ -960,6 +960,7 @@ def selector_matches(labels, raw_selector):
     return True
 
 found = 0
+matched = 0
 for line in sys.stdin:
     if not line.strip() or line.lstrip().startswith("#"):
         continue
@@ -970,6 +971,7 @@ for line in sys.stdin:
     labels = parse_labels(match.group("labels"))
     if labels is None or not selector_matches(labels, selector):
         continue
+    matched += 1
     try:
         total += float(match.group("value"))
     except (IndexError, ValueError):
@@ -977,6 +979,12 @@ for line in sys.stdin:
 if found == 0:
     print(f"ERROR: metric family {family!r} not found in metrics output", file=sys.stderr)
     sys.exit(1)
+# A well-formed document whose family carries no sample matching the
+# selector is a legitimate zero (optional samples may be omitted on a
+# fresh endpoint), not a parse failure.
+if matched == 0:
+    print(0)
+    sys.exit(0)
 print(int(total) if total >= 0 else 0)
 ' <<< "${metrics_text}" || {
     echo "ERROR: get_metric_value: metrics parse failed for ${metric_path} (family ${metric_family})" >&2

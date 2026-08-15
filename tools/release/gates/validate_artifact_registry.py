@@ -285,8 +285,17 @@ def _check_local_artifact_digest(artifact: dict, index_pos: int,
     if not _contains(local, f"artifacts[{index_pos}].artifact_id"):
         return
     if local.is_file():
-        actual = "sha256:" + hashlib.sha256(
-            local.read_bytes()).hexdigest()
+        digest = hashlib.sha256()
+        try:
+            with open(local, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    digest.update(chunk)
+        except OSError as exc:
+            reasons.append(
+                f"malformed: artifacts[{index_pos}] local artifact "
+                f"{artifact_path} unreadable: {exc}")
+            return
+        actual = "sha256:" + digest.hexdigest()
         if actual != artifact_sha_value:
             reasons.append(
                 f"stale-digest: artifacts[{index_pos}] local "

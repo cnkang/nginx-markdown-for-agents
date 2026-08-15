@@ -1021,6 +1021,7 @@ def _run_soak_session(
     drain_samples = []
     peak_memory_bytes = None
     ready_error = None
+    ended = None
     try:
         ready_fixture = next(iter(corpus.values()), None)
         if not ready_fixture or not wait_for_ready(
@@ -1035,15 +1036,25 @@ def _run_soak_session(
             rss_series, scenario_metrics = run_load_loop(
                 corpus, worker_pid, duration, started,
                 manifest["concurrency"], runtime_dir)
+            # Capture the sustained-load end immediately after the load loop
+            # returns, before drain measurement and shutdown cleanup, so the
+            # recorded duration reflects the load window only.
+            ended = time.time()
             drain_delta, monotonic, drain_samples = measure_drain(worker_pid)
             peak_memory_bytes = read_module_peak_memory(base_url)
     finally:
+        if ended is None:
+            # Readiness failure or a load-branch exception: record a
+            # fallback end timestamp so callers always receive a numeric
+            # window instead of None (readiness errors are reported via
+            # ready_error; the window is empty).
+            ended = time.time()
         _stop_nginx(nginx)
         _cleanup_runtime_directory(runtime_dir)
 
     return {
         "started": started,
-        "ended": time.time(),
+        "ended": ended,
         "rss_series": rss_series,
         "scenario_metrics": scenario_metrics,
         "drain_delta": drain_delta,
