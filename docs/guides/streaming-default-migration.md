@@ -48,13 +48,15 @@ Add to your `http` block:
 
 ```nginx
 http {
-    markdown_streaming_engine off;
+    markdown_streaming_engine off   # 0.8.0-era name. 0.9.1+ uses markdown_streaming off
     markdown_prune_noise off;
     # ... existing configuration
 }
 ```
 
 This produces identical output to 0.5.x with no behavioral differences.
+(0.9.1+ operators: replace `markdown_streaming_engine` with
+`markdown_streaming`. The 0.9.1 release removed the engine name.)
 
 ### Path C: Selective Rollback
 
@@ -65,7 +67,7 @@ Restore streaming default but keep pruning, or vice versa:
 markdown_prune_noise off;
 
 # Keep pruning, disable auto streaming
-markdown_streaming_engine off;
+markdown_streaming_engine off   # 0.8.0-era name. 0.9.1+ uses markdown_streaming off
 ```
 
 ## Streaming Auto Mode Details
@@ -205,7 +207,7 @@ markdown_memory_budget 8m;
 
 If 0.6.0 defaults cause issues:
 
-1. **Immediate rollback**: Add `markdown_streaming_engine off; markdown_prune_noise off;` at http level
+1. **Immediate rollback**: Add `markdown_streaming_engine off; markdown_prune_noise off;` at http level (0.9.1+ operators use `markdown_streaming off`)
 2. **Selective rollback**: Disable only the problematic default
 3. **Binary rollback**: Downgrade to 0.5.x binary — configuration is backward-compatible
 
@@ -228,6 +230,7 @@ curl -s -H "Accept: text/markdown" http://localhost/page | head -50
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Kang | Active migration examples use markdown_streaming; historical names only in history section |
 | 0.9.2 | 2026-08-08 | Kang | Clarified that configuration examples use 0.8.0-era directive names |
 | 0.8.3 | 2026-06-26 | Kang | No changes; version alignment with 0.8.3 release |
 | 0.8.0 | 2026-06-16 | Kang | Updated for 0.8.0: markdown_streaming_auto_threshold removed, $variable support removed, default threshold changed to 1m |

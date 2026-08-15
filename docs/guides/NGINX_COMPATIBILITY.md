@@ -13,10 +13,11 @@ For full troubleshooting and package-level compatibility details, see the
 
 The minimum supported NGINX version is **1.24.0**. The compatibility matrix
 lists the selected nginx.org official stable and mainline releases targeted by
-the release workflows. A matrix entry does not guarantee that the project
-publishes a package asset for that tag. Before downloading a prebuilt asset,
-verify the GitHub Release assets for the exact tag. Building from source
-needs no asset verification.
+the release workflows. "Full (prebuilt binary)" in the matrix indicates CI/
+build support and that the release workflows produce a binary for that tag.
+it does not guarantee a published GitHub Release asset for every listed tag.
+Before downloading a prebuilt asset, verify the GitHub Release assets for the
+exact tag. Building from source needs no asset verification.
 
 > **Canonical source:** [`tools/release-matrix.json`](../../tools/release-matrix.json)
 > is the machine-readable source of truth. The table below is a human-readable

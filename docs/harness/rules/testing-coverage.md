@@ -94,7 +94,7 @@ Required:
 ### 20. Spec task-completion and evidence-drift guardrails
 
 Required:
-- Do not mark a spec task as complete based only on file/code presence and run the
+- Do not mark a spec task as complete based only on file/code presence. Run the
   corresponding verification path at least once in the current session.
 - For any newly added `#[ignore]` tests (for example large-fixture or evidence
   pack tests), execute them explicitly with `-- --ignored` before closing the
@@ -125,8 +125,8 @@ Required:
 - Do not add helper functions that are not consumed in the same change set.
   Speculative "this might be useful later" functions produce dead_code warnings
   that dilute real regression signals. If you add a helper, ensure at least one
-  call site uses it before merging. The only exception stays shared test-support
-  modules (see next rule).
+  call site uses it before merging. Shared test-support modules are the only
+  exception (see next rule).
 - Shared test utility modules included via `#[path = "..."]` in multiple
   integration test binaries must carry `#![allow(dead_code)]` at the module
   level, because each binary only uses a subset of the shared API and the

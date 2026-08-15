@@ -223,7 +223,9 @@ Request arrives
     │   └─ FAIL → pass-through, reason: timeout
     │
     ├─ html5ever parse_document (uninterruptible)
-    │   └─ Bounded by markdown_limits conversion_memory= ≤ 64 MiB
+    │   └─ Input capped by markdown_limits conversion_memory= before parsing
+    │      (default 64 MiB, configurable); parser allocations are bounded by
+    │      parser_memory=, not this directive
     │
     ├─ markdown_limits parser_timeout= post-parse check
     │   └─ FAIL → pass-through, reason: timeout
@@ -267,9 +269,11 @@ These include timeout or budget failures during DOM traversal, output
 normalization, or streaming output production after the module has already
 committed headers and begun sending the converted body. At this point the
 module cannot roll back to the original content because headers are already
-on the wire. The module stops output, closes the downstream connection, and
-logs the reason code. The original content is not available for pass-through
-because the response is mid-flight.
+on the wire. The module applies the protocol-safe finish-or-abort contract:
+it finishes the remaining converted output cleanly when possible, or aborts
+with the reason code recorded for diagnostics. It does not necessarily close
+the downstream connection on every post-commit failure. The original content
+is not available for pass-through because the response is mid-flight.
 
 Additional notes:
 

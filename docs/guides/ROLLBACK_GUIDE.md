@@ -62,7 +62,15 @@ Rollback requires only an NGINX configuration edit and a graceful reload. Specif
 - No recompilation
 - No downtime
 
-The `nginx -s reload` command performs a graceful reload. NGINX re-reads the configuration, spawns new worker processes with the updated config, and drains existing connections on old workers. In-flight requests complete on the old configuration. New requests use the updated configuration immediately.
+The `nginx -s reload` command performs a graceful reload. NGINX re-reads the
+configuration and spawns new worker processes with the updated configuration.
+The new workers handle new connections (and new requests that arrive on them)
+using the updated configuration. Keep-alive connections already open before
+the reload can remain served by the old workers until
+they drain and close, so in-flight requests complete on the old configuration.
+Requests that arrive on those pre-existing keep-alive connections may
+therefore continue to use the previous configuration until the connection
+closes or the old worker exits.
 
 ---
 
@@ -354,7 +362,7 @@ Conversion failure rate exceeds 5% of conversion attempts over any 1-hour window
 
 ```bash
 # Check failure count vs. total conversion attempts
-curl -s http://localhost/markdown-metrics | \
+curl -s -H "Accept: text/plain; version=0.0.4" http://localhost/markdown-metrics | \
   grep -E "nginx_markdown_conversion_attempts_total|nginx_markdown_conversion_deliveries_total|nginx_markdown_requests_total"
 ```
 
@@ -367,7 +375,7 @@ roll back.
 Conversion latency approaches or exceeds the configured `markdown_limits conversion_timeout=`. Check the latency bucket distribution:
 
 ```bash
-curl -s http://localhost/markdown-metrics | \
+curl -s -H "Accept: text/plain; version=0.0.4" http://localhost/markdown-metrics | \
   grep "nginx_markdown_conversion_duration_seconds_bucket"
 ```
 
@@ -504,7 +512,9 @@ see the dedicated [Performance Rollout and Rollback Guide](performance-rollout-0
 
 All config-based rollbacks take effect for new requests immediately after
 `nginx -s reload`. In-flight requests complete with their existing
-configuration.
+configuration. Requests that arrive on keep-alive connections already open
+before the reload may continue on the old workers' configuration until those
+connections drain or close (see the reload semantics above).
 
 ---
 
@@ -512,6 +522,7 @@ configuration.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Kang | Reload semantics distinguish new workers from keep-alive connections; Accept header on metric curls |
 | 0.9.2 | 2026-08-15 | Hermes | Use current metric names in the pre-rollback metric check |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.9.1 | 2026-07-05 | Kiro | Added 0.9.1 performance optimization rollback cross-reference |

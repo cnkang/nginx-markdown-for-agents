@@ -12,10 +12,14 @@ Accepted — Brotli full-buffer section superseded by [ADR-0024](0024-brotli-str
 ## Context
 
 0.9.1 routes compressed responses through streaming decompression when the
-module selects the streaming engine, `auto_decompress` turns on, and cache validation is
+module selects the streaming engine, `markdown_auto_decompress` turns on, and cache validation is
 not `full`. Deflate already supports both RFC 1950 zlib-wrapped and RFC 1951
 raw framing through deferred header sniffing. Gzip uses zlib's gzip wrapper
 mode (`MAX_WBITS + 16`), including header and trailer validation.
+
+> **Naming note**: `auto_decompress` in this ADR refers to the
+> `markdown_auto_decompress` public configuration identifier. The shorter
+> form appears only as an internal shorthand and is not a configuration key.
 
 The lifecycle distinction is important: `Z_STREAM_END` completes one gzip
 member, not necessarily the compressed HTTP response. Concatenated members may
@@ -113,6 +117,7 @@ Kang
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Kang | Use canonical markdown_auto_decompress directive name in examples |
 | 0.9.1 | 2026-07-17 | Kang | Added cross-reference to ADR-0024 (Brotli streaming decompression); marked Brotli full-buffer section superseded |
 | 0.9.1 | 2026-07-14 | Kang | Enabled member-aware gzip streaming alongside zlib/raw deflate; retained bounded Brotli full-buffer routing |
 | 0.9.1 | 2026-07-14 | Codex | Aligned Rust and C full-buffer gzip with the same multi-member, truncation, and response-budget contract |

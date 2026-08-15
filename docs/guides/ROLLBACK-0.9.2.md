@@ -35,9 +35,30 @@ Publication and artifact availability are separate release gates.
 
 2. **Restore the 0.9.1 module binary:**
 
+   Derive the module directory from the active NGINX build rather than
+   hard-coding one path:
+
    ```bash
-   sudo cp /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so.0.9.1.bak \
-       /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
+   MODULES_DIR="$(nginx -V 2>&1 | sed -n 's/.*--modules-path=\([^ ]*\).*/\1/p')"
+   if [[ -z "$MODULES_DIR" || ! -d "$MODULES_DIR" ]]; then
+     # Fall back to the distro-specific module directories, selecting the
+     # first that actually exists.
+     for candidate in \
+         /usr/lib/nginx/modules \      # Debian/Ubuntu packages
+         /usr/lib64/nginx/modules \    # RHEL-family packages
+         /usr/local/nginx/modules; do  # source builds with default prefix
+       if [[ -d "$candidate" ]]; then
+         MODULES_DIR="$candidate"
+         break
+       fi
+     done
+   fi
+   if [[ -z "$MODULES_DIR" || ! -d "$MODULES_DIR" ]]; then
+     echo "ERROR: cannot locate the NGINX modules directory" >&2
+     exit 1
+   fi
+   sudo cp "$MODULES_DIR/ngx_http_markdown_filter_module.so.0.9.1.bak" \
+       "$MODULES_DIR/ngx_http_markdown_filter_module.so"
    ```
 
    Or download the 0.9.1 binary from the GitHub release archive. Verify the
@@ -85,7 +106,7 @@ Publication and artifact availability are separate release gates.
      exit 1
    fi
    # Restore the versioned 0.9.1 nginx.conf and dynamic-configuration file here.
-   sudo cp objs/ngx_http_markdown_filter_module.so /usr/lib/nginx/modules/
+   sudo cp objs/ngx_http_markdown_filter_module.so "$MODULES_DIR/"
    sudo nginx -t && sudo nginx
    ```
 
@@ -138,7 +159,11 @@ Key reversions:
 
 ```bash
 sudo nginx -s quit
-while sudo systemctl is-active --quiet nginx; do sleep 1; done
+timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
+if sudo systemctl is-active --quiet nginx; then
+  echo "NGINX did not stop within 30s — investigate before continuing" >&2
+  exit 1
+fi
 # Restore the versioned 0.9.0 nginx.conf and dynamic-configuration file before
 # installing the 0.9.0 binary. The 0.9.1 configuration is not compatible.
 sudo cp /path/to/ngx_http_markdown_filter_module.so.0.9.0 \
@@ -221,7 +246,14 @@ When rolling back from 0.9.2 to 0.9.1:
 | OTel surface | Present in 0.9.1 documentation; removed from 0.9.2, so restore the old configuration before rollback |
 | Dynconf diagnostics | `POST action=rollback` is rejected; restore the watched file atomically |
 | `stream_state` logging | `PRE_COMMIT` fallthrough returns to silent behavior |
-| Prometheus metrics | No metric name or label changes — counters continue from their current values |
+| Prometheus metric families | **Differ between the versions.** 0.9.2 exposes exactly the twelve frozen v1 families (`nginx_markdown_build_info`, `nginx_markdown_conversion_attempts_total`, `nginx_markdown_conversion_deliveries_total`, `nginx_markdown_conversion_duration_seconds`, `nginx_markdown_decompression_events_total`, `nginx_markdown_dynconf_reloads_total`, `nginx_markdown_inflight_requests`, `nginx_markdown_input_bytes_total`, `nginx_markdown_output_bytes_total`, `nginx_markdown_requests_total`, `nginx_markdown_streaming_events_total`, `nginx_markdown_streaming_peak_memory_bytes`). The 0.9.1 binary re-emits the legacy surface it shipped with: per-path families (`per_path_conversions_total`, `per_path_overflow_total`, …), shadow metrics, profile/passthrough/decision families, and the debug/perf families removed in 0.9.2 (see `docs/guides/prometheus-metrics.md`). Renamed families include `conversions_total` → `conversion_attempts_total`/`conversion_deliveries_total`, `decompressions_total` → `decompression_events_total`, and `streaming_failure_total` → `streaming_events_total` labels. |
+
+After rollback, validate every dashboard and alert that consumes the
+`/markdown-metrics` endpoint: 0.9.2 family names and label sets do not exist
+under the 0.9.1 binary, and the 0.9.1 legacy families reappear. Queries that
+reference removed or renamed families must update their alert rules, and
+operators must re-test the alerts against the downgraded binary before
+they consider the rollback complete.
 
 Metric counters are **not reset** on rollback. They continue accumulating
 from their current values under the downgraded module.
@@ -232,5 +264,6 @@ from their current values under the downgraded module.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Kang | Modules path derived from nginx -V; bounded shutdown loop; metric-family difference table |
 | 0.9.2 | 2026-08-08 | Kang | Clarified that OTel directives exist in no 0.9.2 configuration (OTel removed) |
 | 0.9.2 | 2026-07-30 | Kang | Initial rollback guide for 0.9.2 |

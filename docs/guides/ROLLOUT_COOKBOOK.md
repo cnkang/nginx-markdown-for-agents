@@ -183,7 +183,7 @@ curl -sD - -o /dev/null \
 #### Safe to Continue
 
 - Conversion success rate > 95% (few or no `failed_open` / `failed_closed` entries)
-- No `FAIL_SYSTEM` category codes in logs
+- No `ffi_panic`, `memory_budget_exceeded`, `timeout`, or `conversion_error` reason codes in logs
 - Conversion latency within the configured `markdown_limits`
 - No upstream error rate increase
 - No `not_eligible` reason codes for requests you expect to convert
@@ -191,7 +191,7 @@ curl -sD - -o /dev/null \
 #### Stop and Investigate
 
 - Sudden increase in `failed_open` or `failed_closed` counts
-- Any `FAIL_SYSTEM` category codes
+- Any `ffi_panic`, `memory_budget_exceeded`, `timeout`, or `conversion_error` reason codes
 - Conversion latency exceeding `markdown_limits`
 - Upstream error rate increase correlated with module enablement
 - Unexpected `Content-Type` in converted responses
@@ -274,7 +274,7 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 
 - Same criteria as Stage 1, applied across all enabled paths
 - No path-specific failure patterns (one path failing more than others)
-- Stable or decreasing `conversions_failed` count over the observation period
+- Stable or decreasing `failed_open` / `failed_closed` counts over the observation period
 
 #### Stop and Investigate
 
@@ -375,7 +375,7 @@ curl -s -H "Accept: text/plain; version=0.0.4" \
 
 - All Stage 1 criteria hold over a full 24-hour period
 - No increase in `failed_open` or `failed_closed` counts relative to conversion volume
-- No `FAIL_SYSTEM` category codes
+- No `ffi_panic`, `memory_budget_exceeded`, `timeout`, or `conversion_error` reason codes
 - Conversion latency within configured `markdown_limits`
 - Stable or decreasing failure count over the 24-hour observation period
 - No upstream error rate increase correlated with module enablement
@@ -1066,9 +1066,21 @@ This is the most important default: it means a module upgrade or installation ne
 
 #### `markdown_error_policy pass`
 
-When conversion fails (HTML parse error, timeout, memory limit), the module serves the original HTML response unchanged. The client never sees a 502 or broken response due to a conversion problem.
+When conversion fails before the module commits the response headers — the
+pre-commit and full-buffer paths — the module serves the original HTML
+response unchanged. The client never sees a 502 or broken response due to a
+conversion problem in those paths.
 
-Fail-open (`pass`) is the safe choice for production because conversion is an enhancement, not a requirement. If the converter encounters HTML it cannot handle, the worst outcome is that the client receives the same HTML. This equals the response without the module. Metrics and decision logs still record the failure (as `failed_open`) so you can investigate. Client experience stays unaffected. This makes `pass` the safe default. The module never breaks responses on conversion errors. It degrades to the original HTML. The worst case equals no module at all.
+Fail-open (`pass`) is the safe choice for production because conversion is an
+enhancement, not a requirement. If the converter encounters HTML it cannot
+handle before commit, the worst outcome is that the client receives the same
+HTML. This equals the response without the module. Metrics and decision logs
+still record the failure (as `failed_open`) so you can investigate. Client
+experience stays unaffected. This makes `pass` the safe default. The module
+never breaks responses on conversion errors before commit. It degrades to the
+original HTML. The worst case equals no module at all. After the module commits the response headers (streaming post-commit),
+`pass` cannot replay the original HTML: the module safe-finishes or aborts
+the Markdown output instead.
 
 #### `markdown_accept strict`
 
@@ -1128,19 +1140,29 @@ The module exposes `/markdown-metrics` as a localhost-only Prometheus text
 [Prometheus Metrics Guide](prometheus-metrics.md). The `Accept` header cannot
 select a legacy JSON or human-readable representation.
 
-The primary rollout ratios come from the frozen families:
+The primary rollout ratios come from the frozen families. Distinguish the
+request-based failure rate from the conversion-attempt-based failure rate:
 
 ```text
 # clamp_min(..., 1e-9) is a divide-by-zero guard only; it does not change
 # the rate units, so low-traffic ratios keep their true magnitude.
 conversion_delivery_rate = sum(rate(nginx_markdown_conversion_deliveries_total[5m]))
                             / clamp_min(sum(rate(nginx_markdown_conversion_attempts_total[5m])), 1e-9)
-failure_rate = sum(rate(nginx_markdown_requests_total{outcome=~"failed_.*"}[5m]))
-               / clamp_min(sum(rate(nginx_markdown_requests_total[5m])), 1e-9)
+# Conversion-attempt-based failure rate: failed outcomes per conversion attempt.
+conversion_failure_rate = sum(rate(nginx_markdown_requests_total{outcome=~"failed_.*"}[5m]))
+                          / clamp_min(sum(rate(nginx_markdown_conversion_attempts_total[5m])), 1e-9)
+# Request-based failure rate: failed outcomes per request that entered the
+# decision chain (includes skipped and disabled requests in the denominator).
+request_failure_rate = sum(rate(nginx_markdown_requests_total{outcome=~"failed_.*"}[5m]))
+                       / clamp_min(sum(rate(nginx_markdown_requests_total[5m])), 1e-9)
 ```
 
-A healthy rollout keeps `failure_rate` within the pre-rollout baseline and
-keeps the delivery rate stable. Use decision logs for reason distributions.
+A healthy rollout keeps `conversion_failure_rate` within the pre-rollout
+baseline and keeps the delivery rate stable. The request-based
+`request_failure_rate` is always lower because its denominator includes
+skipped and disabled requests. Use it only when you want the share of failed
+requests over all requests, and do not compare it against the
+conversion-attempt-based rate. Use decision logs for reason distributions.
 
 ### Log Patterns to Check
 
@@ -1265,7 +1287,7 @@ curl -s -H "Accept: text/plain; version=0.0.4" \
   grep -E 'nginx_markdown_requests_total\{[^}]*outcome="failed_[^"}]*"'
 ```
 
-#### Check conversion latency buckets
+#### Check latency histogram samples
 
 ```bash
 # Show histogram samples from the metrics endpoint
@@ -1337,6 +1359,7 @@ When a trigger fires:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Kang | Failure-rate formulas split conversion-attempt vs request based; error-policy pass scoped to pre-commit |
 | 0.9.2 | 2026-08-15 | Hermes | Update failure reason values and point internal-failure triggers to decision logs |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |

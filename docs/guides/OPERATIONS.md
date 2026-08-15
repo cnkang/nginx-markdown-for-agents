@@ -116,7 +116,7 @@ scrape_configs:
 ```promql
 # Failed request rate
 sum(rate(nginx_markdown_requests_total{outcome=~"failed_.*"}[5m]))
-/ clamp_min(sum(rate(nginx_markdown_requests_total[5m])), 1e-10) * 100
+/ clamp_min(sum(rate(nginx_markdown_requests_total{outcome!~"skipped"}[5m])), 1e-10) * 100
 
 # Slow conversion bucket share (> 1s)
 (sum(rate(nginx_markdown_conversion_duration_seconds_bucket{le="+Inf"}[5m]))

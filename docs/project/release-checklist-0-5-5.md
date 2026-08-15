@@ -102,7 +102,7 @@ The release removed the 0.5.5-specific validator (`validate_release_gates_055.py
 
 If any go/no-go criterion cannot be met, the team must record and approve a
 waiver before release proceeds. Each waiver entry MUST
-contain all four required fields:
+contain all six required fields:
 
 | Field | Format | Description |
 |-------|--------|-------------|
@@ -117,9 +117,9 @@ Waiver entries missing any field or with a duplicate `waiver_id` are invalid.
 
 ### Active Waivers
 
-| waiver_id | approver | date | justification |
-|-----------|----------|------|---------------|
-| WAIVER-0.5.5-001 | release-owner | 2026-04-24 | `docs-check` baseline failures in `0.5.5-release-spec.md` are pre-existing internal references in the release-level specification, not operator-facing documentation drift. These do not affect operator docs accuracy. |
+| waiver_id | approver | date | justification | risk_assessment | mitigation_strategy |
+|-----------|----------|------|---------------|-----------------|---------------------|
+| WAIVER-0.5.5-001 | release-owner | 2026-04-24 | `docs-check` baseline failures in `0.5.5-release-spec.md` are pre-existing internal references in the release-level specification, not operator-facing documentation drift. These do not affect operator docs accuracy. | The `docs-check` gate reports failures on the release-spec document, so the gate cannot go fully green until the pre-existing internal references are removed; the risk is limited to release-process documentation, not operator-facing surfaces. | Remove the pre-existing internal references from `0.5.5-release-spec.md` before the next release so the `docs-check` gate returns to fully green, and track the cleanup in the release follow-up checklist. |
 
 ## Docs Sync Trigger Rules Reference
 
@@ -141,4 +141,5 @@ The following change types trigger mandatory documentation synchronization
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Kang | Waiver schema requires six fields; Active Waivers table filled |
 | 0.5.5 | 2026-04-24 | Release gate sync | Initial 0.5.5 release checklist |

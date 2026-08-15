@@ -85,7 +85,32 @@ sudo cp ngx_http_markdown_filter_module.so \
     /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
 ```
 
-### 5. Validate and restart
+### 5. Migrate the configuration
+
+0.9.2 is a breaking configuration release (25-directive surface, dynconf
+schema v2). Before validating or restarting NGINX, apply the 0.9.2 migration:
+
+```bash
+# Apply the 0.9.2 directive changes documented in MIGRATION-0.9.2.md:
+# removed profile/OTel directives, consolidated markdown_limits keys,
+# dynconf JSON v1 migration.
+# (The markdown_streaming_engine -> markdown_streaming rename happened in
+# 0.9.1, not 0.9.2; 0.9.2 removed markdown_stream_threshold and
+# markdown_streaming_zero_copy.)
+# See docs/guides/MIGRATION-0.9.2.md for the complete mapping.
+```
+
+Validate the migrated configuration with the new binary:
+
+```bash
+sudo nginx -t
+```
+
+A 0.9.1 configuration fails `nginx -t` under the 0.9.2 binary (removed
+directives produce errors), so configuration migration must happen before
+the restart in the next step.
+
+### 6. Validate and restart
 
 ```bash
 sudo nginx -t && sudo systemctl restart nginx
@@ -212,4 +237,5 @@ curl -sD - -H "Accept: text/markdown" http://localhost/docs/ | head -5
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Kang | Added Step 5 migrate-the-configuration before restart |
 | 0.9.2 | 2026-07-30 | Kang | Initial upgrade guide for 0.9.2 |

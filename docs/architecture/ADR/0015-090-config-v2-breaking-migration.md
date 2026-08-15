@@ -70,9 +70,11 @@ Stub set: `markdown_on_wildcard`, `markdown_etag`,
 - `markdown_cache_validation full` + `markdown_streaming force` → **error**
   (streaming cannot generate a strong ETag for chunked output, headers commit
   before the transformed body is known — see ADR-0017).
-- `markdown_cache_validation full` + `markdown_streaming auto` → **warning**,
-  at runtime the module blocks streaming and the request uses full-buffer with full
-  validation, reason code `streaming_block_full_cache_validation` (ADR-0018).
+- `markdown_cache_validation full` + `markdown_streaming auto` → **runtime
+  warning** (not an `nginx -t` configuration error): the header-filter phase
+  detects the conflict at request time, blocks streaming for that request, and
+  uses full-buffer conversion with full validation, emitting reason code
+  `streaming_block_full_cache_validation` (ADR-0018).
 - `markdown_accept force` + `markdown_auth_policy deny` → **warning** (dangerous).
 
 ### Dynconf schema version
@@ -128,4 +130,5 @@ Kang
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Kang | Clarified that cache_validation full is a runtime warning, not a config error |
 | 0.9.0 | 2026-06-30 | Kang | Initial ADR — Config V2 grammar freeze, reject-only stub policy, conflict rules, dynconf schema_version |

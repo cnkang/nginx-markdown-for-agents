@@ -48,9 +48,10 @@ Since mid-parse interruption is not feasible, the current implementation uses:
 2. **Cooperative timeout** (`markdown_limits parser_timeout=<time>`, default 10s): Checked
    at checkpoints during DOM traversal (every 100 nodes) and at pipeline
    boundaries. Input size bounds the uninterruptible parse phase.
-3. **Memory budget** (`markdown_limits parser_memory=<size>`, default 32m): Enforced via
-   `MemoryBudget` stage checks in the streaming path. It acts as an input-size
-   proxy in the full-buffer path.
+3. **Streaming-path memory enforcement** (`markdown_limits parser_memory=<size>`,
+   default 32m): Enforced via `MemoryBudget` stage checks in the **streaming
+   path only**. The full-buffer path performs no input-size cap from this
+   setting. It is not a memory budget for full-buffer allocations.
 4. **Implicit depth limit**: State stack budget (64 KiB) bounds nesting to
    ~1000 levels in the streaming path.
 

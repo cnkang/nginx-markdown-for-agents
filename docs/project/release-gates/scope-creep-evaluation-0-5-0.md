@@ -23,7 +23,7 @@ flowchart TD
     B -->|No| D{"On the non-goals list?"}
     D -->|Yes| E["Reject — record as 0.6.x+ candidate"]
     D -->|No| F{"Clearly in scope?"}
-    F -->|Yes| G["Accept — update affected sub-spec docs"]
+    F -->|Yes| G["Accept — record affected streaming path, streaming test, and rollback boundary; update affected sub-spec docs"]
     F -->|No| H["Evaluate using Boundary Description template"]
     H --> I["Review boundary description"]
     I --> J{"Accept?"}
@@ -51,8 +51,9 @@ The following topics are explicitly out of scope for 0.5.0 (referenced from `doc
 1. The evaluator must check any proposal not covered by an existing sub-spec against the 0.5.0 goal boundary. The non-goals list applies too. Check before work begins
 2. The process rejects proposals matching non-goals and records them as 0.6.x+ candidates
 3. Ambiguous proposals require evaluation using the Boundary Description template followed by review
-4. Approved scope expansions must record rationale and reflect in affected sub-spec documents
-5. P1 items may ship but must not block the release. When P1 work threatens the release timeline, defer rather than block
+4. The reviewer approves a proposal only after recording all three streaming evidence fields in the scope-expansion record (see the template below). The three fields are the affected streaming path, the streaming test, and the rollback boundary. A record missing any of the three fields does not authorize approval, regardless of the evaluation result
+5. Approved scope expansions must record rationale and reflect in affected sub-spec documents
+6. P1 items may ship but must not block the release. When P1 work threatens the release timeline, defer rather than block
 
 ## Scope Expansion Record Template
 
@@ -64,4 +65,5 @@ The following topics are explicitly out of scope for 0.5.0 (referenced from `doc
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Kang | Three streaming evidence fields required before approval |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

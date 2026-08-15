@@ -32,7 +32,7 @@ The key properties of this positioning:
 
 4. **Simpler cache semantics**: The CDN caches the converted Markdown variant like any other response. This works when conversion happens at the origin. The origin controls `Vary`, `ETag`, and `Cache-Control` directly. The CDN must honor representation variants declared by `Vary: Accept` when matching cached responses, so that clients receive the correct representation.
 
-5. **Variable-driven flexibility**: Because the module runs inside NGINX, operators can use `map` directives and variables to control conversion per request. This includes User-Agent-based bot targeting.
+5. **Variable-driven flexibility**: Because the module runs inside NGINX, operators can use `map` directives and variables to control conversion per request. This includes User-Agent-based bot targeting. When targeting variables (such as a bot-detection map) change the representation served to different clients, the operator must preserve cache separation: either add the targeting variable to `Vary` (for example `Vary: Accept, User-Agent`) or include a normalized targeting-variable value in the cache key, so caches do not serve the Markdown variant to clients that should receive HTML (or the reverse).
 
 ### Negative Consequences
 
@@ -99,4 +99,5 @@ Project Team
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Kang | ADR-0003 clarifies Vary/cache-key guidance for User-Agent-targeted representations |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

@@ -92,10 +92,17 @@ the request solely because streaming is unavailable.
 ## Pre-commit fallback
 
 Streaming can fall back before the module commits headers when the bounded replay
-or parser pre-commit work cannot complete. This is safe fail-open behavior.
-The fail-open path preserves the original response content. The pre-commit
-fallback returns the original HTML without modification. The request-level
-metric records the terminal outcome.
+or parser pre-commit work cannot complete. The behavior depends on
+`markdown_error_policy`:
+
+- With `pass` (default), this is safe fail-open behavior: the fallback path
+  preserves and returns the original response content. The pre-commit
+  fallback returns the original HTML without modification.
+- With `fail_closed`, the module does not unconditionally fail open. It
+  follows its configured failure behavior: the module rejects the request
+  with the configured error status instead of replaying the original body.
+
+The request-level metric records the terminal outcome.
 
 Inspect these transitions:
 

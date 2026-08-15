@@ -87,7 +87,6 @@ VALIDSIG="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
 EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
 [[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1
 grep " ${PKG}$" SHA256SUMS | sha256sum -c -
-dpkg-sig --verify "${PKG}"
 sudo apt install "./${PKG}"
 ```
 
@@ -115,7 +114,6 @@ VALIDSIG="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
 EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
 [[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1
 grep " ${PKG}$" SHA256SUMS | sha256sum -c -
-rpm -Kv "${PKG}"
 sudo rpm -Uvh "./${PKG}"
 ```
 

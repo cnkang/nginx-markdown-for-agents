@@ -64,6 +64,15 @@ Inputs must route through environment variables (`env:`) and reference
 only as env vars in shell scripts. This prevents command substitution attacks
 where a malicious input value contains shell metacharacters.
 
+**Shell-safety requirements**: Expand environment variables that carry
+workflow input values inside double quotes when passing them to tools
+(for example `"$VERSION"`), so the value arrives as a single argument
+even when it contains whitespace or shell metacharacters. Shells must not
+evaluate those values with `eval`, and the scripts must not rely on
+unquoted expansion or word splitting to transform them. Any validation
+of the value (regex or otherwise) must run before the scripts expand the
+value into a command.
+
 **Historical issue**: `d0d5730c` — the workflow interpolated `inputs.version` directly
 into shell `run:` blocks before regex validation, allowing command substitution
 in the signing environment. Also found in `release-rpm.yml` during harness

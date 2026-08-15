@@ -33,7 +33,7 @@ paths:
 
 ## Description
 All version numbers across the project must synchronize to reflect the current release version. This includes:
-- Main `Cargo.toml` (source of truth)
+- `components/rust-converter/Cargo.toml` (the version-owning manifest — source of truth)
 - Helm Chart `version` and `appVersion` fields
 - Internal Cargo.toml dependencies (fuzz targets, corpus tools)
 - Documentation examples (INSTALLATION.md, and so on)
@@ -128,7 +128,7 @@ This detector integrates into:
 ## Example Output
 ```text
 INFO: Checking version consistency...
-PASS: Main Cargo.toml version: 0.9.2
+PASS: components/rust-converter/Cargo.toml version: 0.9.2
 PASS: Chart.yaml version: 0.9.2
 PASS: Chart.yaml appVersion: 0.9.2
 PASS: fuzz/Cargo.toml dep version: 0.9.2

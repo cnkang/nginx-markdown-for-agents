@@ -190,7 +190,7 @@ curl -sD - -o /dev/null -A "ClaudeBot/1.0" http://localhost/docs/
 curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/docs/
 ```
 
-This works because the module's content negotiation sees `text/markdown` in the rewritten Accept header and converts the response. All other eligibility checks (status code, content type, size limits) still apply. Browsers and non-matching clients remain unaffected.
+This works because the module's content negotiation selects Markdown when it sees `text/markdown` in the accepted types and converts the response. The module does not rewrite the `Accept` header. It only decides conversion. All other eligibility checks (status code, content type, size limits) still apply. Browsers and non-matching clients remain unaffected.
 
 For a complete template with more bot patterns, see [examples/nginx-configs/06-bot-targeted-conversion.conf](examples/nginx-configs/06-bot-targeted-conversion.conf). For the full walkthrough, see [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md#bot-targeted-conversion-user-agent-based).
 
