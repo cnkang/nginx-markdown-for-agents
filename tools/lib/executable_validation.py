@@ -82,7 +82,10 @@ def _active_rustup_toolchain() -> str | None:
     2. a `rust-toolchain.toml` / `rust-toolchain` file found from the
        current working directory upward (directory-scoped override);
     3. the `default_toolchain` recorded in ``~/.rustup/settings.toml``.
-    Returns None when none is available.
+    Returns None when none is available.  A bare channel (e.g. ``1.97.1``)
+    is expanded to its host-triple toolchain name when that toolchain is
+    installed (``1.97.1-aarch64-apple-darwin``), matching Rustup's own
+    installed-toolchain naming.
     """
     env_toolchain = os.environ.get("RUSTUP_TOOLCHAIN")
     if env_toolchain:
@@ -95,7 +98,7 @@ def _active_rustup_toolchain() -> str | None:
     if cwd is not None:
         directory_toolchain = _toolchain_from_directory(cwd)
         if directory_toolchain:
-            return directory_toolchain
+            return _expand_toolchain_name(directory_toolchain)
 
     settings = Path.home() / ".rustup" / "settings.toml"
     try:
@@ -105,7 +108,30 @@ def _active_rustup_toolchain() -> str | None:
     match = re.search(
         r"^\s*default_toolchain\s*=\s*[\"']([^\"']+)[\"']",
         content, re.MULTILINE)
-    return match.group(1) if match else None
+    if not match:
+        return None
+    return _expand_toolchain_name(match.group(1))
+
+
+def _expand_toolchain_name(channel: str) -> str:
+    """Map a bare channel to its installed host-triple toolchain name.
+
+    Rustup names installed toolchains ``<channel>-<host-triple>`` (e.g.
+    ``1.97.1-aarch64-apple-darwin``).  If a toolchain directory with that
+    suffix exists, return the full name; otherwise return the channel as-is
+    so callers fail closed instead of resolving the wrong binary.
+    """
+    try:
+        toolchain_root = (
+            Path.home() / ".rustup" / "toolchains").resolve(strict=True)
+    except (OSError, RuntimeError, KeyError):
+        return channel
+    if (toolchain_root / channel).is_dir():
+        return channel
+    for entry in toolchain_root.iterdir():
+        if entry.is_dir() and entry.name.startswith(channel + "-"):
+            return entry.name
+    return channel
 
 
 def _is_rustup_tool_shim(candidate: Path, resolved: Path, name: str) -> bool:
