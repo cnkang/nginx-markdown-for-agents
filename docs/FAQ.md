@@ -32,7 +32,7 @@ This project draws inspiration from Cloudflare's announcement but provides a sel
 ### What are the system requirements?
 
 - **NGINX**: 1.24.0 or higher
-- **Rust**: 1.97.0 or higher (for source builds only)
+- **Rust**: 1.97.1 or higher (for source builds only; MSRV 1.97)
 - **Operating System**: macOS or Linux (x86_64 or aarch64)
 - **Memory**: Minimum 512MB RAM per worker (more for large documents)
 

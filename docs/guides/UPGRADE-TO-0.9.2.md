@@ -108,8 +108,8 @@ git checkout v0.9.2
 ### 2. Update Rust toolchain
 
 ```bash
-rustup toolchain install 1.97.0
-rustup default 1.97.0
+rustup toolchain install 1.97.1
+rustup default 1.97.1
 ```
 
 ### 3. Build the Rust converter
