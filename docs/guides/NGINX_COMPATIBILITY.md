@@ -13,9 +13,10 @@ For full troubleshooting and package-level compatibility details, see the
 
 The minimum supported NGINX version is **1.24.0**. The compatibility matrix
 lists the selected nginx.org official stable and mainline releases targeted by
-the release workflows. A matrix entry does not guarantee that a package asset
-the project publishes for a particular tag. Verify the GitHub Release assets before
-you download or build from source.
+the release workflows. A matrix entry does not guarantee that the project
+publishes a package asset for that tag. Before downloading a prebuilt asset,
+verify the GitHub Release assets for the exact tag. Building from source
+needs no asset verification.
 
 > **Canonical source:** [`tools/release-matrix.json`](../../tools/release-matrix.json)
 > is the machine-readable source of truth. The table below is a human-readable
@@ -192,6 +193,7 @@ prebuilt package for an nginx.org official build, or build from source with
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Hermes | Release-asset verification applies before downloading a prebuilt asset only |
 | 0.9.1 | 2026-07-28 | Codex | Synced the human-readable NGINX compatibility matrix with the canonical 1.30.4 and 1.31.3 release entries; clarified that matrix coverage does not guarantee published package assets. |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.7.0 | 2026-05-20 | Kiro | Initial NGINX compatibility guide for docs/guides/ |

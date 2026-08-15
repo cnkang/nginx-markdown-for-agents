@@ -19,9 +19,10 @@ required by HTTP. Raw RFC 1951 deflate is additionally accepted as a
 compatibility fallback for legacy servers (RFC 2616-era implementations),
 matching the C streaming and full-buffer decompressors. Deflate rejects trailing
 bytes. Gzip validates trailers and supports concatenated members while
-retaining one response-wide budget. Brotli uses the native streaming decoder
-when the build compiles `NGX_HTTP_BROTLI` in.
-Otherwise it uses the bounded full-buffer path.
+retaining one response-wide budget. Brotli build control
+`NGX_MARKDOWN_BROTLI_STREAMING` (default `auto`) manages the compile-time
+probe. A successful probe defines `NGX_HTTP_BROTLI` and enables the native
+streaming decoder. Builds without it use the bounded full-buffer path.
 
 `markdown_auto_decompress off;` preserves a compressed response without
 conversion. With the default `on`, `markdown_streaming` and
@@ -87,5 +88,6 @@ and [`CONFIGURATION.md`](../guides/CONFIGURATION.md) for operator syntax.
 
 | Version | Date | Changes |
 | --- | --- | --- |
+| 0.9.2 | 2026-08-15 | Hermes | Document Brotli build control NGX_MARKDOWN_BROTLI_STREAMING and the NGX_HTTP_BROTLI probe outcome |
 | 0.9.2 | 2026-08-08 | Non-native-reader writing pass: active voice, removed prose semicolons. |
 | 0.9.2 | 2026-08-04 | Align decompression controls and metrics with the frozen release contract. |

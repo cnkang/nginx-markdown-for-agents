@@ -30,11 +30,12 @@ selector:
 - `force` selects streaming for every eligible response after hard request,
   content-type, and cache-validation gates.
 
-`markdown_streaming_engine` was reject-only through 0.9.1, so `nginx -t`
-reported an exact migration hint. The 0.9.2 release removed the parser entry:
-the directive now fails `nginx -t` with the standard `unknown directive`
-error. It is not part of the 1.0 configuration surface. The migration table
-below documents the 0.9.1-era mapping:
+The 0.9.1 release made `markdown_streaming_engine` reject-only, so `nginx -t`
+reported an exact migration hint. The directive accepted `off`, `auto`, and
+`on` through 0.9.0. The 0.9.2 release removed the parser entry: the directive
+now fails `nginx -t` with the standard `unknown directive` error. It is not
+part of the 1.0 configuration surface. The migration table below documents
+the 0.9.1-era mapping:
 
 | Removed value | Replacement |
 |---------------|-------------|
@@ -90,5 +91,6 @@ Codex
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Hermes | Reconcile markdown_streaming_engine release history: accepted through 0.9.0, reject-only in 0.9.1, parser entry removed in 0.9.2 |
 | 0.9.2 | 2026-08-08 | Kang | Noted that 0.9.2 deleted the markdown_streaming_engine reject-only stub |
 | 0.9.1 | 2026-07-14 | Codex | Established one public streaming policy and removed non-semantic flavor selectors before v1.0 |

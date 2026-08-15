@@ -104,9 +104,11 @@ after streaming headers have been sent.
 
 `streaming_buffer` is a total per-request byte budget shared by the Rust
 streaming converter's working set and the pre-commit original-body replay
-buffer. It is not an upstream chunk-size or flush-size setting. If the budget
-is too small for the converter's resident state, the request can report
-`STREAMING_BUDGET_EXCEEDED` and follow the configured fail-open policy.
+buffer. It is not an upstream chunk-size or flush-size setting. Streaming
+budget and replay-overflow errors follow `markdown_error_policy`. With
+`pass`, the module passes through the original response. This is the only
+fail-open outcome. With `fail_closed` or `status <code>`, the module rejects
+the request and returns the configured reject status.
 
 The 0.9.2 default for `streaming_buffer` is 2 MiB, up from 256 KiB in 0.9.1.
 Set `markdown_limits streaming_buffer=256k` to retain the previous default.

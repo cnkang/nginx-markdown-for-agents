@@ -255,7 +255,7 @@ flowchart TD
 
     subgraph edge["NGINX 请求路径"]
         ingress["请求进入 NGINX"]
-        rewrite["Accept 头改写<br/>（针对匹配的 User-Agent）"]
+        rewrite["markdown_accept 协商<br/>（针对匹配的 User-Agent）"]
         filter["Markdown 过滤模块 (C)<br/>准入判断<br/>响应缓冲<br/>头部策略"]
         passthrough["普通 HTML 响应<br/>给浏览器和普通客户端"]
     end

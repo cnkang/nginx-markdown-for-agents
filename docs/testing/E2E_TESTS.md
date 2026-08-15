@@ -13,7 +13,8 @@ client -> NGINX runtime -> upstream/backend -> NGINX markdown filter -> client
 Use this page to answer three questions:
 
 - which E2E scenarios count as canonical
-- which script owns each scenario
+- which surface owns each scenario (`tools/e2e/` entrypoints or
+  `tools/e2e-harness/` migrated Rust scenarios)
 - how `make test-e2e` and CI reuse native NGINX runtimes
 
 ## Canonical Suite
@@ -28,8 +29,9 @@ That suite currently runs focused checks across all E2E scenarios.
 
 ### Migrated scenarios (Rust e2e-harness)
 
-The following scenarios have migrated to the Rust e2e-harness and run
-via `e2e-harness scenario <name>`:
+The following scenarios have migrated to the Rust e2e-harness. The harness
+owns their fixtures, requests, and assertions. They run via
+`e2e-harness scenario <name>`:
 
 | Scenario | Rust module | Former shell source |
 |----------|-------------|---------------------|
@@ -63,7 +65,9 @@ The suite keeps the public command stable:
 make test-e2e
 ```
 
-but the maintained implementation now lives entirely under `tools/e2e/`, not under `components/nginx-module/tests/e2e/`.
+Suite entrypoints live under `tools/e2e/`, and migrated Rust scenarios live
+under `tools/e2e-harness/`. Neither surface lives under
+`components/nginx-module/tests/e2e/` anymore.
 
 ## What E2E Covers
 
@@ -230,6 +234,7 @@ That helper owns:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Hermes | Split E2E ownership: tools/e2e/ owns suite entrypoints, tools/e2e-harness/ owns migrated Rust scenarios |
 | 0.6.3 | 2026-05-12 | Kang | Added Rust e2e-harness migrated scenarios section, make test-e2e-rust, separated migrated vs non-migrated scenarios |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.6.0 | 2026-05-02 | v060-prod | Added new E2E scripts (metrics, conditional requests, config merge, auth/cache, status codes); listed shared helpers |

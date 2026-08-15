@@ -1018,7 +1018,7 @@ The alignment works as follows:
 | Reason Code Category | Metrics Endpoint Field | Log Correlation | Example |
 |---|---|---|---|
 | Skip codes (`not_eligible`, `skipped_*`, `bypass_no_transform`) | `nginx_markdown_requests_total{outcome="skipped",reason="..."}` | `reason` field in decision log | `grep "reason=not_eligible" error.log` |
-| Failure categories (`conversion_error`, `resource_limit`, `system_error`) | Canonical failed outcome in `nginx_markdown_requests_total{outcome=~"failed_.*",reason=~"failed_open|failed_closed"}` | `category` field in decision log | `grep -E "category=(conversion_error|resource_limit|system_error)" error.log` |
+| Failure categories (`conversion_error`, `memory_budget_exceeded`, `timeout`, `ffi_panic`) | Canonical failed outcome in `nginx_markdown_requests_total{outcome=~"failed_.*",reason=~"failed_open|failed_closed"}` | `category` field in decision log | `grep -E "category=(conversion_error|memory_budget_exceeded|timeout|ffi_panic)" error.log` |
 | `converted` | `nginx_markdown_requests_total{outcome="converted"}` | `reason` field in decision log | `grep "reason=converted" error.log` |
 | `failed_open` | `nginx_markdown_requests_total{outcome="failed_open"}` | `reason` field in decision log | `grep "reason=failed_open" error.log` |
 | `failed_closed` | `nginx_markdown_requests_total{outcome="failed_closed"}` | `reason` field in decision log | `grep "reason=failed_closed" error.log` |
@@ -1030,7 +1030,7 @@ When you see a spike in a metric, use the same reason code string to find the co
 ```bash
 # Example: you see failed request samples increasing in the metrics endpoint
 # Find the matching log entries:
-grep "markdown decision:" /var/log/nginx/error.log | grep -E "category=(conversion_error|resource_limit|system_error)"
+grep "markdown decision:" /var/log/nginx/error.log | grep -E "category=(conversion_error|memory_budget_exceeded|timeout|ffi_panic)"
 
 # Example: you see failed_open or failed_closed samples increasing
 # Find the matching log entries:
@@ -1288,6 +1288,7 @@ plain-text metric fields are part of the 0.9.2 contract.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Hermes | Update failure categories to conversion_error, memory_budget_exceeded, timeout, and ffi_panic |
 | 0.9.2 | 2026-08-08 | Kang | Added missing nginx_markdown_streaming_peak_memory_bytes metric row |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
