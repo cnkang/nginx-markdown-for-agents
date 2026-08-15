@@ -224,8 +224,9 @@ ngx_pfree(ngx_pool_t *pool, void *p)
 #include "../../src/ngx_http_markdown_decompression.c"
 
 /* The production unit links the C decompression implementation without the
- * Rust static library.  Keep the FFI seam deterministic for the malformed
- * empty-header regression exercised below. */
+ * Rust static library.  Keep the FFI seam deterministic: the targeted
+ * empty-header input is a valid empty encoding chain, while every other
+ * input is classified malformed. */
 uint8_t
 markdown_parse_encoding_chain(const uint8_t *value, size_t value_len,
     FFIEncodingChainResult *result)
@@ -234,8 +235,10 @@ markdown_parse_encoding_chain(const uint8_t *value, size_t value_len,
         return ENCODING_CHAIN_MALFORMED;
     }
     memset(result, 0, sizeof(*result));
+    if (value_len == 0) {
+        return ENCODING_CHAIN_VALID;
+    }
     (void) value;
-    (void) value_len;
     return ENCODING_CHAIN_MALFORMED;
 }
 
@@ -592,8 +595,8 @@ test_collect_content_encoding_repeated_fields(void)
 
         memset(&ctx, 0, sizeof(ctx));
         TEST_ASSERT(ngx_http_markdown_parse_encoding_chain_ffi(
-                    &r, &ctx, &combined) == ENCODING_CHAIN_MALFORMED,
-                    "an active empty Content-Encoding field must be malformed");
+                    &r, &ctx, &combined) == ENCODING_CHAIN_VALID,
+                    "an active empty Content-Encoding field must parse as a valid empty chain");
     }
 
     TEST_PASS("repeated Content-Encoding fields are collected");
@@ -621,6 +624,7 @@ test_collect_content_encoding_allocation_failure(void)
                 "combined Content-Encoding allocation failure must be fatal");
     TEST_ASSERT(combined.data == NULL && combined.len == 0,
                 "failed Content-Encoding collection must clear its output");
+    g_pnalloc_fail_count = 0;
 
     TEST_PASS("Content-Encoding allocation failures are reported");
 }
@@ -718,6 +722,7 @@ test_collection_failure_handler_dispatch(void)
     rc = ngx_http_markdown_collect_content_encoding(&r, &combined);
     TEST_ASSERT(rc == NGX_ERROR,
                 "collection must fail on allocation failure");
+    g_pnalloc_fail_count = 0;
 
     /* Fail-open policy: state set before downstream dispatch. */
     conf = g_conf;

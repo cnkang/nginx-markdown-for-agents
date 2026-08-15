@@ -867,8 +867,14 @@ ngx_http_markdown_reject_or_fail_open_buffered_response(
     UNUSED(ctx);
     UNUSED(debug_message);
     g_failopen_call_count++;
-    g_last_failure_policy = conf->on_error;
-    g_last_failure_status = conf->error_status;
+    if (conf != NULL) {
+        g_last_failure_policy = conf->on_error;
+        g_last_failure_status = conf->error_status;
+    } else {
+        /* Safe fallbacks matching the stub-state initializers. */
+        g_last_failure_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+        g_last_failure_status = 0;
+    }
     return g_failopen_rc;
 }
 

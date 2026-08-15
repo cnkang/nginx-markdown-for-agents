@@ -648,9 +648,10 @@ ngx_http_markdown_diagnostics_check_access(ngx_http_request_t *r)
         const struct sockaddr_in *sin =
             (const struct sockaddr_in *) r->connection->sockaddr;
 
-        if (ntohl(sin->sin_addr.s_addr) != INADDR_LOOPBACK) {
+        /* Accept any address in 127.0.0.0/8, not only INADDR_LOOPBACK. */
+        if ((ntohl(sin->sin_addr.s_addr) & 0xFF000000U) != 0x7F000000U) {
             ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                "markdown: access denied from non-localhost IPv4 address");
+                "markdown: access denied from non-loopback IPv4 address");
             return NGX_HTTP_FORBIDDEN;
         }
     }

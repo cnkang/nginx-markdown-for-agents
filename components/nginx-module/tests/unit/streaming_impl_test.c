@@ -1390,6 +1390,11 @@ ngx_http_markdown_record_per_path_metrics(
 static ngx_int_t g_stream_commit_headers_rc = NGX_OK;
 static int g_stream_commit_headers_called;
 
+/* Shared counter mirroring the production pending-output request count:
+ * incremented when a NULL slot takes a non-NULL chain and decremented on
+ * the reverse transition. */
+static ngx_atomic_uint_t g_pending_output_state;
+
 /* Stub: ngx_http_markdown_stream_commit_headers */
 ngx_int_t
 ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
@@ -1404,15 +1409,21 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
 void
 ngx_http_markdown_pending_output_set(ngx_chain_t **slot, ngx_chain_t *value)
 {
-    if (slot != NULL) {
-        *slot = value;
+    if (slot == NULL) {
+        return;
     }
+    if (*slot == NULL && value != NULL) {
+        g_pending_output_state++;
+    } else if (*slot != NULL && value == NULL) {
+        g_pending_output_state--;
+    }
+    *slot = value;
 }
 
 ngx_atomic_uint_t
 ngx_http_markdown_pending_output_current(void)
 {
-    return 0;
+    return g_pending_output_state;
 }
 
 /*
@@ -1464,6 +1475,7 @@ reset_globals(void)
     g_set_etag_rc = NGX_OK;
     g_stream_commit_headers_rc = NGX_OK;
     g_stream_commit_headers_called = 0;
+    g_pending_output_state = 0;
     g_buffer_init_rc = NGX_OK;
     g_buffer_init_fail_after = 0;
     g_buffer_init_call_count = 0;
