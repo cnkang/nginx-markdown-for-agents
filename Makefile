@@ -424,6 +424,8 @@ harness-security-checks:
 	PYTHONPATH=. python3 tools/harness/detect_test_assertion_coverage.py
 	PYTHONPATH=. python3 tools/harness/detect_html_sanitizer_invariants.py
 	PYTHONPATH=. python3 tools/harness/detect_metrics_event_conservation.py
+	PYTHONPATH=. python3 tools/harness/detect_access_before_method.py --strict
+	PYTHONPATH=. python3 tools/harness/detect_elts_null_guard.py
 	PYTHONPATH=. python3 tools/harness/detect_doc_sync.py
 
 release-supply-chain-check:
