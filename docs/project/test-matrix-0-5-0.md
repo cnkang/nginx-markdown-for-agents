@@ -39,9 +39,12 @@ If infrastructure or resource constraints block a cell, the sub-spec must record
 
 ## Aggregate Coverage Status
 
-Before release, aggregate all sub-spec coverage mappings. Ensure every
-required tuple of values across the matrix has at least one covering sub-spec.
-Covering each value independently is not sufficient:
+The required coverage set is the complete Cartesian product of the listed
+dimensions: 2 platforms x 3 NGINX versions x 4 response size tiers x 2
+conversion engines x 3 conversion paths = 144 tuples. Before release,
+aggregate all sub-spec coverage mappings. Ensure every required tuple has at
+least one covering sub-spec. Covering each value independently is not
+sufficient:
 
 | Combination ID | Platform | NGINX Version | Response Size Tier | Conversion Engine | Conversion Path | Covering Sub-Spec | Status |
 |---------------|----------|---------------|--------------------|-------------------|-----------------|------------------|--------|
@@ -52,4 +55,5 @@ Covering each value independently is not sufficient:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Hermes | Define the required coverage set as the complete 144-tuple Cartesian product |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

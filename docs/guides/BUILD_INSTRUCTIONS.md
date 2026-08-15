@@ -88,9 +88,11 @@ Available targets include:
 - `make sonar-compile-db` - Generate `compile_commands.json` for SonarQube C/C++ analysis (local + CI)
 - `make clean` - Clean Rust and selected NGINX module test artifacts
 
-CI generates release and performance evidence under `artifacts/` and
-ignored by Git. CI validates generated evidence against checked-in source and
-schema before upload. Do not commit local copies of those files. The canonical module benchmark environment stays tracked as source configuration in
+CI generates release and performance evidence under `artifacts/`. Git ignores
+this directory, so the generated evidence never enters the repository. CI
+validates generated evidence against checked-in source and schema before
+upload. Do not commit local copies of those files. The canonical module
+benchmark environment stays tracked as source configuration in
 `release/performance/canonical-environment.json`.
 
 ## SonarQube C/C++ Compilation Database
@@ -332,5 +334,6 @@ After building successfully:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Hermes | State explicitly that Git ignores generated evidence under artifacts/ |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

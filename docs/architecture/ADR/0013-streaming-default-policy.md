@@ -52,8 +52,10 @@ conversion enter the streaming path targeted by the 0.8.0 release.
   without operator intervention
 - With the default profile, small responses retain the simpler full-buffer
   path, avoiding state machine overhead for trivial conversions
-- Backward-compatible: operators who use `markdown_streaming off|auto|force`
-  see no change
+- Backward-compatible at the configuration level: the directive syntax
+  `markdown_streaming off|auto|force` accepts the same values as before.
+  Under `markdown_streaming auto`, responses in the 32K-1m range now use
+  the full-buffer path instead of becoming streaming candidates
 - Aligns with the 0.6.0 auto-mode precedent (ADR-0007) and extends it with
   the 0.8.0 true streaming contract
 - Conservative threshold (1m) reduces risk during initial 0.8.0 development

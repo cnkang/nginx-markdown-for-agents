@@ -24,7 +24,7 @@ mode. Use it to understand behavioral differences before enabling streaming.
 | Dynamic configuration | ✅ | ✅ | Runtime engine switching supported |
 | Shadow mode | ✅ | N/A | Runs streaming in background against full-buffer result |
 | Decompression (gzip) | ✅ | ✅ | Member-aware; streaming since 0.9.1 |
-| Decompression (deflate) | ✅ | ✅ | RFC 1950 zlib-wrapped plus raw RFC 1951 fallback: full-buffer retries as raw after a zero-output format error; streaming detects once on the first two bytes and fails closed on misclassified streams; streaming since 0.9.1 |
+| Decompression (deflate) | ✅ | ✅ | RFC 1950 zlib-wrapped plus raw RFC 1951 fallback: full-buffer retries as raw after a zero-output format error; streaming detects once on the first two bytes and reports a format error for misclassified streams; streaming since 0.9.1 |
 | Decompression (Brotli) | ✅ | ✅ | Requires `NGX_HTTP_BROTLI`; streaming since 0.9.1 |
 
 ## Legend
@@ -96,6 +96,7 @@ thresholds.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Hermes | Deflate streaming misclassification reports a format error instead of failing closed |
 | 0.9.1 | 2026-07-18 | Kang | Added streaming decompression rows (gzip, deflate, Brotli) to compatibility matrix |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.8.0 | 2026-06-16 | Kang  | Initial feature compatibility matrix |

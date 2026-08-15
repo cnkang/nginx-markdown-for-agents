@@ -212,7 +212,7 @@ This assessment rests on:
 - Shared native-build helper logic for Rust/NGINX verification scripts, including aligned macOS deployment-target handling
 - Delegated runtime validations now reuse an exported module-enabled `NGINX_BIN` only when it has a reusable runtime layout. Otherwise they fall back to self-building their own native NGINX runtime
 - The GitHub Actions `runtime-regressions` job now retains the validated IMS runtime and reuses its `NGINX_BIN` for chunked and large-response checks. This avoids rebuilding native NGINX three times
-- Canonical E2E coverage for migrated scenarios now lives under `tools/e2e/`. The `make test-e2e` target delegates to a focused proxy/TLS, chunked, and large-response suite instead of maintaining a second full inline runner. Native and not-yet-migrated scenarios stay in the inline runner until they move to `tools/e2e/`
+- Canonical E2E coverage splits ownership across two directories. Compatibility wrapper scripts and suite entrypoints stay under `tools/e2e/`. Migrated fixtures, requests, and assertions live under `tools/e2e-harness/`. The `make test-e2e` target delegates to a focused proxy/TLS, chunked, and large-response suite instead of maintaining a second full inline runner. Native and not-yet-migrated scenarios stay in the inline runner until they move to `tools/e2e/`
 - The Rust converter now keeps the public `ffi.rs` and `metadata.rs` entrypoints. It pushes ABI decoding, memory handling, export wiring, metadata traversal, and URL resolution into focused submodules
 - `cargo-fuzz` targets and nightly fuzz workflow for parser, FFI, and security-validator paths
 - A separate non-blocking Darwin/macOS smoke workflow validates native Rust build plus real-nginx runtime checks on GitHub-hosted macOS
@@ -774,6 +774,7 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Hermes | Split E2E coverage ownership between tools/e2e/ entrypoints and tools/e2e-harness/ migrated scenarios |
 | 0.9.2 | 2026-08-08 | Kang | Fixed summary release line to 0.9.2; removed OTel and per-path metrics from current capabilities |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.8.3 | 2026-06-26 | Kang | 0.8.3 closeout: streaming state machine fixes, ExitMany batch unwind, decompression buffer memory safety, snapshot capacity, FFI Box::into_raw fix, full release gate validation |

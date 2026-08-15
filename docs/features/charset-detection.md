@@ -195,11 +195,12 @@ When the NGINX C module calls the Rust converter:
 ### Error Handling
 
 - Missing or malformed charset parameter in Content-Type: Falls back to HTML meta tag detection
-- Invalid UTF-8 in HTML: Returns `ConversionError::EncodingError`
+- Invalid UTF-8 bytes in HTML: Returns `ConversionError::EncodingError`
 - Empty input: Returns `ConversionError::InvalidInput`
-- Charset detection never fails (always returns UTF-8 as fallback), but
-  parsing still rejects invalid UTF-8 or declared non-UTF-8 input until the
-  project adds transcoding support
+- Charset detection never fails (always returns UTF-8 as fallback). Parsing
+  rejects only invalid UTF-8 bytes. Valid UTF-8 bytes remain parseable even
+  when the declared charset is not UTF-8. The fallback and conversion-error
+  behavior stay unchanged
 
 ## Dependencies
 
@@ -225,5 +226,6 @@ When the NGINX C module calls the Rust converter:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Hermes | Error handling rejects only invalid UTF-8 bytes; valid UTF-8 passes even with a non-UTF-8 declared charset |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

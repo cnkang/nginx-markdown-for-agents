@@ -148,8 +148,11 @@ Content-Type: text/markdown; charset=utf-8
 Vary: Accept
 ```
 
-If the response returns `Content-Type: text/markdown`, the module loads and
-converts HTML to Markdown for agent clients.
+If the response returns `Content-Type: text/markdown`, the module loads. To
+confirm the conversion, request a known HTML page and assert Markdown-specific
+body content. For example, an `<h1>Welcome</h1>` heading must appear as
+`# Welcome` in the response body. The `Content-Type` alone does not prove
+that the conversion ran.
 
 ---
 
@@ -203,8 +206,9 @@ For the full list of supported versions and architectures, see the
 
 For Kubernetes and Helm deployments, see
 [`KUBERNETES_DEPLOYMENT.md`](./KUBERNETES_DEPLOYMENT.md). The Helm chart runs
-with stock NGINX by default and requires an explicit module-enabled image plus
-`markdown.loadModule` when markdown directives turn on.
+with stock NGINX by default. To use the module, deploy an explicit
+module-enabled image. When `markdown.enabled=true`, set `markdown.loadModule`
+to the in-container module path.
 
 ### Automated Diagnostics
 

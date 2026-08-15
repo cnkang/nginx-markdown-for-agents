@@ -1107,7 +1107,7 @@ Keep `markdown_error_policy pass` until:
 
 1. Your rollout has been stable for multiple traffic cycles (at least 48 hours in production).
 2. Your `failed_open` count is zero or near-zero for all enabled scopes.
-3. You have reviewed the failure reason codes (`FAIL_CONVERSION`, `FAIL_RESOURCE_LIMIT`, `FAIL_SYSTEM`) and resolved any underlying issues.
+3. You have reviewed the failure reason codes (`conversion_error`, `memory_budget_exceeded`, `timeout`, `ffi_panic`) and resolved any underlying issues.
 4. You have a specific operational reason to reject failed conversions. For example, you need to guarantee Markdown-only responses for a downstream consumer.
 
 Even then, consider enabling `fail_closed` only in narrow scopes (specific `location` blocks) rather than globally, and monitor closely after the change. If failures appear, switch back to `pass` immediately by setting `markdown_error_policy pass` and running `nginx -s reload`.
@@ -1317,7 +1317,7 @@ Stop expanding rollout scope and investigate if any of the following occur:
 | Trigger | What It Means | How to Detect |
 |---------|---------------|---------------|
 | Sudden increase in failed outcomes | Conversion failures are spiking — may indicate upstream HTML changes, resource pressure, or a converter bug | `grep "reason=failed_open\|reason=failed_closed" /var/log/nginx/error.log \| tail -20` or watch the failed `requests_total` series |
-| Repeated internal failure reasons | Internal/system error — investigate the reason labels and decision logs | Inspect `requests_total{outcome=~"failed_.*"}` reason labels and NGINX logs |
+| Repeated internal failure reasons | Internal failure categories appear repeatedly, for example `memory_budget_exceeded` or `ffi_panic` — check the decision logs | Inspect the `category=` field in decision log entries and the NGINX logs; these categories do not appear as `requests_total` reason labels |
 | Conversion latency exceeding `markdown_limits` | Conversions are taking too long — may indicate large pages, resource contention, or converter performance issues | Check latency buckets; look for conversions in the highest `le` bucket or timeouts in logs |
 | Upstream error rate increase | The module may be causing upstream issues (unlikely but possible with decompression or buffering interactions) | Compare upstream 5xx rates before and after enablement |
 | Unexpected `Content-Type` in responses | Converted responses have wrong Content-Type, or non-HTML responses are being processed | `curl -sD - -H "Accept: text/markdown" http://localhost/your-path/ \| grep Content-Type` |
@@ -1337,6 +1337,7 @@ When a trigger fires:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Hermes | Update failure reason values and point internal-failure triggers to decision logs |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

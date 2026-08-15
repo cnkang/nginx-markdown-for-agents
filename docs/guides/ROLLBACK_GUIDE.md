@@ -355,10 +355,12 @@ Conversion failure rate exceeds 5% of conversion attempts over any 1-hour window
 ```bash
 # Check failure count vs. total conversion attempts
 curl -s http://localhost/markdown-metrics | \
-  grep -E "conversions_(attempted|succeeded|failed)"
+  grep -E "nginx_markdown_conversion_attempts_total|nginx_markdown_conversion_deliveries_total|nginx_markdown_requests_total"
 ```
 
-If `conversions_failed` is growing faster than expected relative to `conversions_attempted`, roll back.
+If the failed `nginx_markdown_requests_total{outcome=~"failed_.*"}` count grows
+faster than expected relative to `nginx_markdown_conversion_attempts_total`,
+roll back.
 
 ### Latency Exceeding Timeout
 
@@ -510,6 +512,7 @@ configuration.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Hermes | Use current metric names in the pre-rollback metric check |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.9.1 | 2026-07-05 | Kiro | Added 0.9.1 performance optimization rollback cross-reference |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |

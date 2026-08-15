@@ -93,7 +93,7 @@ remain blocking even when the workflow itself is green.
 | # | Check Item | Verification Command | Pass Criteria |
 |---|-----------|---------------------|---------------|
 | 4.1 | Helm chart lint | `helm lint charts/nginx-markdown` | Exit 0, no errors |
-| 4.2 | Helm chart render | `helm template gate4-test charts/nginx-markdown --namespace gate4-smoke` and `tools/release/gates/validate_helm_render.py release-evidence/gate4/<candidate-sha>/rendered-manifests/` | Exit 0 and rendered security checks pass (run the validator against the rendered manifests or assert required fields explicitly) |
+| 4.2 | Helm chart render | `helm template gate4-test charts/nginx-markdown --namespace gate4-smoke > release-evidence/gate4/<candidate-sha>/rendered-manifests/rendered.yaml` and `python3 tools/release/gates/validate_k8s_manifests.py` | Exit 0. Assert that the rendered output at `release-evidence/gate4/<candidate-sha>/rendered-manifests/rendered.yaml` contains the Deployment `metadata.name`, the container `image`, and the `nginx-markdown` ConfigMap |
 | 4.3 | Promoted cluster smoke | `tools/release/gates/gate4_local_k8s_smoke.sh` or the promoted-cluster equivalent | Evidence at `release-evidence/gate4/<candidate-sha>/cluster-smoke.json`; conversion, Accept, and metrics checks pass |
 | 4.4 | F5 feasibility assessment | Review `docs/guides/F5_INGRESS_FEASIBILITY.md` and record assessment | Evidence at `release-evidence/gate4/<candidate-sha>/f5-assessment.md` is complete |
 
@@ -201,5 +201,6 @@ make release-gates-check-070
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Hermes | Helm chart render gate uses validate_k8s_manifests.py and defines the required rendered fields |
 | 0.7.0-int | 2026-05-20 | Kang | Add Gate 6 (Fuzz & Packaging Infrastructure) with validate_fuzz_packaging.py checks |
 | 0.7.0-draft | 2026-05-17 | spec-agent | Initial v0.7.0 gate definitions from design.md §14.0 |
