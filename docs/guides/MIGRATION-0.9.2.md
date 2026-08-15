@@ -102,7 +102,7 @@ The profile directive no longer exists. Use explicit directive settings instead.
 # BEFORE (0.9.1)
 markdown_profile balanced;
 
-# AFTER (0.9.2) — balanced equivalent
+# AFTER (0.9.2) — recommended explicit preset
 markdown_limits conversion_memory=64m conversion_timeout=5s parser_timeout=5s max_inflight=64;
 markdown_cache_validation ims_only;
 markdown_error_policy pass;
@@ -112,7 +112,7 @@ markdown_error_policy pass;
 # BEFORE (0.9.1)
 markdown_profile strict_cache;
 
-# AFTER (0.9.2) — strict_cache equivalent
+# AFTER (0.9.2) — recommended explicit preset
 markdown_limits conversion_memory=128m conversion_timeout=10s max_inflight=32;
 markdown_cache_validation full;
 markdown_error_policy pass;
@@ -122,12 +122,19 @@ markdown_error_policy pass;
 # BEFORE (0.9.1)
 markdown_profile streaming_first;
 
-# AFTER (0.9.2) — streaming_first equivalent
+# AFTER (0.9.2) — recommended explicit preset
 markdown_streaming force;
 markdown_limits conversion_memory=256m conversion_timeout=30s streaming_buffer=16m max_inflight=128;
 markdown_error_policy pass;
 markdown_accept wildcard;
 ```
+
+These presets are recommendations, not equivalents. The 0.9.1 profiles
+shared one resource envelope: 8 MiB conversion memory, 2 s timeout, and
+64 max-inflight. The balanced and streaming_first profiles also set a
+256 KiB streaming buffer. The values above raise the envelope several
+times over. Choose values for your workload. Do not treat these numbers
+as a 1:1 replacement for a profile.
 
 ### `markdown_metrics_format` → removed (single format)
 
@@ -377,8 +384,10 @@ markdown_limits conversion_timeout=30s
 
 Cross-key constraints: `parser_timeout <= conversion_timeout`,
 `parser_memory <= conversion_memory`, `streaming_buffer <= conversion_memory`.
-The 0.9.2 default for `streaming_buffer` is 2 MiB, up from 256 KiB in 0.9.1.
-Pin `markdown_limits streaming_buffer=256k` to preserve the older default.
+The 0.9.2 default for `streaming_buffer` is 2 MiB, the same default that
+0.9.1 used. The 256 KiB value appeared only in the removed profiles
+(balanced and streaming_first). Pin `markdown_limits streaming_buffer=2m`
+to keep the module default explicit.
 
 ---
 
@@ -450,6 +459,7 @@ curl -s http://localhost/nginx-markdown/diagnostics | python3 -m json.tool | hea
 ## Document Updates
 
 | Version | Date | Author | Changes |
-|---------|------|--------|---------|
+|---|---|---|---|
+| 0.9.2 | 2026-08-15 | Hermes | Corrected profile preset guidance: recommended presets, not equivalents; fixed the streaming_buffer default claim. |
 | 0.9.2 | 2026-08-08 | Hermes | Non-native-reader writing pass: active voice for removal descriptions. |
 | 0.9.2 | 2026-07-30 | Kang | Complete rewrite for 0.9.2 breaking freeze: 25-directive contract, before/after examples for all removed directives |

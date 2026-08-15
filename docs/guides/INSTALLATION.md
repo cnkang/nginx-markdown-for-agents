@@ -190,6 +190,7 @@ Replace `VERSION` below with a published release version. `NGINX_VERSION` must
 match the NGINX ABI you run.
 
 ```bash
+set -euo pipefail
 VERSION="<published-version>"
 NGINX_VERSION=1.26.3
 ARCH=amd64
@@ -215,6 +216,7 @@ Replace `VERSION` below with a published release version. `NGINX_VERSION` must
 match the NGINX ABI you run.
 
 ```bash
+set -euo pipefail
 VERSION="<published-version>"
 NGINX_VERSION=1.26.3
 ARCH=x86_64

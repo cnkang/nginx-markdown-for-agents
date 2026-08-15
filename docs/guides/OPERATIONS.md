@@ -432,8 +432,8 @@ curl -H "Accept: text/markdown" http://localhost/test
 
 | Module Version | Rust Version | Status |
 |----------------|--------------|--------|
-| 0.9.1+ | 1.97.0+ | Supported (edition 2024) |
-| 0.9.1+ | < 1.97.0 | Not supported for source builds |
+| 0.9.1+ | 1.97.1+ | Supported (edition 2024) |
+| 0.9.1+ | < 1.97.1 | Not supported for source builds |
 
 ---
 
@@ -442,7 +442,7 @@ curl -H "Accept: text/markdown" http://localhost/test
 #### Upgrading to 0.9.x
 
 - `fullbuffer_path_hits` and `incremental_path_hits` moved to the end of `ngx_http_markdown_metrics_t`. If you use shared-memory metrics, a graceful reload is sufficient. You need no data migration.
-- The `incremental` feature is off by default. Enable it with `--features incremental` when building the Rust converter. This activates the incremental processing path. `markdown_streaming off|auto|force` controls streaming selection. `auto` uses an internal bounded heuristic rather than an operator-facing threshold directive. This replaces the retired threshold directive.
+- The Rust converter enables the `incremental` feature by default. The streaming path (`markdown_streaming off|auto|force`) controls runtime selection. `auto` uses an internal bounded heuristic rather than an operator-facing threshold directive. This replaces the retired threshold directive.
 - `X-Forwarded-Host` and `X-Forwarded-Proto` headers are no longer trusted by default for base URL construction. If NGINX sits behind a trusted reverse proxy that sets these headers, add its proxy range in the `http` context. For example, use `markdown_trusted_proxies 10.0.0.0/8;`. Forwarded headers remain ignored for direct peers outside the configured CIDRs. Trusted proxies keep base URLs correct. Configure them explicitly. This restores the previous behavior.
 
 #### Upgrading to 0.2.x
