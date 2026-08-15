@@ -167,12 +167,14 @@ the actual timeout overshoot depends on input size:
 | < 1 MB | < 100 ms | Negligible |
 | 1-5 MB | 100-500 ms | Low |
 | 5-10 MB | 500 ms - 1 s | Moderate |
-| > 64 MiB | Blocked (not truncated) by `markdown_limits conversion_memory=` | N/A |
+| > conversion_memory | Blocked (not truncated) by `markdown_limits conversion_memory=` | N/A |
 
-The `markdown_limits conversion_memory=<size>` directive (default 64 MiB)
-bounds the input and associated full-buffer work. It does not promise a
-fixed wall-clock parse duration. Hardware, parser behavior, and the configured
-`conversion_timeout` determine the observed time.
+The `markdown_limits conversion_memory=<size>` directive bounds the input
+and associated full-buffer work. Its default is 64 MiB. The table compares
+input size against the configured value, not a fixed limit. The directive
+does not promise a fixed wall-clock parse duration. Hardware, parser
+behavior, and the configured `conversion_timeout` determine the observed
+time.
 
 ### 2.4 Depth Limit (Implicit via State Stack Budget)
 

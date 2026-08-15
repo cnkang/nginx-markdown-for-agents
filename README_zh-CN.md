@@ -292,7 +292,7 @@ flowchart TD
     class passthrough passthrough;
 ```
 
-NGINX 模块负责请求是否可转换、响应缓冲和头部管理。对于按 bot 定向转换的场景，NGINX 的 `map` 指令在模块处理请求之前改写 Accept 头，模块的标准内容协商逻辑照常工作。Rust 转换器负责 HTML 解析、安全清洗、确定性 Markdown 生成等核心逻辑。
+NGINX 模块负责请求是否可转换、响应缓冲和头部管理。对于按 bot 定向转换的场景，模块的 `markdown_accept` 协商决定是否转换。NGINX 不会改写 Accept 头。Rust 转换器负责 HTML 解析、安全清洗、确定性 Markdown 生成等核心逻辑。
 
 ### 为什么是 C + Rust
 
@@ -397,7 +397,7 @@ v0.9.2 分支目前是开发候选版本，尚未发布。这是 v1.0 前最后�
 
 v0.9.1 是 **v1.0 前最后一次基线收敛与兼容性重置**。它在性能就绪工作的基础上，完成 v1.0 冻结前最后一轮有意的源码构建与公共契约清理。v0.9.0 发布时原计划作为最后一个破坏性版本；由于 v1.0 尚未发布且采用规模仍有限，兼容性冻结窗口现明确延长至 v0.9.1。
 
-- **Rust 基线重置**：源码构建现在要求 Rust 1.97+；仓库、CI 和发布构建使用精确的 Rust 1.97.0 (MSRV 1.97)。预构建模块的用户不需要安装 Rust。
+- **Rust 基线重置**：源码构建现在要求 Rust 1.97+；仓库、CI 和发布构建使用精确的 Rust 1.97.1 (MSRV 1.97)。预构建模块的用户不需要安装 Rust。
 - **单一流式控制**：`markdown_streaming off|auto|force` 现在是唯一处理路径选择器。重复的 `markdown_streaming_engine` 已移除；旧配置由 NGINX 标准 unknown-directive 错误识别。
 - **明确支持的 flavor**：`markdown_flavor` 仅支持 `commonmark` 和 `gfm`。实验性的 `mdx` 与 `org-mode` 从未有独立生产语义，现会被明确拒绝。
 - **自动零拷贝流式输出**：由缓冲区所有权和背压状态在内部选择安全的交付路径。显式 `markdown_streaming_zero_copy` 指令于 v0.9.1 引入、v0.9.2 移除，交付路径选择改为内部实现。
@@ -427,6 +427,7 @@ BSD 2-Clause "Simplified" License。详见 [LICENSE](LICENSE)。
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Hermes | 移除流程图与 bot 定向段落中陈旧的 Accept 头改写说法；协商仅由 markdown_accept 完成 |
 | 0.9.2 | 2026-08-08 | Hermes | 非母语读者友好改写：拆分长句、移除正文分号、主动语态，遵循 WRITING_GUIDE 的 STE 风格 |
 | 0.9.2 | 2026-08-07 | Kang | 新增 v0.9.2 新特性段、生产显式配置段、0.9.2/0.9.1 迁移指南链接，并同步文档更新记录 |
 | 0.9.1 | 2026-07-29 | Kang | 发布基线同步：完成 CHANGELOG 日期收口、发布说明状态更新、PROJECT_STATUS 当前版本线更新、版本规划、Harness 规则表 (Rules 52-60) 与 build-safety 域对齐。 |

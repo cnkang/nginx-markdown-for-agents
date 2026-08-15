@@ -172,7 +172,7 @@ cat > "$tmp" <<'EOF'
   "schema_version": 1,
   "filter": "off",
   "error_policy": "pass",
-  "streaming_budget": 1048576
+  "streaming_buffer": 1048576
 }
 EOF
 mv -f "$tmp" "$path"

@@ -261,7 +261,7 @@ flowchart TD
 
     subgraph edge["NGINX request path"]
         ingress["Request enters NGINX"]
-        rewrite["Accept header rewrite<br/>(for matched User-Agent)"]
+        rewrite["markdown_accept negotiation<br/>(for matched User-Agent)"]
         filter["Markdown Filter Module (C)<br/>eligibility check<br/>buffering<br/>header policy"]
         passthrough["Normal HTML response<br/>for browsers and other clients"]
     end
@@ -298,7 +298,7 @@ flowchart TD
     class passthrough passthrough;
 ```
 
-The NGINX module handles request eligibility, buffering, and response header management. For bot-targeted conversion, NGINX's `map` directive rewrites the Accept header before the module sees the request. The module's standard content negotiation then handles the rest. The Rust converter handles HTML parsing, sanitization, deterministic Markdown generation, and related transformation logic.
+The NGINX module handles request eligibility, buffering, and response header management. For bot-targeted conversion, the module's `markdown_accept` negotiation selects conversion. NGINX does not rewrite the Accept header. The Rust converter handles HTML parsing, sanitization, deterministic Markdown generation, and related transformation logic.
 
 ### Why C + Rust
 
@@ -414,7 +414,7 @@ See the [0.9.2 release notes](docs/releases/0.9.2-release-notes.md),
 
 v0.9.1 is the **final pre-v1.0 baseline consolidation and compatibility reset**. It combines performance readiness with the last deliberate source-build and public-contract cleanup before the v1.0 freeze. The project intended v0.9.0 to be the last breaking release. It extended the freeze through v0.9.1 while v1.0 remained unpublished and adoption was still limited.
 
-- **Rust baseline reset**: source builds now require Rust 1.97+. Repository, CI, and release builds use exact Rust 1.97.0 (MSRV 1.97). Prebuilt module users do not need Rust.
+- **Rust baseline reset**: source builds now require Rust 1.97+. Repository, CI, and release builds use exact Rust 1.97.1 (MSRV 1.97). Prebuilt module users do not need Rust.
 - **Single streaming control**: `markdown_streaming off|auto|force` is now the sole processing-path selector. The duplicate `markdown_streaming_engine` directive is absent. Use the standard NGINX unknown-directive error to identify stale configuration.
 - **Supported flavors clarified**: `markdown_flavor` supports `commonmark` and `gfm`. The module rejects the experimental `mdx` and `org-mode` values because they never had distinct production conversion semantics.
 - **Automatic zero-copy streaming output**: buffer ownership and backpressure select the safe delivery path internally. The explicit `markdown_streaming_zero_copy` directive existed from v0.9.1 to v0.9.2. Delivery-path selection is now internal.
@@ -445,6 +445,7 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Hermes | Removed stale Accept-header rewrite claims from the flow diagram and bot-targeting paragraph; negotiation is markdown_accept only |
 | 0.9.2 | 2026-08-08 | Hermes | Non-native-reader writing pass: split long sentences, removed prose semicolons, active voice, STE-inspired style per WRITING_GUIDE |
 | 0.9.2 | 2026-08-07 | Kang | Added What's New v0.9.2 section, explicit production settings section, 0.9.2/0.9.1 migration guide links, and document history sync |
 | 0.9.1 | 2026-07-29 | Kang | Release audit: finalized CHANGELOG date, release notes status, PROJECT_STATUS 0.9.1 section, VERSION_PLANNING release state, harness rule mapping (Rules 52-60), build-safety domain alignment. |
