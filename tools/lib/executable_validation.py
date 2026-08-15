@@ -42,6 +42,38 @@ def _is_under(path: Path, roots: tuple[Path, ...]) -> bool:
     return any(resolved == root or root in resolved.parents for root in roots)
 
 
+def _channel_from_toolchain_file(content: str) -> str | None:
+    """Extract the channel from a rust-toolchain(.toml) file body.
+
+    TOML form: `channel = "1.97.1"`; legacy form: a bare channel on the
+    first non-empty line.
+    """
+    match = re.search(
+        r"^\s*channel\s*=\s*[\"']([^\"']+)[\"']",
+        content, re.MULTILINE)
+    if match:
+        return match.group(1)
+    first = content.strip().splitlines()
+    if first and first[0].strip():
+        return first[0].strip()
+    return None
+
+
+def _toolchain_from_directory(cwd: Path) -> str | None:
+    """Find a rust-toolchain(.toml) override from cwd upward."""
+    for directory in (cwd, *cwd.parents):
+        for name in ("rust-toolchain.toml", "rust-toolchain"):
+            candidate = directory / name
+            if not candidate.is_file():
+                continue
+            try:
+                content = candidate.read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                continue
+            return _channel_from_toolchain_file(content)
+    return None
+
+
 def _active_rustup_toolchain() -> str | None:
     """Resolve the active Rustup toolchain name.
 
@@ -61,25 +93,9 @@ def _active_rustup_toolchain() -> str | None:
     except OSError:
         cwd = None
     if cwd is not None:
-        for directory in (cwd, *cwd.parents):
-            for name in ("rust-toolchain.toml", "rust-toolchain"):
-                candidate = directory / name
-                if not candidate.is_file():
-                    continue
-                try:
-                    content = candidate.read_text(encoding="utf-8")
-                except (OSError, UnicodeError):
-                    continue
-                # TOML form: `channel = "1.97.1"`; legacy form: bare channel.
-                match = re.search(
-                    r"^\s*channel\s*=\s*[\"']([^\"']+)[\"']",
-                    content, re.MULTILINE)
-                if match:
-                    return match.group(1)
-                first = content.strip().splitlines()
-                if first and first[0].strip():
-                    return first[0].strip()
-                break
+        directory_toolchain = _toolchain_from_directory(cwd)
+        if directory_toolchain:
+            return directory_toolchain
 
     settings = Path.home() / ".rustup" / "settings.toml"
     try:

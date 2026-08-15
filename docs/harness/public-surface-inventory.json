@@ -1294,7 +1294,7 @@
       "c_accessor": "reason_str_overload",
       "discriminant": 20,
       "metric_family": "nginx_markdown_requests_total",
-      "metric_key": "markdown_errors_total",
+      "metric_key": "markdown_skipped_total",
       "name": "Overload",
       "string": "overload"
     },
