@@ -545,7 +545,13 @@ def _compose_record(candidate_sha: str, blocking_names: set[str],
 
 def _write_record(record: dict, args) -> Path:
     """Persist the qualification record at its one canonical artifact path."""
-    requested_output = Path(args.output if args.output else args.record).resolve()
+    requested = args.output if args.output else args.record
+    requested_path = Path(requested)
+    if not requested_path.is_absolute():
+        # Relative inputs (including the DEFAULT_RECORD default) resolve
+        # against the repository root, never the current working directory.
+        requested_path = REPO_ROOT / requested_path
+    requested_output = requested_path.resolve()
     expected_output = (REPO_ROOT / DEFAULT_RECORD).resolve()
     if requested_output != expected_output:
         raise ValueError(

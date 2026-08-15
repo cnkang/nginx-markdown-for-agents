@@ -85,7 +85,7 @@ jobs:
         working-directory: ${{ runner.temp }}
         shell: bash
         run: |
-          if rustup toolchain list | grep -q '^1\.97\.0-'; then
+          if rustup toolchain list | grep -q '^1\.97\.1-'; then
             rustup toolchain uninstall 1.97.1
           fi
 

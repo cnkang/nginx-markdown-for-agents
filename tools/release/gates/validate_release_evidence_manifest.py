@@ -292,6 +292,28 @@ def _validate_observation_state(
             f"{exc.message}")
 
 
+def _check_blocking_semantics(manifest: dict, reasons: list) -> None:
+    """Enforce the release-blocking semantics that the JSON schema cannot
+    express as structure: every entry with blocking=true must have
+    status=pass, and no blocking entry may be pending.  The generator
+    derives run_status from this rule; the gate re-checks it so a real
+    release cannot pass a manifest whose blocking entries did not pass."""
+    entries = manifest.get("entries")
+    if not isinstance(entries, list):
+        return
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("blocking") is not True:
+            continue
+        status = entry.get("status")
+        if status != "pass":
+            reasons.append(
+                f"blocking-pending: entries[{index}] "
+                f"(domain={entry.get('domain')!r}) is blocking with "
+                f"status={status!r}; blocking entries must pass")
+
+
 def _resolve_expected_sha(args) -> str | None:
     """Resolve the frozen candidate SHA from the release-candidate-sha
     manifest, or use the explicit --expected-sha when given."""
@@ -337,6 +359,7 @@ def run_real_gate(args) -> int:
                 print(f"ERROR: {reason}", file=sys.stderr)
         return 1
     _validate_evidence_schema(manifest, reasons)
+    _check_blocking_semantics(manifest, reasons)
     _validate_observation_state(reasons, expected_sha, manifest_path.parent)
 
     if reasons:

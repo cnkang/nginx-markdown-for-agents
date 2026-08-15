@@ -84,14 +84,38 @@ def _forbidden_feature_consumers(
         yield from _forbidden_feature_list(value, path)
 
 
+def _forbidden_feature_table(
+    table: dict, path: tuple[str, ...]
+) -> Iterator[tuple[str, str]]:
+    """Walk every list-valued child of a `[features]` table.
+
+    Feature names vary, so each list-valued child is inspected with its
+    full path; nested dict children recurse.
+    """
+    for sub_key, sub_child in table.items():
+        sub_path = (*path, str(sub_key))
+        if isinstance(sub_child, list):
+            yield from _forbidden_feature_values(sub_child, sub_path)
+        elif isinstance(sub_child, dict):
+            yield from _forbidden_feature_dict(sub_child, sub_path)
+
+
 def _forbidden_feature_dict(
     value: dict, path: tuple[str, ...]
 ) -> Iterator[tuple[str, str]]:
     """Walk a parsed TOML table for feature consumers."""
     for key, child in value.items():
         child_path = (*path, str(key))
-        if key == "features" and isinstance(child, list):
-            yield from _forbidden_feature_values(child, child_path)
+        if key == "features":
+            # A `[features]` table (or `features = [...]` array) may carry
+            # any number of list-valued feature declarations.  Inspect every
+            # list-valued child with its full path, regardless of the
+            # feature name, so a forbidden name inside an arbitrary feature
+            # array is still caught.
+            if isinstance(child, list):
+                yield from _forbidden_feature_values(child, child_path)
+            elif isinstance(child, dict):
+                yield from _forbidden_feature_table(child, child_path)
             continue
         if isinstance(child, dict) and key in ("features", "options"):
             yield from _forbidden_feature_dict(child, child_path)
