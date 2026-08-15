@@ -77,7 +77,7 @@ while IFS= read -r -d '' file; do
 
             # Skip declarations with inline whole-init (= {0}, = { ... }, memset
             # on the same line, or a helper call).
-            if echo "$content" | grep -qE '=\s*\{|=\s*0;|memset|memzero|_init\('; then
+            if echo "$content" | grep -qE '=[[:space:]]*\{|=[[:space:]]*0;|memset|memzero|_init\('; then
                 continue
             fi
 

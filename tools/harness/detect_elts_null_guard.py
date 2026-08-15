@@ -36,8 +36,6 @@ DEFAULT_DIR = REPO_ROOT / "components/nginx-module/src"
 
 # `foo->elts` or `foo.elts` access.
 ELTS_ACCESS_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*->\s*elts\b")
-# Element indexing of a pointer: `ptr[i]`.
-INDEX_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\[")
 # Loop over part->next (chain traversal) signals.
 CHAIN_LOOP_RE = re.compile(
     r"\bpart\s*=\s*part\s*->\s*next\b|for\s*\([^)]*\bpart\b[^)]*->\s*next"
@@ -127,8 +125,13 @@ def _elts_holders(body: str) -> set[str]:
 
 def _holder_is_safe(body: str, holder: str) -> bool:
     """True when the elts holder is protected by a nelts bound or NULL guard."""
-    if not INDEX_RE.search(body):
-        return True  # never indexed
+    # Only the holder's own indexing is relevant: another variable being
+    # indexed in the same function must not make this holder look unsafe,
+    # and a nelts bound is only accepted when this holder is actually
+    # indexed (scoped to the holder, not any unrelated part->nelts use).
+    holder_index_re = re.compile(rf"\b{re.escape(holder)}\s*\[")
+    if not holder_index_re.search(body):
+        return True  # this holder is never indexed
     if re.search(r"\bpart\s*->\s*nelts\b", body):
         return True  # standard bounded iteration
     guard_re = re.compile(
