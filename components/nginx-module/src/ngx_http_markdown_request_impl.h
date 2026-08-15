@@ -1555,9 +1555,13 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
             ctx->conversion.bypass_counted = 1;
         }
         rc = ngx_http_markdown_forward_headers(r, ctx);
-        if (rc != NGX_OK) {
+        if (rc != NGX_OK && rc != NGX_AGAIN) {
             return rc;
         }
+        /* Header-chain NGX_AGAIN = headers queued by the write filter
+         * (NGINX core model).  Continue so the pass-through body is
+         * always delivered; returning early here sends headers only
+         * under backpressure. */
         return ngx_http_next_body_filter(r, in);
     }
 

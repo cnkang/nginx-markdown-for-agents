@@ -13,6 +13,7 @@
 #include <ngx_http.h>
 
 struct MarkdownOptions;
+struct MarkdownResult;
 
 typedef struct ngx_http_markdown_loc_validation_summary_s {
     size_t      min_applicable_conversion_memory;
@@ -1250,6 +1251,13 @@ typedef struct {
 
             /* Continue finalize() after tail-output backpressure drains. */
             ngx_flag_t                    finalize_after_pending;
+
+            /* Finalize output deferred behind a header NGX_AGAIN retry.
+             * Body output must not run ahead of headers, so the final
+             * markdown chunk waits for the header retry to succeed.  The
+             * pointer owns the MarkdownResult and its Rust-allocated
+             * buffers; release with markdown_result_free(). */
+            struct MarkdownResult        *finalize_pending_result;
 
             /* Pending output is a fail-open delivery; resume_pending
              * should increment results.failopen_count on downstream

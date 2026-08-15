@@ -1271,6 +1271,20 @@ ngx_http_markdown_decomp_brotli_stream(
 
         if (result == BROTLI_DECODER_RESULT_SUCCESS) {
             output->total_out = output->size - available_out;
+            if (available_in > 0) {
+                /* Trailing compressed bytes after stream completion are
+                 * a format violation.  The streaming path classifies
+                 * this case as FORMAT_ERROR; keep both paths aligned
+                 * (parity rule). */
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                              "markdown: brotli trailing data: %uz bytes "
+                              "after stream completion, "
+                              "category=conversion",
+                              available_in);
+                return ngx_http_markdown_decomp_brotli_fail(
+                    decoder, output->data,
+                    NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR);
+            }
             return NGX_OK;
         }
 
