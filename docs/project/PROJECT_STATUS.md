@@ -677,7 +677,7 @@ View the latest CI status: [GitHub Actions](https://github.com/cnkang/nginx-mark
 - macOS (Apple Silicon and Intel)
 - Linux (x86_64 and aarch64)
 - NGINX 1.24.0 and later
-- Rust 1.97.0 and later for source builds
+- Rust 1.97.1 and later for source builds (pinned baseline, MSRV 1.97)
 
 ### Docker Support
 - Official NGINX base images
