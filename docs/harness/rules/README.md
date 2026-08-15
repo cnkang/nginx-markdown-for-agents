@@ -15,7 +15,7 @@ related rules by domain with YAML frontmatter for path-scoped loading.
 | 9, 49, 63 | Docs & Tooling Drift | [docs-tooling.md](docs-tooling.md) | README, validators, metric names, THIRD-PARTY-NOTICES, non-native-reader writing style (STE-inspired) |
 | 10 | Parser & Regex | [parser-regex.md](parser-regex.md) | ReDoS, deterministic parsing |
 | 11, 18, 41 | Shell | [shell.md](shell.md) | portability, hygiene, POSIX ERE |
-| 12, 32, 33 | Security & CWE | [security-cwe.md](security-cwe.md) | path traversal, integer overflow |
+| 12, 32, 33, 68 | Security & CWE | [security-cwe.md](security-cwe.md) | path traversal, integer overflow, access-before-method ordering |
 | 13, 54, 66 | CI Gating | [ci-gating.md](ci-gating.md) | workflow filters, artifact upload, Homebrew formula, release artifact path traversal, local GCC parity gate |
 | 14, 16, 20, 22, 25 | Testing & Coverage | [testing-coverage.md](testing-coverage.md) | regression, dead stores, Rust infra |
 | 15, 46, 53 | FFI & Cross-Language | [ffi-crosslang.md](ffi-crosslang.md) | ABI, header sync, lifecycle, panic safety, handle ownership, fat-pointer safety |

@@ -27,6 +27,19 @@ Required:
 - Single-header shortcut functions (for example "find first occurrence of
   header X") must document the first-match-only limitation explicitly in
   their doc comment.
+- **elts NULL guard**: when a chain part can carry `nelts != 0` with a
+  NULL `elts` pointer (partial/boundary list state — a real crash class
+  found in review), guard the dereference:
+  ```c
+  headers = part->elts;
+  if (headers == NULL && part->nelts != 0) {
+      return;  /* or continue — do not index a NULL elts */
+  }
+  ```
+  Standard NGINX iterations bounded by `i < part->nelts` are exempt
+  (NGINX guarantees elts non-NULL whenever nelts > 0 for request-parsed
+  lists); you must add the guard when iterating lists whose construction
+  state is not fully controlled by the request parser.
 - When aggregating flags or values from multiple headers of the same name
   (for example `X-Forwarded-For`), check the aggregated result before
   branching on per-header flags, so a later header cannot override an
@@ -36,6 +49,9 @@ Verification:
 - `grep -rn 'part.nelts\|part.elts' components/nginx-module/src/` — confirm
   every hit is inside a `while (part)` / `for (;; part = part->next)` loop.
 - `grep -rn 'r->headers_in.headers.part\b' components/nginx-module/src/`
+- `python3 tools/harness/detect_elts_null_guard.py` — advisory local
+  gate flagging elts indexing without a nelts bound or NULL guard in
+  chain loops.
 
 ---
 

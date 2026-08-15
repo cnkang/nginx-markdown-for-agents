@@ -1,6 +1,6 @@
 ---
 domain: security-cwe
-rules: [12, 32, 33]
+rules: [12, 32, 33, 68]
 paths:
   - "tools/**"
   - "components/nginx-module/src/**"
@@ -109,3 +109,33 @@ Verification:
 - `make harness-security-checks`
 - Regression tests covering symlink escapes for both write targets and
   CLI-selected executables
+
+---
+
+### 68. Access control before method handling in HTTP handlers
+Historical issues: access-after-method ordering in the diagnostics
+endpoint handler regressed repeatedly (three separate review rounds).
+Denied requests disclosed the endpoint's 405 behavior and Allow header
+to unauthorized callers.
+
+Required:
+- HTTP content handlers that reject unsupported methods (405
+  `NGX_HTTP_NOT_ALLOWED` or a `*_method_not_allowed()` helper) must
+  evaluate access control **before** the method-rejection branch.
+- A denied request must not receive a 405 response, an `Allow` header,
+  or any handler-behavior signal.  Access denial takes precedence over
+  method rejection.
+- The access check (`check_access` / `ngx_http_core_access_phase` or a
+  module-specific access helper) must appear earlier in source order
+  than any `NGX_HTTP_NOT_ALLOWED` assignment.
+- Handlers that never reject methods are exempt.
+
+Verification:
+- `python3 tools/harness/detect_access_before_method.py` — advisory
+  local gate; `--strict` promotes findings to violations (blocking
+  harness-tooling CI check via `make harness-security-checks` for
+  selected `harness_tooling` paths).
+- `PYTHONPATH=tools python3 -m pytest
+  tools/harness/tests/test_detect_access_before_method.py -q --tb=short`
+  — detector regression tests (clean ordering, bad ordering, exempt
+  handlers, non-handler skip).
