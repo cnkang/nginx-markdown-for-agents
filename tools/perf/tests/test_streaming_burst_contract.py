@@ -15,7 +15,12 @@ def _location_block(source: str, location: str) -> str:
         f"location block {location!r} not found in NATIVE_STREAMING_E2E"
     )
     start = source.index(marker)
-    end = source.index("\n        }", start)
+    terminator = "\n        }"
+    assert terminator in source[start:], (
+        f"location block {location!r} has no closing terminator "
+        f"{terminator.strip()!r} in NATIVE_STREAMING_E2E"
+    )
+    end = source.index(terminator, start)
     return source[start:end]
 
 
