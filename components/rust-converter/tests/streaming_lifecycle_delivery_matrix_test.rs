@@ -1517,14 +1517,7 @@ mod delivery_matrix {
         for cmd in &result.side_effects {
             assert!(matches!(
                 cmd.kind,
-                SideEffectKind::LatchTerminalSent
-                    | SideEffectKind::EmitFailureLedger
-                    | SideEffectKind::ClearInflightAndPending
-                    | SideEffectKind::SetSafeFinishOutputLoss
-                    | SideEffectKind::SetSafeFinishTerminalSendFailed
-                    | SideEffectKind::StoreFailureLedger
-                    | SideEffectKind::RecordPostcommitAbort
-                    | SideEffectKind::TransferFailureToFullBuffer
+                SideEffectKind::LatchTerminalSent | SideEffectKind::EmitFailureLedger
             ));
         }
     }

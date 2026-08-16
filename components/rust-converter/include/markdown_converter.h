@@ -754,9 +754,10 @@ typedef struct MarkdownOptions {
    * Unified memory budget in bytes (0 = use per-engine defaults).
    *
    * When non-zero, NGINX may use this value to derive full-buffer
-   * max_size when no explicit markdown_limits memory= is set. Rust
-   * currently enforces this budget only for streaming/incremental
-   * paths; full-buffer relies on NGINX-side buffering limits.
+   * max_size when no explicit markdown_limits memory= is set. The
+   * full-buffer engine enforces this budget as a cap on generated
+   * Markdown output (check_output_budget); set_output_budget(0) selects
+   * the 64 MiB default. Streaming/incremental paths enforce it too.
    * Populated from `markdown_limits memory=<size>` (Config V2).
    */
   uint64_t memory_budget;
@@ -1257,11 +1258,11 @@ typedef struct FFIDecompResult {
  * - `ENCODING_CHAIN_MALFORMED` (1): malformed grammar; the C caller emits
  *   `ENCODING_HEADER_INVALID` during outer precommit routing, starts no
  *   decoder, and mutates no response header
- * - `ENCODING_CHAIN_UNKNOWN_TOKEN` (2): capability bypass; the entire
- *   conversion is bypassed in precommit and the original response passes
- *   through unchanged with no error-policy dispatch
+ * - `ENCODING_CHAIN_UNKNOWN_TOKEN` (2): capability bypass; precommit
+ *   routing applies the configured error policy — `reject` returns the
+ *   configured status, `pass` forwards the original response unchanged
  * - `ENCODING_CHAIN_DEPTH_EXCEEDED` (3): more than 3 non-identity layers;
- *   same capability-bypass semantics as unknown-token
+ *   same error-policy semantics as unknown-token
  */
 typedef struct FFIEncodingChainResult {
   /**
