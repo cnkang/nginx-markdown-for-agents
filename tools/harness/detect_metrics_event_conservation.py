@@ -58,7 +58,7 @@ RENDERER_RE = re.compile(r"ngx_http_markdown_metrics_to_v1\s*\(")
 # v1->requests.aborted assignment must source from terminal_aborted_total.
 # Capture the full RHS expression up to ';' then check its final field.
 ABORTED_ASSIGN_RE = re.compile(
-    r"v1->requests\.aborted\s*=\s*([^;]+);"
+    r"v1->requests\.aborted\s*=\s*([^;]+?);"
 )
 # The per-path postcommit abort counter is stale for v1 terminal outcome.
 STALE_ABORT_SRC = "streaming_failure_postcommit_abort"
@@ -70,7 +70,7 @@ ABORTED_SOURCE_FIELD = "terminal_aborted_total"
 # assign failed_closed; a missing deduction in one branch must not be
 # masked by the other branch still containing the counter name).
 FAILED_CLOSED_ASSIGN_RE = re.compile(
-    r"failed_closed\s*=\s*([^;]+);"
+    r"failed_closed\s*=\s*([^;]+?);"
 )
 
 
@@ -119,7 +119,7 @@ def _directive_kind(stripped: str) -> str:
         return "if"
     if stripped.startswith("#endif"):
         return "endif"
-    if stripped.startswith("#else") or stripped.startswith("#elif"):
+    if stripped.startswith(("#else", "#elif")):
         return "else"
     return "other"
 
@@ -234,7 +234,7 @@ def _audit_failed_closed(
     return violations, reviews
 
 
-def audit(path: Path, strict: bool) -> tuple[list[str], list[str]]:
+def audit(path: Path) -> tuple[list[str], list[str]]:
     """Return (violations, reviews)."""
     resolved = validate_read_path(path, purpose="metrics implementation")
     if not resolved.exists():
@@ -280,7 +280,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        violations, reviews = audit(args.path, args.strict)
+        violations, reviews = audit(args.path)
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2

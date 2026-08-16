@@ -372,35 +372,23 @@ def test_validate_schema_rejects_malformed_entry():
     assert errors
 
 
-def test_check_file_reports_missing_registered_target():
+def test_check_file_reports_missing_registered_target(monkeypatch):
     """A registered but absent target is a check failure."""
-    saved_root = rmd.ROOT
-    saved_registry = rmd.SECTION_REGISTRY
-    try:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            rmd.ROOT = Path(temp_dir)
-            rmd.SECTION_REGISTRY = {"missing.md": ["support-matrix"]}
-            errors = rmd.check_file("missing.md", [], MINIMAL_MATRIX)
-            assert errors == ["missing.md: target file not found"]
-    finally:
-        rmd.ROOT = saved_root
-        rmd.SECTION_REGISTRY = saved_registry
+    with tempfile.TemporaryDirectory() as temp_dir:
+        monkeypatch.setattr(rmd, "ROOT", Path(temp_dir))
+        monkeypatch.setattr(rmd, "SECTION_REGISTRY", {"missing.md": ["support-matrix"]})
+        errors = rmd.check_file("missing.md", [], MINIMAL_MATRIX)
+        assert errors == ["missing.md: target file not found"]
 
 
-def test_check_file_reports_target_without_markers():
+def test_check_file_reports_target_without_markers(monkeypatch):
     """A registered target without markers cannot be considered synchronized."""
-    saved_root = rmd.ROOT
-    saved_registry = rmd.SECTION_REGISTRY
-    try:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            rmd.ROOT = Path(temp_dir)
-            rmd.SECTION_REGISTRY = {"plain.md": ["support-matrix"]}
-            Path(temp_dir, "plain.md").write_text("# no generated section\n")
-            errors = rmd.check_file("plain.md", [], MINIMAL_MATRIX)
-            assert errors == ["plain.md: no release-matrix markers"]
-    finally:
-        rmd.ROOT = saved_root
-        rmd.SECTION_REGISTRY = saved_registry
+    with tempfile.TemporaryDirectory() as temp_dir:
+        monkeypatch.setattr(rmd, "ROOT", Path(temp_dir))
+        monkeypatch.setattr(rmd, "SECTION_REGISTRY", {"plain.md": ["support-matrix"]})
+        Path(temp_dir, "plain.md").write_text("# no generated section\n")
+        errors = rmd.check_file("plain.md", [], MINIMAL_MATRIX)
+        assert errors == ["plain.md: no release-matrix markers"]
 
 
 # ---------------------------------------------------------------------------
