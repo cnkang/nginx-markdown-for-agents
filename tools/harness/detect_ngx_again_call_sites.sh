@@ -13,6 +13,14 @@
 # functions.  Adding a new API that can return NGX_AGAIN requires registering
 # it here (and in the rule document) so every call site is audited.
 #
+# Heuristic scope (tools P3-3): this is an audit-assist heuristic, NOT a
+# completeness proof.  Known limitations: (a) a windowed scan can let one
+# call site's NGX_AGAIN mention mask a sibling call site in the same
+# function; (b) the folded pattern `if (rc == NGX_OK) {...} else {error}`
+# (success branch + implicit NGX_AGAIN fall-through) is not matched; (c) only
+# a bare `return rc;` with no nearby NGX_AGAIN mention is reported.  Manual
+# review of each reported-and-each-missed site remains authoritative.
+#
 # Usage:
 #   bash tools/harness/detect_ngx_again_call_sites.sh [directory]
 #     directory defaults to components/nginx-module/src

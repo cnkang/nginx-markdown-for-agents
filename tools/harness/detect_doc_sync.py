@@ -47,6 +47,7 @@ HANDLERS_PATH = Path(
 CHART_TEMPLATE_PATH = Path("charts/nginx-markdown/templates/configmap.yaml")
 CHART_VALUES_PATH = Path("charts/nginx-markdown/values.yaml")
 CONFIGURATION_GUIDE_PATH = Path("docs/guides/CONFIGURATION.md")
+MIGRATION_GUIDE_PATH = Path("docs/guides/MIGRATION-0.9.2.md")
 PUBLIC_INVENTORY_PATH = Path("docs/architecture/PUBLIC_SURFACE_INVENTORY.md")
 STREAMING_TROUBLESHOOTING_PATH = Path(
     "docs/guides/streaming-troubleshooting.md"
@@ -408,6 +409,34 @@ def _check_public_inventory(directives: str, inventory: str) -> List[str]:
     return errors
 
 
+def _check_migration_removed_table(directives: str, migration: str) -> List[str]:
+    """Require every reject-only directive to appear in the 0.9.2 migration
+    removed-directive table with a replacement (tests P3-2: the reject-only
+    test list and the migration replacement guide must not drift)."""
+    errors: List[str] = []
+    _, rejected = _directive_registry(directives)
+    for name in rejected:
+        if f"`{name}`" not in migration:
+            errors.append(
+                f"MIGRATION-0.9.2.md: removed directive {name} is missing from "
+                "the migration replacement table"
+            )
+    return errors
+
+
+def _check_migration_removed_table_contract(
+    project_root: Path, directives: str | None, errors: List[str]
+) -> List[str]:
+    """Read the migration guide and run the removed-table consistency check.
+
+    Extracted so check_public_config_contract stays under the complexity
+    threshold."""
+    migration = _read_required(project_root, MIGRATION_GUIDE_PATH, errors)
+    if directives is None or migration is None:
+        return []
+    return _check_migration_removed_table(directives, migration)
+
+
 def _check_otel_reject_docs(directives: str, guide: str) -> List[str]:
     """Require every reject-only OTel control to be documented as rejected."""
     errors: List[str] = []
@@ -549,6 +578,7 @@ def check_public_config_contract(project_root: Path) -> List[str]:
         errors.extend(_check_public_inventory(directives, inventory))
     if directives is not None and guide is not None:
         errors.extend(_check_otel_reject_docs(directives, guide))
+    errors.extend(_check_migration_removed_table_contract(project_root, directives, errors))
     if troubleshooting is not None:
         errors.extend(_check_observability_examples(troubleshooting))
     if directives is not None and profile_inventory is not None:
