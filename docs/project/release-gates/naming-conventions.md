@@ -105,8 +105,11 @@ are internal transition names, not a second operator-visible reason taxonomy:
 
 The generator creates the authoritative operator-visible reason-code list from
 `components/rust-converter/reason_registry.toml`. The Rust `ReasonCode` registry
-governs only the Prometheus values in the `reason` label: they must remain
-lowercase `snake_case` and match the decision-log `reason=` codes exactly.
+is authoritative for **both** the decision-log `reason=` codes and the
+Prometheus `reason` label values. They must match exactly and use lowercase
+`snake_case`. Uppercase streaming lifecycle transition names cannot appear as
+`reason` values. Keep them internal or expose them only through a separate
+transition metric (see the metrics registry).
 Streaming accessors may retain internal uppercase transition labels only where
 the metrics registry explicitly defines them.
 
