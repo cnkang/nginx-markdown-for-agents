@@ -492,6 +492,17 @@ ngx_http_markdown_streaming_decomp_feed_header(
 }
 
 
+static void
+ngx_http_markdown_streaming_decomp_set_origin(
+    ngx_http_markdown_decomp_failure_origin_e *origin,
+    ngx_http_markdown_decomp_failure_origin_e value)
+{
+    if (origin != NULL) {
+        *origin = value;
+    }
+}
+
+
 /*
  * Create a streaming decompressor for the given compression type.
  *
@@ -511,23 +522,20 @@ ngx_http_markdown_streaming_decomp_create_with_origin(
     ngx_http_markdown_streaming_decomp_t  *decomp;
     ngx_pool_cleanup_t                    *cln;
 
-    if (origin != NULL) {
-        *origin = NGX_HTTP_MD_DECOMP_ORIGIN_NONE;
-    }
+            ngx_http_markdown_streaming_decomp_set_origin(
+            origin, NGX_HTTP_MD_DECOMP_ORIGIN_NONE);
 
     if (pool == NULL) {
-        if (origin != NULL) {
-            *origin = NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
-        }
+                    ngx_http_markdown_streaming_decomp_set_origin(
+                origin, NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL);
         return NULL;
     }
 
     decomp = ngx_pcalloc(pool,
         sizeof(ngx_http_markdown_streaming_decomp_t));
     if (decomp == NULL) {
-        if (origin != NULL) {
-            *origin = NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
-        }
+                    ngx_http_markdown_streaming_decomp_set_origin(
+                origin, NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION);
         return NULL;
     }
 
@@ -615,9 +623,8 @@ ngx_http_markdown_streaming_decomp_create_with_origin(
                 ngx_http_markdown_brotli_alloc,
                 ngx_http_markdown_brotli_free, decomp);
         if (decomp->state.brotli == NULL) {
-            if (origin != NULL) {
-                *origin = NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
-            }
+                            ngx_http_markdown_streaming_decomp_set_origin(
+                    origin, NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION);
             return NULL;
         }
         decomp->initialized = 1;
@@ -625,9 +632,8 @@ ngx_http_markdown_streaming_decomp_create_with_origin(
 #endif
 
     default:
-        if (origin != NULL) {
-            *origin = NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
-        }
+                    ngx_http_markdown_streaming_decomp_set_origin(
+                origin, NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL);
         return NULL;
     }
 
@@ -636,9 +642,8 @@ ngx_http_markdown_streaming_decomp_create_with_origin(
     if (cln == NULL) {
         ngx_http_markdown_streaming_decomp_cleanup(
             decomp);
-        if (origin != NULL) {
-            *origin = NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
-        }
+                    ngx_http_markdown_streaming_decomp_set_origin(
+                origin, NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION);
         return NULL;
     }
 

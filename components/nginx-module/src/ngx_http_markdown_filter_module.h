@@ -1690,7 +1690,6 @@ extern ngx_module_t ngx_http_markdown_filter_module;
 
 /* Forward declarations for FFI types used in public module interfaces */
 struct MarkdownConverterHandle;
-struct MarkdownResult;
 
 /*
  * Accept header negotiation
