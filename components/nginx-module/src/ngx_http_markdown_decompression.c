@@ -482,6 +482,11 @@ ngx_http_markdown_detect_compression(ngx_http_request_t *r)
      * precommit path parses comma-separated values with the Rust chain
      * validator; do not emit the single-token "unsupported" warning before
      * that parser has classified a valid multi-layer response.
+     *
+     * Intentional (C-P3-2): a comma-containing value is reported UNKNOWN
+     * here so the single-token classifier does not double-report what the
+     * chain parser owns; the precommit chain validator then classifies the
+     * real layers (valid multi-layer chains still reach decompression).
      */
     if (ngx_strlchr(h->value.data, h->value.data + h->value.len, ',') != NULL) {
         return NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN;

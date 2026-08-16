@@ -6956,6 +6956,59 @@ test_streaming_stage_handler_failure_category_routing(void)
 }
 
 /*
+ * C-P2-2: abandon_pending_after_fatal must release pending_header_output.
+ *
+ * The fatal path clears every module-owned continuation; pending_header_output
+ * is module-owned Rust memory produced before header commit, so it must be
+ * freed there too or it leaks when the request ends without a successful
+ * header delivery.
+ */
+static void
+test_abandon_pending_after_fatal_releases_pending_header_output(void)
+{
+    ngx_http_request_t       r;
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_pool_t               pool;
+    ngx_connection_t         conn;
+    ngx_log_t                log;
+    ngx_event_t              read_event;
+    ngx_http_markdown_ctx_t *saved_ctx;
+    unsigned int             saved_free_calls;
+
+    memset(&r, 0, sizeof(r));
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&pool, 0, sizeof(pool));
+    memset(&conn, 0, sizeof(conn));
+    memset(&log, 0, sizeof(log));
+    memset(&read_event, 0, sizeof(read_event));
+
+    r.pool = &pool;
+    r.connection = &conn;
+    conn.log = &log;
+    conn.read = &read_event;
+    ctx.streaming.classify.input_disposition = NGX_HTTP_MD_INPUT_TERMINAL;
+    ctx.streaming.pending_meta.pending_header_output =
+        (u_char *) "deferred-header-output";
+    ctx.streaming.pending_meta.pending_header_output_len = 21;
+
+    saved_ctx = r.ctx;
+    r.ctx = &ctx;
+    saved_free_calls = g_output_free_calls;
+
+    ngx_http_markdown_streaming_abandon_pending_after_fatal(&r, &ctx);
+
+    TEST_ASSERT(ctx.streaming.pending_meta.pending_header_output == NULL,
+        "abandon must clear pending_header_output");
+    TEST_ASSERT(ctx.streaming.pending_meta.pending_header_output_len == 0,
+        "abandon must clear pending_header_output_len");
+    TEST_ASSERT(g_output_free_calls == saved_free_calls + 1,
+        "abandon must release the Rust-owned pending header output buffer");
+
+    r.ctx = saved_ctx;
+    TEST_PASS("abandon_pending_after_fatal releases pending_header_output");
+}
+
+/*
  * Test entry point.  Runs all streaming_impl unit test functions in
  * sequence.  Prints a banner before and after the test run.  Returns 0
  * on success; individual test assertions abort via TEST_ASSERT on failure.
@@ -7011,6 +7064,7 @@ main(void)
     test_streaming_decompression_error_metric_mapping();
     test_streaming_decomp_error_origin_classification();
     test_streaming_stage_handler_failure_category_routing();
+    test_abandon_pending_after_fatal_releases_pending_header_output();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");
