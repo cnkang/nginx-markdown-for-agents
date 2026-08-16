@@ -1210,6 +1210,10 @@ pub unsafe extern "C" fn markdown_parse_encoding_chain(
     if result.is_null() {
         return ENCODING_CHAIN_INVALID_ARGS;
     }
+    // Initialize the caller-provided output storage before creating a
+    // mutable reference (same pattern as markdown_build_header_plan and
+    // the other FFI export entry points).
+    unsafe { ptr::write(result, std::mem::zeroed()) };
     let result_ref = unsafe { &mut *result };
     reset_encoding_chain_result(result_ref);
 
