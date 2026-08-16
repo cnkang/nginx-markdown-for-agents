@@ -98,17 +98,6 @@ mod delivery_matrix {
         }
     }
 
-    fn again_outcome() -> ActionOutcome {
-        ActionOutcome {
-            ngx_result: NgxResult::Again,
-            failure_site: None,
-            error_origin: None,
-            produced_closing_bytes: false,
-            /* Neutral: pending_kind is action-specific (P3-1 validation). */
-            pending_kind: None,
-        }
-    }
-
     fn again_closing_outcome() -> ActionOutcome {
         ActionOutcome {
             ngx_result: NgxResult::Again,
