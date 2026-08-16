@@ -17,7 +17,7 @@ http {
     markdown_error_policy pass;
     markdown_limits conversion_memory=64m conversion_timeout=10s
         parser_memory=32m parser_timeout=5s streaming_buffer=2m
-        decompressed_size=20m decompression_ratio=100 max_inflight=64;
+        decompressed_size=10m decompression_ratio=100 max_inflight=64;
 
     server {
         listen 8080;
@@ -94,7 +94,7 @@ Example:
 ```nginx
 markdown_limits conversion_timeout=10s parser_timeout=5s
     conversion_memory=64m parser_memory=32m streaming_buffer=2m
-    decompressed_size=20m decompression_ratio=100 max_inflight=64;
+    decompressed_size=10m decompression_ratio=100 max_inflight=64;
 ```
 
 The bounds are cumulative where the decoder has multiple gzip members. The
