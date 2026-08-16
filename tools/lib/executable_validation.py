@@ -24,6 +24,7 @@ _APPROVED_EXECUTABLE_DIRS = (
 
 # Executables that may be Rustup tool shims (resolved through ~/.cargo/bin).
 _RUSTUP_SHIM_TOOLS = frozenset({"cargo", "rustfmt"})
+_RUSTUP_DIR_NAME = ".rustup"
 
 
 def _trusted_roots() -> tuple[Path, ...]:
@@ -100,7 +101,7 @@ def _active_rustup_toolchain() -> str | None:
         if directory_toolchain:
             return _expand_toolchain_name(directory_toolchain)
 
-    settings = Path.home() / ".rustup" / "settings.toml"
+    settings = Path.home() / _RUSTUP_DIR_NAME / "settings.toml"
     try:
         content = settings.read_text(encoding="utf-8")
     except (OSError, UnicodeError):
@@ -123,7 +124,7 @@ def _expand_toolchain_name(channel: str) -> str:
     """
     try:
         toolchain_root = (
-            Path.home() / ".rustup" / "toolchains").resolve(strict=True)
+            Path.home() / _RUSTUP_DIR_NAME / "toolchains").resolve(strict=True)
     except (OSError, RuntimeError, KeyError):
         return channel
     if (toolchain_root / channel).is_dir():
@@ -148,7 +149,7 @@ def _is_rustup_tool_shim(candidate: Path, resolved: Path, name: str) -> bool:
     except (RuntimeError, KeyError):
         return False
     tool_shim = home / ".cargo" / "bin" / name
-    rustup_toolchains = home / ".rustup" / "toolchains"
+    rustup_toolchains = home / _RUSTUP_DIR_NAME / "toolchains"
     if candidate != tool_shim:
         return False
     if resolved.name == name and rustup_toolchains.resolve() in resolved.parents:
@@ -170,7 +171,7 @@ def _is_rustup_tool_shim(candidate: Path, resolved: Path, name: str) -> bool:
         tool = toolchain / "bin" / name
         try:
             tool_resolved = tool.resolve(strict=True)
-        except (FileNotFoundError, OSError):
+        except OSError:
             return False
         return (
             tool_resolved.name == name

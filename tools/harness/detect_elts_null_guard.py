@@ -35,7 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DIR = REPO_ROOT / "components/nginx-module/src"
 
 # `foo->elts` or `foo.elts` access.
-ELTS_ACCESS_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*->\s*elts\b")
+ELTS_ACCESS_RE = re.compile(r"\b(\w+)\s*->\s*elts\b")
 # Loop over part->next (chain traversal) signals.
 CHAIN_LOOP_RE = re.compile(
     r"\bpart\s*=\s*part\s*->\s*next\b|for\s*\([^)]*\bpart\b[^)]*->\s*next"

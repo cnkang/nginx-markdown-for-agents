@@ -43,7 +43,7 @@ DEFAULT_DIR = REPO_ROOT / "components/nginx-module/src"
 # switch) never match because their condition is followed by '{' or ';',
 # not a bare ')' at end-of-line.
 FUNC_DEF_RE = re.compile(
-    r"^(?:[A-Za-z_][A-Za-z0-9_ \t*]*\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\([^;]*\)\s*$",
+    r"^(?:\w[\w \t*]*\s+)?(\w+)\s*\([^;]*\)\s*$",
     re.MULTILINE,
 )
 # Function may span lines: collect braces by scanning from a def line.
@@ -55,7 +55,7 @@ ACCESS_CALL_RE = re.compile(
 )
 # Method-rejection signals (405).
 METHOD_REJECT_RE = re.compile(
-    r"\bNGX_HTTP_NOT_ALLOWED\b|\b[A-Za-z_][A-Za-z0-9_]*method_not_allowed\s*\("
+    r"\bNGX_HTTP_NOT_ALLOWED\b|\b\w+method_not_allowed\s*\("
 )
 # r->method reference (handler detection).
 METHOD_REF_RE = re.compile(r"\br->method\b")
@@ -116,7 +116,7 @@ def audit_dir(directory: Path, strict: bool) -> tuple[list[str], list[str]]:
             [],
         )
     for path in sorted(directory.glob("*.c")) + sorted(directory.glob("*.h")):
-        v, r = audit_file(path, strict)
+        v, r = audit_file(path)
         violations.extend(v)
         reviews.extend(r)
     return violations, reviews
@@ -133,7 +133,7 @@ def _strip_literals_and_comments(text: str) -> str:
     return _TOKEN_RE.sub(lambda m: " " * len(m.group(0)), text)
 
 
-def audit_file(path: Path, strict: bool) -> tuple[list[str], list[str]]:
+def audit_file(path: Path) -> tuple[list[str], list[str]]:
     """Return (violations, reviews) for one file."""
     violations: list[str] = []
     reviews: list[str] = []

@@ -433,7 +433,7 @@ def _migration_removed_table_rows(migration: str) -> set[tuple[str, str]]:
             continue
         if not in_table:
             continue
-        if stripped.startswith("|---") or stripped.startswith("|--"):
+        if stripped.startswith(("|---", "|--")):
             continue
         if not stripped.startswith("|"):
             in_table = False
@@ -471,7 +471,7 @@ def _check_migration_removed_table(directives: str, migration: str) -> List[str]
 
 
 def _check_migration_removed_table_contract(
-    project_root: Path, directives: str | None, errors: List[str]
+    project_root: Path, directives: str | None
 ) -> List[str]:
     """Read the migration guide and run the removed-table consistency check.
 
@@ -626,7 +626,7 @@ def check_public_config_contract(project_root: Path) -> List[str]:
         errors.extend(_check_public_inventory(directives, inventory))
     if directives is not None and guide is not None:
         errors.extend(_check_otel_reject_docs(directives, guide))
-    errors.extend(_check_migration_removed_table_contract(project_root, directives, errors))
+    errors.extend(_check_migration_removed_table_contract(project_root, directives))
     if troubleshooting is not None:
         errors.extend(_check_observability_examples(troubleshooting))
     if directives is not None and profile_inventory is not None:

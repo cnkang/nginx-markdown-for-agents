@@ -98,11 +98,9 @@ while IFS= read -r -d '' file; do
             fi
 
             # Ignore the API definition body (the function that IS the API)
-            if echo "$surrounding_code" | grep -qE "^${api}[[:space:]]*\(|^[a-z_]+[[:space:]]*\*?[a-z_]*[[:space:]]*${api}[[:space:]]*\("; then
-                # Definition detected only if the body starts within the window
-                if echo "$surrounding_code" | grep -qE "${api}[[:space:]]*\([^)]*\)[[:space:]]*\{"; then
-                    continue
-                fi
+            if echo "$surrounding_code" | grep -qE "^${api}[[:space:]]*\(|^[a-z_]+[[:space:]]*\*?[a-z_]*[[:space:]]*${api}[[:space:]]*\(" \
+                && echo "$surrounding_code" | grep -qE "${api}[[:space:]]*\([^)]*\)[[:space:]]*\{"; then
+                continue
             fi
 
             # Heuristic: skip when the call is the definition's first line.

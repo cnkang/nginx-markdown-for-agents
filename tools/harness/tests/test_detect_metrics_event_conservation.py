@@ -72,7 +72,7 @@ def _audit_text(content: str):
     )
     path.write_text(content, encoding="utf-8")
     try:
-        return module.audit(path, strict=False)
+        return module.audit(path)
     finally:
         path.unlink()
 
