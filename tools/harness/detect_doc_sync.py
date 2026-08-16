@@ -409,17 +409,52 @@ def _check_public_inventory(directives: str, inventory: str) -> List[str]:
     return errors
 
 
+def _migration_removed_table_rows(migration: str) -> set[tuple[str, str]]:
+    """Parse the \"| Removed Directive | Replacement |\" markdown table into
+    (directive, replacement) rows.  The header line anchors the section; a
+    non-table line ends it."""
+    rows: set[tuple[str, str]] = set()
+    in_table = False
+    for line in migration.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("| Removed Directive"):
+            in_table = True
+            continue
+        if not in_table:
+            continue
+        if stripped.startswith("|---") or stripped.startswith("|--"):
+            continue
+        if not stripped.startswith("|"):
+            in_table = False
+            continue
+        cells = [c.strip() for c in stripped.strip("|").split("|")]
+        if len(cells) >= 2:
+            directive = cells[0].strip("`").strip()
+            replacement = cells[1].strip()
+            rows.add((directive, replacement))
+    return rows
+
+
 def _check_migration_removed_table(directives: str, migration: str) -> List[str]:
-    """Require every reject-only directive to appear in the 0.9.2 migration
-    removed-directive table with a replacement (tests P3-2: the reject-only
-    test list and the migration replacement guide must not drift)."""
+    """Require every reject-only directive to appear as a ROW in the 0.9.2
+    migration removed-directive table with a non-empty replacement (tests
+    P3-2: the reject-only test list and the migration replacement guide must
+    not drift).  A prose mention elsewhere in the document does NOT satisfy
+    the check — the table row is what operators follow."""
     errors: List[str] = []
     _, rejected = _directive_registry(directives)
+    table_rows = _migration_removed_table_rows(migration)
     for name in rejected:
-        if f"`{name}`" not in migration:
+        row = next((r for r in table_rows if r[0] == name), None)
+        if row is None:
             errors.append(
-                f"MIGRATION-0.9.2.md: removed directive {name} is missing from "
-                "the migration replacement table"
+                f"MIGRATION-0.9.2.md: removed directive {name} is missing "
+                "from the migration Removed Directive table"
+            )
+        elif not row[1]:
+            errors.append(
+                f"MIGRATION-0.9.2.md: removed directive {name} has an empty "
+                "replacement cell in the migration table"
             )
     return errors
 
