@@ -160,7 +160,12 @@ def build_candidate_manifest(candidate_sha: str, created_at: str) -> dict:
     feature_digest = _canonical_digest(FEATURE_MANIFEST)
     matrix_digest = _sha256_file(REPO_ROOT / "docs/releases/release-matrix.json")
     ffi_digest = _sha256_file(ABI_HEADER)
-    performance_digest = _sha256_file(REPO_ROOT / SHORT_SOAK_SCOPE)
+    # The canonical performance environment (NGINX version, runner, rust
+    # toolchain, identity contract) is the authoritative provenance for the
+    # blocking perf evidence; short-soak-scope.json is a different artifact.
+    performance_digest = _sha256_file(
+        REPO_ROOT / "release/performance/canonical-environment.json"
+    )
     return {
         "schema_version": "release.candidate-sha-manifest.v1",
         "candidate_sha": candidate_sha,
@@ -308,7 +313,14 @@ def build_final_evidence(candidate_sha: str, generated_at: str) -> tuple[dict, d
     root = OUTPUT_ROOT
     fuzz_pass = _record_value(root / "fuzz-qualification-record.json", "blocking_pass")
     soak_status = _record_value(root / "soak-qualification-record.json")
-    performance_path = root / "performance-qualification-report.json"
+    # The blocking performance evidence is produced by the release-gate job's
+    # `make release-perf-evidence-blocking BASELINE_VERSION=092` step, which
+    # writes perf/reports/evidence-092.json.  There is no
+    # performance-qualification-report.json writer anywhere in the tree; the
+    # legacy read below was a guaranteed-fail dead path.
+    performance_path = (
+        REPO_ROOT / "perf" / "reports" / "evidence-092.json"
+    )
     performance_pass = False
     if performance_path.is_file():
         try:
@@ -317,7 +329,7 @@ def build_final_evidence(candidate_sha: str, generated_at: str) -> tuple[dict, d
             )
             performance_pass = (
                 isinstance(performance_report, dict)
-                and performance_report.get("conclusion") == "pass"
+                and performance_report.get("verdict") == "PASS"
             )
         except (json.JSONDecodeError, OSError, UnicodeDecodeError):
             performance_pass = False

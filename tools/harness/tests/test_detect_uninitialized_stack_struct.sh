@@ -52,7 +52,9 @@ run_detector() {
     local src_dir="$1"
     local output_file="$2"
 
-    bash "${DETECTOR}" "${src_dir}" >"${output_file}" 2>&1
+    # The detector is advisory by default (exit 0 on candidates); the unit
+    # test exercises the fail-closed path, so run with --strict.
+    bash "${DETECTOR}" --strict "${src_dir}" >"${output_file}" 2>&1
     return $?
 }
 
