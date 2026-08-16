@@ -242,6 +242,66 @@ There are 2 `markdown_*` command-table entries: 1 active parser entries and
     assert any("markdown_otel_metrics must be documented" in error for error in errors)
 
 
+def test_migration_removed_table_requires_row_with_replacement(tmp_path: Path) -> None:
+    """A reject-only directive must appear as a ROW in the MIGRATION removed
+    table with a non-empty replacement; a prose mention alone is not enough
+    (tests P3-2 / CR F1)."""
+    _write_valid_fixture(tmp_path)
+    directives = tmp_path / detector.DIRECTIVES_PATH
+    content = directives.read_text(encoding="utf-8").replace(
+        "};\n",
+        """\n    {
+        ngx_string("markdown_otel_metrics"),
+        NGX_CONF_FLAG,
+        ngx_http_markdown_reject_otel_directive,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        hint
+    },
+};
+""",
+    )
+    directives.write_text(content, encoding="utf-8")
+
+    # Prose mention only, no table row -> must be flagged.
+    migration = tmp_path / detector.MIGRATION_GUIDE_PATH
+    migration.write_text(
+        "`markdown_otel_metrics` is removed in 0.9.2.\n",
+        encoding="utf-8",
+    )
+    errors = detector.check_public_config_contract(tmp_path)
+    assert any(
+        "markdown_otel_metrics is missing" in error for error in errors
+    ), "prose mention must not satisfy the removed-table check"
+
+    # Table row with empty replacement -> must be flagged.
+    migration.write_text(
+        "| Removed Directive | Replacement |\n"
+        "|---|---|\n"
+        "| `markdown_otel_metrics` |  |\n",
+        encoding="utf-8",
+    )
+    errors = detector.check_public_config_contract(tmp_path)
+    assert any(
+        "markdown_otel_metrics has an empty replacement" in error for error in errors
+    ), "empty replacement cell must be flagged"
+
+    # Complete row -> no MIGRATION-table error (other contract checks may
+    # still flag the fixture, which lacks inventory/reject-only docs for the
+    # added directive — scope the assertion to the migration check only).
+    migration.write_text(
+        "| Removed Directive | Replacement |\n"
+        "|---|---|\n"
+        "| `markdown_otel_metrics` | Removed (use NGINX native OTel) |\n",
+        encoding="utf-8",
+    )
+    errors = detector.check_public_config_contract(tmp_path)
+    assert not any("MIGRATION-0.9.2.md" in error for error in errors), (
+        "complete table row must satisfy the removed-table check: "
+        + str([e for e in errors if "MIGRATION-0.9.2.md" in e])
+    )
+
+
 def test_diagnostics_example_rejects_non_production_fields(tmp_path: Path) -> None:
     _write_valid_fixture(tmp_path)
     _write(

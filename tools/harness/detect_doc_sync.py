@@ -183,6 +183,17 @@ def _read_required(
         return None
 
 
+def _read_optional(project_root: Path, relative_path: Path) -> str | None:
+    """Read a worktree file, returning None when absent or unreadable.
+
+    Used for drift-guard inputs whose absence is not a contract violation."""
+    path = project_root / relative_path
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
 def _extract_directive_entry(content: str, directive: str) -> str | None:
     """Extract one ngx_command_t initializer from the directive table."""
     pattern = re.compile(
@@ -465,8 +476,10 @@ def _check_migration_removed_table_contract(
     """Read the migration guide and run the removed-table consistency check.
 
     Extracted so check_public_config_contract stays under the complexity
-    threshold."""
-    migration = _read_required(project_root, MIGRATION_GUIDE_PATH, errors)
+    threshold.  The guide is read softly: contexts without the migration
+    document (test fixtures, older checkouts) skip the check instead of
+    failing, since it is a drift guard, not a hard contract surface."""
+    migration = _read_optional(project_root, MIGRATION_GUIDE_PATH)
     if directives is None or migration is None:
         return []
     return _check_migration_removed_table(directives, migration)
