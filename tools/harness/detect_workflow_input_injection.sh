@@ -144,6 +144,18 @@ while IFS= read -r -d '' file; do
                 echo "  Fix: map a fixed identifier through env and a shell case statement" >&2
                 findings=$((findings + 1))
             fi
+
+            # External event data (PR head ref/title/body, release tag name,
+            # issue fields, head_ref, ref_name) is attacker-influenced for
+            # pull_request/release/issue events and must never be interpolated
+            # into run-block shell source.  Route through env with explicit
+            # validation instead.
+            if [[ "$line" =~ \$\{\{[[:space:]]*(github\.event\.(pull_request|release|issue|comment|inputs)\.[a-zA-Z_.]+|github\.head_ref|github\.ref_name)[[:space:]]*\}\} ]]; then
+                echo "ERROR: ${rel_path}:${line_num}: external event data directly interpolated in run block" >&2
+                echo "  ${line}" >&2
+                echo "  Fix: route through env and validate the value (e.g. against ^[0-9]+$ for refs)" >&2
+                findings=$((findings + 1))
+            fi
         fi
 
     done < "$file"
