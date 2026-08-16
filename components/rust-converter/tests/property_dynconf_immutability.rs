@@ -162,7 +162,7 @@ proptest! {
         initial_doc in arbitrary_valid_dynconf(),
         reload_docs in proptest::collection::vec(arbitrary_reload_dynconf(), 2..5),
     ) {
-        let global_snapshot = parse_dynconf(initial_doc.as_bytes())
+        let mut global_snapshot = parse_dynconf(initial_doc.as_bytes())
             .expect("initial document must be valid");
 
         // Bind at header-filter entry
@@ -171,8 +171,11 @@ proptest! {
 
         // Simulate multiple timer-fired reloads
         for reload_doc in &reload_docs {
-            let _new_global = parse_dynconf(reload_doc.as_bytes())
+            // Each parsed reload replaces the shared global snapshot binding,
+            // while request_snapshot remains bound to the original snapshot.
+            global_snapshot = parse_dynconf(reload_doc.as_bytes())
                 .expect("reload document must be valid");
+            let _ = bind_snapshot_to_request(&global_snapshot);
 
             // After each "reload", verify the request snapshot is still unchanged
             assert_snapshots_equal(&request_snapshot, &expected);

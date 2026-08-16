@@ -395,7 +395,10 @@ fuzz/
 ├── corpus/
 │   ├── convert_html/                   # Seed corpus (version-controlled)
 │   ├── streaming_chunks/               # Seed corpus (version-controlled)
-│   └── negotiation_and_headers/        # Seed corpus (version-controlled)
+│   ├── negotiation_and_headers/        # Seed corpus (version-controlled)
+│   ├── fuzz_encoding_chain/            # v0.9.2 Content-Encoding chain seeds
+│   ├── fuzz_multilayer_decode/         # v0.9.2 multi-layer decompression seeds
+│   └── fuzz_trusted_proxy_cidr/        # v0.9.2 trusted-proxy CIDR seeds
 ├── artifacts/
 │   └── .gitkeep                        # Crash artifacts (gitignored)
 └── target/                             # Build output (gitignored)

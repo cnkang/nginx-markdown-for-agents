@@ -245,8 +245,9 @@ The historical latency tables below predate the extra front-matter sample added 
 ## FFI Baselines — Large Tiers (Pending Measurement)
 
 The large-response optimization work added the following tiers to `perf/metrics-schema.json`. The team will populate baseline data once the incremental processing path turns on and gets profiled end-to-end. The team populates these tables after the profiling pass.
-These rows are regression-comparison targets, not 0.8.0 release-blocking
-thresholds.
+These rows are regression-comparison targets, not release-blocking
+thresholds. They are no longer tied to the 0.8.0 release line. See the
+current release checklist for blocking performance evidence.
 
 `tools/corpus/generate_large_samples.sh` generates samples in four variants per tier: `plain-html`, `front-matter`, `token-estimation`, `nested-tables-code`.
 

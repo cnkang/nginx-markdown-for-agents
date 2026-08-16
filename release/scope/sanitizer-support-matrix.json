@@ -9,9 +9,6 @@
       "platform": "linux",
       "compiler": "clang",
       "blocking": true,
-      "workflow": ".github/workflows/nightly-observation.yml",
-      "job": "sanitizer",
-      "matrix_key": "row_id",
       "ci": {
         "workflow": ".github/workflows/nightly-observation.yml",
         "job": "sanitizer",
@@ -26,9 +23,6 @@
       "platform": "linux",
       "compiler": "clang",
       "blocking": true,
-      "workflow": ".github/workflows/nightly-observation.yml",
-      "job": "sanitizer",
-      "matrix_key": "row_id",
       "ci": {
         "workflow": ".github/workflows/nightly-observation.yml",
         "job": "sanitizer",

@@ -169,6 +169,15 @@ def main() -> int:
     directory = validate_read_path(args.directory, purpose="scan directory")
     findings = audit_dir(directory)
 
+    if not findings and not list(directory.glob("*.c")) and not list(
+        directory.glob("*.h")
+    ):
+        # A scan that finds no source files is a configuration error, not a
+        # clean audit (docstring contract: exit 1 when no source files are
+        # found).
+        print(f"ERROR: no source files found in {directory}", file=sys.stderr)
+        return 1
+
     for f in findings:
         print(f"REVIEW: {f}")
 

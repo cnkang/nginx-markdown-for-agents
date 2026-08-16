@@ -613,15 +613,26 @@ def test_no_event_counter_request_relation(requests):
     """
     snapshot = process_request_sequence(requests)
 
-    # The only assertion is that these counters exist and are
-    # non-negative — no relation to request count is enforced
-    assert snapshot.streaming_events_total >= 0
-    assert snapshot.decompression_events_total >= 0
+    # Concrete expected-counter checks derived from the request workload:
+    # streaming events fire once per STREAMING_CONVERT request, and
+    # decompression events fire once per DECOMPRESS_FAIL request.  The
+    # counters are scenario-driven, not proportional to the raw request
+    # total (a workload without those scenarios leaves them at zero).
+    expected_streaming = sum(
+        1 for req in requests if req.scenario == RequestScenario.STREAMING_CONVERT
+    )
+    expected_decomp = sum(
+        1 for req in requests if req.scenario == RequestScenario.DECOMPRESS_FAIL
+    )
+    assert snapshot.streaming_events_total == expected_streaming
+    assert snapshot.decompression_events_total == expected_decomp
     assert snapshot.dynconf_reloads_total >= 0
 
-    # Explicitly verify no equality is mandated
-    # (streaming_events may be less than, equal to, or greater than
-    # requests_total depending on the workload)
+    # No relation is asserted between event counters and the request total:
+    # a workload with zero streaming/decompression scenarios keeps those
+    # counters at zero regardless of the request count.
+    assert snapshot.streaming_events_total <= len(requests)
+    assert snapshot.decompression_events_total <= len(requests)
 
 
 @settings(max_examples=200)

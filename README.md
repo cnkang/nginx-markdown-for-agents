@@ -190,7 +190,7 @@ curl -sD - -o /dev/null -A "ClaudeBot/1.0" http://localhost/docs/
 curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/docs/
 ```
 
-This works because the module's content negotiation selects Markdown when it sees `text/markdown` in the accepted types and converts the response. The module does not rewrite the `Accept` header. It only decides conversion. All other eligibility checks (status code, content type, size limits) still apply. Browsers and non-matching clients remain unaffected.
+This works because `markdown_filter $markdown_for_bot` selects the matching bot traffic. `markdown_accept force` selects Markdown regardless of the client's accepted types — the bot does not need to send `Accept: text/markdown`. The module does not rewrite the `Accept` header. It only decides conversion. All other eligibility checks (status code, content type, size limits) still apply. Browsers and non-matching clients remain unaffected.
 
 For a complete template with more bot patterns, see [examples/nginx-configs/06-bot-targeted-conversion.conf](examples/nginx-configs/06-bot-targeted-conversion.conf). For the full walkthrough, see [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md#bot-targeted-conversion-user-agent-based).
 
