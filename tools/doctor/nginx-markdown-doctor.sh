@@ -627,27 +627,27 @@ check_rust_toolchain() {
         if [[ "$toolchain_file_exists" != "true" ]]; then
             emit_check "rust_toolchain" "warn" \
                 "rustc ${rustc_version} meets MSRV but rust-toolchain.toml is missing" \
-                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_expected_msrv"'","toolchain_file_present":false}' \
+                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_expected_msrv"'","toolchain":null}' \
                 "Add rust-toolchain.toml with channel = \"${expected_msrv}\" for reproducible release builds"
         elif [[ -z "$toolchain_file" ]]; then
             emit_check "rust_toolchain" "warn" \
                 "rustc ${rustc_version} meets MSRV but rust-toolchain.toml has no channel" \
-                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_expected_msrv"'","toolchain_file_present":true}' \
+                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_expected_msrv"'","toolchain":null}' \
                 "Set channel = \"${expected_msrv}\" in rust-toolchain.toml"
         elif [[ "$pinned_ok" == "true" ]]; then
             emit_check "rust_toolchain" "pass" \
                 "rustc ${rustc_version} meets MSRV; repository pins exact toolchain ${toolchain_file}" \
-                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_expected_msrv"'","pinned_channel":"'"$escaped_toolchain_file"'"}'
+                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_expected_msrv"'","toolchain":"'"$escaped_toolchain_file"'"}'
         else
             emit_check "rust_toolchain" "warn" \
                 "rustc ${rustc_version} meets MSRV but rust-toolchain.toml is not pinned to ${expected_msrv}" \
-                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_expected_msrv"'","pinned_channel":"'"$escaped_toolchain_file"'"}' \
+                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_expected_msrv"'","toolchain":"'"$escaped_toolchain_file"'"}'
                 "Set channel = \"${expected_msrv}\" in rust-toolchain.toml for reproducible release builds"
         fi
     else
         emit_check "rust_toolchain" "warn" \
             "rustc ${rustc_version:-unknown} is below the MSRV floor ${msrv_floor}" \
-            '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_expected_msrv"'"}' \
+            '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_expected_msrv"'","toolchain":null}' \
             "Install Rust ${msrv_floor} or newer (rustup toolchain install ${expected_msrv})"
     fi
     return 0

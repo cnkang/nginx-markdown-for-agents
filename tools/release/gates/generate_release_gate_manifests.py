@@ -19,6 +19,19 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Sibling module import: this script is invoked as
+# `python3 tools/release/gates/...py` from the repo root, so its own
+# directory is not on sys.path.  Add the repo root and the gates
+# directory so the sibling generate_soak_scenario_manifest import below
+# resolves (its own lib.* imports need <repo>/tools on sys.path).
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_GATES_DIR = Path(__file__).resolve().parent
+for _p in (str(_REPO_ROOT), str(_REPO_ROOT / "tools"), str(_GATES_DIR)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+from generate_soak_scenario_manifest import build_manifest  # noqa: E402
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OUTPUT_ROOT = REPO_ROOT / "artifacts" / "release" / "0.9.2"
 FEATURE_MANIFEST = OUTPUT_ROOT / "official-build-feature-manifest.json"
@@ -451,17 +464,6 @@ def main(argv: list[str] | None = None) -> int:
             blocking, corpus = build_fuzz_manifests(candidate_sha, created_at)
             _write_json(OUTPUT_ROOT / "blocking-fuzz-target-manifest.json", blocking)
             _write_json(OUTPUT_ROOT / "corpus-seed-manifest.json", corpus)
-            import importlib.util
-
-            _soak_module_path = (
-                Path(__file__).resolve().parent / "generate_soak_scenario_manifest.py"
-            )
-            _soak_spec = importlib.util.spec_from_file_location(
-                "generate_soak_scenario_manifest", _soak_module_path
-            )
-            _soak_module = importlib.util.module_from_spec(_soak_spec)
-            _soak_spec.loader.exec_module(_soak_module)
-            build_manifest = _soak_module.build_manifest
 
             soak_scope_path = REPO_ROOT / SHORT_SOAK_SCOPE
             soak_scope = _load_json(SHORT_SOAK_SCOPE)

@@ -106,7 +106,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--output",
         help=(
             "real mode: compatibility option; output is always written to "
-            "DEFAULT_RECORD"
+            "the canonical DEFAULT_RECORD path, so the supplied path must "
+            "equal DEFAULT_RECORD (validated by _write_record)"
         ),
     )
     parser.add_argument("--allow-skip-fuzz", action="store_true",
