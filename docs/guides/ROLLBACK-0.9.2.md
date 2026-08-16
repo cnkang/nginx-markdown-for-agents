@@ -43,10 +43,14 @@ Publication and artifact availability are separate release gates.
    if [[ -z "$MODULES_DIR" || ! -d "$MODULES_DIR" ]]; then
      # Fall back to the distro-specific module directories, selecting the
      # first that actually exists.
+     # - /usr/lib/nginx/modules      Debian/Ubuntu packages
+     # - /usr/lib64/nginx/modules    RHEL-family packages
+     # - /usr/local/nginx/modules    source builds with default prefix
      for candidate in \
-         /usr/lib/nginx/modules \      # Debian/Ubuntu packages
-         /usr/lib64/nginx/modules \    # RHEL-family packages
-         /usr/local/nginx/modules; do  # source builds with default prefix
+         /usr/lib/nginx/modules \
+         /usr/lib64/nginx/modules \
+         /usr/local/nginx/modules
+     do
        if [[ -d "$candidate" ]]; then
          MODULES_DIR="$candidate"
          break
