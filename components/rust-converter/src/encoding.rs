@@ -619,7 +619,10 @@ mod tests {
          * misclassifying it as truncation. */
         let layers = vec![Encoding::Gzip, Encoding::Deflate];
         let out = decode_chain(b"", &layers, DecodeLimits::default()).unwrap();
-        assert!(out.is_empty(), "empty input must decode to an empty payload");
+        assert!(
+            out.is_empty(),
+            "empty input must decode to an empty payload"
+        );
     }
 
     #[test]
