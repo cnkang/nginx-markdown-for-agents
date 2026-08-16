@@ -153,16 +153,36 @@ exact versioned GitHub Release artifact first, verify the release signature
 over `SHA256SUMS.asc`, then check the downloaded artifacts against the
 checksums file — all in the same directory. The example below uses the v0.9.1
 release assets (the 0.9.2 release is not yet published; adapt the version
-once available):
+once available). Asset names follow the canonical
+`nginx-module-markdown-for-agents_<ver>_nginx-<nginx-ver>_<arch>.deb` form —
+list the exact names with `gh release view v0.9.1 --json assets`:
 
 ```bash
 VERSION=v0.9.1
 BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${VERSION}"
 curl -fSLo SHA256SUMS "${BASE_URL}/SHA256SUMS"
 curl -fSLo SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
-curl -fSLO "${BASE_URL}/nginx-module-markdown-for-agents_0.9.1-1_amd64.deb"
-gpg --verify SHA256SUMS.asc SHA256SUMS
-sha256sum -c SHA256SUMS
+curl -fSLO "${BASE_URL}/nginx-module-markdown-for-agents_0.9.1_nginx-1.30.4_amd64.deb"
+# Verify the signature AND the signer identity.  `gpg --verify` alone only
+# proves the file was signed by *some* key.  Fetch the project signing key
+# (published with the release / on the project's documented key URL) into
+# an isolated keyring, note its fingerprint, and compare it with the one
+# published in the project README / release notes before trusting it.
+KEYRING="$(mktemp -d)/keyring.gpg"
+curl -fsSL https://packages.nginx-markdown.dev/gpg-key.asc | \
+    gpg --no-default-keyring --keyring "$KEYRING" --import
+gpg --no-default-keyring --keyring "$KEYRING" --fingerprint
+gpg --no-default-keyring --keyring "$KEYRING" --verify SHA256SUMS.asc SHA256SUMS
+# Every file listed in SHA256SUMS must be present before `sha256sum -c`
+# passes.  Select the checksum line for the exact artifact you fetched and
+# fail unless exactly one entry matches (an empty selection would make
+# `sha256sum -c` succeed vacuously):
+PACKAGE="nginx-module-markdown-for-agents_0.9.1_nginx-1.30.4_amd64.deb"
+awk -v pkg="$PACKAGE" '
+  $2 == pkg || $2 == "*" pkg { print; n++ }
+  END { exit n == 1 ? 0 : 1 }
+' SHA256SUMS > SHA256SUMS.select
+sha256sum -c SHA256SUMS.select
 ```
 
 **Per-package signatures** (only for releases whose workflow produces them;
