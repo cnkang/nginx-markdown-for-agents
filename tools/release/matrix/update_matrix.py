@@ -1173,6 +1173,18 @@ def _frozen_abi_version() -> int:
     return int(match.group(1))
 
 
+def _rebind_stale_dynamic_rows(other_entries: list) -> None:
+    """Rebind surviving stale dynamic-module rows to the current digest/ABI.
+
+    Kept separate from ``_replace_canonical_dynamic_entries`` to hold the
+    function's cyclomatic complexity below the lint threshold.
+    """
+    for entry in other_entries:
+        if isinstance(entry, dict) and entry.get("artifact_type") == "dynamic-module":
+            entry["feature_manifest_digest"] = _feature_manifest_digest()
+            entry["abi_version"] = _frozen_abi_version()
+
+
 def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
     """Replace generated dynamic-module rows while preserving other artifacts.
 
@@ -1223,10 +1235,7 @@ def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
     # Stale supported/candidate rows survive (hand-maintained compatibility
     # declarations), but they are rebound like the regenerated rows so the
     # tool input never carries a mixed bound/unbound state.
-    for entry in other_entries:
-        if isinstance(entry, dict) and entry.get("artifact_type") == "dynamic-module":
-            entry["feature_manifest_digest"] = _feature_manifest_digest()
-            entry["abi_version"] = _frozen_abi_version()
+    _rebind_stale_dynamic_rows(other_entries)
     dynamic_entries.sort(
         key=lambda entry: (
             version_tuple(_matrix_entry_identity(entry)[0]),
