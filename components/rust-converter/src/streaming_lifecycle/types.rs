@@ -367,6 +367,26 @@ impl FailureLedger {
     pub fn is_populated(&self) -> bool {
         self.primary.is_some() || self.secondary.is_some() || self.delivery.is_some()
     }
+
+    /// Return a copy of this ledger with the pre-effect slot updates applied.
+    ///
+    /// The apply protocol (apply.rs module doc) requires the caller to apply
+    /// pre-effect updates before constructing the next transition frame, so
+    /// frames handed to the next apply step carry the freshly recorded
+    /// failure rather than a stale ledger.
+    pub fn apply_pre_effect(&self, pre_effect: &PreEffect) -> FailureLedger {
+        let mut next = self.clone();
+        if let Some(record) = &pre_effect.primary_update {
+            next.primary = Some(record.clone());
+        }
+        if let Some(record) = &pre_effect.secondary_update {
+            next.secondary = Some(record.clone());
+        }
+        if let Some(record) = &pre_effect.delivery_update {
+            next.delivery = Some(record.clone());
+        }
+        next
+    }
 }
 
 /// Failure updates returned by apply_result.
@@ -664,8 +684,6 @@ pub enum StateMachineError {
         state: StreamingState,
         event: EventKind,
     },
-    /// Second terminal transition attempted.
-    SecondTerminalTransition { current_state: StreamingState },
     /// Invariant violation.
     InvariantViolation { message: String },
     /// Action/payload mismatch.

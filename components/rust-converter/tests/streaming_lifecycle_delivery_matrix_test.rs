@@ -104,7 +104,38 @@ mod delivery_matrix {
             failure_site: None,
             error_origin: None,
             produced_closing_bytes: false,
+            /* Neutral: pending_kind is action-specific (P3-1 validation). */
+            pending_kind: None,
+        }
+    }
+
+    fn again_closing_outcome() -> ActionOutcome {
+        ActionOutcome {
+            ngx_result: NgxResult::Again,
+            failure_site: None,
+            error_origin: None,
+            produced_closing_bytes: false,
+            pending_kind: Some(PendingKind::ClosingMarkdown),
+        }
+    }
+
+    fn again_terminal_outcome() -> ActionOutcome {
+        ActionOutcome {
+            ngx_result: NgxResult::Again,
+            failure_site: None,
+            error_origin: None,
+            produced_closing_bytes: false,
             pending_kind: Some(PendingKind::Terminal),
+        }
+    }
+
+    fn again_abort_terminal_outcome() -> ActionOutcome {
+        ActionOutcome {
+            ngx_result: NgxResult::Again,
+            failure_site: None,
+            error_origin: None,
+            produced_closing_bytes: false,
+            pending_kind: Some(PendingKind::AbortTerminal),
         }
     }
 
@@ -223,7 +254,7 @@ mod delivery_matrix {
         let term_result = apply_result(
             StreamingState::PostCommitSafeFinish,
             &next,
-            &again_outcome(),
+            &again_terminal_outcome(),
             &ctx_usable(),
         )
         .unwrap();
@@ -323,7 +354,7 @@ mod delivery_matrix {
         let close_result = apply_result(
             StreamingState::PostCommitSafeFinish,
             &next,
-            &again_outcome(),
+            &again_closing_outcome(),
             &ctx_usable(),
         )
         .unwrap();
@@ -457,7 +488,7 @@ mod delivery_matrix {
         let r3 = apply_result(
             StreamingState::PostCommitSafeFinish,
             &term_frame,
-            &again_outcome(),
+            &again_terminal_outcome(),
             &ctx_usable(),
         )
         .unwrap();
@@ -538,7 +569,7 @@ mod delivery_matrix {
         let result = apply_result(
             StreamingState::PendingClosingOutput,
             &frame,
-            &again_outcome(),
+            &again_closing_outcome(),
             &ctx_usable(),
         )
         .unwrap();
@@ -601,7 +632,7 @@ mod delivery_matrix {
         let result = apply_result(
             StreamingState::PendingTerminal,
             &frame,
-            &again_outcome(),
+            &again_terminal_outcome(),
             &ctx_usable(),
         )
         .unwrap();
@@ -691,7 +722,7 @@ mod delivery_matrix {
         let result = apply_result(
             StreamingState::PostCommitAbort,
             &frame,
-            &again_outcome(),
+            &again_abort_terminal_outcome(),
             &ctx_usable(),
         )
         .unwrap();
@@ -775,7 +806,7 @@ mod delivery_matrix {
         let result = apply_result(
             StreamingState::PendingAbortTerminal,
             &frame,
-            &again_outcome(),
+            &again_abort_terminal_outcome(),
             &ctx_usable(),
         )
         .unwrap();
@@ -1259,7 +1290,7 @@ mod delivery_matrix {
         let result = apply_result(
             StreamingState::PostCommitSafeFinish,
             &frame,
-            &again_outcome(),
+            &again_terminal_outcome(),
             &ctx_usable(),
         )
         .unwrap();
@@ -1309,7 +1340,7 @@ mod delivery_matrix {
         let r = apply_result(
             StreamingState::PostCommitSafeFinish,
             &frame,
-            &again_outcome(),
+            &again_terminal_outcome(),
             &ctx_usable(),
         )
         .unwrap();
@@ -1320,7 +1351,7 @@ mod delivery_matrix {
         let r2 = apply_result(
             StreamingState::PostCommitSafeFinish,
             &close_frame,
-            &again_outcome(),
+            &again_closing_outcome(),
             &ctx_usable(),
         )
         .unwrap();
@@ -1331,7 +1362,7 @@ mod delivery_matrix {
         let r3 = apply_result(
             StreamingState::PostCommitAbort,
             &abort_frame,
-            &again_outcome(),
+            &again_abort_terminal_outcome(),
             &ctx_usable(),
         )
         .unwrap();
