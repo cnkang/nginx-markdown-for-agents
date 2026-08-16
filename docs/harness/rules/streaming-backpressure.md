@@ -457,6 +457,40 @@ Verification:
   regression tests (folded-error, immediate-return, clean branch, definition
   skip).
 
+### 69. Header-chain NGX_AGAIN publishes commit latches (canonical model)
+
+Rule 64 states the semantics; this rule locks the latch contract.  A
+header-chain `NGX_AGAIN` from `ngx_http_next_header_filter` means the write
+filter queued the header block — the headers are ACCEPTED and the header
+filter chain is invoked at most once per request.  Any code that rolls back
+commit latches on header `NGX_AGAIN` and re-invokes the downstream header
+chain on resume re-runs intermediate header filters (for example gzip)
+that are not idempotent.
+
+Required:
+- On header-chain `NGX_AGAIN`, publish the delivery latches immediately
+  (`headers_committed`, `headers_forwarded`, commit state / metric) — the
+  headers crossed the module boundary into the write path.
+- Never re-invoke `ngx_http_next_header_filter` for the same request; a
+  write-event resume is a pure body-filter re-entry
+  (`ngx_http_next_body_filter(r, NULL)` or equivalent) that drains
+  deferred output.
+- Backpressured body output may be deferred (pending header/finalize
+  output) until the write event fires, but deferral must not be paired
+  with a header-level retry.
+- The body-filter `NGX_AGAIN` contract is unchanged: a body chain
+  `NGX_AGAIN` means the downstream filter retained the chain — suspend and
+  resume, never latch terminal delivery (Rule 47).
+
+Verification:
+- `grep -rn 'ngx_http_next_header_filter' components/nginx-module/src/` —
+  every call site must either publish latches on `NGX_AGAIN` or return it
+  without re-entry.
+- `grep -rn 'headers_committed\\|headers_forwarded' components/nginx-module/src/` —
+  commit latches set on the header `NGX_AGAIN` branch as well as the
+  `NGX_OK` branch.
+- No `headers_pending`-style "header retry" field may be re-introduced.
+
 ---
 
 ## Recent Git Analysis and Remediation Closeout

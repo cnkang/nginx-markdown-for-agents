@@ -1066,8 +1066,7 @@ typedef struct {
         ngx_http_markdown_buffer_t        replay_buf;      /* Replay buffer for pre-commit fallback */
         size_t                            replay_capacity; /* Max replay buffer size (from config) */
         ngx_flag_t                        replay_initialized;
-        ngx_flag_t                        headers_committed; /* Headers sent downstream */
-        ngx_flag_t                        headers_pending;   /* Header filter returned NGX_AGAIN */
+        ngx_flag_t                        headers_committed; /* Header chain accepted (incl. NGX_AGAIN) */
     } stream_sm;
 
     /*

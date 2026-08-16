@@ -783,7 +783,6 @@ ngx_http_markdown_streaming_sync_buffered(
     if (ctx->streaming.pending_output != NULL
         || ctx->streaming.pending_input.head != NULL
         || ctx->streaming.pending_meta.pending_header_output != NULL
-        || ctx->stream_sm.headers_pending
         || ctx->streaming.completion.finalize_after_pending
         || ctx->streaming.completion.finalize_pending_lastbuf
         || ctx->streaming.completion.failopen_abort_after_pending)
@@ -2430,10 +2429,6 @@ ngx_http_markdown_streaming_precommit_error(
  *   NGX_OK    on success (commit state updated)
  *   NGX_ERROR on header update or filter failure
  */
-static ngx_int_t ngx_http_markdown_streaming_resume_header_commit(
-    ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx);
-
 static ngx_int_t
 ngx_http_markdown_streaming_commit(
     ngx_http_request_t *r,
@@ -2442,11 +2437,14 @@ ngx_http_markdown_streaming_commit(
 {
     ngx_int_t  rc;
 
-    /* A prior header-filter NGX_AGAIN already completed header mutation.
-     * Resume only the downstream header filter; replaying update_headers
-     * would apply the transaction a second time on the feed path. */
-    if (ctx->stream_sm.headers_pending) {
-        return ngx_http_markdown_streaming_resume_header_commit(r, ctx);
+    /* Canonical NGINX model: the header filter chain runs at most once per
+     * request.  A prior commit — including one that hit header backpressure
+     * — already accepted the headers, so replaying update_headers or the
+     * downstream header chain would double-apply the transaction and
+     * re-run intermediate filters (gzip and friends) that are not
+     * idempotent. */
+    if (ctx->stream_sm.headers_committed) {
+        return NGX_OK;
     }
 
     rc = ngx_http_markdown_streaming_update_headers(
@@ -2459,23 +2457,29 @@ ngx_http_markdown_streaming_commit(
     rc = ngx_http_next_header_filter(r);
     if (rc == NGX_AGAIN) {
         /*
-         * Header mutations are complete, but the downstream header chain
-         * still owns delivery. Roll back every commit latch and remember the
-         * retry so body output cannot run ahead of headers.
+         * Canonical NGINX model: header-chain NGX_AGAIN means the write
+         * filter queued the header block — the headers are ACCEPTED and
+         * delivery is owned by the write filter.  Publish every commit
+         * latch now; the caller defers body output (pending_header_output
+         * / finalize_pending_result) and the write-event resume delivers
+         * it through the BODY filter chain, which is the only chain that
+         * may be re-entered.  The header chain is never re-invoked, so
+         * intermediate filters run exactly once.
          */
-        ctx->stream_sm.headers_committed = 0;
-        ctx->stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
-        ctx->stream_sm.headers_pending = 1;
+        ctx->stream_sm.headers_committed = 1;
+        ctx->stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+        ctx->streaming.commit_state =
+            NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
+        ctx->headers_forwarded = 1;
+        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.commit_total);
         return NGX_AGAIN;
     }
     if (!ngx_http_markdown_streaming_delivery_ok(rc)) {
         ctx->stream_sm.headers_committed = 0;
         ctx->stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
-        ctx->stream_sm.headers_pending = 0;
         return rc;
     }
 
-    ctx->stream_sm.headers_pending = 0;
     ctx->stream_sm.headers_committed = 1;
     ctx->stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     ctx->streaming.commit_state =
@@ -2491,56 +2495,6 @@ ngx_http_markdown_streaming_commit(
         r->connection->log, 0,
         "markdown: commit "
         "boundary reached, headers sent");
-
-    return NGX_OK;
-}
-
-
-/*
- * Retry only the downstream header filter after a commit returned NGX_AGAIN.
- * The header mutation phase is not repeated: it already completed before the
- * first downstream call. Publish all commit latches atomically after the
- * retry accepts the headers.
- *
- * NOTE: this re-entry assumes the downstream
- * header filter chain tolerates being invoked a second time. The built-in
- * ngx_http_header_filter guards on r->header_sent and returns NGX_OK, so no
- * duplicate header block reaches the wire; intermediate filters (e.g. gzip)
- * DO re-run their header-filter code on the retry. This matches the module's
- * documented deferral design; the canonical NGINX model (header NGX_AGAIN =
- * accepted, no re-entry) is tracked as a follow-up unification with the
- * full-buffer path.
- */
-static ngx_int_t
-ngx_http_markdown_streaming_resume_header_commit(
-    ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx)
-{
-    ngx_int_t  rc;
-
-    if (!ctx->stream_sm.headers_pending) {
-        return NGX_OK;
-    }
-
-    rc = ngx_http_next_header_filter(r);
-    if (rc == NGX_AGAIN) {
-        return NGX_AGAIN;
-    }
-    if (!ngx_http_markdown_streaming_delivery_ok(rc)) {
-        ctx->stream_sm.headers_pending = 0;
-        return rc;
-    }
-
-    ctx->stream_sm.headers_pending = 0;
-    ctx->stream_sm.headers_committed = 1;
-    ctx->stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
-    ctx->streaming.commit_state =
-        NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
-    ctx->headers_forwarded = 1;
-    NGX_HTTP_MARKDOWN_METRIC_INC(streaming.commit_total);
-
-    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "markdown: resumed header commit successfully");
 
     return NGX_OK;
 }
@@ -2734,11 +2688,11 @@ ngx_http_markdown_streaming_handle_success_output(
         rc = ngx_http_markdown_streaming_commit(r, ctx, conf);
         if (rc == NGX_AGAIN) {
             /*
-             * The downstream header chain still owns delivery after a
-             * backpressure NGX_AGAIN (headers_pending). Keep the converted
-             * bytes in module state until that header-only retry succeeds;
-             * the input buffer is consumed and cannot be fed again on NULL
-             * re-entry.
+             * The downstream write filter queued the header block on a
+             * backpressure NGX_AGAIN (headers accepted, canonical model).
+             * Keep the converted bytes in module state until the write
+             * event fires; the input buffer is consumed and cannot be fed
+             * again on NULL re-entry.
              */
             if (ctx->streaming.pending_meta.pending_header_output != NULL) {
                 /*
@@ -3488,11 +3442,11 @@ ngx_http_markdown_streaming_finalize_send_markdown(
         rc = ngx_http_markdown_streaming_commit(
             r, ctx, conf);
         if (rc == NGX_AGAIN) {
-            /* Header chain owns delivery (headers_pending).  Defer the
-             * finalize output until the header retry succeeds, matching
-             * the feed path's pending_header_output handling: body
-             * output must not run ahead of headers.  The null-input
-             * re-entry path sends the deferred chunk after the retry. */
+            /* Header chain accepted on NGX_AGAIN (canonical model).  Defer
+             * the finalize output until the write event fires, matching
+             * the feed path's pending_header_output handling: body output
+             * must not run ahead of the queued header block.  The null-input
+             * re-entry path sends the deferred chunk on the write event. */
             if (ctx->streaming.completion.finalize_pending_result != NULL) {
                 ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                     "markdown: finalize output re-entry while a previous "
@@ -4554,30 +4508,23 @@ ngx_http_markdown_streaming_abort_failopen_after_pending(
 
 
 /*
- * Resume a header-only backpressure retry before body output.
+ * Resume body output deferred by a commit-time header NGX_AGAIN.
  *
- * Finishes the header commit and then resumes pending header output.  Returns
- * NGX_OK when both resumed cleanly, otherwise propagates the delivery rc.
- * Extracted from ngx_http_markdown_streaming_handle_null_input() to bound
- * cognitive complexity (Rule 17).
+ * There is no header-level retry: the header chain was accepted (queued by
+ * the write filter) when commit returned NGX_AGAIN, so this write-event
+ * re-entry is a pure body-filter resume that drains the deferred conversion
+ * output and any deferred finalize output.  Returns NGX_OK when everything
+ * resumed cleanly, otherwise propagates the delivery rc.  Extracted from
+ * ngx_http_markdown_streaming_handle_null_input() to bound cognitive
+ * complexity (Rule 17).
  */
 static ngx_int_t
-ngx_http_markdown_streaming_null_input_resume_header(
+ngx_http_markdown_streaming_null_input_resume_output(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf)
 {
     ngx_int_t  rc;
-
-    rc = ngx_http_markdown_streaming_resume_header_commit(r, ctx);
-    if (rc == NGX_AGAIN) {
-        return rc;
-    }
-    if (!ngx_http_markdown_streaming_delivery_ok(rc)) {
-        ngx_http_markdown_streaming_release_pending_header_output(ctx);
-        ngx_http_markdown_streaming_release_finalize_pending(ctx);
-        return rc;
-    }
 
     rc = ngx_http_markdown_streaming_resume_pending_header_output(
         r, ctx, conf);
@@ -4589,8 +4536,8 @@ ngx_http_markdown_streaming_null_input_resume_header(
         return rc;
     }
 
-    /* A header NGX_AGAIN may also have deferred the finalize output on
-     * the finalize path.  Send it now that the header retry succeeded,
+    /* A commit-time header NGX_AGAIN may also have deferred the finalize
+     * output on the finalize path.  Send it now that the write event fired,
      * then deliver the terminal last_buf.  The output-bytes accounting
      * already ran on the first pass (before the deferral), so this path
      * sends directly instead of re-running finalize_send_markdown. */
@@ -4717,8 +4664,10 @@ ngx_http_markdown_streaming_handle_null_input(
 {
     ngx_int_t  rc;
 
-    /* Step 1: Finish a header-only backpressure retry before body output. */
-    rc = ngx_http_markdown_streaming_null_input_resume_header(r, ctx, conf);
+    /* Step 1: Resume body output deferred by a commit-time header
+     * NGX_AGAIN (pure body-filter re-entry; the header chain is not
+     * re-invoked). */
+    rc = ngx_http_markdown_streaming_null_input_resume_output(r, ctx, conf);
     if (rc != NGX_OK) {
         return rc;
     }
@@ -5137,9 +5086,9 @@ ngx_http_markdown_streaming_handle_new_input_with_pending(
         rc = ngx_http_markdown_streaming_precommit_error(
             r, ctx, conf, enqueue_error);
         if (rc == NGX_DECLINED && !ctx->eligible) {
-            if (ctx->stream_sm.headers_pending) {
-                /* The header block was already mutated and queued for
-                 * the header retry.  Fail-open here would pair
+            if (ctx->stream_sm.headers_committed) {
+                /* The header block was already mutated and accepted
+                 * (queued by the write filter).  Fail-open here would pair
                  * Markdown-contract headers with the original HTML
                  * body, a mismatched response.  Fail closed instead;
                  * the request terminates with an error. */
