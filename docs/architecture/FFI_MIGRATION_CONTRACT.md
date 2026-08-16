@@ -36,7 +36,7 @@ The following families have current NGINX production consumers:
 | Decompression | `markdown_decompress_bounded`, `markdown_decomp_result_init`, `markdown_decompress_free` | Bounded Rust decompression path |
 | Error/reason | `markdown_classify_error_code`, `markdown_reason_code_str`, `markdown_reason_code_metric_key`, `markdown_reason_code_count` | Canonical cross-language classification and labels |
 | Streaming | `markdown_streaming_new_with_code`, `markdown_streaming_feed`, `markdown_streaming_finalize`, `markdown_streaming_abort`, `markdown_streaming_safe_finish`, `markdown_streaming_output_free` | Streaming request lifecycle |
-| Incremental | `markdown_incremental_new_with_code`, `markdown_incremental_feed`, `markdown_incremental_finalize`, `markdown_incremental_free` | Bounded incremental conversion |
+| Incremental | `markdown_incremental_new_with_code`, `markdown_incremental_feed`, `markdown_incremental_finalize`, `markdown_incremental_free` | Bounded incremental conversion. **Retained internal legacy ABI symbols**: exported for the feature-gated C callers under `MARKDOWN_INCREMENTAL_ENABLED`; supported configurations do not route production requests through this path |
 | ABI alignment | `markdown_abi_version`, `markdown_abi_header_hash`, `markdown_abi_symbol_set_hash`, `markdown_abi_layout_fingerprint` | Startup-enforced version, generated-header, exported-symbol, and layout match |
 
 The generated header contains only the bundled production boundary. Test-only

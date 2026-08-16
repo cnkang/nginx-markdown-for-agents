@@ -28,7 +28,9 @@ contract requires:
    filters as soon as deterministic rendering is possible, without waiting for
    EOF.
 3. **Bounded memory**: a configurable budget bounds peak memory usage
-   independent of total response size.
+   independent of total response size. The pre-commit replay storage is
+   subject to the same configurable budget and cannot grow with total
+   response size.
 
 All three conditions must hold simultaneously for the module to classify a response
 as "true streaming."

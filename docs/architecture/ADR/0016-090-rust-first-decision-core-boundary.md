@@ -55,12 +55,15 @@ ADR-justified exception.
 
 Source IP comes from `r->connection->sockaddr` (after the realip module,
 if configured). `markdown_trusted_proxies` is **http context only**, CIDR-based
-(IPv4 + IPv6, parsed at config time). The module begins with the connection
-peer, walks aligned `Forwarded` or `X-Forwarded-*` hops from right to left,
-strips trusted hops, and selects the first untrusted hop as the client-facing
-value. `Forwarded` takes precedence over `X-Forwarded-*`. `proto` accepts only
-`http` or `https`. Untrusted sources produce a reason code and never leak raw
-header values into logs or metrics.
+(IPv4 + IPv6, parsed at config time). An immediate peer that is **outside**
+`markdown_trusted_proxies` is the client: the module ignores any `Forwarded`
+or `X-Forwarded-*` headers it carries and uses the peer address directly,
+before any right-to-left traversal. Otherwise the module begins with the
+connection peer, walks aligned `Forwarded` or `X-Forwarded-*` hops from
+right to left, strips trusted hops, and selects the first untrusted hop as
+the client-facing value. `Forwarded` takes precedence over `X-Forwarded-*`.
+`proto` accepts only `http` or `https`. Untrusted sources produce a reason
+code and never leak raw header values into logs or metrics.
 
 ### C complexity reduction acceptance (per migrated file)
 

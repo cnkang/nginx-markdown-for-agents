@@ -32,7 +32,7 @@ The key properties of this positioning:
 
 4. **Simpler cache semantics**: The CDN caches the converted Markdown variant like any other response. This works when conversion happens at the origin. The origin controls `Vary`, `ETag`, and `Cache-Control` directly. The CDN must honor representation variants declared by `Vary: Accept` when matching cached responses, so that clients receive the correct representation.
 
-5. **Variable-driven flexibility**: Because the module runs inside NGINX, operators can use `map` directives and variables to control conversion per request. This includes User-Agent-based bot targeting. When targeting variables (such as a bot-detection map) change the representation served to different clients, the operator must preserve cache separation: either add the targeting variable to `Vary` (for example `Vary: Accept, User-Agent`) or include a normalized targeting-variable value in the cache key, so caches do not serve the Markdown variant to clients that should receive HTML (or the reverse).
+5. **Variable-driven flexibility**: Because the module runs inside NGINX, operators can use `map` directives and variables to control conversion per request. This includes User-Agent-based bot targeting. When targeting variables (such as a bot-detection map) change the representation served to different clients, the operator must preserve cache separation: either add a **request header field name** (for example `Vary: Accept, User-Agent`) or include a normalized targeting-variable value in the cache key, so caches do not serve the Markdown variant to clients that should receive HTML (or the reverse). `Vary` may list only request header field names; for non-header map inputs, the normalized targeting-variable value must go in the cache key.
 
 ### Negative Consequences
 
@@ -79,7 +79,7 @@ The key properties of this positioning:
 ## Relationship to Other ADRs
 
 - [ADR-0001](0001-use-rust-for-conversion.md): The choice of Rust for conversion is partly motivated by the fact that conversion runs inline. Input safety and predictable performance matter more when conversion is in the request path.
-- [ADR-0002](0002-full-buffering-approach.md): Full buffering is a consequence of inline conversion — the module must produce a complete, correct Markdown response before sending headers.
+- [ADR-0002](0002-full-buffering-approach.md): Full buffering is a consequence of inline conversion. On the full-buffer engine/path, the module must produce a complete, correct Markdown response before sending headers. The streaming engine/path sends headers once the commit decision is made, see ADR-0011.
 
 ## References
 
