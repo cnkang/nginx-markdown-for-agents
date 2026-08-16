@@ -130,5 +130,5 @@ Kang
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-08-15 | Kang | Clarified that cache_validation full is a runtime warning, not a config error |
+| 0.9.2 | 2026-08-15 | Kang | Clarified that cache_validation full combined with markdown_streaming auto is a runtime warning, not a config error; markdown_streaming force combined with cache_validation full remains an nginx -t configuration error |
 | 0.9.0 | 2026-06-30 | Kang | Initial ADR — Config V2 grammar freeze, reject-only stub policy, conflict rules, dynconf schema_version |

@@ -31,7 +31,9 @@ Implement a two-phase fallback state machine per RFC 0008 section 3:
 2. **Post-commit phase**: Markdown output has been partially delivered. On
    error, the module MUST NOT attempt to replay the original HTML. The
    module terminates the response with whatever Markdown it produced.
-   It logs the error with appropriate reason codes.
+   Any Markdown-generation failure in this phase is explicitly an aborted
+   or incomplete response — never normal completion. It logs the error
+   with appropriate reason codes.
 
 The commit boundary is the point at which the first Markdown output buffer is
 sent to the next body filter in the NGINX chain.

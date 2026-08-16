@@ -9,8 +9,10 @@
 v0.5.x ships noise pruning as an opt-in Cargo feature (`prune_noise_regions`).
 When enabled, it removes the built-in structural selectors `nav`, `footer`,
 and `aside`, which have little value for AI-agent consumption. This typically
-reduces output volume by 15–60% depending on page noise ratio. The pruning
-targets non-content regions only.
+reduces output volume by 15–60% depending on page noise ratio. Because
+tag-name matching also removes meaningful content inside those regions (for
+example a navigation block that contains inline text), pruning is **not**
+guaranteed to touch only non-content regions.
 
 Current limitations:
 1. Pruning is opt-in at compile time — operators must rebuild with `--features prune_noise_regions`
