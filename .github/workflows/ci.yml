@@ -283,6 +283,12 @@ jobs:
       - name: Run repository harness security checks
         run: make harness-security-checks
 
+      - name: Run harness detector unit tests
+        # The detector single tests (test_detect_*, test_dynconf_reload_rollback)
+        # verify the detectors themselves; without this step a detector change
+        # can break its own tests without CI noticing (P1-5/P1-6).
+        run: make test-harness
+
   header-sync:
     name: FFI Header Generation Smoke
     needs: changes
