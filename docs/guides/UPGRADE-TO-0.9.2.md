@@ -219,6 +219,21 @@ curl -s http://localhost/nginx-markdown/diagnostics | python3 -m json.tool
 # Verify recent_decisions[].reason can carry bypass_no_transform
 ```
 
+Executable assertion (fails with a non-zero exit when the contract is not
+met, so the verification step is deterministic):
+
+```bash
+curl -s http://localhost/nginx-markdown/diagnostics \
+    | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d.get("version") == "0.9.2", f"version={d.get(\"version\")!r}"
+reasons = {r.get("reason") for r in d.get("recent_decisions", [])}
+assert "bypass_no_transform" in reasons, f"missing bypass_no_transform in {sorted(reasons)}"
+print("diagnostics contract verified")
+'
+```
+
 ### 4. Metrics endpoint
 
 ```bash

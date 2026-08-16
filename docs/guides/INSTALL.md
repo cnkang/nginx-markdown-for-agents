@@ -152,7 +152,18 @@ To verify the module loaded and conversion works, request a known HTML page
 and assert the converted Markdown body. For example, an `<h1>Welcome</h1>`
 heading must appear as `# Welcome` in the response body. Do not treat a
 `Content-Type: text/markdown` response alone as evidence that conversion
-succeeded — it only confirms the label applied to the response.
+succeeded — it only confirms the label applied to the response. The check
+below fails (non-zero exit) unless the body actually contains the converted
+heading, so a successful exit is deterministic evidence of conversion:
+
+```bash
+# Serve an <h1>Welcome</h1> page from a local fixture, or point the first
+# curl at any page on your site that renders a known <h1>:
+curl -s -H "Accept: text/markdown" http://localhost/ \
+    | grep -Fq '# Welcome' \
+    && echo "conversion verified" \
+    || echo "conversion NOT verified (exit $?)"
+```
 
 ---
 
