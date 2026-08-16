@@ -443,6 +443,12 @@ def _run_target_soak(target: str, seed: int, required_executions: int,
     log_parts = []
     failure = None
     target_corpus_dir = CORPUS_ROOT / validated_target
+    # Capture the startup corpus size ONCE before the loop: libFuzzer grows
+    # the corpus directory while running, so re-measuring inside the loop
+    # (as each invocation's launch overhead) would systematically over-deduct
+    # on later invocations (tools P3-4).  The pre-run count is the true
+    # startup-replay overhead for every invocation.
+    startup_overhead = _startup_corpus_size(target_corpus_dir) + 1
     for _index in range(MAX_FUZZ_INVOCATIONS):
         runs_remaining = max(0, required_executions - total_executions)
         seconds_remaining = max(
@@ -461,8 +467,9 @@ def _run_target_soak(target: str, seed: int, required_executions: int,
         executions, elapsed, failure = _soak_outcome(invocation)
         # Exclude the empty-input callback and the startup-corpus replay
         # from the mutation-budget accounting: they are launch overhead
-        # repeated on every invocation, not new executions.
-        startup_overhead = _startup_corpus_size(target_corpus_dir) + 1
+        # repeated on every invocation, not new executions.  startup_overhead
+        # was captured before the loop (tools P3-4) so corpus growth during
+        # the run does not inflate the deduction.
         executions = max(0, executions - startup_overhead)
         total_executions += executions
         total_elapsed += elapsed

@@ -724,6 +724,11 @@ jobs:
     needs: [prepare, smoke-test]
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
+    # 14 blocking fuzz targets (15 min each) + short-soak + 091/092 perf
+    # gates + toolchain install ≈ 4.5-5.5 h; keep headroom over the
+    # 360-min GitHub-hosted default so slow runners do not time out the
+    # tag release (tools P3-1).
+    timeout-minutes: 420
     permissions:
       contents: read
       checks: read

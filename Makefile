@@ -182,7 +182,12 @@ test-c-unit-gcc:
 	@docker run --rm -v "$(CURDIR)":/repo -w /repo/components/nginx-module/tests \
 	    ubuntu:24.04@sha256:019e8eb29a85e74d64925745884f2ec79aa27e3feab36353d24656f4d6b89467 bash -c "apt-get update -qq && apt-get install -y -qq gcc make libz-dev libbrotli-dev python3 valgrind && make clean && make unit"
 	@echo "=== Cleaning container artifacts from local build dir ==="
-	@$(MAKE) -C $(NGINX_TEST_DIR) clean || true
+	@if $(MAKE) -C $(NGINX_TEST_DIR) clean; then \
+		echo "Clean OK"; \
+	else \
+		echo "WARNING: container artifact cleanup failed; root-owned Linux ELF binaries may remain in build/ (tools P3-2)" >&2; \
+		exit 1; \
+	fi
 	@echo "OK: C unit suite passed under Ubuntu GCC"
 
 test-nginx-unit-streaming:
@@ -562,6 +567,10 @@ release-gates-check:
 	python3 packaging/scripts/test_generate_checksums.py
 
 # release-gates-check-070: comprehensive v0.7.0 release readiness gate.
+# (tools P3-5: the 070 gate packages the CURRENT 0.9.2 version by default —
+# the gate name is the baseline lineage, not the packaged version; every
+# release-gates-check-0XX target intentionally packages the current version.
+# Override with PKG_VERSION= to validate a specific version line.)
 #
 # Environment variables:
 #   RELEASE_GATE_ALLOW_SKIP_FUZZ=1       - skip fuzz smoke/build when
