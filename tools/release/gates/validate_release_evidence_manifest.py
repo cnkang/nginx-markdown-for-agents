@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -67,7 +68,52 @@ def build_arg_parser() -> argparse.ArgumentParser:
             / "final-evidence-manifest.json"
         ),
         help="real mode: final evidence manifest to validate")
+    parser.add_argument(
+        "--verify-head",
+        action="store_true",
+        help="real mode: require the manifest candidate_sha to equal the "
+             "repository HEAD (detects committed evidence drifting from "
+             "the release candidate; regenerate at freeze)")
     return parser
+
+
+def _git_head_sha() -> str | None:
+    """Return the repository HEAD SHA, or None when not resolvable."""
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10,
+            cwd=REPO_ROOT,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    head = proc.stdout.strip()
+    if CANDIDATE_SHA_PATTERN.fullmatch(head):
+        return head
+    return None
+
+
+def _verify_head_matches(candidate_sha: str | None, reasons: list[str]) -> None:
+    """Append a reason when the evidence candidate SHA drifted from HEAD.
+
+    The evidence manifest is regenerated at freeze; a committed manifest
+    whose candidate_sha no longer equals the repository HEAD means the
+    evidence no longer describes the release candidate (P1-1).
+    """
+    if not isinstance(candidate_sha, str):
+        return
+    head = _git_head_sha()
+    if head is None:
+        reasons.append(
+            "verify-head: cannot resolve repository HEAD "
+            "(not a git checkout?)")
+    elif head != candidate_sha:
+        reasons.append(
+            f"stale-digest: candidate_sha {candidate_sha} != "
+            f"repository HEAD {head}; evidence drifted from the "
+            "release candidate — regenerate at freeze")
 
 
 def load_json(path: str | Path, label: str) -> dict:
@@ -353,6 +399,8 @@ def run_real_gate(args) -> int:
         reasons.append(
             f"stale-digest: candidate_sha {candidate_sha} != expected {expected_sha}"
         )
+    if args.verify_head and isinstance(candidate_sha, str):
+        _verify_head_matches(candidate_sha, reasons)
     if not _require_jsonschema():
         if reasons:
             for reason in reasons:

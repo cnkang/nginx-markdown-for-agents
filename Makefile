@@ -1105,14 +1105,17 @@ artifact-registry-check:
 	fi
 
 # release-evidence-manifest-check: Pre-freeze release evidence manifest gate.
-# Validates release evidence manifest against the v1 schema.
+# Validates release evidence manifest against the v1 schema and, in real
+# mode, requires the manifest candidate_sha to equal the repository HEAD
+# (--verify-head) so committed evidence cannot drift from the release
+# candidate (P1-1: evidence SHA == release candidate SHA).
 # FIXTURE mode: make release-evidence-manifest-check FIXTURE=path/to/fixture.json
 release-evidence-manifest-check:
 	@echo "=== Release Evidence Manifest Check ==="
 	@if [ -n "$(FIXTURE)" ]; then \
 		python3 tools/release/gates/validate_release_evidence_manifest.py --mode fixture --expected-sha 9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d --record-input "$(FIXTURE)"; \
 	else \
-		python3 tools/release/gates/validate_release_evidence_manifest.py --mode real; \
+		python3 tools/release/gates/validate_release_evidence_manifest.py --mode real --verify-head; \
 	fi
 
 # test-rust-fuzz-qualification: Pre-freeze fuzz qualification gate.
