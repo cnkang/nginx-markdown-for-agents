@@ -247,8 +247,13 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
         ngx_http_markdown_reason_from_error_category(
             NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
     rc = ngx_http_next_header_filter(r);
-    /* NGX_AGAIN is a pending header-filter retry, not delivery; the
-     * fail-open delivery counter remains unchanged until success. */
+    /*
+     * Canonical NGINX model: header-chain NGX_AGAIN means the write filter
+     * queued the header block — the headers are accepted.  No ctx exists on
+     * this path (allocation failed), so there is no delivery latch to
+     * publish; the body filter sees ctx == NULL and passes through without
+     * re-entering the header chain.
+     */
     /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
     if (rc == NGX_OK || rc == NGX_DONE) {
         ngx_http_markdown_metric_inc_failopen(eff, conf);
@@ -678,9 +683,18 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
             r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_overload());
         rc = ngx_http_next_header_filter(r);
-        /* NGX_AGAIN is a pending header-filter retry, not delivery; keep
-         * headers_forwarded clear until NGX_OK/NGX_DONE. */
+        /*
+         * Canonical NGINX model: header-chain NGX_AGAIN means the write
+         * filter queued the header block — the headers are accepted.
+         * Publish the delivery latch so the pass-through body path never
+         * re-enters the header chain (intermediate filters are not
+         * idempotent).
+         */
         /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
+        if (rc == NGX_AGAIN) {
+            ctx->headers_forwarded = 1;
+            return rc;
+        }
         if (rc == NGX_OK || rc == NGX_DONE) {
             ctx->headers_forwarded = 1;
             ngx_http_markdown_metric_inc_failopen(
@@ -710,9 +724,18 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
             r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_failed_open());
         rc = ngx_http_next_header_filter(r);
-        /* NGX_AGAIN is a pending header-filter retry, not delivery; keep
-         * headers_forwarded clear until NGX_OK/NGX_DONE. */
+        /*
+         * Canonical NGINX model: header-chain NGX_AGAIN means the write
+         * filter queued the header block — the headers are accepted.
+         * Publish the delivery latch so the pass-through body path never
+         * re-enters the header chain (intermediate filters are not
+         * idempotent).
+         */
         /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
+        if (rc == NGX_AGAIN) {
+            ctx->headers_forwarded = 1;
+            return rc;
+        }
         if (rc == NGX_OK || rc == NGX_DONE) {
             ctx->headers_forwarded = 1;
             ngx_http_markdown_metric_inc_failopen(
@@ -907,9 +930,18 @@ ngx_http_markdown_handle_encoding_header_invalid(
                   "markdown: malformed Content-Encoding "
                   "chain, returning original encoded content");
     rc = ngx_http_next_header_filter(r);
-    /* NGX_AGAIN is a pending header-filter retry, not delivery; keep
-     * headers_forwarded clear until NGX_OK/NGX_DONE. */
+    /*
+     * Canonical NGINX model: header-chain NGX_AGAIN means the write
+     * filter queued the header block — the headers are accepted.
+     * Publish the delivery latch so the pass-through body path never
+     * re-enters the header chain (intermediate filters are not
+     * idempotent).
+     */
     /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
+    if (rc == NGX_AGAIN) {
+        ctx->headers_forwarded = 1;
+        return rc;
+    }
     if (rc == NGX_OK || rc == NGX_DONE) {
         ctx->headers_forwarded = 1;
         ngx_http_markdown_metric_inc_failopen(
@@ -1006,8 +1038,17 @@ encoding_policy:
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_streaming_skip_compressed());
         *rc = ngx_http_next_header_filter(r);
-        /* NGX_AGAIN preserves the header retry; only definitive success may
-         * publish headers_forwarded to the body path. */
+        /*
+         * Canonical NGINX model: header-chain NGX_AGAIN means the write
+         * filter queued the header block — the headers are accepted.
+         * Publish the delivery latch so the pass-through body path never
+         * re-enters the header chain (intermediate filters are not
+         * idempotent).
+         */
+        if (*rc == NGX_AGAIN) {
+            ctx->headers_forwarded = 1;
+            return 1;
+        }
         if (*rc == NGX_OK || *rc == NGX_DONE) {
             ctx->headers_forwarded = 1;
         }
