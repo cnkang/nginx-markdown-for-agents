@@ -337,6 +337,15 @@ public-surface-drift-check:
 schema-drift-check:
 	python3 tools/release/gates/generate_schema_artifacts.py --version "$(SCHEMA_RELEASE_VERSION)"
 	python3 tools/release/gates/validate_schema_drift.py --version "$(SCHEMA_RELEASE_VERSION)"
+	# The generator rewrites the three schema artifacts in place; verify the
+	# committed copies match what the generator produces, otherwise drift in
+	# the committed artifacts would never be detected (the validator only
+	# checks the freshly generated content).
+	@git diff --exit-code -- \
+		artifacts/release/$(SCHEMA_RELEASE_VERSION)/metrics-registry.json \
+		artifacts/release/$(SCHEMA_RELEASE_VERSION)/diagnostics-field-contract.json \
+		artifacts/release/$(SCHEMA_RELEASE_VERSION)/dynconf-precedence-report.json \
+		|| { echo "ERROR: schema artifacts are stale or modified; regenerate and commit them"; exit 1; }
 
 harness-check-full:
 	$(MAKE) docs-check-base

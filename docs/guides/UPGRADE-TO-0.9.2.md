@@ -88,12 +88,13 @@ sudo cp ngx_http_markdown_filter_module.so \
 ### 5. Migrate the configuration
 
 0.9.2 is a breaking configuration release (25-directive surface, dynconf
-schema v2). Before validating or restarting NGINX, apply the 0.9.2 migration:
+file format frozen at JSON schema v1). Before validating or restarting
+NGINX, apply the 0.9.2 migration:
 
 ```bash
 # Apply the 0.9.2 directive changes documented in MIGRATION-0.9.2.md:
 # removed profile/OTel directives, consolidated markdown_limits keys,
-# dynconf JSON migration from schema v1 to schema v2.
+# dynconf migration from legacy line format to JSON schema v1.
 # (The markdown_streaming_engine -> markdown_streaming rename happened in
 # 0.9.1, not 0.9.2; 0.9.2 removed markdown_stream_threshold and
 # markdown_streaming_zero_copy.)
@@ -215,7 +216,7 @@ bash tools/doctor/nginx-markdown-doctor.sh
 ```bash
 curl -s http://localhost/nginx-markdown/diagnostics | python3 -m json.tool
 # Verify version shows 0.9.2
-# Verify reason_to_code includes bypass_no_transform
+# Verify recent_decisions[].reason can carry bypass_no_transform
 ```
 
 ### 4. Metrics endpoint

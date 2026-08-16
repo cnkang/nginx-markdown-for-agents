@@ -174,12 +174,17 @@ fn classify_io_error(e: std::io::Error) -> DecompError {
     let msg = e.to_string();
     match e.kind() {
         std::io::ErrorKind::InvalidData | std::io::ErrorKind::InvalidInput => {
-            // Distinguish format errors from truncation by inspecting the message
+            // Distinguish format errors from truncation by inspecting the
+            // message.  "corrupt deflate stream" is data corruption (bad
+            // block type / checksum), NOT truncation: classifying it as
+            // TruncatedInput mislabels the telemetry and, more importantly,
+            // defeats the raw-deflate compatibility retry (which only fires
+            // on FormatError).  Genuine truncation surfaces as "unexpected
+            // eof"/"truncat"/"premature".
             let lower = msg.to_lowercase();
             if lower.contains("truncat")
                 || lower.contains("unexpected eof")
                 || lower.contains("premature")
-                || lower.contains("corrupt deflate stream")
             {
                 DecompError::TruncatedInput(msg)
             } else {
@@ -195,10 +200,9 @@ fn classify_io_error(e: std::io::Error) -> DecompError {
 fn classify_deflate_error(e: flate2::DecompressError) -> DecompError {
     let msg = e.to_string();
     let lower = msg.to_lowercase();
-    if lower.contains("truncat")
-        || lower.contains("unexpected eof")
-        || lower.contains("premature")
-        || lower.contains("corrupt deflate stream")
+    // Same policy as classify_io_error: "corrupt deflate stream" is a format
+    // error (bad data), not truncation.
+    if lower.contains("truncat") || lower.contains("unexpected eof") || lower.contains("premature")
     {
         DecompError::TruncatedInput(msg)
     } else {

@@ -253,7 +253,7 @@ When rolling back from 0.9.2 to 0.9.1:
 
 | Aspect | Impact |
 |--------|--------|
-| `reason_to_code` mapping | `bypass_no_transform` entry removed from diagnostics JSON |
+| `recent_decisions[].reason` | `bypass_no_transform` entry removed from diagnostics JSON |
 | C reason code constants | Decompression series (4–11) constants unavailable in `components/nginx-module/src/ngx_http_markdown_reason.c` |
 | OTel surface | Present in 0.9.1 documentation; removed from 0.9.2, so restore the old configuration before rollback |
 | Dynconf diagnostics | `POST action=rollback` is rejected; restore the watched file atomically |
