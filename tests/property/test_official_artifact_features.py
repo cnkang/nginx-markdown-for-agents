@@ -124,13 +124,18 @@ def _workflow_feature_flags(path: pathlib.Path) -> list[set[str]]:
     can distinguish it from an explicit feature list.
     """
     text = path.read_text(encoding="utf-8")
-    no_default = "no-default-features" in text
+    no_default = bool(
+        re.search(r"--no-default-features(?:\s|$)", text)
+    )
     all_features = bool(re.search(r"--all-features(?:\s|$)", text))
     flags = re.findall(
-        r"--features(?:=|\s+)[\"']?([A-Za-z0-9_,]+)[\"']?",
+        r"--features(?:=|\s+)[\"']?([A-Za-z0-9_,][A-Za-z0-9_, ]*)[\"']?",
         text,
     )
-    parsed = [set(f.split(",")) for f in flags]
+    parsed = [
+        {f.strip() for f in re.split(r"[,\s]+", flag) if f.strip()}
+        for flag in flags
+    ]
     if all_features:
         parsed.append({"*all*"})
     if no_default:

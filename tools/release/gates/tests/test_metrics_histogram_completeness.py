@@ -56,7 +56,9 @@ def _registry_artifact() -> dict:
         / "metrics-registry.json"
     )
     if not registry_path.is_file():
-        pytest.skip(f"metrics registry artifact missing: {registry_path}")
+        raise AssertionError(
+            f"metrics registry artifact missing: {registry_path}"
+        )
     return json.loads(registry_path.read_text(encoding="utf-8"))
 
 
