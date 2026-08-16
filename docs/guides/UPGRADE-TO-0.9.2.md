@@ -93,7 +93,7 @@ schema v2). Before validating or restarting NGINX, apply the 0.9.2 migration:
 ```bash
 # Apply the 0.9.2 directive changes documented in MIGRATION-0.9.2.md:
 # removed profile/OTel directives, consolidated markdown_limits keys,
-# dynconf JSON v1 migration.
+# dynconf JSON migration from schema v1 to schema v2.
 # (The markdown_streaming_engine -> markdown_streaming rename happened in
 # 0.9.1, not 0.9.2; 0.9.2 removed markdown_stream_threshold and
 # markdown_streaming_zero_copy.)
@@ -168,6 +168,10 @@ sudo nginx -t && sudo systemctl restart nginx
 ### 1. Update the chart repository
 
 ```bash
+# If you installed from the in-tree chart, refresh it from the 0.9.2 source:
+#   git fetch origin && git checkout v0.9.2   (or update your vendored copy)
+# If you use a remote chart repository, define it before updating:
+#   helm repo add nginx-markdown <your-chart-repo-url>
 helm repo update
 ```
 

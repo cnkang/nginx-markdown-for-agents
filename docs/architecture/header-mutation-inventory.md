@@ -152,6 +152,7 @@ now routed through the two-phase prepare/commit protocol.
 |------|------|----------|--------|
 | Conversion success (full-buffer) | `ngx_http_markdown_headers_impl.h` | Content-Type, Content-Encoding, Content-Length, ETag, Vary: Accept, X-Markdown-Tokens, Accept-Ranges, Cache-Control | **Full-coverage prepare/commit** |
 | Conversion success (streaming) | `ngx_http_markdown_stream_commit.c` | Content-Type, Content-Length, Content-Encoding, ETag (cleared), Vary: Accept, Cache-Control | **Full-coverage prepare/commit (snapshot/rollback + infallible commit)** |
+| Streaming: X-Markdown-Tokens / Accept-Ranges | `ngx_http_markdown_stream_commit.c` | **Not applied, not cleared** — intentionally left as upstream delivered them | Streaming commit does not allocate or format token headers and does not remove Accept-Ranges; both remain exactly as received from upstream |
 | Conditional (ETag / Last-Modified) | `ngx_http_markdown_conditional.c` | set ETag, push header entries | Routed through prepare/commit in conditional 304 path |
 | Payload | `ngx_http_markdown_payload_impl.h` | set `last_modified_time` | Scalar assignment (infallible, no allocation) — not a HeaderPlan candidate |
 

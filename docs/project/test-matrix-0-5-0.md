@@ -10,7 +10,7 @@ All sub-specs map their test plans to this matrix. Combined coverage must addres
 |-----------|--------|
 | Platform | Ubuntu (primary), macOS (secondary) |
 | NGINX Version | 1.24.x (LTS), 1.26.x (stable), 1.27.x (mainline) |
-| Response Size Tier | Small (<10KB), Medium (10KB–1MB), Large (1MB–64MB), Extra-Large (>64MB) |
+| Response Size Tier | Small ([0, 10KB)), Medium ([10KB, 1MB)), Large ([1MB, 64MB)), Extra-Large ([64MB, ∞)) — half-open disjoint boundaries: exactly 10KB maps to Medium, exactly 1MB maps to Large, exactly 64MB maps to Extra-Large |
 | Conversion Engine | full-buffer, streaming |
 | Conversion Path | convert (successful conversion), skip (ineligible skip), fallback/fail-open (pre-commit fallback) |
 
@@ -19,6 +19,10 @@ All sub-specs map their test plans to this matrix. Combined coverage must addres
 Each sub-spec fills in the following template to identify complete covered
 tuples. A row is one executable combination across all dimensions. Listing a
 value in isolation does not establish coverage for the cross-product.
+The **Combination ID** must be deterministic and globally unique: derive it
+from every listed dimension value (for example a stable hash of the
+canonical dimension tuple), or specify the complete dimension tuple as the
+canonical key — never reuse the same ID for different tuples.
 
 ```markdown
 ## Test Matrix Coverage — [Sub-Spec Name]

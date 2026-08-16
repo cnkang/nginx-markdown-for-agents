@@ -19,8 +19,10 @@ v0.6.x compatibility bridge entirely:
 | `markdown_streaming_auto_threshold` | N/A (new in 0.6.0) | Accepted (32k default) | **Removed** — `nginx -t` fails | Auto mode used the then-current threshold; see the 0.9.2 note below |
 | `markdown_streaming_engine` `$variable` | Accepted | Accepted | **Removed** — `nginx -t` fails | Must use fixed `off`/`auto`/`on` |
 
-**Key guarantee**: Explicit `off`/`on` configurations produce identical behavior
-to 0.5.x. However, configurations using `markdown_streaming_auto_threshold` or
+**Key guarantee**: An explicit `off` configuration produces identical behavior
+to 0.5.x. `on` configurations are not part of the equivalence claim — 0.9.2
+treats the streaming engine as the default path, so describe `off` and `on`
+separately. Configurations using `markdown_streaming_auto_threshold` or
 `markdown_streaming_engine $variable` **need updating before you upgrade to 0.8.0**.
 You must update these configurations before the upgrade. The removed directives fail `nginx -t`. Update them or the upgrade fails.
 
@@ -48,7 +50,7 @@ Add to your `http` block:
 
 ```nginx
 http {
-    markdown_streaming_engine off   # 0.8.0-era name. 0.9.1+ uses markdown_streaming off
+    markdown_streaming off;   # 0.8.0-era name was markdown_streaming_engine; 0.9.1+ uses markdown_streaming off
     markdown_prune_noise off;
     # ... existing configuration
 }
@@ -207,7 +209,7 @@ markdown_memory_budget 8m;
 
 If 0.6.0 defaults cause issues:
 
-1. **Immediate rollback**: Add `markdown_streaming_engine off; markdown_prune_noise off;` at http level (0.9.1+ operators use `markdown_streaming off`)
+1. **Immediate rollback**: Add `markdown_streaming off; markdown_prune_noise off;` at http level (0.9.1/0.9.2 syntax; use `markdown_streaming off;` as the primary command)
 2. **Selective rollback**: Disable only the problematic default
 3. **Binary rollback**: Downgrade to 0.5.x binary — configuration is backward-compatible
 

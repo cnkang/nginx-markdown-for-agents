@@ -916,7 +916,7 @@ These page types share common traits that make them ideal first candidates:
 - Content-Type is consistently `text/html`
 - Response sizes are within typical `markdown_limits` limits
 
-Once these paths are stable (conversion success rate > 95%, no `FAIL_SYSTEM` codes, latency within `markdown_limits`), expand to additional content paths. Follow the [Rollout Stages](#rollout-stages) sequence for each expansion.
+Once these paths are stable (conversion success rate > 95%, latency within `markdown_limits`), expand to additional content paths. Follow the [Rollout Stages](#rollout-stages) sequence for each expansion.
 
 ### Excluding Page Types from Conversion Scope
 
@@ -1299,12 +1299,18 @@ curl -s -H "Accept: text/plain; version=0.0.4" \
 #### Check latency with human-readable summary
 
 ```bash
-# Prometheus can calculate a percentile from the frozen histogram directly:
-# histogram_quantile(0.95, sum by (le) (
-#   rate(nginx_markdown_conversion_duration_seconds_bucket[5m])))
+# Fetch the frozen histogram buckets:
 curl -s -H "Accept: text/plain; version=0.0.4" \
   http://localhost/markdown-metrics | \
   grep 'nginx_markdown_conversion_duration_seconds_bucket'
+
+# Compute p95 from the buckets (requires promtool; the finite buckets stop
+# at 5s, so p95 is only meaningful below that bound):
+curl -s -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics > /tmp/markdown-metrics.txt
+promtool query instant 'histogram_quantile(0.95, sum by (le) (rate(nginx_markdown_conversion_duration_seconds_bucket[5m])))' \
+  --url=http://localhost:9090 2>/dev/null \
+  || echo "promtool/Prometheus not available — inspect the bucket output above for the distribution"
 ```
 
 #### Verify a test request converts successfully
