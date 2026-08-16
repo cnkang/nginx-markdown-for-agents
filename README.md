@@ -182,8 +182,8 @@ http {
 ```
 
 ```bash
-# Simulate ClaudeBot — returns Markdown
-curl -sD - -o /dev/null -A "ClaudeBot/1.0" http://localhost/docs/
+# Simulate ClaudeBot — returns Markdown despite a browser-style Accept header
+curl -sD - -o /dev/null -A "ClaudeBot/1.0" -H "Accept: text/html" http://localhost/docs/
 # Expected: Content-Type: text/markdown; charset=utf-8
 
 # Normal browser request — returns HTML as usual

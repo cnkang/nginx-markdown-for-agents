@@ -176,8 +176,8 @@ http {
 ```
 
 ```bash
-# 模拟 ClaudeBot — 返回 Markdown
-curl -sD - -o /dev/null -A "ClaudeBot/1.0" http://localhost/docs/
+# 模拟 ClaudeBot — 即使带浏览器式 Accept 头也返回 Markdown
+curl -sD - -o /dev/null -A "ClaudeBot/1.0" -H "Accept: text/html" http://localhost/docs/
 # 预期: Content-Type: text/markdown; charset=utf-8
 
 # 普通浏览器请求 — 仍然返回 HTML

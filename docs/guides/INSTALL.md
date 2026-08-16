@@ -148,11 +148,11 @@ Content-Type: text/markdown; charset=utf-8
 Vary: Accept
 ```
 
-If the response returns `Content-Type: text/markdown`, the module loads. To
-confirm the conversion, request a known HTML page and assert Markdown-specific
-body content. For example, an `<h1>Welcome</h1>` heading must appear as
-`# Welcome` in the response body. The `Content-Type` alone does not prove
-that the conversion ran.
+To verify the module loaded and conversion works, request a known HTML page
+and assert the converted Markdown body. For example, an `<h1>Welcome</h1>`
+heading must appear as `# Welcome` in the response body. Do not treat a
+`Content-Type: text/markdown` response alone as evidence that conversion
+succeeded — it only confirms the label applied to the response.
 
 ---
 

@@ -218,7 +218,9 @@ class TestCheckerAdversarialInputs:
             "components/rust-converter/fuzz/corpus/"
             "fuzz_multilayer_decode/seed-minimum-valid.txt"
         )
-        assert seed_path.exists(), (
+        # Resolve the existence assertion through REPO_ROOT so the test does
+        # not depend on the process working directory.
+        assert (REPO_ROOT / seed_path).exists(), (
             "fuzz seed must exist; the exclusion must cover the real seed"
         )
         assert checker._should_skip_path(seed_path)

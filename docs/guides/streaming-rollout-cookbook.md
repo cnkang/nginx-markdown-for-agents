@@ -2,7 +2,7 @@
 
 This cookbook describes a controlled rollout of the frozen 0.9.2 streaming
 surface. It uses the module's current explicit directives and Prometheus
-families, profiles, threshold directives, and zero-copy switches are not part
+families. Profiles, threshold directives, and zero-copy switches are not part
 of the active configuration contract.
 
 ## Before rollout

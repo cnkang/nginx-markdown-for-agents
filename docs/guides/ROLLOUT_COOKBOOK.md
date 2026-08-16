@@ -1087,7 +1087,8 @@ the Markdown output instead.
 With `strict`, only requests containing an explicit `Accept: text/markdown`
 media type trigger conversion. Wildcard Accept values like `Accept: */*` or
 `Accept: text/*` — which browsers and many HTTP clients send by default — do
-not trigger conversion.
+not trigger conversion. An explicit rejection (`Accept: text/markdown;q=0`,
+or a wildcard with `q=0`) produces the `skipped_accept_reject` outcome.
 
 This prevents accidental conversion of browser traffic. A standard browser
 request (`Accept: text/html, */*`) does not match the strict policy and keeps

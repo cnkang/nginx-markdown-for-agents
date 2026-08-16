@@ -146,20 +146,23 @@ curl -fsSL https://pkg.example.com/nginx-markdown/gpg.key | \
 ```bash
 # Verify the Release file signature
 gpg --verify /var/lib/apt/lists/*nginx-markdown*Release.gpg
-
-# Check package integrity after download
-apt-get download nginx-module-markdown-for-agents
 ```
 
-**Canonical release verification**: for a published release, verify the
-release signature over `SHA256SUMS.asc`, then check the downloaded artifacts
-against the checksums file. The example below uses the v0.9.1 release assets
-(the 0.9.2 release is not yet published; adapt the version once available):
+**Canonical release verification**: for a published release, download the
+exact versioned GitHub Release artifact first, verify the release signature
+over `SHA256SUMS.asc`, then check the downloaded artifacts against the
+checksums file — all in the same directory. The example below uses the v0.9.1
+release assets (the 0.9.2 release is not yet published; adapt the version
+once available):
 
 ```bash
+VERSION=v0.9.1
+BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${VERSION}"
+curl -fSLo SHA256SUMS "${BASE_URL}/SHA256SUMS"
+curl -fSLo SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
+curl -fSLO "${BASE_URL}/nginx-module-markdown-for-agents_0.9.1-1_amd64.deb"
 gpg --verify SHA256SUMS.asc SHA256SUMS
 sha256sum -c SHA256SUMS
-apt-get download nginx-module-markdown-for-agents=0.9.1-1
 ```
 
 **Per-package signatures** (only for releases whose workflow produces them;
