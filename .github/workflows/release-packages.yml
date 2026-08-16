@@ -1188,7 +1188,10 @@ jobs:
           export GNUPGHOME="${RUNNER_TEMP}/package-signing-gnupg"
           mkdir -p "${GNUPGHOME}"
           chmod 700 "${GNUPGHOME}"
-          trap 'rm -rf "${GNUPGHOME}"' EXIT
+          # Terminate the gpg-agent (which caches the preset passphrase)
+          # before removing GNUPGHOME so the cached secret is not left
+          # behind for other steps on the same runner.
+          trap 'gpgconf --kill gpg-agent >/dev/null 2>&1 || true; rm -rf "${GNUPGHOME}"' EXIT
           printf '%s' "${GPG_PRIVATE_KEY}" | gpg --batch --yes --import >/dev/null 2>&1
           key_fp="$(gpg --list-keys --with-colons "${GPG_KEY_ID}" \
             | awk -F: '$1 == "fpr" {print $10; exit}')"

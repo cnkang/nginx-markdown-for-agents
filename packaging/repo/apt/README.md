@@ -151,17 +151,19 @@ gpg --verify /var/lib/apt/lists/*nginx-markdown*Release.gpg
 apt-get download nginx-module-markdown-for-agents
 ```
 
-**Canonical 0.9.2 verification**: verify the release signature over
-`SHA256SUMS.asc`, then check the downloaded artifacts against the checksums
-file:
+**Canonical release verification**: for a published release, verify the
+release signature over `SHA256SUMS.asc`, then check the downloaded artifacts
+against the checksums file. The example below uses the v0.9.1 release assets
+(the 0.9.2 release is not yet published; adapt the version once available):
 
 ```bash
 gpg --verify SHA256SUMS.asc SHA256SUMS
 sha256sum -c SHA256SUMS
+apt-get download nginx-module-markdown-for-agents=0.9.1-1
 ```
 
 **Per-package signatures** (only for releases whose workflow produces them;
-not part of the canonical 0.9.2 path):
+not part of the canonical release verification path):
 
 ```bash
 dpkg-sig --verify nginx-module-markdown-for-agents_*.deb

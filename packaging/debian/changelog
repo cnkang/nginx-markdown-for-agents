@@ -7,7 +7,7 @@ nginx-module-markdown (0.9.2-1) UNRELEASED; urgency=medium
   * Public surface inventory and drift detection gate
   * Release gates 0.9.2
 
- -- Kang Liu <liukang@noreply.github.com>  UNRELEASED
+ -- Kang Liu <liukang@noreply.github.com>  Sat, 15 Aug 2026 12:00:00 +0000
 
 nginx-module-markdown (0.9.1-1) unstable; urgency=medium
 
