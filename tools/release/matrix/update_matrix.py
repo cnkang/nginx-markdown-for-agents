@@ -1113,6 +1113,10 @@ def _canonical_dynamic_entry(
         entry.pop("managed_by", None)
         entry["nginx_version"] = version
         entry["libc"] = libc
+        # Refresh the binding keys with the same computed values as the
+        # new-row branch so an existing row never carries stale digests.
+        entry["feature_manifest_digest"] = _feature_manifest_digest()
+        entry["abi_version"] = _frozen_abi_version()
         return entry
 
     normalized = normalize_entry_aliases(legacy_entry)
@@ -1170,7 +1174,13 @@ def _frozen_abi_version() -> int:
 
 
 def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
-    """Replace generated dynamic-module rows while preserving other artifacts."""
+    """Replace generated dynamic-module rows while preserving other artifacts.
+
+    Generated rows are projected through ``_canonical_dynamic_entry`` (which
+    refreshes binding keys on existing rows), and stale supported/candidate
+    dynamic rows that are no longer generated survive but are rebound to the
+    current digest/ABI, so the tool input is uniformly bound.
+    """
     entries = data.get("entries")
     if not isinstance(entries, list):
         _matrix_error("Canonical release matrix is missing an entries list")
@@ -1210,6 +1220,13 @@ def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
         or entry.get("artifact_type") != "dynamic-module"
         or _matrix_entry_identity(entry) not in generated_keys
     ]
+    # Stale supported/candidate rows survive (hand-maintained compatibility
+    # declarations), but they are rebound like the regenerated rows so the
+    # tool input never carries a mixed bound/unbound state.
+    for entry in other_entries:
+        if isinstance(entry, dict) and entry.get("artifact_type") == "dynamic-module":
+            entry["feature_manifest_digest"] = _feature_manifest_digest()
+            entry["abi_version"] = _frozen_abi_version()
     dynamic_entries.sort(
         key=lambda entry: (
             version_tuple(_matrix_entry_identity(entry)[0]),
