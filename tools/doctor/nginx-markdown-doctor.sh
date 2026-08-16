@@ -521,7 +521,8 @@ check_rust_toolchain() {
     local expected_msrv="1.97.1"     # rust-toolchain.toml channel (exact pin)
 
     if ! command -v rustc >/dev/null 2>&1; then
-        emit_check "rust_toolchain" "skip" "rustc not available (install Rust via rustup)"
+        emit_check "rust_toolchain" "skip" "rustc not available (install Rust via rustup)" \
+            '{"rustc_version":null,"msrv":"'"$expected_msrv"'","pinned_channel":null}'
         return 0
     fi
 
@@ -532,7 +533,7 @@ check_rust_toolchain() {
     if [[ -z "$rustc_version" ]]; then
         emit_check "rust_toolchain" "fail" \
             "rustc version could not be determined" \
-            '{"msrv_ok":null}'
+            '{"rustc_version":null,"msrv":"'"$expected_msrv"'","pinned_channel":null}'
         return 0
     fi
     if [[ -n "$rustc_version" ]]; then
@@ -561,7 +562,7 @@ check_rust_toolchain() {
         if (( symlink_hops > max_symlink_hops )); then
             emit_check "rust_toolchain" "fail" \
                 "doctor script symlink chain exceeds ${max_symlink_hops} hops" \
-                '{"repository_checkout":false,"symlink_chain_bounded":false}'
+                '{"repository_checkout":false,"symlink_chain_bounded":false,"pinned_channel":null}'
             return 0
         fi
         doctor_dir=$(cd -P "$(dirname "$doctor_source")" \
@@ -596,11 +597,11 @@ check_rust_toolchain() {
         if [[ "$msrv_ok" == "true" ]]; then
             emit_check "rust_toolchain" "warn" \
                 "rustc ${rustc_version} meets MSRV ${msrv_floor}; repository checkout unavailable, pinned-channel check skipped" \
-                '{"repository_checkout":false,"msrv_ok":true}'
+                '{"repository_checkout":false,"msrv_ok":true,"pinned_channel":null}'
         else
             emit_check "rust_toolchain" "warn" \
                 "rustc ${rustc_version} below MSRV ${msrv_floor}; repository checkout unavailable, pinned-channel check skipped" \
-                '{"repository_checkout":false,"msrv_ok":false}'
+                '{"repository_checkout":false,"msrv_ok":false,"pinned_channel":null}'
         fi
         return 0
     fi
