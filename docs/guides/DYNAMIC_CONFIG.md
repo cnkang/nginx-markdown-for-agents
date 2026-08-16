@@ -58,9 +58,10 @@ contain only these runtime keys:
 | `error_policy` | `pass`, `fail_closed`, `status 429`, `status 503` |
 | `streaming_buffer` | integer bytes from 64 KiB through 1 GiB |
 
-The 0.9.2 default for `streaming_buffer` is 2 MiB. Pin
-`streaming_buffer=262144` in `markdown_limits` when operators need the 0.9.1
-256 KiB behavior.
+The 0.9.2 default for `streaming_buffer` is 2 MiB, the same default that
+0.9.1 used. The 256 KiB value appeared only in the removed `balanced` and
+`streaming_first` profiles. Operators who explicitly pinned those profiles
+should pin `streaming_buffer=262144` in `markdown_limits` to retain it.
 
 Example:
 

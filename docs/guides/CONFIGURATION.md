@@ -113,8 +113,10 @@ exception the decision engine rejects the request using `REJECT_STATUS`
 instead. With `fail_closed` or `status <code>`, the module rejects the
 request and returns the configured reject status.
 
-The 0.9.2 default for `streaming_buffer` is 2 MiB, up from 256 KiB in 0.9.1.
-Set `markdown_limits streaming_buffer=256k` to retain the previous default.
+The 0.9.2 default for `streaming_buffer` is 2 MiB, the same default that
+0.9.1 used. The 256 KiB value appeared only in the removed `balanced` and
+`streaming_first` profiles. Operators who explicitly pinned those profiles
+should set `markdown_limits streaming_buffer=256k` to retain that behavior.
 
 ## Streaming policy
 
