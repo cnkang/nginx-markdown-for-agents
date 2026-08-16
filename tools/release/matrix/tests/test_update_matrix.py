@@ -646,7 +646,11 @@ def test_property11_pin_entry_preservation(auto_versions, manual_entries):
 
 
 def test_replace_canonical_dynamic_entries_preserves_stale_supported_rows():
-    """Keep every non-generated row while replacing generated rows."""
+    """Keep every non-generated row while replacing generated rows.
+
+    Stale supported/candidate rows survive the update but are rebound to the
+    current digest/ABI alongside the regenerated rows (uniform rebind).
+    """
     data = {
         "entries": [
             {
@@ -702,6 +706,12 @@ def test_replace_canonical_dynamic_entries_preserves_stale_supported_rows():
 
     # Non-generated artifacts must pass through unchanged.
     assert {"artifact_type": "source-archive", "name": "source"} in data["entries"]
+
+    # Every dynamic-module row — generated or stale — carries the current
+    # binding keys (uniform rebind contract).
+    for entry in dynamic:
+        assert entry.get("feature_manifest_digest") == um._feature_manifest_digest()
+        assert entry.get("abi_version") == um._frozen_abi_version()
 
 
 def test_replace_canonical_dynamic_entries_normalizes_alias_rows():
@@ -1098,9 +1108,9 @@ def test_canonical_dynamic_entry_new_row_constructs_target_from_arch():
     assert row["target"] == "aarch64-unknown-linux-musl"
 
 
-def test_canonical_dynamic_entry_existing_row_preserves_bindings():
-    """An existing canonical row keeps its binding keys and gains no
-    dropped legacy keys or legacy aliases."""
+def test_canonical_dynamic_entry_existing_row_refreshes_bindings():
+    """An existing canonical row is rebound to the current digest/ABI and
+    gains no dropped legacy keys or legacy aliases."""
     existing = {
         "nginx_version": "1.24.0",
         "os": "debian12",
@@ -1118,7 +1128,7 @@ def test_canonical_dynamic_entry_existing_row_preserves_bindings():
         },
         existing,
     )
-    assert row["feature_manifest_digest"] == "sha256:abc"
-    assert row["abi_version"] == 2
+    assert row["feature_manifest_digest"] == um._feature_manifest_digest()
+    assert row["abi_version"] == um._frozen_abi_version()
     assert not DROPPED_CANONICAL_KEYS.intersection(row)
     assert not LEGACY_ALIAS_KEYS.intersection(row)

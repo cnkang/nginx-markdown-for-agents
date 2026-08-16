@@ -11,7 +11,9 @@
       "test_level": "smoke-test",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/release-packages.yml"
+      "owner_workflow": ".github/workflows/release-packages.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.24.0",
@@ -23,7 +25,9 @@
       "test_level": "smoke-test",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/release-packages.yml"
+      "owner_workflow": ".github/workflows/release-packages.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.24.0",
@@ -35,7 +39,9 @@
       "test_level": "docker-validation",
       "support_tier": "supported",
       "release_blocking": false,
-      "owner_workflow": ".github/workflows/release-binaries.yml"
+      "owner_workflow": ".github/workflows/release-binaries.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.24.0",
@@ -47,7 +53,9 @@
       "test_level": "docker-validation",
       "support_tier": "supported",
       "release_blocking": false,
-      "owner_workflow": ".github/workflows/release-binaries.yml"
+      "owner_workflow": ".github/workflows/release-binaries.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.26.3",
@@ -59,7 +67,9 @@
       "test_level": "smoke-test",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/release-packages.yml"
+      "owner_workflow": ".github/workflows/release-packages.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.26.3",
@@ -71,7 +81,9 @@
       "test_level": "smoke-test",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/release-packages.yml"
+      "owner_workflow": ".github/workflows/release-packages.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.26.3",
@@ -83,7 +95,9 @@
       "test_level": "docker-validation",
       "support_tier": "supported",
       "release_blocking": false,
-      "owner_workflow": ".github/workflows/release-binaries.yml"
+      "owner_workflow": ".github/workflows/release-binaries.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.26.3",
@@ -95,7 +109,9 @@
       "test_level": "docker-validation",
       "support_tier": "supported",
       "release_blocking": false,
-      "owner_workflow": ".github/workflows/release-binaries.yml"
+      "owner_workflow": ".github/workflows/release-binaries.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.28.3",
@@ -107,7 +123,9 @@
       "test_level": "smoke-test",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/release-packages.yml"
+      "owner_workflow": ".github/workflows/release-packages.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.28.3",
@@ -119,7 +137,9 @@
       "test_level": "smoke-test",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/release-packages.yml"
+      "owner_workflow": ".github/workflows/release-packages.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.28.3",
@@ -131,7 +151,9 @@
       "test_level": "docker-validation",
       "support_tier": "supported",
       "release_blocking": false,
-      "owner_workflow": ".github/workflows/release-binaries.yml"
+      "owner_workflow": ".github/workflows/release-binaries.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.28.3",
@@ -143,7 +165,9 @@
       "test_level": "docker-validation",
       "support_tier": "supported",
       "release_blocking": false,
-      "owner_workflow": ".github/workflows/release-binaries.yml"
+      "owner_workflow": ".github/workflows/release-binaries.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.30.4",
@@ -155,7 +179,9 @@
       "test_level": "smoke-test",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/release-packages.yml"
+      "owner_workflow": ".github/workflows/release-packages.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.30.4",
@@ -167,7 +193,9 @@
       "test_level": "smoke-test",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/release-packages.yml"
+      "owner_workflow": ".github/workflows/release-packages.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.30.4",
@@ -179,7 +207,9 @@
       "test_level": "docker-validation",
       "support_tier": "supported",
       "release_blocking": false,
-      "owner_workflow": ".github/workflows/release-binaries.yml"
+      "owner_workflow": ".github/workflows/release-binaries.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.30.4",
@@ -191,7 +221,9 @@
       "test_level": "docker-validation",
       "support_tier": "supported",
       "release_blocking": false,
-      "owner_workflow": ".github/workflows/release-binaries.yml"
+      "owner_workflow": ".github/workflows/release-binaries.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.31.3",
@@ -203,7 +235,9 @@
       "test_level": "smoke-test",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/release-packages.yml"
+      "owner_workflow": ".github/workflows/release-packages.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.31.3",
@@ -215,7 +249,9 @@
       "test_level": "smoke-test",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/release-packages.yml"
+      "owner_workflow": ".github/workflows/release-packages.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.31.3",
@@ -227,7 +263,9 @@
       "test_level": "docker-validation",
       "support_tier": "supported",
       "release_blocking": false,
-      "owner_workflow": ".github/workflows/release-binaries.yml"
+      "owner_workflow": ".github/workflows/release-binaries.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.31.3",
@@ -239,7 +277,9 @@
       "test_level": "docker-validation",
       "support_tier": "supported",
       "release_blocking": false,
-      "owner_workflow": ".github/workflows/release-binaries.yml"
+      "owner_workflow": ".github/workflows/release-binaries.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.26.3",
@@ -251,7 +291,9 @@
       "test_level": "functional-check",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/official-nginx-docker.yml"
+      "owner_workflow": ".github/workflows/official-nginx-docker.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.26.3",
@@ -263,7 +305,9 @@
       "test_level": "functional-check",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/official-nginx-docker.yml"
+      "owner_workflow": ".github/workflows/official-nginx-docker.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.26.3",
@@ -275,7 +319,9 @@
       "test_level": "functional-check",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/official-nginx-docker.yml"
+      "owner_workflow": ".github/workflows/official-nginx-docker.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.26.3",
@@ -287,7 +333,9 @@
       "test_level": "functional-check",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/official-nginx-docker.yml"
+      "owner_workflow": ".github/workflows/official-nginx-docker.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.31.3",
@@ -299,7 +347,9 @@
       "test_level": "functional-check",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/official-nginx-docker.yml"
+      "owner_workflow": ".github/workflows/official-nginx-docker.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.31.3",
@@ -311,7 +361,9 @@
       "test_level": "functional-check",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/official-nginx-docker.yml"
+      "owner_workflow": ".github/workflows/official-nginx-docker.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.31.3",
@@ -323,7 +375,9 @@
       "test_level": "functional-check",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/official-nginx-docker.yml"
+      "owner_workflow": ".github/workflows/official-nginx-docker.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.31.3",
@@ -335,7 +389,9 @@
       "test_level": "functional-check",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/official-nginx-docker.yml"
+      "owner_workflow": ".github/workflows/official-nginx-docker.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.26.3",
@@ -347,7 +403,9 @@
       "test_level": "smoke-test",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/release-packages.yml"
+      "owner_workflow": ".github/workflows/release-packages.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.26.3",
@@ -359,7 +417,9 @@
       "test_level": "smoke-test",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/release-packages.yml"
+      "owner_workflow": ".github/workflows/release-packages.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.26.3",
@@ -371,7 +431,9 @@
       "test_level": "smoke-test",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/release-packages.yml"
+      "owner_workflow": ".github/workflows/release-packages.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.26.3",
@@ -383,7 +445,9 @@
       "test_level": "smoke-test",
       "support_tier": "supported",
       "release_blocking": true,
-      "owner_workflow": ".github/workflows/release-packages.yml"
+      "owner_workflow": ".github/workflows/release-packages.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.26.3",
@@ -395,7 +459,9 @@
       "test_level": "formula-gate",
       "support_tier": "experimental",
       "release_blocking": false,
-      "owner_workflow": ".github/workflows/homebrew-formula-gate.yml"
+      "owner_workflow": ".github/workflows/homebrew-formula-gate.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     },
     {
       "nginx_version": "1.26.3",
@@ -407,7 +473,9 @@
       "test_level": "ci-only",
       "support_tier": "best-effort",
       "release_blocking": false,
-      "owner_workflow": ".github/workflows/ci.yml"
+      "owner_workflow": ".github/workflows/ci.yml",
+      "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
+      "abi_version": 2
     }
   ]
 }
