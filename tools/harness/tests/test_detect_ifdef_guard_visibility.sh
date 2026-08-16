@@ -111,6 +111,32 @@ else
     cat "${output_file}" >&2
 fi
 
+# Test 4: Multiline call to a guarded function outside the guard -> FAIL
+# The call spans lines (``fn(\n arg\n);``); it must be detected as an
+# out-of-guard reference, not misclassified as a split-line definition
+# (regression for the split_definition_pattern fix).
+cat >"${src_dir}/multi_call.c" <<'C'
+#include "header.h"
+
+void use_multiline_outside_guard(void) {
+    ngx_http_markdown_reason_guarded(
+        NULL
+    );
+}
+C
+
+output_file="${tmp_dir}/multicall.out"
+${DETECTOR} "${src_dir}/header.h" "${src_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 1 ]] \
+   && grep -q "ngx_http_markdown_reason_guarded" "${output_file}"; then
+    pass "bad: multiline call outside guard detected"
+else
+    fail "bad: multiline call outside guard detected" \
+        "expected exit 1 with reference, got ${exit_code}"
+    cat "${output_file}" >&2
+fi
+
 printf '\n%d passed, %d failed\n' "${PASS_COUNT}" "${FAIL_COUNT}"
 if [[ ${FAIL_COUNT} -gt 0 ]]; then
     exit 1

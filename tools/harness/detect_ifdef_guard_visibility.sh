@@ -281,6 +281,11 @@ for i, line in enumerate(lines, 1):
             if re.search(r'\)\s*\{\s*$', line) or ';' in line:
                 pending_definition = False
                 continue
+            if re.match(r'^\s*\{', line):
+                # K&R/nginx variants that put the opening brace on its own
+                # line after the parameter list.
+                pending_definition = False
+                continue
             if re.search(r'\)\s*$', line):
                 pending_definition = False
             else:
@@ -295,14 +300,45 @@ for i, line in enumerate(lines, 1):
         )
         if re.match(definition_pattern, line):
             continue
+        # nginx-style split-line definition: the return type is on the
+        # preceding line and the function name starts this line, followed
+        # by a parameter list that may span lines before the opening brace.
+        # Require the preceding line to be a return-type line (a type
+        # declaration ending without ';', '(', '{', or '}') so a multiline
+        # *call* such as ``fn(\n arg\n);`` is not misclassified as a
+        # definition (which would skip checking an out-of-guard reference).
+        prev_line = lines[i - 2] if i >= 2 else ""
+        prev_stripped = prev_line.strip()
+        prev_is_type_line = bool(
+            prev_stripped
+            and not re.search(r'[;(){}]', prev_stripped)
+            and re.search(
+                r'(?:^|\s)(?:static|inline|const|ngx_[a-z_]+_t|u_char|size_t|'
+                r'ngx_int_t|ngx_uint_t|ngx_flag_t|void|char|int|unsigned|'
+                r'off_t|ssize_t|time_t|struct|enum|union)\s*$',
+                prev_stripped,
+            )
+        )
+        split_definition_pattern = (
+            r'^\s*(?:static\s+)?(?:inline\s+)?(?:const\s+)?'
+            + re.escape(func_name) + r'\s*\([^;]*$'
+        )
+        if prev_is_type_line and re.match(split_definition_pattern, line):
+            pending_definition = True
+            continue
         if func_name + '(' in line:
             # Skip a prototype in the owning header only.
             if same_file(header_path, source_path) and ';' in line:
                 continue
             # A signature fragment that ends with the opening paren (no
             # closing paren on this line) can be a multi-line definition
-            # whose parameter list and opening brace follow.
-            if re.search(r'\b' + re.escape(func_name) + r'\s*\(\s*$', line):
+            # whose parameter list and opening brace follow.  Only treat it
+            # as such when the preceding line is a return-type line; a
+            # multiline call (``fn(\n arg\n);``) must be reported as a
+            # reference instead of being skipped.
+            if prev_is_type_line and re.search(
+                r'\b' + re.escape(func_name) + r'\s*\(\s*$', line
+            ):
                 pending_definition = True
                 continue
             print(f'{i}:{line.strip()[:80]}')

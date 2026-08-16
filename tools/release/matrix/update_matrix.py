@@ -1113,6 +1113,10 @@ def _canonical_dynamic_entry(
         entry.pop("managed_by", None)
         entry["nginx_version"] = version
         entry["libc"] = libc
+        # Refresh the binding keys with the same computed values as the
+        # new-row branch so an existing row never carries stale digests.
+        entry["feature_manifest_digest"] = _feature_manifest_digest()
+        entry["abi_version"] = _frozen_abi_version()
         return entry
 
     normalized = normalize_entry_aliases(legacy_entry)
@@ -1199,16 +1203,11 @@ def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
         )
         for legacy_entry in merged_dynamic
     ]
-    generated_keys = {
-        _matrix_entry_identity(entry)
-        for entry in dynamic_entries
-    }
     other_entries = [
         entry
         for entry in entries
         if not isinstance(entry, dict)
         or entry.get("artifact_type") != "dynamic-module"
-        or _matrix_entry_identity(entry) not in generated_keys
     ]
     dynamic_entries.sort(
         key=lambda entry: (
@@ -1252,7 +1251,7 @@ def _run_write_mode(
 
             # Update entries with the new version numbers if they exist
             _update_entries_for_added_versions(data, diff)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OSError) as exc:
         print(f"Error preparing matrix update: {exc}", file=sys.stderr)
         return 1
 

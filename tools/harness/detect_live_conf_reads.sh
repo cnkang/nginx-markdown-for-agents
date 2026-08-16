@@ -71,6 +71,15 @@ function_contains_line() {
               "${candidate_text}" == *";"* ]]; then
             continue
         fi
+        # Control-flow call sites (if/while/for/switch/return, including
+        # else if and `return fn(...)` direct calls) are never definitions:
+        # the leading keyword is a control expression, not a return type.
+        # Accept a candidate only when the target name starts the line or
+        # no leading keyword precedes it.
+        if [[ "${candidate_text}" =~ ^[[:space:]]*(else[[:space:]]+)?(if|while|for|switch|return)[[:space:]]*\( ]] \
+           || [[ "${candidate_text}" =~ ^[[:space:]]*return[[:space:]]+[A-Za-z_][A-Za-z0-9_]*\( ]]; then
+            continue
+        fi
         # A C definition may put the return type, name, parameters, and
         # opening brace on separate lines. Walk forward until the first
         # statement terminator or opening brace so multiline definitions are

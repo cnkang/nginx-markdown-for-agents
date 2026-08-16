@@ -2453,7 +2453,7 @@ def _resolve_baseline(
             "release_gate_exclusion_reason",
             "no exclusion reason recorded",
         )
-        if _is_release_tag():
+        if blocking and _is_release_tag():
             _stderr(
                 "ERROR: checked-in module baseline is ineligible for "
                 f"release-gate comparison: {reason}"

@@ -180,7 +180,7 @@ test-c-unit-gcc:
 	@command -v docker >/dev/null 2>&1 || { echo "FAIL: docker is required for test-c-unit-gcc" >&2; exit 1; }
 	@echo "=== C unit suite under Ubuntu GCC (Docker) ==="
 	@docker run --rm -v "$(CURDIR)":/repo -w /repo/components/nginx-module/tests \
-	    ubuntu:24.04 bash -c "apt-get update -qq && apt-get install -y -qq gcc make libz-dev libbrotli-dev python3 valgrind && make clean && make unit"
+	    ubuntu:24.04@sha256:019e8eb29a85e74d64925745884f2ec79aa27e3feab36353d24656f4d6b89467 bash -c "apt-get update -qq && apt-get install -y -qq gcc make libz-dev libbrotli-dev python3 valgrind && make clean && make unit"
 	@echo "=== Cleaning container artifacts from local build dir ==="
 	@$(MAKE) -C $(NGINX_TEST_DIR) clean || true
 	@echo "OK: C unit suite passed under Ubuntu GCC"
