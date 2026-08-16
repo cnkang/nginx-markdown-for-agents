@@ -88,7 +88,7 @@ curl --fail-with-body -H "Accept: text/plain; version=0.0.4" "$METRICS_URL"
 ```text
 # HELP nginx_markdown_requests_total Requests entering the decision chain
 # TYPE nginx_markdown_requests_total counter
-nginx_markdown_requests_total{outcome="converted",stage="delivery",reason="none"} 1180
+nginx_markdown_requests_total{outcome="converted",stage="delivery",reason="converted"} 1180
 # TYPE nginx_markdown_conversion_duration_seconds histogram
 nginx_markdown_conversion_duration_seconds_count{engine="full_buffer"} 1180
 ```
