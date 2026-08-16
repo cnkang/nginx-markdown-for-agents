@@ -1048,6 +1048,11 @@ pub unsafe extern "C" fn markdown_decompress_bounded(
     }
 
     let result_ref = unsafe { &mut *result };
+    // Free any previous output before reusing the result buffer, matching
+    // the markdown_convert contract (P3-4: reuse previously leaked the old
+    // Rust-allocated output when a caller invoked the FFI twice on the
+    // same result without an intermediate free).
+    free_buffer(&mut result_ref.output, &mut result_ref.output_len);
     // Initialize result to safe defaults
     result_ref.output = ptr::null_mut();
     result_ref.output_len = 0;
@@ -1377,6 +1382,9 @@ pub unsafe extern "C" fn markdown_decode_encoding_chain(
         return DECOMP_CATEGORY_INVALID_ARGS;
     }
     let result_ref = unsafe { &mut *result };
+    // Free any previous output before reusing the result buffer, matching
+    // the markdown_convert contract (P3-4).
+    free_buffer(&mut result_ref.output, &mut result_ref.output_len);
     reset_chain_decode_result(result_ref);
 
     let input_slice = match unsafe { chain_decode_input_slice(input, input_len) } {

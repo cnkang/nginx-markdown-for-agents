@@ -185,14 +185,14 @@ impl ErrorPolicy {
     /// use nginx_markdown_converter::error::classification::ErrorPolicy;
     ///
     /// assert_eq!(ErrorPolicy::Pass.as_str(), "pass");
-    /// assert_eq!(ErrorPolicy::Status(503).as_str(), "status");
+    /// assert_eq!(ErrorPolicy::Status(503).as_str(), "status_503");
     /// assert_eq!(ErrorPolicy::FailClosed.as_str(), "fail_closed");
     /// ```
-    pub fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> String {
         match self {
-            ErrorPolicy::Pass => "pass",
-            ErrorPolicy::Status(_) => "status",
-            ErrorPolicy::FailClosed => "fail_closed",
+            ErrorPolicy::Pass => "pass".to_string(),
+            ErrorPolicy::Status(code) => format!("status_{}", code),
+            ErrorPolicy::FailClosed => "fail_closed".to_string(),
         }
     }
 }
@@ -664,8 +664,14 @@ mod tests {
     #[test]
     fn test_policy_as_str() {
         assert_eq!(ErrorPolicy::Pass.as_str(), "pass");
-        assert_eq!(ErrorPolicy::Status(429).as_str(), "status");
+        assert_eq!(ErrorPolicy::Status(429).as_str(), "status_429");
+        assert_eq!(ErrorPolicy::Status(503).as_str(), "status_503");
         assert_eq!(ErrorPolicy::FailClosed.as_str(), "fail_closed");
+        /* Distinct status codes must produce distinct strings (P3-8). */
+        assert_ne!(
+            ErrorPolicy::Status(429).as_str(),
+            ErrorPolicy::Status(503).as_str()
+        );
     }
 
     /* ====================================================================

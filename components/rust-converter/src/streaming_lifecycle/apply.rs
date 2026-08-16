@@ -23,7 +23,7 @@
 use super::types::{
     Action, ActionOutcome, ActionPayload, ApplyResult, EmitFailureLedgerDisposition,
     EmitFailureLedgerPayload, ErrorOrigin, EventKind, FailureLedger, FailureRecord, FailureSite,
-    FailureUpdates, NgxResult, OwnerPredicate, OwnerTransition, PostEffect, PreEffect,
+    FailureUpdates, NgxResult, OwnerPredicate, OwnerTransition, PendingKind, PostEffect, PreEffect,
     SideEffectCommand, SideEffectKind, SideEffectPayload, StateMachineError, StreamingState,
     TelemetryScope, TransferMode, TransitionContext, TransitionFrame,
 };
@@ -385,7 +385,7 @@ fn apply_finalize_converter(
                     action_payload: ActionPayload::NULL,
                     event: frame.event.clone(),
                     reason: frame.reason.clone(),
-                    failure_ledger: frame.failure_ledger.clone(),
+                    failure_ledger: frame.failure_ledger.apply_pre_effect(&pre_effect),
                 };
                 let cmd_store = format!("CMD_A{}-STORE", frame.transition_id.replace("PLAN-", ""));
                 Ok(ApplyResult {
@@ -498,7 +498,18 @@ fn apply_send_closing_output(
             })
         }
         NgxResult::Again => {
-            /* NGX_AGAIN → PENDING_CLOSING_OUTPUT */
+            /* NGX_AGAIN → PENDING_CLOSING_OUTPUT.  The action contract
+             * requires the pending chain to be the closing Markdown bytes;
+             * a mismatched kind signals a plan/apply protocol violation
+             * (P3-1: pending_kind was previously never validated). */
+            if outcome.pending_kind != Some(PendingKind::ClosingMarkdown) {
+                return Err(StateMachineError::InvariantViolation {
+                    message: format!(
+                        "SEND_CLOSING_OUTPUT NGX_AGAIN with pending_kind={:?}",
+                        outcome.pending_kind
+                    ),
+                });
+            }
             Ok(ApplyResult {
                 new_state: StreamingState::PendingClosingOutput,
                 next_frame: None,
@@ -622,7 +633,18 @@ fn apply_send_terminal(
             })
         }
         NgxResult::Again => {
-            /* NGX_AGAIN → PENDING_TERMINAL, no latch */
+            /* NGX_AGAIN → PENDING_TERMINAL, no latch.  The action contract
+             * requires the pending chain to be the terminal last_buf; a
+             * mismatched kind signals a plan/apply protocol violation
+             * (P3-1: pending_kind was previously never validated). */
+            if outcome.pending_kind != Some(PendingKind::Terminal) {
+                return Err(StateMachineError::InvariantViolation {
+                    message: format!(
+                        "SEND_TERMINAL NGX_AGAIN with pending_kind={:?}",
+                        outcome.pending_kind
+                    ),
+                });
+            }
             Ok(ApplyResult {
                 new_state: StreamingState::PendingTerminal,
                 next_frame: None,
@@ -1049,6 +1071,10 @@ fn apply_resume_terminal(
                 failure_site: Some(FailureSite::PendingResume),
             };
             let pre_effect = promote_or_delivery(&frame.failure_ledger, &record);
+            let cmd_latch = format!(
+                "CMD_A{}-RTERM-FAIL-LATCH",
+                frame.transition_id.replace("PLAN-", "")
+            );
             let cmd_store = format!(
                 "CMD_A{}-RTERM-STORE",
                 frame.transition_id.replace("PLAN-", "")
@@ -1061,6 +1087,13 @@ fn apply_resume_terminal(
                 new_state: StreamingState::Aborted,
                 next_frame: None,
                 side_effects: vec![
+                    SideEffectCommand {
+                        command_id: cmd_latch.clone(),
+                        kind: SideEffectKind::SetSafeFinishTerminalSendFailed,
+                        execute_if: OwnerPredicate::Always,
+                        payload: SideEffectPayload::None,
+                        owner_transition: None,
+                    },
                     SideEffectCommand {
                         command_id: cmd_store.clone(),
                         kind: SideEffectKind::StoreFailureLedger,
@@ -1275,6 +1308,51 @@ mod tests {
                 .iter()
                 .any(|c| c.kind == SideEffectKind::SetSafeFinishTerminalSendFailed)
         );
+    }
+
+    #[test]
+    fn finalize_converter_error_next_frame_carries_updated_ledger() {
+        /* R-P2-1: the BEGIN_ABORT frame handed to the next apply step must
+         * carry the pre-effect ledger (with the freshly recorded finalize
+         * failure), not the stale pre-failure ledger. */
+        let mut frame = simple_frame(Action::FinalizeConverter, "PLAN-21");
+        frame.failure_ledger = FailureLedger {
+            primary: Some(FailureRecord {
+                stage: "streaming".to_string(),
+                reason: "earlier".to_string(),
+                error_origin: ErrorOrigin::Internal,
+                failure_site: Some(FailureSite::ConverterFinalize),
+            }),
+            secondary: None,
+            delivery: None,
+            ledger_stored: false,
+            ledger_emitted: false,
+        };
+        let result = apply_result(
+            StreamingState::Committed,
+            &frame,
+            &error_outcome(FailureSite::ConverterFinalize),
+            &TransitionContext {
+                downstream_usable: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(result.new_state, StreamingState::PostCommitAbort);
+        let next = result.next_frame.expect("BEGIN_ABORT frame expected");
+        assert_eq!(next.action, Action::BeginAbort);
+        /* primary carries the original failure; the new finalize failure
+         * lands in secondary (compute_finalize_failure_updates when a
+         * primary already exists). */
+        assert_eq!(
+            next.failure_ledger.primary.as_ref().unwrap().reason,
+            "earlier"
+        );
+        let secondary = next
+            .failure_ledger
+            .secondary
+            .as_ref()
+            .expect("secondary slot must carry the fresh finalize failure");
+        assert_eq!(secondary.failure_site, Some(FailureSite::ConverterFinalize));
     }
 
     #[test]
@@ -1519,5 +1597,30 @@ mod tests {
                         && !command.command_id.contains("-ATERM-"))
             );
         }
+    }
+
+    #[test]
+    fn resume_terminal_error_sets_safe_finish_latch() {
+        /* R-P2-2: apply_resume_terminal's Error path must emit the same
+         * SetSafeFinishTerminalSendFailed latch as apply_send_terminal's
+         * Error path (terminal chain definitively rejected downstream). */
+        let frame = simple_frame(Action::SendTerminal, "PLAN-21");
+        let result = apply_result(
+            StreamingState::PendingTerminal,
+            &frame,
+            &error_outcome(FailureSite::PendingResume),
+            &TransitionContext {
+                downstream_usable: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(result.new_state, StreamingState::Aborted);
+        assert!(
+            result
+                .side_effects
+                .iter()
+                .any(|c| c.kind == SideEffectKind::SetSafeFinishTerminalSendFailed),
+            "resume-terminal Error must set the safe-finish-terminal-send-failed latch"
+        );
     }
 }

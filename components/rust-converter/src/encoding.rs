@@ -269,6 +269,13 @@ pub fn decode_chain(
     let mut cumulative = 0usize;
     let mut has_decoded_layer = false;
 
+    /* An empty body is a legal empty payload: there is nothing to decode,
+     * so return success immediately instead of classifying the empty
+     * input as truncation on a later layer (P3-6). */
+    if current.is_empty() {
+        return Ok(Vec::new());
+    }
+
     /* Decode from the outermost layer (last declared) inward. */
     for enc in layers.iter().rev() {
         if *enc == Encoding::Identity {
@@ -603,6 +610,16 @@ mod tests {
         };
         let err = decode_chain(&outer, &layers, limits).unwrap_err();
         assert_eq!(err, ChainDecodeError::BudgetExceeded);
+    }
+
+    #[test]
+    fn decode_chain_empty_input_is_empty_payload() {
+        /* P3-6: an empty body with declared encodings is a legal empty
+         * payload — decode_chain returns an empty result instead of
+         * misclassifying it as truncation. */
+        let layers = vec![Encoding::Gzip, Encoding::Deflate];
+        let out = decode_chain(b"", &layers, DecodeLimits::default()).unwrap();
+        assert!(out.is_empty(), "empty input must decode to an empty payload");
     }
 
     #[test]

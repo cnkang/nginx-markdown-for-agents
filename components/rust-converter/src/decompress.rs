@@ -144,7 +144,10 @@ fn read_bounded<R: Read>(mut reader: R, budget: usize) -> Result<Vec<u8>, Decomp
         match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
-                if output.len() + n > budget {
+                /* Saturating add: with an extreme budget (usize::MAX)
+                 * output.len() + n could overflow on the check itself
+                 * (P3-5).  BudgetExceeded is returned either way. */
+                if output.len().saturating_add(n) > budget {
                     return Err(DecompError::BudgetExceeded);
                 }
                 /* Reserve exactly the needed capacity to prevent Vec

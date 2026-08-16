@@ -215,6 +215,14 @@ fn lookup_pre_commit(
         EventKind::ResourceLimit => plan_precommit_fallback(ctx, "resource_limit", "PLAN-12"),
         EventKind::Error => plan_precommit_error_recovery(ctx, "error", "PLAN-13"),
         EventKind::Commit => plan_action(Action::CommitHeaders, "commit", "PLAN-14"),
+        EventKind::UpstreamEnd => Err(StateMachineError::InvariantViolation {
+            message: concat!(
+                "UPSTREAM_END before header commit - the model has no ",
+                "pre-commit upstream-end path (P3-3); commit headers ",
+                "first (PLAN-14), then finalize (PLAN-21)"
+            )
+            .to_string(),
+        }),
         _ => invalid_transition(StreamingState::PreCommit, event),
     }
 }

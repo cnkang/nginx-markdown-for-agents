@@ -94,7 +94,40 @@ fn again_outcome() -> ActionOutcome {
         failure_site: None,
         error_origin: None,
         produced_closing_bytes: false,
+        /* Neutral: pending_kind is action-specific; the action helpers below
+         * set it explicitly.  P3-1 now validates pending_kind against the
+         * action, so a generic helper must not hard-code Terminal. */
+        pending_kind: None,
+    }
+}
+
+fn again_closing_outcome() -> ActionOutcome {
+    ActionOutcome {
+        ngx_result: NgxResult::Again,
+        failure_site: None,
+        error_origin: None,
+        produced_closing_bytes: false,
+        pending_kind: Some(PendingKind::ClosingMarkdown),
+    }
+}
+
+fn again_terminal_outcome() -> ActionOutcome {
+    ActionOutcome {
+        ngx_result: NgxResult::Again,
+        failure_site: None,
+        error_origin: None,
+        produced_closing_bytes: false,
         pending_kind: Some(PendingKind::Terminal),
+    }
+}
+
+fn again_abort_terminal_outcome() -> ActionOutcome {
+    ActionOutcome {
+        ngx_result: NgxResult::Again,
+        failure_site: None,
+        error_origin: None,
+        produced_closing_bytes: false,
+        pending_kind: Some(PendingKind::AbortTerminal),
     }
 }
 
@@ -413,7 +446,7 @@ fn prop_20_chain_terminates_on_ngx_again() {
     let close_result = apply_result(
         result.new_state,
         &close_frame,
-        &again_outcome(),
+        &again_closing_outcome(),
         &ctx_usable(),
     )
     .unwrap();
@@ -699,7 +732,7 @@ fn prop_30_ngx_again_never_transitions_to_terminal() {
     let result = apply_result(
         StreamingState::PostCommitSafeFinish,
         &frame,
-        &again_outcome(),
+        &again_closing_outcome(),
         &ctx_usable(),
     )
     .unwrap();
@@ -725,7 +758,7 @@ fn prop_30_ngx_again_never_sets_terminal_latch() {
     let result = apply_result(
         StreamingState::PostCommitSafeFinish,
         &frame,
-        &again_outcome(),
+        &again_terminal_outcome(),
         &ctx_usable(),
     )
     .unwrap();
@@ -849,7 +882,7 @@ fn prop_31_terminal_latch_only_after_ok_or_done() {
     let r_again = apply_result(
         StreamingState::PostCommitSafeFinish,
         &frame,
-        &again_outcome(),
+        &again_terminal_outcome(),
         &ctx_usable(),
     )
     .unwrap();
@@ -2430,7 +2463,7 @@ fn proto_6_36_abort_terminal_outcomes() {
     let r_again = apply_result(
         StreamingState::PostCommitAbort,
         &frame,
-        &again_outcome(),
+        &again_abort_terminal_outcome(),
         &ctx_usable(),
     )
     .unwrap();
