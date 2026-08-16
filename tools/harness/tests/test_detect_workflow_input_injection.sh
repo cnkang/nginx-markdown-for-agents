@@ -235,6 +235,64 @@ else
 fi
 rm -f "${wf_dir}/bracket-output.yml"
 
+# Test 8: Index-form event selectors in run block -> FAIL (both selector
+# forms must be caught; the index form bypasses a dot-only pattern)
+cat >"${wf_dir}/index-event.yml" <<'Y'
+name: index-event
+on: [pull_request]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run
+        run: |
+          echo "${{ github.event['pull_request'].head.ref }}"
+          echo "${{ github.event.pull_request['head']['ref'] }}"
+          echo "${{ github.head_ref }}"
+Y
+
+${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 1 ]]; then
+    pass "index-form event selector interpolation detected"
+else
+    fail "index-form event selector interpolation detected" "expected exit 1, got ${exit_code}"
+    cat "${output_file}" >&2
+fi
+rm -f "${wf_dir}/index-event.yml"
+
+# Test 9: Each index-form selector variant must be caught independently
+# (a combined fixture could pass with only one variant detected).
+check_index_variant() {
+    local name="$1"
+    local expr="$2"
+    cat >"${wf_dir}/single-index.yml" <<Y
+name: single-index
+on: [pull_request]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run
+        run: echo "\${{ ${expr} }}"
+Y
+    ${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+    local rc=$?
+    if [[ ${rc} -eq 1 ]] && grep -Fq "${expr}" "${output_file}"; then
+        pass "${name} detected"
+    else
+        fail "${name} detected" "expected exit 1 + diagnostic, got ${rc}"
+        cat "${output_file}" >&2
+    fi
+    rm -f "${wf_dir}/single-index.yml"
+    return 0
+}
+
+check_index_variant "event['pull_request'] bracket event" "github.event['pull_request'].head.ref"
+check_index_variant "event.pull_request['head'] bracket field" "github.event.pull_request['head']['ref']"
+check_index_variant "github.head_ref alias" "github.head_ref"
+check_index_variant "github.ref_name alias" "github.ref_name"
+
 printf '\n%d passed, %d failed\n' "${PASS_COUNT}" "${FAIL_COUNT}"
 if [[ ${FAIL_COUNT} -gt 0 ]]; then
     exit 1

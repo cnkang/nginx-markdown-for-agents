@@ -150,7 +150,21 @@ while IFS= read -r -d '' file; do
             # pull_request/release/issue events and must never be interpolated
             # into run-block shell source.  Route through env with explicit
             # validation instead.
-            if [[ "$line" =~ \$\{\{[[:space:]]*(github\.event\.(pull_request|release|issue|comment|inputs)\.[a-zA-Z_.]+|github\.head_ref|github\.ref_name)[[:space:]]*\}\} ]]; then
+            # Both selector forms are matched: dot form
+            # (github.event.pull_request.head.ref) and index form
+            # (github.event['pull_request'].head.ref /
+            #  github.event.pull_request['head']['ref']) — the index form
+            # bypasses a dot-only pattern while carrying the same
+            # attacker-controlled data.
+            # Dot-form selector (github.event.pull_request.head.ref),
+            # index-form selector (github.event['pull_request'].head.ref /
+            # github.event.pull_request['head']['ref']), and the head_ref /
+            # ref_name aliases.  Three separate patterns avoid embedding a
+            # double-quote literal inside [[ =~ ]] (which would terminate
+            # the quoted regex) while still matching both selector forms.
+            if [[ "$line" =~ \$\{\{[[:space:]]*github\.event\.(pull_request|release|issue|comment|inputs)((\.[a-zA-Z_.]+|\[[^]]*\])+)[[:space:]]*\}\} ]] || \
+               [[ "$line" =~ \$\{\{[[:space:]]*github\.event\[[^]]*\](\.[a-zA-Z_.]+|\[[^]]*\])+[[:space:]]*\}\} ]] || \
+               [[ "$line" =~ \$\{\{[[:space:]]*(github\.head_ref|github\.ref_name)[[:space:]]*\}\} ]]; then
                 echo "ERROR: ${rel_path}:${line_num}: external event data directly interpolated in run block" >&2
                 echo "  ${line}" >&2
                 echo "  Fix: route through env and validate the value (e.g. against ^[0-9]+$ for refs)" >&2
