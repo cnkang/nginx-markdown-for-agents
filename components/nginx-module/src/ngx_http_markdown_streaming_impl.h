@@ -887,6 +887,11 @@ ngx_http_markdown_streaming_abandon_pending_after_fatal(
     ctx->streaming.completion.failopen_abort_error_code = ERROR_SUCCESS;
     ctx->streaming.completion.upstream_terminal_seen = 0;
 
+    /* pending_header_output is module-owned Rust memory produced before
+     * header commit; the fatal path must release it too, or the buffer
+     * leaks when the request ends without a successful header delivery. */
+    ngx_http_markdown_streaming_release_pending_header_output(ctx);
+
     ngx_http_markdown_streaming_pending_input_abandon_and_clear(ctx);
     ngx_http_markdown_streaming_sync_buffered(r, ctx);
 }
@@ -1407,6 +1412,11 @@ ngx_http_markdown_streaming_handle_backpressure(
  *
  * Increments postcommit_error_total and failed_total once (idempotent via
  * the failure_recorded flag), then logs the postcommit failure reason code.
+ *
+ * Mutually exclusive with record_postcommit_success: a request is recorded
+ * as either a success (delivered terminal) or a failure (post-commit error
+ * / abort), never both — failure_recorded and the success latch are
+ * disjoint and each path sets exactly one (C-P3-1).
  *
  * Parameters:
  *   r     - HTTP request
@@ -3674,6 +3684,10 @@ ngx_http_markdown_streaming_init_buffers(
         if (ctx->streaming.decompressor == NULL) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                 "markdown: failed to create decompressor");
+            /* Keep attempted >= failed conservation: the attempt was
+             * counted above, so the creation failure must be recorded as
+             * a decompression failure too (C-P3-4). */
+            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.failed);
             markdown_streaming_abort(ctx->streaming.handle);
             ctx->streaming.handle = NULL;
             create_error = create_origin

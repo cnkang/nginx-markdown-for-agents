@@ -625,6 +625,13 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
      * Resolve decompress_max_size default: if not explicitly set at any
      * level, inherit max_size.  This must run after memory_budget override
      * so the default tracks the effective max_size.
+     *
+     * NOTE (C-P3-5): under the 0.9.2 contract this branch is effectively
+     * dead — config_merge_impl.h always assigns
+     * conf->decompress.max_size = conf->limits.decompressed_size (which
+     * has an independent 10m default) before this point, so the value is
+     * never NGX_CONF_UNSET_SIZE here.  Retained defensively for config
+     * paths that bypass the merge helper.
      */
     if (conf->decompress.max_size == NGX_CONF_UNSET_SIZE) {
         conf->decompress.max_size = conf->max_size;
