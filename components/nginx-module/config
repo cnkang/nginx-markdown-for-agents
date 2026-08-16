@@ -51,8 +51,6 @@ if [ -z "$ngx_markdown_rust_lib" ] || [ ! -f "$ngx_markdown_rust_lib" ]; then
 
     if [ -n "$ngx_markdown_target" ]; then
         ngx_markdown_rust_lib="$ngx_addon_dir/../rust-converter/target/$ngx_markdown_target/release/libnginx_markdown_converter.a"
-    else
-        ngx_markdown_rust_lib="$ngx_addon_dir/../rust-converter/target/release/libnginx_markdown_converter.a"
     fi
 fi
 
@@ -79,6 +77,16 @@ if [ ! -f "$ngx_markdown_rust_lib" ]; then
             fi
         done
     fi
+fi
+
+if [ -z "$ngx_markdown_rust_lib" ] || [ ! -f "$ngx_markdown_rust_lib" ]; then
+    echo "configuration error: cannot locate the Rust converter static library" >&2
+    echo "  (libnginx_markdown_converter.a) for platform: $(uname -s 2>/dev/null || echo unknown)/$(uname -m 2>/dev/null || echo unknown)" >&2
+    echo "  Build the Rust library first: cargo build --release (in rust-converter/)" >&2
+    echo "  or set RUST_TARGET=<triple> to select an existing archive explicitly." >&2
+    echo "  Refusing to fall back to an arbitrary target/release archive that may" >&2
+    echo "  belong to a different platform." >&2
+    exit 1
 fi
 
 # Libraries required by the Rust FFI converter.
