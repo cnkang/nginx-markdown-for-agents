@@ -727,7 +727,7 @@ typedef struct {
     struct {
         ngx_flag_t   auto_decompress;      /* markdown_auto_decompress on|off (default: on) */
         size_t       max_size;             /* markdown_limits decompressed_size (default: same as max_size) */
-        ngx_msec_t   parse_timeout;        /* markdown_limits parser_timeout (default: 30000ms) */
+        ngx_msec_t   parse_timeout;        /* markdown_limits parser_timeout (default: NGX_HTTP_MARKDOWN_LIMITS_PARSER_TIMEOUT_DEFAULT = 10000ms) */
         size_t       parser_budget;        /* legacy compat; parser_memory via markdown_limits */
         ngx_flag_t   max_size_explicit;    /* 1 if operator set markdown_limits memory at this or parent level */
     } decompress;
