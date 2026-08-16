@@ -1588,9 +1588,19 @@ ngx_http_markdown_forward_headers(ngx_http_request_t *r, ngx_http_markdown_ctx_t
     }
 
     rc = ngx_http_next_header_filter(r);
-    /* NGX_AGAIN leaves header delivery pending; do not publish the
-     * headers_forwarded latch until the downstream retry succeeds. */
-    if (rc == NGX_AGAIN || rc == NGX_ERROR || rc > NGX_OK) {
+    /*
+     * Canonical NGINX model: header-chain NGX_AGAIN means the write filter
+     * queued the header block — the headers are ACCEPTED and the header
+     * chain must not be re-invoked (intermediate filters are not
+     * idempotent).  Publish the delivery latch on NGX_AGAIN too, so a
+     * body-filter re-entry forwards the body without re-entering the
+     * header chain; only definitive errors leave the latch clear.
+     */
+    if (rc == NGX_AGAIN) {
+        ctx->headers_forwarded = 1;
+        return rc;
+    }
+    if (rc == NGX_ERROR || rc > NGX_OK) {
         return rc;
     }
 

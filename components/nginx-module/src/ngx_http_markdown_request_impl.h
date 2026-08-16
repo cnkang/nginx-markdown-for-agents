@@ -316,11 +316,17 @@ ngx_http_markdown_handle_encoding_collection_failure(
             NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
     rc = ngx_http_next_header_filter(r);
     /*
-     * NGX_AGAIN means the next header filter retained the request for a
-     * retry; it is not proof that headers crossed the downstream boundary.
-     * Keep headers_forwarded clear until NGX_OK/NGX_DONE so the retry remains
-     * eligible to forward headers (Rule 47: delivery latches follow success).
+     * Canonical NGINX model: header-chain NGX_AGAIN means the write filter
+     * queued the header block — the headers are accepted.  Publish the
+     * delivery latch so the retry path forwards the buffered original body
+     * without re-entering the header chain (Rule 47 delivery latches still
+     * follow confirmed success for terminal markers; header acceptance is
+     * owned by the write filter once NGX_AGAIN is returned).
      */
+    if (rc == NGX_AGAIN) {
+        ctx->headers_forwarded = 1;
+        return rc;
+    }
     if (rc == NGX_OK || rc == NGX_DONE) {
         ctx->headers_forwarded = 1;
         ngx_http_markdown_metric_inc_failopen(eff, conf);

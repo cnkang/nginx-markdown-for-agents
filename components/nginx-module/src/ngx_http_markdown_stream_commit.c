@@ -404,7 +404,6 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
      * After this point, no HTML fallback is possible.
      */
     ctx->stream_sm.headers_committed = 1;
-    ctx->stream_sm.headers_pending = 0;
     ctx->stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,

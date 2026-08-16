@@ -318,6 +318,7 @@ typedef struct {
 static body_filter_hist_entry_t g_body_filter_hist[G_BODY_FILTER_HIST_MAX];
 static ngx_uint_t g_body_filter_hist_len = 0;
 static ngx_int_t g_next_header_filter_rc = NGX_OK;
+static ngx_uint_t g_next_header_filter_calls = 0;
 static ngx_int_t g_complex_value_rc = NGX_OK;
 static ngx_int_t g_add_vary_rc = NGX_OK;
 static ngx_int_t g_set_etag_rc = NGX_OK;
@@ -626,6 +627,7 @@ static ngx_int_t
 ngx_http_next_header_filter_stub(ngx_http_request_t *r)
 {
     UNUSED(r);
+    g_next_header_filter_calls++;
     return g_next_header_filter_rc;
 }
 
@@ -1470,6 +1472,7 @@ reset_globals(void)
     g_body_filter_hist_len = 0;
     ngx_memzero(g_body_filter_hist, sizeof(g_body_filter_hist));
     g_next_header_filter_rc = NGX_OK;
+    g_next_header_filter_calls = 0;
     g_complex_value_rc = NGX_OK;
     g_add_vary_rc = NGX_OK;
     g_set_etag_rc = NGX_OK;
@@ -2857,20 +2860,15 @@ test_commit_feed_and_finalize_core_paths(void)
         "header update failure triggers full-buffer fallback");
     g_stream_commit_headers_rc = NGX_OK;
 
-    g_next_header_filter_rc = NGX_AGAIN;
-    rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
-    TEST_ASSERT(rc == NGX_AGAIN,
-        "commit should propagate downstream backpressure");
-    TEST_ASSERT(ctx.streaming.commit_state
-        == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE
-        && ctx.headers_forwarded == 0
-        && metrics.streaming.commit_total == 0,
-        "NGX_AGAIN commit must not publish a partial transition");
-
     g_next_header_filter_rc = NGX_ERROR;
     rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_ERROR,
         "commit should propagate next header filter errors");
+    TEST_ASSERT(ctx.streaming.commit_state
+        == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE
+        && ctx.headers_forwarded == 0
+        && metrics.streaming.commit_total == 0,
+        "header-filter errors must not publish commit state");
 
     g_next_header_filter_rc = 1;
     rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
@@ -2887,6 +2885,25 @@ test_commit_feed_and_finalize_core_paths(void)
         "commit should mark headers as forwarded");
     TEST_ASSERT(metrics.streaming.commit_total == 1,
         "successful commit should increment commit_total exactly once");
+
+    /* Canonical model: header NGX_AGAIN = write filter queued the header
+     * block — the full commit publishes immediately (headers accepted).
+     * Re-arm a fresh commit state for the scenario. */
+    ctx.stream_sm.headers_committed = 0;
+    ctx.headers_forwarded = 0;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+    g_next_header_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "commit should propagate downstream backpressure");
+    TEST_ASSERT(ctx.streaming.commit_state
+        == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST
+        && ctx.stream_sm.headers_committed == 1
+        && ctx.headers_forwarded == 1
+        && metrics.streaming.commit_total == 1,
+        "NGX_AGAIN publishes the full commit (headers accepted)");
 
     ctx.processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
@@ -3074,9 +3091,11 @@ test_commit_feed_and_finalize_core_paths(void)
 
 
 /*
- * Header commit is a two-step downstream operation.  A header filter
- * NGX_AGAIN must retain only the retry marker; all commit latches and the
- * commit metric publish together after the NULL-input resume succeeds.
+ * Header commit follows the canonical NGINX model: a header-filter
+ * NGX_AGAIN means the write filter queued the header block — the headers
+ * are ACCEPTED.  Every commit latch and the commit metric publish
+ * immediately on NGX_AGAIN, the header chain is invoked exactly once, and
+ * the write-event resume is a pure body-filter re-entry (no header retry).
  */
 static void
 test_header_commit_backpressure_retry_is_atomic(void)
@@ -3091,7 +3110,7 @@ test_header_commit_backpressure_retry_is_atomic(void)
     ngx_http_markdown_metrics_t metrics;
     ngx_int_t                 rc;
 
-    TEST_SUBSECTION("header commit NGX_AGAIN retry");
+    TEST_SUBSECTION("header commit NGX_AGAIN publishes canonically");
     reset_globals();
     init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
     ngx_memzero(&metrics, sizeof(metrics));
@@ -3102,38 +3121,40 @@ test_header_commit_backpressure_retry_is_atomic(void)
     rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_AGAIN,
                 "header commit propagates downstream NGX_AGAIN");
-    TEST_ASSERT(ctx.stream_sm.headers_pending == 1
-                && ctx.stream_sm.headers_committed == 0
-                && ctx.streaming.commit_state
-                   == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE
-                && ctx.headers_forwarded == 0
-                && metrics.streaming.commit_total == 0,
-                "NGX_AGAIN leaves only the header retry marker published");
-
-    rc = ngx_http_markdown_streaming_handle_null_input(&r, &ctx, &conf);
-    TEST_ASSERT(rc == NGX_AGAIN,
-                "a second blocked header retry remains suspended");
-    TEST_ASSERT(ctx.stream_sm.headers_pending == 1
-                && metrics.streaming.commit_total == 0,
-                "repeated NGX_AGAIN does not publish commit state");
-
-    g_next_header_filter_rc = NGX_OK;
-    rc = ngx_http_markdown_streaming_handle_null_input(&r, &ctx, &conf);
-    TEST_ASSERT(rc == NGX_OK,
-                "successful header retry resumes the streaming request");
-    TEST_ASSERT(ctx.stream_sm.headers_pending == 0
-                && ctx.stream_sm.headers_committed == 1
+    TEST_ASSERT(ctx.stream_sm.headers_committed == 1
                 && ctx.streaming.commit_state
                    == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST
+                && ctx.stream_sm.state == NGX_HTTP_MD_STATE_COMMITTED
                 && ctx.headers_forwarded == 1
                 && metrics.streaming.commit_total == 1,
-                "header commit latches publish atomically after NGX_OK");
+                "NGX_AGAIN publishes the full commit (headers accepted)");
+    TEST_ASSERT(g_next_header_filter_calls == 1,
+                "header filter chain must be invoked exactly once");
 
-    TEST_PASS("header commit NGX_AGAIN retry is atomic");
+    /* A second commit call short-circuits on headers_committed: header
+     * mutations and the downstream chain are never replayed. */
+    g_stream_commit_headers_called = 0;
+    g_next_header_filter_calls = 0;
+    g_stream_commit_headers_rc = NGX_ERROR;
+    rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK,
+                "re-commit after acceptance must short-circuit");
+    TEST_ASSERT(g_stream_commit_headers_called == 0
+                && g_next_header_filter_calls == 0,
+                "re-commit must not replay mutations or the header chain");
+
+    /* Null-input resume with no deferred output is a clean no-op. */
+    rc = ngx_http_markdown_streaming_handle_null_input(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK,
+                "null-input resume with no deferred output succeeds");
+
+    TEST_PASS("header commit NGX_AGAIN publishes canonically");
 }
 
-/* Feed-path regression: a pending header commit must resume the downstream
- * header filter without replaying the transactional header mutation. */
+/* Feed-path regression: after a commit-time header NGX_AGAIN the feed path
+ * must not replay the transactional header mutation nor re-invoke the
+ * header chain — the next feed cycles straight into the POST-commit body
+ * path (canonical model). */
 static void
 test_feed_path_resumes_pending_header_commit(void)
 {
@@ -3147,7 +3168,7 @@ test_feed_path_resumes_pending_header_commit(void)
     ngx_http_markdown_metrics_t metrics;
     ngx_int_t                rc;
 
-    TEST_SUBSECTION("feed path resumes pending header commit");
+    TEST_SUBSECTION("feed path skips header re-entry after acceptance");
     reset_globals();
     init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
     ngx_memzero(&metrics, sizeof(metrics));
@@ -3156,25 +3177,27 @@ test_feed_path_resumes_pending_header_commit(void)
 
     g_next_header_filter_rc = NGX_AGAIN;
     rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
-    TEST_ASSERT(rc == NGX_AGAIN && ctx.stream_sm.headers_pending == 1,
-        "initial feed-path commit should retain pending headers");
+    TEST_ASSERT(rc == NGX_AGAIN && ctx.stream_sm.headers_committed == 1,
+        "initial feed-path commit accepts the queued headers");
 
     g_stream_commit_headers_rc = NGX_ERROR;
     g_stream_commit_headers_called = 0;
+    g_next_header_filter_calls = 0;
     g_next_header_filter_rc = NGX_OK;
     rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_OK,
-        "feed-path retry should accept downstream headers");
-    TEST_ASSERT(g_stream_commit_headers_called == 0,
-        "feed-path retry must not replay header mutations");
-    TEST_ASSERT(ctx.stream_sm.headers_pending == 0
+        "feed-path re-commit short-circuits on the accepted latch");
+    TEST_ASSERT(g_stream_commit_headers_called == 0
+                && g_next_header_filter_calls == 0,
+        "feed path must not replay mutations nor the header chain");
+    TEST_ASSERT(ctx.stream_sm.headers_committed == 1
                 && ctx.streaming.commit_state
                    == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST
                 && ctx.headers_forwarded == 1
                 && metrics.streaming.commit_total == 1,
-        "feed-path retry should publish the commit atomically");
+        "feed-path commit state remains fully published");
 
-    TEST_PASS("feed path resumes pending header commit");
+    TEST_PASS("feed path skips header re-entry after acceptance");
 }
 
 /*
@@ -3182,11 +3205,13 @@ test_feed_path_resumes_pending_header_commit(void)
  * when the header commit returns NGX_AGAIN.
  *
  * The feed path calls ngx_http_markdown_streaming_commit while still in
- * COMMIT_PRE. A backpressure NGX_AGAIN leaves headers_pending set; sending
- * conversion output in that state would let the body run ahead of the
- * headers. The success-output handler must propagate NGX_AGAIN immediately,
- * retain the unconsumed output, and preserve the pending commit state until
- * the header-only retry can deliver it.
+ * COMMIT_PRE.  Under the canonical model the NGX_AGAIN means the write
+ * filter queued the header block — the commit latches publish immediately
+ * (headers accepted) — but the write queue is busy, so the conversion
+ * output must be retained in module state until the write event fires.
+ * The success-output handler must propagate NGX_AGAIN immediately, retain
+ * the unconsumed output, and let the null-input re-entry (a pure
+ * body-filter resume) deliver it without re-invoking the header chain.
  *
  * Covers: ngx_http_markdown_streaming_handle_success_output,
  *         ngx_http_markdown_streaming_handle_feed_result
@@ -3228,18 +3253,24 @@ test_success_output_defers_body_when_commit_again(void)
 
     TEST_ASSERT(rc == NGX_AGAIN,
         "feed path must propagate the commit NGX_AGAIN");
-    TEST_ASSERT(ctx.stream_sm.headers_pending == 1,
-        "pending header commit state must be preserved");
+    TEST_ASSERT(ctx.stream_sm.headers_committed == 1
+                && ctx.streaming.commit_state
+                   == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST
+                && ctx.headers_forwarded == 1
+                && metrics.streaming.commit_total == 1,
+        "commit latches publish immediately on header NGX_AGAIN");
+    TEST_ASSERT(g_next_header_filter_calls == 1,
+        "header chain must be invoked exactly once");
     TEST_ASSERT(g_next_body_filter_calls == 0,
-        "body output must not run ahead of the pending header commit");
+        "body output must not run ahead of the queued header block");
     TEST_ASSERT(ctx.streaming.pending_meta.pending_header_output == out_data
                 && ctx.streaming.pending_meta.pending_header_output_len
                    == sizeof(out_data) - 1,
-        "conversion output must remain owned while headers are pending");
+        "conversion output must remain owned while headers are queued");
     TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
         "header backpressure must keep the request buffered for re-entry");
     TEST_ASSERT(g_output_free_calls == free_before,
-        "pending conversion output must not be freed before header retry");
+        "pending conversion output must not be freed before delivery");
 
     rc = ngx_http_markdown_streaming_handle_new_input_with_pending(
         &r, &ctx, &conf, &future);
@@ -3248,21 +3279,14 @@ test_success_output_defers_body_when_commit_again(void)
         "future input must queue while header output is pending");
     ngx_http_markdown_streaming_pending_input_clear(&ctx);
 
-    g_next_header_filter_rc = NGX_AGAIN;
-    rc = ngx_http_markdown_streaming_handle_null_input(
-        &r, &ctx, &conf);
-    TEST_ASSERT(rc == NGX_AGAIN,
-        "blocked header retry must keep conversion output pending");
-    TEST_ASSERT(ctx.streaming.pending_meta.pending_header_output == out_data
-                && (r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0
-                && g_next_body_filter_calls == 0,
-        "body output must remain deferred across repeated header NGX_AGAIN");
-
-    g_next_header_filter_rc = NGX_OK;
+    /* The write event fires: null-input re-entry resumes the deferred body.
+     * The header rc is still NGX_AGAIN and MUST stay irrelevant — the
+     * header chain is never re-invoked (canonical model). */
+    g_next_header_filter_calls = 0;
     rc = ngx_http_markdown_streaming_handle_null_input(
         &r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_OK,
-        "successful header retry must release the deferred body");
+        "null-input resume must deliver the deferred body");
     sent_buf = g_next_body_filter_last_in == NULL
         ? NULL : g_next_body_filter_last_in->buf;
     TEST_ASSERT(ctx.streaming.pending_meta.pending_header_output == NULL
@@ -3274,10 +3298,12 @@ test_success_output_defers_body_when_commit_again(void)
                 && ngx_memcmp(sent_buf->pos, out_data,
                               sizeof(out_data) - 1) == 0,
         "deferred conversion output must be delivered exactly once");
+    TEST_ASSERT(g_next_header_filter_calls == 0,
+        "header chain must not be re-invoked on write-event resume");
     TEST_ASSERT(g_output_free_calls == free_before + 1,
         "deferred conversion output must be freed after delivery");
 
-    TEST_PASS("success output defers body until headers commit");
+    TEST_PASS("success output defers body until the write event");
 }
 
 /*
