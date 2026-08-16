@@ -655,7 +655,6 @@ model_encoding_collection_failure_dispatch(ngx_http_markdown_ctx_t *ctx,
 {
     /* Mirrors request_impl.h: state first, then policy dispatch. */
     ctx->eligible = 0;
-    ctx->headers_forwarded = 1;
     ctx->error.last_category = NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
     ctx->error.has_category = 1;
 
@@ -664,9 +663,20 @@ model_encoding_collection_failure_dispatch(ngx_http_markdown_ctx_t *ctx,
     }
 
     (*downstream_invocations)++;
-    /* Rule 38: failopen is a delivery counter, incremented only after
-     * the downstream filter confirms delivery (NGX_OK or NGX_DONE). */
+    /*
+     * Canonical model: header-chain NGX_AGAIN means the write filter queued
+     * the header block — the headers are accepted.  Publish the delivery
+     * latch on NGX_AGAIN too so the pass-through body path never re-enters
+     * the header chain (intermediate filters are not idempotent).
+     * Rule 38: failopen is a delivery counter, incremented only after the
+     * downstream filter confirms delivery (NGX_OK or NGX_DONE).
+     */
+    if (downstream_result == NGX_AGAIN) {
+        ctx->headers_forwarded = 1;
+        return downstream_result;
+    }
     if (downstream_result == NGX_OK || downstream_result == NGX_DONE) {
+        ctx->headers_forwarded = 1;
         (*failopen_delivery)++;
     }
     return downstream_result;
@@ -771,6 +781,10 @@ test_collection_failure_handler_dispatch(void)
                 "downstream invoked once on NGX_AGAIN");
     TEST_ASSERT(failopen_delivery == 0,
                 "NGX_AGAIN must not count as fail-open delivery");
+    TEST_ASSERT(ctx.headers_forwarded,
+                "NGX_AGAIN must publish the delivery latch (canonical model: "
+                "headers queued by the write filter are accepted; the "
+                "pass-through body path must not re-enter the header chain)");
 
     /* Fail-closed policy: state set, no downstream dispatch. */
     memset(&ctx, 0, sizeof(ctx));
@@ -784,9 +798,11 @@ test_collection_failure_handler_dispatch(void)
         &downstream_invocations, &failopen_delivery);
     TEST_ASSERT(rc == (ngx_int_t) 502,
                 "fail-closed must return the configured error status");
-    TEST_ASSERT(!ctx.eligible && ctx.headers_forwarded
+    TEST_ASSERT(!ctx.eligible && !ctx.headers_forwarded
                 && ctx.error.has_category,
-                "fail-closed must record ineligible and error state");
+                "fail-closed must record ineligible and error state; the "
+                "headers were never forwarded (NGINX sends the error "
+                "response directly, so the delivery latch stays clear)");
     TEST_ASSERT(downstream_invocations == 0,
                 "fail-closed must not invoke downstream");
     TEST_ASSERT(failopen_delivery == 0,
