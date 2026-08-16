@@ -104,10 +104,11 @@ are internal transition names, not a second operator-visible reason taxonomy:
   `STREAMING_PRECOMMIT_REJECT`, `STREAMING_SHADOW`.
 
 The generator creates the authoritative operator-visible reason-code list from
-`components/rust-converter/reason_registry.toml`. Decision logs and Prometheus
-must use that exact lowercase list. Streaming accessors may retain internal
-uppercase transition labels only where the metrics registry explicitly defines
-them.
+`components/rust-converter/reason_registry.toml`. The Rust `ReasonCode` registry
+governs only the Prometheus values in the `reason` label: they must remain
+lowercase `snake_case` and match the decision-log `reason=` codes exactly.
+Streaming accessors may retain internal uppercase transition labels only where
+the metrics registry explicitly defines them.
 
 ### Decision-chain reason code table (lowercase)
 

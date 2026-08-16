@@ -262,7 +262,7 @@ override. This list is the source used by the request-lifecycle documentation.
 
 ### 3.3 Profile Integration Point (not implemented — feature removed)
 
-The planned merge order is:
+*Historical context only.* The pre-freeze design planned this merge order.
 
 ```
 effective = builtin_defaults
@@ -271,9 +271,12 @@ if profile != NONE:
 effective.apply(explicit_directives)        ← explicit overrides profile
 ```
 
-This maps to using `ngx_http_markdown_profile_defaults_t` values as the
-"default" argument in `ngx_conf_merge_*` calls, replacing the hard-coded
-compile-time defaults when a profile is active.
+This would have mapped to using `ngx_http_markdown_profile_defaults_t` values
+as the "default" argument in `ngx_conf_merge_*` calls. It was never
+implemented. The 0.9.2 release removed profiles entirely. We retain this
+section solely as historical evidence. It is **not** active guidance. Do
+not implement profile defaults or a `detect_conflicts` step. See
+`docs/guides/0.9.2-breaking-changes.md`.
 
 ---
 

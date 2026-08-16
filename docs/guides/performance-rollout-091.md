@@ -1,11 +1,12 @@
 # Performance Rollout and Rollback Guide — 0.9.1 Optimizations
 
 > **Superseded in 0.9.2.** This document applies only to the 0.9.1 release
-> line. 0.9.2 removes `markdown_streaming_zero_copy`, `markdown_profile`,
-> and the other directives referenced below, configuring them fails `nginx -t`
-> with an `unknown directive` error. In 0.9.2, zero-copy delivery is an
-> internal optimization selected automatically from buffer ownership and
-> backpressure state, and profile-based switching is no longer available.
+> line. The directives removed in 0.9.2 — `markdown_streaming_zero_copy`,
+> `markdown_profile`, and the other removed directives referenced below —
+> fail `nginx -t` with an `unknown directive` error. In 0.9.2, zero-copy
+> delivery is an internal optimization selected automatically from buffer
+> ownership and backpressure state, and profile-based switching is no longer
+> available.
 > For 0.9.2 behavior, see [CONFIGURATION.md](CONFIGURATION.md) and
 > [0.9.2-breaking-changes.md](0.9.2-breaking-changes.md).
 

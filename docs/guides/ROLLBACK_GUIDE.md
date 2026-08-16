@@ -372,7 +372,7 @@ roll back.
 
 ### Latency Exceeding Timeout
 
-Conversion latency approaches or exceeds the configured `markdown_limits conversion_timeout=`. Check the latency bucket distribution:
+Conversion latency approaches or exceeds the configured `markdown_limits conversion_timeout=`. Check the latency histogram buckets first. The histogram's finite buckets stop at 5 seconds. They are **insufficient for diagnosing timeouts above 5s**. Use the decision log (`category=timeout` entries) for those cases.
 
 ```bash
 curl -s -H "Accept: text/plain; version=0.0.4" http://localhost/markdown-metrics | \

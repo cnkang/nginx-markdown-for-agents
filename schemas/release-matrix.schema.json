@@ -83,6 +83,11 @@
         "abi_version": {
           "type": "integer",
           "description": "Final frozen FFI ABI version."
+        },
+        "support_tier": {
+          "type": "string",
+          "enum": ["full", "supported", "experimental", "best-effort", "source_only", "deprecated", "archived"],
+          "description": "Support tier consumed by completeness_check and normalize_matrix (for example \"full\" rows must have complete artifact sets). Optional: not every row carries it."
         }
       }
     },

@@ -76,8 +76,8 @@ ARCH=amd64
 BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}"
 PKG="nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
 
-curl -fSLO "${BASE_URL}/SHA256SUMS"
-curl -fSLO "${BASE_URL}/SHA256SUMS.asc"
+curl -fSLo SHA256SUMS "${BASE_URL}/SHA256SUMS"
+curl -fSLo SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
 curl -fSLO "${BASE_URL}/${PKG}"
 # Set TRUSTED_FINGERPRINT only from an independently authenticated channel.
 : "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated}"
@@ -103,8 +103,8 @@ ARCH=x86_64
 BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}"
 PKG="nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
 
-curl -fSLO "${BASE_URL}/SHA256SUMS"
-curl -fSLO "${BASE_URL}/SHA256SUMS.asc"
+curl -fSLo SHA256SUMS "${BASE_URL}/SHA256SUMS"
+curl -fSLo SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
 curl -fSLO "${BASE_URL}/${PKG}"
 # Set TRUSTED_FINGERPRINT only from an independently authenticated channel.
 : "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated}"

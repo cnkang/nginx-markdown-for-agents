@@ -110,6 +110,14 @@ Publication and artifact availability are separate release gates.
      exit 1
    fi
    # Restore the versioned 0.9.1 nginx.conf and dynamic-configuration file here.
+   # Locate the module directory explicitly: derive it from the active nginx
+   # configuration, or set MODULES_DIR yourself when following this procedure
+   # independently.
+   MODULES_DIR="${MODULES_DIR:-$(nginx -V 2>&1 | sed -n 's/.*--modules-path=\([^ ]*\).*/\1/p')}"
+   if [[ -z "$MODULES_DIR" || ! -d "$MODULES_DIR" ]]; then
+     echo "ERROR: cannot locate the NGINX modules directory" >&2
+     exit 1
+   fi
    sudo cp objs/ngx_http_markdown_filter_module.so "$MODULES_DIR/"
    sudo nginx -t && sudo nginx
    ```
@@ -259,8 +267,9 @@ reference removed or renamed families must update their alert rules, and
 operators must re-test the alerts against the downgraded binary before
 they consider the rollback complete.
 
-Metric counters are **not reset** on rollback. They continue accumulating
-from their current values under the downgraded module.
+Metric counters are **not reset** on a graceful reload. They continue accumulating
+from their current values under the downgraded module. A full NGINX stop and
+subsequent start resets shared-memory counters. A graceful reload preserves them.
 
 ---
 
