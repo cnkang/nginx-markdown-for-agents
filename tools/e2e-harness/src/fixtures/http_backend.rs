@@ -387,11 +387,14 @@ fn scenario_response(
     headers: HeaderMap,
     path: String,
 ) -> axum::response::Response {
-    state.total_requests.fetch_add(1, Ordering::Relaxed);
-
     if path == "/metrics" {
+        // The metrics route reports the request counters; it must not
+        // increment the counter it is reporting (that would skew the
+        // served totals by one per scrape).
         return metrics_response(state, method, headers);
     }
+    state.total_requests.fetch_add(1, Ordering::Relaxed);
+
     if path == "/md/redirect-target" {
         return html_response(method, 200, "<h1>redirect target</h1>", true, None, None);
     }

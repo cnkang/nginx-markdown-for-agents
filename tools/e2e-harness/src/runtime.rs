@@ -290,10 +290,14 @@ http {{\n\
             markdown_cache_validation off;\n\
             markdown_limits conversion_memory=64m conversion_timeout=30s;\n\
             markdown_error_policy pass;\n\
+            proxy_http_version 1.1;\n\
+            proxy_set_header Connection \"\";\n\
             proxy_pass http://fixture_backend/;\n\
         }}\n\
         location /chain-raw/ {{\n\
             markdown_filter off;\n\
+            proxy_http_version 1.1;\n\
+            proxy_set_header Connection \"\";\n\
             proxy_pass http://fixture_backend/;\n\
         }}\n\
         location /chain-stream/ {{\n\
@@ -317,6 +321,8 @@ http {{\n\
             markdown_cache_validation off;\n\
             markdown_limits conversion_memory=64m conversion_timeout=30s;\n\
             markdown_error_policy fail_closed;\n\
+            proxy_http_version 1.1;\n\
+            proxy_set_header Connection \"\";\n\
             proxy_pass http://fixture_backend/;\n\
         }}\n\
         location = /markdown-metrics {{ markdown_metrics; }}\n\

@@ -135,8 +135,10 @@ while IFS= read -r -d '' file; do
 
             # Command outputs are executable data and must use a fixed
             # allowlist rather than entering the shell source text.
-            if [[ "$line" =~ \$\{\{[[:space:]]*steps\.[a-zA-Z_][a-zA-Z0-9_-]*\.outputs\.[a-zA-Z_][a-zA-Z0-9_-]*[[:space:]]*\}\} ]] || \
-               [[ "$line" =~ \$\{\{[[:space:]]*steps\[[^]]*\]\.outputs\[[^]]*\][[:space:]]*\}\} ]]; then
+            # Accept either dot or index syntax for both the step selector
+            # and the output selector, including mixed forms such as
+            # steps.build.outputs['command'] and steps['build'].outputs.command.
+            if [[ "$line" =~ \$\{\{[[:space:]]*steps(\.[a-zA-Z_][a-zA-Z0-9_-]*|\[[^]]*\])\.outputs(\.[a-zA-Z_][a-zA-Z0-9_-]*|\[[^]]*\])[[:space:]]*\}\} ]]; then
                 echo "ERROR: ${rel_path}:${line_num}: step output directly interpolated in run block" >&2
                 echo "  ${line}" >&2
                 echo "  Fix: map a fixed identifier through env and a shell case statement" >&2

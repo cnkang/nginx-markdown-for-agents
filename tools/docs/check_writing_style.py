@@ -123,8 +123,6 @@ def _is_maintained(rel: str) -> bool:
 
 
 def _tracked_md_files() -> list[Path]:
-    import subprocess
-
     out = subprocess.run(
         ["git", "ls-files", "--cached", "--others", "--exclude-standard", "--", "*.md"],
         cwd=ROOT,

@@ -91,7 +91,12 @@ def test_missing_entries_array_is_ignored() -> None:
     """The blocking rule silently skips structurally-invalid manifests;
     the schema layer reports structural problems instead."""
     reasons: list[str] = []
-    gate._check_blocking_semantics(_manifest_with(entries_override=None), reasons)
+    manifest = _manifest_with()
+    # Construct a manifest with the entries key explicitly absent.
+    # Passing entries_override=None to _manifest_with would preserve the
+    # base entries, which does not exercise the missing-key path.
+    del manifest["entries"]
+    gate._check_blocking_semantics(manifest, reasons)
     assert reasons == []
 
 

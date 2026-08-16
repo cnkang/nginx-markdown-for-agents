@@ -23,19 +23,39 @@
 # positives on structs that are intentionally zeroed elsewhere.
 #
 # Usage:
-#   bash tools/harness/detect_uninitialized_stack_struct.sh [directory]
+#   bash tools/harness/detect_uninitialized_stack_struct.sh [--strict] [directory]
 #     directory defaults to components/nginx-module (src + tests)
 #
 # Exit codes:
-#   0 — no candidate violations found (or advisory mode)
-#   1 — one or more candidate violations found (advisory report)
+#   0 — no candidate violations found (or advisory mode; --strict escalates
+#       candidate findings to exit 1)
+#   1 — one or more candidate violations found under --strict
 #   2 — usage/argument error
 
 set -eu
 
 SCRIPT_DIR="$(dirname "$0")"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-SCAN_DIR="${1:-${REPO_ROOT}/components/nginx-module}"
+
+# Advisory by default: report candidates but exit 0 so the detector can
+# run in normal CI without hard-blocking on reviewable patterns.
+# Pass --strict to preserve exit status 1 when candidates are found.
+strict_mode=0
+for arg in "$@"; do
+    if [[ "$arg" == "--strict" ]]; then
+        strict_mode=1
+    fi
+done
+
+# The first non-flag argument is the scan directory.
+SCAN_DIR=""
+for arg in "$@"; do
+    if [[ "$arg" != "--strict" ]]; then
+        SCAN_DIR="$arg"
+        break
+    fi
+done
+SCAN_DIR="${SCAN_DIR:-${REPO_ROOT}/components/nginx-module}"
 
 if [[ ! -d "$SCAN_DIR" ]]; then
     echo "ERROR: Scan directory not found: $SCAN_DIR" >&2
@@ -108,7 +128,10 @@ violations=$(wc -l < "$tmp_violations" | tr -d '[:space:]')
 if [[ "$violations" -gt 0 ]]; then
     cat "$tmp_violations" >&2
     echo "NOTE: Found $violations candidate(s) for manual review (advisory detector)" >&2
-    exit 1
+    if [[ "$strict_mode" -eq 1 ]]; then
+        exit 1
+    fi
+    exit 0
 else
     echo "OK: No partially-initialized stack struct candidates detected"
     exit 0

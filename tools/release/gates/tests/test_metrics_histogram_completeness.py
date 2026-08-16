@@ -39,14 +39,22 @@ def _renderer_source() -> str:
 
 
 def _histogram_function(source: str) -> str:
-    match = re.search(
-        r"static u_char \*\s*ngx_http_markdown_metrics_v1_render_histogram\("
-        r".*?(?=\n}\n\nstatic )",
-        source,
-        flags=re.DOTALL,
-    )
-    assert match is not None, "production histogram renderer function is missing"
-    return match.group(0)
+    start = source.find("ngx_http_markdown_metrics_v1_render_histogram(")
+    assert start != -1, "production histogram renderer function is missing"
+    # Walk forward from the signature balancing braces, so the extraction
+    # does not depend on exact whitespace or a following static declaration.
+    brace_depth = 0
+    i = start
+    while i < len(source):
+        ch = source[i]
+        if ch == "{":
+            brace_depth += 1
+        elif ch == "}":
+            brace_depth -= 1
+            if brace_depth == 0:
+                return source[start : i + 1]
+        i += 1
+    raise AssertionError("histogram renderer function body is unbalanced")
 
 
 def _registry_artifact() -> dict:
@@ -71,8 +79,9 @@ def test_renderer_boundaries_match_registry() -> None:
         flags=re.DOTALL,
     )
     assert match is not None, "renderer bucket boundary array is missing"
-    boundaries = re.findall(r'"([0-9.]+)"', match.group(1))
-    assert boundaries == [str(value) for value in HISTOGRAM["bucket_boundaries"]]
+    bucket_body = match.group(1)
+    boundaries = [float(v) for v in re.findall(r'"([0-9.]+)"', bucket_body)]
+    assert boundaries == [float(value) for value in HISTOGRAM["bucket_boundaries"]]
     assert len(boundaries) == HISTOGRAM["bucket_count"]
 
 
@@ -105,8 +114,15 @@ def test_v1_mapping_does_not_put_gt_1000ms_in_finite_5s_bucket() -> None:
         encoding="utf-8"
     )
     mapping = source[source.index("ngx_http_markdown_metrics_to_v1"):]
+    # buckets[9] is the finite le=5s boundary (see the v1 histogram band
+    # contract).  >1000ms latency must not be placed in a dedicated
+    # >1000ms bucket; the renderer folds everything past the last finite
+    # boundary into +Inf.  The positive assertions cover the legacy->v1
+    # band copy (buckets[8]=le_1000ms, buckets[9]=le_5000ms).
     assert "duration_full_buffer.buckets[9]" not in mapping
     assert "duration_streaming.buckets[9]" not in mapping
+    assert "destination->buckets[9] = source->le_5000ms;" in source
+    assert "destination->buckets[8] = source->le_1000ms;" in source
 
 
 def test_registry_histogram_has_correct_boundaries() -> None:
