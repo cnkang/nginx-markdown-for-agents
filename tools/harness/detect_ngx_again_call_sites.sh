@@ -136,7 +136,7 @@ while IFS= read -r -d '' file; do
             # the top of the file cannot produce an invalid address 0.
             total_lines=$(echo "$surrounding_code" | wc -l | tr -d ' ')
             start_line=$((total_lines - 6))
-            if [ "$start_line" -lt 1 ]; then
+            if [[ "$start_line" -lt 1 ]]; then
                 start_line=1
             fi
             next_lines=$(echo "$surrounding_code" | sed -n "${start_line},\$p")
