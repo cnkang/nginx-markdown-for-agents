@@ -205,8 +205,13 @@ def _extract_directive_entry(content: str, directive: str) -> str | None:
     return match[1] if match is not None else None
 
 
-def _expand_directive_macros(content: str) -> str:
-    """Expand canonical directive-name macros before table inspection."""
+def _expand_directive_macros(content: str) -> tuple[str, list[str]]:
+    """Expand canonical directive-name macros before table inspection.
+
+    Returns ``(expanded, errors)``: a directive-name macro used in a
+    table entry but never #defined is reported as an error instead of
+    being silently treated as its own literal directive string.
+    """
     definitions = dict(
         re.findall(
             r"^#define\s+(NGX_HTTP_MARKDOWN_DIRECTIVE_[A-Z0-9_]+)"
@@ -215,10 +220,25 @@ def _expand_directive_macros(content: str) -> str:
             flags=re.MULTILINE,
         )
     )
-    return re.sub(
-        r"ngx_string\((NGX_HTTP_MARKDOWN_DIRECTIVE_[A-Z0-9_]+)\)",
-        lambda match: f'ngx_string("{definitions.get(match[1], match[1])}")',
-        content,
+    errors: list[str] = []
+
+    def _substitute(match: re.Match[str]) -> str:
+        macro = match[1]
+        defined = definitions.get(macro)
+        if defined is None:
+            errors.append(
+                f"directive-name macro {macro!r} used in ngx_string() "
+                "is not #defined"
+            )
+        return f'ngx_string("{defined if defined is not None else macro}")'
+
+    return (
+        re.sub(
+            r"ngx_string\((NGX_HTTP_MARKDOWN_DIRECTIVE_[A-Z0-9_]+)\)",
+            _substitute,
+            content,
+        ),
+        errors,
     )
 
 
@@ -595,7 +615,11 @@ def _read_directive_source(project_root: Path, errors: List[str]) -> str | None:
     directive_names = _read_required(project_root, DIRECTIVE_NAMES_PATH, errors)
     if directives is None or directive_names is None:
         return None
-    return _expand_directive_macros(f"{directives}\n{directive_names}")
+    expanded, macro_errors = _expand_directive_macros(
+        f"{directives}\n{directive_names}"
+    )
+    errors.extend(macro_errors)
+    return expanded
 
 
 def check_public_config_contract(project_root: Path) -> List[str]:

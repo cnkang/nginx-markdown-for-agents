@@ -333,6 +333,7 @@ def check_matrix_consistency() -> list[str]:
 
     table_rows = _parse_matrix_table(m[1])
 
+    matched = 0
     for entry in matrix_data.get("entries", []):
         if (
             entry.get("artifact_type") != "dynamic-module"
@@ -340,6 +341,7 @@ def check_matrix_consistency() -> list[str]:
             or entry.get("libc") not in {"glibc", "musl"}
         ):
             continue
+        matched += 1
         nginx = entry["nginx_version"]
         os_type = entry["libc"]
         arch = _target_arch(entry["target"])
@@ -358,6 +360,11 @@ def check_matrix_consistency() -> list[str]:
                 f"nginx={nginx} os_type={os_type} arch={arch} "
                 f"expected 'Full' but found '{matching[0][3]}'"
             )
+    if matched == 0:
+        errors.append(
+            "Release matrix contains no dynamic-module/supported entries to "
+            "cross-check against the installation guide compatibility table"
+        )
     return errors
 
 

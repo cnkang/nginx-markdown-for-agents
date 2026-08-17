@@ -222,8 +222,10 @@ def _audit_failed_closed(
         # terminal_aborted_total only exists under the streaming build; the
         # non-streaming branch assigns aborted = 0 and legitimately has no
         # aborted deduction.
-        if "#ifdef MARKDOWN_STREAMING_ENABLED" in block \
-                or "#if MARKDOWN_STREAMING_ENABLED" in block:
+        if re.search(
+            r"#if(?:def)?\s+(?:defined\s*\(\s*)?MARKDOWN_STREAMING_ENABLED",
+            block,
+        ):
             if not any("terminal_aborted_total" in stmt
                        for stmt in block_stmts):
                 reviews.append(

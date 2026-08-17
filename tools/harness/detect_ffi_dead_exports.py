@@ -348,11 +348,26 @@ def scan_test_references(test_directory: Path) -> set[str]:
             text = validated_path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        for match in FN_POINTER_RE.finditer(text):
-            name = match.group(1)
-            if name.startswith("markdown_"):
-                references.add(name)
+        references.update(_callsite_names(text))
     return references
+
+
+def _callsite_names(text: str) -> set[str]:
+    """Return markdown_* function names on non-comment, non-declaration lines."""
+    names: set[str] = set()
+    # Align with the production callsite scan: comments, strings and
+    # declarations do not count as test references.
+    for line in text.splitlines():
+        if _is_non_callsite_line(line):
+            continue
+        # Mask out double-quoted string literals so markdown_* names inside
+        # test payload strings (e.g. "markdown_convert") are not counted as
+        # references.
+        masked = re.sub(r'"[^"\n]*"', '""', line)
+        for match in FN_POINTER_RE.finditer(masked):
+            # The regex enforces the markdown_ prefix already.
+            names.add(match.group(1))
+    return names
 
 
 def classify_exports(

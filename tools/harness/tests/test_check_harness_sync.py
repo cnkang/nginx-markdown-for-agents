@@ -89,6 +89,29 @@ def test_manifest_command_reachability_rejects_missing_surface(tmp_path, monkeyp
     assert ".github/workflows/missing.yml" in result.detail
 
 
+def test_manifest_command_reachability_skips_make_include_dir(tmp_path, monkeypatch):
+    """``make -I <dir> check`` must not treat the include directory as a
+    target: ``-I`` is a value-taking flag whose argument is skipped during
+    target validation (regression for the -I classification fix)."""
+    (tmp_path / "Makefile").write_text("check:\n\t@true\n", encoding="utf-8")
+    (tmp_path / "build" / "includes").mkdir(parents=True)
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+
+    manifest = {
+        "verification_families": {
+            "fixture": {
+                "commands": [
+                    "make -I build/includes check",
+                ]
+            }
+        }
+    }
+
+    result = sync._check_manifest_command_reachability(manifest)
+
+    assert result.status == sync.PASS, f"expected PASS, got {result.status}: {result.detail}"
+
+
 def test_collect_results_warns_for_local_kiro_drift(tmp_path, monkeypatch):
     repo = tmp_path
     _write_repo_fixture(repo, with_kiro=True, kiro_has_links=False)

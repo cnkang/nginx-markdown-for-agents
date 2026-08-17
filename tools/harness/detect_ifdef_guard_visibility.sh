@@ -74,26 +74,22 @@ if [[ ! -d "$SRC_DIR" ]]; then
     exit 1
 fi
 
-# Step 1: Extract function names declared inside #ifdef GUARD_NAME blocks in the header
-# These are prototype-style declarations (end with ;)
-if ! guarded_funcs=$(python3 - "${HEADER_FILE}" "${GUARD_NAME}" <<'PY'
+# Step 1: Extract function names declared inside #ifdef GUARD_NAME blocks in the
+# header (prototype style, ending with ';') plus function definitions inside the
+# guard across every .c/.h file in SRC_DIR, so a guarded-only definition behind
+# an unguarded declaration is still collected and checked.
+if ! guarded_funcs=$(python3 - "${HEADER_FILE}" "${GUARD_NAME}" "${SRC_DIR}" <<'PY'
 import re
 import sys
 import os
 
-header_path, guard_name = sys.argv[1:3]
-
-with open(header_path, encoding='utf-8') as f:
-    lines = f.readlines()
-
-funcs = set()
-stack = []
+header_path, guard_name, src_dir = sys.argv[1:4]
 
 # MARKDOWN_STREAMING_SHADOW_DEBUG is only defined for a streaming build, so
 # code guarded by it also has the visibility of MARKDOWN_STREAMING_ENABLED.
 implied_guards = {'MARKDOWN_STREAMING_SHADOW_DEBUG': guard_name}
 
-def guard_enabled():
+def guard_enabled(stack):
     return any(name == guard_name and active for name, active, _ in stack)
 
 def guard_expression(expression):
@@ -111,46 +107,51 @@ def guard_expression(expression):
         return False
     return None
 
-pending_definition = False
-pending_decl = None
+def update_stack(stack, kind, expression):
+    if kind == 'endif':
+        if stack:
+            stack.pop()
+    elif kind in ('ifdef', 'ifndef'):
+        name = expression.strip()
+        if name in implied_guards:
+            name = implied_guards[name]
+        active = name == guard_name and kind == 'ifdef'
+        stack.append((name, active, active))
+    elif kind == 'if':
+        active = guard_expression(expression)
+        stack.append((guard_name if active is not None else None,
+                      active, active is True))
+    elif kind == 'elif' and stack:
+        name, active, branch_taken = stack[-1]
+        candidate = guard_expression(expression)
+        if candidate is not None:
+            next_active = not branch_taken and candidate
+            stack[-1] = (guard_name, next_active,
+                         branch_taken or next_active)
+        elif name == guard_name and active is not None:
+            next_active = False
+            stack[-1] = (name, next_active, branch_taken or next_active)
+    elif kind == 'else' and stack:
+        name, active, branch_taken = stack[-1]
+        if name == guard_name and active is not None:
+            next_active = not branch_taken
+            stack[-1] = (name, next_active, branch_taken or next_active)
 
-for i, line in enumerate(lines, 1):
-    stripped = line.strip()
-    directive = re.match(r'#\s*(ifdef|ifndef|if|else|elif|endif)\b(.*)', stripped)
-    if directive:
-        kind, expression = directive.groups()
-        if kind == 'endif':
-            if stack:
-                stack.pop()
-        elif kind in ('ifdef', 'ifndef'):
-            name = expression.strip()
-            if name in implied_guards:
-                name = implied_guards[name]
-            active = name == guard_name and kind == 'ifdef'
-            stack.append((name, active, active))
-        elif kind == 'if':
-            active = guard_expression(expression)
-            stack.append((guard_name if active is not None else None,
-                          active, active is True))
-        elif kind == 'elif' and stack:
-            name, active, branch_taken = stack[-1]
-            candidate = guard_expression(expression)
-            if candidate is not None:
-                next_active = not branch_taken and candidate
-                stack[-1] = (guard_name, next_active,
-                             branch_taken or next_active)
-            elif name == guard_name and active is not None:
-                next_active = False
-                stack[-1] = (name, next_active, branch_taken or next_active)
-        elif kind == 'else' and stack:
-            name, active, branch_taken = stack[-1]
-            if name == guard_name and active is not None:
-                next_active = not branch_taken
-                stack[-1] = (name, next_active, branch_taken or next_active)
-        continue
-
-    if guard_enabled():
-        # Find function declarations: return_type name(args);
+def scan_declarations(path):
+    """Collect function names declared inside the guard (prototype style)."""
+    funcs = set()
+    with open(path, encoding='utf-8') as f:
+        lines = f.readlines()
+    stack = []
+    pending_decl = None
+    for line in lines:
+        stripped = line.strip()
+        directive = re.match(r'#\s*(ifdef|ifndef|if|else|elif|endif)\b(.*)', stripped)
+        if directive:
+            update_stack(stack, directive.group(1), directive.group(2))
+            continue
+        if not guard_enabled(stack):
+            continue
         if stripped.startswith(('//', '/*', '*')):
             continue
         m = re.search(r'\b(ngx_http_markdown_\w+)\s*\(', stripped)
@@ -161,20 +162,103 @@ for i, line in enumerate(lines, 1):
                 # Multi-line declaration: name( on this line, arguments
                 # and semicolon on the following lines.
                 pending_decl = m.group(1)
-            elif pending_decl is not None and ';' in line:
-                funcs.add(pending_decl)
-                pending_decl = None
         elif pending_decl is not None and ';' in line:
             funcs.add(pending_decl)
             pending_decl = None
+    return funcs
 
+def scan_definitions(path):
+    """Collect function names defined inside the guard (body style)."""
+    funcs = set()
+    with open(path, encoding='utf-8') as f:
+        lines = f.readlines()
+    stack = []
+    pending_def = None
+    for line in lines:
+        stripped = line.strip()
+        directive = re.match(r'#\s*(ifdef|ifndef|if|else|elif|endif)\b(.*)', stripped)
+        if directive:
+            update_stack(stack, directive.group(1), directive.group(2))
+            continue
+        if not guard_enabled(stack):
+            continue
+        if stripped.startswith(('//', '/*', '*')):
+            continue
+        if pending_def is not None:
+            # Multi-line signature: a definition ends at the opening brace,
+            # a prototype at the semicolon.
+            if '{' in line:
+                funcs.add(pending_def)
+                pending_def = None
+            elif ';' in line:
+                pending_def = None
+            continue
+        m = re.search(r'\b(ngx_http_markdown_\w+)\s*\(', stripped)
+        if m and re.search(r'\)\s*\{\s*$', line.rstrip()):
+            # One-line definition: name(args) {
+            funcs.add(m.group(1))
+        elif m and re.search(r'\(\s*$', stripped):
+            # Multi-line signature start; may be a definition or a call.
+            pending_def = m.group(1)
+    return funcs
+
+
+def scan_definitions_outside_guard(path):
+    """Collect function names defined OUTSIDE the guard (feature-disabled
+    build must still link them)."""
+    funcs = set()
+    with open(path, encoding='utf-8') as f:
+        lines = f.readlines()
+    stack = []
+    pending_def = None
+    for line in lines:
+        stripped = line.strip()
+        directive = re.match(r'#\s*(ifdef|ifndef|if|else|elif|endif)\b(.*)', stripped)
+        if directive:
+            update_stack(stack, directive.group(1), directive.group(2))
+            continue
+        if guard_enabled(stack):
+            continue
+        if stripped.startswith(('//', '/*', '*')):
+            continue
+        if pending_def is not None:
+            if '{' in line:
+                funcs.add(pending_def)
+                pending_def = None
+            elif ';' in line:
+                pending_def = None
+            continue
+        m = re.search(r'\b(ngx_http_markdown_\w+)\s*\(', stripped)
+        if m and re.search(r'\)\s*\{\s*$', line.rstrip()):
+            funcs.add(m.group(1))
+        elif m and re.search(r'\(\s*$', stripped):
+            pending_def = m.group(1)
+    return funcs
+
+
+funcs = set()
+funcs |= scan_declarations(header_path)
+outside_defs = set()
+for dirpath, _dirnames, filenames in os.walk(src_dir):
+    for filename in sorted(filenames):
+        if not filename.endswith(('.c', '.h')):
+            continue
+        path = os.path.join(dirpath, filename)
+        funcs |= scan_definitions(path)
+        outside_defs |= scan_definitions_outside_guard(path)
+
+for f in sorted(outside_defs):
+    print('OUTSIDE_DEF\t' + f)
 for f in sorted(funcs):
     print(f)
 PY
 ); then
-    echo "ERROR: Python parser failed while extracting guarded functions from ${HEADER_FILE}" >&2
+    echo "ERROR: Python parser failed while extracting guarded functions from ${HEADER_FILE} / ${SRC_DIR}" >&2
     exit 1
 fi
+
+outside_defs="$(printf '%s\n' "$guarded_funcs" | awk -F'\t' '$1 == "OUTSIDE_DEF" { print $2 }')"
+guarded_funcs="$(printf '%s\n' "$guarded_funcs" | awk -F'\t' '$1 != "OUTSIDE_DEF" { print $1 }')"
 
 if [[ -z "$guarded_funcs" ]]; then
     echo "OK: no functions found inside #ifdef ${GUARD_NAME} blocks"
@@ -182,37 +266,27 @@ if [[ -z "$guarded_funcs" ]]; then
 fi
 
 # Step 2: For each guarded function, search for references outside #ifdef blocks
-# in all .c and .h files in SRC_DIR
+# in all .c and .h files in SRC_DIR.  One Python process scans every file once,
+# tracking guard state per file, so the cost is O(files) not O(files x funcs).
 findings=0
 parse_errors=0
 
-for func in $guarded_funcs; do
-    # Search all .c and .h files for this function name
-    while IFS= read -r -d '' file; do
-        rel_path="${file#${REPO_ROOT}/}"
-
-        # Use Python to check if the function is referenced outside the guard.
-        # Keep conditional nesting intact: an inner #ifdef must not make the
-        # outer streaming guard appear closed.  Shadow debug is a streaming
-        # sub-feature and therefore implies the requested guard.
-if ! result=$(python3 - "${file}" "${func}" "${GUARD_NAME}" "${HEADER_FILE}" <<'PY'
+if ! scan_result=$(python3 - "${SRC_DIR}" "${GUARD_NAME}" "${HEADER_FILE}" "${guarded_funcs}" "${outside_defs}" <<'PY'
 import re
 import sys
 import os
 
-source_path, func_name, guard_name, header_path = sys.argv[1:5]
+src_dir, guard_name, header_path = sys.argv[1:4]
+func_names = sys.argv[4].split()
+# Functions with an equivalent feature-disabled definition are linkable in
+# every build; only calls to a guarded-only symbol are visibility gaps.
+outside_defs = set(sys.argv[5].split()) if len(sys.argv) > 5 else set()
+func_names = [name for name in func_names if name not in outside_defs]
 
 def same_file(left, right):
     return os.path.realpath(left) == os.path.realpath(right)
 
-with open(source_path, encoding='utf-8') as f:
-    lines = f.readlines()
-
-stack = []
 implied_guards = {'MARKDOWN_STREAMING_SHADOW_DEBUG': guard_name}
-
-def guard_enabled():
-    return any(name == guard_name and active for name, active, _ in stack)
 
 def guard_expression(expression):
     positive = re.search(
@@ -229,44 +303,54 @@ def guard_expression(expression):
         return False
     return None
 
-pending_definition = False
+def guard_enabled(stack):
+    return any(name == guard_name and active for name, active, _ in stack)
 
-for i, line in enumerate(lines, 1):
-    stripped = line.strip()
-    directive = re.match(r'#\s*(ifdef|ifndef|if|else|elif|endif)\b(.*)', stripped)
-    if directive:
-        kind, expression = directive.groups()
-        if kind == 'endif':
-            if stack:
-                stack.pop()
-        elif kind in ('ifdef', 'ifndef'):
-            name = expression.strip()
-            if name in implied_guards:
-                name = implied_guards[name]
-            active = name == guard_name and kind == 'ifdef'
-            stack.append((name, active, active))
-        elif kind == 'if':
-            active = guard_expression(expression)
-            stack.append((guard_name if active is not None else None,
-                          active, active is True))
-        elif kind == 'elif' and stack:
-            name, active, branch_taken = stack[-1]
-            candidate = guard_expression(expression)
-            if candidate is not None:
-                next_active = not branch_taken and candidate
-                stack[-1] = (guard_name, next_active,
-                             branch_taken or next_active)
-            elif name == guard_name and active is not None:
-                next_active = False
-                stack[-1] = (name, next_active, branch_taken or next_active)
-        elif kind == 'else' and stack:
-            name, active, branch_taken = stack[-1]
-            if name == guard_name and active is not None:
-                next_active = not branch_taken
-                stack[-1] = (name, next_active, branch_taken or next_active)
-        continue
+def push_directive(stack, kind, expression):
+    if kind == 'endif':
+        if stack:
+            stack.pop()
+    elif kind in ('ifdef', 'ifndef'):
+        name = expression.strip()
+        if name in implied_guards:
+            name = implied_guards[name]
+        active = name == guard_name and kind == 'ifdef'
+        stack.append((name, active, active))
+    elif kind == 'if':
+        active = guard_expression(expression)
+        stack.append((guard_name if active is not None else None,
+                      active, active is True))
+    elif kind == 'elif' and stack:
+        name, active, branch_taken = stack[-1]
+        candidate = guard_expression(expression)
+        if candidate is not None:
+            next_active = not branch_taken and candidate
+            stack[-1] = (guard_name, next_active,
+                         branch_taken or next_active)
+        elif name == guard_name and active is not None:
+            next_active = False
+            stack[-1] = (name, next_active, branch_taken or next_active)
+    elif kind == 'else' and stack:
+        name, active, branch_taken = stack[-1]
+        if name == guard_name and active is not None:
+            next_active = not branch_taken
+            stack[-1] = (name, next_active, branch_taken or next_active)
 
-    if not guard_enabled():
+def scan_file(path):
+    """Return (file, [(line_no, text)]) references outside the guard."""
+    hits = []
+    with open(path, encoding='utf-8') as f:
+        lines = f.readlines()
+    stack = []
+    pending_definition = False
+    for i, line in enumerate(lines, 1):
+        stripped = line.strip()
+        directive = re.match(r'#\s*(ifdef|ifndef|if|else|elif|endif)\b(.*)', stripped)
+        if directive:
+            push_directive(stack, directive.group(1), directive.group(2))
+            continue
+        if guard_enabled(stack):
+            continue
         # Skip comments and preprocessor text.  A function definition itself
         # is not a visibility reference; its enclosing guard is validated by
         # the same parser in this script.
@@ -293,20 +377,6 @@ for i, line in enumerate(lines, 1):
         # A call can contain a declaration-like return type (for example
         # ``const ngx_str_t *r = func()``).  Only skip an actual definition;
         # calls must remain visible to the guard check.
-        definition_pattern = (
-            r'^\s*(?:static\s+)?(?:inline\s+)?(?:const\s+)?'
-            r'[\w\s*]+\b' + re.escape(func_name)
-            + r'\s*\([^;]*\)\s*\{'
-        )
-        if re.match(definition_pattern, line):
-            continue
-        # nginx-style split-line definition: the return type is on the
-        # preceding line and the function name starts this line, followed
-        # by a parameter list that may span lines before the opening brace.
-        # Require the preceding line to be a return-type line (a type
-        # declaration ending without ';', '(', '{', or '}') so a multiline
-        # *call* such as ``fn(\n arg\n);`` is not misclassified as a
-        # definition (which would skip checking an out-of-guard reference).
         prev_line = lines[i - 2] if i >= 2 else ""
         prev_stripped = prev_line.strip()
         prev_is_type_line = bool(
@@ -319,48 +389,70 @@ for i, line in enumerate(lines, 1):
                 prev_stripped,
             )
         )
-        split_definition_pattern = (
-            r'^\s*(?:static\s+)?(?:inline\s+)?(?:const\s+)?'
-            + re.escape(func_name) + r'\s*\([^;]*$'
-        )
-        if prev_is_type_line and re.match(split_definition_pattern, line):
-            pending_definition = True
-            continue
-        if func_name + '(' in line:
-            # Skip a prototype in the owning header only.
-            if same_file(header_path, source_path) and ';' in line:
+        for func_name in func_names:
+            # Skip a prototype in the owning header only — including
+            # multi-line declarations whose parameter list and semicolon
+            # span several lines.
+            if same_file(header_path, path):
+                if func_name + '(' in line and ';' in line:
+                    continue
+                if re.search(
+                    r'^\s*(?:static\s+)?(?:inline\s+)?(?:const\s+)?'
+                    r'[\w\s*]+\b' + re.escape(func_name) + r'\s*\([^;]*$',
+                    line,
+                ) and '{' not in line:
+                    continue
+            definition_pattern = (
+                r'^\s*(?:static\s+)?(?:inline\s+)?(?:const\s+)?'
+                r'[\w\s*]+\b' + re.escape(func_name)
+                + r'\s*\([^;]*\)\s*\{'
+            )
+            if re.match(definition_pattern, line):
                 continue
-            # A signature fragment that ends with the opening paren (no
-            # closing paren on this line) can be a multi-line definition
-            # whose parameter list and opening brace follow.  Only treat it
-            # as such when the preceding line is a return-type line; a
-            # multiline call (``fn(\n arg\n);``) must be reported as a
-            # reference instead of being skipped.
-            if prev_is_type_line and re.search(
-                r'\b' + re.escape(func_name) + r'\s*\(\s*$', line
-            ):
+            split_definition_pattern = (
+                r'^\s*(?:static\s+)?(?:inline\s+)?(?:const\s+)?'
+                + re.escape(func_name) + r'\s*\([^;]*$'
+            )
+            if prev_is_type_line and re.match(split_definition_pattern, line):
                 pending_definition = True
-                continue
-            print(f'{i}:{line.strip()[:80]}')
+                break
+            if func_name + '(' in line:
+                # A signature fragment that ends with the opening paren (no
+                # closing paren on this line) can be a multi-line definition
+                # whose parameter list and opening brace follow.  Only treat
+                # it as such when the preceding line is a return-type line; a
+                # multiline call (``fn(\n arg\n);``) must be reported as a
+                # reference instead of being skipped.
+                if prev_is_type_line and re.search(
+                    r'\b' + re.escape(func_name) + r'\s*\(\s*$', line
+                ):
+                    pending_definition = True
+                    break
+                hits.append((i, line.strip()[:80], func_name))
+    return hits
+
+for dirpath, _dirnames, filenames in os.walk(src_dir):
+    for filename in sorted(filenames):
+        if not filename.endswith(('.c', '.h')):
+            continue
+        path = os.path.join(dirpath, filename)
+        for line_no, text, func_name in scan_file(path):
+            print(f'{path}\t{line_no}\t{func_name}\t{text}')
 PY
 ); then
-            echo "ERROR: Python parser failed while checking ${func} visibility in ${file}" >&2
-            parse_errors=$((parse_errors + 1))
-            continue
-        fi
+    echo "ERROR: Python parser failed while scanning guard visibility" >&2
+    exit 1
+fi
 
-        if [[ -n "$result" ]]; then
-            while IFS= read -r match_line; do
-                [[ -z "$match_line" ]] && continue
-                line_num="${match_line%%:*}"
-                line_text="${match_line#*:}"
-                echo "ERROR: ${rel_path}:${line_num}: ${func}() referenced outside #ifdef ${GUARD_NAME}" >&2
-                echo "  ${line_text}" >&2
-                findings=$((findings + 1))
-            done <<< "$result"
-        fi
-    done < <(find "$SRC_DIR" -type f \( -name '*.c' -o -name '*.h' \) -print0)
-done
+if [[ -n "$scan_result" ]]; then
+    while IFS=$'\t' read -r path line_no func_name line_text; do
+        [[ -z "$path" ]] && continue
+        rel_path="${path#${REPO_ROOT}/}"
+        echo "ERROR: ${rel_path}:${line_no}: ${func_name}() referenced outside #ifdef ${GUARD_NAME}" >&2
+        echo "  ${line_text}" >&2
+        findings=$((findings + 1))
+    done <<< "$scan_result"
+fi
 
 if [[ $findings -gt 0 || $parse_errors -gt 0 ]]; then
     echo "FAIL: found ${findings} #ifdef guard visibility gap(s), ${parse_errors} parse error(s)" >&2

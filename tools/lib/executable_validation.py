@@ -43,17 +43,24 @@ def _is_under(path: Path, roots: tuple[Path, ...]) -> bool:
     return any(resolved == root or root in resolved.parents for root in roots)
 
 
-def _channel_from_toolchain_file(content: str) -> str | None:
+def _channel_from_toolchain_file(
+    content: str, *, is_toml: bool = False
+) -> str | None:
     """Extract the channel from a rust-toolchain(.toml) file body.
 
     TOML form: `channel = "1.97.1"`; legacy form: a bare channel on the
-    first non-empty line.
+    first non-empty line.  The bare-line fallback only applies to the
+    legacy `rust-toolchain` file: a `rust-toolchain.toml` without a
+    channel key must not fall back to its first line (e.g. a
+    `[toolchain]` header).
     """
     match = re.search(
         r"^\s*channel\s*=\s*[\"']([^\"']+)[\"']",
         content, re.MULTILINE)
     if match:
         return match.group(1)
+    if is_toml:
+        return None
     first = content.strip().splitlines()
     if first and first[0].strip():
         return first[0].strip()
@@ -61,9 +68,13 @@ def _channel_from_toolchain_file(content: str) -> str | None:
 
 
 def _toolchain_from_directory(cwd: Path) -> str | None:
-    """Find a rust-toolchain(.toml) override from cwd upward."""
+    """Find a rust-toolchain(.toml) override from cwd upward.
+
+    Rustup checks ``rust-toolchain`` before ``rust-toolchain.toml``, so the
+    bare file takes precedence within each directory.
+    """
     for directory in (cwd, *cwd.parents):
-        for name in ("rust-toolchain.toml", "rust-toolchain"):
+        for name in ("rust-toolchain", "rust-toolchain.toml"):
             candidate = directory / name
             if not candidate.is_file():
                 continue
@@ -71,7 +82,13 @@ def _toolchain_from_directory(cwd: Path) -> str | None:
                 content = candidate.read_text(encoding="utf-8")
             except (OSError, UnicodeError):
                 continue
-            return _channel_from_toolchain_file(content)
+            channel = _channel_from_toolchain_file(
+                content, is_toml=(name == "rust-toolchain.toml")
+            )
+            if channel is not None:
+                return channel
+            # A candidate file that yields no channel does not end the
+            # search; keep looking at the remaining candidates.
     return None
 
 
