@@ -105,8 +105,9 @@ def test_load_json_rejects_absolute_and_parent_paths(
 
     with pytest.raises(ValueError, match="relative"):
         _load_json(outside)
+    parent_path = Path("../outside.json")
     with pytest.raises(ValueError, match="relative"):
-        _load_json(Path("../outside.json"))
+        _load_json(parent_path)
 
 
 def test_load_json_rejects_symlink_escape(
@@ -120,8 +121,9 @@ def test_load_json_rejects_symlink_escape(
     (repository / "response.json").symlink_to(outside)
     monkeypatch.chdir(repository)
 
+    response_path = Path("response.json")
     with pytest.raises(ValueError, match="within the repository"):
-        _load_json(Path("response.json"))
+        _load_json(response_path)
 
 
 def test_main_accepts_generated_responses_inside_the_checkout(
