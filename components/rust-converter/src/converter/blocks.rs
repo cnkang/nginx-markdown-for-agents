@@ -358,36 +358,7 @@ impl MarkdownConverter {
             }
         }
 
-        let mut language = String::new();
-        for child in node.children.borrow().iter() {
-            if let NodeData::Element {
-                ref name,
-                ref attrs,
-                ..
-            } = child.data
-                && name.local.as_ref() == "code"
-            {
-                for attr in attrs.borrow().iter() {
-                    if attr.name.local.as_ref() == "class" {
-                        let class_value = attr.value.to_string();
-                        for class in class_value.split_whitespace() {
-                            let candidate = class
-                                .strip_prefix("language-")
-                                .or_else(|| class.strip_prefix("lang-"));
-                            if let Some(lang) = candidate
-                                && let Some(valid) = Self::safe_code_language(lang)
-                            {
-                                language = valid;
-                                break;
-                            }
-                        }
-                        if !language.is_empty() {
-                            break;
-                        }
-                    }
-                }
-            }
-        }
+        let language = self.extract_code_language(node);
 
         let mut code_content = String::new();
         self.extract_code_content(node, &mut code_content, 0, ctx)?;
@@ -409,6 +380,48 @@ impl MarkdownConverter {
         output.push('\n');
 
         Ok(())
+    }
+
+    fn extract_code_language(&self, node: &Handle) -> String {
+        for child in node.children.borrow().iter() {
+            if let NodeData::Element {
+                ref name,
+                ref attrs,
+                ..
+            } = child.data
+                && name.local.as_ref() == "code"
+            {
+                if let Some(lang) = self.find_language_from_attrs(&attrs.borrow()) {
+                    return lang;
+                }
+            }
+        }
+        String::new()
+    }
+
+    fn find_language_from_attrs(&self, attrs: &Ref<Vec<Attribute>>) -> Option<String> {
+        for attr in attrs.iter() {
+            if attr.name.local.as_ref() == "class" {
+                if let Some(lang) = self.find_language_from_classes(&attr.value) {
+                    return Some(lang);
+                }
+            }
+        }
+        None
+    }
+
+    fn find_language_from_classes(&self, class_value: &str) -> Option<String> {
+        for class in class_value.split_whitespace() {
+            let candidate = class
+                .strip_prefix("language-")
+                .or_else(|| class.strip_prefix("lang-"));
+            if let Some(lang) = candidate
+                && let Some(valid) = Self::safe_code_language(lang)
+            {
+                return Some(valid);
+            }
+        }
+        None
     }
 
     /// Accept common code-language identifiers without allowing characters
