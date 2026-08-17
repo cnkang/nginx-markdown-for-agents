@@ -43,7 +43,7 @@ DEFAULT_DIR = REPO_ROOT / "components/nginx-module/src"
 # switch) never match because their condition is followed by '{' or ';',
 # not a bare ')' at end-of-line.
 FUNC_DEF_RE = re.compile(
-    r"^(?:\w[\w \t*]*\s+)?(\w+)\s*\([^)]*\)\s*$",
+    r"^(?:[\w*]+(?:[ \t]+[\w*]+)*[ \t]+)?[*]*(\w+)\s*\([^)]*\)\s*$",
     re.MULTILINE,
 )
 # Function may span lines: collect braces by scanning from a def line.
