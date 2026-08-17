@@ -217,16 +217,20 @@ unsigned release asset.
 ### Importing the Project Public Key
 
 Before verifying signatures, obtain the project signing public key and its
-full fingerprint from the release's independently authenticated project
-channel. A key ID or keyserver result only transports the key. It does not
-establish identity. The current repository does not publish that fingerprint,
-so do not treat a GitHub Release signature as trusted until the release
-process publishes and independently authenticates it. See
-[GPG Key Management](GPG_KEY_MANAGEMENT.md) for the fail-closed status.
+full fingerprint. The project checks the public key in at
+`packaging/nginx-markdown-for-agents-release.asc` and publishes its
+signing-subkey fingerprint as `15C792438EAA762B421E60D21E8D41E7D19A8A75`
+(primary key `7A3743687FEEE0313128355038724643EA12C02A`). A key ID or
+keyserver result only transports the key. It does not establish identity —
+verify the full fingerprint with `gpg --show-keys` after import. See
+[GPG Key Management](GPG_KEY_MANAGEMENT.md) for the verification contract.
 
 ```bash
-# Import from a keyserver only after checking the independently published
-# full fingerprint (replace KEY_ID with the published project key ID)
+# Import the checked-in project public key, then confirm the fingerprint.
+gpg --show-keys packaging/nginx-markdown-for-agents-release.asc
+
+# Or import from a keyserver after checking the published full fingerprint
+# (replace KEY_ID with the published project key ID)
 gpg --keyserver hkps://keys.openpgp.org --recv-keys <KEY_ID>
 
 # Or import from a local file if provided

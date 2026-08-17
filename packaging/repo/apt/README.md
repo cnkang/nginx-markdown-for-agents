@@ -120,10 +120,10 @@ repo/apt/
 
 ### Key Details
 
-- **Key ID**: Published at the key URL below
-- **Key Type**: RSA 4096-bit (or Ed25519)
-- **Key URL**: `https://pkg.example.com/nginx-markdown/gpg.key`
-- **Fingerprint**: Verify against the project README or release notes
+- **Key ID**: `7A3743687FEEE0313128355038724643EA12C02A`
+- **Key Type**: RSA 4096 (primary certification key, expires 2031-05-19)
+- **Key URL**: checked in at `packaging/nginx-markdown-for-agents-release.asc`
+- **Fingerprint (signing subkey)**: `15C792438EAA762B421E60D21E8D41E7D19A8A75` — verify this value with `gpg --fingerprint` after importing
 
 ### Importing the Key
 
@@ -164,13 +164,13 @@ curl -fSLo SHA256SUMS "${BASE_URL}/SHA256SUMS"
 curl -fSLo SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
 curl -fSLO "${BASE_URL}/nginx-module-markdown-for-agents_0.9.1_nginx-1.30.4_amd64.deb"
 # Verify the signature AND the signer identity.  `gpg --verify` alone only
-# proves the file was signed by *some* key.  Fetch the project signing key
-# (published with the release / on the project's documented key URL) into
-# an isolated keyring, note its fingerprint, and compare it with the one
-# published in the project README / release notes before trusting it.
+# proves the file was signed by *some* key.  Import the checked-in project
+# public key (packaging/nginx-markdown-for-agents-release.asc) into an
+# isolated keyring and verify the signing-subkey fingerprint
+# 15C792438EAA762B421E60D21E8D41E7D19A8A75 before trusting the signature.
 KEYRING="$(mktemp -d)/keyring.gpg"
-curl -fsSL https://packages.nginx-markdown.dev/gpg-key.asc | \
-    gpg --no-default-keyring --keyring "$KEYRING" --import
+gpg --no-default-keyring --keyring "$KEYRING" \
+    --import packaging/nginx-markdown-for-agents-release.asc
 gpg --no-default-keyring --keyring "$KEYRING" --fingerprint
 gpg --no-default-keyring --keyring "$KEYRING" --verify SHA256SUMS.asc SHA256SUMS
 # Every file listed in SHA256SUMS must be present before `sha256sum -c`
@@ -206,8 +206,14 @@ When you rotate the signing key:
    overlap, before the old key is removed:
 
 ```bash
-curl -fsSL https://pkg.example.com/nginx-markdown/gpg.key | \
-    sudo gpg --dearmor -o /usr/share/keyrings/nginx-markdown-archive-keyring.gpg
+# Refresh from the checked-in project public key, then verify the
+# signing-subkey fingerprint before trusting the repository.
+gpg --no-default-keyring --keyring /tmp/markdown-keyring.gpg \
+    --import packaging/nginx-markdown-for-agents-release.asc
+gpg --no-default-keyring --keyring /tmp/markdown-keyring.gpg --fingerprint
+sudo gpg --dearmor \
+    -o /usr/share/keyrings/nginx-markdown-archive-keyring.gpg \
+    < /tmp/markdown-keyring.gpg
 ```
 
 4. Remove the old key only after the overlap migration is complete.

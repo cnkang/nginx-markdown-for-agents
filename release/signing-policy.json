@@ -4,12 +4,12 @@
   "frozen_at": "2026-08-05",
   "owner": "release engineering",
   "status": "frozen",
-  "trust_anchor_published": false,
-  "note": "Private keys and key material are NEVER included in this policy or any repository artifact. This policy defines the mechanism, identity binding, and verification contract only.",
+  "trust_anchor_published": true,
+  "note": "Private keys and key material are NEVER included in this policy or any repository artifact. This policy defines the mechanism, identity binding, and verification contract only. The public trust anchor is checked in at packaging/nginx-markdown-for-agents-release.asc: signing-subkey fingerprint 15C792438EAA762B421E60D21E8D41E7D19A8A75, primary key 7A3743687FEEE0313128355038724643EA12C02A.",
   "artifact_types": {
     "source_archive": {
       "signing_mechanism": "GPG detached signature over the archive's SHA-256 checksum file (SHA256SUMS.asc), repository-configured GPG signing key",
-      "identity_issuer": "Fail-closed until the release process publishes and independently authenticates the full release-key fingerprint; see docs/guides/GPG_KEY_MANAGEMENT.md",
+      "identity_issuer": "Signing-subkey fingerprint 15C792438EAA762B421E60D21E8D41E7D19A8A75, public anchor checked in at packaging/nginx-markdown-for-agents-release.asc; see docs/guides/GPG_KEY_MANAGEMENT.md",
       "attachment_name": "SHA256SUMS.asc (detached ASCII-armored signature over SHA256SUMS)",
       "digest_binding": "SHA256SUMS lists the source archive path and its sha256 digest; the detached signature covers the exact checksum file bytes",
       "verification_commands": [
@@ -20,7 +20,7 @@
     },
     "dynamic_module": {
       "signing_mechanism": "GPG detached signature over the archive checksum file (SHA256SUMS.asc), using the repository release-signing key",
-      "identity_issuer": "Fail-closed until the release process publishes and independently authenticates the full release-key fingerprint; see docs/guides/GPG_KEY_MANAGEMENT.md",
+      "identity_issuer": "Signing-subkey fingerprint 15C792438EAA762B421E60D21E8D41E7D19A8A75, public anchor checked in at packaging/nginx-markdown-for-agents-release.asc; see docs/guides/GPG_KEY_MANAGEMENT.md",
       "attachment_name": "SHA256SUMS.asc (detached ASCII-armored signature over SHA256SUMS)",
       "digest_binding": "SHA256SUMS lists every published dynamic-module archive and its sha256 digest; the detached signature covers the exact checksum file bytes",
       "verification_commands": [
@@ -31,7 +31,7 @@
     },
     "deb": {
       "signing_mechanism": "GPG (dpkg-sig builder signature) using the repository signing key",
-      "identity_issuer": "Fail-closed until the release process publishes and independently authenticates the full release-key fingerprint; see docs/guides/GPG_KEY_MANAGEMENT.md",
+      "identity_issuer": "Signing-subkey fingerprint 15C792438EAA762B421E60D21E8D41E7D19A8A75, public anchor checked in at packaging/nginx-markdown-for-agents-release.asc; see docs/guides/GPG_KEY_MANAGEMENT.md",
       "attachment_name": "dpkg-sig embedded signature (no separate attachment)",
       "digest_binding": "The .deb control and payload digests are covered by the embedded dpkg-sig signature; package sha256 also listed in SHA256SUMS",
       "verification_commands": [
@@ -43,7 +43,7 @@
     },
     "rpm": {
       "signing_mechanism": "GPG (rpm --addsign) using the repository signing key",
-      "identity_issuer": "Fail-closed until the release process publishes and independently authenticates the full release-key fingerprint; see docs/guides/GPG_KEY_MANAGEMENT.md",
+      "identity_issuer": "Signing-subkey fingerprint 15C792438EAA762B421E60D21E8D41E7D19A8A75, public anchor checked in at packaging/nginx-markdown-for-agents-release.asc; see docs/guides/GPG_KEY_MANAGEMENT.md",
       "attachment_name": "Embedded RPM PGP header signature",
       "digest_binding": "RPM header signature covers package content digest; package sha256 also listed in SHA256SUMS",
       "verification_commands": [
