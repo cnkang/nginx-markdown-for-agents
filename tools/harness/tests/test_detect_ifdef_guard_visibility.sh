@@ -218,6 +218,47 @@ fi
 # cleanup performed after Test 5).
 rm -f "${src_dir}/dual_impl.c" "${src_dir}/dual_call.c" "${src_dir}/dual_header.h"
 
+# Test 7: nginx-style definition whose signature closes on its own line and
+# the opening brace follows on the next line, called outside the guard ->
+# FAIL (split-signature definition-collection regression fixture).
+cat >"${src_dir}/split_header.h" <<'H'
+const ngx_str_t *ngx_http_markdown_reason_split_def(void);
+H
+
+cat >"${src_dir}/split_impl.c" <<'C'
+#include "split_header.h"
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+const ngx_str_t *
+ngx_http_markdown_reason_split_def(void)
+{
+    return NULL;
+}
+#endif
+C
+
+cat >"${src_dir}/split_call.c" <<'C'
+#include "split_header.h"
+
+void use_split_def(void) {
+    const ngx_str_t *r = ngx_http_markdown_reason_split_def();
+}
+C
+
+output_file="${tmp_dir}/split.out"
+${DETECTOR} "${src_dir}/split_header.h" "${src_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 1 ]] \
+   && grep -q "ngx_http_markdown_reason_split_def" "${output_file}"; then
+    pass "bad: split-signature guarded definition referenced outside guard detected"
+else
+    fail "bad: split-signature guarded definition referenced outside guard detected" \
+        "expected exit 1 with reference, got ${exit_code}"
+    cat "${output_file}" >&2
+fi
+
+rm -f "${src_dir}/split_impl.c" "${src_dir}/split_call.c" "${src_dir}/split_header.h"
+
 printf '\n%d passed, %d failed\n' "${PASS_COUNT}" "${FAIL_COUNT}"
 if [[ ${FAIL_COUNT} -gt 0 ]]; then
     exit 1

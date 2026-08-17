@@ -154,18 +154,38 @@ def scan_declarations(path):
             continue
         if stripped.startswith(('//', '/*', '*')):
             continue
-        m = re.search(r'\b(ngx_http_markdown_\w+)\s*\(', stripped)
-        if m:
+        name = _definition_signature(stripped, line)
+        if name is not None:
             if ';' in line:
-                funcs.add(m.group(1))
-            elif re.search(r'\(\s*$', stripped):
+                funcs.add(name)
+            elif re.search(r'\(\s*$', stripped) or re.search(r'\)\s*$', line.rstrip()):
                 # Multi-line declaration: name( on this line, arguments
                 # and semicolon on the following lines.
-                pending_decl = m.group(1)
+                pending_decl = name
         elif pending_decl is not None and ';' in line:
             funcs.add(pending_decl)
             pending_decl = None
     return funcs
+
+def _definition_signature(stripped, line):
+    """Return the function name when ``line`` begins an nginx-style
+    definition signature, else None.
+
+    The signature must start at column 0 (the optional leading type tokens
+    plus the function name are the first tokens of the line).  Control-flow
+    statements (``if``, ``for``, ``while``, ``switch``, ``return``, ``do``,
+    ``else``) never qualify, so a call ending in ``) {`` is not recorded as
+    a definition.  A name buried mid-expression is not a signature.
+    """
+    if re.match(r'(?:if|for|while|switch|return|do|else)\b', stripped):
+        return None
+    m = re.match(
+        r'(?:[A-Za-z_][A-Za-z0-9_]*\s+(?:\*\s*)?)*'
+        r'(ngx_http_markdown_\w+)\s*\(',
+        stripped,
+    )
+    return m.group(1) if m is not None else None
+
 
 def scan_definitions(path):
     """Collect function names defined inside the guard (body style)."""
@@ -193,13 +213,18 @@ def scan_definitions(path):
             elif ';' in line:
                 pending_def = None
             continue
-        m = re.search(r'\b(ngx_http_markdown_\w+)\s*\(', stripped)
-        if m and re.search(r'\)\s*\{\s*$', line.rstrip()):
+        name = _definition_signature(stripped, line)
+        if name is not None and re.search(r'\)\s*\{\s*$', line.rstrip()):
             # One-line definition: name(args) {
-            funcs.add(m.group(1))
-        elif m and re.search(r'\(\s*$', stripped):
+            funcs.add(name)
+        elif name is not None and (
+            re.search(r'\(\s*$', stripped)
+            or re.search(r'\)\s*$', line.rstrip())
+        ):
             # Multi-line signature start; may be a definition or a call.
-            pending_def = m.group(1)
+            # ``name(...)`` closing the parameter list with the opening
+            # brace on the following line is the common nginx body style.
+            pending_def = name
     return funcs
 
 
@@ -228,11 +253,14 @@ def scan_definitions_outside_guard(path):
             elif ';' in line:
                 pending_def = None
             continue
-        m = re.search(r'\b(ngx_http_markdown_\w+)\s*\(', stripped)
-        if m and re.search(r'\)\s*\{\s*$', line.rstrip()):
-            funcs.add(m.group(1))
-        elif m and re.search(r'\(\s*$', stripped):
-            pending_def = m.group(1)
+        name = _definition_signature(stripped, line)
+        if name is not None and re.search(r'\)\s*\{\s*$', line.rstrip()):
+            funcs.add(name)
+        elif name is not None and (
+            re.search(r'\(\s*$', stripped)
+            or re.search(r'\)\s*$', line.rstrip())
+        ):
+            pending_def = name
     return funcs
 
 
