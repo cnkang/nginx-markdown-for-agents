@@ -2485,8 +2485,12 @@ ngx_http_markdown_streaming_commit(
         return NGX_AGAIN;
     }
     if (!ngx_http_markdown_streaming_delivery_ok(rc)) {
-        ctx->stream_sm.headers_committed = 0;
-        ctx->stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+        /* Definitive downstream failure after the header transaction was
+         * applied: keep headers_committed so no later path can re-run
+         * the header mutations — the canonical header chain runs at most
+         * once per request. The request
+         * ends through the caller's error path; the commit is never
+         * retried. */
         return rc;
     }
 

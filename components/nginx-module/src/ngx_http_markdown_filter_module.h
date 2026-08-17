@@ -1997,11 +1997,11 @@ ngx_http_markdown_decompress(ngx_http_request_t *r,
 /*
  * Internal return code for conditional-request Bypass outcome
  * (ConditionalOutcome::Bypass = 2).  The C caller should deliver the
- * upstream response unmodified.  Value -104 is intentionally reused from
- * the decompression return-code domain; callers inspect it only in the
- * conditional-decision stage and never compare it with decomp results.
+ * upstream response unmodified.  Value -106 keeps it disjoint from the
+ * decompression return-code domain (-100..-105) so a confused caller can
+ * never misread a decompression failure as a conditional bypass.
  */
-#define NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT     -104
+#define NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT     -106
 
 /*
  * Safe buffer length helper.

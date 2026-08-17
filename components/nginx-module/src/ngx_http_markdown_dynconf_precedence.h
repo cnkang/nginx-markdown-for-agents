@@ -33,6 +33,11 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
+/* Self-contained header: ngx_http_markdown_loc_validation_summary_t is
+ * defined by the filter module header and is used by the validation
+ * helpers below. */
+#include "ngx_http_markdown_filter_module.h"
+
 
 /*
  * Dynconf block mask bit definitions.

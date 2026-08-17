@@ -10,6 +10,13 @@ ngx_markdown_rust_lib=
 
 if [ -n "$RUST_TARGET" ]; then
     ngx_markdown_rust_lib="$ngx_addon_dir/../rust-converter/target/$RUST_TARGET/release/libnginx_markdown_converter.a"
+    if [ ! -f "$ngx_markdown_rust_lib" ]; then
+        echo "configuration error: RUST_TARGET=$RUST_TARGET was set explicitly but" >&2
+        echo "  $ngx_markdown_rust_lib does not exist." >&2
+        echo "  Refusing to fall back to a host-platform archive that does not" >&2
+        echo "  match the requested target." >&2
+        exit 1
+    fi
 fi
 
 if [ -z "$ngx_markdown_rust_lib" ] || [ ! -f "$ngx_markdown_rust_lib" ]; then

@@ -2294,10 +2294,12 @@ test_apply_ffi_streaming_budget_bounds(void)
             &snapshot, &result, &g_log, &failure_code);
         TEST_ASSERT(rc == NGX_OK,
                     "aggregated min (128K) overrides owner snapshot limit (64K)");
-        /* failure_code retains its pre-set DYNCONF_ERR_INVALID_TYPE sentinel
-         * on the success path (set at line 1278 before apply_* calls);
-         * only a rejection overwrites it via apply_reject(). */
-        (void) failure_code;
+        /* The apply shim sets failure_code = DYNCONF_ERR_INVALID_TYPE at
+         * the start of the success path (~line 1369) and only a rejection
+         * overwrites it via apply_reject(); the recorded value is the
+         * INVALID_TYPE sentinel, not 0. */
+        TEST_ASSERT(failure_code == DYNCONF_ERR_INVALID_TYPE,
+                    "success path must record the INVALID_TYPE sentinel");
 
         /* streaming_buffer above aggregated min (128K) is rejected. */
         result.streaming_buffer = 160 * 1024;

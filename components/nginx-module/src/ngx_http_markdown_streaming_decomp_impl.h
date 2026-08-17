@@ -211,39 +211,44 @@ ngx_http_markdown_brotli_alloc(void *opaque, size_t size)
     ngx_http_markdown_streaming_decomp_t *decomp;
     ngx_http_markdown_brotli_allocation_t *allocation;
     ngx_atomic_uint_t                    *counter;
+    size_t                                total;
 
     decomp = opaque;
-    if (decomp == NULL || size == 0
-        || size > (size_t) -1
-            - sizeof(ngx_http_markdown_brotli_allocation_t))
-    {
+    if (decomp == NULL || size == 0) {
+        return NULL;
+    }
+
+    /* The workspace reservation and counter must cover the whole
+     * allocation (header + payload), not just the payload, so the
+     * configured workspace limit bounds actual memory. */
+    total = size + sizeof(ngx_http_markdown_brotli_allocation_t);
+    if (total < size) {
+        /* size_t wraparound */
         return NULL;
     }
 
     counter = ngx_http_markdown_brotli_workspace_counter(decomp);
     if (ngx_http_markdown_brotli_reserve(
-            counter, decomp->brotli_workspace_limit, size) != NGX_OK)
+            counter, decomp->brotli_workspace_limit, total) != NGX_OK)
     {
         return NULL;
     }
 
     if (decomp->brotli_log == NULL) {
         (void) ngx_atomic_fetch_add(
-            counter, -((ngx_atomic_int_t) size));
+            counter, -((ngx_atomic_int_t) total));
         return NULL;
     }
 
-    allocation = ngx_alloc(
-        sizeof(ngx_http_markdown_brotli_allocation_t) + size,
-        decomp->brotli_log);
+    allocation = ngx_alloc(total, decomp->brotli_log);
     if (allocation == NULL) {
         (void) ngx_atomic_fetch_add(
-            counter, -((ngx_atomic_int_t) size));
+            counter, -((ngx_atomic_int_t) total));
         return NULL;
     }
 
     allocation->counter = counter;
-    allocation->size = size;
+    allocation->size = total;
     return allocation + 1;
 }
 
@@ -522,20 +527,20 @@ ngx_http_markdown_streaming_decomp_create_with_origin(
     ngx_http_markdown_streaming_decomp_t  *decomp;
     ngx_pool_cleanup_t                    *cln;
 
-            ngx_http_markdown_streaming_decomp_set_origin(
-            origin, NGX_HTTP_MD_DECOMP_ORIGIN_NONE);
+    ngx_http_markdown_streaming_decomp_set_origin(
+        origin, NGX_HTTP_MD_DECOMP_ORIGIN_NONE);
 
     if (pool == NULL) {
-                    ngx_http_markdown_streaming_decomp_set_origin(
-                origin, NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL);
+        ngx_http_markdown_streaming_decomp_set_origin(
+            origin, NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL);
         return NULL;
     }
 
     decomp = ngx_pcalloc(pool,
         sizeof(ngx_http_markdown_streaming_decomp_t));
     if (decomp == NULL) {
-                    ngx_http_markdown_streaming_decomp_set_origin(
-                origin, NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION);
+        ngx_http_markdown_streaming_decomp_set_origin(
+            origin, NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION);
         return NULL;
     }
 

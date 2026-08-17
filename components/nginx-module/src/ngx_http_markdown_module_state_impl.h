@@ -302,7 +302,7 @@ ngx_http_markdown_record_dynconf_reload(ngx_uint_t error_code)
         break;
     default:
         NGX_HTTP_MARKDOWN_METRIC_INC(
-            results.dynconf_reloads.failure_file_error);
+            results.dynconf_reloads.failure_parse_error);
         break;
     }
 }

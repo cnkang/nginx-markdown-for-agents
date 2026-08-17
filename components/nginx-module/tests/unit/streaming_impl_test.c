@@ -3201,7 +3201,7 @@ test_feed_path_resumes_pending_header_commit(void)
 }
 
 /*
- * Regression (run12 P1-1): handle_success_output must NOT send body output
+ * Regression: handle_success_output must NOT send body output
  * when the header commit returns NGX_AGAIN.
  *
  * The feed path calls ngx_http_markdown_streaming_commit while still in

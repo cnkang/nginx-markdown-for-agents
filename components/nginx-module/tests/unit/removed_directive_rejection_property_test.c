@@ -23,6 +23,8 @@
 
 #include "../include/test_common.h"
 
+#include <string.h>
+
 #include "../../src/ngx_http_markdown_directive_names.h"
 
 /* ----------------------------------------------------------------

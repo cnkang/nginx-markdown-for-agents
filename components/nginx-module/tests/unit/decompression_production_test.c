@@ -612,6 +612,10 @@ test_collect_content_encoding_allocation_failure(void)
 
     init_request(&r);
     memset(headers, 0, sizeof(headers));
+    /* Initialize the output to a known sentinel before the failing call so
+     * the post-failure assertions read deterministic state. */
+    ngx_memzero(&combined, sizeof(combined));
+    combined.data = (u_char *) "sentinel";
     headers[0].value.data = (u_char *) "gzip";
     headers[0].value.len = sizeof("gzip") - 1;
     headers[1].value.data = (u_char *) "br";

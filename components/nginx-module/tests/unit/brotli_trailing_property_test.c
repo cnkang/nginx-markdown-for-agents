@@ -642,22 +642,26 @@ test_brotli_workspace_budget(void)
     shared_bytes = 0;
 
     first.brotli_workspace_bytes_shared = &shared_bytes;
-    first.brotli_workspace_limit = 16;
+    first.brotli_workspace_limit = 40;
     first.brotli_log = &test_log;
     second.brotli_workspace_bytes_shared = &shared_bytes;
-    second.brotli_workspace_limit = 16;
+    second.brotli_workspace_limit = 40;
     second.brotli_log = &test_log;
 
+    /* Workspace accounting covers the whole allocation (header + payload):
+     * 12-byte payload -> 28 bytes
+     * total; 5-byte payload -> 21 bytes total; 28 + 21 > 40 so the second
+     * allocation must be rejected. */
     first_block = ngx_http_markdown_brotli_alloc(&first, 12);
     TEST_ASSERT(first_block != NULL,
         "first Brotli allocation must fit the shared workspace budget");
-    TEST_ASSERT(shared_bytes == 12,
+    TEST_ASSERT(shared_bytes == 28,
         "shared Brotli workspace bytes must track live allocations");
 
     second_block = ngx_http_markdown_brotli_alloc(&second, 5);
     TEST_ASSERT(second_block == NULL,
         "concurrent Brotli allocation must stop at the shared budget");
-    TEST_ASSERT(shared_bytes == 12,
+    TEST_ASSERT(shared_bytes == 28,
         "rejected Brotli allocation must not consume the budget");
 
     ngx_http_markdown_brotli_free(&first, first_block);
