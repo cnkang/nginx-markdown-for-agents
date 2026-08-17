@@ -27,12 +27,12 @@ Module baselines contain two different classes of data:
   `peak_rss_bytes`, `input_bytes`, scenario status and metadata, platform,
   load generator, and NGINX version.
 - Performance thresholds may round RPS downward or lower it. They may round
-  latency and TTFB upward or raise them. RPS must never increase and
-  latency/TTFB must never decrease to make evidence look better.
+  latency, TTFB, and TTLB upward or raise them. RPS must never increase and
+  latency/TTFB/TTLB must never decrease to make evidence look better.
 
 Do not fabricate or improve measured evidence. Conservative normalization
-may adjust latency and throughput only. Path, fallback, output, memory, and
-environment evidence must remain verbatim.
+may adjust latency and throughput only. Path, fallback, output, memory,
+`input_bytes`, and environment evidence must remain verbatim.
 
 Retain the raw workflow artifact and record its run, source Git commit,
 adjustment rule, person or reason, and adjustment date in `baseline_policy`.
@@ -91,11 +91,11 @@ mismatch. Do not write a digest without verifying the file.
 - **`conservative_normalized`**: RPS may only round downward or lower.
   Latency, TTFB, and TTLB may only round upward or increase. Truth evidence
   (path, fallback, output, memory, environment, scenario status, metadata,
-  metric keys, and `decompression_coverage`) must remain identical to the raw
-  report. The policy adjustment ledger must exactly describe every changed
-  adjustable metric and its delta. The finalizer records the adjustment rule,
-  reason, and date. The validator machine-verifies the full relationship
-  against the raw artifact.
+  `input_bytes`, metric keys, and `decompression_coverage`) must remain
+  identical to the raw report. The policy adjustment ledger must exactly
+  describe every changed adjustable metric and its delta. The finalizer
+  records the adjustment rule, reason, and date. The validator
+  machine-verifies the full relationship against the raw artifact.
 
 The `baseline_policy.type` permits only `verbatim_run` or
 `conservative_normalized`. Any other value (or a missing type) fail-closes
