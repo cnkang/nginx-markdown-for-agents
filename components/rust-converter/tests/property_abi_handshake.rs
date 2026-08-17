@@ -227,7 +227,7 @@ fn c_define_value(header: &str, name: &str) -> u64 {
 
 /// Verify the Rust ABI constants match the canonical C header #defines, so
 /// the handshake simulation cannot pass with self-consistent but stale
-/// constants (run12 MAJOR: property_abi_handshake C-header anchoring).
+/// constants (C-header anchoring).
 #[test]
 fn rust_constants_match_c_header_defines() {
     let header = include_str!("../include/markdown_converter.h");

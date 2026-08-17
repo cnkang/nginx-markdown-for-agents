@@ -823,7 +823,18 @@ fn apply_abort_terminal_with_prefix(
             })
         }
         NgxResult::Again => {
-            /* NGX_AGAIN → PENDING_ABORT_TERMINAL, no latch */
+            /* NGX_AGAIN → PENDING_ABORT_TERMINAL, no latch.  The action
+             * contract requires the pending chain to be the abort-terminal
+             * last_buf; a mismatched kind (including None) signals a
+             * plan/apply protocol violation. */
+            if outcome.pending_kind != Some(PendingKind::AbortTerminal) {
+                return Err(StateMachineError::InvariantViolation {
+                    message: format!(
+                        "SEND_ABORT_TERMINAL NGX_AGAIN with pending_kind={:?}",
+                        outcome.pending_kind
+                    ),
+                });
+            }
             Ok(ApplyResult {
                 new_state: StreamingState::PendingAbortTerminal,
                 next_frame: None,

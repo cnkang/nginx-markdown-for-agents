@@ -1347,6 +1347,10 @@ pub unsafe extern "C" fn markdown_chain_decode_result_init(result: *mut FFIChain
 /// `decompression_ratio`) activates only above the fixed 256-byte
 /// internal threshold.
 ///
+/// An identity-only chain (`layer_count == 0`) is a successful no-op:
+/// the output is a copy of the input (decode(identity, input) == input),
+/// allocated by Rust and released with `markdown_chain_decode_free`.
+///
 /// # Return Value
 ///
 /// Returns the error category:
@@ -1381,10 +1385,12 @@ pub unsafe extern "C" fn markdown_decode_encoding_chain(
     if result.is_null() {
         return DECOMP_CATEGORY_INVALID_ARGS;
     }
+    // Zero-initialize the caller-provided storage before touching it (the
+    // same pattern as markdown_parse_encoding_chain and the other FFI entry
+    // points). Callers that reuse a result structure
+    // must release a previous output with markdown_chain_decode_free first.
+    unsafe { ptr::write(result, std::mem::zeroed()) };
     let result_ref = unsafe { &mut *result };
-    // Free any previous output before reusing the result buffer, matching
-    // the markdown_convert contract (P3-4).
-    free_buffer(&mut result_ref.output, &mut result_ref.output_len);
     reset_chain_decode_result(result_ref);
 
     let input_slice = match unsafe { chain_decode_input_slice(input, input_len) } {
@@ -1393,10 +1399,13 @@ pub unsafe extern "C" fn markdown_decode_encoding_chain(
     };
 
     if layer_count == 0 {
-        /* No decoder work: identity-only chain. The caller already owns the
-         * input bytes; report success with an empty output. */
-        result_ref.output = ptr::null_mut();
-        result_ref.output_len = 0;
+        /* Identity-only chain: a successful no-op decode returns the input
+         * unchanged (decode(identity, input) == input).
+         * Clone the input into a Rust-allocated output buffer so the FFI
+         * ownership contract holds — callers release the output with
+         * markdown_chain_decode_free, so returning the input pointer itself
+         * would be double-freed. */
+        store_chain_decode_output(result_ref, input_slice.to_vec());
         return 0;
     }
     if layers.is_null() {
@@ -2150,6 +2159,87 @@ mod tests {
         assert_eq!(result.error_category, 101);
         assert!(result.output.is_null());
         assert_eq!(result.output_len, 0);
+    }
+
+    #[test]
+    fn chain_decode_identity_only_returns_input_copy() {
+        /* decode(identity, input) == input at the FFI
+         * boundary.  layer_count == 0 must clone the input into the output
+         * buffer (released via markdown_chain_decode_free). */
+        let input = b"abc";
+        let mut result: FFIChainDecodeResult = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            markdown_decode_encoding_chain(
+                input.as_ptr(),
+                input.len(),
+                std::ptr::null(), // layers: NULL when layer_count == 0
+                0,
+                1024, // max_output
+                10,   // ratio
+                &mut result,
+            )
+        };
+        assert_eq!(rc, 0, "Expected success (0), got {rc}");
+        assert_eq!(result.error_category, 0);
+        assert_eq!(result.output_len, input.len());
+        assert!(!result.output.is_null());
+        let output = unsafe { std::slice::from_raw_parts(result.output, result.output_len) };
+        assert_eq!(output, input);
+
+        unsafe { markdown_chain_decode_free(&mut result) };
+        assert!(result.output.is_null());
+        assert_eq!(result.output_len, 0);
+    }
+
+    #[test]
+    fn chain_decode_identity_only_empty_input() {
+        /* Empty identity-only input: successful no-op with an empty output
+         * (NULL pointer, zero length — the FFI empty-buffer convention). */
+        let mut result: FFIChainDecodeResult = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            markdown_decode_encoding_chain(
+                std::ptr::null(),
+                0,
+                std::ptr::null(),
+                0,
+                1024,
+                10,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, 0, "Expected success (0), got {rc}");
+        assert_eq!(result.error_category, 0);
+        assert!(result.output.is_null());
+        assert_eq!(result.output_len, 0);
+    }
+
+    #[test]
+    fn chain_decode_does_not_read_uninitialized_result() {
+        /* The entry point zero-initializes the
+         * result storage before touching it, so a caller that fails to
+         * initialize the result cannot trigger a free of garbage pointers
+         * (the previous free_buffer-on-possibly-uninitialized-fields
+         * pattern). */
+        let input = b"payload";
+        let mut result: std::mem::MaybeUninit<FFIChainDecodeResult> =
+            std::mem::MaybeUninit::uninit();
+        let rc = unsafe {
+            markdown_decode_encoding_chain(
+                input.as_ptr(),
+                input.len(),
+                std::ptr::null(),
+                0,
+                1024,
+                10,
+                result.as_mut_ptr(),
+            )
+        };
+        assert_eq!(rc, 0, "Expected success (0), got {rc}");
+        let mut result = unsafe { result.assume_init() };
+        assert_eq!(result.output_len, input.len());
+        let output = unsafe { std::slice::from_raw_parts(result.output, result.output_len) };
+        assert_eq!(output, input);
+        unsafe { markdown_chain_decode_free(&mut result) };
     }
 
     #[test]

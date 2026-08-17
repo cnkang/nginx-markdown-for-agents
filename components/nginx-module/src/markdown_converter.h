@@ -1880,6 +1880,10 @@ void markdown_chain_decode_result_init(struct FFIChainDecodeResult *result);
  * `decompression_ratio`) activates only above the fixed 256-byte
  * internal threshold.
  *
+ * An identity-only chain (`layer_count == 0`) is a successful no-op:
+ * the output is a copy of the input (decode(identity, input) == input),
+ * allocated by Rust and released with `markdown_chain_decode_free`.
+ *
  * # Return Value
  *
  * Returns the error category:
