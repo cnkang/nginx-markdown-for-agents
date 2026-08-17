@@ -106,6 +106,13 @@ scrape_configs:
 Keep the endpoint on a management listener or behind an internal access
 policy. Do not expose it directly to the public network.
 
+The metrics endpoint accepts only loopback clients (`allow 127.0.0.1; allow ::1;
+deny all;`), so the `targets: ['127.0.0.1:80']` example works only when
+Prometheus shares NGINX's network namespace (same host or same pod). For remote
+or separately containerized Prometheus, use a local agent, a sidecar, or a
+loopback relay that forwards to the management listener instead of changing the
+endpoint's loopback restriction.
+
 ## Verify the contract
 
 From a repository checkout, the static and schema gates are:

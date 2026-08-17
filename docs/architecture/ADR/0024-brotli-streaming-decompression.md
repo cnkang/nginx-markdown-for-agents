@@ -77,18 +77,11 @@ worker. Concurrent requests in that worker share the counter, and the
 allocator releases each reservation from its allocation header before NGINX
 reclaims the request pool.
 
-Reservation failures fall into two cases depending on whether the decoder
-has consumed input:
+Reservation failures fall into three cases based on decoder input consumption, tracked independently from HTTP/output commit:
 
-- **Before input consumption (pre-commit)**: The decoder has not yet
-  processed any compressed chunk. The allocator reports an allocation
-  failure and the module follows the existing pre-commit replay strategy
-  (same as other decompression failures before output commitment).
-- **After input consumption (post-commit)**: The decoder has already
-  consumed one or more chunks. The workspace expansion failure places the
-  decoder in a terminal abort state. The module does not re-feed the
-  consumed chunk. Existing terminal/error state fields enforce this
-  non-retryable invariant (see the State Machine section below).
+- **Before input consumption (pre-commit)**: The decoder has not yet processed any compressed chunk. The allocator reports an allocation failure and the module follows the existing pre-commit replay strategy (same as other decompression failures before output commitment).
+- **After input consumption but before response commit (intermediate state)**: The decoder has consumed one or more compressed chunks, but the module has not yet committed the HTTP response headers (`ngx_http_send_header()` not called). The workspace expansion failure triggers the configured pre-commit error policy (`markdown_error_policy`): `pass` replays the original upstream body, `fail_closed` or `status <code>` returns the configured error. The module cannot replay the consumed compressed input, but the original upstream response is still available for replay via the pre-commit buffer.
+- **After response commit (post-commit)**: The decoder has consumed input and `ngx_http_send_header()` has returned `NGX_OK`. The workspace expansion failure places the decoder in a terminal abort state. The module does not re-feed the consumed chunk. Existing terminal/error state fields enforce this non-retryable invariant (see the State Machine section below).
 
 Decoded output remains governed separately by the cumulative
 `markdown_decompress_max_size` budget.

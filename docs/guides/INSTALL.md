@@ -159,10 +159,14 @@ heading, so a successful exit is deterministic evidence of conversion:
 ```bash
 # Serve an <h1>Welcome</h1> page from a local fixture, or point the first
 # curl at any page on your site that renders a known <h1>:
-curl -s -H "Accept: text/markdown" http://localhost/ \
-    | grep -Fq '# Welcome' \
-    && echo "conversion verified" \
-    || echo "conversion NOT verified (exit $?)"
+response=$(curl -s -H "Accept: text/markdown" http://localhost/)
+if printf '%s' "$response" | grep -Fq '# Welcome'; then
+    echo "conversion verified"
+    exit 0
+else
+    echo "conversion NOT verified"
+    exit 1
+fi
 ```
 
 ---

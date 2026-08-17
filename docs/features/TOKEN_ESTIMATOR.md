@@ -29,11 +29,11 @@ estimated_tokens = ceil(character_count / chars_per_token)
 The heuristic's accuracy depends on content type. As a rule of thumb with the
 4.0 default:
 
-| Content | Typical error |
+|| Content | Typical error ||
 |---------|---------------|
 | English prose | ±20% (worst case ±30%) |
-| Code-heavy content | underestimated by up to ~2× (~1.5–2 chars/token) |
-| CJK text | underestimated by up to ~2× (~1.5–2 chars/token) |
+| Code-heavy content | underestimated by approximately 2.0–2.7×, reflecting the 4.0 versus 1.5–2 chars-per-token comparison |
+| CJK text | underestimated by approximately 2.0–2.7×, reflecting the 4.0 versus 1.5–2 chars-per-token comparison |
 | Mixed-language documents | within ±50% in practice |
 
 Use the estimate for planning, context-window sizing, or progress logging.

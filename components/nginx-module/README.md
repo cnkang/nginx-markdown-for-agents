@@ -50,7 +50,7 @@ For full build and installation steps, use [../../docs/guides/BUILD_INSTRUCTIONS
 For directive semantics and operator-facing behavior, prefer [../../docs/guides/CONFIGURATION.md](../../docs/guides/CONFIGURATION.md) over repeating those details here.
 For canonical architecture and repository-layout notes, prefer [../../docs/architecture/SYSTEM_ARCHITECTURE.md](../../docs/architecture/SYSTEM_ARCHITECTURE.md) and [../../docs/architecture/REPOSITORY_STRUCTURE.md](../../docs/architecture/REPOSITORY_STRUCTURE.md).
 
-## Removed: Streaming Threshold Directive
+## Removed: Streaming Threshold Directive (`markdown_stream_threshold`)
 
 The 0.9.2 release removed the `markdown_stream_threshold` directive and
 threshold-based routing. Since 0.9.2 the `markdown_streaming off|auto|force`
@@ -62,6 +62,15 @@ Configurations that still set `markdown_stream_threshold` fail `nginx -t`
 with `unknown directive` until migrated. See
 [../../docs/guides/0.9.2-breaking-changes.md](../../docs/guides/0.9.2-breaking-changes.md)
 for the complete removal reference and migration guidance.
+
+## Retired: Large Body Threshold Directive (`markdown_large_body_threshold`)
+
+The `markdown_large_body_threshold` directive was retired in 0.9.0 (superseded
+by `markdown_limits` and `markdown_streaming`) and removed in 0.9.2 with no
+replacement. Configurations that still set `markdown_large_body_threshold`
+fail `nginx -t` with `unknown directive`. See
+[../../docs/guides/0.9.2-breaking-changes.md](../../docs/guides/0.9.2-breaking-changes.md)
+for the complete removal reference.
 
 For the full directive reference, see [../../docs/guides/CONFIGURATION.md](../../docs/guides/CONFIGURATION.md). For the design rationale and architecture, see [../../docs/architecture/LARGE_RESPONSE_DESIGN.md](../../docs/architecture/LARGE_RESPONSE_DESIGN.md).
 

@@ -81,8 +81,9 @@ remain blocking even when the workflow itself is green.
 | 3.3 | Package signature verification | `gpg --verify` / `rpm -K` | Valid signatures |
 | 3.4 | Install smoke tests | `dpkg -i` + `rpm -i` + `nginx -V` + `curl` | Module loads and converts |
 | 3.5 | Upgrade/rollback tests | Version switch test | Upgrade and rollback succeed without service interruption |
+| 3.6 | Independent upgrade/rollback evidence | Release record review | Independent upgrade/rollback evidence is attached to the release record (missing evidence is release-blocking) |
 
-**Fail action**: Block release. Resolve package build, install-layout, checksum, smoke-test, or signature gaps before proceeding.
+**Fail action**: Block release. Resolve package build, install-layout, checksum, smoke-test, signature, or missing upgrade/rollback-evidence gaps before proceeding.
 
 ---
 
@@ -93,7 +94,7 @@ remain blocking even when the workflow itself is green.
 | # | Check Item | Verification Command | Pass Criteria |
 |---|-----------|---------------------|---------------|
 | 4.1 | Helm chart lint | `helm lint charts/nginx-markdown` | Exit 0, no errors |
-| 4.2 | Helm chart render | `helm template gate4-test charts/nginx-markdown --namespace gate4-smoke > release-evidence/gate4/<candidate-sha>/rendered-manifests/rendered.yaml` and `python3 tools/release/gates/validate_k8s_manifests.py` | Exit 0. Assert that the rendered output at `release-evidence/gate4/<candidate-sha>/rendered-manifests/rendered.yaml` contains the Deployment `metadata.name`, the container `image`, and the `nginx-markdown` ConfigMap |
+| 4.2 | Helm chart render | `CANDIDATE_SHA="<candidate-sha>"` then `mkdir -p "release-evidence/gate4/${CANDIDATE_SHA}/rendered-manifests"` and `helm template gate4-test charts/nginx-markdown --namespace gate4-smoke > "release-evidence/gate4/${CANDIDATE_SHA}/rendered-manifests/rendered.yaml"` then `python3 tools/release/gates/validate_k8s_manifests.py "release-evidence/gate4/${CANDIDATE_SHA}/rendered-manifests/rendered.yaml"` | Exit 0. Assert that the rendered output at `release-evidence/gate4/${CANDIDATE_SHA}/rendered-manifests/rendered.yaml` contains the Deployment `metadata.name`, the container `image`, and the `nginx-markdown` ConfigMap |
 | 4.3 | Promoted cluster smoke | `tools/release/gates/gate4_local_k8s_smoke.sh` or the promoted-cluster equivalent | Evidence at `release-evidence/gate4/<candidate-sha>/cluster-smoke.json`; conversion, Accept, and metrics checks pass |
 | 4.4 | F5 feasibility assessment | Review `docs/guides/F5_INGRESS_FEASIBILITY.md` and record assessment | Evidence at `release-evidence/gate4/<candidate-sha>/f5-assessment.md` is complete |
 

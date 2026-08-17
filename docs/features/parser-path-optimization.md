@@ -341,7 +341,7 @@ already-converted Markdown size rather than an estimate of it:
 
 | Stage | Capacity source |
 |-------|-----------------|
-| Initial traversal | `estimate_output_capacity(input_size_hint)` when the hint exceeds `LARGE_BODY_THRESHOLD`; otherwise the default 1 KB |
+| Initial traversal | `estimate_output_capacity(input_size_hint)` when the hint exceeds `LARGE_BODY_THRESHOLD`. Otherwise the default 1 KB |
 | Fused normalizer | Actual traversal output length (`output.len()`) |
 
 The traversal code clamps its estimate to 4 KB–4 MB. The fused normalizer's
@@ -418,7 +418,11 @@ standard `normalize_output` two-pass approach.
 The optimization is security-sensitive. Early pruning intentionally bypasses
 `SecurityValidator::check_element` for elements classified as prunable, so the
 prunable-element allowlist and its safety tests are part of the security
-contract. Other elements still pass through the normal validator:
+contract. The approved bypass contract allows only the following elements to
+skip `SecurityValidator::check_element`: `<script>`, `<style>`, `<noscript>`
+(active by default), plus `<nav>`, `<footer>`, `<aside>` (behind the
+`prune_noise_regions` feature flag). All other elements pass through the normal
+validator:
 
 - Dangerous element removal (`script`, `style`, `noscript`, and others in
   `DANGEROUS_ELEMENTS`)
@@ -430,6 +434,11 @@ Pruning `<script>`, `<style>`, and `<noscript>` earlier is security-positive —
 it avoids visiting their children, which the security validator would remove
 anyway. Pruning `<nav>`, `<footer>`, `<aside>` is a content decision, not a
 security decision. These elements are not in `DANGEROUS_ELEMENTS`.
+
+The `optimization_regression` test suite (11 tests) and 40 property-based
+tests validate the prunable-element allowlist, verifying output
+equivalence and security properties across both default and `prune_noise_regions`
+feature modes. All security tests pass in both modes.
 
 No optimization in this spec introduces new `unsafe` code.
 

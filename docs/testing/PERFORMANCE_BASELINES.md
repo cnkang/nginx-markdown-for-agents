@@ -28,7 +28,13 @@ For long-lived release thresholds, RPS may round downward or lower and
 latency/TTFB may round upward or raise. RPS must not increase,
 latency/TTFB must not decrease, and path, fallback, output, memory, or
 environment evidence must not change. This makes the threshold more
-conservative without improving or fabricating measured evidence.
+conservative without improving or fabricating measured evidence. All
+adjustments must stay within a documented bound — a fixed precision or
+maximum adjustment (for example ±5% of the measured value, or rounding to
+at most one significant digit) recorded in the `baseline_policy` metadata.
+The gate rejects arbitrary downward RPS or upward latency/TTFB changes beyond
+that bound, and it also fails repeated small adjustments that accumulate past
+it.
 
 Every canonical baseline must retain the raw workflow artifact and record the
 artifact/run, original Git commit, adjustment rule, person or reason, and date

@@ -198,8 +198,10 @@ ARCH=amd64
 curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS"
 curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS.asc"
 curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
-# Obtain TRUSTED_FINGERPRINT through an independently authenticated channel.
-: "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated}"
+# Import the release signing key through an independently authenticated channel before GPG verification.
+# Example: curl -fsSL https://example.com/nginx-markdown-gpg.key | gpg --import
+# Then validate the imported key fingerprint matches TRUSTED_FINGERPRINT.
+: "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated and the key is imported}"
 [[ "${TRUSTED_FINGERPRINT}" =~ ^[A-Fa-f0-9]{40}$ ]] || exit 1
 VALIDSIG="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
     | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
@@ -224,8 +226,10 @@ ARCH=x86_64
 curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS"
 curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS.asc"
 curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
-# Obtain TRUSTED_FINGERPRINT through an independently authenticated channel.
-: "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated}"
+# Import the release signing key through an independently authenticated channel before GPG verification.
+# Example: curl -fsSL https://example.com/nginx-markdown-gpg.key | gpg --import
+# Then validate the imported key fingerprint matches TRUSTED_FINGERPRINT.
+: "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated and the key is imported}"
 [[ "${TRUSTED_FINGERPRINT}" =~ ^[A-Fa-f0-9]{40}$ ]] || exit 1
 VALIDSIG="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
     | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"

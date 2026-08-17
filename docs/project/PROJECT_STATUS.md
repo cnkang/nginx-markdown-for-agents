@@ -759,8 +759,12 @@ fuzzing workflows, and shared metrics aggregation for observability.
 - Multi-platform support (macOS, Linux, Docker)
 
 ### Current State
-The project has implemented and tested the core feature set. The focus is on operational validation, performance optimization, and community feedback integration. This phase completes the production readiness picture.
-
+The team has implemented and tested the core feature set. Production and release
+readiness remain pending: release assets and the required verification
+evidence (performance baselines, SonarCloud scan on the final SHA, and the
+full release-gate suite) stay blocked until all release gates pass. The focus
+is on operational validation, performance optimization, and community feedback
+integration.
 ### Getting Started
 - **Evaluate**: Read the [README](../../README.md) and [DEPLOYMENT_EXAMPLES](../guides/DEPLOYMENT_EXAMPLES.md)
 - **Install**: Follow the [INSTALLATION](../guides/INSTALLATION.md) guide

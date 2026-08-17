@@ -215,7 +215,7 @@ Implemented in `ngx_http_markdown_merge_conf()` at
 ```
 merge_conf(cf, parent, child):
   1. merge_enabled(child, parent)           — enabled/complex inheritance
-  2. Save explicit-set flags (max_size_set, stream_threshold_set, etc.)
+  2. Save explicit-set flags (max_size_set, stream_threshold_set, and similar)
   3. merge_core_values(child, parent)       — standard ngx_conf_merge_*
      a. merge_core_base_values  — max_size, timeout, on_error, flavor,
                                   accept_policy, auth, generate_etag,
@@ -384,18 +384,24 @@ streaming, no caching overhead, wildcard Accept.
 
 ---
 
-## 7. Implementation Notes
+## 7. Implementation Notes (Historical — profiles removed in 0.9.2)
+
+> ⚠️ **HISTORICAL** — 0.9.2 removed profiles. The following describes the pre-removal implementation approach for reference only.
 
 - The `ngx_http_markdown_profile_defaults_t` struct is already defined in
   the header (`ngx_http_markdown_filter_module.h`). Profile constants
   (`NGX_HTTP_MARKDOWN_PROFILE_*`) and the `conf.profile.name` / `.set`
   fields are also already present.
-- The `merge_conf` implementation needs to resolve profile defaults BEFORE
+- The `merge_conf` implementation resolved profile defaults BEFORE
   the standard `ngx_conf_merge_*` calls, substituting profile values as
-  the "default" argument when a profile is active.
-- Forced-field conflict detection belongs in `merge_conf` (or a post-merge
+  the "default" argument when a profile was active.
+- Forced-field conflict detection belonged in `merge_conf` (or a post-merge
   validation step) and in the Rust `detect_conflicts` FFI for dynconf
   dry-run.
-- The effective-conf view (`ngx_http_markdown_effective_conf_t`) does not
-  need profile awareness — profiles resolve entirely at config parse
-  time and cached in the merged `ngx_http_markdown_conf_t`.
+- The effective-conf view (`ngx_http_markdown_effective_conf_t`) did not
+  need profile awareness — profiles resolved entirely at config parse
+  time and the parser cached them in the merged `ngx_http_markdown_conf_t`.
+
+For the current 0.9.2 contract, profiles do not exist. Use explicit
+directives (`markdown_limits`, `markdown_streaming`, `markdown_cache_validation`,
+`markdown_error_policy`, `markdown_accept`, and similar) for all configuration.

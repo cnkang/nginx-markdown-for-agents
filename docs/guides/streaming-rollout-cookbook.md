@@ -10,12 +10,15 @@ of the active configuration contract.
 Validate the binary and configuration:
 
 ```bash
+# Create a private temporary directory so baseline snapshots do not land in
+# predictable paths under /tmp.
+SNAPSHOT_DIR="$(mktemp -d)"
 nginx -t
 nginx -T 2>/dev/null | grep -E 'markdown_(filter|streaming|auto_decompress|cache_validation|limits|error_policy)'
 curl -s -H 'Accept: text/plain; version=0.0.4' \
-  http://localhost/markdown-metrics > /tmp/markdown-metrics.baseline
+  http://localhost/markdown-metrics > "$SNAPSHOT_DIR/markdown-metrics.baseline"
 curl -s -H 'Accept: application/json' \
-  http://localhost/nginx-markdown/diagnostics > /tmp/markdown-diagnostics.baseline.json
+  http://localhost/nginx-markdown/diagnostics > "$SNAPSHOT_DIR/markdown-diagnostics.baseline.json"
 ```
 
 Start with explicit, bounded settings:
@@ -114,7 +117,10 @@ location /docs {
 }
 ```
 
-Apply with `nginx -t && nginx -s reload`, then verify that streaming attempts
-stop and full-buffer attempts remain healthy. Preserve the diagnostics JSON,
-Prometheus snapshot, error-log excerpts, and the exact configuration used for
-the incident.
+Apply with `nginx -t && nginx -s reload`, then wait for the graceful reload to
+drain (in-flight requests from before the reload reach zero — poll
+`nginx_markdown_requests_total` until the counter stops advancing), and only
+then compare counters scoped to requests started after the reload. Verify that
+streaming attempts stop and full-buffer attempts remain healthy. Preserve the
+diagnostics JSON, Prometheus snapshot, error-log excerpts, and the exact
+configuration used for the incident.

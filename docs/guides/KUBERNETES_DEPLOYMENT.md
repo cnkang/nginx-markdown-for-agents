@@ -32,7 +32,7 @@ kubectl exec -n ingress-nginx <pod> -- nginx -V 2>&1 | grep markdown
 
 ### Disable
 
-Remove `markdown_filter on` from ConfigMap. The module remains loaded but inactive.
+Remove `markdown_filter on` from ConfigMap. This disables only Markdown conversion — the module remains loaded in NGINX and metrics or diagnostics handlers may still run. For full module deactivation, explicitly remove the `load_module` directive from the ConfigMap snippet and rebuild the custom image or revert to the upstream Ingress Controller image.
 
 ### Rollback
 

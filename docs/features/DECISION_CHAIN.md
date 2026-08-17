@@ -143,7 +143,7 @@ When conversion fails (either `failed_open` or `failed_closed`), the module reco
 |---------------------|---------|
 | `conversion_error` | HTML parse or conversion error — the input HTML could not be processed |
 | `memory_budget_exceeded` | Conversion-memory limit reached (`markdown_limits conversion_memory=`) |
-| `timeout` | The request exceeded the authoritative overall conversion deadline `markdown_limits conversion_timeout=`; `parser_timeout=` is the per-checkpoint parser budget and is subsumed by `conversion_timeout=` (the latter wins) |
+|| `timeout` | The request exceeded the authoritative overall conversion deadline `markdown_limits conversion_timeout=`; `parser_timeout=` triggers an earlier parser checkpoint when nonzero and smaller than `conversion_timeout`, while `conversion_timeout=` remains the overall upper bound and is never extended by `parser_timeout=` |
 | `budget_exceeded` | Parser memory exceeded `markdown_limits parser_memory=`; this is distinct from `memory_budget_exceeded` and takes precedence for parser allocations |
 | `ffi_panic` | Internal/system error (unexpected Rust↔C panic) |
 | `decompression_error` / `decompression_budget_exceeded` / `decompression_format_error` / `decompression_truncated_input` / `decompression_io_error` | Decompression failures (see [Automatic Decompression](../features/AUTOMATIC_DECOMPRESSION.md)) |

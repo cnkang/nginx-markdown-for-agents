@@ -348,7 +348,7 @@ nginx -t && nginx -s reload
 
 #### Verify
 
-Follow the [Verification Steps](#verification-steps) section. The key signal is that `failed_closed` entries stop appearing in decision logs and `failed_open` entries replace them. Clients receive original HTML instead of 502 errors when conversion fails.
+Follow the [Verification Steps](#verification-steps) section. The key signal is that `failed_closed` entries stop appearing in decision logs and `failed_open` entries replace them. Do **not** require a `failed_open` log entry after rollback. Verify that `failed_closed` entries stop appearing, then trigger a conversion failure. Confirm the client receives original HTML instead of a 502. Successful conversions produce no log entry, so expect none.
 
 ---
 
@@ -368,7 +368,11 @@ curl -s -H "Accept: text/plain; version=0.0.4" http://localhost/markdown-metrics
 
 If the failed `nginx_markdown_requests_total{outcome=~"failed_.*"}` count grows
 faster than expected relative to `nginx_markdown_conversion_attempts_total`,
-roll back.
+roll back. Compare the two counters using PromQL rates (for example
+`rate(nginx_markdown_requests_total{outcome=~"failed_.*"}[5m])` against
+`rate(nginx_markdown_conversion_attempts_total[5m])`) or before-and-after
+counter deltas over the same window, rather than comparing instantaneous
+snapshots.
 
 ### Latency Exceeding Timeout
 

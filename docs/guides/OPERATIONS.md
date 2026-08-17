@@ -220,7 +220,17 @@ fi
 # check_markdown_filter.sh
 #!/bin/bash
 
-METRICS=$(curl -s -H "Accept: text/plain; version=0.0.4" "${METRICS_URL:-http://localhost/markdown-metrics}")
+# Use curl with explicit timeouts and fail-closed behavior
+set -e
+METRICS=$(curl --fail-with-body --max-time 10 --connect-timeout 5 \
+    -H "Accept: text/plain; version=0.0.4" \
+    "${METRICS_URL:-http://localhost/markdown-metrics}")
+CURL_EXIT=$?
+if [ $CURL_EXIT -ne 0 ]; then
+    echo "CRITICAL: Metrics retrieval failed (curl exit $CURL_EXIT)"
+    exit 2
+fi
+
 FAILED=$(echo "$METRICS" | grep 'nginx_markdown_requests_total{.*outcome="failed_' | awk '{sum += $2} END {print sum + 0}')
 ATTEMPTED=$(echo "$METRICS" | grep 'nginx_markdown_conversion_attempts_total' | awk '{sum += $2} END {print sum + 0}')
 

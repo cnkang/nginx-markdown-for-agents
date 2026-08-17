@@ -1,6 +1,6 @@
 ---
 domain: streaming-backpressure
-rules: [1, 2, 38, 47, 51, 52, 64]
+rules: [1, 2, 38, 47, 51, 52, 64, 69]
 paths:
   - "components/nginx-module/src/**"
   - "components/rust-converter/src/streaming/**"
@@ -468,9 +468,12 @@ chain on resume re-runs intermediate header filters (for example gzip)
 that are not idempotent.
 
 Required:
-- On header-chain `NGX_AGAIN`, publish the delivery latches immediately
-  (`headers_committed`, `headers_forwarded`, commit state / metric) — the
-  headers crossed the module boundary into the write path.
+- On header-chain `NGX_AGAIN`, publish **only** the delivery latches
+  (`headers_committed`, `headers_forwarded`, commit state) — the headers
+  crossed the module boundary into the write path. Defer success-only
+  metrics (delivery gauges and counters) until resume/drain yields `NGX_OK`
+  or `NGX_DONE`, so a backpressured request never records a delivery it has
+  not completed.
 - Never re-invoke `ngx_http_next_header_filter` for the same request; a
   write-event resume is a pure body-filter re-entry
   (`ngx_http_next_body_filter(r, NULL)` or equivalent) that drains

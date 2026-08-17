@@ -35,16 +35,7 @@ Make **gzip** and **deflate** streaming-eligible under the same routing gates in
 That restriction is historical and ADR-0024 superseded it. ADR-0024 adds
 Brotli under the same runtime gates in the final 0.9.1 implementation.
 
-The deflate inflater sniffs the first two bytes to distinguish zlib-wrapped
-(RFC 1950, RFC 9110-compliant) from raw deflate (RFC 1951). The 0.9.2
-public contract supports both framings: zlib-wrapped RFC 1950 is the
-HTTP-standard form, and raw RFC 1951 is a compatibility fallback for legacy
-servers. The gzip inflater
-uses gzip framing and treats each valid `Z_STREAM_END` as a member boundary.
-It resets the inflater while preserving remaining compressed input, accepts a
-member boundary between feed calls, and consumes later members exactly once.
-The actual upstream terminal finalizes the compressed response: a complete
-member boundary succeeds and an incomplete final member fails.
+The deflate inflater uses a replay-safe trial-decode approach to distinguish zlib-wrapped (RFC 1950, RFC 9110-compliant) from raw deflate (RFC 1951). The first two bytes are not treated as an unambiguous discriminator. The 0.9.2 public contract supports both framings: zlib-wrapped RFC 1950 is the HTTP-standard form, and raw RFC 1951 is a compatibility fallback for legacy servers. The gzip inflater uses gzip framing and treats each valid `Z_STREAM_END` as a member boundary. It resets the inflater while preserving remaining compressed input, accepts a member boundary between feed calls, and consumes later members exactly once. The actual upstream terminal finalizes the compressed response: a complete member boundary succeeds and an incomplete final member fails.
 
 `total_decompressed` and `max_decompressed_size` remain response-wide across
 gzip member resets. Source input ownership remains independent of downstream

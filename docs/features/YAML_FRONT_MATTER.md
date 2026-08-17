@@ -55,16 +55,29 @@ published: "2024-01-15"
 ### Configuration
 
 Enable YAML front matter by setting `include_front_matter`. The converter
-automatically enables metadata extraction for this path. The `extract_metadata`
-option also supports metadata/ETag work without emitting front matter when
-enabled alone:
+automatically promotes `extract_metadata` internally when `include_front_matter`
+is set — `include_front_matter` alone gates and enables front matter output.
+
+The `extract_metadata` option by itself supports metadata/ETag processing
+without emitting front matter when enabled alone:
 
 ```rust
 let options = ConversionOptions {
-    include_front_matter: true,  // Enable front matter output
+    include_front_matter: true,  // Enable front matter output; promotes extract_metadata internally
     extract_metadata: false,      // Raised internally for front matter
     base_url: Some("https://example.com/page".to_string()),
     resolve_relative_urls: true,  // Resolve relative URLs to absolute
+    ..Default::default()
+};
+```
+
+For metadata-only workflows (ETag, conditional requests) without front matter:
+```rust
+let options = ConversionOptions {
+    include_front_matter: false,  // No front matter output
+    extract_metadata: true,       // Metadata extraction for ETag/conditional
+    base_url: Some("https://example.com/page".to_string()),
+    resolve_relative_urls: true,
     ..Default::default()
 };
 ```

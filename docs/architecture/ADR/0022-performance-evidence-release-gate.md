@@ -23,7 +23,7 @@ relative to a baseline:
 - **p50 latency**: ≤ +10%
 - **p95 latency**: ≤ +15%
 - **TTFB**: ≤ +10%
-- **Streaming fallback rate**: ≤ 5% absolute
+- **Streaming fallback rate**: ≤ 5% absolute. Numerator: streaming responses that emit `fallback_to_buffered` or `fallback_to_full_buffer`. Denominator: all streaming-eligible responses (responses that selected the streaming engine via `markdown_streaming auto|force`). Excluded: responses that never attempted streaming (routed directly to full-buffer by `markdown_streaming off`, profile, or decision-chain `not_eligible`). Measurement window: per benchmark scenario run. Aggregation: per streaming-eligible response (not per chunk or attempt). The window combines results by summing numerator and denominator across all iterations within a scenario before computing the rate.
 - **Memory slope**: ≤ +20%
 
 ### Tooling
