@@ -263,7 +263,7 @@ pub fn decode_chain(
 ) -> Result<Vec<u8>, ChainDecodeError> {
     /* The initial layer borrows the caller's compressed buffer instead of
      * cloning it; ownership transfers only after the first decoder layer
-     * produces its owned output (run12 F-7 / supp-27 M3: avoids the
+     * produces its owned output (avoids the
      * full-input copy that made peak memory unpredictable). */
     let mut current: std::borrow::Cow<'_, [u8]> = std::borrow::Cow::Borrowed(encoded);
     let mut cumulative = 0usize;
@@ -291,11 +291,36 @@ pub fn decode_chain(
             .max_output
             .checked_sub(cumulative)
             .ok_or(ChainDecodeError::BudgetExceeded)?;
+        /* Pre-decoder ratio ceiling: bound the decompression
+         * work itself, not only the accepted result.  When this layer's
+         * compressed input reaches RATIO_ACTIVATION_THRESHOLD, the decoder
+         * is allowed at most input_len * ratio bytes of output; hitting
+         * that ceiling is classified as RatioExceeded while the absolute
+         * cumulative ceiling keeps BudgetExceeded.  The post-decode
+         * validate_decoded_layer() below remains as a belt-and-suspenders
+         * check with identical semantics. */
+        let ratio_budget = if input_len >= RATIO_ACTIVATION_THRESHOLD {
+            usize::try_from((input_len as u64).saturating_mul(limits.ratio)).unwrap_or(usize::MAX)
+        } else {
+            usize::MAX
+        };
+        let layer_budget = remaining_budget.min(ratio_budget);
+        let ratio_capped = layer_budget < remaining_budget;
         let layer_limits = DecodeLimits {
-            max_output: remaining_budget,
+            max_output: layer_budget,
             ratio: limits.ratio,
         };
-        let decoded = decode_layer(&current, *enc, layer_limits)?;
+        let decoded = match decode_layer(&current, *enc, layer_limits) {
+            Ok(decoded) => decoded,
+            Err(ChainDecodeError::BudgetExceeded) if ratio_capped => {
+                /* The decoder hit the ratio-derived ceiling before the
+                 * absolute budget: report the ratio violation, not a
+                 * generic budget error, so metrics/observability keep the
+                 * distinction. */
+                return Err(ChainDecodeError::RatioExceeded);
+            }
+            Err(e) => return Err(e),
+        };
         validate_decoded_layer(input_len, decoded.len(), &mut cumulative, limits)?;
         current = std::borrow::Cow::Owned(decoded);
         has_decoded_layer = true;
@@ -323,6 +348,15 @@ fn decode_layer(
         .map(|result| result.output)
 }
 
+/// Enforce the per-layer expansion ratio on a decoded layer's output and
+/// accumulate the cumulative output budget.
+///
+/// Ratio semantics: the per-layer ratio ceiling activates only when the
+/// layer's compressed `input_len` is at least [`RATIO_ACTIVATION_THRESHOLD`]
+/// (256) bytes; inputs from 1 through 255 bytes are **not** subject to the
+/// ratio ceiling and are limited only by the cumulative `max_output` budget.
+/// (Zero-length input is accepted for the initial decoder only; a non-empty
+/// decoded output from an empty input is rejected as a ratio violation.)
 fn validate_decoded_layer(
     input_len: usize,
     decoded_len: usize,
@@ -740,5 +774,66 @@ mod tests {
         let chained =
             decode_chain(&compressed, &[Encoding::Gzip], DecodeLimits::default()).unwrap();
         assert_eq!(chained, single);
+    }
+
+    #[test]
+    fn identity_only_chain_returns_input_unchanged() {
+        /* decode(identity, input) == input.  With no
+         * effective decoder layers the chain decoder returns the input
+         * unchanged. */
+        let input = b"abc";
+        let out = decode_chain(input, &[], DecodeLimits::default()).unwrap();
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn identity_bracketed_chain_decodes() {
+        /* "identity, gzip, identity": identity layers are stripped after
+         * parse; decode_chain receives only [Gzip] and decodes the wire
+         * payload. */
+        let original = b"<html><body>bracketed identity</body></html>";
+        let compressed = gzip_compress(original);
+        let parsed = parse_encoding_chain(b"identity, gzip, identity").unwrap();
+        let layers = strip_identity(&parsed);
+        assert_eq!(layers, vec![Encoding::Gzip]);
+        let out = decode_chain(&compressed, &layers, DecodeLimits::default()).unwrap();
+        assert_eq!(out, original);
+    }
+
+    #[test]
+    fn ratio_ceiling_classified_before_absolute_budget() {
+        /* With the ratio ceiling binding far below the
+         * absolute budget, hitting it must classify as RatioExceeded, not
+         * BudgetExceeded — proving the ceiling bounds decoder work, not
+         * just the accepted result. */
+        let original = vec![0u8; 1_000_000];
+        let compressed = gzip_compress(&original);
+        assert!(compressed.len() >= RATIO_ACTIVATION_THRESHOLD);
+        let limits = DecodeLimits {
+            max_output: usize::MAX, // absolute budget effectively unbounded
+            ratio: 1,               // ratio ceiling ≈ compressed_len bytes
+        };
+        let err = decode_chain(&compressed, &[Encoding::Gzip], limits).unwrap_err();
+        assert_eq!(err, ChainDecodeError::RatioExceeded);
+    }
+
+    #[test]
+    fn absolute_budget_keeps_budget_exceeded_despite_high_ratio() {
+        /* The cumulative absolute budget still classifies as BudgetExceeded
+         * when the ratio ceiling is not the binding constraint (the two
+         * classifications must stay distinct). */
+        let original = vec![0u8; 200_000];
+        let compressed = gzip_compress(&original);
+        assert!(
+            compressed.len() < RATIO_ACTIVATION_THRESHOLD,
+            "ratio must be inactive for this input ({} bytes)",
+            compressed.len()
+        );
+        let limits = DecodeLimits {
+            max_output: 100_000,
+            ratio: 10_000,
+        };
+        let err = decode_chain(&compressed, &[Encoding::Gzip], limits).unwrap_err();
+        assert_eq!(err, ChainDecodeError::BudgetExceeded);
     }
 }

@@ -810,7 +810,7 @@ impl IncrementalEmitter {
         /* Normalize CR/LF to spaces before buffering so inline-code
          * content follows the same whitespace semantics as plain text.
          * CRLF is treated as one logical line ending (single space),
-         * not two (run12 MAJOR + follow-up). */
+         * not two. */
         let mut normalized_text = String::with_capacity(text.len());
         let mut chars = text.chars().peekable();
         while let Some(c) = chars.next() {

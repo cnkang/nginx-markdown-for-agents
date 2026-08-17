@@ -404,7 +404,7 @@ fn large_pre_block_preserves_following_tail_marker() {
     let escaped_end_token = END_TOKEN.replace('_', r"\_");
     /* Character-aware suffix for diagnostics: byte-indexing a String can
      * panic on a UTF-8 boundary, and chars().rev() must be reversed again
-     * to preserve the original tail order (run12 MINOR). */
+     * to preserve the original tail order. */
     let suffix: String = full
         .chars()
         .rev()

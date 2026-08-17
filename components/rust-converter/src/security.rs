@@ -832,7 +832,12 @@ pub(crate) fn is_dangerous_url_value(url: &str) -> bool {
     if contains_percent_encoded_control(trimmed) {
         return true;
     }
-    if let Some(colon) = trimmed.find(':') {
+    /* A colon is a scheme separator only when it precedes any '/', '?',
+     * or '#' delimiter: colons inside relative paths or query strings
+     * (e.g. "/docs/fa:q" or "?x=a:b") must not be treated as a scheme
+     * separator. */
+    let scheme_zone_end = trimmed.find(['/', '?', '#']).unwrap_or(trimmed.len());
+    if let Some(colon) = trimmed[..scheme_zone_end].find(':') {
         let scheme = &trimmed[..colon];
         if !scheme.is_empty() && scheme.bytes().any(|byte| byte >= 0x80) {
             return true;
