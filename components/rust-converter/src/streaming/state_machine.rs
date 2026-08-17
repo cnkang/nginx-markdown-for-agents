@@ -226,25 +226,8 @@ impl StructuralStateMachine {
                 StructuralContext::CodeBlock(None)
             }
             "code" => {
-                // If parent is CodeBlock (pre>code), extract language from class
                 if self.current_context() == Some(&StructuralContext::CodeBlock(None)) {
-                    let lang = attrs.iter().find(|(k, _)| k == "class").and_then(|(_, v)| {
-                        v.split_whitespace()
-                            .filter_map(|class| {
-                                class
-                                    .strip_prefix("language-")
-                                    .or_else(|| class.strip_prefix("lang-"))
-                            })
-                            .find(|language| Self::is_safe_code_fence_language(language))
-                            .map(ToOwned::to_owned)
-                    });
-                    if lang.is_some() {
-                        // Update the parent CodeBlock context with the language
-                        if let Some(last) = self.stack.last_mut() {
-                            *last = StructuralContext::CodeBlock(lang.clone());
-                        }
-                    }
-                    // Don't push separate context for code inside pre
+                    self.apply_code_language(attrs);
                     return Ok(StateMachineAction::None);
                 }
                 StructuralContext::InlineCode
@@ -349,6 +332,24 @@ impl StructuralStateMachine {
 
         self.push_context(ctx.clone())?;
         Ok(StateMachineAction::Enter(ctx))
+    }
+
+    fn apply_code_language(&mut self, attrs: &[(String, String)]) {
+        let lang = attrs.iter().find(|(k, _)| k == "class").and_then(|(_, v)| {
+            v.split_whitespace()
+                .filter_map(|class| {
+                    class
+                        .strip_prefix("language-")
+                        .or_else(|| class.strip_prefix("lang-"))
+                })
+                .find(|language| Self::is_safe_code_fence_language(language))
+                .map(ToOwned::to_owned)
+        });
+        if let Some(lang) = lang {
+            if let Some(last) = self.stack.last_mut() {
+                *last = StructuralContext::CodeBlock(Some(lang));
+            }
+        }
     }
 
     /// Process an HTML end tag, pop the corresponding structural context if present, and update

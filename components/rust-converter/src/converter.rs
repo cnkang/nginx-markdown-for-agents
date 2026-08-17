@@ -684,19 +684,27 @@ impl MarkdownConverter {
         }
 
         if url.starts_with('/') {
-            let after_scheme = base
-                .strip_prefix("https://")
-                .or_else(|| base.strip_prefix("http://"))
-                .unwrap_or(base);
-            let origin = if let Some(pos) = after_scheme.find('/') {
-                let scheme_len = if base.starts_with("https://") { 8 } else { 7 };
-                &base[..scheme_len + pos]
-            } else {
-                base.as_str()
-            };
-            return format!("{}{}", origin, url);
+            return Self::resolve_origin_relative(base, url);
         }
 
+        Self::resolve_path_relative(base, url)
+    }
+
+    fn resolve_origin_relative(base: &str, url: &str) -> String {
+        let after_scheme = base
+            .strip_prefix("https://")
+            .or_else(|| base.strip_prefix("http://"))
+            .unwrap_or(base);
+        let origin = if let Some(pos) = after_scheme.find('/') {
+            let scheme_len = if base.starts_with("https://") { 8 } else { 7 };
+            &base[..scheme_len + pos]
+        } else {
+            base.as_str()
+        };
+        format!("{}{}", origin, url)
+    }
+
+    fn resolve_path_relative(base: &str, url: &str) -> String {
         if base.ends_with('/') {
             return format!("{}{}", base, url);
         }
