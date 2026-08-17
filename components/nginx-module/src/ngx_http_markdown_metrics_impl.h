@@ -974,23 +974,17 @@ ngx_http_markdown_metrics_to_v1(
 }
 
 /*
- * Validate method and shared-state availability for the metrics handler.
- *
- * Access control remains intentionally strict: the content handler itself
- * only serves loopback clients. NGINX `allow`/`deny` rules can further
- * restrict that location, but they cannot broaden access beyond localhost.
+ * Enforce the metrics endpoint's loopback-only peer boundary before method
+ * handling. NGINX `allow`/`deny` rules can further restrict that location,
+ * but they cannot broaden access beyond localhost.
  */
 static ngx_int_t
-ngx_http_markdown_metrics_validate_request(ngx_http_request_t *r)
+ngx_http_markdown_metrics_check_access(ngx_http_request_t *r)
 {
     if (r == NULL || r->connection == NULL
         || r->connection->sockaddr == NULL)
     {
         return NGX_HTTP_FORBIDDEN;
-    }
-
-    if (!(r->method & (NGX_HTTP_GET|NGX_HTTP_HEAD))) {
-        return NGX_HTTP_NOT_ALLOWED;
     }
 
     if (r->connection->sockaddr->sa_family == AF_INET) {
@@ -1017,6 +1011,27 @@ ngx_http_markdown_metrics_validate_request(ngx_http_request_t *r)
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                      "markdown: access denied from unknown address family");
         return NGX_HTTP_FORBIDDEN;
+    }
+
+    return NGX_OK;
+}
+
+
+/*
+ * Validate method and shared-state availability for the metrics handler.
+ */
+static ngx_int_t
+ngx_http_markdown_metrics_validate_request(ngx_http_request_t *r)
+{
+    ngx_int_t  rc;
+
+    rc = ngx_http_markdown_metrics_check_access(r);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
+    if (!(r->method & (NGX_HTTP_GET|NGX_HTTP_HEAD))) {
+        return NGX_HTTP_NOT_ALLOWED;
     }
 
     if (ngx_http_markdown_metrics == NULL) {

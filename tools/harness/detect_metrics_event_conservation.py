@@ -58,7 +58,7 @@ RENDERER_RE = re.compile(r"ngx_http_markdown_metrics_to_v1\s*\(")
 # v1->requests.aborted assignment must source from terminal_aborted_total.
 # Capture the full RHS expression up to ';' then check its final field.
 ABORTED_ASSIGN_RE = re.compile(
-    r"v1->requests\.aborted\s*=\s*([^;]+?);"
+    r"v1->requests\.aborted[ \t]*=([^;]*);"
 )
 # The per-path postcommit abort counter is stale for v1 terminal outcome.
 STALE_ABORT_SRC = "streaming_failure_postcommit_abort"
@@ -70,7 +70,7 @@ ABORTED_SOURCE_FIELD = "terminal_aborted_total"
 # assign failed_closed; a missing deduction in one branch must not be
 # masked by the other branch still containing the counter name).
 FAILED_CLOSED_ASSIGN_RE = re.compile(
-    r"failed_closed\s*=\s*([^;]+?);"
+    r"failed_closed[ \t]*=([^;]*);"
 )
 
 
@@ -222,17 +222,20 @@ def _audit_failed_closed(
         # terminal_aborted_total only exists under the streaming build; the
         # non-streaming branch assigns aborted = 0 and legitimately has no
         # aborted deduction.
-        if re.search(
-            r"#if(?:def)?\s+(?:defined\s*\(\s*)?MARKDOWN_STREAMING_ENABLED",
-            block,
+        if (
+            re.search(
+                r"#if(?:def)?\s+(?:defined\s*\(\s*)?MARKDOWN_STREAMING_ENABLED",
+                block,
+            )
+            and not any(
+                "terminal_aborted_total" in stmt for stmt in block_stmts
+            )
         ):
-            if not any("terminal_aborted_total" in stmt
-                       for stmt in block_stmts):
-                reviews.append(
-                    f"{name}: failed_closed derivation does not deduct "
-                    "terminal_aborted_total in the streaming branch; "
-                    "aborted may be double counted"
-                )
+            reviews.append(
+                f"{name}: failed_closed derivation does not deduct "
+                "terminal_aborted_total in the streaming branch; "
+                "aborted may be double counted"
+            )
     return violations, reviews
 
 

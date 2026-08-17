@@ -89,12 +89,11 @@ while IFS= read -r -d '' file; do
             # list.  Calls are followed by more statements.  Skip lines that
             # look like declarations: name(...) followed only by ';' on the
             # same line AND the surrounding window has no assignment/return.
-            if echo "$content" | grep -qE "${api}[[:space:]]*\([^;]*\)[[:space:]]*;"; then
-                # Still may be a call statement `rc = api(...);` — allowlist
-                # assignment/return forms, skip bare declarations.
-                if ! echo "$content" | grep -qE '(=|return|->|\.)'; then
-                    continue
-                fi
+            # Still may be a call statement `rc = api(...);` — allowlist
+            # assignment/return forms, skip bare declarations.
+            if echo "$content" | grep -qE "${api}[[:space:]]*\([^;]*\)[[:space:]]*;" \
+                && ! echo "$content" | grep -qE '(=|return|->|\.)'; then
+                continue
             fi
 
             # Ignore the API definition body (the function that IS the API)
