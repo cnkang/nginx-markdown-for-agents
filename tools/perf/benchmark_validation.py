@@ -588,14 +588,16 @@ def _path_metrics(
     streaming_ratio = streaming_hits / total_hits if total_hits > 0 else None
     fullbuffer_ratio = fullbuffer_hits / total_hits if total_hits > 0 else None
     requests_total = streaming.get("requests_total")
-    failopen_total = streaming.get("precommit_failopen_total")
+    streaming_fallback_total = streaming.get("fallback_total")
 
-    if _is_numeric_count(requests_total) and _is_numeric_count(failopen_total):
-        # _is_numeric_count rejects None; narrow for static analysis.
-        assert requests_total is not None and failopen_total is not None
+    if _is_numeric_count(requests_total) and _is_numeric_count(streaming_fallback_total):
+        # fallback_rate is the streaming-path fallback share:
+        # streaming_fallback_total / streaming_requests_total (1.0 when every
+        # request falls back).
+        assert requests_total is not None and streaming_fallback_total is not None
         if requests_total > 0:
-            fallback_rate = failopen_total / requests_total
-        elif failopen_total == 0:
+            fallback_rate = streaming_fallback_total / requests_total
+        elif streaming_fallback_total == 0:
             fallback_rate = 0.0
         else:
             fallback_rate = None
@@ -608,7 +610,7 @@ def _path_metrics(
         fullbuffer_hits,
         streaming_ratio,
         fullbuffer_ratio,
-    ), requests_total, failopen_total, fallback_rate, total_hits
+    ), requests_total, streaming_fallback_total, fallback_rate, total_hits
 
 
 def _normalise_path_hits(value: object) -> int | float:

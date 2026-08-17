@@ -406,10 +406,16 @@ def _check_entry(entry: dict, index: int, seen_ids: set, reasons: list) -> None:
 
     entry_id = entry.get("id")
     if entry_id is not None:
-        if entry_id in seen_ids:
+        if not isinstance(entry_id, str):
             reasons.append(
-                f"malformed: duplicate entry id {entry_id!r}")
-        seen_ids.add(entry_id)
+                f"malformed: entries[{index}] id must be a string"
+            )
+        elif entry_id in seen_ids:
+            reasons.append(
+                f"malformed: duplicate entry id {entry_id!r}"
+            )
+        else:
+            seen_ids.add(entry_id)
 
     status = entry.get("status")
     if status is not None and status not in VALID_STATUSES:

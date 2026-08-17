@@ -2458,6 +2458,20 @@ def _resolve_baseline(
                 "ERROR: checked-in module baseline is ineligible for "
                 f"release-gate comparison: {reason}"
             )
+            # Match _resolve_missing_baseline: build and emit the evidence
+            # pack and summary before failing so the failure is documented
+            # in the output artifact, not only on stderr.
+            evidence_pack = _build_evidence_pack(
+                report=report,
+                verdict="MISSING_EVIDENCE",
+                breaches=[{
+                    "metric": "baseline",
+                    "reason": f"release-tag baseline ineligible for comparison: {reason}",
+                }],
+                results=[],
+            )
+            _print_evidence_summary(evidence_pack)
+            _write_output(evidence_pack, args.output)
             return {}, False, EXIT_FAILURE
         _stderr(
             "INFO: Checked-in module baseline is excluded from release-gate "

@@ -316,6 +316,27 @@ EOF
             echo "FAIL: ${policy}/${handler}/${method}/satisfy_any_allow_wins: expected=200 actual=${unauth_status}" >&2
             fail_count=$((fail_count + 1))
           fi
+          # A client on 127.0.0.2 stays on loopback but is outside the
+          # allowlist, so the deny branch applies: satisfy_any cannot fall
+          # back to auth_basic without credentials, and the unauthenticated
+          # request is rejected with the expected_unauth status.
+          if [[ "${loopback_alias_available}" -eq 0 ]]; then
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+              "${policy}" "${handler}" "${method}" "unauthorized_skipped" \
+              "${expected_unauth}" "skipped" "${config_digest}" >> "${RESULT_TSV}"
+            continue
+          fi
+          if ! outside_status="$(curl -sS --interface 127.0.0.2 ${method_flag} \
+            -o /dev/null -w '%{http_code}' \
+            "http://127.0.0.1:${PORT}/${handler}" 2>/dev/null)"; then
+            outside_status=000
+          fi
+          if [[ "${outside_status}" != "${expected_unauth}" ]]; then
+            echo "FAIL: ${policy}/${handler}/${method}/unauthorized: expected=${expected_unauth} actual=${outside_status}" >&2
+            fail_count=$((fail_count + 1))
+          fi
+          printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "${policy}" "${handler}" "${method}" "unauthorized" "${expected_unauth}" "${outside_status}" "${config_digest}" >> "${RESULT_TSV}"
           ;;
         *)
           echo "FAIL: unsupported access policy=${policy}" >&2

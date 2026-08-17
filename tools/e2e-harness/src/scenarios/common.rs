@@ -123,6 +123,34 @@ pub fn header_value(headers: &reqwest::header::HeaderMap, name: &str) -> String 
         .to_string()
 }
 
+/// Parse Prometheus text-format sample lines whose metric name is exactly
+/// *family*, returning each sample as `(label_set, value)`.
+///
+/// The family match is boundary-precise: the character following the family
+/// name must be `{` (start of the label set) or whitespace, so a family never
+/// matches a longer metric name it merely prefixes. The value is the field
+/// immediately after the label set's closing brace (or after the metric name
+/// when there is no label set), never a trailing field that could be an
+/// optional timestamp.
+pub fn prometheus_samples(body: &str, family: &str) -> Vec<(String, f64)> {
+    body.lines()
+        .filter(|line| !line.starts_with('#'))
+        .filter_map(|line| {
+            let rest = line.strip_prefix(family)?;
+            let (labels, tail) = match rest.chars().next() {
+                Some('{') => {
+                    let close = rest.find('}')?;
+                    (rest[..=close].to_string(), &rest[close + 1..])
+                }
+                Some(c) if c.is_whitespace() => (String::new(), rest),
+                _ => return None,
+            };
+            let value = tail.split_whitespace().next()?.parse::<f64>().ok()?;
+            Some((labels, value))
+        })
+        .collect()
+}
+
 /// Check a converted Markdown body for a fixture token.
 ///
 /// The converter escapes underscores in ordinary text to prevent accidental

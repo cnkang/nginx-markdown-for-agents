@@ -55,6 +55,24 @@ def _normalize_tier(tier: str) -> str:
     return normalized
 
 
+def _normalize_target(target: str) -> str:
+    """Normalize a target to canonical architecture identity.
+
+    Matches the canonical identity logic from _matrix_entry_identity in
+    update_matrix.py: x86_64-* -> x86_64, aarch64-* -> aarch64.
+    """
+    normalized = {
+        "amd64": "x86_64",
+        "arm64": "aarch64",
+    }.get(target, target)
+    if isinstance(normalized, str):
+        if normalized.startswith("x86_64-"):
+            normalized = "x86_64"
+        elif normalized.startswith("aarch64-"):
+            normalized = "aarch64"
+    return normalized
+
+
 def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
     """
     Load matrix entries from a release-matrix JSON file and normalize their support tier.
@@ -74,9 +92,7 @@ def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
         (
             item["nginx_version"],
             item["libc"],
-            {"amd64": "x86_64", "arm64": "aarch64"}.get(
-                item["target"], item["target"]
-            ),
+            _normalize_target(item["target"]),
             _normalize_tier(item["support_tier"]),
         )
         for item in data.get("entries", [])

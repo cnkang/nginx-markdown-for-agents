@@ -156,7 +156,13 @@ def _validate_family_labels(
                 f"Family '{name}' label {index} must be an object"
             )
             continue
-        label_names.append(label.get("name"))
+        label_name = label.get("name")
+        if not isinstance(label_name, str) or not label_name:
+            errors.append(
+                f"Family '{name}' label {index} name must be a non-empty string"
+            )
+            continue
+        label_names.append(label_name)
     if len(label_names) != len(set(label_names)):
         errors.append(f"Family '{name}' has duplicate label names")
     forbidden = set(constraints.get("forbidden_labels", []))

@@ -156,17 +156,9 @@ fn assert_prometheus_sample(
     label_fragment: &str,
     body: &str,
 ) -> AssertionResult {
-    let found = body.lines().any(|line| {
-        let Some(sample) = line.strip_prefix(family) else {
-            return false;
-        };
-        sample.contains(label_fragment)
-            && sample
-                .split_whitespace()
-                .last()
-                .and_then(|value| value.parse::<f64>().ok())
-                .is_some_and(|value| value >= 1.0)
-    });
+    let found = common::prometheus_samples(body, family)
+        .iter()
+        .any(|(labels, value)| labels.contains(label_fragment) && *value >= 1.0);
     AssertionResult {
         name: name.to_string(),
         passed: found,
