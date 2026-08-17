@@ -370,7 +370,7 @@
                   },
                   "compression": {
                     "type": "string",
-                    "enum": ["none", "gzip", "deflate"],
+                    "enum": ["none", "gzip", "deflate", "brotli"],
                     "description": "Upstream compression type"
                   },
                   "transfer_encoding": {

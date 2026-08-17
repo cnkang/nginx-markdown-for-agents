@@ -6,6 +6,10 @@
     "platform": "linux-x86_64",
     "load_generator": "ab",
     "nginx_version": "nginx version: nginx/1.24.0",
+    "memory_slope": {
+      "rss_per_input_mb": 0.0,
+      "r_squared": 0.0
+    },
     "scenarios": [
       {
         "name": "plain-small",
@@ -118,7 +122,7 @@
           "fullbuffer_path_hits": 1030,
           "streaming_ratio": 0.0,
           "fullbuffer_ratio": 1.0,
-          "fallback_rate": 0.0,
+          "fallback_rate": 1.0,
           "streaming_fallback_total": 1030,
           "streaming_requests_total": 1030,
           "throughput_mbps": 1.968915,
