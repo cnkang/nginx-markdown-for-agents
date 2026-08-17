@@ -652,10 +652,12 @@ ngx_http_markdown_stream_postcommit_send_chain(
 #endif
     }
 
+#ifdef MARKDOWN_STREAMING_ENABLED
     if ((rc == NGX_OK || rc == NGX_DONE) && pending_output_bytes > 0) {
         ngx_http_markdown_metrics_record_postcommit_copied_delivery(
             pending_output_bytes);
     }
+#endif
 
     /* Rule 47: only latch terminal-delivered state after a successful
      * downstream return, never on NGX_AGAIN.
