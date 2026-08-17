@@ -600,14 +600,16 @@ def test_streaming_multi_delivery_conservation(requests):
 
 @settings(max_examples=200)
 @given(requests=mixed_workload_strategy)
-def test_no_event_counter_request_relation(requests):
+def test_event_counters_are_scenario_driven(requests):
     """
-    Property 10n: No relation is asserted between event counters
-    (streaming_events_total, decompression_events_total,
-    dynconf_reloads_total) and request counts.
+    Property 10n: Event counters (streaming_events_total,
+    decompression_events_total, dynconf_reloads_total) are scenario-driven
+    rather than proportional to the raw request count.
 
-    Event counters may be zero, less than, equal to, or greater than
-    request counts depending on scenarios.
+    Streaming events fire once per STREAMING_CONVERT request and
+    decompression events fire once per DECOMPRESS_FAIL request; a workload
+    without those scenarios leaves the counters at zero regardless of how
+    many requests it contains.
 
     **Validates: Requirements 5.6**
     """
@@ -615,9 +617,7 @@ def test_no_event_counter_request_relation(requests):
 
     # Concrete expected-counter checks derived from the request workload:
     # streaming events fire once per STREAMING_CONVERT request, and
-    # decompression events fire once per DECOMPRESS_FAIL request.  The
-    # counters are scenario-driven, not proportional to the raw request
-    # total (a workload without those scenarios leaves them at zero).
+    # decompression events fire once per DECOMPRESS_FAIL request.
     expected_streaming = sum(
         1 for req in requests if req.scenario == RequestScenario.STREAMING_CONVERT
     )
@@ -627,12 +627,6 @@ def test_no_event_counter_request_relation(requests):
     assert snapshot.streaming_events_total == expected_streaming
     assert snapshot.decompression_events_total == expected_decomp
     assert snapshot.dynconf_reloads_total >= 0
-
-    # No relation is asserted between event counters and the request total:
-    # a workload with zero streaming/decompression scenarios keeps those
-    # counters at zero regardless of the request count.
-    assert snapshot.streaming_events_total <= len(requests)
-    assert snapshot.decompression_events_total <= len(requests)
 
 
 @settings(max_examples=200)

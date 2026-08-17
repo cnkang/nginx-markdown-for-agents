@@ -40,6 +40,7 @@ SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 FINAL_EVIDENCE_SCHEMA = "schemas/final-evidence-manifest.schema.json"
 OBSERVATION_STATE_SCHEMA = "schemas/observation-state.schema.json"
 SHORT_SOAK_SCOPE = "release/scope/short-soak-scope.json"
+CANONICAL_PERF_ENV = "release/performance/canonical-environment.json"
 
 TRACKED_RELEASE_INPUTS = (
     "artifacts/release/0.9.2/official-build-feature-manifest.json",
@@ -53,6 +54,7 @@ TRACKED_RELEASE_INPUTS = (
     "release/scope/fuzz-scope.json",
     "release/scope/corpus-scope.json",
     SHORT_SOAK_SCOPE,
+    CANONICAL_PERF_ENV,
     "components/rust-converter/include/markdown_converter.h",
 )
 
@@ -161,11 +163,10 @@ def build_candidate_manifest(candidate_sha: str, created_at: str) -> dict:
     matrix_digest = _sha256_file(REPO_ROOT / "docs/releases/release-matrix.json")
     ffi_digest = _sha256_file(ABI_HEADER)
     # The canonical performance environment (NGINX version, runner, rust
-    # toolchain, identity contract) is the authoritative provenance for the
-    # blocking perf evidence; short-soak-scope.json is a different artifact.
-    performance_digest = _sha256_file(
-        REPO_ROOT / "release/performance/canonical-environment.json"
-    )
+    # toolchain, identity contract) is a tracked release input whose digest
+    # is folded into input_digests; short-soak-scope.json is a different
+    # artifact.
+    performance_digest = input_digests[CANONICAL_PERF_ENV]
     return {
         "schema_version": "release.candidate-sha-manifest.v1",
         "candidate_sha": candidate_sha,
@@ -347,7 +348,7 @@ def build_final_evidence(candidate_sha: str, generated_at: str) -> tuple[dict, d
             "domain": "performance",
             "blocking": True,
             "status": "pass" if performance_pass else "fail",
-            "artifact_ref": "artifacts/release/0.9.2/performance-qualification-report.json",
+            "artifact_ref": "perf/reports/evidence-092.json",
         },
         {
             "domain": "fuzz",
@@ -424,7 +425,7 @@ def build_final_evidence(candidate_sha: str, generated_at: str) -> tuple[dict, d
             },
             "performance": {
                 "per_scenario_budgets": [],
-                "baseline_ref": "artifacts/release/0.9.2/performance-qualification-report.json",
+                "baseline_ref": "perf/reports/evidence-092.json",
             },
             "fuzz": {
                 "blocking_targets": [],

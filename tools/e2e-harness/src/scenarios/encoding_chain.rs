@@ -336,7 +336,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         format!(
             "status={} content_encoding={} bytes={}",
             truncated.status,
-            truncated.headers.contains_key("Content-Encoding"),
+            common::header_value(&truncated.headers, "Content-Encoding"),
             truncated.body.len()
         ),
     );

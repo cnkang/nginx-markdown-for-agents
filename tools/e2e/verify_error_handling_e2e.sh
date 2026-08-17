@@ -9,8 +9,8 @@ set -euo pipefail
 #  3) Malformed HTML input does not crash
 #  4) Upstream 5xx errors are not converted
 #  5) 206 Partial Content is not converted
-#  6) markdown_limits conversion_memory= boundary: exactly at limit converts,
-#     over limit fail-opens
+#  6) markdown_limits conversion_memory= boundary: under-limit response
+#     converts, over-limit response fail-opens
 #  7) Metrics endpoint is reachable
 
 NGINX_VERSION="${NGINX_VERSION:-1.28.2}"

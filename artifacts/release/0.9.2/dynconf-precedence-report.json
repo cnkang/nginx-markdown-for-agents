@@ -1,0 +1,98 @@
+{
+  "$id": "dynconf-precedence-v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "allowed_provenance": [
+    "request_variable",
+    "static",
+    "dynconf",
+    "http_baseline",
+    "default"
+  ],
+  "contract_source": "schemas/dynconf-precedence-v1.json",
+  "description": "Canonical precedence and provenance contract for dynconf-mutable fields.",
+  "field_specific_provenance_rules": {
+    "fields": {
+      "error_policy": {
+        "allowed_provenance": [
+          "static",
+          "dynconf",
+          "http_baseline",
+          "default"
+        ]
+      },
+      "filter": {
+        "allowed_provenance": [
+          "request_variable",
+          "static",
+          "dynconf",
+          "http_baseline",
+          "default"
+        ]
+      },
+      "log_verbosity": {
+        "allowed_provenance": [
+          "static",
+          "dynconf",
+          "http_baseline",
+          "default"
+        ]
+      },
+      "prune_noise": {
+        "allowed_provenance": [
+          "static",
+          "dynconf",
+          "http_baseline",
+          "default"
+        ]
+      },
+      "streaming_buffer": {
+        "allowed_provenance": [
+          "static",
+          "dynconf",
+          "http_baseline",
+          "default"
+        ]
+      }
+    }
+  },
+  "five_tier_precedence_hierarchy": [
+    {
+      "description": "NGINX request variable evaluation (e.g., markdown_filter $var)",
+      "scope": "filter only",
+      "source": "request_variable",
+      "tier": 1
+    },
+    {
+      "description": "Server/location explicit static configuration (block bit set)",
+      "scope": "server/location explicit",
+      "source": "static",
+      "tier": 2
+    },
+    {
+      "description": "Dynconf runtime override (block bit NOT set)",
+      "scope": "where block bit NOT set",
+      "source": "dynconf",
+      "tier": 3
+    },
+    {
+      "description": "Inherited http baseline (http-block merged value)",
+      "scope": "http block",
+      "source": "http_baseline",
+      "tier": 4
+    },
+    {
+      "description": "Built-in default (compile-time default)",
+      "scope": "compile-time",
+      "source": "default",
+      "tier": 5
+    }
+  ],
+  "generator": "generate_schema_artifacts.py",
+  "implementation_sources": [
+    "schemas/dynconf.schema.json",
+    "components/rust-converter/src/dynconf/schema.rs",
+    "components/nginx-module/src/ngx_http_markdown_dynconf_precedence.h"
+  ],
+  "schema_version": 1,
+  "title": "nginx-markdown-for-agents Dynamic Configuration Precedence v1 Contract"
+}

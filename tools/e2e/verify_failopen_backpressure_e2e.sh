@@ -210,6 +210,25 @@ print(int(match.group(1)) * units[match.group(2)] + 4096)
     echo "ERROR: unable to parse MARKDOWN_MAX_SIZE=${MARKDOWN_MAX_SIZE}" >&2
     exit 1
 fi
+
+# Keep streaming_buffer well above conversion_memory so the padded fail-open
+# fixtures (conversion_memory + 4096) exceed only the conversion budget and
+# never the streaming buffer. Fail-open is then driven by conversion_memory
+# alone, matching the "exceeds conversion_memory" comment on the fixtures.
+if ! MARKDOWN_STREAMING_BUFFER="$(MARKDOWN_MAX_SIZE_VALUE="${MARKDOWN_MAX_SIZE}" python3 -c '
+import os
+import re
+
+raw = os.environ["MARKDOWN_MAX_SIZE_VALUE"].strip().lower()
+match = re.fullmatch(r"([0-9]+)([kmgt]?)", raw)
+if match is None:
+    raise SystemExit(f"invalid MARKDOWN_MAX_SIZE: {raw!r}")
+units = {"": 1, "k": 1024, "m": 1024**2, "g": 1024**3, "t": 1024**4}
+print(int(match.group(1)) * units[match.group(2)] * 8)
+')"; then
+    echo "ERROR: unable to derive MARKDOWN_STREAMING_BUFFER" >&2
+    exit 1
+fi
 python3 -c "
 import sys
 body = '<h1>Title</h1>' + '<p>' + 'x' * 200 + '</p>\n' * 20
@@ -332,7 +351,7 @@ http {
             proxy_http_version 1.1;
 
             markdown_filter on;
-            markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_memory=${MARKDOWN_MAX_SIZE} streaming_buffer=${MARKDOWN_MAX_SIZE} conversion_timeout=120s;
+            markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_memory=${MARKDOWN_MAX_SIZE} streaming_buffer=${MARKDOWN_STREAMING_BUFFER} conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_streaming force;
         }

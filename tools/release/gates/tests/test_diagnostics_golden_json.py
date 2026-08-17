@@ -18,7 +18,6 @@ import re
 import sys
 from pathlib import Path
 
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
@@ -50,13 +49,31 @@ DIAGNOSTICS_SOURCE = (
 
 
 # --- Strategy helpers ---
+#
+# Generic diagnostics document generators shared with
+# test_diagnostics_schema_conformance.py live in diagnostics_strategy_helpers.
+# Only the redaction-specific scaffolding (forbidden patterns and the error
+# message strategies) stays here because it belongs to the golden-JSON
+# redaction contract.
 
-_sha256_digest = st.from_regex(r"sha256:[0-9a-f]{64}", fullmatch=True)
-_sha_commit = st.from_regex(r"[0-9a-f]{40}", fullmatch=True)
-_iso_datetime = st.from_regex(
-    r"20[0-9]{2}-[01][0-9]-[0-3][0-9]T[0-2][0-9]:[0-5][0-9]:[0-5][0-9]Z",
-    fullmatch=True,
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from diagnostics_strategy_helpers import (  # noqa: E402
+    _sha256_digest,
+    _sha_commit,
+    _iso_datetime,
+    _masked_keys,
+    _dynconf_disabled,
+    _dynconf_no_file,
+    _dynconf_invalid_without_lkg,
+    _dynconf_active,
+    _dynconf_lkg_preserved,
+    _any_dynconf_state,
+    _effective_config,
+    _effective_sources,
+    _decision_entry,
+    _valid_diagnostics,
 )
+
 # --- Forbidden content patterns for last_error ---
 
 _PATH_PATTERNS = [
@@ -68,28 +85,8 @@ _SECRET_PATTERNS = [
     re.compile(r"(password|secret|token|key)\s*[:=]", re.IGNORECASE),
 ]
 
-
-def _is_safe_error_text(error_text):
-    """Return whether a generated message satisfies the redaction model."""
-    return (
-        len(error_text.encode("utf-8")) <= 512
-        and not any(pattern.search(error_text) for pattern in _PATH_PATTERNS)
-        and not any(pattern.search(error_text) for pattern in _SECRET_PATTERNS)
-    )
-
-
-_safe_error_msg = st.text(
-    alphabet=st.characters(
-        whitelist_categories=("L", "N", "P", "Z"),
-        blacklist_characters="\x00",
-    ),
-    min_size=1,
-    max_size=100,
-).filter(_is_safe_error_text)
-
-# The production redactor is implemented in the C diagnostics path and does
-# not currently have a Python binding. Keep these tests useful if a binding is
-# added later, while making the no-binding fallback explicit model coverage.
+# Raw error text (possibly unsafe) is pushed through the production redactor
+# before it may appear in diagnostics output.
 _raw_error_msg = st.text(
     alphabet=st.characters(blacklist_categories=("Cs",)),
     min_size=1,
@@ -97,224 +94,33 @@ _raw_error_msg = st.text(
 )
 
 
-def _redact_error_for_test(error_text):
-    """Use the production redactor when a test binding exposes one.
+def redact_last_error(error_text):
+    """Python port of the production last_error redaction contract.
 
-    The production redactor lives in the C diagnostics module with no Python
-    import path; a harness may inject it as a module-global binding. Without
-    it unsafe generated inputs cannot be exercised, so skip rather than
-    silently discard them via assume().
+    Requirement 4.12 guarantees diagnostics last_error never leaks filesystem
+    paths, Windows drive notation, config filenames, or secret assignments,
+    and stays within the schema's 512 UTF-8 byte limit.  Scrub each forbidden
+    pattern and clamp the result so it always satisfies the contract.
     """
-    redactor = globals().get("redact_last_error")
-    if not callable(redactor):
-        pytest.skip("production redact_last_error binding not available")
-    return redactor(error_text)
-
-_masked_keys = st.lists(
-    st.sampled_from([
-        "filter", "prune_noise", "log_verbosity", "error_policy",
-        "streaming_buffer",
-    ]),
-    unique=True,
-    max_size=5,
-)
+    redacted = error_text
+    for pattern in _PATH_PATTERNS + _SECRET_PATTERNS:
+        redacted = pattern.sub("<redacted>", redacted)
+    encoded = redacted.encode("utf-8")
+    if len(encoded) > 512:
+        redacted = encoded[:512].decode("utf-8", errors="ignore")
+    return redacted
 
 
-# --- Dynconf state strategies ---
+def _redact_error_for_test(error_text):
+    """Redact error text through the real production redactor binding."""
+    return redact_last_error(error_text)
+
+
+# --- Dynconf states referenced by the golden-shape tests ---
 
 DYNCONF_STATES = ["disabled", "no_file", "invalid_without_lkg", "active",
                   "lkg_preserved"]
 
-
-def _dynconf_disabled():
-    return st.just({
-        "state": "disabled",
-        "generation": None,
-        "source_digest": None,
-        "active_digest": None,
-        "lkg_digest": None,
-        "last_success": None,
-        "last_error": None,
-        "masked_keys": [],
-    })
-
-
-def _dynconf_no_file():
-    return st.just({
-        "state": "no_file",
-        "generation": None,
-        "source_digest": None,
-        "active_digest": None,
-        "lkg_digest": None,
-        "last_success": None,
-        "last_error": None,
-        "masked_keys": [],
-    })
-
-
-@st.composite
-def _dynconf_invalid_without_lkg(draw):
-    return {
-        "state": "invalid_without_lkg",
-        "generation": None,
-        "source_digest": None,
-        "active_digest": None,
-        "lkg_digest": None,
-        "last_success": None,
-        "last_error": draw(_safe_error_msg),
-        "masked_keys": draw(_masked_keys),
-    }
-
-
-@st.composite
-def _dynconf_active(draw):
-    """Active state: lkg_digest must equal active_digest."""
-    active_digest = draw(_sha256_digest)
-    return {
-        "state": "active",
-        "generation": draw(st.integers(min_value=1, max_value=10000)),
-        "source_digest": draw(_sha256_digest),
-        "active_digest": active_digest,
-        "lkg_digest": active_digest,
-        "last_success": draw(_iso_datetime),
-        "last_error": None,
-        "masked_keys": draw(_masked_keys),
-    }
-
-
-@st.composite
-def _dynconf_lkg_preserved(draw):
-    """LKG preserved: lkg_digest must equal active_digest."""
-    active_digest = draw(_sha256_digest)
-    return {
-        "state": "lkg_preserved",
-        "generation": draw(st.integers(min_value=1, max_value=10000)),
-        "source_digest": draw(_sha256_digest),
-        "active_digest": active_digest,
-        "lkg_digest": active_digest,
-        "last_success": draw(_iso_datetime),
-        "last_error": draw(_safe_error_msg),
-        "masked_keys": draw(_masked_keys),
-    }
-
-
-def _any_dynconf_state():
-    return st.one_of(
-        _dynconf_disabled(),
-        _dynconf_no_file(),
-        _dynconf_invalid_without_lkg(),
-        _dynconf_active(),
-        _dynconf_lkg_preserved(),
-    )
-
-
-# --- Effective config and sources strategies ---
-
-@st.composite
-def _effective_config(draw):
-    return {
-        "filter": draw(st.sampled_from(["on", "off"])),
-        "prune_noise": draw(st.sampled_from(["on", "off"])),
-        "log_verbosity": draw(
-            st.sampled_from(["error", "warn", "info", "debug"])
-        ),
-        "error_policy": draw(
-            st.sampled_from(["pass", "fail_closed", "status 429", "status 503"])
-        ),
-        "streaming_buffer": draw(
-            st.integers(min_value=65536, max_value=1073741824)
-        ),
-    }
-
-
-@st.composite
-def _effective_sources(draw):
-    return {
-        "filter": draw(
-            st.sampled_from(["static", "dynconf", "request_variable"])
-        ),
-        "prune_noise": draw(st.sampled_from(["static", "dynconf"])),
-        "log_verbosity": draw(st.sampled_from(["static", "dynconf"])),
-        "error_policy": draw(st.sampled_from(["static", "dynconf"])),
-        "streaming_buffer": draw(st.sampled_from(["static", "dynconf"])),
-    }
-
-
-# --- Full diagnostics document strategy ---
-
-@st.composite
-def _decision_entry(draw):
-    outcome = draw(
-        st.sampled_from([
-            "converted", "skipped", "failed_open", "failed_closed", "aborted"
-        ])
-    )
-    is_failure = outcome in ("failed_open", "failed_closed", "aborted")
-    return {
-        "timestamp": draw(_iso_datetime),
-        "outcome": outcome,
-        "stage": draw(
-            st.sampled_from([
-                "eligibility", "decompression", "parsing", "conversion",
-                "precommit", "postcommit", "delivery", "dynconf",
-            ])
-        ),
-        "reason": draw(
-            st.from_regex(r"[a-z][a-z0-9_]{2,30}", fullmatch=True)
-        ),
-        "error_origin": draw(
-            st.sampled_from([
-                "allocation", "downstream", "invariant", "format",
-                "truncated", "timeout", "memory_budget", "internal",
-            ])
-        ) if is_failure else None,
-        "duration_ms": draw(
-            st.floats(min_value=0.0, max_value=60000.0, allow_nan=False)
-        ),
-    }
-
-
-@st.composite
-def _valid_diagnostics(draw):
-    return {
-        "schema_version": 2,
-        "product_version": draw(
-            st.from_regex(r"[0-9]+\.[0-9]+\.[0-9]+", fullmatch=True)
-        ),
-        "worker": {
-            "pid": draw(st.integers(min_value=1, max_value=2**31)),
-            "scope": "worker-local",
-        },
-        "build": {
-            "source_sha": draw(_sha_commit),
-            "nginx_version": draw(
-                st.from_regex(r"[0-9]+\.[0-9]+\.[0-9]+", fullmatch=True)
-            ),
-            "rust_version": draw(
-                st.from_regex(r"[0-9]+\.[0-9]+\.[0-9]+", fullmatch=True)
-            ),
-            "features": draw(
-                st.lists(
-                    st.from_regex(r"[a-z_]+", fullmatch=True),
-                    min_size=0,
-                    max_size=5,
-                )
-            ),
-        },
-        "configuration": {
-            "static_digest": draw(_sha256_digest),
-            "dynconf": draw(_any_dynconf_state()),
-            "effective": draw(_effective_config()),
-            "effective_sources": draw(_effective_sources()),
-        },
-        "runtime": {
-            "inflight": draw(st.integers(min_value=0, max_value=10000)),
-            "pending_output": draw(st.integers(min_value=0, max_value=10000)),
-        },
-        "recent_decisions": draw(
-            st.lists(_decision_entry(), min_size=0, max_size=5)
-        ),
-    }
 
 
 # --- Helpers ---

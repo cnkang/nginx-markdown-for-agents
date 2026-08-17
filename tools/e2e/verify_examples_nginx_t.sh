@@ -374,8 +374,7 @@ if [[ -f "${CONFIGMAP_YAML}" ]]; then
             ;;
         esac
       done
-  PREPARED_CONF="${RUNTIME_DIR}/configmap_test.conf"
-  PREPARED_HANDLE=0
+  PREPARED_RAW="${RUNTIME_DIR}/configmap_test.raw.conf"
   {
     echo "worker_processes 1;"
     echo "error_log logs/error.log crit;"
@@ -389,22 +388,15 @@ if [[ -f "${CONFIGMAP_YAML}" ]]; then
     echo "        location / { return 200 'ok'; }"
     echo "    }"
     echo "}"
-  } > "${PREPARED_CONF}"
+  } > "${PREPARED_RAW}"
   if [[ ! -s "${CM_MAIN}" && ! -s "${CM_HTTP}" ]]; then
     echo "FAIL: configmap extraction produced no directives (CM_MAIN and CM_HTTP empty)" >&2
     exit 1
   fi
-  if [[ -n "${MODULE_SO}" ]]; then
-    escaped_module_so="$(escape_sed_replacement "${MODULE_SO}")"
-    sed_in_place "s|^([[:space:]]*)load_module[[:space:]]+[^;]*;|\1load_module ${escaped_module_so};|" \
-      "${PREPARED_CONF}"
-    if has_load_module "${PREPARED_CONF}"; then
-      PREPARED_HANDLE=1
-    fi
-  else
-    sed_in_place '/^[[:space:]]*load_module[[:space:]]/s/^/#/' \
-      "${PREPARED_CONF}"
-  fi
+  # sandbox_conf applies the path/cache/platform rewrites and rewrites the
+  # load_module path to the built module (or comments it out). prepare_file_conf
+  # also records whether the assembled config itself loads the module.
+  prepare_file_conf "${PREPARED_RAW}"
   check_conf "kubernetes/configmap (data section)" pass || true
 else
   echo "ERROR: missing ${CONFIGMAP_YAML}" >&2

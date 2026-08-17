@@ -33,6 +33,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 from lib.path_validation import validate_read_path  # noqa: E402
+from lib.executable_validation import resolve_approved_executable  # noqa: E402
 
 SCHEMA_VERSION = "release.evidence-manifest.v1"
 
@@ -79,9 +80,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def _git_head_sha() -> str | None:
     """Return the repository HEAD SHA, or None when not resolvable."""
+    git = resolve_approved_executable("git")
+    if git is None:
+        return None
     try:
         proc = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
+            [git, "rev-parse", "HEAD"],
             capture_output=True, text=True, timeout=10,
             cwd=REPO_ROOT,
         )

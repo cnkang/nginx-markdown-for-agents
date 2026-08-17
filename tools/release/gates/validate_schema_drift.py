@@ -330,10 +330,17 @@ def _check_dynconf_streaming_buffer(schema_props: dict) -> list[str]:
         return []
     contract = _load_json(DIAGNOSTICS_FIELD_CONTRACT)
     schema_field = schema_props.get("streaming_buffer", {})
-    contract_field = contract.get("effective_fields", {}).get(
-        "streaming_buffer", {}
-    )
+    if not isinstance(schema_field, dict):
+        return ["dynconf streaming_buffer malformed: schema entry is not an object"]
+    effective_fields = contract.get("effective_fields")
+    if not isinstance(effective_fields, dict):
+        return ["dynconf streaming_buffer missing-contract: effective_fields absent or malformed"]
+    contract_field = effective_fields.get("streaming_buffer")
+    if not isinstance(contract_field, dict):
+        return ["dynconf streaming_buffer missing-contract: streaming_buffer entry absent or malformed"]
     bounds = contract_field.get("bounds", {})
+    if not isinstance(bounds, dict):
+        return ["dynconf streaming_buffer malformed: bounds is not an object"]
     errors = []
     if bounds.get("minimum") != schema_field.get("minimum"):
         errors.append(

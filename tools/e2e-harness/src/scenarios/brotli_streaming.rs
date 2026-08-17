@@ -365,29 +365,22 @@ fn metric_value(base_url: &str, name: &str) -> Result<u64> {
         other => return Err(anyhow::anyhow!("unsupported metric name: {other}")),
     };
     let mut matched_samples = 0_u64;
-    let value = response
-        .body
-        .lines()
-        .filter(|line| line.starts_with(family) && !line.starts_with('#'))
+    let value = common::prometheus_samples(&response.body, family)
+        .into_iter()
         // Match required labels independently: each required fragment must
         // appear in the sample's label set.  Relying on one combined label
         // string breaks if the renderer orders labels differently.
-        .filter(|line| {
+        .filter(|(labels, _)| {
             label.map_or(true, |required| {
-                required.split(',').all(|part| line.contains(part.trim()))
+                required.split(',').all(|part| labels.contains(part.trim()))
             })
         })
-        // The sample value is the field immediately following the metric
-        // identifier (family + label set); never the last whitespace field,
-        // which may be a trailing artifact.
-        .filter_map(|line| line.split_whitespace().nth(1))
-        .filter_map(|sample| {
-            let value = sample.parse::<f64>().ok()?;
-            if !value.is_finite() || value < 0.0 {
+        .filter_map(|(_, sample_value)| {
+            if !sample_value.is_finite() || sample_value < 0.0 {
                 return None;
             }
             matched_samples += 1;
-            Some(value)
+            Some(sample_value)
         })
         .sum::<f64>();
     if matched_samples > 0 {
