@@ -1223,7 +1223,7 @@ class TestReportSchemaConformance:
     def test_compression_enum_values(self):
         """compression field enum covers all valid types."""
         self._assert_schema_enum_values(
-            "compression", "none", "gzip", "deflate"
+            "compression", "none", "gzip", "deflate", "brotli"
         )
 
     def _assert_schema_enum_values(self, prop_name, *expected_values):
