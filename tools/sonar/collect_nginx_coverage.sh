@@ -1385,8 +1385,13 @@ check_prometheus_response() {
   local -a curl_args
 
   curl_args=(-sS -D "${header_file}" -o "${body_file}")
-  if [[ $# -ge 1 ]]; then
+  if [[ -n "${accept_header}" ]]; then
     curl_args+=(-H "${accept_header}")
+  else
+    # No Accept header requested: pass an explicit empty Accept header so
+    # curl does not add its default, making the two cases distinguishable
+    # at the endpoint.
+    curl_args+=(-H 'Accept:')
   fi
   if ! status="$(curl "${curl_args[@]}" \
     "http://127.0.0.1:${PORT}/metrics-prometheus" -w '%{http_code}' 2>/dev/null)"; then

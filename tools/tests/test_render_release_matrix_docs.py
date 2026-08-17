@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import unittest.mock
 from pathlib import Path
 
 # Add tools/ to path so we can import the module
@@ -372,23 +373,34 @@ def test_validate_schema_rejects_malformed_entry():
     assert errors
 
 
-def test_check_file_reports_missing_registered_target(monkeypatch):
+def test_check_file_reports_missing_registered_target():
     """A registered but absent target is a check failure."""
     with tempfile.TemporaryDirectory() as temp_dir:
-        monkeypatch.setattr(rmd, "ROOT", Path(temp_dir))
-        monkeypatch.setattr(rmd, "SECTION_REGISTRY", {"missing.md": ["support-matrix"]})
-        errors = rmd.check_file("missing.md", [], MINIMAL_MATRIX)
-        assert errors == ["missing.md: target file not found"]
+        # unittest.mock.patch.object instead of the pytest-only monkeypatch
+        # fixture so the custom no-argument runner executes identically to
+        # pytest.
+        with (
+            unittest.mock.patch.object(rmd, "ROOT", Path(temp_dir)),
+            unittest.mock.patch.object(
+                rmd, "SECTION_REGISTRY", {"missing.md": ["support-matrix"]}
+            ),
+        ):
+            errors = rmd.check_file("missing.md", [], MINIMAL_MATRIX)
+            assert errors == ["missing.md: target file not found"]
 
 
-def test_check_file_reports_target_without_markers(monkeypatch):
+def test_check_file_reports_target_without_markers():
     """A registered target without markers cannot be considered synchronized."""
     with tempfile.TemporaryDirectory() as temp_dir:
-        monkeypatch.setattr(rmd, "ROOT", Path(temp_dir))
-        monkeypatch.setattr(rmd, "SECTION_REGISTRY", {"plain.md": ["support-matrix"]})
-        Path(temp_dir, "plain.md").write_text("# no generated section\n")
-        errors = rmd.check_file("plain.md", [], MINIMAL_MATRIX)
-        assert errors == ["plain.md: no release-matrix markers"]
+        with (
+            unittest.mock.patch.object(rmd, "ROOT", Path(temp_dir)),
+            unittest.mock.patch.object(
+                rmd, "SECTION_REGISTRY", {"plain.md": ["support-matrix"]}
+            ),
+        ):
+            Path(temp_dir, "plain.md").write_text("# no generated section\n")
+            errors = rmd.check_file("plain.md", [], MINIMAL_MATRIX)
+            assert errors == ["plain.md: no release-matrix markers"]
 
 
 # ---------------------------------------------------------------------------

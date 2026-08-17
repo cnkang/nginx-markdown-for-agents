@@ -132,7 +132,14 @@ while IFS= read -r -d '' file; do
 
             # 3. A return immediately after the call without NGX_AGAIN mention.
             immediate_return=0
-            next_lines=$(echo "$surrounding_code" | sed -n "$(($(echo "$surrounding_code" | wc -l | tr -d ' ') - 6)),\$p")
+            # Clamp the sed start address to >= 1 so a short window near
+            # the top of the file cannot produce an invalid address 0.
+            total_lines=$(echo "$surrounding_code" | wc -l | tr -d ' ')
+            start_line=$((total_lines - 6))
+            if [ "$start_line" -lt 1 ]; then
+                start_line=1
+            fi
+            next_lines=$(echo "$surrounding_code" | sed -n "${start_line},\$p")
             if echo "$next_lines" | grep -qE '^[[:space:]]*return[[:space:]]+(rc|[a-z_]+);'; then
                 immediate_return=1
             fi

@@ -269,7 +269,7 @@ def _validate_readme(errors: list[str], readme_text: str) -> None:
 
 def _check_duplicate_keys(errors: list[str], domain: str, keys: list[str]) -> None:
     """Detect duplicate keys before a dict comprehension silently overwrites
-    them (run12 MINOR: duplicate-key detection in contract map construction)."""
+    them (duplicate-key detection in contract map construction)."""
     seen: set[str] = set()
     for key in keys:
         if key in seen:

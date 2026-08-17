@@ -100,6 +100,30 @@ def _validate_legacy_keys(index: int, entry: dict) -> list[str]:
     return []
 
 
+def _track_legacy_keys(
+    index: int,
+    entry: object,
+    seen: dict[str, int],
+    errors: list[str],
+) -> None:
+    """Record legacy reason aliases, flagging cross-entry duplicates."""
+    if not isinstance(entry, dict):
+        return
+    legacy_keys = entry.get("legacy_keys")
+    if not isinstance(legacy_keys, list):
+        return  # malformed value already flagged by _validate_legacy_keys
+    for alias in legacy_keys:
+        if not isinstance(alias, str):
+            continue  # malformed alias already flagged
+        if alias in seen:
+            errors.append(
+                f"duplicate legacy reason key {alias!r}: "
+                f"entries {seen[alias]} and {index}"
+            )
+        else:
+            seen[alias] = index
+
+
 def _validate_discriminant(
     index: int,
     discriminant: object,
@@ -227,15 +251,7 @@ def _validate_reasons(reasons: object) -> list[str]:
                 index, entry, seen_discriminants, seen_keys
             )
         )
-        if isinstance(entry, dict):
-            for alias in entry.get("legacy_keys", []):
-                if alias in seen_legacy_keys:
-                    errors.append(
-                        f"duplicate legacy reason key {alias!r}: "
-                        f"entries {seen_legacy_keys[alias]} and {index}"
-                    )
-                else:
-                    seen_legacy_keys[alias] = index
+        _track_legacy_keys(index, entry, seen_legacy_keys, errors)
 
     expected = set(range(len(reasons)))
     actual = set(seen_discriminants)

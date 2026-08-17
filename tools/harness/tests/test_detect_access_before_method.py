@@ -15,16 +15,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import detect_access_before_method as module
 
 
-def _audit_text(content: str):
-    path = (
-        Path(module.__file__).resolve().parents[1]
-        / "_fixture_access_before_method.c"
-    )
+def _audit_text(content: str, tmp_path: Path):
+    path = tmp_path / "_fixture_access_before_method.c"
     path.write_text(content, encoding="utf-8")
     try:
         return module.audit_file(path)
     finally:
-        path.unlink()
+        path.unlink(missing_ok=True)
 
 
 CLEAN_HANDLER = """\
@@ -89,24 +86,24 @@ ngx_http_markdown_diagnostics_parse(ngx_str_t *s, ngx_int_t *value)
 """
 
 
-def test_clean_handler_passes() -> None:
-    violations, reviews = _audit_text(CLEAN_HANDLER)
+def test_clean_handler_passes(tmp_path) -> None:
+    violations, reviews = _audit_text(CLEAN_HANDLER, tmp_path)
     assert violations == []
     assert reviews == []
 
 
-def test_bad_order_is_violation() -> None:
-    violations, _ = _audit_text(BAD_ORDER_HANDLER)
+def test_bad_order_is_violation(tmp_path) -> None:
+    violations, _ = _audit_text(BAD_ORDER_HANDLER, tmp_path)
     assert any("BEFORE access" in v for v in violations)
 
 
-def test_no_reject_handler_exempt() -> None:
-    violations, reviews = _audit_text(NO_REJECT_HANDLER)
+def test_no_reject_handler_exempt(tmp_path) -> None:
+    violations, reviews = _audit_text(NO_REJECT_HANDLER, tmp_path)
     assert violations == []
     assert reviews == []
 
 
-def test_non_handler_skipped() -> None:
-    violations, reviews = _audit_text(NON_HANDLER)
+def test_non_handler_skipped(tmp_path) -> None:
+    violations, reviews = _audit_text(NON_HANDLER, tmp_path)
     assert violations == []
     assert reviews == []

@@ -63,12 +63,15 @@ def _function_bodies(text: str):
 
 # Tokenizer for brace matching: line comments, block comments, string and
 # char literals, and braces.  Non-greedy alternation keeps scanning linear.
+# DOTALL lets the block-comment branch span newlines so braces inside
+# multi-line comments cannot corrupt the brace balance.
 _TOKEN_RE = re.compile(
     r"//[^\n]*"
     r"|/\*.*?\*/"
     r'|"(?:\\.|[^"\\])*"'
     r"|'(?:\\.|[^'\\])*'"
-    r"|[{}]"
+    r"|[{}]",
+    flags=re.DOTALL,
 )
 
 

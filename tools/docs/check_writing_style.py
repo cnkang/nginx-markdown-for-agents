@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import shutil
 import subprocess
 import sys
 from collections import Counter
@@ -415,22 +416,39 @@ def _lines_with_offsets(text: str) -> Iterator[tuple[int, str]]:
         offset += len(line)
 
 
+def _require_git() -> str:
+    """Return the git executable path, or raise a clear error when git is
+    missing from PATH.
+
+    Shared pre-check for the git-dependent helpers so a missing git never
+    surfaces as a raw FileNotFoundError from subprocess.run.
+    """
+    git = shutil.which("git")
+    if git is None:
+        raise RuntimeError(
+            "git executable not found on PATH; --changed and --base modes "
+            "need git to compare maintained docs against repository history"
+        )
+    return git
+
+
 def _changed_md_files(base: str) -> list[Path]:
     """Maintained .md files changed since base (working tree + staged + untracked)."""
+    git = _require_git()
     out = subprocess.run(
-        ["git", "diff", "--name-only", base, "--", "*.md"],
+        [git, "diff", "--name-only", base, "--", "*.md"],
         cwd=ROOT,
         capture_output=True,
         text=True,
     )
     cached = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--", "*.md"],
+        [git, "diff", "--cached", "--name-only", "--", "*.md"],
         cwd=ROOT,
         capture_output=True,
         text=True,
     )
     untracked = subprocess.run(
-        ["git", "ls-files", "--others", "--exclude-standard", "--", "*.md"],
+        [git, "ls-files", "--others", "--exclude-standard", "--", "*.md"],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -451,11 +469,12 @@ def _changed_md_files(base: str) -> list[Path]:
 
 def _base_warning_counts(files: list[Path], base: str) -> dict[Path, Counter]:
     """Warning counts for the base revision of each file (empty for new files)."""
+    git = _require_git()
     counts: dict[Path, Counter] = {}
     for f in files:
         rel = f.relative_to(ROOT).as_posix()
         out = subprocess.run(
-            ["git", "show", f"{base}:{rel}"],
+            [git, "show", f"{base}:{rel}"],
             cwd=ROOT,
             capture_output=True,
             text=True,
@@ -518,8 +537,9 @@ def _resolve_base(ref: str) -> str | None:
     validated_ref = f"{base_ref}{revision}"
     # Keep the validated revision out of argv. The subprocess command remains
     # fixed, and Git receives the revision only through its standard input.
+    git = _require_git()
     resolved = subprocess.run(
-        ["git", "cat-file", "--batch-check"],
+        [git, "cat-file", "--batch-check"],
         cwd=ROOT,
         capture_output=True,
         input=f"{validated_ref}^{{commit}}\n",
@@ -561,10 +581,16 @@ def _select_files(
     if args.changed:
         if not args.base:
             parser.error("--base is required with --changed")
-        base = _resolve_base(args.base)
+        try:
+            base = _resolve_base(args.base)
+        except RuntimeError as exc:
+            parser.error(str(exc))
         if base is None:
             parser.error(f"--base does not name a valid commit: {args.base}")
-        return _changed_md_files(base), base
+        try:
+            return _changed_md_files(base), base
+        except RuntimeError as exc:
+            parser.error(str(exc))
     if args.paths:
         files: list[Path] = []
         root = ROOT.resolve()

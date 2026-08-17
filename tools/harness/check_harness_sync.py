@@ -380,25 +380,49 @@ def _missing_make_target_arguments(
     """Return undeclared targets from the arguments after ``make``."""
     missing: list[str] = []
     skip_next = False
-    for candidate in candidates:
+    for index, candidate in enumerate(candidates):
         if candidate in {"&&", "||", ";", "|", "&"}:
             break
         if skip_next:
             skip_next = False
             continue
-        if candidate in {"-C", "-f", "--file", "-j", "--jobs"}:
+        action = _classify_make_argument(candidate, index, candidates)
+        if action == "value_flag":
             skip_next = True
-            continue
-        if candidate.startswith(("-C", "-j", "--jobs=")):
-            continue
-        if "=" in candidate:
-            # VAR=value overrides are Make options, not target names.
-            continue
-        if not candidate.startswith("-") and candidate not in targets:
+        elif action == "target" and candidate not in targets:
             missing.append(
                 f"{command!r}: Make target {candidate!r} is not declared"
             )
     return missing
+
+
+def _classify_make_argument(
+    candidate: str, index: int, candidates: list[str]
+) -> str:
+    """Classify a ``make`` argument after shell tokens are handled.
+
+    Returns one of ``"value_flag"`` (consume the next token as its value),
+    ``"option"`` (self-contained flag), ``"override"`` (VAR=value), or
+    ``"target"`` (a candidate Make target name).
+    """
+    if candidate in {"-C", "-f", "--file", "-I"}:
+        return "value_flag"
+    if candidate in {"-j", "--jobs"}:
+        # GNU make's job-count argument is optional: `-j` alone means
+        # unbounded jobs, so the next token is not necessarily a value.
+        # Only consume a following bare numeric job count so a target
+        # that directly follows `-j` is still validated.
+        if index + 1 < len(candidates) and candidates[index + 1].isdigit():
+            return "value_flag"
+        return "option"
+    if candidate.startswith(("-C", "-j", "--jobs=")):
+        return "option"
+    if "=" in candidate:
+        # VAR=value overrides are Make options, not target names.
+        return "override"
+    if candidate.startswith("-"):
+        return "option"
+    return "target"
 
 
 def _resolve_makefile_targets(after_make: list[str],
