@@ -113,7 +113,7 @@ def test_verify_head_flags_drifted_evidence(monkeypatch) -> None:
     """Committed evidence whose candidate_sha != repository HEAD must be
     flagged as stale (P1-1: evidence SHA == release candidate SHA)."""
     reasons: list[str] = []
-    monkeypatch.setattr(gate, "_git_head_sha", lambda: "b" * 40)
+    monkeypatch.setattr(gate, "_git_head_sha", lambda: ("b" * 40, None))
     gate._verify_head_matches("a" * 40, reasons)
     assert any("stale-digest" in r and "repository HEAD" in r for r in reasons)
 
@@ -121,7 +121,7 @@ def test_verify_head_flags_drifted_evidence(monkeypatch) -> None:
 def test_verify_head_accepts_matching_sha(monkeypatch) -> None:
     """Evidence bound to the current HEAD produces no reason."""
     reasons: list[str] = []
-    monkeypatch.setattr(gate, "_git_head_sha", lambda: "a" * 40)
+    monkeypatch.setattr(gate, "_git_head_sha", lambda: ("a" * 40, None))
     gate._verify_head_matches("a" * 40, reasons)
     assert reasons == []
 
@@ -129,6 +129,7 @@ def test_verify_head_accepts_matching_sha(monkeypatch) -> None:
 def test_verify_head_reports_unresolvable_head(monkeypatch) -> None:
     """An unresolvable repository HEAD fails closed with a clear reason."""
     reasons: list[str] = []
-    monkeypatch.setattr(gate, "_git_head_sha", lambda: None)
+    monkeypatch.setattr(gate, "_git_head_sha", lambda: (None, "test cause"))
     gate._verify_head_matches("a" * 40, reasons)
     assert any("verify-head" in r for r in reasons)
+    assert any("test cause" in r for r in reasons)
