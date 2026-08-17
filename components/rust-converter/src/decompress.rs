@@ -274,21 +274,25 @@ fn decompress_deflate(input: &[u8], budget: usize) -> Result<DecompResult, Decom
 
     match deflate_decode_into(input, budget, zlib_wrapped, &mut output) {
         Ok(()) => Ok(DecompResult { output }),
-        Err(e) => {
-            let retry_as_raw =
-                zlib_wrapped && output.is_empty() && matches!(e, DecompError::FormatError(_));
-            if !retry_as_raw {
-                return Err(e);
-            }
-            // The sniff was fooled by a raw stream whose first bytes satisfy
-            // the CMF/FLG check (e.g. `78 9c` stored-block padding bits).
-            // The wrapped attempt produced no output, so nothing committed is
-            // discarded by restarting the decode in raw mode.
-            output.clear();
-            deflate_decode_into(input, budget, false, &mut output)?;
-            Ok(DecompResult { output })
-        }
+        Err(e) => retry_raw_deflate(input, budget, zlib_wrapped, output, e),
     }
+}
+
+fn retry_raw_deflate(
+    input: &[u8],
+    budget: usize,
+    zlib_wrapped: bool,
+    mut output: Vec<u8>,
+    err: DecompError,
+) -> Result<DecompResult, DecompError> {
+    let should_retry =
+        zlib_wrapped && output.is_empty() && matches!(err, DecompError::FormatError(_));
+    if !should_retry {
+        return Err(err);
+    }
+    output.clear();
+    deflate_decode_into(input, budget, false, &mut output)?;
+    Ok(DecompResult { output })
 }
 
 /// Run a bounded flate2 decode (wrapped or raw) appending into `output`.
