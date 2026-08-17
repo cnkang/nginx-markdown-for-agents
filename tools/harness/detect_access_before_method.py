@@ -43,7 +43,7 @@ DEFAULT_DIR = REPO_ROOT / "components/nginx-module/src"
 # switch) never match because their condition is followed by '{' or ';',
 # not a bare ')' at end-of-line.
 FUNC_DEF_RE = re.compile(
-    r"^(?:\w[\w \t*]*\s+)?(\w+)\s*\([^;]*\)\s*$",
+    r"^(?:\w[\w \t*]*\s+)?(\w+)\s*\([^)]*\)\s*$",
     re.MULTILINE,
 )
 # Function may span lines: collect braces by scanning from a def line.
@@ -51,7 +51,8 @@ FUNC_DEF_RE = re.compile(
 # Access-control call signals.
 ACCESS_CALL_RE = re.compile(
     r"\b(?:check_access|ngx_http_access_handler|ngx_http_core_access_phase|"
-    r"ngx_http_markdown_diagnostics_check_access)\s*\("
+    r"ngx_http_markdown_diagnostics_check_access|"
+    r"ngx_http_markdown_metrics_check_access)\s*\("
 )
 # Method-rejection signals (405).
 METHOD_REJECT_RE = re.compile(
@@ -106,7 +107,7 @@ def _iter_functions(text: str):
         yield name, body
 
 
-def audit_dir(directory: Path, strict: bool) -> tuple[list[str], list[str]]:
+def audit_dir(directory: Path) -> tuple[list[str], list[str]]:
     """Return (violations, reviews) across *.c and *.h files."""
     violations: list[str] = []
     reviews: list[str] = []
@@ -183,7 +184,7 @@ def main() -> int:
     args = parser.parse_args()
 
     directory = validate_read_path(args.directory, purpose="scan directory")
-    violations, reviews = audit_dir(directory, args.strict)
+    violations, reviews = audit_dir(directory)
 
     for v in violations:
         print(f"VIOLATION: {v}")

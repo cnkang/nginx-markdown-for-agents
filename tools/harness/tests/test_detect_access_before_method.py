@@ -92,6 +92,16 @@ def test_clean_handler_passes(tmp_path) -> None:
     assert reviews == []
 
 
+def test_metrics_access_helper_passes(tmp_path) -> None:
+    content = CLEAN_HANDLER.replace(
+        "ngx_http_markdown_diagnostics_check_access",
+        "ngx_http_markdown_metrics_check_access",
+    )
+    violations, reviews = _audit_text(content, tmp_path)
+    assert violations == []
+    assert reviews == []
+
+
 def test_bad_order_is_violation(tmp_path) -> None:
     violations, _ = _audit_text(BAD_ORDER_HANDLER, tmp_path)
     assert any("BEFORE access" in v for v in violations)

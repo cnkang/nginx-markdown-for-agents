@@ -78,6 +78,11 @@ PEAK_MEMORY_MISSING_ERROR = (
 
 RECORD_SCHEMA_VERSION = "release.soak-qualification.v1"
 
+
+class SoakScenarioValidationError(Exception):
+    """Report scenario-row errors without terminating real-mode aggregation."""
+
+
 REQUIRED_RECORD_FIELDS = (
     "schema_version",
     "candidate_sha",
@@ -302,20 +307,20 @@ def _check_scenario_rows(record: dict, manifest: dict) -> None:
     scenario_ids = {s.get("id") for s in manifest["corpus"]}
     record_ids = {s.get("id") for s in record["per_scenario"]}
     if not scenario_ids.issubset(record_ids):
-        raise SystemExit(
+        raise SoakScenarioValidationError(
             "ERROR: missing-observation: corpus scenarios missing from record: "
             f"{sorted(scenario_ids - record_ids)}"
         )
     for scenario in record["per_scenario"]:
         if scenario.get("status") not in (None, "pass"):
-            raise SystemExit(
+            raise SoakScenarioValidationError(
                 "ERROR: blocking-pending: scenario "
                 f"{scenario.get('id')!r} status {scenario.get('status')!r}"
             )
         completed = scenario.get("completed_requests")
         if (not isinstance(completed, int) or isinstance(completed, bool)
                 or completed <= 0):
-            raise SystemExit(
+            raise SoakScenarioValidationError(
                 "ERROR: below-threshold: scenario "
                 f"{scenario.get('id')!r} completed_requests "
                 f"{scenario.get('completed_requests')!r} must be a "
@@ -325,7 +330,7 @@ def _check_scenario_rows(record: dict, manifest: dict) -> None:
         if (type(error_rate) not in (int, float)
                 or not math.isfinite(error_rate)
                 or abs(error_rate) > FLOAT_EPSILON):
-            raise SystemExit(
+            raise SoakScenarioValidationError(
                 "ERROR: below-threshold: scenario "
                 f"{scenario.get('id')!r} error_rate {scenario.get('error_rate')!r}"
             )
@@ -357,7 +362,10 @@ def _peak_memory_issue(record: dict, manifest: dict) -> str | None:
 
 
 def validate_soak_outcome(record: dict, manifest: dict) -> None:
-    _check_scenario_rows(record, manifest)
+    try:
+        _check_scenario_rows(record, manifest)
+    except SoakScenarioValidationError as exc:
+        raise SystemExit(str(exc)) from exc
     rss_issue = _rss_evidence_issue(record)
     if rss_issue:
         raise SystemExit(f"ERROR: {rss_issue}")
@@ -1146,7 +1154,7 @@ def real_main(args: argparse.Namespace) -> int:
         # malformed error_rate values are classified here instead of
         # surfacing as TypeError inside _soak_failures.
         _check_scenario_rows(record, manifest)
-    except SystemExit as exc:
+    except SoakScenarioValidationError as exc:
         failures.append(str(exc))
     failures.extend(
         _soak_failures(record, manifest, elapsed, session["ready_error"])

@@ -1633,7 +1633,7 @@ ngx_http_markdown_diagnostics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void
          * is not supported for the endpoint.) */
         clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
         if (clcf != NULL
-            && clcf->handler == ngx_http_markdown_diagnostics_handler)
+            && clcf->handler == &ngx_http_markdown_diagnostics_handler)
         {
             clcf->handler = NULL;
         }

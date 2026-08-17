@@ -44,12 +44,12 @@ handle_metrics_request(const char *method, const char *remote_addr, const char *
     (void) format;
     memset(&out, 0, sizeof(out));
 
-    if (!(STR_EQ(method, "GET") || STR_EQ(method, "HEAD"))) {
-        out.status = 405;
-        return out;
-    }
     if (!is_localhost(remote_addr)) {
         out.status = 403;
+        return out;
+    }
+    if (!(STR_EQ(method, "GET") || STR_EQ(method, "HEAD"))) {
+        out.status = 405;
         return out;
     }
 
@@ -128,13 +128,17 @@ test_access_restrictions(void)
 
     TEST_SUBSECTION("Method and localhost restrictions");
 
-    r = handle_metrics_request("POST", "127.0.0.1", "text", &m);
-    TEST_ASSERT(r.status == 405, "Only GET/HEAD should be allowed");
-
     written = snprintf(remote_addr, sizeof(remote_addr), "%u.%u.%u.%u",
                        10U, 0U, 0U, 5U);
     TEST_ASSERT(written > 0 && (size_t) written < sizeof(remote_addr),
                 "failed to build remote address");
+    r = handle_metrics_request("POST", remote_addr, "text", &m);
+    TEST_ASSERT(r.status == 403,
+                "Remote clients must be denied before method handling");
+
+    r = handle_metrics_request("POST", "127.0.0.1", "text", &m);
+    TEST_ASSERT(r.status == 405, "Only GET/HEAD should be allowed locally");
+
     r = handle_metrics_request("GET", remote_addr, "text", &m);
     TEST_ASSERT(r.status == 403, "Non-localhost access should be forbidden");
 
