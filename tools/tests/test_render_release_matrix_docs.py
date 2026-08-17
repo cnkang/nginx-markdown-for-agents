@@ -539,20 +539,20 @@ def test_write_file_rejects_unregistered_target():
     assert "unregistered release matrix documentation target" in errors[0]
 
 
-def test_main_reports_matrix_validation_error():
+def test_main_reports_matrix_validation_error(monkeypatch):
     """CLI matrix path validation failures return a controlled exit code."""
-    old_argv = sys.argv[:]
     suspicious_matrix = rmd.ROOT / "tools" / ".." / "tools" / "release-matrix.json"
-    try:
-        sys.argv = [
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
             "render_release_matrix_docs.py",
             "--check",
             "--matrix",
             str(suspicious_matrix),
-        ]
-        assert rmd.main() == 2
-    finally:
-        sys.argv = old_argv
+        ],
+    )
+    assert rmd.main() == 2
 
 
 # ---------------------------------------------------------------------------
