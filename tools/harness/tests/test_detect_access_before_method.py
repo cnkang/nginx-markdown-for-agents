@@ -86,8 +86,32 @@ ngx_http_markdown_diagnostics_parse(ngx_str_t *s, ngx_int_t *value)
 """
 
 
+INLINE_SIGNATURE_HANDLER = """\
+static ngx_int_t ngx_http_markdown_inline_handler(ngx_http_request_t *r)
+{
+    ngx_int_t rc;
+
+    rc = ngx_http_markdown_diagnostics_check_access(r);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
+    if (!(r->method & NGX_HTTP_GET)) {
+        return NGX_HTTP_NOT_ALLOWED;
+    }
+    return NGX_OK;
+}
+"""
+
+
 def test_clean_handler_passes(tmp_path) -> None:
     violations, reviews = _audit_text(CLEAN_HANDLER, tmp_path)
+    assert violations == []
+    assert reviews == []
+
+
+def test_inline_signature_is_scanned(tmp_path) -> None:
+    violations, reviews = _audit_text(INLINE_SIGNATURE_HANDLER, tmp_path)
     assert violations == []
     assert reviews == []
 
