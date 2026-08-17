@@ -135,10 +135,13 @@ fuzz_target!(|data: &[u8]| {
             /* Round-trip oracle: a single valid compressed layer must
              * reproduce its original payload exactly.  The oracle applies
              * only when the payload format matches the layer encoding: the
-             * kind byte and the encoding byte are independently derived, and
-             * zlib-wrapped deflate may legitimately classify arbitrary bytes
-             * as a format or truncation error without panicking.
-             * (no checksum), so a mismatched pair must not be compared. */
+             * kind byte and the encoding byte are independently derived, so
+             * a mismatched pair must not be compared.  For a Deflate layer
+             * the oracle applies only to the zlib-wrapped deflate case
+             * (which carries a checksum and therefore a canonical byte
+             * stream); a raw RFC 1951 stream has no checksum, so its bytes
+             * may legitimately classify as a format or truncation error
+             * without panicking. */
             if layers.len() == 1
                 && let Some(orig) = original
             {

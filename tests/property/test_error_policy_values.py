@@ -81,6 +81,19 @@ def test_accepted_status_values(status_code):
     assert code == status_code
 
 
+def test_leading_zero_status_equivalent():
+    """Leading-zero forms resolve to the same accepted status code.
+
+    The handler parses the suffix with an unsigned-integer parser, so
+    ``status 0429`` and ``status 000503`` are equivalent to ``status 429``
+    and ``status 503`` respectively.
+    """
+    for canonical, leading in [(429, "0429"), (503, "000503")]:
+        kind, code = classify_policy(f"status {leading}")
+        assert kind == ErrorPolicyKind.ACCEPTED
+        assert code == canonical
+
+
 @settings(max_examples=200)
 @given(st.sampled_from(sorted(REJECTED_NAMED_STATUS_CODES)))
 def test_rejected_named_status_values(status_code):
