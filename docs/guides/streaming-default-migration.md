@@ -17,7 +17,7 @@ v0.6.x compatibility bridge entirely:
 | `markdown_streaming_engine` | `off` (full-buffer) | `auto` (per-request selection) | `auto` (per-request selection) | Large/chunked responses use streaming by default |
 | `markdown_prune_noise` | N/A (compile-time opt-in) | `on` (runtime, default-enabled) | `on` (runtime, default-enabled) | Noise regions (nav, footer, ads) removed by default |
 | `markdown_streaming_auto_threshold` | N/A (new in 0.6.0) | Accepted (32k default) | **Removed** — `nginx -t` fails | Auto mode used the then-current threshold; see the 0.9.2 note below |
-| `markdown_streaming_engine` `$variable` | Accepted | Accepted | **Removed** — `nginx -t` fails | Must use fixed `off`/`auto`/`on` |
+| `markdown_streaming_engine` `$variable` | Accepted | Accepted | **Removed** — `nginx -t` fails | Must use fixed `off`/`auto`/`force` in 0.9.2 (historical `on` value replaced by `force`) |
 
 **Key guarantee**: An explicit `off` configuration produces identical behavior
 to 0.5.x. `on` configurations are not part of the equivalence claim — 0.9.2
@@ -69,7 +69,7 @@ Restore streaming default but keep pruning, or vice versa:
 markdown_prune_noise off;
 
 # Keep pruning, disable auto streaming
-markdown_streaming_engine off   # 0.8.0-era name. 0.9.1+ uses markdown_streaming off
+markdown_streaming off   # 0.9.1+ syntax (0.8.0-era name was markdown_streaming_engine)
 ```
 
 ## Streaming Auto Mode Details
@@ -172,8 +172,9 @@ markdown_streaming auto;
 
 ### `markdown_streaming_engine` `$variable` — REMOVED in 0.8.0
 
-The directive no longer accepts NGINX variables. It accepts only `off`, `auto`, and
-`on`:
+The directive no longer accepts NGINX variables. In 0.9.2, `markdown_streaming`
+accepts `off`, `auto`, and `force` (the historical `on` value became
+`force`. `on` remains valid only in the 0.8.0-era `markdown_streaming_engine`):
 
 ```nginx
 # Before (0.6.x/0.7.x) — NO LONGER ACCEPTED

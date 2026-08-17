@@ -29,8 +29,8 @@ canonical key — never reuse the same ID for different tuples.
 
 | Combination ID | Platform | NGINX Version | Response Size Tier | Conversion Engine | Conversion Path | Test Type | Covering Sub-Spec |
 |---------------|----------|---------------|--------------------|-------------------|-----------------|-----------|------------------|
-| TM-001 | Ubuntu | 1.26.x | Small | full-buffer | convert | CI / e2e | [sub-spec name] |
-| TM-002 | macOS | 1.27.x | Large | streaming | fallback/fail-open | manual / benchmark | [sub-spec name] |
+| TM-001 (placeholder — derive from the full tuple, e.g. a stable hash) | Ubuntu | 1.26.x | Small | full-buffer | convert | CI / e2e | [sub-spec name] |
+| TM-002 (placeholder — derive from the full tuple, e.g. a stable hash) | macOS | 1.27.x | Large | streaming | fallback/fail-open | manual / benchmark | [sub-spec name] |
 ```
 
 ## Gap Record Format

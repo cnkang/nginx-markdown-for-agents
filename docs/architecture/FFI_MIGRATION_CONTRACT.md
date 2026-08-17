@@ -33,11 +33,14 @@ The following families have current NGINX production consumers:
 | Conditional | `markdown_decide_conditional` | Cache mode, precedence, and bypass decision |
 | Header plan | `markdown_build_header_plan`, `markdown_header_plan_init`, `markdown_header_plan_free` | Rust-owned atomic plan, C application |
 | Base URL | `markdown_trusted_proxies_new`, `markdown_trusted_proxies_push`, `markdown_trusted_proxies_free`, `markdown_decide_base_url` | CIDR-aware trusted forwarding decision |
+| Initialization helpers | `markdown_base_url_input_init` | Base URL input initialization for trusted-proxy decision |
 | Decompression | `markdown_decompress_bounded`, `markdown_decomp_result_init`, `markdown_decompress_free` | Bounded Rust decompression path |
 | Error/reason | `markdown_classify_error_code`, `markdown_reason_code_str`, `markdown_reason_code_metric_key`, `markdown_reason_code_count` | Canonical cross-language classification and labels |
 | Streaming | `markdown_streaming_new_with_code`, `markdown_streaming_feed`, `markdown_streaming_finalize`, `markdown_streaming_abort`, `markdown_streaming_safe_finish`, `markdown_streaming_output_free` | Streaming request lifecycle |
-| Incremental | `markdown_incremental_new_with_code`, `markdown_incremental_feed`, `markdown_incremental_finalize`, `markdown_incremental_free` | Bounded incremental conversion. **Retained internal legacy ABI symbols**: exported for the feature-gated C callers under `MARKDOWN_INCREMENTAL_ENABLED`; supported configurations do not route production requests through this path |
+| Incremental | `markdown_incremental_new_with_code`, `markdown_incremental_feed`, `markdown_incremental_finalize`, `markdown_incremental_free` | **Retained internal legacy ABI symbols** (not production consumers): exported for the feature-gated C callers under `MARKDOWN_INCREMENTAL_ENABLED`; supported configurations do not route production requests through this path |
 | ABI alignment | `markdown_abi_version`, `markdown_abi_header_hash`, `markdown_abi_symbol_set_hash`, `markdown_abi_layout_fingerprint` | Startup-enforced version, generated-header, exported-symbol, and layout match |
+| Dynamic configuration | `markdown_dynconf_parse`, `markdown_dynconf_result_init`, `markdown_dynconf_result_free` | Runtime dynconf parsing and result handling |
+| Encoding chain and hash helpers | `markdown_chain_decode_free`, `markdown_chain_decode_result_init`, `markdown_decode_encoding_chain`, `markdown_parse_encoding_chain`, `markdown_sha256_hex` | Bounded decompression chain decode and SHA-256 hex helpers |
 
 The generated header contains only the bundled production boundary. Test-only
 Rust helpers are not emitted as C declarations.

@@ -86,7 +86,7 @@ Plan-only targets (for example `*-plan`) are documentation aids, not evidence.
 | 5 | `harness-core` | Harness execution loop and status semantics |
 | 6 (lowest) | `replay-calibration` | Replay calibration data |
 
-Safety/engineering invariants always win, user-task controls scope and approach.
+Safety/engineering invariants always win. User-task controls scope and approach.
 
 ## Adaptive Checks
 

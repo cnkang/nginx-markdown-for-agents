@@ -62,7 +62,7 @@ The three fingerprint values detect drift even when the numeric ABI version
 stays unchanged:
 - **header hash**: detects header regeneration or content changes
 - **symbol set hash**: detects export additions, removals, or renames
-- **layout fingerprint**: detects struct size changes or struct set changes
+- **layout fingerprint**: detects struct size changes, alignment changes, field offset changes, field reordering, field type changes, enum representation changes, or struct set changes
 
 `nginx-markdown-doctor` also checks that the module contains the
 `markdown_abi_version` symbol. The doctor symbol check is diagnostic. The

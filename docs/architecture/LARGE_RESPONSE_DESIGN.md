@@ -272,14 +272,18 @@ This 5% threshold is specific to the large-response optimization validation. It 
 
 For all inputs that produce correct results through the full-buffer path, the active streaming engine must produce byte-identical output. Property-based testing (proptest) verifies this by feeding random HTML inputs through the streaming engine's chunked feed path and comparing the output against the full-buffer path.
 
-## Error Handling
+## Error Handling (Historical — pre-0.9.0 threshold router)
 
-| Error Scenario | Handling | User-Visible Behavior |
+> ⚠️ **HISTORICAL** — The table below describes the retired `markdown_large_body_threshold` routing removed in 0.9.2. It does not apply to the active `markdown_streaming` path.
+
+|| Error Scenario | Handling | User-Visible Behavior ||
 |---------------|----------|----------------------|
 | `feed_chunk()` failure | Returns `ConversionError`; C module applies `markdown_error_policy` | fail-open: original HTML; fail-closed: 502 |
 | `finalize()` failure | Same as above | Same as above |
 | Missing `Content-Length` | Buffer first, decide path after threshold comparison | Transparent to client |
 | `incremental` feature not compiled but threshold configured (pre-0.9.0) | Ignore threshold, use full-buffer path, log warning | `error.log` warning; conversion still works |
+
+For the active `markdown_streaming` path error handling, see [STREAMING_COMPATIBILITY.md](../features/STREAMING_COMPATIBILITY.md) and [AUTOMATIC_DECOMPRESSION.md](../features/AUTOMATIC_DECOMPRESSION.md).
 
 ## Rollback
 

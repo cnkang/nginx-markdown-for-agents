@@ -45,6 +45,8 @@ documentation may use removed directive names (including naming
 `markdown_stream_threshold` and `markdown_stream_types` in before/after
 examples). See `docs/guides/0.9.2-breaking-changes.md` for the full removal list.
 
+Note: `markdown_stream_threshold` (removed in 0.9.2, threshold internalized to fixed 1 MiB) and `markdown_large_body_threshold` (retired in 0.9.0, removed in 0.9.2) are distinct directives with different migration paths.
+
 ## Contract Loading
 
 This README intentionally does not duplicate frozen numeric facts. Load

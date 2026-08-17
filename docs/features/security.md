@@ -70,7 +70,7 @@ The converter classifies elements into three categories using `SanitizeAction`:
 
 **Form Elements — Tags Stripped, Content Preserved** (`SanitizeAction::StripElement`):
 - `<form>`, `<button>`, `<select>`, `<textarea>`, `<fieldset>`, `<legend>`, `<label>`, `<option>`, `<optgroup>`, `<datalist>`, `<output>` - The module removes tags but preserves child text content in the Markdown output. This ensures AI agents see meaningful content (labels, button captions, option lists) without raw HTML leaking into the output.
-- `<input>` (void form control) - The module extracts descriptive text from attributes in priority order: `aria-label` > `placeholder` > `value`. It suppresses hidden inputs (`type="hidden"`) entirely. The module drops them from the output.
+- `<input>` (void form control) - The module extracts descriptive text from attributes in priority order: `aria-label` > `placeholder` > `value`. It suppresses sensitive control types (`type="password"`, `type="hidden"`) entirely and does not fall back to their `value` attribute. Other control types (such as `type="text"`, `type="email"`, `type="number"`) may use the `value` fallback only when `aria-label` and `placeholder` are absent.
 
 **Embedded Content Elements — Tags Stripped, URL Extracted, Fallback Preserved** (`SanitizeAction::StripElement`):
 - `<iframe>`, `<object>`, `<embed>` - The module removes tags. It extracts the `src` (iframe/embed) or `data` (object) URL as a Markdown link, using the `title` attribute as the link label when available. Fallback child text between the tags stays in the output. It suppresses dangerous URL schemes (`javascript:`, `data:`, and so on) — only safe URLs appear in the output. The module blocks unsafe schemes entirely.

@@ -46,11 +46,11 @@ The team may exclude the P1 sub-spec without blocking the release (Req 7.5).
 
 ## Exceptions
 
-Every unresolved failure must have an exception record here that includes its rationale, risk assessment, and mitigation (Req 7.6).
+Every unresolved failure must have an exception record here that includes its rationale, risk assessment, and mitigation (Req 7.6). Each exception must carry a non-P0, non-safety classification to be eligible for approval, and the release owner must approve it.
 
-| # | Gate Item | Exception Rationale | Risk Assessment | Mitigation | Approver |
-|---|----------|-------------------|-----------------|------------|----------|
-| | | | | | |
+| # | Gate Item | Eligibility (non-P0, non-safety) | Exception Rationale | Risk Assessment | Mitigation | Approver (release owner) |
+|---|----------|--------------------------------|-------------------|-----------------|------------|--------------------------|
+| | | | | | | |
 
 ## Rules
 

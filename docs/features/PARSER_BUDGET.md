@@ -219,6 +219,9 @@ Request arrives
     ├─ markdown_limits conversion_memory= check (C layer)
     │   └─ FAIL → pass-through, reason: not_eligible
     │
+    ├─ markdown_limits conversion_timeout= pre-check (overall FFI deadline)
+    │   └─ FAIL → pass-through, reason: timeout
+    │
     ├─ markdown_limits parser_timeout= pre-check
     │   └─ FAIL → pass-through, reason: timeout
     │
@@ -227,16 +230,16 @@ Request arrives
     │      (default 64 MiB, configurable); parser allocations are bounded by
     │      parser_memory=, not this directive
     │
-    ├─ markdown_limits parser_timeout= post-parse check
+    ├─ markdown_limits conversion_timeout= / parser_timeout= post-parse check
     │   └─ FAIL → pass-through, reason: timeout
     │
     ├─ DOM traversal with cooperative checkpoints
-    │   ├─ Every 100 nodes: check_timeout()
+    │   ├─ Every 100 nodes: check_timeout() against the earlier of conversion_timeout= and parser_timeout=
     │   │   └─ FAIL → pass-through, reason: timeout
     │   └─ Memory budget checks (streaming path)
     │       └─ FAIL → pass-through, reason: budget_exceeded
     │
-    └─ Output normalization + final timeout check
+    └─ Output normalization + final timeout check (earlier of conversion_timeout= and parser_timeout=)
         └─ FAIL → pass-through, reason: timeout
 ```
 
@@ -245,8 +248,9 @@ Request arrives
 When multiple limits are hit simultaneously, the first detected wins:
 
 1. Input size (`markdown_limits conversion_memory=<size>`) — checked first, before FFI call
-2. Parse timeout (`markdown_limits parser_timeout=<time>`) — checked at each checkpoint
-3. Memory budget (`markdown_limits parser_memory=<size>`) — checked on each allocation
+2. Overall FFI deadline (`markdown_limits conversion_timeout=<time>`) — the authoritative upper bound, checked at each checkpoint alongside parser_timeout
+3. Parser checkpoint deadline (`markdown_limits parser_timeout=<time>`) — triggers an earlier parser checkpoint when nonzero and smaller than conversion_timeout. At each applicable checkpoint the earlier of the two deadlines wins.
+4. Memory budget (`markdown_limits parser_memory=<size>`) — checked on each allocation
 
 ### Fail-Open Behavior
 

@@ -291,7 +291,9 @@ gpg --armor --export-secret-subkeys '<SIGNING_SUBKEY_FINGERPRINT>!' \
 #   Value: (40-character signing-subkey fingerprint, e.g. 0123456789ABCDEF0123456789ABCDEF01234567)
 
 # Clean up - securely delete the exported key
-shred -u private-signing-subkey.asc
+# Linux: shred -u private-signing-subkey.asc
+# macOS: shred is unavailable by default; install GNU coreutils (brew install coreutils) and use gshred -u, or use rm -P (POSIX secure deletion) if available
+rm -P private-signing-subkey.asc 2>/dev/null || gshred -u private-signing-subkey.asc 2>/dev/null || rm -f private-signing-subkey.asc
 ```
 
 ### Workflow Usage

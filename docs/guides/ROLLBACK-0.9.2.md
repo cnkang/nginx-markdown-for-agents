@@ -178,8 +178,13 @@ if sudo systemctl is-active --quiet nginx; then
 fi
 # Restore the versioned 0.9.0 nginx.conf and dynamic-configuration file before
 # installing the 0.9.0 binary. The 0.9.1 configuration is not compatible.
+MODULES_DIR="${MODULES_DIR:-$(nginx -V 2>&1 | sed -n 's/.*--modules-path=\([^ ]*\).*/\1/p')}"
+if [[ -z "$MODULES_DIR" || ! -d "$MODULES_DIR" ]]; then
+  echo "ERROR: cannot locate the NGINX modules directory" >&2
+  exit 1
+fi
 sudo cp /path/to/ngx_http_markdown_filter_module.so.0.9.0 \
-    /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
+    "$MODULES_DIR/ngx_http_markdown_filter_module.so"
 sudo nginx -t && sudo nginx
 ```
 

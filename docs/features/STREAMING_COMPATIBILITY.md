@@ -8,7 +8,7 @@ mode. Use it to understand behavioral differences before enabling streaming.
 
 ## Compatibility Matrix
 
-| Feature | Full-Buffer | Streaming | Notes |
+|| Feature | Full-Buffer | Streaming | Notes ||
 |---------|:-----------:|:---------:|-------|
 | Content negotiation (Accept header) | ✅ | ✅ | Works identically in both modes |
 | HTML-to-Markdown conversion | ✅ | ✅ | Same output quality |
@@ -16,7 +16,8 @@ mode. Use it to understand behavioral differences before enabling streaming.
 | Conditional requests (304) | ✅ | ❌ | Requires ETag; streaming bypasses |
 | Fail-open (pre-commit) | ✅ | ✅ | Streaming: configurable via `markdown_error_policy` |
 | Fail-open (post-commit) | N/A | ❌ | Post-commit errors produce truncated output |
-| Memory budget | ✅ | ✅ | Enforced in both paths |
+| `parser_memory` budget | N/A | ✅ | Rust parser allocation bound; streaming path only |
+| `conversion_memory` budget | ✅ | ✅ | Cumulative input-size cap shared by buffered and streaming paths |
 | Prometheus metrics | ✅ | ✅ | Additional streaming-specific counters |
 | Token estimation header | ✅ | ❌ | Requires full output; not available in streaming |
 | Front matter (YAML) | ✅ | ✅ | Emitted in pre-commit phase |
@@ -73,7 +74,7 @@ itself.
 Use **full-buffer** when:
 
 - You need ETag-based caching and conditional requests
-- Response sizes are moderate (within `markdown_limits conversion_memory=<size>`, the hard cumulative input-size cap shared by both buffered and streaming paths)
+- Response sizes are moderate (within `markdown_limits conversion_memory=<size>`, the hard cumulative input-size cap shared by both buffered and streaming paths). Streaming adds `parser_memory=` for the Rust parser allocation bound
 - Downstream consumers require token estimation headers
 
 Use **streaming** when:
@@ -82,8 +83,7 @@ Use **streaming** when:
 - Time-to-first-byte matters more than conditional caching
 - You accept that post-commit errors produce truncated output
 
-Use **auto** (default since 0.8.0) to let the module choose based on response size
-thresholds.
+Use **auto** (default since 0.8.0) to let the module choose based on response size thresholds.
 
 ## Related Documentation
 

@@ -49,8 +49,16 @@ curl --fail --location --remote-name "${RELEASE_BASE}/SHA256SUMS.asc"
 ```bash
 set -euo pipefail
 
-# Import and verify the trusted project release key before this step; see
-# docs/guides/GPG_KEY_MANAGEMENT.md for the key fingerprint contract.
+# The signing key fingerprint is defined by the GPG key management contract;
+# import it through an independently authenticated channel before verifying.
+# See docs/guides/GPG_KEY_MANAGEMENT.md for the authoritative fingerprint.
+TRUSTED_FINGERPRINT="<project-signing-key-fingerprint-from-GPG_KEY_MANAGEMENT.md>"
+SIGNER_FINGERPRINT="$(gpg --with-colons --import-options show-only --import < SHA256SUMS.asc 2>/dev/null | awk -F: '$1 == "fpr" { print $10; exit }')"
+if [[ -z "$SIGNER_FINGERPRINT" || "$SIGNER_FINGERPRINT" != "$TRUSTED_FINGERPRINT" ]]; then
+  printf 'signer fingerprint mismatch: got %s, expected %s\n' \
+      "${SIGNER_FINGERPRINT:-<none>}" "$TRUSTED_FINGERPRINT" >&2
+  exit 1
+fi
 gpg --verify SHA256SUMS.asc SHA256SUMS
 
 verify_module_archive_checksum() {
@@ -73,8 +81,15 @@ verify_module_archive_checksum
 ### 3. Back up the current module
 
 ```bash
-sudo cp /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so \
-    /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so.0.9.1.bak
+# Derive the module directory from the active NGINX build so RPM systems
+# resolve /usr/lib64/nginx/modules and source builds their own prefix.
+MODULES_DIR="${MODULES_DIR:-$(nginx -V 2>&1 | sed -n 's/.*--modules-path=\([^ ]*\).*/\1/p')}"
+if [[ -z "$MODULES_DIR" || ! -d "$MODULES_DIR" ]]; then
+  echo "ERROR: cannot locate the NGINX modules directory; set MODULES_DIR explicitly" >&2
+  exit 1
+fi
+sudo cp "$MODULES_DIR/ngx_http_markdown_filter_module.so" \
+    "$MODULES_DIR/ngx_http_markdown_filter_module.so.0.9.1.bak"
 ```
 
 ### 4. Replace the module
@@ -82,7 +97,7 @@ sudo cp /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so \
 ```bash
 tar -xzf "${MODULE_ARCHIVE}"
 sudo cp ngx_http_markdown_filter_module.so \
-    /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
+    "$MODULES_DIR/ngx_http_markdown_filter_module.so"
 ```
 
 ### 5. Migrate the configuration
@@ -229,7 +244,12 @@ import json, sys
 d = json.load(sys.stdin)
 assert d.get("version") == "0.9.2", f"version={d.get(\"version\")!r}"
 reasons = {r.get("reason") for r in d.get("recent_decisions", [])}
-assert "bypass_no_transform" in reasons, f"missing bypass_no_transform in {sorted(reasons)}"
+# Recent decisions may not yet contain a bypass_no_transform entry (the
+# decision log is bounded and depends on traffic). Issue a deterministic
+# no-transform probe first, or validate that every returned entry exposes
+# a reason field rather than requiring a specific observed outcome.
+assert reasons, f"no recent_decisions entries returned: {sorted(reasons)}"
+assert all(r is not None for r in reasons), "entry missing reason field"
 print("diagnostics contract verified")
 '
 ```

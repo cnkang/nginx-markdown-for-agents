@@ -84,8 +84,7 @@ the core plan commits and fall within the atomic scope boundary below
 - `X-Markdown-Tokens` header
 - Auth `Cache-Control` modify
 
-Any **new** exception requires ADR justification and an entry here. No other
-code may mutate `headers_out` in place outside HeaderPlan.
+Any **new** exception requires ADR justification and an entry here. No other code may mutate `headers_out` in place outside HeaderPlan **for core fields** (Content-Type, Content-Encoding, Content-Length). The post-plan operations listed above (ETag, Vary, X-Markdown-Tokens, Auth Cache-Control) are explicitly exempt from the HeaderPlan atomicity invariant. They execute after the plan commits under the pre-send best-effort boundary.
 
 ### Post-commit error boundary
 

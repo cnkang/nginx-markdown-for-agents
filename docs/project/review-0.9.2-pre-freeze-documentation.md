@@ -105,7 +105,7 @@
 ### R-H4 (High) — `tools/release-matrix.json:413-440`
 - **Issue**: File carries legacy top-level `matrix` array (20 stale entries with `nginx`/`os_type`/`support_tier:"full"` aliases) + `updated_at`. Violates own schema (`additionalProperties:false`) and Rule 62 (alias coexistence).
 - **Evidence**: `normalize_matrix.py:88-90` fail-closes when both `entries` and `matrix` present. Consumers `validate_matrix_install_consistency.py:65` and `check_packaging_consistency.py:313` read legacy `matrix` — they must migrate to the canonical `entries` array.
-- **Fix**: Remove legacy `matrix` array + `updated_at`, update the two consumers to read `entries` (with key normalization via `normalize_matrix.load_and_normalize` where feasible).
+- **Fix**: Remove legacy `matrix` array; remove `updated_at` because the schema rejects it (`additionalProperties:false`), update the two consumers to read `entries` (with key normalization via `normalize_matrix.load_and_normalize` where feasible).
 - **Verify**: `python3 -m pytest tools/release/matrix/tests tools/docs/tests -q`, run both consumers.
 
 ### R-M1 — `README.md:373` / `README_zh-CN.md:370` — doc nav lists only MIGRATION-0.9/0.8; add MIGRATION-0.9.1.md and MIGRATION-0.9.2.md links.
@@ -150,7 +150,7 @@ R-L5 remains explicitly deferred until the release-time Debian changelog update:
 | D-H1..D-H13, D-M1..D-M15, D-L1..D-L6 | **fixed** — 16 docs/ files updated; ADR-0023 (OTel) renamed to ADR-0027 with references updated in PROJECT_STATUS.md + PUBLIC_SURFACE_INVENTORY.md |
 | R-H1 | **fixed** — THIRD-PARTY-NOTICES serde_json → 1.0.151 (matches Cargo.lock) |
 | R-H2/R-H3 | **fixed** — nginx-module README threshold section rewritten for 0.9.2 |
-| R-H4 | **fixed** — all matrix consumers now normalize the canonical `entries` view through one alias boundary; compatibility metadata (`updated_at`, `support_tiers`, `tier_mapping`) is preserved, and legacy aliases remain input-only. |
+| R-H4 | **fixed** — legacy `matrix` array and `updated_at` removed (the schema rejects `updated_at` under `additionalProperties:false`); all matrix consumers now normalize the canonical `entries` view through one alias boundary; remaining compatibility metadata (`support_tiers`, `tier_mapping`) is preserved, and legacy aliases remain input-only. |
 | R-M1..R-M12, R-L1..R-L4, R-L6..R-L8 | **fixed** |
 | R-L5 | **deferred** — Debian changelog date is set at release time |
 

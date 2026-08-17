@@ -182,8 +182,8 @@ curl -sD - -o /dev/null \
 
 #### Safe to Continue
 
-- Conversion success rate > 95% (few or no `failed_open` / `failed_closed` entries)
-- No `ffi_panic`, `memory_budget_exceeded`, `timeout`, or `conversion_error` reason codes in logs
+- Conversion success rate > 95% (few or no `failed_open` / `failed_closed` request outcomes)
+- No decision-log failure categories (`ffi_panic`, `memory_budget_exceeded`, `timeout`, or `conversion_error`). Inspect the `category=` field in decision-log entries
 - Conversion latency within the configured `markdown_limits`
 - No upstream error rate increase
 - No `not_eligible` reason codes for requests you expect to convert
@@ -1309,8 +1309,10 @@ curl -s -H "Accept: text/plain; version=0.0.4" \
 # at 5s, so p95 is only meaningful below that bound):
 curl -s -H "Accept: text/plain; version=0.0.4" \
   http://localhost/markdown-metrics > /tmp/markdown-metrics.txt
-promtool query instant 'histogram_quantile(0.95, sum by (le) (rate(nginx_markdown_conversion_duration_seconds_bucket[5m])))' \
-  --url=http://localhost:9090 2>/dev/null \
+promtool query instant \
+  --url=http://localhost:9090 \
+  'histogram_quantile(0.95, sum by (le) (rate(nginx_markdown_conversion_duration_seconds_bucket[5m])))' \
+  2>/dev/null \
   || echo "promtool/Prometheus not available — inspect the bucket output above for the distribution"
 ```
 
@@ -1345,7 +1347,7 @@ Stop expanding rollout scope and investigate if any of the following occur:
 
 | Trigger | What It Means | How to Detect |
 |---------|---------------|---------------|
-| Sudden increase in failed outcomes | Conversion failures are spiking — may indicate upstream HTML changes, resource pressure, or a converter bug | `grep "reason=failed_open\|reason=failed_closed" /var/log/nginx/error.log \| tail -20` or watch the failed `requests_total` series |
+| Sudden increase in failed outcomes | Conversion failures are spiking — may indicate upstream HTML changes, resource pressure, or a converter bug | `grep -E "reason=(failed_open\|failed_closed)" /var/log/nginx/error.log \| tail -20` or watch the failed `requests_total` series |
 | Repeated internal failure reasons | Internal failure categories appear repeatedly, for example `memory_budget_exceeded` or `ffi_panic` — check the decision logs | Inspect the `category=` field in decision log entries and the NGINX logs; these categories do not appear as `requests_total` reason labels |
 | Conversion latency exceeding `markdown_limits` | Conversions are taking too long — may indicate large pages, resource contention, or converter performance issues | Check latency buckets; look for conversions in the highest `le` bucket or timeouts in logs |
 | Upstream error rate increase | The module may be causing upstream issues (unlikely but possible with decompression or buffering interactions) | Compare upstream 5xx rates before and after enablement |

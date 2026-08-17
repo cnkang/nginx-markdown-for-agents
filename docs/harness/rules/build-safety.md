@@ -50,9 +50,15 @@ from non-streaming code paths. The team had to move the function outside the
 **Detection**: `bash tools/harness/detect_ifdef_guard_visibility.sh`
 - Parses the header file to find function identifiers declared inside
   `#ifdef MARKDOWN_STREAMING_ENABLED` blocks
+- Also collects function **definitions** inside the guard across every
+  `.c`/`.h` file, so a guarded-only definition behind an unguarded
+  declaration is still checked
 - For each guarded function, searches all .c and .h files for references
   that appear outside the `#ifdef` guard
-- Flags any reference found outside the guard as a visibility gap
+- Flags any reference found outside the guard as a visibility gap, unless
+  the symbol also has an equivalent feature-disabled definition (available
+  in the non-streaming build), in which case the call is linkable and is
+  not reported
 
 **Verification**: `bash tools/harness/detect_ifdef_guard_visibility.sh`
 
