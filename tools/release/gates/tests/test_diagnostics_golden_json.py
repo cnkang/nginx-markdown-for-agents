@@ -58,19 +58,11 @@ DIAGNOSTICS_SOURCE = (
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from diagnostics_strategy_helpers import (  # noqa: E402
-    _sha256_digest,
-    _sha_commit,
-    _iso_datetime,
-    _masked_keys,
     _dynconf_disabled,
     _dynconf_no_file,
     _dynconf_invalid_without_lkg,
     _dynconf_active,
     _dynconf_lkg_preserved,
-    _any_dynconf_state,
-    _effective_config,
-    _effective_sources,
-    _decision_entry,
     _valid_diagnostics,
 )
 
