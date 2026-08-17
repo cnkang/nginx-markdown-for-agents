@@ -43,31 +43,37 @@ _masked_keys = st.lists(
 # --- Dynconf state strategies ---
 
 def _dynconf_disabled():
-    """Generate a disabled dynconf state as a fresh copy per draw."""
-    return st.just({
-        "state": "disabled",
-        "generation": None,
-        "source_digest": None,
-        "active_digest": None,
-        "lkg_digest": None,
-        "last_success": None,
-        "last_error": None,
-        "masked_keys": [],
-    }).map(dict)
+    """Generate a disabled dynconf state with fresh nested values per draw."""
+    return st.builds(
+        lambda masked_keys: {
+            "state": "disabled",
+            "generation": None,
+            "source_digest": None,
+            "active_digest": None,
+            "lkg_digest": None,
+            "last_success": None,
+            "last_error": None,
+            "masked_keys": masked_keys,
+        },
+        masked_keys=_masked_keys,
+    )
 
 
 def _dynconf_no_file():
-    """Generate a no_file dynconf state as a fresh copy per draw."""
-    return st.just({
-        "state": "no_file",
-        "generation": None,
-        "source_digest": None,
-        "active_digest": None,
-        "lkg_digest": None,
-        "last_success": None,
-        "last_error": None,
-        "masked_keys": [],
-    }).map(dict)
+    """Generate a no_file dynconf state with fresh nested values per draw."""
+    return st.builds(
+        lambda masked_keys: {
+            "state": "no_file",
+            "generation": None,
+            "source_digest": None,
+            "active_digest": None,
+            "lkg_digest": None,
+            "last_success": None,
+            "last_error": None,
+            "masked_keys": masked_keys,
+        },
+        masked_keys=_masked_keys,
+    )
 
 
 @st.composite

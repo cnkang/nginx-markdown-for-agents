@@ -78,25 +78,30 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _git_head_sha() -> str | None:
-    """Return the repository HEAD SHA, or None when not resolvable."""
+def _git_head_sha() -> tuple[str | None, str | None]:
+    """Return (HEAD SHA, failure cause).  The SHA is None when the HEAD
+    cannot be resolved; ``cause`` carries a toolchain-specific reason so
+    callers can distinguish an unavailable or unapproved git executable
+    from a failed ``git rev-parse`` invocation or a non-git checkout."""
     git = resolve_approved_executable("git")
     if git is None:
-        return None
+        return None, "git executable is not available or not approved"
     try:
         proc = subprocess.run(
             [git, "rev-parse", "HEAD"],
             capture_output=True, text=True, timeout=10,
             cwd=REPO_ROOT,
         )
-    except (OSError, subprocess.SubprocessError):
-        return None
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, f"git rev-parse failed to start: {exc}"
     if proc.returncode != 0:
-        return None
+        stderr = proc.stderr.strip()
+        detail = f": {stderr}" if stderr else ""
+        return None, f"git rev-parse HEAD failed{detail}"
     head = proc.stdout.strip()
     if CANDIDATE_SHA_PATTERN.fullmatch(head):
-        return head
-    return None
+        return head, None
+    return None, f"git rev-parse HEAD returned non-SHA {head!r}"
 
 
 def _verify_head_matches(candidate_sha: str | None, reasons: list[str]) -> None:
@@ -108,11 +113,11 @@ def _verify_head_matches(candidate_sha: str | None, reasons: list[str]) -> None:
     """
     if not isinstance(candidate_sha, str):
         return
-    head = _git_head_sha()
+    head, cause = _git_head_sha()
     if head is None:
         reasons.append(
             "verify-head: cannot resolve repository HEAD "
-            "(not a git checkout?)")
+            f"({cause if cause is not None else 'unknown cause'})")
     elif head != candidate_sha:
         reasons.append(
             f"stale-digest: candidate_sha {candidate_sha} != "
