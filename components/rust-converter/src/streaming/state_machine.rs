@@ -345,10 +345,10 @@ impl StructuralStateMachine {
                 .find(|language| Self::is_safe_code_fence_language(language))
                 .map(ToOwned::to_owned)
         });
-        if let Some(lang) = lang {
-            if let Some(last) = self.stack.last_mut() {
-                *last = StructuralContext::CodeBlock(Some(lang));
-            }
+        if let Some(lang) = lang
+            && let Some(last) = self.stack.last_mut()
+        {
+            *last = StructuralContext::CodeBlock(Some(lang));
         }
     }
 

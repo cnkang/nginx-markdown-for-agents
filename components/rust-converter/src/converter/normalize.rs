@@ -148,10 +148,7 @@ impl MarkdownConverter {
 }
 
 fn measure_fence_len(line: &str) -> usize {
-    line.trim_start()
-        .bytes()
-        .take_while(|&b| b == b'`')
-        .count()
+    line.trim_start().bytes().take_while(|&b| b == b'`').count()
 }
 
 fn fix_trailing_newlines(mut result: String) -> String {

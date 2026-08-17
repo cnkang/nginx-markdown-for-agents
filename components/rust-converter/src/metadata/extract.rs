@@ -123,12 +123,7 @@ impl MetadataExtractor {
                     ref attrs,
                     ..
                 } => {
-                    self.process_element_for_metadata(
-                        name,
-                        attrs,
-                        metadata,
-                        &mut canonical,
-                    )?;
+                    self.process_element_for_metadata(name, attrs, metadata, &mut canonical)?;
                     for child in node.children.borrow().iter().rev() {
                         stack.push((child.clone(), depth + 1));
                     }
@@ -148,7 +143,7 @@ impl MetadataExtractor {
     fn process_element_for_metadata(
         &self,
         name: &html5ever::QualName,
-        attrs: &std::cell::Ref<Vec<html5ever::Attribute>>,
+        attrs: &std::cell::RefCell<Vec<html5ever::Attribute>>,
         metadata: &mut PageMetadata,
         canonical: &mut Option<String>,
     ) -> Result<(), ConversionError> {

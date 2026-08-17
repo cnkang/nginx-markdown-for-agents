@@ -357,10 +357,7 @@ impl MarkdownConverter {
         self.find_text_align_in_style(attrs)
     }
 
-    fn find_align_attribute(
-        &self,
-        attrs: &Ref<Vec<Attribute>>,
-    ) -> Option<Option<TableAlignment>> {
+    fn find_align_attribute(&self, attrs: &Ref<Vec<Attribute>>) -> Option<Option<TableAlignment>> {
         for attr in attrs.iter() {
             if attr.name.local.as_ref() == "align" {
                 let value = attr.value.to_string().to_lowercase();
@@ -375,15 +372,12 @@ impl MarkdownConverter {
         None
     }
 
-    fn find_text_align_in_style(
-        &self,
-        attrs: &Ref<Vec<Attribute>>,
-    ) -> Option<TableAlignment> {
+    fn find_text_align_in_style(&self, attrs: &Ref<Vec<Attribute>>) -> Option<TableAlignment> {
         for attr in attrs.iter() {
-            if attr.name.local.as_ref() == "style" {
-                if let Some(align) = parse_text_align_from_style(&attr.value) {
-                    return Some(align);
-                }
+            if attr.name.local.as_ref() == "style"
+                && let Some(align) = parse_text_align_from_style(&attr.value)
+            {
+                return Some(align);
             }
         }
         None

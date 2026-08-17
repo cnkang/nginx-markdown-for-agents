@@ -390,10 +390,9 @@ impl MarkdownConverter {
                 ..
             } = child.data
                 && name.local.as_ref() == "code"
+                && let Some(lang) = self.find_language_from_attrs(&attrs.borrow())
             {
-                if let Some(lang) = self.find_language_from_attrs(&attrs.borrow()) {
-                    return lang;
-                }
+                return lang;
             }
         }
         String::new()
@@ -401,10 +400,10 @@ impl MarkdownConverter {
 
     fn find_language_from_attrs(&self, attrs: &Ref<Vec<Attribute>>) -> Option<String> {
         for attr in attrs.iter() {
-            if attr.name.local.as_ref() == "class" {
-                if let Some(lang) = self.find_language_from_classes(&attr.value) {
-                    return Some(lang);
-                }
+            if attr.name.local.as_ref() == "class"
+                && let Some(lang) = self.find_language_from_classes(&attr.value)
+            {
+                return Some(lang);
             }
         }
         None

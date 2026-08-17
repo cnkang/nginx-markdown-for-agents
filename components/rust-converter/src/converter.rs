@@ -699,7 +699,7 @@ impl MarkdownConverter {
             let scheme_len = if base.starts_with("https://") { 8 } else { 7 };
             &base[..scheme_len + pos]
         } else {
-            base.as_str()
+            base
         };
         format!("{}{}", origin, url)
     }

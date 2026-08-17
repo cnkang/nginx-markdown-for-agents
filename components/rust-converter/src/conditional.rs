@@ -265,7 +265,11 @@ fn max_days_in_month(year: i64, month: i64) -> i64 {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
         2 => {
-            if is_leap_year(year) { 29 } else { 28 }
+            if is_leap_year(year) {
+                29
+            } else {
+                28
+            }
         }
         _ => 0,
     }
