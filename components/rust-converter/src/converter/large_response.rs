@@ -256,6 +256,10 @@ mod tests {
             }
         }
 
+        fix_reference_trailing_newlines(result)
+    }
+
+    fn fix_reference_trailing_newlines(mut result: String) -> String {
         if !result.ends_with('\n') {
             result.push('\n');
         } else if result.ends_with("\n\n") {

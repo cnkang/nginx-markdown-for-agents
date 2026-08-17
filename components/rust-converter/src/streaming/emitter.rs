@@ -1109,44 +1109,50 @@ impl IncrementalEmitter {
         self.last_text_ended_whitespace = false;
         let bytes = s.as_bytes();
         self.check_buffer_budget(bytes.len())?;
-        // Normalize CRLF → LF as we write
         for ch in s.chars() {
             if ch == '\r' {
-                // Skip \r; the following \n (if any) will be written
                 continue;
             }
             if ch == '\n' {
-                if self.consecutive_blank_lines < 1 || !self.last_was_newline {
-                    self.buffer.push(b'\n');
-                    self.markdown_escape_state.advance('\n');
-                    if self.last_was_newline {
-                        self.consecutive_blank_lines =
-                            self.consecutive_blank_lines.saturating_add(1);
-                    } else {
-                        self.consecutive_blank_lines = 0;
-                    }
-                    self.last_was_newline = true;
-                    // Prepend blockquote markers on the new line
-                    if self.blockquote_depth > 0 {
-                        let prefix_size = 2 * self.blockquote_depth;
-                        self.check_buffer_budget(prefix_size)?;
-                        for _ in 0..self.blockquote_depth {
-                            self.buffer.extend_from_slice(b"> ");
-                            self.markdown_escape_state.advance('>');
-                            self.markdown_escape_state.advance(' ');
-                        }
-                    }
-                }
+                self.write_newline()?;
             } else {
-                let mut encoded = [0u8; 4];
-                let encoded = ch.encode_utf8(&mut encoded);
-                self.buffer.extend_from_slice(encoded.as_bytes());
-                self.markdown_escape_state.advance(ch);
-                self.last_was_newline = false;
-                self.consecutive_blank_lines = 0;
+                self.write_char(ch);
             }
         }
         Ok(())
+    }
+
+    fn write_newline(&mut self) -> Result<(), ConversionError> {
+        if self.consecutive_blank_lines >= 1 && self.last_was_newline {
+            return Ok(());
+        }
+        self.buffer.push(b'\n');
+        self.markdown_escape_state.advance('\n');
+        if self.last_was_newline {
+            self.consecutive_blank_lines = self.consecutive_blank_lines.saturating_add(1);
+        } else {
+            self.consecutive_blank_lines = 0;
+        }
+        self.last_was_newline = true;
+        if self.blockquote_depth > 0 {
+            let prefix_size = 2 * self.blockquote_depth;
+            self.check_buffer_budget(prefix_size)?;
+            for _ in 0..self.blockquote_depth {
+                self.buffer.extend_from_slice(b"> ");
+                self.markdown_escape_state.advance('>');
+                self.markdown_escape_state.advance(' ');
+            }
+        }
+        Ok(())
+    }
+
+    fn write_char(&mut self, ch: char) {
+        let mut encoded = [0u8; 4];
+        let encoded = ch.encode_utf8(&mut encoded);
+        self.buffer.extend_from_slice(encoded.as_bytes());
+        self.markdown_escape_state.advance(ch);
+        self.last_was_newline = false;
+        self.consecutive_blank_lines = 0;
     }
 
     /// Write raw bytes without normalization (used for code block fences).
