@@ -589,15 +589,19 @@ def _path_metrics(
     fullbuffer_ratio = fullbuffer_hits / total_hits if total_hits > 0 else None
     requests_total = streaming.get("requests_total")
     streaming_fallback_total = streaming.get("fallback_total")
+    streaming_failopen_total = streaming.get("precommit_failopen_total")
 
-    if _is_numeric_count(requests_total) and _is_numeric_count(streaming_fallback_total):
-        # fallback_rate is the streaming-path fallback share:
-        # streaming_fallback_total / streaming_requests_total (1.0 when every
-        # request falls back).
-        assert requests_total is not None and streaming_fallback_total is not None
+    if _is_numeric_count(requests_total) and _is_numeric_count(
+        streaming_failopen_total
+    ):
+        # fallback_rate is the hard fail-open share:
+        # precommit_failopen_total / streaming_requests_total (1.0 when every
+        # streaming request fails open). Capability fallbacks are reported
+        # separately and must not affect the release gate.
+        assert requests_total is not None and streaming_failopen_total is not None
         if requests_total > 0:
-            fallback_rate = streaming_fallback_total / requests_total
-        elif streaming_fallback_total == 0:
+            fallback_rate = streaming_failopen_total / requests_total
+        elif streaming_failopen_total == 0:
             fallback_rate = 0.0
         else:
             fallback_rate = None
