@@ -1387,6 +1387,8 @@ ngx_http_markdown_handle_decompress_result(ngx_http_request_t *r,
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total);
         ngx_http_markdown_record_decompression_failure_budget(
             ctx->decompression.type);
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            perf.decompression_budget_exceeded_total);
         return ngx_http_markdown_handle_decompression_alloc_error(
             r, ctx, conf,
             NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT,

@@ -301,9 +301,9 @@ ngx_http_markdown_stream_commit_apply_auth_cache_control(
  *   These are pointer/integer assignments that cannot fail.
  *
  * On success, applies all header mutations and records the COMMITTED state.
- * The streaming caller must roll back its request-level commit latches when
- * the downstream header filter returns NGX_AGAIN, and publishes the
- * downstream-forwarded latch only after acceptance.
+ * The streaming caller treats NGX_AGAIN from the downstream header filter as
+ * accepted headers (canonical NGINX model) and publishes its commit latches
+ * and committed state; no rollback is performed on NGX_AGAIN.
  *
  * Returns:
  *   NGX_OK    - All mutations applied, committed flag set

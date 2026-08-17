@@ -2664,6 +2664,10 @@ ngx_http_markdown_dynconf_assert_snapshot_layout(void)
         sizeof(ngx_http_markdown_dynconf_snapshot_t)
             == 12 * sizeof(void *),
         "dynconf_snapshot_t layout changed, review shallow copy");
+#if (NGX_PTR_SIZE == 8)
+    /* Literal-byte offset assertions are LP64-specific; on 32-bit targets
+     * the pointer-derived offsets differ and the pointer-scaled size
+     * assertion above remains the portable check. */
     _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
                             enabled) == 0,
                    "dynconf snapshot enabled offset changed");
@@ -2700,11 +2704,13 @@ ngx_http_markdown_dynconf_assert_snapshot_layout(void)
     _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
                             valid) == 88,
                    "dynconf snapshot valid offset changed");
+#endif /* NGX_PTR_SIZE == 8 (LP64 literal offsets) */
 #else
     _Static_assert(
         sizeof(ngx_http_markdown_dynconf_snapshot_t)
             == 11 * sizeof(void *),
         "dynconf_snapshot_t layout changed, review shallow copy");
+#if (NGX_PTR_SIZE == 8)
     _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
                             enabled) == 0,
                    "dynconf snapshot enabled offset changed");
@@ -2738,6 +2744,7 @@ ngx_http_markdown_dynconf_assert_snapshot_layout(void)
     _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
                             valid) == 80,
                    "dynconf snapshot valid offset changed");
+#endif /* NGX_PTR_SIZE == 8 (LP64 literal offsets) */
 #endif
 
 }

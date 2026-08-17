@@ -59,8 +59,10 @@
  *
  * On success, applies the header mutations and eagerly sets headers_committed
  * and the committed stream state. If ngx_http_next_header_filter returns
- * NGX_AGAIN, the caller must roll both state fields back before retrying the
- * header transaction; only an accepted header chain is terminally committed.
+ * NGX_AGAIN, the streaming caller publishes the commit latches and committed
+ * state and treats the headers as accepted (canonical NGINX model — the
+ * header chain is never re-invoked, so no rollback/retry of the header
+ * transaction is performed).
  *
  * Parameters:
  *   r    - current HTTP request
