@@ -135,20 +135,15 @@ gpg --verify SHA256SUMS.asc SHA256SUMS
 ```
 
 Expected output includes `Good signature from ...` and the key fingerprint.
-Compare the fingerprint with the complete value published through an
-independently authenticated project/operator channel before trusting the
-signature. A key ID, keyserver result, or key file downloaded from the same
-release does not establish identity.
-
-No public signing-key fingerprint is published in this repository yet. Until
-the release process publishes the complete fingerprint through an independent
-trust channel and includes `SHA256SUMS.asc`, package users must withhold
-project-signature trust. `SHA256SUMS` detects accidental corruption during
-transfer and storage, but it is not a tamper-proof security boundary. A
+Compare the fingerprint with the value published in this repository:
+the signing subkey fingerprint is
+`15C792438EAA762B421E60D21E8D41E7D19A8A75` (primary key
+`7A3743687FEEE0313128355038724643EA12C02A`). Confirm it with
+`gpg --show-keys nginx-markdown-for-agents-release.asc` before trusting the
+signature. `SHA256SUMS` detects accidental corruption during transfer and
+storage, but it is not a tamper-proof security boundary by itself — a
 malicious actor who can replace packages can also replace the checksums file.
-Verify the release signature only after the release process publishes the
-complete fingerprint through an independent trust channel and includes
-`SHA256SUMS.asc`.
+Always verify the release signature and confirm the fingerprint first.
 
 ### Generating Checksums (CI / Maintainers)
 

@@ -156,13 +156,15 @@ rpm -qa gpg-pubkey* --qf '%{NAME}-%{VERSION}-%{RELEASE}\t%{SUMMARY}\n' \
   | grep -i markdown
 ```
 
-The current GitHub Release artifact channel does not publish a complete
-release-key fingerprint or public-key trust anchor. This policy fails closed:
-operators must withhold project-signature trust until the release process
-publishes the complete fingerprint in the release documentation and repeats it
-through an independently authenticated project channel. A key ID, keyserver
-lookup, or the public-key file attached to the same release is only a transport
-mechanism and cannot establish identity by itself.
+The project checks the public key in at
+`packaging/nginx-markdown-for-agents-release.asc`. Its signing-subkey
+fingerprint is `15C792438EAA762B421E60D21E8D41E7D19A8A75` (primary key
+`7A3743687FEEE0313128355038724643EA12C02A`). Operators must verify the
+fingerprint with `gpg --show-keys` after import and confirm it matches this
+published value before trusting release signatures. A key ID, keyserver
+lookup, or a key file downloaded from the same release is only a transport
+mechanism and cannot establish identity by itself — the fingerprint is the
+trust anchor.
 
 ---
 
