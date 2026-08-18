@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/cnkang/nginx-markdown-for-agents/charts/nginx-markdown/values.schema.json",
+  "title": "nginx-markdown Helm values",
+  "type": "object",
+  "properties": {
+    "markdown": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "maxSize": { "type": "string" },
+        "timeout": { "type": "string" },
+        "onError": { "type": "string" },
+        "flavor": { "type": "string" },
+        "tokenEstimate": { "type": "boolean" },
+        "etag": { "type": "boolean" },
+        "conditionalRequests": { "type": "string" },
+        "logVerbosity": { "type": "string" },
+        "autoDecompress": {
+          "type": "boolean",
+          "description": "Must be a real boolean. String overrides such as \"on\" are rejected during values validation instead of being coerced in the configmap template."
+        },
+        "loadModule": { "type": "string" },
+        "streaming": {
+          "type": "object",
+          "properties": {
+            "mode": { "type": "string" },
+            "budget": { "type": "string" }
+          }
+        },
+        "prune": {
+          "type": "object",
+          "properties": {
+            "noise": { "type": "boolean" },
+            "selectors": { "type": "string" },
+            "protectionSelectors": { "type": "string" }
+          }
+        },
+        "contentTypes": { "type": "array", "items": { "type": "string" } },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "conversionMemory": { "type": "string" },
+            "conversionTimeout": { "type": "string" },
+            "parserMemory": { "type": "string" },
+            "parserTimeout": { "type": "string" },
+            "streamingBuffer": { "type": "string" },
+            "decompressedSize": { "type": "string" },
+            "decompressionRatio": { "type": "integer", "minimum": 1 },
+            "maxInflight": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "uri": { "type": "string" },
+        "shmSize": { "type": "string" },
+        "sidecar": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "fetchInterval": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    }
+  }
+}
