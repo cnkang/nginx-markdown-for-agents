@@ -26,7 +26,7 @@
  *     copy of the snapshot that was active when it entered the
  *     header filter.
  *
- * Requirements: P2-10, P0-1, P0-2, P1-2
+ * Requirements: dynconf, dynconf, dynconf, subrequest
  */
 
 #ifndef NGX_HTTP_MARKDOWN_DYNCONF_IMPL_H
@@ -188,7 +188,6 @@ typedef struct ngx_http_markdown_dynconf_snapshot_s {
 #ifdef MARKDOWN_STREAMING_ENABLED
     size_t       streaming_budget;
 #endif
-    size_t       memory_budget;
     size_t       conversion_memory;
     const ngx_http_markdown_loc_validation_summary_t *validation_summary;
     ngx_uint_t   valid;
@@ -341,7 +340,6 @@ ngx_http_markdown_dynconf_snapshot_from_conf(
 #ifdef MARKDOWN_STREAMING_ENABLED
     snapshot->streaming_budget = conf->stream.budget;
 #endif
-    snapshot->memory_budget = conf->advanced.memory_budget;
     snapshot->conversion_memory = conf->limits.conversion_memory;
     snapshot->valid = 1;
 }
@@ -376,7 +374,9 @@ ngx_http_markdown_dynconf_apply_snapshot(
 #ifdef MARKDOWN_STREAMING_ENABLED
         conf->stream.budget = snapshot->streaming_budget;
 #endif
-    conf->advanced.memory_budget = snapshot->memory_budget;
+    /* conversion_memory is the frozen conversion bound; restore it so
+     * effective_memory_budget reads the snapshot-consistent value. */
+    conf->limits.conversion_memory = snapshot->conversion_memory;
 }
 
 
@@ -541,8 +541,10 @@ ngx_http_markdown_build_effective_conf(
     ngx_http_markdown_select_effective_error(
         eff, snap, conf, mask, snap_valid);
 
-    /* memory_budget is static in the v0.9.2 dynconf schema. */
-    eff->memory_budget = conf->advanced.memory_budget;
+    /* memory_budget is static in the v0.9.2 dynconf schema; the effective
+     * projection carries the frozen conversion_memory limit so request
+     * paths read one consistent value. */
+    eff->memory_budget = conf->limits.conversion_memory;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     ngx_http_markdown_select_effective_streaming(
@@ -645,6 +647,13 @@ ngx_http_markdown_effective_prune_noise(
 
 /**
  * Read effective memory_budget for a request.
+ *
+ * The full-buffer conversion memory bound is the frozen public
+ * `markdown_limits conversion_memory` limit.  The legacy internal
+ * `advanced.memory_budget` field (static directive removed in 0.9.0)
+ * is no longer a runtime source: `eff->memory_budget` carries the
+ * conversion_memory projection for dynconf snapshots, and the static
+ * fallback reads `conf->limits.conversion_memory` directly.
  */
 static size_t
 ngx_http_markdown_effective_memory_budget(
@@ -654,7 +663,7 @@ ngx_http_markdown_effective_memory_budget(
     if (eff != NULL) {
         return eff->memory_budget;
     }
-    return conf->advanced.memory_budget;
+    return conf->limits.conversion_memory;
 }
 
 
@@ -1206,14 +1215,7 @@ ngx_http_markdown_dynconf_apply_streaming_buffer(
         || (!has_location_index && snapshot->conversion_memory != 0
             && snapshot->conversion_memory
                 != NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE
-            && result->streaming_buffer > snapshot->conversion_memory)
-        || (!has_location_index && (snapshot->conversion_memory == 0
-             || snapshot->conversion_memory
-                == NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE)
-            && snapshot->memory_budget != 0
-            && snapshot->memory_budget
-                != NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE
-            && result->streaming_buffer > snapshot->memory_budget))
+            && result->streaming_buffer > snapshot->conversion_memory))
     {
         return NGX_ERROR;
     }
@@ -1422,6 +1424,10 @@ ngx_http_markdown_dynconf_apply_ffi_result_with_log(
 
 #if defined(NGX_HTTP_MARKDOWN_DYNCONF_LEGACY_TEST)
 
+/* Defined at file scope after the legacy-test section; declared here so
+ * the legacy-test reload path can call it. */
+static void ngx_http_markdown_dynconf_assert_snapshot_layout(void);
+
 static ngx_int_t
 ngx_http_markdown_dynconf_apply_ffi_result(
     ngx_http_markdown_dynconf_snapshot_t *snapshot,
@@ -1446,8 +1452,7 @@ ngx_http_markdown_dynconf_apply_ffi_result(
 #define NGX_HTTP_MARKDOWN_DYNCONF_KEY_PRUNE_NOISE     2
 #define NGX_HTTP_MARKDOWN_DYNCONF_KEY_LOG_VERBOSITY   3
 #define NGX_HTTP_MARKDOWN_DYNCONF_KEY_STREAMING_BUDGET 4
-#define NGX_HTTP_MARKDOWN_DYNCONF_KEY_MEMORY_BUDGET   5
-#define NGX_HTTP_MARKDOWN_DYNCONF_KEY_SCHEMA_VERSION  6
+#define NGX_HTTP_MARKDOWN_DYNCONF_KEY_SCHEMA_VERSION  5
 
 /*
  * Required schema version string for 0.9.0.
@@ -1488,7 +1493,6 @@ ngx_http_markdown_dynconf_match_key(u_char *p, const u_char *eq,
     static u_char  prune_noise_key[] = "prune_noise";
     static u_char  log_verbosity_key[] = "log_verbosity";
     static u_char  streaming_budget_key[] = "streaming_budget";
-    static u_char  memory_budget_key[] = "memory_budget";
     static u_char  schema_version_key[] = "schema_version";
     size_t  len;
 
@@ -1505,8 +1509,6 @@ ngx_http_markdown_dynconf_match_key(u_char *p, const u_char *eq,
         *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_LOG_VERBOSITY;
     } else if (len == 16 && ngx_strncasecmp(p, streaming_budget_key, 16) == 0) {
         *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_STREAMING_BUDGET;
-    } else if (len == 13 && ngx_strncasecmp(p, memory_budget_key, 13) == 0) {
-        *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_MEMORY_BUDGET;
     } else if (len == 14 && ngx_strncasecmp(p, schema_version_key, 14) == 0) {
         *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_SCHEMA_VERSION;
     } else {
@@ -1527,7 +1529,6 @@ ngx_http_markdown_dynconf_match_key(u_char *p, const u_char *eq,
  *   prune_noise on|off
  *   log_verbosity error|warn|info|debug
  *   streaming_budget <size_with_unit>
- *   memory_budget <size_with_unit>
  *
  * Parameters:
  *   line     - line text (not NUL-terminated)
@@ -1872,21 +1873,6 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_dynconf_snapshot_t *snapshot,
 #endif
         break;
 
-    /* Set the total memory budget for full-buffer conversion (size value). */
-    case NGX_HTTP_MARKDOWN_DYNCONF_KEY_MEMORY_BUDGET:
-        {
-            size_t  budget;
-
-            if (ngx_http_markdown_dynconf_parse_size_safe(
-                    value, value_len, "memory_budget",
-                    NGX_MAX_SIZE_T_VALUE, log, &budget) != NGX_OK)
-            {
-                return NGX_ERROR;
-            }
-            snapshot->memory_budget = budget;
-        }
-        break;
-
     /* Validate the schema_version field (mandatory, must be "0.9").
      * This key does not modify the snapshot — it is purely a
      * compatibility gate.  If the value is not "0.9", the entire
@@ -1933,15 +1919,16 @@ ngx_http_markdown_dynconf_validate_budget_relationship(
         return NGX_ERROR;
     }
 
-    if (snapshot->memory_budget != 0
+    if (snapshot->conversion_memory != 0
+        && snapshot->conversion_memory != NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE
         && snapshot->streaming_budget != 0
-        && snapshot->streaming_budget > snapshot->memory_budget)
+        && snapshot->streaming_budget > snapshot->conversion_memory)
     {
         ngx_log_error(NGX_LOG_WARN, log, 0,
                       "markdown: streaming_budget (%uz) exceeds "
-                      "memory_budget (%uz)",
+                      "conversion_memory (%uz)",
                       snapshot->streaming_budget,
-                      snapshot->memory_budget);
+                      snapshot->conversion_memory);
         return NGX_ERROR;
     }
 #else
@@ -2393,10 +2380,9 @@ ngx_http_markdown_dynconf_try_line_dryrun(
             "prune_noise",
             "log_verbosity",
             "streaming_budget",
-            "memory_budget",
             "schema_version"
         };
-        static size_t  key_name_lens[] = { 15, 11, 13, 16, 13, 14 };
+        static size_t  key_name_lens[] = { 15, 11, 13, 16, 14 };
 
         const u_char  *field_name;
         size_t         field_name_len;
@@ -2607,8 +2593,8 @@ ngx_http_markdown_dynconf_reload_dryrun(
             &watcher->diagnostic_state.last_validation, 0,
             (const u_char *) "streaming_budget",
             sizeof("streaming_budget") - 1,
-            (const u_char *) "exceeds memory_budget",
-            sizeof("exceeds memory_budget") - 1);
+            (const u_char *) "exceeds conversion_memory",
+            sizeof("exceeds conversion_memory") - 1);
     }
 
     /* Final validation: if any errors were accumulated across all
@@ -2655,99 +2641,6 @@ ngx_http_markdown_dynconf_reload_dryrun(
     return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_OK;
 }
 
-
-static void
-ngx_http_markdown_dynconf_assert_snapshot_layout(void)
-{
-#ifdef MARKDOWN_STREAMING_ENABLED
-    _Static_assert(
-        sizeof(ngx_http_markdown_dynconf_snapshot_t)
-            == 12 * sizeof(void *),
-        "dynconf_snapshot_t layout changed, review shallow copy");
-#if (NGX_PTR_SIZE == 8)
-    /* Literal-byte offset assertions are LP64-specific; on 32-bit targets
-     * the pointer-derived offsets differ and the pointer-scaled size
-     * assertion above remains the portable check. */
-    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
-                            enabled) == 0,
-                   "dynconf snapshot enabled offset changed");
-    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
-                            enabled_source) == 8,
-                   "dynconf snapshot enabled_source offset changed");
-    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
-                            enabled_complex) == 16,
-                   "dynconf snapshot enabled_complex offset changed");
-    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
-                            prune_noise) == 24,
-                   "dynconf snapshot prune_noise offset changed");
-    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
-                            log_verbosity) == 32,
-                   "dynconf snapshot log_verbosity offset changed");
-    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
-                            error_policy) == 40,
-                   "dynconf snapshot error_policy offset changed");
-    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
-                            error_status) == 48,
-                   "dynconf snapshot error_status offset changed");
-    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
-                            streaming_budget) == 56,
-                   "dynconf snapshot streaming_budget offset changed");
-    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
-                            memory_budget) == 64,
-                   "dynconf snapshot memory_budget offset changed");
-    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
-                            conversion_memory) == 72,
-                   "dynconf snapshot conversion_memory offset changed");
-    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
-                            validation_summary) == 80,
-                   "dynconf snapshot validation_summary offset changed");
-    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
-                            valid) == 88,
-                   "dynconf snapshot valid offset changed");
-#endif /* NGX_PTR_SIZE == 8 (LP64 literal offsets) */
-#else
-    _Static_assert(
-        sizeof(ngx_http_markdown_dynconf_snapshot_t)
-            == 11 * sizeof(void *),
-        "dynconf_snapshot_t layout changed, review shallow copy");
-#if (NGX_PTR_SIZE == 8)
-    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
-                            enabled) == 0,
-                   "dynconf snapshot enabled offset changed");
-    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
-                            enabled_source) == 8,
-                   "dynconf snapshot enabled_source offset changed");
-    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
-                            enabled_complex) == 16,
-                   "dynconf snapshot enabled_complex offset changed");
-    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
-                            prune_noise) == 24,
-                   "dynconf snapshot prune_noise offset changed");
-    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
-                            log_verbosity) == 32,
-                   "dynconf snapshot log_verbosity offset changed");
-    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
-                            error_policy) == 40,
-                   "dynconf snapshot error_policy offset changed");
-    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
-                            error_status) == 48,
-                   "dynconf snapshot error_status offset changed");
-    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
-                            memory_budget) == 56,
-                   "dynconf snapshot memory_budget offset changed");
-    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
-                            conversion_memory) == 64,
-                   "dynconf snapshot conversion_memory offset changed");
-    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
-                            validation_summary) == 72,
-                   "dynconf snapshot validation_summary offset changed");
-    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
-                            valid) == 80,
-                   "dynconf snapshot valid offset changed");
-#endif /* NGX_PTR_SIZE == 8 (LP64 literal offsets) */
-#endif
-
-}
 
 
 /**
@@ -2964,6 +2857,10 @@ ngx_http_markdown_dynconf_reload(
 }
 
 #else /* NGX_HTTP_MARKDOWN_DYNCONF_LEGACY_TEST */
+
+/* Defined at file scope after the legacy-test section; declared here so
+ * the production publish path can call it. */
+static void ngx_http_markdown_dynconf_assert_snapshot_layout(void);
 
 static void
 ngx_http_markdown_dynconf_record_static_error(
@@ -3424,6 +3321,12 @@ ngx_http_markdown_dynconf_publish_candidate(
                sizeof(watcher->digest_state.source_digest));
     ngx_memcpy(watcher->digest_state.active_digest, active_digest,
                sizeof(watcher->digest_state.active_digest));
+    /*
+     * Compile-time guard: if a field is added to the snapshot struct,
+     * sizeof changes and this assertion fires, forcing a review of the
+     * shallow-copy safety below (active_snapshot = staging_snapshot).
+     */
+    ngx_http_markdown_dynconf_assert_snapshot_layout();
     watcher->active_snapshot = watcher->staging_snapshot;
     ngx_http_markdown_dynconf_apply_snapshot(conf, &watcher->active_snapshot);
     watcher->digest_state.generation++;
@@ -3514,6 +3417,94 @@ ngx_http_markdown_dynconf_reload(
 }
 
 #endif /* NGX_HTTP_MARKDOWN_DYNCONF_LEGACY_TEST */
+
+static void
+ngx_http_markdown_dynconf_assert_snapshot_layout(void)
+{
+#ifdef MARKDOWN_STREAMING_ENABLED
+    _Static_assert(
+        sizeof(ngx_http_markdown_dynconf_snapshot_t)
+            == 11 * sizeof(void *),
+        "dynconf_snapshot_t layout changed, review shallow copy");
+#if (NGX_PTR_SIZE == 8)
+    /* Literal-byte offset assertions are LP64-specific; on 32-bit targets
+     * the pointer-derived offsets differ and the pointer-scaled size
+     * assertion above remains the portable check. */
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            enabled) == 0,
+                   "dynconf snapshot enabled offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            enabled_source) == 8,
+                   "dynconf snapshot enabled_source offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            enabled_complex) == 16,
+                   "dynconf snapshot enabled_complex offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            prune_noise) == 24,
+                   "dynconf snapshot prune_noise offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            log_verbosity) == 32,
+                   "dynconf snapshot log_verbosity offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            error_policy) == 40,
+                   "dynconf snapshot error_policy offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            error_status) == 48,
+                   "dynconf snapshot error_status offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            streaming_budget) == 56,
+                   "dynconf snapshot streaming_budget offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            conversion_memory) == 64,
+                   "dynconf snapshot conversion_memory offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            validation_summary) == 72,
+                   "dynconf snapshot validation_summary offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            valid) == 80,
+                   "dynconf snapshot valid offset changed");
+#endif /* NGX_PTR_SIZE == 8 (LP64 literal offsets) */
+#else
+    _Static_assert(
+        sizeof(ngx_http_markdown_dynconf_snapshot_t)
+            == 10 * sizeof(void *),
+        "dynconf_snapshot_t layout changed, review shallow copy");
+#if (NGX_PTR_SIZE == 8)
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            enabled) == 0,
+                   "dynconf snapshot enabled offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            enabled_source) == 8,
+                   "dynconf snapshot enabled_source offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            enabled_complex) == 16,
+                   "dynconf snapshot enabled_complex offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            prune_noise) == 24,
+                   "dynconf snapshot prune_noise offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            log_verbosity) == 32,
+                   "dynconf snapshot log_verbosity offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            error_policy) == 40,
+                   "dynconf snapshot error_policy offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            error_status) == 48,
+                   "dynconf snapshot error_status offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            conversion_memory) == 56,
+                   "dynconf snapshot conversion_memory offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            validation_summary) == 64,
+                   "dynconf snapshot validation_summary offset changed");
+    _Static_assert(offsetof(ngx_http_markdown_dynconf_snapshot_t,
+                            valid) == 72,
+                   "dynconf snapshot valid offset changed");
+#endif /* NGX_PTR_SIZE == 8 (LP64 literal offsets) */
+#endif
+
+}
+
 
 
 

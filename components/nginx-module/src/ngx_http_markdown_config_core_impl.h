@@ -359,6 +359,9 @@ ngx_http_markdown_mark_static_explicit_fields(
     {
         mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_CACHE;
     }
+    if (conf->on_error != NGX_CONF_UNSET_UINT) {
+        mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_ERROR_POLICY;
+    }
     if (conf->stream.policy != NGX_CONF_UNSET_UINT) {
         mask |= NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_STREAM;
     }
@@ -498,7 +501,6 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->advanced.prune_noise = NGX_CONF_UNSET;
     conf->advanced.prune_selectors = NGX_CONF_UNSET_PTR;
     conf->advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
-    conf->advanced.memory_budget = NGX_CONF_UNSET_SIZE;
     conf->advanced.dynconf_enabled = NGX_CONF_UNSET;
     conf->advanced.dynconf_path.len = 0;
     conf->advanced.dynconf_path.data = NULL;
@@ -626,7 +628,7 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
      * level, inherit max_size.  This must run after memory_budget override
      * so the default tracks the effective max_size.
      *
-     * NOTE (C-P3-5): under the 0.9.2 contract this branch is effectively
+     * NOTE (0.9.2-contract): under the 0.9.2 contract this branch is effectively
      * dead — config_merge_impl.h always assigns
      * conf->decompress.max_size = conf->limits.decompressed_size (which
      * has an independent 10m default) before this point, so the value is

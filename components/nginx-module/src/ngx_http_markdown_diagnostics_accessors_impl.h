@@ -791,7 +791,7 @@ ngx_http_markdown_manifest_append_runtime_fields(
     }
     if (ngx_http_markdown_manifest_field_string(
             builder, "error_policy", error_value, error_len,
-            explicit & NGX_HTTP_MARKDOWN_EXPLICIT_ERROR_POLICY, 0)
+            explicit & NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_ERROR_POLICY, 0)
         != NGX_OK)
     {
         return NGX_ERROR;

@@ -90,6 +90,13 @@ ngx_http_markdown_full_brotli_alloc(void *opaque, size_t size)
         sizeof(ngx_http_markdown_full_brotli_allocation_t) + size,
         ctx->log);
     if (allocation == NULL) {
+        /*
+         * Roll back the reserved budget.  NGINX workers are single-threaded
+         * event loops (one worker per process), so the atomic counter has no
+         * real contention here — the CAS/atomic discipline is retained for
+         * Rule 42 volatile/atomic consistency and metrics-snapshot safety,
+         * not for cross-thread synchronization.
+         */
         (void) ngx_atomic_fetch_add(
             ctx->counter, -((ngx_atomic_int_t) size));
         return NULL;
@@ -483,7 +490,7 @@ ngx_http_markdown_detect_compression(ngx_http_request_t *r)
      * validator; do not emit the single-token "unsupported" warning before
      * that parser has classified a valid multi-layer response.
      *
-     * Intentional (C-P3-2): a comma-containing value is reported UNKNOWN
+     * Intentional (comma-value): a comma-containing value is reported UNKNOWN
      * here so the single-token classifier does not double-report what the
      * chain parser owns; the precommit chain validator then classifies the
      * real layers (valid multi-layer chains still reach decompression).

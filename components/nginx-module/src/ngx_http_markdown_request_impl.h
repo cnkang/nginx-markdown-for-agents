@@ -650,7 +650,7 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
     ngx_int_t  rc;
 
     inflight_rc = ngx_http_markdown_inflight_try_increment(
-        r, conf);
+        r, conf, ctx);
 
     if (inflight_rc == NGX_DECLINED) {
         /* Overloaded — apply error policy */
@@ -1414,6 +1414,10 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
                 "skipped_conditional", "conversion"}),
             elapsed_ms);
 
+        /* subrequest: no conversion ran for this response — release the
+         * inflight slot now instead of waiting for pool destruction. */
+        ngx_http_markdown_inflight_release(ctx);
+
         return NGX_OK;
     }
     if (rc != NGX_OK) {
@@ -1430,6 +1434,9 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
                     ? "failed_closed" : "failed_open",
                 "conversion"}),
             elapsed_ms);
+
+        /* subrequest: conversion terminated with an error — release the slot. */
+        ngx_http_markdown_inflight_release(ctx);
         return rc;
     }
 
@@ -1449,9 +1456,19 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
                         ? "failed_closed" : "failed_open",
                     "conversion"}),
                 elapsed_ms);
+
+            /* subrequest: conversion terminated with an error — release the slot. */
+            ngx_http_markdown_inflight_release(ctx);
             return rc;
         }
     }
+
+    /* subrequest: conversion work has finished (conditional result reused or
+     * fresh conversion succeeded).  Release the inflight slot before
+     * emitting output; the slot guards conversions in progress, not
+     * downstream delivery.  For subrequests this frees the slot before
+     * the shared parent pool is destroyed. */
+    ngx_http_markdown_inflight_release(ctx);
 
     rc = ngx_http_markdown_send_conversion_output(
         r, ctx, conf, &result, elapsed_ms);

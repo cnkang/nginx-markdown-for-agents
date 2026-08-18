@@ -276,7 +276,10 @@ ngx_http_markdown_contains_csv_token(const ngx_str_t *value,
         size_t start;
         size_t end;
 
-        while (i < value->len && (value->data[i] == ' ' || value->data[i] == ',')) {
+        while (i < value->len
+               && (value->data[i] == ' ' || value->data[i] == '\t'
+                   || value->data[i] == ','))
+        {
             i++;
         }
 
@@ -286,7 +289,10 @@ ngx_http_markdown_contains_csv_token(const ngx_str_t *value,
         }
         end = i;
 
-        while (end > start && value->data[end - 1] == ' ') {
+        while (end > start
+               && (value->data[end - 1] == ' '
+                   || value->data[end - 1] == '\t'))
+        {
             end--;
         }
 

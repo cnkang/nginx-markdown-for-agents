@@ -153,6 +153,7 @@ ngx_http_markdown_metrics_v1_render_histogram(
         "0.1", "0.25", "0.5", "1.0", "5.0"
     };
     ngx_atomic_uint_t  cumulative;
+    ngx_atomic_uint_t  total;
     ngx_atomic_uint_t  sum_seconds;
     ngx_atomic_uint_t  sum_frac;
 
@@ -175,10 +176,17 @@ ngx_http_markdown_metrics_v1_render_histogram(
         }
     }
 
+    /* The +Inf bucket must never be below the preceding cumulative
+     * bucket (Prometheus histogram monotonicity), and _count must equal
+     * +Inf.  Use one total for both samples so a count that lags the
+     * bucket increments cannot emit a decreasing or inconsistent series. */
+    total = (ngx_atomic_uint_t) (cumulative > histogram->count
+        ? cumulative : histogram->count);
+
     p = ngx_slprintf(p, end,
         "nginx_markdown_conversion_duration_seconds_bucket"
         "{engine=\"%s\",le=\"+Inf\"} %uA\n",
-        engine, histogram->count);
+        engine, total);
     if (p >= end) {
         return NULL;
     }
