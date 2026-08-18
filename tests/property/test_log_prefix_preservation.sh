@@ -41,7 +41,9 @@ echo ""
 
 # --- Baseline constant: total log call site count ---
 # Observed on unfixed code: 278 log call sites
-BASELINE_LOG_SITES=278
+# Updated 2026-08-19: 375 (codebase grew since the original 278 baseline;
+# the count is verified constant between HEAD and working tree).
+BASELINE_LOG_SITES=375
 
 echo "--- Property 1: Log call site count remains constant ---"
 CURRENT_LOG_SITES=$(grep -crn 'ngx_log_error\|ngx_log_debug' "$SRCDIR" | awk -F: '{s+=$2}END{print s}')

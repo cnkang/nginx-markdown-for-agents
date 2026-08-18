@@ -1,8 +1,11 @@
 name: Release Binaries
 
 on:
-  release:
-    types: [published]
+  # Musl dynamic-module tarballs are now built BEFORE publication by
+  # release-packages.yml (musl-build job, tag + workflow_dispatch triggers).
+  # This workflow remains as a manual rebuild tool for existing releases;
+  # it never runs on release publication (F-01 fix: supported musl artifacts
+  # must exist before the release goes public).
   workflow_dispatch:
     inputs:
       version:

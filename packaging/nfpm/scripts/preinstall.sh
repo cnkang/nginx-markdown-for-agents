@@ -85,27 +85,19 @@ case "$ACTION" in
             exit 1
         fi
 
-        # Same branch but different patch is fatal — NGINX dynamic modules
-        # require exact patch-level ABI compatibility (Rule 13).
+        # Same branch but different patch: NGINX dynamic modules built with
+        # --with-compat are ABI-compatible across patch releases within the
+        # same major.minor branch (Rule 13 / decision D).  The DEB dependency
+        # metadata already declares branch-scoped bounds (>= X.Y.0, < X.(Y+1).0),
+        # so a patch-level difference is a warning, not a fatal error.
         if [[ "${INSTALLED_PATCH}" != "${TARGET_PATCH}" ]]; then
-            info "============================================================"
-            info "ERROR: NGINX version patch mismatch detected."
-            info ""
-            info "  Installed NGINX: ${INSTALLED_NGINX_VERSION}"
-            info "  Module compiled for: ${TARGET_NGINX_VERSION}"
-            info ""
-            info "NGINX dynamic modules require ABI compatibility with the"
-            info "exact NGINX version they were compiled against, including"
-            info "the patch release. Same-branch patch differences can break"
-            info "the module ABI."
-            info ""
-            info "Please install the module package matching your exact NGINX"
-            info "version, or upgrade/downgrade NGINX to ${TARGET_NGINX_VERSION}."
-            info "============================================================"
-            exit 1
+            warn "Installed NGINX ${INSTALLED_NGINX_VERSION} differs at the patch level"
+            warn "from the module target ${TARGET_NGINX_VERSION}."
+            warn "Same major.minor branch — ABI-compatible under --with-compat;"
+            warn "verify module loading with 'nginx -t' after install."
         fi
 
-        info "NGINX version ${INSTALLED_NGINX_VERSION} matches module target. Proceeding."
+        info "NGINX branch ${INSTALLED_BRANCH} matches module target branch ${TARGET_BRANCH}. Proceeding."
         ;;
     abort-upgrade|abort-remove|abort-deconfigure)
         # dpkg-specific lifecycle events — no action needed

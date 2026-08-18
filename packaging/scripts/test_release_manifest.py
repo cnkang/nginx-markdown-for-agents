@@ -256,6 +256,47 @@ class TestGenerateManifest(unittest.TestCase):
         self.assertFalse(manifest["integrity"]["signature_available"])
         self.assertIsNone(manifest["integrity"]["signed_file"])
 
+    def test_dynamic_module_tarball_generate(self):
+        """generate-release-manifest must include dynamic-module tarballs."""
+        expected_sha = self._write_package(
+            "ngx_http_markdown_filter_module-1.28.3-musl-x86_64.tar.gz",
+            b"fake-tarball",
+        )
+        result = self._run_generate([
+            "--version", "0.8.3",
+            "--tag", "v0.8.3",
+            "--commit", "abc1234def5678",
+            "--repo", "cnkang/nginx-markdown-for-agents",
+        ])
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        manifest = json.loads(result.stdout)
+        self.assertEqual(len(manifest["packages"]), 1)
+        pkg = manifest["packages"][0]
+        self.assertEqual(pkg["format"], "dynamic-module")
+        self.assertEqual(pkg["nginx_version"], "1.28.3")
+        self.assertEqual(pkg["libc"], "musl")
+        self.assertEqual(pkg["arch"], "amd64")
+        self.assertEqual(pkg["sha256"], expected_sha)
+        # dynamic-module entries do not carry a project version key
+        self.assertNotIn("version", pkg)
+
+    def test_tarball_only_no_version_does_not_keyerror(self):
+        """generate without --version and only tarballs must not raise
+        KeyError on the missing entry version (dynamic-module entries
+        carry nginx_version instead of a project version)."""
+        self._write_package(
+            "ngx_http_markdown_filter_module-1.28.3-musl-x86_64.tar.gz",
+            b"fake-tarball",
+        )
+        result = self._run_generate([
+            "--no-source",
+            "--ref-type", "branch",
+        ])
+        self.assertEqual(result.returncode, 1, "expected failure without any version")
+        # The failure must be the controlled 'no version' error, not a KeyError.
+        self.assertIn("version", result.stderr.lower())
+
 
 class TestValidateManifest(unittest.TestCase):
     def setUp(self):
@@ -690,6 +731,36 @@ class TestValidateManifest(unittest.TestCase):
             any("filename escapes artifact directory" in e for e in errors),
             f"Expected path traversal error, got: {errors}",
         )
+
+    def test_dynamic_module_tarball_validate_passes(self):
+        """Validator must accept dynamic-module entries without version."""
+        fname = "ngx_http_markdown_filter_module-1.28.3-glibc-x86_64.tar.gz"
+        self.artifact_dir.joinpath(fname).write_bytes(b"fake-glibc-tarball")
+        self._make_valid_manifest([
+            {
+                "filename": fname,
+                "format": "dynamic-module",
+                "nginx_version": "1.28.3",
+                "libc": "glibc",
+                "arch": "amd64",
+                "sha256": sha256_bytes(b"fake-glibc-tarball"),
+            }
+        ])
+        # SHA256SUMS must include all artifacts + release-manifest.json
+        entries = []
+        for f in sorted(self.artifact_dir.iterdir()):
+            entries.append(f"{sha256_bytes(f.read_bytes())}  {f.name}")
+        # Copy the manifest into the artifact dir (validator cross-checks
+        # CLI manifest against artifact_dir/release-manifest.json)
+        (self.artifact_dir / "release-manifest.json").write_text(
+            self.manifest_path.read_text()
+        )
+        entries.append(
+            f"{sha256_bytes((self.artifact_dir / 'release-manifest.json').read_bytes())}  release-manifest.json"
+        )
+        self.sha256sums_path.write_text("\n".join(entries) + "\n")
+        errors = self._validate()
+        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
 
 
 if __name__ == "__main__":

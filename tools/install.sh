@@ -1187,6 +1187,10 @@ echo "$SEPARATOR_LINE"
 # Emit JSON output if --json was requested
 if [[ "$NGINX_TEST_RESULT" = "failed" ]]; then
   json_output false
+  # A failed nginx -t means the install produced a broken
+  # config; the exit code must reflect that so automation does not treat a
+  # broken install as success.
+  exit 1
 else
   json_output true
 fi

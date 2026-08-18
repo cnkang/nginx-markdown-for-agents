@@ -106,6 +106,7 @@ jobs:
       nginx_versions: ${{ steps.resolve.outputs.nginx_versions }}
       package_matrix: ${{ steps.resolve.outputs.package_matrix }}
       smoke_matrix: ${{ steps.resolve.outputs.smoke_matrix }}
+      musl_matrix: ${{ steps.resolve.outputs.musl_matrix }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -191,9 +192,38 @@ jobs:
               out.write(f"package_matrix={json.dumps(package_matrix)}\n")
               out.write(f"smoke_matrix={json.dumps(smoke_matrix)}\n")
 
+              # Musl dynamic-module matrix: entries owned by
+              # release-binaries.yml (musl only).  Built in this workflow so
+              # all supported artifacts are produced BEFORE the release is
+              # published (the previous post-publication musl build could
+              # never block a release).
+              musl_entries = [
+                  {
+                      "nginx": e["nginx_version"],
+                      "os_type": e["libc"],
+                      "arch": {"amd64": "x86_64", "arm64": "aarch64"}.get(e["arch"], e["arch"]),
+                  }
+                  for e in data.get("entries", [])
+                  if e.get("owner_workflow") == ".github/workflows/release-binaries.yml"
+                  and e.get("support_tier") == "supported"
+                  and e.get("artifact_type") == "dynamic-module"
+                  and e.get("libc") == "musl"
+              ]
+              musl_entries.sort(
+                  key=lambda e: (
+                      tuple(int(p) for p in e["nginx"].split(".")),
+                      e["arch"],
+                  )
+              )
+              if musl_entries:
+                  out.write(f"musl_matrix={json.dumps(musl_entries)}\n")
+              else:
+                  out.write("musl_matrix=[]\n")
+
           print(f"Resolved {len(versions)} NGINX versions: {versions}")
           print(f"Package matrix: {len(package_matrix)} entries")
           print(f"Smoke test matrix: {len(smoke_matrix)} entries")
+          print(f"Musl dynamic-module matrix: {len(musl_entries)} entries")
           PY
         shell: bash
 
@@ -470,6 +500,47 @@ jobs:
           if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────────────────────
+  # Musl Build Job: Build musl dynamic-module tarballs BEFORE publication.
+  # Previously release-binaries.yml built musl artifacts only after the
+  # release was published (trigger: release: [published]) — a failed musl
+  # build could never block the public release (F-01).  This job builds the
+  # same matrix in the tag pipeline so every supported artifact exists before
+  # the publish job runs.  release-binaries.yml keeps workflow_dispatch for
+  # manual rebuilds of existing releases.
+  # ─────────────────────────────────────────────────────────────────────────────
+  musl-build:
+    name: Musl Build - NGINX ${{ matrix.nginx }} - ${{ matrix.arch }}
+    needs: prepare
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.prepare.outputs.musl_matrix) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build musl module tarball
+        run: |
+          ./tools/build_release.sh "${{ matrix.nginx }}" musl "${{ matrix.arch }}"
+
+      - name: Upload musl module tarball
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pkg-musl-module-${{ matrix.nginx }}-${{ matrix.arch }}
+          path: dist/${{ matrix.nginx }}-musl-${{ matrix.arch }}/*.tar.gz
+          if-no-files-found: error
+          retention-days: 5
+
+  # ─────────────────────────────────────────────────────────────────────────────
   # Package Job: Generate .deb/.rpm via nFPM (matrix)
   # Consumes the compiled .so from the build job and produces distribution
   # packages following 0.8.x release package naming and layout conventions.
@@ -658,6 +729,43 @@ jobs:
         with:
           name: pkg-rpm-${{ matrix.nginx_version }}-${{ matrix.arch }}
           path: dist/${{ steps.pkg-env.outputs.rpm_filename }}
+          if-no-files-found: error
+          retention-days: 5
+
+      - name: Package glibc module tarball
+        run: |
+          # Produce the glibc dynamic-module tarball that the release matrix
+          # declares as supported/release-blocking but release-binaries.yml
+          # (musl-only) never builds.  Naming matches tools/build_release.sh:
+          #   ngx_http_markdown_filter_module-<version>-glibc-<arch>.tar.gz
+          # The .so is already in build/ from the build job (downloaded via
+          # module-so artifact at the top of this job).
+          SO="$(find build/ -name 'ngx_http_markdown_filter_module.so' -print -quit)"
+          if [[ -z "${SO}" ]]; then
+            echo "ERROR: module .so not found in build/" >&2
+            exit 1
+          fi
+
+          case "${MATRIX_ARCH}" in
+            amd64) TARBALL_ARCH="x86_64" ;;
+            arm64) TARBALL_ARCH="aarch64" ;;
+            *) echo "ERROR: Unsupported architecture: ${MATRIX_ARCH}" >&2; exit 1 ;;
+          esac
+
+          TARBALL_NAME="ngx_http_markdown_filter_module-${NGINX_VERSION}-glibc-${TARBALL_ARCH}.tar.gz"
+          mkdir -p dist/tarball
+          cp "${SO}" "dist/tarball/ngx_http_markdown_filter_module.so"
+          tar -C dist/tarball -czf "dist/${TARBALL_NAME}" ngx_http_markdown_filter_module.so
+          rm -rf dist/tarball
+          echo "Generated: dist/${TARBALL_NAME}" >&2
+          ls -la "dist/${TARBALL_NAME}"
+        shell: bash
+
+      - name: Upload glibc module tarball
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pkg-glibc-module-${{ matrix.nginx_version }}-${{ matrix.arch }}
+          path: dist/ngx_http_markdown_filter_module-*-glibc-*.tar.gz
           if-no-files-found: error
           retention-days: 5
 
@@ -1043,6 +1151,22 @@ jobs:
           path: artifacts/
           merge-multiple: true
 
+      - name: Download all glibc module tarballs (workflow dispatch)
+        if: github.ref_type != 'tag'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: pkg-glibc-module-*
+          path: artifacts/
+          merge-multiple: true
+
+      - name: Download all musl module tarballs (workflow dispatch)
+        if: github.ref_type != 'tag'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: pkg-musl-module-*
+          path: artifacts/
+          merge-multiple: true
+
       - name: List downloaded artifacts
         run: |
           echo "=== Downloaded artifacts ===" >&2
@@ -1136,7 +1260,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   integrity-signing:
     name: Integrity - GPG Sign
-    needs: [smoke-test, release-gate]
+    needs: [smoke-test, release-gate, musl-build]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     permissions:
@@ -1349,6 +1473,22 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-rpm-*
+          path: release-assets/
+          merge-multiple: true
+
+      - name: Download all glibc module tarballs
+        if: github.ref_type != 'tag'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: pkg-glibc-module-*
+          path: release-assets/
+          merge-multiple: true
+
+      - name: Download all musl module tarballs
+        if: github.ref_type != 'tag'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: pkg-musl-module-*
           path: release-assets/
           merge-multiple: true
 

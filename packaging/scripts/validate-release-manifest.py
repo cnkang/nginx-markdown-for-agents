@@ -156,7 +156,19 @@ def validate_manifest(
         manifest_filenames = set()
         for i, pkg in enumerate(packages):
             prefix = f"packages[{i}]"
-            for key in ("filename", "format", "version", "sha256"):
+            # dynamic-module tarballs carry nginx_version/libc/arch instead of
+            # a project version (their name encodes the NGINX version, not the
+            # release version).  Require the version key for deb/rpm only, and
+            # the full identity set for dynamic-module entries.
+            if pkg.get("format") in ("deb", "rpm"):
+                required_keys = ("filename", "format", "version", "sha256")
+            elif pkg.get("format") == "dynamic-module":
+                required_keys = (
+                    "filename", "format", "nginx_version", "libc", "arch", "sha256",
+                )
+            else:
+                required_keys = ("filename", "format", "sha256")
+            for key in required_keys:
                 if key not in pkg:
                     errors.append(f"{prefix}: missing {key}")
 
@@ -186,7 +198,7 @@ def validate_manifest(
                             f"manifest={pkg['sha256']}, actual={actual_sha}"
                         )
 
-            if "format" in pkg and pkg["format"] not in ("deb", "rpm"):
+            if "format" in pkg and pkg["format"] not in ("deb", "rpm", "dynamic-module"):
                 errors.append(f"{prefix}: unexpected format: {pkg['format']}")
 
             if "sha256" in pkg:
