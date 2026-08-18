@@ -395,13 +395,15 @@
 
 /**
  * Content-Encoding chain parse classification: syntactically valid token
- * outside the supported set; precommit capability bypass (passthrough).
+ * outside the supported set; routed through the configured error policy
+ * (reject returns the configured status, pass forwards the original
+ * response unchanged).
  */
 #define ENCODING_CHAIN_UNKNOWN_TOKEN 2
 
 /**
  * Content-Encoding chain parse classification: more than 3 non-identity
- * layers; precommit depth bypass (passthrough).
+ * layers; same error-policy routing as unknown-token.
  */
 #define ENCODING_CHAIN_DEPTH_EXCEEDED 3
 
@@ -1883,6 +1885,16 @@ void markdown_chain_decode_result_init(struct FFIChainDecodeResult *result);
  * An identity-only chain (`layer_count == 0`) is a successful no-op:
  * the output is a copy of the input (decode(identity, input) == input),
  * allocated by Rust and released with `markdown_chain_decode_free`.
+ *
+ * **Empty-input contract (empty-input):** an empty wire body (`input_len == 0`)
+ * is a legal empty payload regardless of the declared chain — the call
+ * succeeds with an empty output (NULL pointer, zero length) instead of
+ * classifying the empty input as truncation. This intentionally differs
+ * from the single-format decompressors, which classify an empty compressed
+ * input as `DECOMP_CATEGORY_TRUNCATED_INPUT`; the chain decoder treats a
+ * zero-byte body as "no content" per HTTP semantics. Callers that need
+ * strict single-format truncation semantics must use the single-format
+ * entry points directly.
  *
  * # Return Value
  *

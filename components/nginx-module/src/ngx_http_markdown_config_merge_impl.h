@@ -47,14 +47,12 @@ ngx_http_markdown_apply_memory_budget_override(
     const ngx_http_markdown_conf_t *prev,
     ngx_flag_t max_size_set)
 {
+    /* The legacy advanced.memory_budget field (static directive removed in
+     * 0.9.0) is fully removed in 0.9.2: the frozen conversion bound is
+     * markdown_limits conversion_memory, projected into max_size by the
+     * merge helper.  Only the explicit-flag propagation remains. */
     conf->decompress.max_size_explicit =
         max_size_set || prev->decompress.max_size_explicit;
-
-    if (conf->advanced.memory_budget != NGX_CONF_UNSET_SIZE
-        && !conf->decompress.max_size_explicit)
-    {
-        conf->max_size = conf->advanced.memory_budget;
-    }
 }
 
 static void
@@ -141,9 +139,6 @@ ngx_http_markdown_merge_advanced_values(ngx_http_markdown_conf_t *conf,
     ngx_conf_merge_ptr_value(conf->advanced.prune_protection_selectors,
                              prev->advanced.prune_protection_selectors,
                              NULL);
-    ngx_conf_merge_size_value(conf->advanced.memory_budget,
-                              prev->advanced.memory_budget,
-                              NGX_CONF_UNSET_SIZE);
     ngx_conf_merge_value(conf->advanced.dynconf_enabled,
                          prev->advanced.dynconf_enabled, 0);
     ngx_http_markdown_merge_str_if_unset(&conf->advanced.dynconf_path,

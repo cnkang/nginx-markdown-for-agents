@@ -1915,6 +1915,16 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
     markdown_result_free(result);
 
     /*
+     * subrequest: release the buffered HTML backing store now that the
+     * converted output has been copied into request-pool memory.
+     * For subrequests this frees the (potentially large) HTML
+     * buffer before the shared parent pool is destroyed
+     * (per-parent-request memory retention).  Idempotent: the pool
+     * cleanup registered by buffer_init remains as the fallback.
+     */
+    ngx_http_markdown_buffer_release(&ctx->buffer);
+
+    /*
      * Step 6: Forward headers downstream (idempotent via headers_forwarded).
      */
     rc = ngx_http_markdown_forward_headers(r, ctx);

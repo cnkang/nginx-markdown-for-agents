@@ -289,6 +289,10 @@ static ngx_int_t
 ngx_http_markdown_stream_commit_apply_auth_cache_control(
     ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf);
 
+static ngx_int_t
+ngx_http_markdown_stream_commit_remove_representation_metadata(
+    ngx_http_request_t *r);
+
 
 /*
  * Execute the streaming header commit sequence.
@@ -398,6 +402,7 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
     (void) ngx_http_markdown_stream_commit_remove_content_length(r);
     (void) ngx_http_markdown_stream_commit_maybe_remove_content_encoding(
         r, ctx);
+    (void) ngx_http_markdown_stream_commit_remove_representation_metadata(r);
 
     /*
      * All mutations succeeded — set committed flag.
@@ -570,6 +575,100 @@ ngx_http_markdown_stream_commit_apply_auth_cache_control(
     (void) r;
     (void) conf;
 #endif
+
+    return NGX_OK;
+}
+
+
+/*
+ * Invalidate a response header by name across the full headers_out list
+ * (Rule 28: iterate every list part; Rule 40: hash=0 marks invalidated).
+ *
+ * Returns:
+ *   NGX_OK always (invalidation cannot fail)
+ */
+static ngx_int_t
+ngx_http_markdown_stream_commit_invalidate_header(
+    ngx_http_request_t *r, const u_char *name, size_t name_len)
+{
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *elts;
+
+    part = &r->headers_out.headers.part;
+
+    while (part != NULL) {
+        elts = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (elts[i].hash == 0) {
+                continue;
+            }
+            if (ngx_http_markdown_stream_commit_header_matches(
+                    &elts[i], name, name_len))
+            {
+                elts[i].hash = 0;
+            }
+        }
+        part = part->next;
+    }
+
+    return NGX_OK;
+}
+
+
+/*
+ * Remove representation-integrity metadata that describes the upstream
+ * HTML representation, not the transformed Markdown body.
+ *
+ * After a successful conversion the response body bytes have changed, so
+ * the following upstream headers are stale and must not be forwarded:
+ *   - Accept-Ranges (byte ranges apply to the HTML representation; the
+ *     module bypasses transformation for Range requests)
+ *   - X-Markdown-Tokens (upstream token count for the HTML body)
+ *   - Content-MD5 / Digest / Content-Digest / Repr-Digest (digests of the
+ *     HTML body; consumers may rely on them for integrity checks)
+ *
+ * This mirrors the full-buffer path (headers_impl.h C6 Accept-Ranges
+ * removal) so streaming and buffered responses share one mutation
+ * contract.  Infallible: only pointer/integer writes and hash=0
+ * invalidations.
+ *
+ * Returns:
+ *   NGX_OK always
+ */
+static ngx_int_t
+ngx_http_markdown_stream_commit_remove_representation_metadata(
+    ngx_http_request_t *r)
+{
+    static u_char  hdr_accept_ranges[] = "Accept-Ranges";
+    static u_char  hdr_token_count[] = "X-Markdown-Tokens";
+    static u_char  hdr_content_md5[] = "Content-MD5";
+    static u_char  hdr_digest[] = "Digest";
+    static u_char  hdr_content_digest[] = "Content-Digest";
+    static u_char  hdr_repr_digest[] = "Repr-Digest";
+
+    /* Accept-Ranges: clear the typed field and invalidate list entries. */
+    r->allow_ranges = 0;
+    r->headers_out.accept_ranges = NULL;
+    (void) ngx_http_markdown_stream_commit_invalidate_header(
+        r, hdr_accept_ranges, sizeof(hdr_accept_ranges) - 1);
+
+    /* Upstream X-Markdown-Tokens describes the HTML body. */
+    (void) ngx_http_markdown_stream_commit_invalidate_header(
+        r, hdr_token_count, sizeof(hdr_token_count) - 1);
+
+    /* Representation digests describe the HTML body. */
+    (void) ngx_http_markdown_stream_commit_invalidate_header(
+        r, hdr_content_md5, sizeof(hdr_content_md5) - 1);
+    (void) ngx_http_markdown_stream_commit_invalidate_header(
+        r, hdr_digest, sizeof(hdr_digest) - 1);
+    (void) ngx_http_markdown_stream_commit_invalidate_header(
+        r, hdr_content_digest, sizeof(hdr_content_digest) - 1);
+    (void) ngx_http_markdown_stream_commit_invalidate_header(
+        r, hdr_repr_digest, sizeof(hdr_repr_digest) - 1);
+
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "markdown stream commit: "
+                   "removed representation-integrity metadata");
 
     return NGX_OK;
 }

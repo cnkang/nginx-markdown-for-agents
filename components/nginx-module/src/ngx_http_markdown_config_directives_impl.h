@@ -235,8 +235,9 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *
      * Cookie name patterns to identify authenticated requests.
      * Supports exact match, prefix match (pattern*), and wildcards.
-     * Public default: none
-     * Default: none (only Authorization header detection)
+     * Public default: built-in session*, auth*, PHPSESSID, wordpress_logged_in_* (explicit replaces)
+     * The built-in patterns are used in addition to Authorization
+     * header detection.  An explicit directive replaces the built-ins.
      * Context: http, server, location
      *
      * Example:

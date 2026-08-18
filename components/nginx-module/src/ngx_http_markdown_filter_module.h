@@ -15,6 +15,12 @@
 struct MarkdownOptions;
 struct MarkdownResult;
 
+/* Forward declaration: defined in ngx_http_markdown_inflight_impl.h
+ * (included after this header).  The request context stores a pointer
+ * to the per-request inflight release data (subrequest subrequest lifecycle). */
+typedef struct ngx_http_markdown_inflight_cleanup_s
+    ngx_http_markdown_inflight_cleanup_t;
+
 typedef struct ngx_http_markdown_loc_validation_summary_s {
     size_t      min_applicable_conversion_memory;
     ngx_flag_t  min_applicable_set;
@@ -81,7 +87,7 @@ struct ngx_http_markdown_effective_conf_s {
     ngx_uint_t   log_verbosity;
     ngx_uint_t   error_policy;
     ngx_uint_t   error_status;
-    size_t       memory_budget;
+    size_t       memory_budget;   /* effective conversion_memory projection (frozen public limit) */
     size_t       streaming_buffer;
 #ifdef MARKDOWN_STREAMING_ENABLED
     size_t       streaming_budget;
@@ -410,6 +416,7 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_DIAGNOSTICS  0x04000000
 #define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_EXCLUDED     0x08000000
 #define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_METRICS       0x10000000
+#define NGX_HTTP_MARKDOWN_STATIC_EXPLICIT_ERROR_POLICY  0x20000000
 
 /*
  * Dynconf block mask bits are part of the shared configuration contract.
@@ -471,7 +478,8 @@ typedef struct {
 /*
  * Default for markdown_limits max_inflight (0.9.0 production protection
  * default).  The value is parsed and stored in Config V2; enforcement is
- * implemented by the worker inflight guard.  0 means unlimited.
+ * implemented by the worker inflight guard.  Zero is rejected at config
+ * parse time (must be 1..65535) — there is no "unlimited" sentinel.
  */
 #define NGX_HTTP_MARKDOWN_MAX_INFLIGHT_DEFAULT  64
 
@@ -666,7 +674,6 @@ typedef struct {
     ngx_flag_t   prune_noise;               /* markdown_prune_noise on|off (default: on) */
     ngx_str_t   *prune_selectors;           /* markdown_prune_selectors (default: built-in list) */
     ngx_str_t   *prune_protection_selectors; /* markdown_prune_protection_selectors (default: empty) */
-    size_t       memory_budget;             /* internal/dynconf memory budget (static directive removed in 0.9.0) */
     ngx_flag_t   dynconf_enabled;           /* markdown_dynamic_config on|off (default: off) */
     ngx_str_t    dynconf_path;              /* markdown_dynamic_config_path (default: empty) */
     ngx_flag_t   dynconf_dry_run;           /* markdown_dynconf_dry_run on|off (default: off) */
@@ -781,7 +788,7 @@ ngx_http_markdown_effective_body_buffer_limit(
     if (eff != NULL) {
         budget = eff->memory_budget;
     } else {
-        budget = conf->advanced.memory_budget;
+        budget = conf->limits.conversion_memory;
     }
 
     if (budget == 0 || budget == NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE) {
@@ -940,7 +947,7 @@ typedef enum {
 typedef enum {
     NGX_HTTP_MARKDOWN_ELIGIBLE,                /* Response is eligible for conversion */
     NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD,       /* Not GET/HEAD */
-    NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS,       /* Not 200 or 206 Partial Content */
+    NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS,       /* Not 200; 206 Partial Content is ineligible (routed to INELIGIBLE_RANGE) */
     NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE, /* Not text/html */
     NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE,         /* Exceeds max_size */
     NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING,    /* Unbounded streaming (SSE, etc.) */
@@ -1315,6 +1322,22 @@ typedef struct {
             ngx_flag_t                    terminal_aborted_recorded;
         } completion;
     } streaming;
+
+    /* Per-request inflight release data (subrequest lifecycle, subrequest).
+     *
+     * Set by ngx_http_markdown_check_inflight after a successful
+     * increment.  Conversion terminal paths call
+     * ngx_http_markdown_inflight_release() to decrement the worker
+     * counter as soon as the conversion result is delivered, instead of
+     * waiting for r->pool destruction.  Subrequests share the parent
+     * request's pool, so pool-cleanup alone would hold the slot until
+     * the whole main request finishes (delayed release).  The release
+     * is idempotent: the pool cleanup handler still runs at pool
+     * destruction and observes the decremented flag.
+     *
+     * NULL until check_inflight succeeds; NULL on requests that never
+     * incremented (ineligible, overloaded, bypassed). */
+    ngx_http_markdown_inflight_cleanup_t *inflight_cleanup;
 } ngx_http_markdown_ctx_t;
 
 /*
@@ -1725,6 +1748,11 @@ ngx_int_t ngx_http_markdown_buffer_reserve(ngx_http_markdown_buffer_t *buf,
 /* Append data to buffer with size limit checking */
 ngx_int_t ngx_http_markdown_buffer_append(ngx_http_markdown_buffer_t *buf,
     const u_char *data, size_t len);
+
+/* Actively release the heap-allocated backing store (subrequest subrequest
+ * lifecycle).  Idempotent; the pool cleanup registered by init remains
+ * as the fallback. */
+void ngx_http_markdown_buffer_release(ngx_http_markdown_buffer_t *buf);
 
 /*
  * Error classification functions

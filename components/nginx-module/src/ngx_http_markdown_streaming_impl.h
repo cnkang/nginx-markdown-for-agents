@@ -1294,7 +1294,10 @@ ngx_http_markdown_streaming_send_output(
     }
 
     /* Keep empty buffers in a valid, zero-length state even when the
-     * allocator does not guarantee zeroed memory. */
+     * allocator does not guarantee zeroed memory.  The self-referential
+     * pos/last pair gives downstream filters explicit zero-length bounds
+     * (pos == last, non-NULL) so an empty terminal buffer is
+     * distinguishable from an uninitialized one. */
     b->pos = (u_char *) b;
     b->last = b->pos;
 
@@ -1416,7 +1419,7 @@ ngx_http_markdown_streaming_handle_backpressure(
  * Mutually exclusive with record_postcommit_success: a request is recorded
  * as either a success (delivered terminal) or a failure (post-commit error
  * / abort), never both — failure_recorded and the success latch are
- * disjoint and each path sets exactly one (C-P3-1).
+ * disjoint and each path sets exactly one.
  *
  * Parameters:
  *   r     - HTTP request
@@ -1432,7 +1435,9 @@ ngx_http_markdown_streaming_record_postcommit_outcome(
     const char *conversion_status,
     const char *terminal_reason)
 {
-    if (ctx->streaming.completion.failure_recorded) {
+    if (ctx->streaming.completion.failure_recorded
+        || ctx->error.terminal_decision_recorded)
+    {
         return;
     }
 
@@ -1468,6 +1473,7 @@ ngx_http_markdown_streaming_record_postcommit_outcome(
             ? "fail_closed" : "pass");
 
     ctx->streaming.completion.failure_recorded = 1;
+    ctx->error.terminal_decision_recorded = 1;
 
     ngx_http_markdown_log_decision(
         r, conf, ctx->effective_conf, decision_reason);
@@ -2402,7 +2408,7 @@ ngx_http_markdown_streaming_precommit_error(
      * init failure, feed/finalize precommit error, pending-input
      * enqueue failure) uniformly enters the mode.  Future input then
      * bypasses Rust via continue_failopen_input instead of
-     * re-entering the converter with a NULL handle.  (P1-1)
+     * re-entering the converter with a NULL handle.
      */
     ctx->streaming.completion.failopen_active = 1;
     NGX_HTTP_MARKDOWN_METRIC_INC(
@@ -3690,7 +3696,7 @@ ngx_http_markdown_streaming_init_buffers(
                 "markdown: failed to create decompressor");
             /* Keep attempted >= failed conservation: the attempt was
              * counted above, so the creation failure must be recorded as
-             * a decompression failure too (C-P3-4). */
+             * a decompression failure too. */
             NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.failed);
             markdown_streaming_abort(ctx->streaming.handle);
             ctx->streaming.handle = NULL;
@@ -3954,7 +3960,7 @@ ngx_http_markdown_streaming_send_failopen_chain(
      * violate the backpressure ownership contract (Rule 1) by
      * overwriting or interleaving pending output.  Moving the check
      * before the downstream call also prevents a partial submit when
-     * the new chain is the one that would be discarded.  (P1-2)
+     * the new chain is the one that would be discarded.
      */
     if (ctx->streaming.pending_output != NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
@@ -4247,6 +4253,11 @@ ngx_http_markdown_streaming_passthrough(
     if (!ctx->headers_forwarded) {
         rc = ngx_http_markdown_forward_headers(
             r, ctx);
+        if (rc == NGX_AGAIN) {
+            /* Header forwarding suspended (write event pending); resume
+             * via body-filter re-entry.  Do not fold into the error path. */
+            return NGX_AGAIN;
+        }
         if (rc != NGX_OK) {
             return rc;
         }
@@ -4684,9 +4695,10 @@ ngx_http_markdown_streaming_handle_null_input(
 
     /* Step 1: Resume body output deferred by a commit-time header
      * NGX_AGAIN (pure body-filter re-entry; the header chain is not
-     * re-invoked). */
+     * re-invoked).  NGX_DONE is a successful delivery and must continue
+     * through pending-output, pending-input, and finalization below. */
     rc = ngx_http_markdown_streaming_null_input_resume_output(r, ctx, conf);
-    if (rc != NGX_OK) {
+    if (!ngx_http_markdown_streaming_delivery_ok(rc)) {
         return rc;
     }
 
@@ -5119,7 +5131,7 @@ ngx_http_markdown_streaming_handle_new_input_with_pending(
     }
 
     /*
-     * P1-2: fail-open mode is a request-lifetime terminal state.
+     * Fail-open mode is a request-lifetime terminal state.
      * Never re-enter precommit_error (which would double-count
      * conversions_failed) or failopen_passthrough (which would
      * build a new replay+input chain and submit it while the old

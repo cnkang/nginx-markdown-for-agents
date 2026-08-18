@@ -106,6 +106,34 @@ ngx_http_markdown_find_response_header(ngx_http_request_t *r, u_char *name,
     return NULL;
 }
 
+/*
+ * Invalidate every response header matching `name` (hash=0 per Rule 40).
+ * Iterates the full headers_out list chain (Rule 28).
+ */
+static void
+ngx_http_markdown_invalidate_response_header(ngx_http_request_t *r,
+    u_char *name, size_t name_len)
+{
+    for (ngx_list_part_t *part = &r->headers_out.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        ngx_table_elt_t  *headers;
+
+        headers = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash == 0) {
+                continue;
+            }
+            if (headers[i].key.len == name_len
+                && ngx_strncasecmp(headers[i].key.data, name, name_len) == 0)
+            {
+                headers[i].hash = 0;
+            }
+        }
+    }
+}
+
 static ngx_int_t
 ngx_http_markdown_strncasecmp_const(const u_char *s1, const u_char *s2,
     size_t n)
@@ -591,6 +619,22 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
 
     ngx_http_clear_content_length(r);
     r->headers_out.content_length_n = -1;
+
+    /* The 304 describes the transformed Markdown representation: clear
+     * Accept-Ranges (byte ranges apply to the HTML representation) and
+     * any representation digests of the upstream HTML body. */
+    r->allow_ranges = 0;
+    r->headers_out.accept_ranges = NULL;
+    ngx_http_markdown_invalidate_response_header(
+        r, (u_char *) "Accept-Ranges", sizeof("Accept-Ranges") - 1);
+    ngx_http_markdown_invalidate_response_header(
+        r, (u_char *) "Content-MD5", sizeof("Content-MD5") - 1);
+    ngx_http_markdown_invalidate_response_header(
+        r, (u_char *) "Digest", sizeof("Digest") - 1);
+    ngx_http_markdown_invalidate_response_header(
+        r, (u_char *) "Content-Digest", sizeof("Content-Digest") - 1);
+    ngx_http_markdown_invalidate_response_header(
+        r, (u_char *) "Repr-Digest", sizeof("Repr-Digest") - 1);
 
     if (result != NULL && result->etag != NULL && result->etag_len > 0) {
         rc = ngx_http_markdown_set_etag(r, result->etag, result->etag_len);
