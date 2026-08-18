@@ -144,9 +144,11 @@ struct ngx_http_request_s {
         ngx_str_t  status_line;
         ngx_list_t headers;
         ngx_table_elt_t *etag;
+        ngx_table_elt_t *accept_ranges;
         off_t      content_length_n;
         time_t     last_modified_time;
     } headers_out;
+    ngx_flag_t allow_ranges;
 };
 
 struct ngx_module_s {

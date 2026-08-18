@@ -53,12 +53,21 @@ typedef struct {
 
 
 static int g_client_family;
+static int g_client_loopback;
 
 
 static int
 diagnostics_minimal_access_guard(void)
 {
+    /* Mirrors ngx_http_markdown_diagnostics_check_access: NULL sockaddr
+     * (family 0) is denied; a present peer is accepted only when it is
+     * loopback (127.0.0.0/8 or ::1).  Non-loopback peers are denied by
+     * the content handler — native access-phase directives may add
+     * restrictions but cannot broaden the loopback-only boundary. */
     if (g_client_family == 0) {
+        return NGX_HTTP_FORBIDDEN;
+    }
+    if (!g_client_loopback) {
         return NGX_HTTP_FORBIDDEN;
     }
     return NGX_OK;
@@ -142,6 +151,7 @@ test_sockaddr_allowed_without_module_allowlist(void)
     TEST_SUBSECTION("Loopback allowed when no allow list configured");
 
     g_client_family = 2;
+    g_client_loopback = 1;
 
     rc = diagnostics_minimal_access_guard();
     TEST_ASSERT(rc == NGX_OK,
@@ -159,10 +169,11 @@ test_nonloopback_delegated_to_native_access_phase(void)
     TEST_SUBSECTION("Non-loopback denied when no allow list configured");
 
     g_client_family = 2;
+    g_client_loopback = 0;
 
     rc = diagnostics_minimal_access_guard();
-    TEST_ASSERT(rc == NGX_OK,
-        "non-loopback policy is handled by native NGINX access phase");
+    TEST_ASSERT(rc == NGX_HTTP_FORBIDDEN,
+        "non-loopback peer is denied by the loopback-only boundary");
 
     TEST_PASS("non-loopback denied");
 }
@@ -176,6 +187,7 @@ test_sockaddr_allowed_with_native_allowlist(void)
     TEST_SUBSECTION("Loopback in CIDR allow list → allowed");
 
     g_client_family = 2;
+    g_client_loopback = 1;
 
     rc = diagnostics_minimal_access_guard();
     TEST_ASSERT(rc == NGX_OK,
@@ -193,10 +205,11 @@ test_nonloopback_policy_delegated_to_native_allowlist(void)
     TEST_SUBSECTION("Non-loopback not in CIDR allow list → denied");
 
     g_client_family = 2;
+    g_client_loopback = 0;
 
     rc = diagnostics_minimal_access_guard();
-    TEST_ASSERT(rc == NGX_OK,
-        "native allow/deny policy is not reimplemented in content handler");
+    TEST_ASSERT(rc == NGX_HTTP_FORBIDDEN,
+        "non-loopback peer is denied by the loopback-only boundary");
 
     TEST_PASS("non-loopback denied by allowlist");
 }

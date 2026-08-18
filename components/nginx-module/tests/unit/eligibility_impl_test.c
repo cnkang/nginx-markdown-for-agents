@@ -986,6 +986,55 @@ test_zero_limit_buffer_initializes_lazily(void)
     TEST_PASS("Zero limit initializes lazily and appends on demand");
 }
 
+static void
+test_buffer_release_frees_backing_store(void)
+{
+    ngx_http_markdown_buffer_t  buffer;
+    ngx_log_t                   log;
+    ngx_pool_t                  pool;
+
+    TEST_SUBSECTION("buffer_release: frees backing store (subrequest)");
+
+    memset(&buffer, 0, sizeof(buffer));
+    memset(&log, 0, sizeof(log));
+    memset(&pool, 0, sizeof(pool));
+    pool.log = &log;
+    test_alloc_calls = 0;
+
+    TEST_ASSERT(ngx_http_markdown_buffer_init(&buffer, 0, &pool) == NGX_OK,
+                "init should succeed");
+    TEST_ASSERT(ngx_http_markdown_buffer_append(
+                    &buffer, (const u_char *) "hello", 5) == NGX_OK,
+                "append should succeed");
+    TEST_ASSERT(buffer.data != NULL,
+                "backing store should be allocated after append");
+
+    /* Active release at conversion terminal (pool NOT destroyed). */
+    ngx_http_markdown_buffer_release(&buffer);
+
+    TEST_ASSERT(buffer.data == NULL,
+                "release should free the backing store");
+    TEST_ASSERT(buffer.size == 0 && buffer.capacity == 0,
+                "release should reset size/capacity");
+
+    /* Idempotent: second release is a no-op. */
+    ngx_http_markdown_buffer_release(&buffer);
+    TEST_ASSERT(buffer.data == NULL,
+                "second release should be a no-op");
+
+    /* Pool cleanup after active release must not double-free. */
+    test_cleanup.handler(test_cleanup.data);
+    TEST_PASS("buffer_release frees backing store and is idempotent");
+}
+
+static void
+test_buffer_release_null_safe(void)
+{
+    TEST_SUBSECTION("buffer_release: NULL is a no-op");
+    ngx_http_markdown_buffer_release(NULL);
+    TEST_PASS("buffer_release(NULL) is a no-op");
+}
+
 
 int
 main(void)
@@ -1006,6 +1055,8 @@ main(void)
     test_eligibility_string_all_values();
     test_stream_type_excluded();
     test_zero_limit_buffer_initializes_lazily();
+    test_buffer_release_frees_backing_store();
+    test_buffer_release_null_safe();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

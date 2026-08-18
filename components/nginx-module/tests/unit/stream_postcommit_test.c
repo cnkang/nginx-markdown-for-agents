@@ -261,6 +261,52 @@ ngx_log_error_core(ngx_uint_t level, ngx_log_t *log,
     UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt);
 }
 
+/*
+ * subrequest: stream_postcommit.c now includes inflight_impl.h (shared
+ * inflight lifecycle).  Provide the atomic/pool stubs it needs
+ * (single-threaded test — no real contention).  ngx_atomic_t and
+ * friends come from nginx_stubs/ngx_core.h.
+ */
+static ngx_inline ngx_atomic_int_t
+ngx_atomic_fetch_add(ngx_atomic_t *value, ngx_atomic_int_t add)
+{
+    ngx_atomic_int_t  old = *value;
+    *value += add;
+    return old;
+}
+
+static ngx_inline ngx_atomic_uint_t
+ngx_atomic_cmp_set(ngx_atomic_uint_t *lock, ngx_atomic_uint_t old,
+    ngx_atomic_uint_t set)
+{
+    if (*(volatile ngx_atomic_uint_t *) lock == old) {
+        *lock = set;
+        return 1;
+    }
+    return 0;
+}
+
+typedef struct ngx_pool_cleanup_s {
+    void                         (*handler)(void *data);
+    void                          *data;
+    struct ngx_pool_cleanup_s     *next;
+} ngx_pool_cleanup_t;
+
+static ngx_pool_cleanup_t  test_cleanup;
+
+ngx_pool_cleanup_t *
+ngx_pool_cleanup_add(ngx_pool_t *pool, size_t size)
+{
+    (void) pool;
+    (void) size;
+    memset(&test_cleanup, 0, sizeof(test_cleanup));
+    return &test_cleanup;
+}
+
+#define ngx_log_debug2(level, log, err, fmt, a1, a2) \
+    do { (void)(level); (void)(log); (void)(err); (void)(fmt); \
+         (void)(a1); (void)(a2); } while (0)
+
 /* Include markdown_converter.h first for FFI type declarations */
 #include "../../src/markdown_converter.h"
 

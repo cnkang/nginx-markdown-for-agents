@@ -611,7 +611,7 @@ test_merge_conf(void)
     parent.advanced.prune_noise = NGX_CONF_UNSET;
     parent.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
     parent.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
-    parent.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    parent.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
     parent.advanced.dynconf_enabled = NGX_CONF_UNSET;
     parent.advanced.dynconf_dry_run = NGX_CONF_UNSET;
 
@@ -673,7 +673,7 @@ test_merge_conf(void)
     child.advanced.prune_noise = NGX_CONF_UNSET;
     child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
     child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
-    child.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
     child.advanced.dynconf_enabled = NGX_CONF_UNSET;
     child.advanced.dynconf_dry_run = NGX_CONF_UNSET;
     child.limits.conversion_timeout = NGX_CONF_UNSET_MSEC;
@@ -730,7 +730,7 @@ test_merge_conf(void)
     child.advanced.prune_noise = NGX_CONF_UNSET;
     child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
     child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
-    child.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
     child.limits.conversion_timeout = NGX_CONF_UNSET_MSEC;
     child.limits.parser_timeout = NGX_CONF_UNSET_MSEC;
     child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
@@ -1104,7 +1104,7 @@ test_merge_conf_double_unset(void)
     parent.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
     parent.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
     parent.advanced.dynconf_enabled = NGX_CONF_UNSET;
-    parent.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    parent.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
     parent.advanced.dynconf_path.len = 0;
     parent.advanced.dynconf_path.data = NULL;
 
@@ -1134,7 +1134,7 @@ test_merge_conf_double_unset(void)
     child.advanced.prune_noise = NGX_CONF_UNSET;
     child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
     child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
-    child.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
     child.limits.conversion_timeout = NGX_CONF_UNSET_MSEC;
     child.limits.parser_timeout = NGX_CONF_UNSET_MSEC;
     child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
@@ -1366,7 +1366,7 @@ test_memory_budget_priority_chain(void)
         parent_conf.stream.budget = NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT;
         parent_conf.stream.budget_explicit = 0;
         parent_conf.advanced.prune_noise = 1;
-        parent_conf.advanced.memory_budget = 50 * 1024 * 1024;
+        parent_conf.limits.conversion_memory = 50 * 1024 * 1024;
 
         child_conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
         child_conf.max_size = NGX_CONF_UNSET_SIZE;
@@ -1375,7 +1375,7 @@ test_memory_budget_priority_chain(void)
         child_conf.advanced.prune_noise = NGX_CONF_UNSET;
         child_conf.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
         child_conf.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
-        child_conf.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+        child_conf.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
 
         rc = ngx_http_markdown_merge_conf(&merge_cf, &parent_conf, &child_conf);
         TEST_ASSERT(rc == NGX_CONF_OK,
@@ -1402,7 +1402,7 @@ test_memory_budget_priority_chain(void)
         child_conf.advanced.prune_noise = NGX_CONF_UNSET;
         child_conf.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
         child_conf.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
-        child_conf.advanced.memory_budget = 50 * 1024 * 1024;
+        child_conf.limits.conversion_memory = 50 * 1024 * 1024;
 
         rc = ngx_http_markdown_merge_conf(&merge_cf, &parent_conf, &child_conf);
         TEST_ASSERT(rc == NGX_CONF_OK,
@@ -1435,7 +1435,7 @@ test_decompress_max_size_zero_rejected(void)
     parent.limits.parser_timeout = 30000;
     parent.limits.parser_memory = 10 * 1024 * 1024;
     parent.limits.conversion_memory = 64 * 1024 * 1024;
-    parent.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    parent.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
 
     memset(&child, 0, sizeof(child));
     child.decompress.max_size = NGX_CONF_UNSET_SIZE;
@@ -1447,7 +1447,7 @@ test_decompress_max_size_zero_rejected(void)
     child.on_error = NGX_CONF_UNSET_UINT;
     child.flavor = NGX_CONF_UNSET_UINT;
     child.decompress.auto_decompress = 1;
-    child.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
     child.stream.budget = NGX_CONF_UNSET_SIZE;
     child.advanced.prune_noise = NGX_CONF_UNSET;
     child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
@@ -1489,7 +1489,7 @@ test_streaming_full_force_conflict_rejected(void)
     parent.limits.parser_timeout = 30000;
     parent.limits.parser_memory = 10 * 1024 * 1024;
     parent.limits.conversion_memory = 64 * 1024 * 1024;
-    parent.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    parent.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
 
     memset(&child, 0, sizeof(child));
     child.decompress.max_size = NGX_CONF_UNSET_SIZE;
@@ -1500,7 +1500,7 @@ test_streaming_full_force_conflict_rejected(void)
     child.timeout = NGX_CONF_UNSET_MSEC;
     child.on_error = NGX_CONF_UNSET_UINT;
     child.flavor = NGX_CONF_UNSET_UINT;
-    child.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
     child.stream.budget = NGX_CONF_UNSET_SIZE;
     child.advanced.prune_noise = NGX_CONF_UNSET;
     child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
@@ -1545,7 +1545,7 @@ test_streaming_full_auto_warns_but_succeeds(void)
     parent.limits.parser_timeout = 30000;
     parent.limits.parser_memory = 10 * 1024 * 1024;
     parent.limits.conversion_memory = 64 * 1024 * 1024;
-    parent.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    parent.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
 
     memset(&child, 0, sizeof(child));
     child.decompress.max_size = NGX_CONF_UNSET_SIZE;
@@ -1556,7 +1556,7 @@ test_streaming_full_auto_warns_but_succeeds(void)
     child.timeout = NGX_CONF_UNSET_MSEC;
     child.on_error = NGX_CONF_UNSET_UINT;
     child.flavor = NGX_CONF_UNSET_UINT;
-    child.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    child.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
     child.stream.budget = NGX_CONF_UNSET_SIZE;
     child.advanced.prune_noise = NGX_CONF_UNSET;
     child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;

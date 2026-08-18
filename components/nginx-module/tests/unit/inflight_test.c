@@ -139,6 +139,16 @@ test_pool_destroy(ngx_pool_t *p)
 #define ngx_log_error(level, log, err, ...) (void)0
 #define ngx_log_debug2(mask, log, err, ...) (void)0
 
+/* Minimal request context stub: only the inflight release field used by
+ * the subrequest active-release path is needed here.  Declared before the
+ * include because ngx_http_markdown_inflight_release() references
+ * ngx_http_markdown_ctx_t; the field uses void* to avoid depending on
+ * the cleanup type before the include defines it (C allows implicit
+ * void* <-> typed-pointer conversion in assignments). */
+typedef struct {
+    void  *inflight_cleanup;
+} ngx_http_markdown_ctx_t;
+
 /* Include the implementation under test */
 #include "../../src/ngx_http_markdown_inflight_impl.h"
 
@@ -149,6 +159,7 @@ test_pool_destroy(ngx_pool_t *p)
 static ngx_log_t         g_log;
 static ngx_connection_t  g_conn;
 static ngx_pool_t        g_pool;
+static ngx_http_markdown_ctx_t  g_ctx;
 
 static void
 setup_request(ngx_http_request_t *r)
@@ -157,6 +168,7 @@ setup_request(ngx_http_request_t *r)
     g_conn.log = &g_log;
     r->pool = &g_pool;
     r->connection = &g_conn;
+    g_ctx.inflight_cleanup = NULL;
 }
 
 /* ----------------------------------------------------------------
@@ -189,7 +201,7 @@ test_increment_below_limit(void)
     setup_request(&r);
 
     conf.routing.max_inflight = 64;
-    rc = ngx_http_markdown_inflight_try_increment(&r, &conf);
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &g_ctx);
 
     TEST_ASSERT(rc == NGX_OK, "increment should succeed below limit");
     TEST_ASSERT(ngx_http_markdown_inflight_current() == 1,
@@ -213,19 +225,19 @@ test_increment_rejects_at_limit(void)
     conf.routing.max_inflight = 2;
 
     /* Fill to limit */
-    rc = ngx_http_markdown_inflight_try_increment(&r, &conf);
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &g_ctx);
     TEST_ASSERT(rc == NGX_OK, "first increment should succeed");
 
     /* Reset pool for second request */
     memset(&g_pool, 0, sizeof(g_pool));
 
-    rc = ngx_http_markdown_inflight_try_increment(&r, &conf);
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &g_ctx);
     TEST_ASSERT(rc == NGX_OK, "second increment should succeed");
 
     /* Now at limit — next should be rejected */
     memset(&g_pool, 0, sizeof(g_pool));
 
-    rc = ngx_http_markdown_inflight_try_increment(&r, &conf);
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &g_ctx);
     TEST_ASSERT(rc == NGX_DECLINED, "third increment should be declined");
     TEST_ASSERT(ngx_http_markdown_inflight_current() == 2,
         "current should remain at 2");
@@ -247,7 +259,7 @@ test_cleanup_handler_decrements(void)
 
     conf.routing.max_inflight = 64;
 
-    rc = ngx_http_markdown_inflight_try_increment(&r, &conf);
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &g_ctx);
     TEST_ASSERT(rc == NGX_OK, "increment should succeed");
     TEST_ASSERT(ngx_http_markdown_inflight_current() == 1,
         "current should be 1");
@@ -274,7 +286,7 @@ test_cleanup_handler_idempotent(void)
 
     conf.routing.max_inflight = 64;
 
-    rc = ngx_http_markdown_inflight_try_increment(&r, &conf);
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &g_ctx);
     TEST_ASSERT(rc == NGX_OK, "increment should succeed");
 
     /* Call cleanup handler multiple times manually */
@@ -308,7 +320,7 @@ test_high_watermark_updates(void)
     /* Increment 5 times */
     for (i = 0; i < 5; i++) {
         setup_request(&r);
-        rc = ngx_http_markdown_inflight_try_increment(&r, &conf);
+        rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &g_ctx);
         TEST_ASSERT(rc == NGX_OK, "increment should succeed");
     }
 
@@ -320,11 +332,11 @@ test_high_watermark_updates(void)
 
     /* Increment 2 more (total = 4, below previous watermark) */
     setup_request(&r);
-    rc = ngx_http_markdown_inflight_try_increment(&r, &conf);
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &g_ctx);
     TEST_ASSERT(rc == NGX_OK, "increment should succeed");
 
     setup_request(&r);
-    rc = ngx_http_markdown_inflight_try_increment(&r, &conf);
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &g_ctx);
     TEST_ASSERT(rc == NGX_OK, "increment should succeed");
 
     /* Watermark should still be 5 (not reduced) */
@@ -334,7 +346,7 @@ test_high_watermark_updates(void)
     /* Push past previous watermark */
     for (i = 0; i < 3; i++) {
         setup_request(&r);
-        rc = ngx_http_markdown_inflight_try_increment(&r, &conf);
+        rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &g_ctx);
         TEST_ASSERT(rc == NGX_OK, "increment should succeed");
     }
 
@@ -357,13 +369,13 @@ test_overload_counter_increments(void)
 
     /* Fill to limit */
     setup_request(&r);
-    rc = ngx_http_markdown_inflight_try_increment(&r, &conf);
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &g_ctx);
     TEST_ASSERT(rc == NGX_OK, "first increment should succeed");
 
     /* Multiple rejections */
     for (i = 0; i < 3; i++) {
         setup_request(&r);
-        rc = ngx_http_markdown_inflight_try_increment(&r, &conf);
+        rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &g_ctx);
         TEST_ASSERT(rc == NGX_DECLINED, "should be declined");
     }
 
@@ -407,7 +419,7 @@ test_sequential_increment_decrement_returns_zero(void)
     /* Simulate N requests, each incrementing and then cleaning up */
     for (i = 0; i < 20; i++) {
         setup_request(&r);
-        rc = ngx_http_markdown_inflight_try_increment(&r, &conf);
+        rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &g_ctx);
         TEST_ASSERT(rc == NGX_OK, "increment should succeed");
         test_pool_destroy(&g_pool);
     }
@@ -443,7 +455,7 @@ test_concurrent_inflight_all_cleanup(void)
     for (i = 0; i < 8; i++) {
         memset(&pools[i], 0, sizeof(ngx_pool_t));
         r.pool = &pools[i];
-        rc = ngx_http_markdown_inflight_try_increment(&r, &conf);
+        rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &g_ctx);
         TEST_ASSERT(rc == NGX_OK, "increment should succeed");
     }
 
@@ -484,7 +496,7 @@ test_cleanup_alloc_failure_returns_error(void)
 
     before = ngx_http_markdown_inflight_current();
 
-    rc = ngx_http_markdown_inflight_try_increment(&r, &conf);
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &g_ctx);
     TEST_ASSERT(rc == NGX_ERROR,
         "should return NGX_ERROR when cleanup alloc fails");
 
@@ -493,6 +505,65 @@ test_cleanup_alloc_failure_returns_error(void)
         "current should be decremented back to prior value (no leak)");
 
     TEST_PASS("cleanup alloc failure returns NGX_ERROR without leak");
+}
+
+static void
+test_active_release_decrements_early(void)
+{
+    /* subrequest: conversion terminal release must decrement the counter
+     * before pool destruction (subrequest lifecycle). */
+    ngx_http_request_t       r;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t                rc;
+
+    ngx_http_markdown_inflight_reset();
+    setup_request(&r);
+    conf.routing.max_inflight = 64;
+
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf, &g_ctx);
+    TEST_ASSERT(rc == NGX_OK, "increment should succeed");
+    TEST_ASSERT(ngx_http_markdown_inflight_current() == 1,
+        "current should be 1 after increment");
+    TEST_ASSERT(g_ctx.inflight_cleanup != NULL,
+        "ctx should carry the inflight cleanup pointer");
+
+    /* Active release at conversion terminal (pool NOT destroyed). */
+    ngx_http_markdown_inflight_release(&g_ctx);
+
+    TEST_ASSERT(ngx_http_markdown_inflight_current() == 0,
+        "current should be 0 after active release");
+    TEST_ASSERT(g_ctx.inflight_cleanup == NULL,
+        "release should consume the ctx pointer (second call is no-op)");
+
+    /* Second release must be a no-op (idempotent). */
+    ngx_http_markdown_inflight_release(&g_ctx);
+    TEST_ASSERT(ngx_http_markdown_inflight_current() == 0,
+        "current should remain 0 after second release");
+
+    /* Pool destroy after active release must not double-decrement. */
+    test_pool_destroy(&g_pool);
+    TEST_ASSERT(ngx_http_markdown_inflight_current() == 0,
+        "current should remain 0 after pool destroy (no double decrement)");
+
+    TEST_PASS("active release decrements early and is idempotent");
+}
+
+static void
+test_active_release_noop_without_increment(void)
+{
+    /* subrequest: release on a context that never incremented must be a
+     * no-op (ineligible / bypassed requests). */
+    ngx_http_markdown_ctx_t  ctx;
+
+    ngx_http_markdown_inflight_reset();
+    ctx.inflight_cleanup = NULL;
+
+    ngx_http_markdown_inflight_release(&ctx);
+
+    TEST_ASSERT(ngx_http_markdown_inflight_current() == 0,
+        "current should stay 0 (no increment happened)");
+
+    TEST_PASS("release without increment is a no-op");
 }
 
 /* ----------------------------------------------------------------
@@ -515,6 +586,8 @@ main(void)
     test_sequential_increment_decrement_returns_zero();
     test_concurrent_inflight_all_cleanup();
     test_cleanup_alloc_failure_returns_error();
+    test_active_release_decrements_early();
+    test_active_release_noop_without_increment();
 
     printf("\n");
     TEST_PASS("inflight: all tests passed");

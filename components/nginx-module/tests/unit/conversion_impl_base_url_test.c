@@ -40,7 +40,7 @@ ngx_http_markdown_effective_memory_budget(
     const ngx_http_markdown_effective_conf_t *eff,
     const ngx_http_markdown_conf_t *conf)
 {
-    return (eff != NULL) ? eff->memory_budget : conf->advanced.memory_budget;
+    return (eff != NULL) ? eff->memory_budget : conf->limits.conversion_memory;
 }
 
 /*
@@ -526,7 +526,7 @@ struct ngx_connection_s {
 };
 
 struct ngx_pool_s {
-    int dummy;
+    ngx_log_t  *log;
 };
 
 /* struct ngx_buf_s provided by nginx_stubs/ngx_core.h */
@@ -669,6 +669,39 @@ ngx_pfree(ngx_pool_t *pool, void *p)
     free(p);
     return NGX_OK;
 }
+
+/*
+ * subrequest: buffer.c symbols.  conversion_impl.h calls
+ * ngx_http_markdown_buffer_release() at the conversion terminal; the
+ * implementation lives in buffer.c and needs these pool/alloc stubs
+ * (same pattern as eligibility_impl_test.c).
+ */
+typedef struct ngx_pool_cleanup_s {
+    void                         (*handler)(void *data);
+    void                          *data;
+    struct ngx_pool_cleanup_s     *next;
+} ngx_pool_cleanup_t;
+
+static ngx_pool_cleanup_t  test_cleanup;
+
+ngx_pool_cleanup_t *
+ngx_pool_cleanup_add(ngx_pool_t *pool, size_t size)
+{
+    (void) pool;
+    (void) size;
+    memset(&test_cleanup, 0, sizeof(test_cleanup));
+    return &test_cleanup;
+}
+
+void *
+ngx_alloc(size_t size, ngx_log_t *log)
+{
+    (void) log;
+    return malloc(size);
+}
+
+#define ngx_free free
+#define ngx_memcpy memcpy
 
 /*
  * Pool allocator stub delegating to malloc(3).  When g_pnalloc_fail_once
@@ -989,6 +1022,14 @@ ngx_http_markdown_send_304(
     return NGX_OK;
 }
 
+/*
+ * subrequest: conversion_impl.h calls ngx_http_markdown_buffer_release() at the
+ * conversion terminal.  The implementation lives in buffer.c; include it
+ * directly (same pattern as eligibility_impl_test.c) so the symbol
+ * resolves at link time.  Must follow the stub definitions above.
+ */
+#include "../../src/ngx_http_markdown_buffer.c"
+
 #include "../../src/ngx_http_markdown_conversion_impl.h" /* SONAR_NOTE: must follow stub definitions */
 
 static ngx_connection_t g_connection = { 0 };
@@ -1018,17 +1059,6 @@ init_request(ngx_http_request_t *r)
  * directive deleted; init_per_path_metrics helper no longer needed.
  */
 
-
-/*
- * Per-path metrics test removed — record_per_path_metrics is a no-op
- * after the per_path directive removal in 0.9.2.
- */
-static void
-test_record_per_path_retention_limits(void)
-{
-    TEST_SUBSECTION("record per-path metrics retention limits");
-    TEST_PASS("per-path metrics removed — no-op in 0.9.2");
-}
 
 static void
 set_single_header_list(ngx_http_request_t *r, ngx_table_elt_t *headers,
@@ -1836,15 +1866,6 @@ TEST_PASS("prepare_conversion_options schema+server fallback correct");
  * Verify shadow compare exits early when prepare_conversion_options
  * rejects invalid shadow-mode options.
  */
-/*
- * Shadow compare test removed — shadow feature removed in 0.9.2.
- */
-static void
-test_shadow_compare_prepare_options_failure(void)
-{
-    TEST_SUBSECTION("shadow compare: prepare options failure (removed)");
-    TEST_PASS("shadow compare removed — feature deleted in 0.9.2");
-}
 
 
 /*
@@ -2594,7 +2615,6 @@ main(void)
     test_prepare_conversion_options_prune_selectors();
     test_prepare_conversion_options_prune_protection_selectors();
     test_prepare_conversion_options_schema_server_fallback();
-    test_shadow_compare_prepare_options_failure();
     test_find_request_header_multi_part();
     test_collect_request_header_values_multi_part();
     test_collect_request_header_values_enforces_cap();
@@ -2607,7 +2627,6 @@ main(void)
     test_fullbuffer_cleanup_clears_aborted_pending_state();
     test_misc_conversion_helpers();
     test_conditional_bypass_bypasses_error_policy();
-    test_record_per_path_retention_limits();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

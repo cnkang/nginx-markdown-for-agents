@@ -143,8 +143,14 @@ ngx_http_markdown_decomp_routing_decision(
     ngx_http_markdown_cache_validation_e cache_validation,
     ngx_http_markdown_compression_type_e encoding)
 {
-    /* Unknown encoding follows on_error; no encoding is a no-op. */
+    /* Unknown encoding follows on_error; no encoding is a no-op.
+     * auto_decompress is evaluated first: when it is off, any
+     * Content-Encoding (including unknown) passes through untouched,
+     * matching ngx_http_markdown_handle_header_compression. */
     if (encoding == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN) {
+        if (auto_decompress != 1) {
+            return NGX_HTTP_MARKDOWN_DECOMP_ROUTE_BYPASS;
+        }
         return NGX_HTTP_MARKDOWN_DECOMP_ROUTE_ERROR_POLICY;
     }
     if (encoding == NGX_HTTP_MARKDOWN_COMPRESSION_NONE) {

@@ -249,7 +249,7 @@ test_effective_conf_helpers_smoke(void)
     conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
     conf.advanced.prune_noise = 0;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
-    conf.advanced.memory_budget = 8 * 1024 * 1024;
+    conf.limits.conversion_memory = 8 * 1024 * 1024;
 #ifdef MARKDOWN_STREAMING_ENABLED
     conf.stream.budget = 4 * 1024 * 1024;
 #endif
@@ -259,7 +259,7 @@ test_effective_conf_helpers_smoke(void)
     snap.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_COMPLEX;
     snap.prune_noise = 1;
     snap.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
-    snap.memory_budget = 16 * 1024 * 1024;
+    snap.conversion_memory = 16 * 1024 * 1024;
 #ifdef MARKDOWN_STREAMING_ENABLED
     snap.streaming_budget = 12 * 1024 * 1024;
 #endif
@@ -436,23 +436,6 @@ test_parse_line_streaming_budget(void)
     TEST_ASSERT(key == NGX_HTTP_MARKDOWN_DYNCONF_KEY_STREAMING_BUDGET,
                 "key is STREAMING_BUDGET");
     TEST_PASS("parse_line: streaming_budget=4m");
-}
-
-static void
-test_parse_line_memory_budget(void)
-{
-    ngx_uint_t  key;
-    u_char     *value;
-    size_t      value_len;
-    ngx_int_t   rc;
-
-    u_char line[] = "memory_budget=128k";
-    rc = ngx_http_markdown_dynconf_parse_line(line, sizeof(line) - 1,
-                                              &key, &value, &value_len);
-    TEST_ASSERT(rc == NGX_OK, "memory_budget=128k parses OK");
-    TEST_ASSERT(key == NGX_HTTP_MARKDOWN_DYNCONF_KEY_MEMORY_BUDGET,
-                "key is MEMORY_BUDGET");
-    TEST_PASS("parse_line: memory_budget=128k");
 }
 
 static void
@@ -837,42 +820,6 @@ test_apply_streaming_budget_invalid(void)
                                          val, 3, &g_log);
     TEST_ASSERT(rc == NGX_ERROR, "apply streaming_budget=abc returns ERROR");
     TEST_PASS("apply: streaming_budget=invalid");
-}
-
-static void
-test_apply_memory_budget(void)
-{
-    ngx_http_markdown_dynconf_snapshot_t  snapshot;
-    ngx_int_t                            rc;
-
-    memset(&snapshot, 0, sizeof(snapshot));
-    snapshot.valid = 1;
-
-    u_char val[] = "128k";
-    rc = ngx_http_markdown_dynconf_apply(&snapshot,
-                                         NGX_HTTP_MARKDOWN_DYNCONF_KEY_MEMORY_BUDGET,
-                                         val, 4, &g_log);
-    TEST_ASSERT(rc == NGX_OK, "apply memory_budget=128k returns OK");
-    TEST_ASSERT(snapshot.memory_budget == 128 * 1024,
-                "memory_budget set to 128KiB");
-    TEST_PASS("apply: memory_budget=128k");
-}
-
-static void
-test_apply_memory_budget_invalid(void)
-{
-    ngx_http_markdown_dynconf_snapshot_t  snapshot;
-    ngx_int_t                            rc;
-
-    memset(&snapshot, 0, sizeof(snapshot));
-    snapshot.valid = 1;
-
-    u_char val[] = "xyz";
-    rc = ngx_http_markdown_dynconf_apply(&snapshot,
-                                         NGX_HTTP_MARKDOWN_DYNCONF_KEY_MEMORY_BUDGET,
-                                         val, 3, &g_log);
-    TEST_ASSERT(rc == NGX_ERROR, "apply memory_budget=xyz returns ERROR");
-    TEST_PASS("apply: memory_budget=invalid");
 }
 
 static void
@@ -1525,7 +1472,7 @@ test_reload_no_newline_at_eof(void)
     {
         FILE *f = fopen(tmpfile, "w");
         TEST_ASSERT(f != NULL, "create temp file without trailing NL");
-        fprintf(f, "schema_version=0.9\nmemory_budget=64k");
+        fprintf(f, "schema_version=0.9\nstreaming_budget=64k");
         fclose(f);
     }
 
@@ -1537,7 +1484,7 @@ test_reload_no_newline_at_eof(void)
     rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
                 "reload file without trailing NL returns APPLIED");
-    TEST_ASSERT(conf.advanced.memory_budget == 64 * 1024, "memory_budget applied");
+    TEST_ASSERT(conf.stream.budget == 64 * 1024, "streaming_budget applied");
 
     unlink(tmpfile);
     TEST_PASS("reload: no newline at EOF");
@@ -1582,7 +1529,6 @@ test_reload_all_keys(void)
         fprintf(f, "prune_noise=on\n");
         fprintf(f, "log_verbosity=error\n");
         fprintf(f, "streaming_budget=8m\n");
-        fprintf(f, "memory_budget=16m\n");
         fclose(f);
     }
 
@@ -1600,8 +1546,6 @@ test_reload_all_keys(void)
                 "log_verbosity=error applied");
     TEST_ASSERT(conf.stream.budget == 8 * 1024 * 1024,
                 "streaming_budget=8m applied");
-    TEST_ASSERT(conf.advanced.memory_budget == 16 * 1024 * 1024,
-                "memory_budget=16m applied");
 
     unlink(tmpfile);
     TEST_PASS("reload: all keys in one file");
@@ -1611,8 +1555,8 @@ static void
 test_reload_rejects_streaming_over_memory(void)
 {
     static const char *contents[] = {
-        "schema_version=0.9\nstreaming_budget=8m\nmemory_budget=256k\n",
-        "schema_version=0.9\nmemory_budget=256k\nstreaming_budget=8m\n"
+        "schema_version=0.9\nstreaming_budget=8m\nconversion_memory=256k\n",
+        "schema_version=0.9\nconversion_memory=256k\nstreaming_budget=8m\n"
     };
     const char                          *tmpfile;
     ngx_http_markdown_dynconf_watcher_t  watcher;
@@ -1633,13 +1577,13 @@ test_reload_rejects_streaming_over_memory(void)
         memset(&conf, 0, sizeof(conf));
         set_ngx_str(&watcher.path, tmpfile);
         watcher.active_snapshot.valid = 1;
-        watcher.active_snapshot.memory_budget = 512 * 1024;
+        watcher.active_snapshot.conversion_memory = 512 * 1024;
         watcher.active_snapshot.streaming_budget = 128 * 1024;
 
         rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
         TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE,
                     "streaming budget above memory budget must be rejected");
-        TEST_ASSERT(watcher.active_snapshot.memory_budget == 512 * 1024
+        TEST_ASSERT(watcher.active_snapshot.conversion_memory == 512 * 1024
                     && watcher.active_snapshot.streaming_budget == 128 * 1024,
                     "active snapshot must remain unchanged after rejection");
         unlink(tmpfile);
@@ -1944,7 +1888,7 @@ test_snapshot_from_conf_and_apply(void)
     conf.advanced.prune_noise = 1;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
     conf.stream.budget = 4 * 1024 * 1024;
-    conf.advanced.memory_budget = 128 * 1024;
+    conf.limits.conversion_memory = 128 * 1024;
 
     ngx_http_markdown_dynconf_snapshot_from_conf(&snapshot, &conf);
     TEST_ASSERT(snapshot.valid == 1, "snapshot marked valid");
@@ -1954,8 +1898,8 @@ test_snapshot_from_conf_and_apply(void)
                 "snapshot log_verbosity=WARN");
     TEST_ASSERT(snapshot.streaming_budget == 4 * 1024 * 1024,
                 "snapshot streaming_budget=4MiB");
-    TEST_ASSERT(snapshot.memory_budget == 128 * 1024,
-                "snapshot memory_budget=128KiB");
+    TEST_ASSERT(snapshot.conversion_memory == 128 * 1024,
+                "snapshot conversion_memory=128KiB");
 
     memset(&conf, 0, sizeof(conf));
     ngx_http_markdown_dynconf_apply_snapshot(&conf, &snapshot);
@@ -1965,8 +1909,8 @@ test_snapshot_from_conf_and_apply(void)
                 "apply snapshot: log_verbosity=WARN");
     TEST_ASSERT(conf.stream.budget == 4 * 1024 * 1024,
                 "apply snapshot: streaming_budget=4MiB");
-    TEST_ASSERT(conf.advanced.memory_budget == 128 * 1024,
-                "apply snapshot: memory_budget=128KiB");
+    TEST_ASSERT(conf.limits.conversion_memory == 128 * 1024,
+                "apply snapshot: conversion_memory=128KiB");
 
     TEST_PASS("snapshot: from_conf and apply_snapshot round-trip");
 }
@@ -1982,7 +1926,7 @@ test_parse_size_safe_valid_values(void)
 
     u_char val_128k[] = "128k";
     rc = ngx_http_markdown_dynconf_parse_size_safe(
-            val_128k, 4, "memory_budget",
+            val_128k, 4, "conversion_memory",
             NGX_MAX_SIZE_T_VALUE, &g_log, &result);
     TEST_ASSERT(rc == NGX_OK, "128k parses OK");
     TEST_ASSERT(result == 128 * 1024, "128k == 131072");
@@ -1996,14 +1940,14 @@ test_parse_size_safe_valid_values(void)
 
     u_char val_1g[] = "1g";
     rc = ngx_http_markdown_dynconf_parse_size_safe(
-            val_1g, 2, "memory_budget",
+            val_1g, 2, "conversion_memory",
             NGX_MAX_SIZE_T_VALUE, &g_log, &result);
     TEST_ASSERT(rc == NGX_OK, "1g parses OK");
     TEST_ASSERT(result == 1UL * 1024 * 1024 * 1024, "1g == 1073741824");
 
     u_char val_plain[] = "4096";
     rc = ngx_http_markdown_dynconf_parse_size_safe(
-            val_plain, 4, "memory_budget",
+            val_plain, 4, "conversion_memory",
             NGX_MAX_SIZE_T_VALUE, &g_log, &result);
     TEST_ASSERT(rc == NGX_OK, "4096 parses OK");
     TEST_ASSERT(result == 4096, "plain 4096");
@@ -2022,13 +1966,13 @@ test_parse_size_safe_invalid_values(void)
 
     u_char val_abc[] = "abc";
     rc = ngx_http_markdown_dynconf_parse_size_safe(
-            val_abc, 3, "memory_budget",
+            val_abc, 3, "conversion_memory",
             NGX_MAX_SIZE_T_VALUE, &g_log, &result);
     TEST_ASSERT(rc == NGX_ERROR, "abc rejected (parse error)");
 
     u_char val_badunit[] = "100x";
     rc = ngx_http_markdown_dynconf_parse_size_safe(
-            val_badunit, 4, "memory_budget",
+            val_badunit, 4, "conversion_memory",
             NGX_MAX_SIZE_T_VALUE, &g_log, &result);
     TEST_ASSERT(rc == NGX_ERROR, "unknown unit 'x' rejected");
 
@@ -2053,13 +1997,13 @@ test_parse_size_safe_upper_bound_enforcement(void)
 
     u_char val_4m[] = "4m";
     rc = ngx_http_markdown_dynconf_parse_size_safe(
-            val_4m, 2, "memory_budget",
+            val_4m, 2, "conversion_memory",
             (size_t) 2 * 1024 * 1024, &g_log, &result);
     TEST_ASSERT(rc == NGX_ERROR,
                 "4m rejected when max is 2m (exceeds bound)");
 
     rc = ngx_http_markdown_dynconf_parse_size_safe(
-            val_4m, 2, "memory_budget",
+            val_4m, 2, "conversion_memory",
             (size_t) 4 * 1024 * 1024, &g_log, &result);
     TEST_ASSERT(rc == NGX_OK,
                 "4m accepted when max is exactly 4m");
@@ -2067,38 +2011,12 @@ test_parse_size_safe_upper_bound_enforcement(void)
                 "result equals 4m at boundary");
 
     rc = ngx_http_markdown_dynconf_parse_size_safe(
-            val_4m, 2, "memory_budget",
+            val_4m, 2, "conversion_memory",
             (size_t) 8 * 1024 * 1024, &g_log, &result);
     TEST_ASSERT(rc == NGX_OK,
                 "4m accepted when max is 8m");
 
     TEST_PASS("parse_size_safe: upper bound enforcement");
-}
-
-
-static void
-test_apply_memory_budget_does_not_mutate_on_error(void)
-{
-    ngx_http_markdown_dynconf_snapshot_t  snapshot;
-    ngx_int_t                            rc;
-    size_t                               original_budget;
-
-    TEST_SUBSECTION("apply: memory_budget not mutated on error");
-
-    memset(&snapshot, 0, sizeof(snapshot));
-    snapshot.valid = 1;
-    snapshot.memory_budget = 999;
-    original_budget = snapshot.memory_budget;
-
-    u_char bad_val[] = "notasize";
-    rc = ngx_http_markdown_dynconf_apply(&snapshot,
-                                         NGX_HTTP_MARKDOWN_DYNCONF_KEY_MEMORY_BUDGET,
-                                         bad_val, 8, &g_log);
-    TEST_ASSERT(rc == NGX_ERROR, "invalid memory_budget returns ERROR");
-    TEST_ASSERT(snapshot.memory_budget == original_budget,
-                "memory_budget unchanged after error");
-
-    TEST_PASS("apply: memory_budget not mutated on error");
 }
 
 
@@ -2125,29 +2043,6 @@ test_apply_streaming_budget_does_not_mutate_on_error(void)
                 "streaming_budget unchanged after error");
 
     TEST_PASS("apply: streaming_budget not mutated on error");
-}
-
-
-static void
-test_apply_memory_budget_large_valid(void)
-{
-    ngx_http_markdown_dynconf_snapshot_t  snapshot;
-    ngx_int_t                            rc;
-
-    TEST_SUBSECTION("apply: memory_budget with large valid value");
-
-    memset(&snapshot, 0, sizeof(snapshot));
-    snapshot.valid = 1;
-
-    u_char val[] = "1g";
-    rc = ngx_http_markdown_dynconf_apply(&snapshot,
-                                         NGX_HTTP_MARKDOWN_DYNCONF_KEY_MEMORY_BUDGET,
-                                         val, 2, &g_log);
-    TEST_ASSERT(rc == NGX_OK, "memory_budget=1g returns OK");
-    TEST_ASSERT(snapshot.memory_budget == 1UL * 1024 * 1024 * 1024,
-                "memory_budget set to 1GiB");
-
-    TEST_PASS("apply: memory_budget with large valid value");
 }
 
 
@@ -2440,7 +2335,7 @@ test_reload_lkg_preserved_on_success(void)
     watcher.active_snapshot.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
     watcher.active_snapshot.prune_noise = 1;
     watcher.active_snapshot.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
-    watcher.active_snapshot.memory_budget = 64 * 1024;
+    watcher.active_snapshot.conversion_memory = 64 * 1024;
     watcher.digest_state.lkg_valid = 0;
 
     rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
@@ -2459,8 +2354,8 @@ test_reload_lkg_preserved_on_success(void)
     TEST_ASSERT(watcher.last_known_good.log_verbosity
                 == NGX_HTTP_MARKDOWN_LOG_INFO,
                 "LKG preserved previous log_verbosity=INFO");
-    TEST_ASSERT(watcher.last_known_good.memory_budget == 64 * 1024,
-                "LKG preserved previous memory_budget=64k");
+    TEST_ASSERT(watcher.last_known_good.conversion_memory == 64 * 1024,
+                "LKG preserved previous conversion_memory=64k");
 
     /* Active snapshot should have the new value */
     TEST_ASSERT(watcher.active_snapshot.enabled == 0,
@@ -2946,7 +2841,7 @@ test_reload_concurrent_request_snapshot_consistency(void)
         fprintf(f, "markdown_filter=on\n");
         fprintf(f, "prune_noise=off\n");
         fprintf(f, "log_verbosity=warn\n");
-        fprintf(f, "memory_budget=128k\n");
+        fprintf(f, "streaming_budget=128k\n");
         fclose(f);
     }
 
@@ -2965,8 +2860,8 @@ test_reload_concurrent_request_snapshot_consistency(void)
     TEST_ASSERT(watcher.active_snapshot.log_verbosity
                     == NGX_HTTP_MARKDOWN_LOG_WARN,
                 "v1: active_snapshot.log_verbosity == WARN");
-    TEST_ASSERT(watcher.active_snapshot.memory_budget == 128 * 1024,
-                "v1: active_snapshot.memory_budget == 128KiB");
+    TEST_ASSERT(watcher.active_snapshot.streaming_budget == 128 * 1024,
+                "v1: active_snapshot.streaming_budget == 128KiB");
 
     /*
      * Step 2: Simulate a request binding its effective_conf.
@@ -2987,8 +2882,8 @@ test_reload_concurrent_request_snapshot_consistency(void)
                 "bound eff.prune_noise == 0 (from v1 snapshot)");
     TEST_ASSERT(eff.log_verbosity == NGX_HTTP_MARKDOWN_LOG_WARN,
                 "bound eff.log_verbosity == WARN (from v1 snapshot)");
-    TEST_ASSERT(eff.memory_budget == 128 * 1024,
-                "bound eff.memory_budget == 128KiB (from v1 snapshot)");
+    TEST_ASSERT(eff.streaming_budget == 128 * 1024,
+                "bound eff.streaming_budget == 128KiB (from v1 snapshot)");
 
     /*
      * Step 3: Simulate a concurrent reload that changes the global
@@ -3002,7 +2897,7 @@ test_reload_concurrent_request_snapshot_consistency(void)
         fprintf(f, "markdown_filter=off\n");
         fprintf(f, "prune_noise=on\n");
         fprintf(f, "log_verbosity=debug\n");
-        fprintf(f, "memory_budget=256k\n");
+        fprintf(f, "streaming_budget=256k\n");
         fclose(f);
     }
 
@@ -3021,8 +2916,8 @@ test_reload_concurrent_request_snapshot_consistency(void)
     TEST_ASSERT(watcher.active_snapshot.log_verbosity
                     == NGX_HTTP_MARKDOWN_LOG_DEBUG,
                 "v2: active_snapshot.log_verbosity == DEBUG (new value)");
-    TEST_ASSERT(watcher.active_snapshot.memory_budget == 256 * 1024,
-                "v2: active_snapshot.memory_budget == 256KiB (new value)");
+    TEST_ASSERT(watcher.active_snapshot.streaming_budget == 256 * 1024,
+                "v2: active_snapshot.streaming_budget == 256KiB (new value)");
 
     /*
      * Step 5: Verify the request's bound snapshot still has v1 values.
@@ -3035,8 +2930,8 @@ test_reload_concurrent_request_snapshot_consistency(void)
                 "bound snapshot still has v1 prune_noise == 0");
     TEST_ASSERT(bound_snapshot.log_verbosity == NGX_HTTP_MARKDOWN_LOG_WARN,
                 "bound snapshot still has v1 log_verbosity == WARN");
-    TEST_ASSERT(bound_snapshot.memory_budget == 128 * 1024,
-                "bound snapshot still has v1 memory_budget == 128KiB");
+    TEST_ASSERT(bound_snapshot.streaming_budget == 128 * 1024,
+                "bound snapshot still has v1 streaming_budget == 128KiB");
 
     /*
      * Step 6: Verify the effective_conf built from the bound snapshot
@@ -3048,8 +2943,8 @@ test_reload_concurrent_request_snapshot_consistency(void)
                 "eff.prune_noise still 0 after reload (bound to v1)");
     TEST_ASSERT(eff.log_verbosity == NGX_HTTP_MARKDOWN_LOG_WARN,
                 "eff.log_verbosity still WARN after reload (bound to v1)");
-    TEST_ASSERT(eff.memory_budget == 128 * 1024,
-                "eff.memory_budget still 128KiB after reload (bound to v1)");
+    TEST_ASSERT(eff.streaming_budget == 128 * 1024,
+                "eff.streaming_budget still 128KiB after reload (bound to v1)");
 
     /*
      * Step 7: A new request binding AFTER the reload would see v2.
@@ -3070,8 +2965,8 @@ test_reload_concurrent_request_snapshot_consistency(void)
                     "new request sees v2 prune_noise == 1");
         TEST_ASSERT(new_eff.log_verbosity == NGX_HTTP_MARKDOWN_LOG_DEBUG,
                     "new request sees v2 log_verbosity == DEBUG");
-        TEST_ASSERT(new_eff.memory_budget == 256 * 1024,
-                    "new request sees v2 memory_budget == 256KiB");
+        TEST_ASSERT(new_eff.streaming_budget == 256 * 1024,
+                    "new request sees v2 streaming_budget == 256KiB");
     }
 
     unlink(tmpfile_v1);
@@ -3096,7 +2991,6 @@ main(void)
     test_parse_line_prune_noise();
     test_parse_line_log_verbosity();
     test_parse_line_streaming_budget();
-    test_parse_line_memory_budget();
     test_parse_line_schema_version();
     test_parse_line_unknown_key();
     test_parse_line_no_equals();
@@ -3121,8 +3015,6 @@ main(void)
     test_apply_filter_off_overrides_complex();
     test_apply_streaming_budget();
     test_apply_streaming_budget_invalid();
-    test_apply_memory_budget();
-    test_apply_memory_budget_invalid();
     test_apply_default_key();
 
     TEST_SECTION("dynconf_impl: check tests");
@@ -3195,9 +3087,7 @@ main(void)
     test_parse_size_safe_valid_values();
     test_parse_size_safe_invalid_values();
     test_parse_size_safe_upper_bound_enforcement();
-    test_apply_memory_budget_does_not_mutate_on_error();
     test_apply_streaming_budget_does_not_mutate_on_error();
-    test_apply_memory_budget_large_valid();
     test_apply_streaming_budget_large_valid();
     test_apply_ffi_streaming_budget_bounds();
 

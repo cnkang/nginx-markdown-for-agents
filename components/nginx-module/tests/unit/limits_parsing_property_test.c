@@ -222,7 +222,7 @@ ngx_conf_log_error(ngx_uint_t level, ngx_conf_t *cf, ngx_err_t err,
             p += n;
             fmt += 2;
         } else if (*fmt == '%' && (*(fmt + 1) == 'u'
-                   && *(fmt + 2) == 'i'))
+                  && *(fmt + 2) == 'i'))
         {
             ngx_uint_t val = va_arg(ap, ngx_uint_t);
             size_t available = (size_t) (end - p);
@@ -236,6 +236,11 @@ ngx_conf_log_error(ngx_uint_t level, ngx_conf_t *cf, ngx_err_t err,
                 }
             }
             fmt += 3;
+        } else if (*fmt == '%') {
+            /* Unsupported conversion specifier: stop processing instead
+             * of copying it literally and continuing with misaligned
+             * variadic arguments (a later va_arg would read garbage). */
+            break;
         } else {
             *p++ = *fmt++;
         }

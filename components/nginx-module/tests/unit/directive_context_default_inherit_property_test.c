@@ -753,7 +753,7 @@ create_unset_conf(void)
     conf->advanced.prune_noise = NGX_CONF_UNSET;
     conf->advanced.prune_selectors = NGX_CONF_UNSET_PTR;
     conf->advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
-    conf->advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    conf->limits.conversion_memory = NGX_CONF_UNSET_SIZE;
     conf->advanced.dynconf_enabled = NGX_CONF_UNSET;
     conf->advanced.dynconf_path.len = 0;
     conf->advanced.dynconf_path.data = NULL;

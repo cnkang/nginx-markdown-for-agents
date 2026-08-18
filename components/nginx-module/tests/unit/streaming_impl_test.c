@@ -553,6 +553,15 @@ ngx_http_markdown_record_decompression_failure_io(
         UNUSED(arg1); UNUSED(arg2); UNUSED(arg3);                                    \
     } while (0)
 
+#ifdef ngx_log_debug2
+#undef ngx_log_debug2
+#endif
+#define ngx_log_debug2(level, log, err, fmt, arg1, arg2)                            \
+    do {                                                                             \
+        UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt);                        \
+        UNUSED(arg1); UNUSED(arg2);                                                  \
+    } while (0)
+
 #ifdef ngx_log_debug4
 #undef ngx_log_debug4
 #endif
@@ -1378,6 +1387,11 @@ ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
 #define ngx_atomic_fetch_add(p, v)  (*(p) += (v), *(p))
 #endif
 
+#ifndef ngx_atomic_cmp_set
+#define ngx_atomic_cmp_set(lock, old, set)                                      \
+    ((*(lock) == (old)) ? (*(lock) = (set), 1) : 0)
+#endif
+
 static ngx_inline void
 ngx_http_markdown_record_per_path_metrics(
     ngx_http_request_t *r,
@@ -2008,6 +2022,10 @@ test_send_output_and_resume_paths(void)
     c_err.next = NULL;
     ctx.streaming.pending_output = &c_err;
     g_next_body_filter_rc = NGX_ERROR;
+    /* The success resume above latched the terminal decision; reset it so
+     * this error scenario models an independent request (a request is
+     * recorded as exactly one terminal outcome). */
+    ctx.error.terminal_decision_recorded = 0;
     rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_ERROR, "resume should propagate downstream error");
     TEST_ASSERT(ctx.streaming.pending_meta.has_data == 0,
@@ -2995,6 +3013,11 @@ test_commit_feed_and_finalize_core_paths(void)
         (uintptr_t) 0x17;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.pending_output = NULL;
+    /* The error scenario above latched the terminal decision; reset it so
+     * this success scenario models an independent request (exactly one
+     * terminal outcome per request). */
+    ctx.error.terminal_decision_recorded = 0;
+    ctx.streaming.completion.failure_recorded = 0;
     g_streaming_finalize_rc = ERROR_SUCCESS;
     g_streaming_finalize_result.markdown = out_data;
     g_streaming_finalize_result.markdown_len = 3;
@@ -3072,6 +3095,7 @@ test_commit_feed_and_finalize_core_paths(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.completion.pending_terminal_metrics = 0;
     ctx.streaming.completion.failure_recorded = 0;
+    ctx.error.terminal_decision_recorded = 0;
     ctx.streaming.pending_output = NULL;
     g_streaming_finalize_rc = ERROR_SUCCESS;
     g_streaming_finalize_result.markdown = out_data;
@@ -4302,6 +4326,7 @@ test_streaming_gap_branches(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.output.bytes = NGX_MAX_SIZE_T_VALUE;
     ctx.streaming.completion.failure_recorded = 0;
+    ctx.error.terminal_decision_recorded = 0;
     ctx.streaming.pending_output = NULL;
     g_streaming_finalize_rc = ERROR_SUCCESS;
     g_streaming_finalize_result.markdown = out_data;
@@ -5185,7 +5210,7 @@ test_pending_input_production_lifecycle(void)
 }
 
 /*
- * Test: P1-1 — ensure_handle() init-failure fail-open must set
+ * Test: init-failure — ensure_handle() init-failure fail-open must set
  * failopen_active so future input bypasses Rust instead of
  * re-entering the converter with a NULL handle.
  *
@@ -5214,7 +5239,7 @@ test_failopen_init_failure_latches_mode(void)
     u_char                   future_data[] = "future";
     ngx_http_markdown_metrics_t metrics;
 
-    TEST_SUBSECTION("P1-1: init-failure fail-open latches failopen_active");
+    TEST_SUBSECTION("init-failure: init-failure fail-open latches failopen_active");
     reset_globals();
     init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
     ngx_memzero(&metrics, sizeof(metrics));
@@ -5233,7 +5258,7 @@ test_failopen_init_failure_latches_mode(void)
     /*
      * Force init_handle to decline: prepare_options failure routes
      * through precommit_error with pass policy, which sets eligible=0
-     * and (after the P1-1 fix) failopen_active=1.
+     * and (after the init-failure fix) failopen_active=1.
      */
     ctx.eligible = 1;
     ctx.streaming.handle = NULL;
@@ -5248,7 +5273,7 @@ test_failopen_init_failure_latches_mode(void)
     TEST_ASSERT(ctx.eligible == 0,
         "precommit_error pass policy must clear eligible");
     TEST_ASSERT(ctx.streaming.completion.failopen_active == 1,
-        "P1-1: init-failure fail-open must latch failopen_active at "
+        "init-failure: init-failure fail-open must latch failopen_active at "
         "the policy selection point so future input bypasses Rust");
     TEST_ASSERT(ctx.streaming.pending_output != NULL,
         "downstream NGX_AGAIN must retain pending_output");
@@ -5283,10 +5308,10 @@ test_failopen_init_failure_latches_mode(void)
     TEST_ASSERT(rc == NGX_AGAIN,
         "failopen_active future input must return NGX_AGAIN");
     TEST_ASSERT(g_streaming_feed_calls == 0,
-        "P1-1: failopen_active future input must never re-enter the "
+        "init-failure: failopen_active future input must never re-enter the "
         "Rust converter (NULL handle would be rejected)");
     TEST_ASSERT(g_next_body_filter_calls == 0,
-        "P1-2: failopen_active future input must not submit a new "
+        "subrequest: failopen_active future input must not submit a new "
         "chain while pending_output is still downstream-owned");
 
     /*
@@ -5311,11 +5336,11 @@ test_failopen_init_failure_latches_mode(void)
     TEST_ASSERT(metrics.results.failopen_count == 1,
         "fail-open delivery must count after pending output drains");
 
-    TEST_PASS("P1-1 init-failure failopen_active latch covered");
+    TEST_PASS("init-failure init-failure failopen_active latch covered");
 }
 
 /*
- * Test: P1-2 — failopen_active + pending_output + future-input enqueue
+ * Test: subrequest — failopen_active + pending_output + future-input enqueue
  * failure must not submit a new chain while the old output is still
  * downstream-owned, must not re-enter precommit_error (double-counting
  * conversions_failed), and must latch a protocol-visible abort after drain.
@@ -5355,7 +5380,7 @@ test_failopen_active_enqueue_failure_aborts_safely(void)
     ngx_uint_t               free_calls;
     ngx_http_markdown_pending_terminal_t  terminal;
 
-    TEST_SUBSECTION("P1-2: failopen_active enqueue failure aborts safely");
+    TEST_SUBSECTION("subrequest: failopen_active enqueue failure aborts safely");
     reset_globals();
     init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
 
@@ -5413,17 +5438,17 @@ test_failopen_active_enqueue_failure_aborts_safely(void)
     rc = ngx_http_markdown_streaming_handle_new_input_with_pending(
         &r, &ctx, &conf, &future);
     TEST_ASSERT(rc == NGX_AGAIN,
-        "P1-2: failopen_active enqueue failure must return NGX_AGAIN");
+        "subrequest: failopen_active enqueue failure must return NGX_AGAIN");
     TEST_ASSERT(g_streaming_feed_calls == 0,
-        "P1-2: must never re-enter the Rust converter");
+        "subrequest: must never re-enter the Rust converter");
     TEST_ASSERT(g_next_body_filter_calls == 0,
-        "P1-2: must not submit a new chain while pending_output is "
+        "subrequest: must not submit a new chain while pending_output is "
         "downstream-owned (Rule 1 backpressure ownership contract)");
     TEST_ASSERT(ctx.streaming.completion.failopen_abort_after_pending == 1,
-        "P1-2: enqueue failure in failopen_active must latch "
+        "subrequest: enqueue failure in failopen_active must latch "
         "failopen_abort_after_pending for visible abort after drain");
     TEST_ASSERT(ctx.streaming.pending_output == &pending_output,
-        "P1-2: old pending_output must remain intact (not freed/overwritten)");
+        "subrequest: old pending_output must remain intact (not freed/overwritten)");
 
     /*
      * Defense-in-depth: send_failopen_chain must refuse to submit when
@@ -5431,31 +5456,31 @@ test_failopen_active_enqueue_failure_aborts_safely(void)
      */
     rc = ngx_http_markdown_streaming_send_failopen_chain(&r, &ctx, &future);
     TEST_ASSERT(rc == NGX_ERROR,
-        "P1-2: send_failopen_chain must refuse to submit a new chain "
+        "subrequest: send_failopen_chain must refuse to submit a new chain "
         "before old pending_output drains (defense-in-depth)");
     TEST_ASSERT(g_next_body_filter_calls == 0,
-        "P1-2: send_failopen_chain guard must fire before downstream call");
+        "subrequest: send_failopen_chain guard must fire before downstream call");
     TEST_ASSERT(ctx.streaming.pending_output == &pending_output,
-        "P1-2: send_failopen_chain guard must preserve the old anchor");
+        "subrequest: send_failopen_chain guard must preserve the old anchor");
     TEST_ASSERT(pending_buf.pos == pending_pos
                 && pending_buf.last == pending_last,
-        "P1-2: send_failopen_chain guard must not mutate shared buffers");
+        "subrequest: send_failopen_chain guard must not mutate shared buffers");
     TEST_ASSERT(g_output_free_calls == 0,
-        "P1-2: guard must not free downstream-owned pending buffers");
+        "subrequest: guard must not free downstream-owned pending buffers");
 
     free_calls = g_output_free_calls;
     rc = ngx_http_markdown_streaming_save_pending(
         &r, &ctx, &future, future_buf.pos,
         ngx_http_markdown_buf_len_safe(&future_buf), terminal);
     TEST_ASSERT(rc == NGX_ERROR,
-        "P1-2: save_pending must reject re-entry");
+        "subrequest: save_pending must reject re-entry");
     TEST_ASSERT(ctx.streaming.pending_output == &pending_output,
-        "P1-2: save_pending guard must preserve the old anchor");
+        "subrequest: save_pending guard must preserve the old anchor");
     TEST_ASSERT(pending_buf.pos == pending_pos
                 && pending_buf.last == pending_last,
-        "P1-2: save_pending guard must not mutate shared buffers");
+        "subrequest: save_pending guard must not mutate shared buffers");
     TEST_ASSERT(g_output_free_calls == free_calls,
-        "P1-2: save_pending guard must not free downstream-owned buffers");
+        "subrequest: save_pending guard must not free downstream-owned buffers");
 
     /*
      * A real NULL resume must drain the old pending output, consume the
@@ -5467,17 +5492,17 @@ test_failopen_active_enqueue_failure_aborts_safely(void)
     g_next_body_filter_calls = 0;
     rc = ngx_http_markdown_streaming_handle_null_input(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_ERROR,
-        "P1-2: known data loss must abort after draining old output");
+        "subrequest: known data loss must abort after draining old output");
     TEST_ASSERT(g_next_body_filter_calls == 1,
-        "P1-2: abort must not send a clean terminal after data loss");
+        "subrequest: abort must not send a clean terminal after data loss");
     TEST_ASSERT(ctx.streaming.pending_output == NULL,
-        "P1-2: old pending anchor must clear only after downstream drain");
+        "subrequest: old pending anchor must clear only after downstream drain");
     TEST_ASSERT(ctx.streaming.completion.failopen_abort_after_pending == 0,
-        "P1-2: abort latch must clear after failure continuation");
+        "subrequest: abort latch must clear after failure continuation");
     TEST_ASSERT(retained_buf.pos == retained_buf.last,
-        "P1-2: discarded retained input must consume shared buffers");
+        "subrequest: discarded retained input must consume shared buffers");
     TEST_ASSERT(ctx.streaming.classify.input_disposition == NGX_HTTP_MD_INPUT_TERMINAL,
-        "P1-2: abort continuation must reject all later input");
+        "subrequest: abort continuation must reject all later input");
 
     later.buf = &later_buf;
     later_buf.pos = later_data;
@@ -5485,13 +5510,13 @@ test_failopen_active_enqueue_failure_aborts_safely(void)
     later.next = NULL;
     rc = ngx_http_markdown_streaming_body_filter(&r, &later);
     TEST_ASSERT(rc == NGX_OK,
-        "P1-2: later input after abort must be safely abandoned");
+        "subrequest: later input after abort must be safely abandoned");
     TEST_ASSERT(later_buf.pos == later_buf.last,
-        "P1-2: later input after abort must be consumed without delivery");
+        "subrequest: later input after abort must be consumed without delivery");
     TEST_ASSERT(g_next_body_filter_calls == 1,
-        "P1-2: later input after abort must not reach downstream");
+        "subrequest: later input after abort must not reach downstream");
 
-    TEST_PASS("P1-2 failopen_active enqueue-failure safe abort covered");
+    TEST_PASS("subrequest failopen_active enqueue-failure safe abort covered");
 }
 
 /*
@@ -5955,7 +5980,7 @@ test_subrequest_failopen_pending_terminal_resumes_once(void)
      * sees it), parser budget unlimited.
      */
     conf.max_size = 0;
-    conf.advanced.memory_budget = 0;
+    conf.limits.conversion_memory = 0;
     conf.decompress.parser_budget = 0;
     conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
@@ -6956,7 +6981,7 @@ test_streaming_stage_handler_failure_category_routing(void)
 }
 
 /*
- * C-P2-2: abandon_pending_after_fatal must release pending_header_output.
+ * abandon-pending: abandon_pending_after_fatal must release pending_header_output.
  *
  * The fatal path clears every module-owned continuation; pending_header_output
  * is module-owned Rust memory produced before header commit, so it must be
