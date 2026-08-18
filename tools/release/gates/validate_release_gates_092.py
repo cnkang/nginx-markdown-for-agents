@@ -48,7 +48,7 @@ def _cargo_version_mismatch(path: Path) -> str | None:
     try:
         validated = validate_read_path(path, purpose="Cargo.toml")
         cargo_data = tomllib.loads(validated.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         return f"Cargo.toml: invalid TOML ({exc})"
     package = cargo_data.get("package")
     version = package.get("version") if isinstance(package, dict) else None
@@ -63,7 +63,7 @@ def _changelog_version_mismatch(path: Path) -> str | None:
     try:
         validated = validate_read_path(path, purpose="CHANGELOG")
         content = validated.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         return f"{CHANGELOG_FILENAME}: cannot read ({exc})"
     if (
         f"## [{EXPECTED_VERSION}]" not in content
@@ -333,7 +333,7 @@ def _load_reason_registry_files(repo):
         validated_inv = validate_read_path(
             inventory_file, purpose="public surface inventory")
         inventory = json.loads(validated_inv.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         return None, None, f"unable to read canonical reason registry: {exc}"
     return source_content, inventory, None
 
@@ -360,7 +360,7 @@ def _validate_c_reason_registry(repo, canonical):
     try:
         validated = validate_read_path(c_file, purpose="C reason registry")
         c_content = validated.read_text(encoding="utf-8")
-    except (OSError, UnicodeError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         return f"unable to read C reason registry: {exc}"
     c_accessors = set(re.findall(
         r"static[ \t]+ngx_str_t[ \t]+(reason_str_\w+)",
@@ -419,7 +419,7 @@ def check_public_surface_inventory(repo: Path) -> dict:
         validated = validate_read_path(
             inventory, purpose="public surface inventory")
         data = json.loads(validated.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         return {"name": "public_surface_inventory", "status": "fail",
                 "message": f"invalid JSON: {exc}"}
     if not isinstance(data, dict):

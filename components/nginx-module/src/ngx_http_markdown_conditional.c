@@ -112,7 +112,7 @@ ngx_http_markdown_find_response_header(ngx_http_request_t *r, u_char *name,
  */
 static void
 ngx_http_markdown_invalidate_response_header(ngx_http_request_t *r,
-    u_char *name, size_t name_len)
+    const u_char *name, size_t name_len)
 {
     for (ngx_list_part_t *part = &r->headers_out.headers.part;
          part != NULL;
@@ -126,7 +126,9 @@ ngx_http_markdown_invalidate_response_header(ngx_http_request_t *r,
                 continue;
             }
             if (headers[i].key.len == name_len
-                && ngx_strncasecmp(headers[i].key.data, name, name_len) == 0)
+                && ngx_strncasecmp(headers[i].key.data,
+                                   (u_char *) name, /* NOSONAR: c:S859; ngx_strncasecmp API takes non-const u_char* (Rule 24 NGINX API contract) */
+                                   name_len) == 0)
             {
                 headers[i].hash = 0;
             }
@@ -626,15 +628,15 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
     r->allow_ranges = 0;
     r->headers_out.accept_ranges = NULL;
     ngx_http_markdown_invalidate_response_header(
-        r, (u_char *) "Accept-Ranges", sizeof("Accept-Ranges") - 1);
+        r, (const u_char *) "Accept-Ranges", sizeof("Accept-Ranges") - 1);
     ngx_http_markdown_invalidate_response_header(
-        r, (u_char *) "Content-MD5", sizeof("Content-MD5") - 1);
+        r, (const u_char *) "Content-MD5", sizeof("Content-MD5") - 1);
     ngx_http_markdown_invalidate_response_header(
-        r, (u_char *) "Digest", sizeof("Digest") - 1);
+        r, (const u_char *) "Digest", sizeof("Digest") - 1);
     ngx_http_markdown_invalidate_response_header(
-        r, (u_char *) "Content-Digest", sizeof("Content-Digest") - 1);
+        r, (const u_char *) "Content-Digest", sizeof("Content-Digest") - 1);
     ngx_http_markdown_invalidate_response_header(
-        r, (u_char *) "Repr-Digest", sizeof("Repr-Digest") - 1);
+        r, (const u_char *) "Repr-Digest", sizeof("Repr-Digest") - 1);
 
     if (result != NULL && result->etag != NULL && result->etag_len > 0) {
         rc = ngx_http_markdown_set_etag(r, result->etag, result->etag_len);
