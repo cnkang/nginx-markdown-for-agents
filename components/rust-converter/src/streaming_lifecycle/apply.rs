@@ -501,7 +501,7 @@ fn apply_send_closing_output(
             /* NGX_AGAIN → PENDING_CLOSING_OUTPUT.  The action contract
              * requires the pending chain to be the closing Markdown bytes;
              * a mismatched kind signals a plan/apply protocol violation
-             * (P3-1: pending_kind was previously never validated). */
+             * (pending_kind was previously never validated). */
             if outcome.pending_kind != Some(PendingKind::ClosingMarkdown) {
                 return Err(StateMachineError::InvariantViolation {
                     message: format!(
@@ -636,7 +636,7 @@ fn apply_send_terminal(
             /* NGX_AGAIN → PENDING_TERMINAL, no latch.  The action contract
              * requires the pending chain to be the terminal last_buf; a
              * mismatched kind signals a plan/apply protocol violation
-             * (P3-1: pending_kind was previously never validated). */
+             * (pending_kind was previously never validated). */
             if outcome.pending_kind != Some(PendingKind::Terminal) {
                 return Err(StateMachineError::InvariantViolation {
                     message: format!(
@@ -1323,7 +1323,7 @@ mod tests {
 
     #[test]
     fn finalize_converter_error_next_frame_carries_updated_ledger() {
-        /* R-P2-1: the BEGIN_ABORT frame handed to the next apply step must
+        /* the BEGIN_ABORT frame handed to the next apply step must
          * carry the pre-effect ledger (with the freshly recorded finalize
          * failure), not the stale pre-failure ledger. */
         let mut frame = simple_frame(Action::FinalizeConverter, "PLAN-21");
@@ -1612,7 +1612,7 @@ mod tests {
 
     #[test]
     fn resume_terminal_error_sets_safe_finish_latch() {
-        /* R-P2-2: apply_resume_terminal's Error path must emit the same
+        /* apply_resume_terminal's Error path must emit the same
          * SetSafeFinishTerminalSendFailed latch as apply_send_terminal's
          * Error path (terminal chain definitively rejected downstream). */
         let frame = simple_frame(Action::SendTerminal, "PLAN-21");

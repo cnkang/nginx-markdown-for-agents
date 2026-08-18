@@ -31,7 +31,7 @@
 //! ```
 
 use regex::Regex;
-use std::sync::{LazyLock, OnceLock};
+use std::sync::LazyLock;
 
 /// Default charset when detection fails
 const DEFAULT_CHARSET: &str = "UTF-8";
@@ -91,10 +91,10 @@ static CHARSET_REGEX: LazyLock<Option<Regex>> =
 /// - "windows-1252" → "WINDOWS-1252"
 pub fn detect_charset(content_type: Option<&str>, html: &[u8]) -> String {
     // Level 1: Check Content-Type header charset parameter (FR-05.1)
-    if let Some(ct) = content_type
-        && let Some(charset) = extract_charset_from_content_type(ct)
-    {
-        return normalize_charset(&charset);
+    if let Some(ct) = content_type {
+        if let Some(charset) = extract_charset_from_content_type(ct) {
+            return normalize_charset(&charset);
+        }
     }
 
     // Level 2: Check HTML meta charset tags (FR-05.2)
@@ -191,42 +191,332 @@ pub fn extract_charset_from_content_type(content_type: &str) -> Option<String> {
 /// assert_eq!(extract_charset_from_html(html), None);
 /// ```
 pub fn extract_charset_from_html(html: &[u8]) -> Option<String> {
-    // Only scan the first META_SCAN_LIMIT bytes for performance
+    // Only scan the first META_SCAN_LIMIT bytes for performance.
     let scan_limit = std::cmp::min(html.len(), META_SCAN_LIMIT);
     let html_prefix = &html[..scan_limit];
 
-    // Convert to string for regex matching (lossy conversion is OK for meta tag detection)
-    let html_str = String::from_utf8_lossy(html_prefix);
+    // Deterministic byte-level prescanner: locate `<meta ...>` elements,
+    // skip HTML comments, and parse attributes in any order with
+    // case-insensitive names.  This replaces the previous regex approach,
+    // which required `charset` to be the first attribute and could match
+    // inside comments.
+    let mut pos = 0usize;
+    while pos < html_prefix.len() {
+        // Skip HTML comments so a commented-out meta tag is not treated as
+        // a real declaration.
+        if html_prefix[pos..].starts_with(b"<!--") {
+            if let Some(end) = find_subslice(&html_prefix[pos + 4..], b"-->") {
+                pos += 4 + end + 3;
+                continue;
+            }
+            break;
+        }
 
-    // Try HTML5 meta charset format first
-    static HTML5_REGEX: OnceLock<Option<Regex>> = OnceLock::new();
-    let html5_regex =
-        HTML5_REGEX.get_or_init(|| Regex::new(r#"(?i)<meta\s+charset\s*=\s*"?([^";>\s]+)"?"#).ok());
-    let html5_regex = html5_regex.as_ref()?;
+        // Find the next '<'.
+        let Some(lt) = find_byte(&html_prefix[pos..], b'<') else {
+            break;
+        };
+        pos += lt;
 
-    if let Some(caps) = html5_regex.captures(&html_str)
-        && let Some(m) = caps.get(1)
-    {
-        return Some(m.as_str().to_string());
-    }
+        // Must be a tag start (not `</` or `<!`).  Skip the whole
+        // declaration/comment to its closing '>' so inner '<' characters
+        // (e.g. a commented-out <meta>) cannot be misread as tag starts.
+        if pos + 1 >= html_prefix.len() {
+            break;
+        }
+        if html_prefix[pos + 1] == b'/' {
+            if let Some(gt) = find_byte(&html_prefix[pos..], b'>') {
+                pos += gt + 1;
+            } else {
+                break;
+            }
+            continue;
+        }
+        if html_prefix[pos + 1] == b'!' {
+            if html_prefix[pos..].starts_with(b"<!--") {
+                if let Some(end) = find_subslice(&html_prefix[pos + 4..], b"-->") {
+                    pos += 4 + end + 3;
+                } else {
+                    break;
+                }
+            } else if let Some(gt) = find_byte(&html_prefix[pos..], b'>') {
+                pos += gt + 1;
+            } else {
+                break;
+            }
+            continue;
+        }
 
-    // Try HTML4 meta http-equiv format
-    static HTML4_REGEX: OnceLock<Option<Regex>> = OnceLock::new();
-    let html4_regex = HTML4_REGEX.get_or_init(|| {
-        Regex::new(
-            r#"(?i)<meta\s+http-equiv\s*=\s*"?Content-Type"?\s+content\s*=\s*"?[^">]*charset\s*=\s*([^";>\s]+)"?"#,
-        )
-        .ok()
-    });
-    let html4_regex = html4_regex.as_ref()?;
+        // Parse the tag name.
+        let mut tag_end = pos + 1;
+        while tag_end < html_prefix.len() && is_html_name_byte(html_prefix[tag_end]) {
+            tag_end += 1;
+        }
+        let tag_name = &html_prefix[pos + 1..tag_end];
+        if !tag_name.eq_ignore_ascii_case(b"meta") {
+            let Some(next_pos) = find_tag_end(html_prefix, tag_end) else {
+                break;
+            };
+            pos = next_pos;
+            continue;
+        }
 
-    if let Some(caps) = html4_regex.captures(&html_str)
-        && let Some(m) = caps.get(1)
-    {
-        return Some(m.as_str().to_string());
+        // Parse attributes until '>' and evaluate the charset declaration.
+        let (attrs, next_pos, closed) = parse_meta_attributes(html_prefix, tag_end);
+        if !closed {
+            break;
+        }
+        if let Some(charset) = charset_from_meta_attrs(&attrs) {
+            // Skip unsupported labels: a bogus declaration must not
+            // terminate the scan.  Continue to the next meta tag so a
+            // later supported declaration (for example utf-8) wins.
+            if encoding_rs::Encoding::for_label(charset.as_bytes()).is_some() {
+                return Some(charset);
+            }
+        }
+        pos = next_pos;
     }
 
     None
+}
+
+/// Parse the attribute list of a `<meta ...>` element starting at `attr_pos`.
+///
+/// Returns `(attributes, position_after_'>', closed)` where `closed` is
+/// false when the scan limit was reached before the tag closed.
+fn parse_meta_attributes(
+    html_prefix: &[u8],
+    mut attr_pos: usize,
+) -> (Vec<(Vec<u8>, Vec<u8>)>, usize, bool) {
+    let mut attrs: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+    while attr_pos < html_prefix.len() {
+        // Skip whitespace.
+        while attr_pos < html_prefix.len() && is_html_space(html_prefix[attr_pos]) {
+            attr_pos += 1;
+        }
+        if attr_pos >= html_prefix.len() {
+            break;
+        }
+        if html_prefix[attr_pos] == b'>' {
+            return (attrs, attr_pos + 1, true);
+        }
+        if html_prefix[attr_pos] == b'/'
+            && attr_pos + 1 < html_prefix.len()
+            && html_prefix[attr_pos + 1] == b'>'
+        {
+            return (attrs, attr_pos + 2, true);
+        }
+
+        // Attribute name.
+        let name_start = attr_pos;
+        while attr_pos < html_prefix.len() && is_html_name_byte(html_prefix[attr_pos]) {
+            attr_pos += 1;
+        }
+        let name = html_prefix[name_start..attr_pos].to_vec();
+        if name.is_empty() {
+            attr_pos += 1;
+            continue;
+        }
+
+        // Optional '=' and quoted/unquoted value.
+        let value = parse_attr_value(html_prefix, &mut attr_pos);
+        attrs.push((name, value));
+    }
+    (attrs, attr_pos, false)
+}
+
+/// Parse the value of an attribute (quoted or bare) starting after the
+/// attribute name; advances `attr_pos` past the value.
+fn parse_attr_value(html_prefix: &[u8], attr_pos: &mut usize) -> Vec<u8> {
+    let mut value: Vec<u8> = Vec::new();
+    let mut vp = *attr_pos;
+    while vp < html_prefix.len() && is_html_space(html_prefix[vp]) {
+        vp += 1;
+    }
+    if vp < html_prefix.len() && html_prefix[vp] == b'=' {
+        vp += 1;
+        while vp < html_prefix.len() && is_html_space(html_prefix[vp]) {
+            vp += 1;
+        }
+        if vp < html_prefix.len() && (html_prefix[vp] == b'"' || html_prefix[vp] == b'\'') {
+            let quote = html_prefix[vp];
+            vp += 1;
+            while vp < html_prefix.len() && html_prefix[vp] != quote {
+                value.push(html_prefix[vp]);
+                vp += 1;
+            }
+            if vp < html_prefix.len() {
+                vp += 1; // closing quote
+            }
+        } else {
+            while vp < html_prefix.len()
+                && !is_html_space(html_prefix[vp])
+                && html_prefix[vp] != b'>'
+            {
+                value.push(html_prefix[vp]);
+                vp += 1;
+            }
+        }
+    }
+    *attr_pos = vp;
+    value
+}
+
+/// Return the charset declared by a `<meta>` element's attributes, or None.
+///
+/// Supports both forms with attributes in any order:
+///   - HTML5: `charset="..."` (any attribute position)
+///   - HTML4: `http-equiv="Content-Type"` + `content="text/html; charset=..."`
+fn charset_from_meta_attrs(attrs: &[(Vec<u8>, Vec<u8>)]) -> Option<String> {
+    let mut charset_attr: Option<&[u8]> = None;
+    let mut http_equiv: Option<&[u8]> = None;
+    let mut content: Option<&[u8]> = None;
+
+    for (name, value) in attrs {
+        if name.eq_ignore_ascii_case(b"charset") {
+            charset_attr = Some(value);
+        } else if name.eq_ignore_ascii_case(b"http-equiv") {
+            http_equiv = Some(value);
+        } else if name.eq_ignore_ascii_case(b"content") {
+            content = Some(value);
+        }
+    }
+
+    // HTML5 form: charset attribute anywhere.
+    if let Some(cs) = charset_attr {
+        if !cs.is_empty() {
+            return Some(String::from_utf8_lossy(cs).into_owned());
+        }
+    }
+
+    // HTML4 form: http-equiv="Content-Type" with content="...; charset=...".
+    if let Some(he) = http_equiv {
+        if he.eq_ignore_ascii_case(b"Content-Type") {
+            if let Some(ct) = content {
+                if let Some(cs) = charset_from_content_value(ct) {
+                    return Some(cs);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Extract the charset parameter from a `content="text/html; charset=..."`
+/// value using a bounded scan (no regex).
+fn charset_from_content_value(content: &[u8]) -> Option<String> {
+    let mut i = 0usize;
+
+    while i < content.len() {
+        // Skip whitespace and ';'.
+        while i < content.len() && (is_html_space(content[i]) || content[i] == b';') {
+            i += 1;
+        }
+        if i >= content.len() {
+            break;
+        }
+
+        // Parameter name.
+        let name_start = i;
+        while i < content.len() && is_html_name_byte(content[i]) {
+            i += 1;
+        }
+        let name = &content[name_start..i];
+
+        // Skip whitespace and '='.
+        while i < content.len() && is_html_space(content[i]) {
+            i += 1;
+        }
+        if i >= content.len() || content[i] != b'=' {
+            // No '=' after the parameter name (e.g. "text/html" where the
+            // '/' terminates "text").  Advance past this parameter so the
+            // scan cannot stall on the same position.
+            while i < content.len() && content[i] != b';' {
+                i += 1;
+            }
+            continue;
+        }
+        i += 1;
+        while i < content.len() && is_html_space(content[i]) {
+            i += 1;
+        }
+
+        // Value (quoted or bare).
+        let value = charset_scan_param_value(content, &mut i);
+        if name.eq_ignore_ascii_case(b"charset") && !value.is_empty() {
+            return Some(String::from_utf8_lossy(&value).into_owned());
+        }
+    }
+
+    None
+}
+
+/// Read the value of one content-type parameter at `i`.
+///
+/// Advances `i` past the value.  Quoted values terminate at the closing
+/// quote; bare values terminate at whitespace or `;`.
+fn charset_scan_param_value(content: &[u8], i: &mut usize) -> Vec<u8> {
+    let mut value: Vec<u8> = Vec::new();
+
+    if *i < content.len() && (content[*i] == b'"' || content[*i] == b'\'') {
+        let quote = content[*i];
+        *i += 1;
+        while *i < content.len() && content[*i] != quote {
+            value.push(content[*i]);
+            *i += 1;
+        }
+        if *i < content.len() {
+            *i += 1;
+        }
+    } else {
+        while *i < content.len() && !is_html_space(content[*i]) && content[*i] != b';' {
+            value.push(content[*i]);
+            *i += 1;
+        }
+    }
+
+    value
+}
+
+fn find_byte(haystack: &[u8], needle: u8) -> Option<usize> {
+    haystack.iter().position(|&b| b == needle)
+}
+
+/// Find the end of a start tag without treating `>` inside a quoted
+/// attribute value as the tag terminator.
+fn find_tag_end(html: &[u8], mut pos: usize) -> Option<usize> {
+    let mut quote = None;
+
+    while pos < html.len() {
+        match quote {
+            Some(delimiter) if html[pos] == delimiter => quote = None,
+            Some(_) => {}
+            None if html[pos] == b'\'' || html[pos] == b'"' => quote = Some(html[pos]),
+            None if html[pos] == b'>' => return Some(pos + 1),
+            None => {}
+        }
+        pos += 1;
+    }
+
+    None
+}
+
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(0);
+    }
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
+fn is_html_name_byte(b: u8) -> bool {
+    // Numeric byte values (45='-', 95='_', 58=':') instead of b'X' literals:
+    // the lizard parser miscounts braces in byte-char literals (Rule 17).
+    b.is_ascii_alphanumeric() || b == 45u8 || b == 95u8 || b == 58u8
+}
+
+fn is_html_space(b: u8) -> bool {
+    b == b' ' || b == b'\t' || b == b'\n' || b == b'\r' || b == b'\x0c'
 }
 
 /// Normalize charset name to uppercase
@@ -393,6 +683,126 @@ mod tests {
 
         // Should not find charset beyond scan limit
         assert_eq!(extract_charset_from_html(&html), None);
+    }
+
+    // ============================================================================
+    // Regression tests: deterministic prescanner (review MEDIUM-1)
+    // ============================================================================
+
+    #[test]
+    fn test_meta_charset_not_first_attribute() {
+        // charset is not the first attribute; the old regex missed this.
+        let html = b"<meta id=\"encoding\" charset=\"windows-1252\">";
+        assert_eq!(
+            extract_charset_from_html(html),
+            Some("windows-1252".to_string())
+        );
+    }
+
+    #[test]
+    fn test_meta_charset_after_other_attributes() {
+        let html = b"<meta charset=windows-1252 id=x>";
+        assert_eq!(
+            extract_charset_from_html(html),
+            Some("windows-1252".to_string())
+        );
+    }
+
+    #[test]
+    fn test_meta_charset_in_comment_ignored() {
+        // A commented-out meta tag must not be treated as a declaration.
+        let html = b"<!-- <meta charset=\"utf-8\"> --><meta charset=\"windows-1252\">";
+        assert_eq!(
+            extract_charset_from_html(html),
+            Some("windows-1252".to_string())
+        );
+    }
+
+    #[test]
+    fn test_meta_charset_inside_non_meta_attribute_ignored() {
+        let html = b"<div data=\"<meta charset=ISO-8859-1>\">text</div>";
+        assert_eq!(extract_charset_from_html(html), None);
+    }
+
+    #[test]
+    fn test_meta_charset_only_in_comment_returns_none() {
+        let html = b"<!-- <meta charset=\"utf-8\"> -->";
+        assert_eq!(extract_charset_from_html(html), None);
+    }
+
+    #[test]
+    fn test_meta_http_equiv_attr_order_swapped() {
+        // content before http-equiv: the old regex required http-equiv first.
+        let html =
+            b"<meta content=\"text/html; charset=windows-1252\" http-equiv=\"Content-Type\">";
+        assert_eq!(
+            extract_charset_from_html(html),
+            Some("windows-1252".to_string())
+        );
+    }
+
+    #[test]
+    fn test_meta_http_equiv_content_charset_any_position() {
+        let html = b"<meta http-equiv=\"Content-Type\" content=\"text/html; charset=ISO-8859-1\">";
+        assert_eq!(
+            extract_charset_from_html(html),
+            Some("ISO-8859-1".to_string())
+        );
+    }
+
+    #[test]
+    fn test_meta_charset_single_quoted() {
+        let html = b"<meta charset='UTF-8'>";
+        assert_eq!(extract_charset_from_html(html), Some("UTF-8".to_string()));
+    }
+
+    #[test]
+    fn test_meta_charset_uppercase_tag_and_attr() {
+        let html = b"<META CHARSET=\"UTF-8\">";
+        assert_eq!(extract_charset_from_html(html), Some("UTF-8".to_string()));
+    }
+
+    #[test]
+    fn test_meta_charset_self_closing() {
+        let html = b"<meta charset=\"UTF-8\" />";
+        assert_eq!(extract_charset_from_html(html), Some("UTF-8".to_string()));
+    }
+
+    #[test]
+    fn test_meta_charset_windows_1252_byte_payload() {
+        // Real Windows-1252 byte payload (0xE9 = é in cp1252).
+        let html =
+            b"<html><head><meta id=x charset=windows-1252></head><body>caf\xE9</body></html>";
+        assert_eq!(
+            extract_charset_from_html(html),
+            Some("windows-1252".to_string())
+        );
+    }
+
+    #[test]
+    fn test_meta_charset_iso_8859_1_byte_payload() {
+        let html = b"<html><head><meta charset=\"ISO-8859-1\"></head><body>caf\xE9</body></html>";
+        assert_eq!(
+            extract_charset_from_html(html),
+            Some("ISO-8859-1".to_string())
+        );
+    }
+
+    #[test]
+    fn test_meta_charset_after_comment_and_other_tags() {
+        let html = b"<html><head><!-- <meta charset=utf-8> --><title>x</title><meta charset=windows-1252></head></html>";
+        assert_eq!(
+            extract_charset_from_html(html),
+            Some("windows-1252".to_string())
+        );
+    }
+
+    #[test]
+    fn test_meta_charset_skips_unsupported_label_and_continues() {
+        // A bogus charset label must not terminate the scan: the next
+        // supported declaration wins.
+        let html = b"<html><head><meta charset=bogus><meta charset=utf-8></head></html>";
+        assert_eq!(extract_charset_from_html(html), Some("utf-8".to_string()));
     }
 
     // ============================================================================

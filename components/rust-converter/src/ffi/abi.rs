@@ -153,10 +153,12 @@ pub const ENCODING_CHAIN_VALID: u8 = 0;
 /// (`ENCODING_HEADER_INVALID`, stage=decompression, error_origin=format).
 pub const ENCODING_CHAIN_MALFORMED: u8 = 1;
 /// Content-Encoding chain parse classification: syntactically valid token
-/// outside the supported set; precommit capability bypass (passthrough).
+/// outside the supported set; routed through the configured error policy
+/// (reject returns the configured status, pass forwards the original
+/// response unchanged).
 pub const ENCODING_CHAIN_UNKNOWN_TOKEN: u8 = 2;
 /// Content-Encoding chain parse classification: more than 3 non-identity
-/// layers; precommit depth bypass (passthrough).
+/// layers; same error-policy routing as unknown-token.
 pub const ENCODING_CHAIN_DEPTH_EXCEEDED: u8 = 3;
 /// Content-Encoding chain parse classification: invalid pointer arguments.
 /// This is kept in the u8 encoding-chain family; decompression's u32 error

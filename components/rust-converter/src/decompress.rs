@@ -146,7 +146,7 @@ fn read_bounded<R: Read>(mut reader: R, budget: usize) -> Result<Vec<u8>, Decomp
             Ok(n) => {
                 /* Saturating add: with an extreme budget (usize::MAX)
                  * output.len() + n could overflow on the check itself
-                 * (P3-5).  BudgetExceeded is returned either way. */
+                 *.  BudgetExceeded is returned either way. */
                 if output.len().saturating_add(n) > budget {
                     return Err(DecompError::BudgetExceeded);
                 }

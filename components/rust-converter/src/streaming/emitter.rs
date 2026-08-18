@@ -376,6 +376,7 @@ impl IncrementalEmitter {
         self.link_text
             .capacity()
             .saturating_add(self.code_block_buffer.capacity())
+            .saturating_add(self.inline_code_buffer.capacity())
     }
 
     /// Finalizes the emitter and returns the fully normalized output.

@@ -148,6 +148,14 @@ impl MarkdownConverter {
 }
 
 fn measure_fence_len(line: &str) -> usize {
+    // CommonMark: a fence must be indented at most 3 spaces.  A line
+    // indented 4+ spaces is an indented code block, not a fence, so
+    // count the backtick run only when the leading indentation is
+    // within the fence limit.
+    let indent = line.len() - line.trim_start().len();
+    if indent > 3 {
+        return 0;
+    }
     line.trim_start().bytes().take_while(|&b| b == b'`').count()
 }
 
@@ -160,4 +168,41 @@ fn fix_trailing_newlines(mut result: String) -> String {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fence_requires_at_most_three_space_indent() {
+        // CommonMark: 4+ space indent is an indented code block, not a
+        // fence.  A 4-space-indented backtick run must NOT open a fence.
+        assert_eq!(measure_fence_len("    ```"), 0);
+        assert_eq!(measure_fence_len("   ```"), 3);
+        assert_eq!(measure_fence_len("  ```"), 3);
+        assert_eq!(measure_fence_len(" ```"), 3);
+        assert_eq!(measure_fence_len("```"), 3);
+        assert_eq!(measure_fence_len("    ````"), 0);
+    }
+
+    #[test]
+    fn normalize_output_does_not_treat_indented_backticks_as_fence() {
+        // A 4-space-indented ``` line is indented code content; the
+        // normalizer must not enter fence mode and must collapse its
+        // internal whitespace like any other non-fence line.
+        let converter = MarkdownConverter::with_options(Default::default());
+        let out = converter.normalize_output("    ```\n    a  b\n    ```\n".to_string());
+        // Indented code content is normalized (spaces collapsed) and no
+        // fence state is entered.  In fence mode the double space would
+        // be preserved verbatim.
+        assert!(
+            out.contains("a b"),
+            "indented code content normalized: {out:?}"
+        );
+        assert!(
+            !out.contains("a  b"),
+            "no fence mode entered (double space would be preserved): {out:?}"
+        );
+    }
 }

@@ -218,7 +218,7 @@ fn lookup_pre_commit(
         EventKind::UpstreamEnd => Err(StateMachineError::InvariantViolation {
             message: concat!(
                 "UPSTREAM_END before header commit - the model has no ",
-                "pre-commit upstream-end path (P3-3); commit headers ",
+                "pre-commit upstream-end path; commit headers ",
                 "first (PLAN-14), then finalize (PLAN-21)"
             )
             .to_string(),

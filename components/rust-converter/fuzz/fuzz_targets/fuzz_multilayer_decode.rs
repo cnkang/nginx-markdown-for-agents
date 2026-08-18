@@ -72,12 +72,19 @@ fn brotli_compress(data: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Build a wire payload from the payload-kind selector and source bytes.
+/// Build a wire payload from the payload-kind selector, source bytes, and
+/// the derived layer chain.
+///
+/// `layers` is in application order (layers[0] is applied first, i.e. the
+/// innermost encoding).  `decode_chain` decodes from the outermost layer
+/// (last declared) inward, so the wire payload must nest the encodings in
+/// the same order: compress `src` with layers[0] first, then wrap that
+/// result with layers[1], and so on.
 ///
 /// Returns the wire payload plus, for the single-format round-trip oracle,
 /// the original uncompressed bytes when they are recoverable.
-fn build_payload(kind: u8, src: &[u8]) -> (Vec<u8>, Option<Vec<u8>>) {
-    match kind % 6 {
+fn build_payload(kind: u8, src: &[u8], layers: &[Encoding]) -> (Vec<u8>, Option<Vec<u8>>) {
+    let single = match kind % 6 {
         0 => (src.to_vec(), None),
         1 => (gzip_compress(src), Some(src.to_vec())),
         2 => (deflate_compress(src), Some(src.to_vec())),
@@ -105,7 +112,27 @@ fn build_payload(kind: u8, src: &[u8]) -> (Vec<u8>, Option<Vec<u8>>) {
             let cut = gz.len() / 2;
             (gz[..cut].to_vec(), None)
         }
+    };
+
+    /* Multi-layer chains: wrap the source with EVERY layer in application
+     * order (layers[0] innermost, last layer outermost), matching how
+     * decode_chain unwinds from the outermost encoding inward.  The
+     * single-layer oracle is only meaningful for the single-layer success
+     * kinds, so it is dropped for multi-layer wires. */
+    if layers.len() <= 1 {
+        return single;
     }
+
+    let mut wire = src.to_vec();
+    for enc in layers {
+        wire = match enc {
+            Encoding::Gzip => gzip_compress(&wire),
+            Encoding::Deflate => deflate_compress(&wire),
+            Encoding::Br => brotli_compress(&wire),
+            Encoding::Identity => wire,
+        };
+    }
+    (wire, None)
 }
 
 fuzz_target!(|data: &[u8]| {
@@ -117,7 +144,7 @@ fuzz_target!(|data: &[u8]| {
     let layers = pick_layers(data);
     let kind = data[1 + layers.len()];
     let src = &data[2 + layers.len()..];
-    let (wire, original) = build_payload(kind, src);
+    let (wire, original) = build_payload(kind, src, &layers);
 
     let limits = DecodeLimits {
         max_output: MAX_OUTPUT,
