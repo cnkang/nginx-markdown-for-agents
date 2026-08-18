@@ -143,6 +143,9 @@ struct ngx_http_request_s {
         ngx_uint_t status;
         ngx_str_t  status_line;
         ngx_list_t headers;
+        ngx_str_t  content_type;
+        ngx_str_t  charset;
+        size_t     content_type_len;
         ngx_table_elt_t *etag;
         ngx_table_elt_t *accept_ranges;
         off_t      content_length_n;

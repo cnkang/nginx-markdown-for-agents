@@ -67,6 +67,7 @@ typedef struct {
     ngx_str_t charset;
     size_t content_type_len;
     off_t content_length_n;
+    time_t last_modified_time;
     ngx_table_elt_t *etag;
     ngx_table_elt_t *content_encoding;
     ngx_table_elt_t *accept_ranges;
