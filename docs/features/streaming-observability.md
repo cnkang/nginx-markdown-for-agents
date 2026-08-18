@@ -15,7 +15,7 @@ observability comes through:
 
 | Family | Labels | Meaning |
 |---|---|---|
-| `nginx_markdown_streaming_events_total` | `transition`, `reason` | Streaming lifecycle events, including start, completion, resume, and failure transitions. |
+| `nginx_markdown_streaming_events_total` | `transition`, `reason` | Streaming lifecycle events. The fixed transition allowlist maps `commit` to completion, `safe_finish_start`/`abort_start` to start, and retains `fallback`, `resume_success`, and `resume_failure`. |
 | `nginx_markdown_conversion_attempts_total` | `engine` | At-most-once conversion attempts. |
 | `nginx_markdown_conversion_deliveries_total` | `engine` | Successful downstream delivery only. |
 | `nginx_markdown_output_bytes_total` | none | Converted bytes accepted downstream. |
@@ -43,12 +43,19 @@ one `transition`/`reason` pair:
 
 | Transition | Fixed reason | Snapshot source | Contract note |
 |---|---|---|---|
-| `commit` | `converted` | `streaming.commit_total` | Counts committed streaming responses. |
+| `commit` | `converted` | `streaming.commit_total` | Counts committed streaming responses (the conversion completed and committed). |
 | `fallback` | `precommit_html_error` | `streaming.fallback_total` | Counts pre-commit fallback decisions. |
-| `safe_finish_start` | `converted` | `streaming_failure_postcommit_safe_finish` | Counts entry into safe-finish handling, not converted deliveries. |
-| `abort_start` | `streaming_mid_flight_error` | `streaming_failure_postcommit_abort` | Counts protocol-safe abort attempts. |
+| `safe_finish_start` | `converted` | `streaming_failure_postcommit_safe_finish` | Counts entry into safe-finish handling (a start transition), not converted deliveries. |
+| `abort_start` | `streaming_mid_flight_error` | `streaming_failure_postcommit_abort` | Counts protocol-safe abort attempts (a start transition). |
 | `resume_success` | `converted` | `perf.backpressure_resume_total` | Counts successful downstream resumes after backpressure. |
 | `resume_failure` | `streaming_mid_flight_error` | `streaming.failed_total` | Independent from `abort_start`; it is not an abort counter. |
+
+Transition semantics: `commit` is the completion transition.
+`safe_finish_start` and `abort_start` are start transitions.
+`resume_success` is an intermediate successful-resume transition (it does
+not prove the conversion completed). `resume_failure` is a failure
+transition. `fallback` is a decision transition (the request left the
+streaming path before commit).
 
 Raw paths, URIs, hosts, users, and profile names are never emitted.
 

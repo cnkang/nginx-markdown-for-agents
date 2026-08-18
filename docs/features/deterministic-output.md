@@ -101,7 +101,7 @@ Input:  "Content\n"         → Output: "Content\n"
 **Rule**: The module collapses consecutive spaces within text to a single
 space, **except**:
 - Inside fenced code blocks, where the module preserves raw line content
-- Inside inline code (` ` `)
+- Inside inline code (backtick-delimited spans)
 - At the start of lines (for list indentation)
 
 **Rationale**: Multiple spaces in regular text do not affect Markdown rendering but create inconsistent output. Code blocks and inline code must preserve exact spacing for correctness.
@@ -140,11 +140,14 @@ to context.
 
 **Rationale**: Ensures that special characters in HTML content are correctly represented in Markdown without breaking formatting.
 
-**Ordinary text**: `\`, `` ` ``, `*`, `_`, `[`, `]`, `<`, `>`, and `~` are
-The module escapes untrusted text before emitting it. It also escapes
-line-start block markers (`#`, `>`, `+`, `-`, `!`, and ordered-list periods)
-when they could change
-the Markdown structure. This keeps ordinary prose such as `a-b` readable.
+- **Ordinary text**: the module escapes `\`, `` ` ``, `*`, `_`, `[`, `]`,
+  `<`, `>`, and `~` before emitting. It also escapes line-start block
+  markers (`#`, `>`, `+`, `-`, `!`, and ordered-list periods) when they
+  could change the Markdown structure. This keeps ordinary prose such as
+  `a-b` readable.
+
+The escape set is applied to untrusted text only. Generated syntax keeps
+its own dedicated handling.
 
 **Generated syntax**: Code spans/blocks retain their code content, and link or
 image labels use the dedicated label escaper so generated Markdown remains
@@ -183,7 +186,18 @@ fn normalize_output(&self, output: String) -> String {
 
     for line in output.lines() {
         let trimmed_start = line.trim_start();
-        let fence_len = trimmed_start.bytes().take_while(|&b| b == b'`').count();
+        // CommonMark: a fence must be indented at most 3 spaces.  A line
+        // indented 4+ spaces is an indented code block, not a fence.
+        // Note: indent counts bytes, so a leading tab reports 1 instead of
+        // advancing to CommonMark column 4; the parser can therefore
+        // recognize a tab-indented fence.  This matches the production
+        // FusedNormalizer::push_line behavior.
+        let indent = line.len() - trimmed_start.len();
+        let fence_len = if indent > 3 {
+            0
+        } else {
+            trimmed_start.bytes().take_while(|&b| b == b'`').count()
+        };
         let is_opening_fence = active_fence_len.is_none() && fence_len >= 3;
         let is_closing_fence = active_fence_len
             .map(|len| fence_len >= len && trimmed_start[fence_len..].trim().is_empty())
@@ -334,5 +348,6 @@ assert_eq!(result1, result2);
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-18 | Hermes | Fence detection requires at most 3-space indent (CommonMark); 4+ space indented backtick runs are indented code, not fences |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

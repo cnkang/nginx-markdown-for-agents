@@ -49,7 +49,9 @@ nav, footer, aside
 
 ### Protection Selectors
 
-When an element matches both a prune selector and a protection selector, protection wins. This allows operators to keep specific nav/footer instances while pruning others.
+When an element matches both a prune selector and a protection selector, protection wins. This allows operators to keep entire tag-name families (for example all `nav` elements) while pruning others.
+
+Tag-name-only selectors apply to **all** elements matching the selected tag names. A protection selector such as `nav` protects every `nav` element, not a specific instance. Tag-name selectors alone cannot protect individual nav or footer instances. Class/id-based protection (`.class`, `#id`) defers to a future release.
 
 ### Empty-Output Fallback
 

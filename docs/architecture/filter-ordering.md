@@ -209,8 +209,11 @@ through the same filter chain, so the markdown filter runs again on every
 request. The cache never serves Markdown without re-conversion. Because the
 cached body is the original HTML, the response still varies by the same
 request properties (such as `Accept` and any bot-targeting variables) as a
-non-cached response, so `proxy_cache_key` must include those properties to
-keep HTML and Markdown variants separated (see
+non-cached response. Include those properties in `proxy_cache_key` **only
+when the upstream response or another cache rule actually varies on them**
+(for example when `markdown_accept` or bot-targeting routing is active).
+An unconditional `Accept` in the key is unnecessary when the upstream never
+varies on it (see
 [CACHE_AWARE_RESPONSES.md](../features/CACHE_AWARE_RESPONSES.md)).
 
 **cache_validation interaction (Requirement 15.3):**

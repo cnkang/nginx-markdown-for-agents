@@ -86,7 +86,7 @@ and [`CONFIGURATION.md`](../guides/CONFIGURATION.md) for operator syntax.
 
 ## Document Updates
 
-|| Version | Date | Author | Changes ||
+| Version | Date | Author | Changes |
 |---|---|---|---|
 | 0.9.2 | 2026-08-15 | Hermes | Document Brotli build control NGX_MARKDOWN_BROTLI_STREAMING and the NGX_HTTP_BROTLI probe outcome |
 | 0.9.2 | 2026-08-08 | Hermes | Non-native-reader writing pass: active voice, removed prose semicolons. |
