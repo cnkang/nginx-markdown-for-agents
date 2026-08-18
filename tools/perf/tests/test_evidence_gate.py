@@ -2286,7 +2286,7 @@ class TestScenarioSourceEnvironment:
 
 
 # ---------------------------------------------------------------------------
-# Critical scenario completeness (P1-2): missing and incomplete scenarios
+# Critical scenario completeness (subrequest): missing and incomplete scenarios
 # ---------------------------------------------------------------------------
 
 class TestCriticalScenarioCompleteness:
@@ -2400,7 +2400,7 @@ class TestCriticalScenarioCompleteness:
 
 
 # ---------------------------------------------------------------------------
-# Memory evidence completeness (P2-1): >= 2 memory points required
+# Memory evidence completeness: >= 2 memory points required
 # ---------------------------------------------------------------------------
 
 class TestMemoryEvidenceCompleteness:
@@ -2502,7 +2502,7 @@ class TestMemoryEvidenceCompleteness:
 
 
 # ---------------------------------------------------------------------------
-# Environment compatibility (P2-2): platform/load_generator/nginx_version match
+# Environment compatibility: platform/load_generator/nginx_version match
 # ---------------------------------------------------------------------------
 
 class TestEnvironmentCompatibility:
@@ -2579,6 +2579,10 @@ class TestEnvironmentCompatibility:
             evidence_gate, "_validate_baseline_evidence",
             lambda *_args: None,
         )
+        # Pin the release-tag check to False so the assertion below is
+        # independent of the environment (a tag on HEAD or a release env
+        # var would otherwise change the blocking path).
+        monkeypatch.setattr(evidence_gate, "_is_release_tag", lambda: False)
 
         metrics, has_baseline, exit_rc = evidence_gate._resolve_baseline(
             {},

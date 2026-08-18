@@ -67,6 +67,13 @@ DROPPED_LEGACY_KEYS = frozenset(
     }
 )
 
+# Keys a compatibility entry may carry after alias folding: the canonical
+# release keys plus the dropped legacy metadata keys (retained for
+# compatibility documents, never used for identity).
+COMPATIBILITY_ENTRY_KEYS = frozenset(
+    set(CANONICAL_ENTRY_KEYS) | set(DROPPED_LEGACY_KEYS)
+)
+
 COMPATIBILITY_TIER_ALIASES = {
     "full": "supported",
     "source_only": "best-effort",
@@ -92,6 +99,25 @@ COMPATIBILITY_ALIASES = {
 
 class MatrixNormalizationError(ValueError):
     """Raised when a matrix document fails the fail-closed normalization."""
+
+
+def canonical_arch(target: str) -> str:
+    """Normalize a target to canonical architecture identity.
+
+    Matches the canonical identity logic from _matrix_entry_identity in
+    update_matrix.py: amd64 -> x86_64, arm64 -> aarch64, and
+    x86_64-* / aarch64-* prefixes collapse to the bare architecture.
+    """
+    normalized = {
+        "amd64": "x86_64",
+        "arm64": "aarch64",
+    }.get(target, target)
+    if isinstance(normalized, str):
+        if normalized.startswith("x86_64-"):
+            normalized = "x86_64"
+        elif normalized.startswith("aarch64-"):
+            normalized = "aarch64"
+    return normalized
 
 
 def normalize_document(doc: Dict[str, Any]) -> Dict[str, Any]:
@@ -214,21 +240,7 @@ def _fold_compatibility_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
                 f"alias {key!r} disagrees with canonical key "
                 f"{canonical_key!r}"
             )
-        if canonical_key in {
-            "nginx_version",
-            "os",
-            "libc",
-            "target",
-            "artifact_type",
-            "feature_manifest_digest",
-            "abi_version",
-            "nginx_channel",
-            "test_level",
-            "support_tier",
-            "release_blocking",
-            "owner_workflow",
-            "managed_by",
-        }:
+        if canonical_key in COMPATIBILITY_ENTRY_KEYS:
             canonical[canonical_key] = value
             continue
         raise MatrixNormalizationError(f"unknown matrix entry key: {key!r}")
@@ -255,6 +267,11 @@ def normalize_compatibility_entry(
         raise MatrixNormalizationError("matrix entry must be an object")
 
     normalized = _fold_compatibility_entry(entry)
+    # Canonicalize the architecture after alias folding so equivalent rows
+    # (arch: amd64 vs target: x86_64 vs target: x86_64-unknown-linux-gnu)
+    # share one identity before any consumer compares entries.
+    if isinstance(normalized.get("target"), str):
+        normalized["target"] = canonical_arch(normalized["target"])
     if "support_tier" in normalized:
         normalized["support_tier"] = _normalize_compatibility_tier(
             normalized["support_tier"]

@@ -1418,13 +1418,19 @@ check_prometheus_response() {
 }
 
 # Prometheus: explicit text 0.0.4 Accept
-check_prometheus_response "openmetrics" 'Accept: text/plain; version=0.0.4'
+if ! check_prometheus_response "openmetrics" 'Accept: text/plain; version=0.0.4'; then
+  exit 1
+fi
 
 # Prometheus: arbitrary Accept still returns the frozen format
-check_prometheus_response "arbitrary-accept" 'Accept: application/openmetrics-text; version=1.0.0'
+if ! check_prometheus_response "arbitrary-accept" 'Accept: application/openmetrics-text; version=1.0.0'; then
+  exit 1
+fi
 
 # Prometheus: no Accept header
-check_prometheus_response "no-accept" ''
+if ! check_prometheus_response "no-accept" ''; then
+  exit 1
+fi
 
 # Prometheus: after streaming conversion (populates streaming metrics)
 curl -sS -H "${ACCEPT_MARKDOWN}" \

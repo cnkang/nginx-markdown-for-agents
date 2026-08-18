@@ -145,3 +145,12 @@ server {
     validator._validate_module_enabled_render(result, "helm", Path("chart"))
 
     assert result.has_failures
+    # The failure must be the specific duplicate-markdown_limits contract
+    # violation, not an unrelated render error: match the check identifier
+    # and the exact "exactly one markdown_limits directive" message.
+    assert any(
+        check_id == validator._CHECK_HELM_RENDER_MODULE_ENABLED
+        and "exactly one markdown_limits directive" in message
+        for status, check_id, message in result.results
+        if status == "FAIL"
+    ), f"expected duplicate-markdown_limits failure, got: {result.results}"

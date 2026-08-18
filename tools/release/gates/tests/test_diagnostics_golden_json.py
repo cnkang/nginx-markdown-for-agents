@@ -152,7 +152,16 @@ def _make_doc_with_dynconf(dynconf):
                 "streaming_buffer": "static",
             },
         },
-        "runtime": {"inflight": 0, "pending_output": 0},
+        "runtime": {
+            "inflight": 0,
+            "pending_output": 0,
+            "module_metrics": {
+                "streaming_requests_total": 0,
+                "precommit_failopen_total": 0,
+                "zero_copy_output_total": 0,
+                "copied_output_total": 0,
+            },
+        },
         "recent_decisions": [],
     }
 
@@ -538,6 +547,22 @@ class TestLastErrorBounds:
         """lkg_preserved last_error is non-null and <= 512 bytes."""
         assert dynconf["last_error"] is not None
         assert len(dynconf["last_error"].encode("utf-8")) <= 512
+
+    def test_truncation_boundary_keeps_redaction_effective(self):
+        """Redaction runs before the 512-byte truncation, so a config
+        filename that straddles the truncation boundary is still scrubbed
+        (the full filename is visible to the redactor before the clamp)."""
+        # Build an error whose tail crosses the 512-byte boundary with a
+        # config filename: the redactor must scrub the complete filename
+        # before truncation, leaving no path fragment in the output.
+        prefix = "x" * 480
+        error_text = prefix + " /etc/nginx/nginx.conf"
+        redacted = redact_last_error(error_text)
+        assert len(redacted.encode("utf-8")) <= 512
+        for pattern in _PATH_PATTERNS:
+            assert not pattern.search(redacted), (
+                f"path fragment survived truncation: {redacted!r}"
+            )
 
 
 class TestHeadResponseBehavior:

@@ -13,7 +13,7 @@
 # functions.  Adding a new API that can return NGX_AGAIN requires registering
 # it here (and in the rule document) so every call site is audited.
 #
-# Heuristic scope (tools P3-3): this is an audit-assist heuristic, NOT a
+# Heuristic scope: this is an audit-assist heuristic, NOT a
 # completeness proof.  Known limitations: (a) a windowed scan can let one
 # call site's NGX_AGAIN mention mask a sibling call site in the same
 # function; (b) the folded pattern `if (rc == NGX_OK) {...} else {error}`
@@ -102,14 +102,6 @@ while IFS= read -r -d '' file; do
                 continue
             fi
 
-            # Heuristic: skip when the call is the definition's first line.
-            # Definitions typically have the opening brace on the same or next
-            # line; calls inside bodies do not start the window with the api.
-            first_line=$(echo "$surrounding_code" | head -1)
-            if echo "$first_line" | grep -qE "${api}[[:space:]]*\("; then
-                continue
-            fi
-
             # ===== Violation checks =====
 
             # 1. NGX_AGAIN must be explicitly branched, not folded into error.
@@ -148,7 +140,7 @@ while IFS= read -r -d '' file; do
             fi
         done
     done
-done < <(find "$SRC_DIR" -name "*.c" -type f -print0)
+done < <(find "$SRC_DIR" \( -name "*.c" -o -name "*.h" \) -type f -print0)
 
 violations=$(wc -l < "$tmp_violations" | tr -d '[:space:]')
 

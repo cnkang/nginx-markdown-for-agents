@@ -50,9 +50,9 @@ def check_reason_code_count(repo: Path) -> dict:
     The 0.9.0 baseline contains 26 codes.  The current 0.9.2 freeze adds
     the distinct ``encoding_header_invalid`` code, so a prior-version
     regression gate must not reject the newer release solely because its
-    registry has grown.  It still verifies that Rust and the production C
-    generated C reason metadata exposes the same count and that the baseline
-    floor remains present. The C projection lives in
+    registry has grown.  It still verifies that the Rust registry and the
+    production generated C reason metadata expose the same count and that
+    the baseline floor remains present. The C projection lives in
     ``markdown_reason_meta.h``; the older hand-written constants in
     ``ngx_http_markdown_reason.c`` no longer exist.
     """

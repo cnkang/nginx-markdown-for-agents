@@ -386,6 +386,9 @@ def validate_contract(
         errors.append("FFI: summary export count or ABI heading does not match inventory")
     if f"**Classification:** all `{inventory['ffi_classification']}`" not in contract_text:
         errors.append("FFI: classification does not match inventory")
+    if ffi_count == 0:
+        errors.append("FFI: inventory declares no exports; generated-header check skipped")
+        return errors
     header = inventory["ffi_exports"][0]["generated_header"]
     if f"**Generated header:** `{header}`" not in contract_text:
         errors.append("FFI: generated header does not match inventory")

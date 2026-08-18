@@ -215,7 +215,16 @@ def validate_registry_structure(registry: dict, contract: dict | None = None) ->
     if not isinstance(families, list) or not families:
         return errors + ["families must be a non-empty list"]
 
-    expected_count = len(contract.get("families", [])) if contract else None
+    expected_count = None
+    if contract is not None:
+        contract_families = contract.get("families", [])
+        if not isinstance(contract_families, list):
+            errors.append(
+                "contract families must be a list; "
+                "family-count validation skipped"
+            )
+        else:
+            expected_count = len(contract_families)
     if expected_count is not None and len(families) != expected_count:
         errors.append(
             f"Expected {expected_count} families from canonical contract, "

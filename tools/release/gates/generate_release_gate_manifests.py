@@ -277,14 +277,34 @@ def build_artifact_index(candidate_sha: str, created_at: str, artifact_root: Pat
     abi_version = int(match.group(1))
     artifacts = []
     for path in files:
-        relative = path.relative_to(REPO_ROOT).as_posix()
+        # Reject symlinked artifacts outright: path.is_file() follows
+        # symlinks, so a .deb symlink could point at a different file and
+        # the index would declare one type while hashing another's bytes.
+        if path.is_symlink():
+            raise ValueError(f"artifact path must not be a symlink: {path}")
+        # Resolve each matched artifact before hashing or deriving its
+        # artifact_id: a symlink inside the artifact root could point
+        # outside REPO_ROOT, and hashing or recording the un-resolved
+        # path would bind bytes that do not belong to the repository.
+        try:
+            resolved = path.resolve()
+            resolved.relative_to(REPO_ROOT.resolve())
+        except (OSError, ValueError) as exc:
+            raise ValueError(
+                f"artifact path escapes the repository: {path}"
+            ) from exc
+        if resolved.suffix != path.suffix:
+            raise ValueError(
+                f"artifact type does not match resolved path: {path}"
+            )
+        relative = resolved.relative_to(REPO_ROOT).as_posix()
         artifact_type = path.suffix[1:]
         artifacts.append({
             "artifact_type": artifact_type,
             "release_matrix_row_id": f"downloaded-{artifact_type}-{path.name}",
             "artifact_id": relative,
             "candidate_sha": candidate_sha,
-            "artifact_sha256": _sha256_file(path),
+            "artifact_sha256": _sha256_file(resolved),
             "feature_manifest_digest": feature_digest,
             "abi_version": abi_version,
             "verification_status": "pass",

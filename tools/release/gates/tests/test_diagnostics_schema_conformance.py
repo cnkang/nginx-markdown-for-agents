@@ -237,6 +237,20 @@ def _valid_diagnostics(draw):
         "runtime": {
             "inflight": draw(st.integers(min_value=0, max_value=10000)),
             "pending_output": draw(st.integers(min_value=0, max_value=10000)),
+            "module_metrics": {
+                "streaming_requests_total": draw(
+                    st.integers(min_value=0, max_value=10000)
+                ),
+                "precommit_failopen_total": draw(
+                    st.integers(min_value=0, max_value=10000)
+                ),
+                "zero_copy_output_total": draw(
+                    st.integers(min_value=0, max_value=10000)
+                ),
+                "copied_output_total": draw(
+                    st.integers(min_value=0, max_value=10000)
+                ),
+            },
         },
         "recent_decisions": draw(
             st.lists(_decision_entry(), min_size=0, max_size=5)
@@ -639,7 +653,16 @@ def _make_doc_with_dynconf(dynconf):
             "effective": _base_effective(),
             "effective_sources": _static_sources(),
         },
-        "runtime": {"inflight": 0, "pending_output": 0},
+        "runtime": {
+            "inflight": 0,
+            "pending_output": 0,
+            "module_metrics": {
+                "streaming_requests_total": 0,
+                "precommit_failopen_total": 0,
+                "zero_copy_output_total": 0,
+                "copied_output_total": 0,
+            },
+        },
         "recent_decisions": [],
     }
 
@@ -671,6 +694,15 @@ def _make_doc_with_config(effective, sources):
             "effective": effective,
             "effective_sources": sources,
         },
-        "runtime": {"inflight": 0, "pending_output": 0},
+        "runtime": {
+            "inflight": 0,
+            "pending_output": 0,
+            "module_metrics": {
+                "streaming_requests_total": 0,
+                "precommit_failopen_total": 0,
+                "zero_copy_output_total": 0,
+                "copied_output_total": 0,
+            },
+        },
         "recent_decisions": [],
     }

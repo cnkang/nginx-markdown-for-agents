@@ -24,8 +24,9 @@ times because the renderer arithmetic had no standing guard.
 The detector is conservative: it verifies structural presence of the
 conservation pattern in the renderer file and reports REVIEW-level
 findings when the pattern drifts.  Exit code is 1 only for hard
-structural violations (missing renderer, missing aborted assignment,
-missing failopen deduction).
+structural violations (missing renderer, missing failopen deduction).
+A missing `v1->requests.aborted` assignment is reported as a REVIEW-level
+finding and affects exit status only under `--strict`.
 
 Usage:
     PYTHONPATH=. python3 tools/harness/detect_metrics_event_conservation.py

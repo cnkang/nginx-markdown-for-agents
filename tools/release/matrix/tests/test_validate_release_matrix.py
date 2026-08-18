@@ -71,8 +71,15 @@ def expected_digest() -> str:
     return "sha256:" + hashlib.sha256(canonical).hexdigest()
 
 
-def test_valid_matrix_passes(monkeypatch: pytest.MonkeyPatch, fake_matrix_root: Path) -> None:
-    """A canonical, bound matrix must pass all checks."""
+@pytest.fixture(autouse=True)
+def patch_validator_paths(
+    monkeypatch: pytest.MonkeyPatch, fake_matrix_root: Path
+) -> None:
+    """Point every validator path at the fake repo root.
+
+    NORMALIZE_PATH stays real: the subprocess entry point is the shared
+    repository tool, which reads whatever MATRIX_PATH the validator passes.
+    """
     for path_attr in (
         "MATRIX_PATH",
         "SCHEMA_PATH",
@@ -80,13 +87,20 @@ def test_valid_matrix_passes(monkeypatch: pytest.MonkeyPatch, fake_matrix_root: 
         "ABI_HEADER_PATH",
     ):
         monkeypatch.setattr(
-            validator, path_attr, fake_matrix_root / getattr(validator, path_attr).relative_to(validator.REPO_ROOT)
+            validator,
+            path_attr,
+            fake_matrix_root
+            / getattr(validator, path_attr).relative_to(validator.REPO_ROOT),
         )
-    # NORMALIZE_PATH stays real: the subprocess entry point is the shared
-    # repository tool, which reads whatever MATRIX_PATH the validator passes.
     monkeypatch.setattr(
-        validator, "NORMALIZE_PATH", validator.REPO_ROOT / "tools/release/matrix/normalize_matrix.py"
+        validator,
+        "NORMALIZE_PATH",
+        validator.REPO_ROOT / "tools/release/matrix/normalize_matrix.py",
     )
+
+
+def test_valid_matrix_passes(fake_matrix_root: Path) -> None:
+    """A canonical, bound matrix must pass all checks."""
     write_matrix(
         fake_matrix_root,
         {"schema_version": 1, "entries": [{**canonical_entry(), "feature_manifest_digest": expected_digest()}]},
@@ -94,24 +108,8 @@ def test_valid_matrix_passes(monkeypatch: pytest.MonkeyPatch, fake_matrix_root: 
     assert validator.main() == 0
 
 
-def test_alias_usage_fails(
-    monkeypatch: pytest.MonkeyPatch, fake_matrix_root: Path
-) -> None:
+def test_alias_usage_fails(fake_matrix_root: Path) -> None:
     """Legacy alias keys in the canonical doc must fail closed."""
-    for path_attr in (
-        "MATRIX_PATH",
-        "SCHEMA_PATH",
-        "FEATURE_MANIFEST_PATH",
-        "ABI_HEADER_PATH",
-    ):
-        monkeypatch.setattr(
-            validator, path_attr, fake_matrix_root / getattr(validator, path_attr).relative_to(validator.REPO_ROOT)
-        )
-    # NORMALIZE_PATH stays real: the subprocess entry point is the shared
-    # repository tool, which reads whatever MATRIX_PATH the validator passes.
-    monkeypatch.setattr(
-        validator, "NORMALIZE_PATH", validator.REPO_ROOT / "tools/release/matrix/normalize_matrix.py"
-    )
     doc = {
         "schema_version": 1,
         "entries": [
@@ -131,24 +129,8 @@ def test_alias_usage_fails(
         validator.main()
 
 
-def test_stale_feature_digest_fails(
-    monkeypatch: pytest.MonkeyPatch, fake_matrix_root: Path
-) -> None:
+def test_stale_feature_digest_fails(fake_matrix_root: Path) -> None:
     """A stale feature-manifest digest must fail closed."""
-    for path_attr in (
-        "MATRIX_PATH",
-        "SCHEMA_PATH",
-        "FEATURE_MANIFEST_PATH",
-        "ABI_HEADER_PATH",
-    ):
-        monkeypatch.setattr(
-            validator, path_attr, fake_matrix_root / getattr(validator, path_attr).relative_to(validator.REPO_ROOT)
-        )
-    # NORMALIZE_PATH stays real: the subprocess entry point is the shared
-    # repository tool, which reads whatever MATRIX_PATH the validator passes.
-    monkeypatch.setattr(
-        validator, "NORMALIZE_PATH", validator.REPO_ROOT / "tools/release/matrix/normalize_matrix.py"
-    )
     write_matrix(
         fake_matrix_root,
         {
@@ -165,24 +147,8 @@ def test_stale_feature_digest_fails(
         validator.main()
 
 
-def test_mismatched_abi_fails(
-    monkeypatch: pytest.MonkeyPatch, fake_matrix_root: Path
-) -> None:
+def test_mismatched_abi_fails(fake_matrix_root: Path) -> None:
     """A mismatched ABI version must fail closed."""
-    for path_attr in (
-        "MATRIX_PATH",
-        "SCHEMA_PATH",
-        "FEATURE_MANIFEST_PATH",
-        "ABI_HEADER_PATH",
-    ):
-        monkeypatch.setattr(
-            validator, path_attr, fake_matrix_root / getattr(validator, path_attr).relative_to(validator.REPO_ROOT)
-        )
-    # NORMALIZE_PATH stays real: the subprocess entry point is the shared
-    # repository tool, which reads whatever MATRIX_PATH the validator passes.
-    monkeypatch.setattr(
-        validator, "NORMALIZE_PATH", validator.REPO_ROOT / "tools/release/matrix/normalize_matrix.py"
-    )
     write_matrix(
         fake_matrix_root,
         {
@@ -195,24 +161,8 @@ def test_mismatched_abi_fails(
         validator.main()
 
 
-def test_missing_matrix_fails(
-    monkeypatch: pytest.MonkeyPatch, fake_matrix_root: Path
-) -> None:
+def test_missing_matrix_fails(fake_matrix_root: Path) -> None:
     """A missing matrix document must fail closed."""
-    for path_attr in (
-        "MATRIX_PATH",
-        "SCHEMA_PATH",
-        "FEATURE_MANIFEST_PATH",
-        "ABI_HEADER_PATH",
-    ):
-        monkeypatch.setattr(
-            validator, path_attr, fake_matrix_root / getattr(validator, path_attr).relative_to(validator.REPO_ROOT)
-        )
-    # NORMALIZE_PATH stays real: the subprocess entry point is the shared
-    # repository tool, which reads whatever MATRIX_PATH the validator passes.
-    monkeypatch.setattr(
-        validator, "NORMALIZE_PATH", validator.REPO_ROOT / "tools/release/matrix/normalize_matrix.py"
-    )
     assert validator.main() == 1
 
 

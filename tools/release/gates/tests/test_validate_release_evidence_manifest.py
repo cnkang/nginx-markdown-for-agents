@@ -22,13 +22,13 @@ _BASE_MANIFEST = {
     "run_status": "pass",
     "entries": [
         {
-            "domain": "coverage",
+            "category": "coverage",
             "blocking": True,
             "status": "pass",
             "artifact_ref": "workflow:coverage",
         },
         {
-            "domain": "documentation",
+            "category": "documentation",
             "blocking": False,
             "status": "skip",
             "artifact_ref": "workflow:docs",
@@ -100,18 +100,18 @@ def test_missing_entries_array_is_ignored() -> None:
     assert reasons == []
 
 
-def test_blocking_rule_reason_names_domain() -> None:
+def test_blocking_rule_reason_names_category() -> None:
     """The rejection reason must name the offending entry for auditing."""
     entries = copy.deepcopy(_BASE_MANIFEST["entries"])
     entries[0]["status"] = "pending"
     reasons: list[str] = []
     gate._check_blocking_semantics(_manifest_with(entries), reasons)
-    assert any("domain='coverage'" in r for r in reasons)
+    assert any("category='coverage'" in r for r in reasons)
 
 
 def test_verify_head_flags_drifted_evidence(monkeypatch) -> None:
     """Committed evidence whose candidate_sha != repository HEAD must be
-    flagged as stale (P1-1: evidence SHA == release candidate SHA)."""
+    flagged as stale (evidence SHA == release candidate SHA)."""
     reasons: list[str] = []
     monkeypatch.setattr(gate, "_git_head_sha", lambda: ("b" * 40, None))
     gate._verify_head_matches("a" * 40, reasons)
