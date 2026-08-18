@@ -99,33 +99,15 @@
       ]
     },
     "oci": {
-      "provenance_form": "OCI image index + SBOM attestation, candidate-bound with digest",
-      "predicate": "OCI provenance: candidate_sha + image digest + feature-manifest digest + ABI version + build runner identity + nginx version for the published 0.9.2 images",
-      "producer": ".github/workflows/official-nginx-docker.yml (docker buildx with attest)",
-      "consumer": "artifact-registry-check gate, release evidence checkpoint, downstream image consumers",
+      "provenance_form": "Not applicable for the 0.9.2 release channel; no OCI publication workflow is wired",
+      "predicate": "Not applicable; no OCI artifact or image digest is published for 0.9.2",
+      "producer": "Not part of the 0.9.2 release channel",
+      "consumer": "Not applicable until an OCI workflow and its immutable identity binding are published",
       "candidate_binding": {
-        "required_fields": [
-          "candidate_sha",
-          "artifact_sha256",
-          "feature_manifest_digest",
-          "abi_version",
-          "artifact_identity",
-          "producer",
-          "consumer",
-          "retention",
-          "storage_class",
-          "run_id",
-          "attempt",
-          "authoritative",
-          "superseded_attempt",
-          "retrieval_location"
-        ],
-        "validator": "artifact-registry-check and release evidence checkpoint (docker manifest digest match)"
+        "required_fields": [],
+        "validator": "Not applicable; no OCI artifact is published"
       },
-      "verification_commands": [
-        "make artifact-registry-check",
-        "docker manifest inspect <image> --verbose"
-      ]
+      "verification_commands": []
     },
     "homebrew_formula_source": {
       "provenance_form": "Formula sha256 stanza + tag archive verification record",

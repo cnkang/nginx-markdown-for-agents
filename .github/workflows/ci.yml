@@ -286,7 +286,7 @@ jobs:
       - name: Run harness detector unit tests
         # The detector single tests (test_detect_*, test_dynconf_reload_rollback)
         # verify the detectors themselves; without this step a detector change
-        # can break its own tests without CI noticing (P1-5/P1-6).
+        # can break its own tests without CI noticing.
         run: make test-harness
 
   header-sync:

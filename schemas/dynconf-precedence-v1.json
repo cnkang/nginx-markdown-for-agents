@@ -1,6 +1,4 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "dynconf-precedence-v1.json",
   "title": "nginx-markdown-for-agents Dynamic Configuration Precedence v1 Contract",
   "description": "Canonical precedence and provenance contract for dynconf-mutable fields.",
   "schema_version": 1,

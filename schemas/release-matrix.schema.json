@@ -73,7 +73,15 @@
         },
         "artifact_type": {
           "type": "string",
-          "description": "Artifact kind: deb, rpm, oci, homebrew, source, bottle."
+          "enum": [
+            "dynamic-module",
+            "deb-package",
+            "rpm-package",
+            "docker-image",
+            "homebrew-formula",
+            "source"
+          ],
+          "description": "Artifact kind consumed by check_packaging_consistency, completeness_check, and the doc-sync validator."
         },
         "feature_manifest_digest": {
           "type": "string",
@@ -82,6 +90,7 @@
         },
         "abi_version": {
           "type": "integer",
+          "minimum": 1,
           "description": "Final frozen FFI ABI version."
         },
         "support_tier": {
@@ -156,6 +165,11 @@
         },
         "abi_version": {
           "type": "integer"
+        },
+        "support_tier": {
+          "type": "string",
+          "enum": ["full", "supported", "experimental", "best-effort", "source_only", "deprecated", "archived"],
+          "description": "Support tier, matching the entry definition. Optional: legacy rows may carry it so normalization preserves it."
         }
       }
     }

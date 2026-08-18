@@ -31,7 +31,7 @@ data:
         listen 8080;
         {{- if .Values.markdown.enabled }}
         markdown_filter on;
-        markdown_limits conversion_memory={{ .Values.markdown.maxSize }} conversion_timeout={{ .Values.markdown.timeout }}{{- if .Values.markdown.streaming }} streaming_buffer={{ .Values.markdown.streaming.budget }}{{- end }};
+        markdown_limits conversion_memory={{ default .Values.markdown.maxSize .Values.markdown.limits.conversionMemory }} conversion_timeout={{ default .Values.markdown.timeout .Values.markdown.limits.conversionTimeout }}{{- if .Values.markdown.limits.streamingBuffer }} streaming_buffer={{ .Values.markdown.limits.streamingBuffer }}{{- else if .Values.markdown.streaming }} streaming_buffer={{ .Values.markdown.streaming.budget }}{{- end }}{{- if .Values.markdown.limits.parserMemory }} parser_memory={{ .Values.markdown.limits.parserMemory }}{{- end }}{{- if .Values.markdown.limits.parserTimeout }} parser_timeout={{ .Values.markdown.limits.parserTimeout }}{{- end }}{{- if .Values.markdown.limits.decompressedSize }} decompressed_size={{ .Values.markdown.limits.decompressedSize }}{{- end }}{{- if .Values.markdown.limits.decompressionRatio }} decompression_ratio={{ .Values.markdown.limits.decompressionRatio }}{{- end }}{{- if .Values.markdown.limits.maxInflight }} max_inflight={{ .Values.markdown.limits.maxInflight }}{{- end }};
         markdown_error_policy {{ .Values.markdown.onError }};
         markdown_flavor {{ .Values.markdown.flavor }};
         {{- if .Values.markdown.tokenEstimate }}
@@ -70,3 +70,26 @@ data:
         {{- end }}
       }
     }
+  {{- if and .Values.markdown.enabled .Values.metrics.enabled .Values.metrics.sidecar.enabled }}
+  metrics-sidecar.conf: |
+    # Metrics sidecar: proxies the loopback-only module metrics endpoint to
+    # a separate port so Prometheus can scrape without the module accepting
+    # non-loopback connections.  Containers in the same Pod share the
+    # network namespace, so 127.0.0.1 reaches the module with a loopback
+    # source address and passes the module's access check.
+    worker_processes 1;
+    pid /var/run/metrics-sidecar.pid;
+    events { worker_connections 256; }
+    http {
+      access_log off;
+      server {
+        listen {{ .Values.metrics.sidecar.port }};
+        location /metrics {
+          proxy_pass http://127.0.0.1:8080{{ .Values.metrics.uri }};
+        }
+        location = /healthz {
+          return 200 "ok\n";
+        }
+      }
+    }
+  {{- end }}

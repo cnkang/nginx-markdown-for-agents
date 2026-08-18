@@ -727,7 +727,7 @@ jobs:
     # 14 blocking fuzz targets (15 min each) + short-soak + 091/092 perf
     # gates + toolchain install ≈ 4.5-5.5 h.  GitHub-hosted ubuntu-24.04
     # jobs are capped at 360 minutes, so set the maximum allowed value
-    # (tools P3-1); if the gate outgrows the cap, split the fuzz matrix.
+    # (tools fuzz-matrix); if the gate outgrows the cap, split the fuzz matrix.
     timeout-minutes: 360
     permissions:
       contents: read
@@ -1208,16 +1208,22 @@ jobs:
           printf 'allow-preset-passphrase\n' > "${GNUPGHOME}/gpg-agent.conf"
           gpgconf --kill gpg-agent
           gpgconf --launch gpg-agent
-          keygrip="$(gpg --list-keys --with-colons --with-keygrip "${GPG_KEY_ID}" \
-            | awk -F: '$1 == "grp" {print $10; exit}')"
+          # Collect every matching keygrip (a key may have multiple
+          # subkeys, each with its own grip) and preset the passphrase
+          # for each one so signing works for any subkey.
+          keygrips="$(gpg --list-keys --with-colons --with-keygrip "${GPG_KEY_ID}" \
+            | awk -F: '$1 == "grp" {print $10}')"
           preset_passphrase="$(command -v gpg-preset-passphrase || true)"
           if [[ -z "${preset_passphrase}" ]] \
               && [[ -x /usr/lib/gnupg/gpg-preset-passphrase ]]; then
             preset_passphrase=/usr/lib/gnupg/gpg-preset-passphrase
           fi
-          if [[ -n "${keygrip}" ]] && [[ -n "${preset_passphrase}" ]]; then
-            printf '%s' "${GPG_PASSPHRASE}" \
-              | "${preset_passphrase}" --preset "${keygrip}"
+          if [[ -n "${keygrips}" ]] && [[ -n "${preset_passphrase}" ]]; then
+            while IFS= read -r keygrip; do
+              [[ -n "${keygrip}" ]] || continue
+              printf '%s' "${GPG_PASSPHRASE}" \
+                | "${preset_passphrase}" --preset "${keygrip}"
+            done <<< "${keygrips}"
           else
             echo "ERROR: gpg-preset-passphrase is required for non-interactive package signing" >&2
             exit 1

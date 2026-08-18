@@ -119,7 +119,8 @@
       "description": "Live worker state. Worker-local scope.",
       "required": [
         "inflight",
-        "pending_output"
+        "pending_output",
+        "module_metrics"
       ],
       "additionalProperties": false,
       "properties": {

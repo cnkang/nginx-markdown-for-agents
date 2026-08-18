@@ -11,5 +11,11 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+    {{- if and .Values.markdown.enabled .Values.metrics.enabled .Values.metrics.sidecar.enabled }}
+    - port: {{ .Values.metrics.sidecar.port }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+    {{- end }}
   selector:
     {{- include "nginx-markdown.selectorLabels" . | nindent 4 }}

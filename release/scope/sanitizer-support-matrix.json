@@ -15,7 +15,7 @@
         "matrix_key": "row_id"
       },
       "command": "make test-nginx-unit-sanitize-smoke",
-      "policy_reference": "Requirement 18 criterion 6: nightly CI runs the full suite with ASan, UBSan, and LSan where supported; supported rows are blocking"
+      "policy_reference": "Requirement 18 criterion 6: nightly CI runs the sanitizer smoke suite with ASan, UBSan, and LSan where supported; supported rows are blocking"
     },
     {
       "row_id": "lsan",

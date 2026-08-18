@@ -114,6 +114,18 @@ markdown:
   # Content-type routing
   contentTypes: []
 
+  # markdown_limits keys (all optional; omitted keys keep module defaults)
+  limits:
+    # conversionMemory: "10m"
+    # conversionTimeout: "5s"
+    # parserMemory: "32m"
+    # parserTimeout: "10s"
+    # streamingBuffer: "2m"
+    # decompressedSize: "64m"
+    # decompressionRatio: 100
+    # maxInflight: 64
+    {}
+
 # Metrics endpoint
 metrics:
   # Requires markdown.enabled=true because markdown_metrics* directives are
@@ -121,3 +133,14 @@ metrics:
   enabled: false
   uri: "/_markdown_metrics"
   shmSize: "8m"
+  # When sidecar.enabled=true the chart adds a metrics-scraper sidecar
+  # container that fetches the loopback-only metrics endpoint and serves it
+  # on a separate port, so Prometheus scraping does not require the module
+  # to accept non-loopback connections (Rule 13: loopback-only module).
+  sidecar:
+    enabled: false
+    image:
+      repository: nginx
+      tag: "1.27-alpine"
+      pullPolicy: IfNotPresent
+    port: 9113
