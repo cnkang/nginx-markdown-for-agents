@@ -91,10 +91,10 @@ static CHARSET_REGEX: LazyLock<Option<Regex>> =
 /// - "windows-1252" → "WINDOWS-1252"
 pub fn detect_charset(content_type: Option<&str>, html: &[u8]) -> String {
     // Level 1: Check Content-Type header charset parameter (FR-05.1)
-    if let Some(ct) = content_type {
-        if let Some(charset) = extract_charset_from_content_type(ct) {
-            return normalize_charset(&charset);
-        }
+    if let Some(ct) = content_type
+        && let Some(charset) = extract_charset_from_content_type(ct)
+    {
+        return normalize_charset(&charset);
     }
 
     // Level 2: Check HTML meta charset tags (FR-05.2)
@@ -280,15 +280,15 @@ pub fn extract_charset_from_html(html: &[u8]) -> Option<String> {
     None
 }
 
+/// A parsed meta attribute list: `(name, value)` pairs.
+type MetaAttrs = Vec<(Vec<u8>, Vec<u8>)>;
+
 /// Parse the attribute list of a `<meta ...>` element starting at `attr_pos`.
 ///
 /// Returns `(attributes, position_after_'>', closed)` where `closed` is
 /// false when the scan limit was reached before the tag closed.
-fn parse_meta_attributes(
-    html_prefix: &[u8],
-    mut attr_pos: usize,
-) -> (Vec<(Vec<u8>, Vec<u8>)>, usize, bool) {
-    let mut attrs: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+fn parse_meta_attributes(html_prefix: &[u8], mut attr_pos: usize) -> (MetaAttrs, usize, bool) {
+    let mut attrs: MetaAttrs = Vec::new();
     while attr_pos < html_prefix.len() {
         // Skip whitespace.
         while attr_pos < html_prefix.len() && is_html_space(html_prefix[attr_pos]) {
@@ -383,21 +383,19 @@ fn charset_from_meta_attrs(attrs: &[(Vec<u8>, Vec<u8>)]) -> Option<String> {
     }
 
     // HTML5 form: charset attribute anywhere.
-    if let Some(cs) = charset_attr {
-        if !cs.is_empty() {
-            return Some(String::from_utf8_lossy(cs).into_owned());
-        }
+    if let Some(cs) = charset_attr
+        && !cs.is_empty()
+    {
+        return Some(String::from_utf8_lossy(cs).into_owned());
     }
 
     // HTML4 form: http-equiv="Content-Type" with content="...; charset=...".
-    if let Some(he) = http_equiv {
-        if he.eq_ignore_ascii_case(b"Content-Type") {
-            if let Some(ct) = content {
-                if let Some(cs) = charset_from_content_value(ct) {
-                    return Some(cs);
-                }
-            }
-        }
+    if let Some(he) = http_equiv
+        && he.eq_ignore_ascii_case(b"Content-Type")
+        && let Some(ct) = content
+        && let Some(cs) = charset_from_content_value(ct)
+    {
+        return Some(cs);
     }
 
     None
