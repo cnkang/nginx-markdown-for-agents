@@ -67,13 +67,21 @@ pub fn fixture_spec(listen_port: u16) -> FixtureSpec {
             chain_route(
                 "/3-gzip-deflate-br",
                 small.clone(),
-                vec![EncodingLayer::Gzip, EncodingLayer::Deflate, EncodingLayer::Br],
+                vec![
+                    EncodingLayer::Gzip,
+                    EncodingLayer::Deflate,
+                    EncodingLayer::Br,
+                ],
                 EncodingFault::None,
             ),
             chain_route(
                 "/3-br-deflate-gzip",
                 small.clone(),
-                vec![EncodingLayer::Br, EncodingLayer::Deflate, EncodingLayer::Gzip],
+                vec![
+                    EncodingLayer::Br,
+                    EncodingLayer::Deflate,
+                    EncodingLayer::Gzip,
+                ],
                 EncodingFault::None,
             ),
             chain_route(
@@ -145,6 +153,12 @@ pub fn fixture_spec(listen_port: u16) -> FixtureSpec {
                 vec![EncodingLayer::Gzip],
                 EncodingFault::Truncated,
             ),
+            chain_route(
+                "/empty-wire",
+                String::new(),
+                vec![EncodingLayer::Gzip, EncodingLayer::Deflate],
+                EncodingFault::EmptyWire,
+            ),
         ],
     }
 }
@@ -157,11 +171,7 @@ fn chain_route(
 ) -> RouteSpec {
     RouteSpec {
         path: path.to_string(),
-        behavior: RouteBehavior::EncodingChain {
-            body,
-            chain,
-            fault,
-        },
+        behavior: RouteBehavior::EncodingChain { body, chain, fault },
     }
 }
 
@@ -210,7 +220,10 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     for (name, path) in [
         ("three_gzip_deflate_br", "/chain/3-gzip-deflate-br"),
         ("three_br_deflate_gzip", "/chain/3-br-deflate-gzip"),
-        ("three_identity_gzip_deflate", "/chain/3-identity-gzip-deflate"),
+        (
+            "three_identity_gzip_deflate",
+            "/chain/3-identity-gzip-deflate",
+        ),
     ] {
         let response = request_markdown(&base_url, path)?;
         append_converted_assertions(
@@ -259,7 +272,10 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         "malformed_pass_original_response",
         malformed.status == 200 && malformed.headers.contains_key("Content-Encoding"),
         "original encoded response preserved under PASS",
-        format!("status={} headers={:?}", malformed.status, malformed.headers),
+        format!(
+            "status={} headers={:?}",
+            malformed.status, malformed.headers
+        ),
     );
 
     /* Malformed grammar with fail_closed policy: resolved reject status
@@ -339,6 +355,31 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             common::header_value(&truncated.headers, "Content-Encoding"),
             truncated.body.len()
         ),
+    );
+
+    /* Empty wire body with declared encodings: the empty-input contract
+     * makes this a legal empty payload, distinct from truncation — the
+     * chain decoder succeeds with an empty output (no error-policy
+     * passthrough, no 502). */
+    let empty_wire = request_markdown(&base_url, "/chain/empty-wire")?;
+    push_assertion(
+        &mut assertions,
+        "empty_wire_legal_empty_payload",
+        empty_wire.status == 200 && empty_wire.body.is_empty(),
+        "empty wire body with declared chain decodes to an empty payload",
+        format!(
+            "status={} content_encoding={:?} bytes={}",
+            empty_wire.status,
+            empty_wire.headers.get("Content-Encoding"),
+            empty_wire.body.len()
+        ),
+    );
+    push_assertion(
+        &mut assertions,
+        "empty_wire_encoding_stripped",
+        !empty_wire.headers.contains_key("Content-Encoding"),
+        "Content-Encoding absent after empty decode",
+        format!("headers={:?}", empty_wire.headers),
     );
 
     Ok(common::finalize_report(SCENARIO, start, assertions))

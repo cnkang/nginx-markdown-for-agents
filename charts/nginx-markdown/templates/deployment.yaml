@@ -15,6 +15,13 @@ spec:
       annotations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if .Values.markdown.enabled }}
+      annotations:
+        # Config changes must roll the pods; without a checksum annotation,
+        # helm upgrade updates the ConfigMap but leaves the running Pod on
+        # the old rendered nginx.conf.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+      {{- end }}
       labels:
         {{- include "nginx-markdown.selectorLabels" . | nindent 8 }}
     spec:
@@ -76,6 +83,8 @@ spec:
               mountPath: /var/run
             - name: nginx-tmp
               mountPath: /tmp
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
           ports:
             - name: metrics
               containerPort: {{ .Values.metrics.sidecar.port }}

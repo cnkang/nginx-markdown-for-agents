@@ -175,11 +175,9 @@ fn behavior_response(
             chunk_size,
             fault,
         } => brotli_response(method, body, *chunk_size, fault),
-        RouteBehavior::EncodingChain {
-            body,
-            chain,
-            fault,
-        } => encoding_chain_response(method, body, chain, fault),
+        RouteBehavior::EncodingChain { body, chain, fault } => {
+            encoding_chain_response(method, body, chain, fault)
+        }
     }
 }
 
@@ -276,6 +274,12 @@ fn encoding_chain_fixture_bytes(
                 tokens.push("gzip".to_string());
                 bytes = gzip_bytes(&bytes)?;
             }
+        }
+        EncodingFault::EmptyWire => {
+            /* Empty-input contract: the wire body is empty while the
+             * declared chain stays intact — the chain decoder treats it
+             * as a legal empty payload, not truncation. */
+            bytes = Vec::new();
         }
         EncodingFault::None | EncodingFault::Truncated => {}
     }
