@@ -214,27 +214,39 @@ curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/docs/
 | 1.31.3 | mainline | linux | musl | arm64 | dynamic-module | supported | No |
 | 1.31.3 | mainline | linux | glibc | amd64 | dynamic-module | supported | Yes |
 | 1.31.3 | mainline | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.31.3 | mainline | debian12 | glibc | arm64 | deb-package | supported | Yes |
 | 1.31.3 | mainline | debian12 | glibc | arm64 | docker-image | supported | Yes |
+| 1.31.3 | mainline | debian12 | glibc | amd64 | deb-package | supported | Yes |
 | 1.31.3 | mainline | debian12 | glibc | amd64 | docker-image | supported | Yes |
 | 1.31.3 | mainline | alpine3.20 | musl | arm64 | docker-image | supported | Yes |
 | 1.31.3 | mainline | alpine3.20 | musl | amd64 | docker-image | supported | Yes |
+| 1.31.3 | mainline | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
+| 1.31.3 | mainline | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
 | 1.30.4 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
 | 1.30.4 | stable | linux | musl | arm64 | dynamic-module | supported | No |
 | 1.30.4 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
 | 1.30.4 | stable | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.30.4 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
+| 1.30.4 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
+| 1.30.4 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
+| 1.30.4 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
 | 1.28.3 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
 | 1.28.3 | stable | linux | musl | arm64 | dynamic-module | supported | No |
 | 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
 | 1.28.3 | stable | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.28.3 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
+| 1.28.3 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
+| 1.28.3 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
+| 1.28.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
 | 1.26.3 | stable | macos | darwin | arm64 | homebrew-formula | experimental | No |
 | 1.26.3 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
 | 1.26.3 | stable | linux | musl | arm64 | dynamic-module | supported | No |
 | 1.26.3 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
 | 1.26.3 | stable | linux | musl | amd64 | dynamic-module | supported | No |
-| 1.26.3 | stable | debian12 | glibc | arm64 | docker-image | supported | Yes |
 | 1.26.3 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
-| 1.26.3 | stable | debian12 | glibc | amd64 | docker-image | supported | Yes |
+| 1.26.3 | stable | debian12 | glibc | arm64 | docker-image | supported | Yes |
 | 1.26.3 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
+| 1.26.3 | stable | debian12 | glibc | amd64 | docker-image | supported | Yes |
 | 1.26.3 | stable | any | n/a | any | source | best-effort | No |
 | 1.26.3 | stable | alpine3.20 | musl | arm64 | docker-image | supported | Yes |
 | 1.26.3 | stable | alpine3.20 | musl | amd64 | docker-image | supported | Yes |
@@ -244,6 +256,10 @@ curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/docs/
 | 1.24.0 | oldstable | linux | musl | arm64 | dynamic-module | supported | No |
 | 1.24.0 | oldstable | linux | glibc | amd64 | dynamic-module | supported | Yes |
 | 1.24.0 | oldstable | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.24.0 | oldstable | debian12 | glibc | arm64 | deb-package | supported | Yes |
+| 1.24.0 | oldstable | debian12 | glibc | amd64 | deb-package | supported | Yes |
+| 1.24.0 | oldstable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
+| 1.24.0 | oldstable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
 <!-- END:release-matrix:support-matrix -->
 
 ## 工作原理
