@@ -43,7 +43,7 @@ Your distro may ship an older NGINX, such as 1.22.x or earlier. Upgrade NGINX to
 Not always.
 
 - If you use one of the supported official NGINX builds and a matching release artifact exists, you can install the published dynamic module. You do not need to rebuild NGINX. Check the release assets for your version.
-- Use a custom NGINX build or a runtime without an exact version match? Compile the module against your NGINX source tree. The source tree provides the matching ABI. This applies to custom builds of NGINX 1.24.0 or higher.
+- Use a custom NGINX build or a runtime without an exact version match? Compile the module against the exact NGINX source tree that produced the running binary, using the same `./configure` options (module paths, feature flags) as that build. A matching-version source tree is not enough: the module ABI depends on the exact source revision and configure options, not just the version string. This applies to custom builds of NGINX 1.24.0 or higher.
 
 You can integrate the module as either:
 - **Dynamic module** (recommended): Load with `load_module`
@@ -514,6 +514,7 @@ Check the repository for sponsorship information (if available).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-18 | Hermes | Require exact NGINX source tree + matching configure options for custom source builds |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.7.0 | 2026-05-19 | Kang | Added decompression budget guidance, v0.7.0 error codes and directives |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
