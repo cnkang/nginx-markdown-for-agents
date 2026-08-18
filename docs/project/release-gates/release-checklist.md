@@ -2,7 +2,7 @@
 
 This is the unified release checklist for the 0.4.0 Go/No-Go review. Every item below derives from the four release gate categories defined in the 0.4.0 Overall Scope and Release Gates spec. Each item is verifiable by a specific artifact, command, or review action — not subjective judgment.
 
-The team must complete and archive this checklist as part of the 0.4.0 release record. Any item that cannot pass escalates to the Go/No-Go review. It carries a documented exception with rationale, risk assessment, and mitigation plan.
+The team must complete and archive this checklist as part of the 0.4.0 release record. Every failed item must escalate to the Go/No-Go review. Documented exceptions apply only to eligible non-P0, non-safety gates as defined by the test-matrix policy. Each exception carries a documented rationale, risk assessment, and mitigation plan.
 
 Requirements references: 10.1, 10.2, 10.3, 10.4, 10.5.
 

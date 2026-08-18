@@ -35,10 +35,13 @@ Prometheus endpoint exposes exactly these relevant families:
 
 ## Response uses full-buffer
 
-Check the effective `markdown_streaming` policy first:
+Check the effective `markdown_streaming` policy first. The diagnostics
+response for the target path reports the effective policy and the
+selection reason. Prefer it over grepping `nginx -T`, which shows the
+configured value, not the per-request decision:
 
 ```bash
-nginx -T 2>/dev/null | grep -i markdown_streaming
+curl -s http://127.0.0.1/nginx-markdown/diagnostics | jq '.streaming_config'
 ```
 
 - `off` intentionally selects full-buffer.

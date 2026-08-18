@@ -19,7 +19,7 @@ class NginxMarkdownModule < Formula
   license "BSD-2-Clause"
 
   depends_on "cbindgen" => :build
-  depends_on "nginx" => :build
+  depends_on "nginx"
   depends_on "pkgconf" => :build
   depends_on "brotli"
   depends_on "openssl@3"

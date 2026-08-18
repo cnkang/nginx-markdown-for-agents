@@ -245,10 +245,11 @@ If the answer to any of these is yes, the test belongs in C.
 
 A test may use the Rust E2E harness when it validates
 **product/runtime behavior** — that is, observable HTTP behavior that
-verifies through real HTTP requests and responses against a running NGINX
-instance, without needing to inspect internal C structures.
+the test verifies through real HTTP requests and responses against a
+running NGINX instance, without needing to inspect internal C
+structures.
 
-Ask: can the test express entirely as:
+Ask: can the test state entirely as:
 
 - An HTTP request (method, URL, headers, body) sent to a running NGINX
 - An assertion on the HTTP response (status code, response headers, response

@@ -33,9 +33,13 @@ Required:
   ```c
   headers = part->elts;
   if (headers == NULL && part->nelts != 0) {
-      return;  /* or continue — do not index a NULL elts */
+      return NGX_ERROR;  /* or continue — do not index a NULL elts */
   }
   ```
+  The guard must return the function's appropriate error or empty value
+  for its declared type, not a bare `return;` (a void function may use
+  `return;`, but a function returning a value must return that value's
+  error/empty form).
   Standard NGINX iterations bounded by `i < part->nelts` are exempt
   (NGINX guarantees elts non-NULL whenever nelts > 0 for request-parsed
   lists); you must add the guard when iterating lists whose construction

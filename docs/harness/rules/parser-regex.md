@@ -103,13 +103,14 @@ Required:
   Shell argument parsing classifies options into boolean flags (consume
   nothing), required-value options (consume next token), optional-value
   options (do not consume next token), pattern options, pattern-file
-  options, and PCRE flags.  After an unknown option, additional non-option
-  the detector collects additional non-option tokens as pattern candidates so a dangerous pattern cannot
-  be hidden behind an unrecognized option.  Multiple `-e` patterns are all
-  extracted.  Pattern-file options (`-f`/`--file`, multiple supported) get
-  resolved relative to the shell script directory, validated to stay within
-  the repository root (absolute paths, `..` traversal, and symlink escapes
-  the detector rejects them), reads as UTF-8, and analyzes per line, read/encoding
+  options, and PCRE flags.  After an unknown option, the detector
+  collects additional non-option tokens as pattern candidates so a
+  dangerous pattern cannot be hidden behind an unrecognized option.
+  Multiple `-e` patterns are all extracted.  Pattern-file options
+  (`-f`/`--file`, multiple supported) get resolved relative to the shell
+  script directory, validated to stay within the repository root
+  (the detector rejects absolute paths, `..` traversal, and symlink
+  escapes), read as UTF-8, and analyzed per line. Read/encoding
   failures (OSError, UnicodeDecodeError, IsADirectoryError) produce a
   ScanError plus a conservative REVIEW instead of crashing.  `shlex` parse
   errors produce ScanError.

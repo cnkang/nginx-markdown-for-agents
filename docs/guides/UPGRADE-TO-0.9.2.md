@@ -53,7 +53,13 @@ set -euo pipefail
 # import it through an independently authenticated channel before verifying.
 # See docs/guides/GPG_KEY_MANAGEMENT.md for the authoritative fingerprint.
 TRUSTED_FINGERPRINT="<project-signing-key-fingerprint-from-GPG_KEY_MANAGEMENT.md>"
-SIGNER_FINGERPRINT="$(gpg --with-colons --import-options show-only --import < SHA256SUMS.asc 2>/dev/null | awk -F: '$1 == "fpr" { print $10; exit }')"
+# Import the independently authenticated public key first, then verify the
+# detached signature with status output and extract the fingerprint from its
+# VALIDSIG record (field 3) — not from --import-options show-only on the
+# signature, which does not prove the signer.
+gpg --import <(curl -fsSL "${SIGNING_KEY_URL:?set to the independently authenticated key URL}") 2>/dev/null
+SIGNER_FINGERPRINT="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
+    | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
 if [[ -z "$SIGNER_FINGERPRINT" || "$SIGNER_FINGERPRINT" != "$TRUSTED_FINGERPRINT" ]]; then
   printf 'signer fingerprint mismatch: got %s, expected %s\n' \
       "${SIGNER_FINGERPRINT:-<none>}" "$TRUSTED_FINGERPRINT" >&2
@@ -172,8 +178,16 @@ make modules
 ### 5. Install and restart
 
 ```bash
-sudo cp objs/ngx_http_markdown_filter_module.so \
-    /usr/lib/nginx/modules/
+# Copy the module into the ACTIVE NGINX module directory.  Determine it
+# from the running binary: `nginx -V 2>&1 | grep modules-path` (for example
+# /usr/lib/nginx/modules on Debian/Ubuntu, /usr/lib64/nginx/modules on
+# RHEL-family).  Do not hard-code a path that differs from your install.
+MODULES_DIR="$(nginx -V 2>&1 | sed -n 's/.*--modules-path=\([^ ]*\).*/\1/p')"
+if [[ -z "${MODULES_DIR}" || ! -d "${MODULES_DIR}" ]]; then
+    echo "ERROR: could not determine a valid --modules-path from 'nginx -V'" >&2
+    exit 1
+fi
+sudo cp objs/ngx_http_markdown_filter_module.so "${MODULES_DIR}/"
 sudo nginx -t && sudo systemctl restart nginx
 ```
 

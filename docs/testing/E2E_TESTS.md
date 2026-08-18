@@ -28,7 +28,9 @@ tools/e2e/run_e2e_suite.sh
 Ownership: `tools/e2e/` owns the suite **entrypoints** (the runner and the
 shell-based scenario drivers), while `tools/e2e-harness/` owns the **migrated
 Rust scenario implementations** invoked from those entrypoints. A scenario
-lives in exactly one of the two layers. See the scenario tables below.
+lives in exactly one of the two layers, but a migrated scenario may span both
+layers: its entrypoint lives in `tools/e2e/` and its implementation lives in
+`tools/e2e-harness/`. See the scenario tables below.
 
 That suite currently runs focused checks across all E2E scenarios.
 

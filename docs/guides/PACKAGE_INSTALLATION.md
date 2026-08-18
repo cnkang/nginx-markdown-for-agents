@@ -83,7 +83,7 @@ curl -fSLO "${BASE_URL}/${PKG}"
 : "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated}"
 [[ "${TRUSTED_FINGERPRINT}" =~ ^[A-Fa-f0-9]{40}$ ]] || exit 1
 VALIDSIG="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
-    | awk '$2 == "VALIDSIG" { print toupper($NF); exit }')"
+    | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
 EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
 [[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1
 grep " ${PKG}$" SHA256SUMS | sha256sum -c -
@@ -110,7 +110,7 @@ curl -fSLO "${BASE_URL}/${PKG}"
 : "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated}"
 [[ "${TRUSTED_FINGERPRINT}" =~ ^[A-Fa-f0-9]{40}$ ]] || exit 1
 VALIDSIG="$(gpg --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
-    | awk '$2 == "VALIDSIG" { print toupper($NF); exit }')"
+    | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
 EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
 [[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1
 grep " ${PKG}$" SHA256SUMS | sha256sum -c -

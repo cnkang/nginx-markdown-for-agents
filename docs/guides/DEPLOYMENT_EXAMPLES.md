@@ -231,7 +231,7 @@ User-Agents. Set the module's `markdown_accept force` policy for that scope.
 `proxy_set_header Accept` changes only the request sent to the upstream. It does
 not replace the module policy.
 
-This is a practical pattern because it requires no application or module code changes. Operators can manage the bot list entirely through NGINX configuration while the module keeps the selection decision in its own request path.
+This is a practical pattern because it requires no application or module code changes. Operators can manage the bot list entirely through NGINX configuration. The module keeps the selection decision in its own request path. The bot list stays in one place, so updates do not touch application code.
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;
@@ -570,6 +570,7 @@ Complete troubleshooting guide: [OPERATIONS.md](OPERATIONS.md#troubleshooting)
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-18 | Hermes | Split long sentence in bot-list management guidance |
 | 0.9.0 | 2026-06-28 | Kang | Added profile-based deployment examples (balanced, strict_cache, streaming_first, mixed profiles per location) |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
