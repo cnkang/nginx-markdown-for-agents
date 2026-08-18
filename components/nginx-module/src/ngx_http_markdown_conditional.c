@@ -637,6 +637,30 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
         r, (const u_char *) "Content-Digest", sizeof("Content-Digest") - 1);
     ngx_http_markdown_invalidate_response_header(
         r, (const u_char *) "Repr-Digest", sizeof("Repr-Digest") - 1);
+    /* The upstream X-Markdown-Tokens counts HTML tokens; invalidate it so
+     * the 304 must not describe the source representation. */
+    ngx_http_markdown_invalidate_response_header(
+        r, (const u_char *) "X-Markdown-Tokens", sizeof("X-Markdown-Tokens") - 1);
+    /* Upstream trailers describe the HTML body; a 304 of the Markdown
+     * representation must not declare them. */
+    ngx_http_markdown_invalidate_response_header(
+        r, (const u_char *) "Trailer", sizeof("Trailer") - 1);
+
+    /* Decision G: the 304 describes the Markdown representation; the weak
+     * validator must not reference the source HTML mtime.  ETag is the
+     * sole validator for converted responses. */
+    r->headers_out.last_modified_time = (time_t) -1;
+    ngx_http_markdown_invalidate_response_header(
+        r, (const u_char *) "Last-Modified", sizeof("Last-Modified") - 1);
+
+    /* The 304 describes the Markdown representation: point Content-Type
+     * at the Markdown media type instead of leaving the upstream
+     * text/html that describes the original body. */
+    r->headers_out.content_type.data = (u_char *) NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL;
+    r->headers_out.content_type.len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
+    r->headers_out.content_type_len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
+    r->headers_out.charset.len = 0;
+    r->headers_out.charset.data = NULL;
 
     if (result != NULL && result->etag != NULL && result->etag_len > 0) {
         rc = ngx_http_markdown_set_etag(r, result->etag, result->etag_len);

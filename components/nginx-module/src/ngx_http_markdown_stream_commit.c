@@ -327,7 +327,7 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
 
     if (ctx->stream_sm.headers_committed) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown stream commit: "
+                      "markdown: stream commit: "
                       "headers already committed");
         return NGX_ERROR;
     }
@@ -337,7 +337,7 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
            != NGX_HTTP_MD_STATE_PRE_COMMIT_REPLAY_UNAVAILABLE)
     {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown stream commit: "
+                      "markdown: stream commit: "
                       "invalid state %ui for commit",
                       (ngx_uint_t) ctx->stream_sm.state);
         return NGX_ERROR;
@@ -354,7 +354,7 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
     rc = ngx_http_markdown_stream_commit_take_snapshot(r, &snap);
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown stream commit: "
+                      "markdown: stream commit: "
                       "snapshot capacity exceeded before header mutation");
         return NGX_ERROR;
     }
@@ -362,7 +362,7 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
     rc = ngx_http_markdown_stream_commit_set_vary(r);
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown stream commit: "
+                      "markdown: stream commit: "
                       "failed to set Vary header");
         ngx_http_markdown_stream_commit_rollback(r, &snap);
         return NGX_ERROR;
@@ -371,7 +371,7 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
     rc = ngx_http_markdown_stream_commit_remove_etag(r);
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown stream commit: "
+                      "markdown: stream commit: "
                       "failed to remove ETag");
         ngx_http_markdown_stream_commit_rollback(r, &snap);
         return NGX_ERROR;
@@ -381,7 +381,7 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
         r, conf);
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown stream commit: "
+                      "markdown: stream commit: "
                       "failed to apply auth Cache-Control");
         ngx_http_markdown_stream_commit_rollback(r, &snap);
         return NGX_ERROR;
@@ -412,7 +412,7 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
     ctx->stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "markdown stream commit: "
+                   "markdown: stream commit: "
                    "headers committed successfully");
 
     return NGX_OK;
@@ -442,7 +442,7 @@ ngx_http_markdown_stream_commit_remove_content_length(
     }
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "markdown stream commit: "
+                   "markdown: stream commit: "
                    "removed Content-Length");
 
     return NGX_OK;
@@ -493,7 +493,7 @@ ngx_http_markdown_stream_commit_set_content_type(
     r->headers_out.charset.data = NULL;
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "markdown stream commit: "
+                   "markdown: stream commit: "
                    "set Content-Type: text/markdown; charset=utf-8");
 
     return NGX_OK;
@@ -645,6 +645,8 @@ ngx_http_markdown_stream_commit_remove_representation_metadata(
     static u_char  hdr_digest[] = "Digest";
     static u_char  hdr_content_digest[] = "Content-Digest";
     static u_char  hdr_repr_digest[] = "Repr-Digest";
+    static u_char  hdr_last_modified[] = "Last-Modified";
+    static u_char  hdr_trailer[] = "Trailer";
 
     /* Accept-Ranges: clear the typed field and invalidate list entries. */
     r->allow_ranges = 0;
@@ -666,8 +668,21 @@ ngx_http_markdown_stream_commit_remove_representation_metadata(
     (void) ngx_http_markdown_stream_commit_invalidate_header(
         r, hdr_repr_digest, sizeof(hdr_repr_digest) - 1);
 
+    /* Decision G: the streamed Markdown representation must not carry the
+     * source HTML mtime as its weak validator; ETag is the sole validator
+     * for converted responses. */
+    r->headers_out.last_modified_time = (time_t) -1;
+    (void) ngx_http_markdown_stream_commit_invalidate_header(
+        r, hdr_last_modified, sizeof(hdr_last_modified) - 1);
+
+    /* Upstream trailers describe the HTML body; the streamed Markdown
+     * body replaces it, so the Trailer declaration must not be
+     * forwarded. */
+    (void) ngx_http_markdown_stream_commit_invalidate_header(
+        r, hdr_trailer, sizeof(hdr_trailer) - 1);
+
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "markdown stream commit: "
+                   "markdown: stream commit: "
                    "removed representation-integrity metadata");
 
     return NGX_OK;

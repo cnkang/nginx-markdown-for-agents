@@ -1569,6 +1569,27 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     }
 
     /*
+     * Decision E (user-confirmed 2026-08-19): a HEAD request proxied to
+     * upstream carries no body — NGINX core delivers only the terminal
+     * last_buf chain after the upstream HEAD response.  Converting the
+     * empty buffer would commit Content-Length: 0 and an empty-input
+     * ETag that contradict the GET representation of the same URL.
+     * Fail open instead: forward the upstream headers unchanged so the
+     * response describes the original HTML representation rather than
+     * a fabricated empty Markdown one.
+     */
+    if (r->method == NGX_HTTP_HEAD && r->header_only) {
+        ctx->eligible = 0;
+        ngx_http_markdown_log_decision(
+            r, conf, ctx->effective_conf,
+            ngx_http_markdown_reason_failed_open());
+        /* Release the inflight slot: the HEAD request performs no
+         * conversion, so holding the slot for the whole header-only
+         * request wastes max_inflight capacity. */
+        ngx_http_markdown_inflight_release(ctx);
+    }
+
+    /*
      * Rule 1 / Rule 38: resume full-buffer pending chain.
      * If the full-buffer path previously returned NGX_AGAIN from
      * send_conversion_output, the pending output must be drained

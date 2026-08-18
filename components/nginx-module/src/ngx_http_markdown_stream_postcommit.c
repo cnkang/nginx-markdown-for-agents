@@ -116,7 +116,7 @@ ngx_http_markdown_stream_postcommit_safe_finish(
            != NGX_HTTP_MD_STATE_POST_COMMIT_SAFE_FINISH)
     {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown postcommit safe_finish: "
+                      "markdown: postcommit safe_finish: "
                       "invalid state %ui, expected COMMITTED "
                       "or POST_COMMIT_SAFE_FINISH",
                       (ngx_uint_t) ctx->stream_sm.state);
@@ -130,7 +130,7 @@ ngx_http_markdown_stream_postcommit_safe_finish(
 #endif
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "markdown postcommit safe_finish: "
+                   "markdown: postcommit safe_finish: "
                    "initiating graceful close");
 
     /* Transition to POST_COMMIT_SAFE_FINISH */
@@ -151,13 +151,13 @@ ngx_http_markdown_stream_postcommit_safe_finish(
         && !ctx->streaming.completion.failure_recorded)
     {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                      "markdown postcommit safe_finish: "
+                      "markdown: postcommit safe_finish: "
                       "no Rust handle in COMMITTED state "
                       "(possible logic error), "
                       "falling back to empty terminal");
     } else {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                       "markdown postcommit safe_finish: "
+                       "markdown: postcommit safe_finish: "
                        "no Rust handle (legitimate, "
                        "handle already consumed), "
                        "sending empty terminal");
@@ -182,7 +182,7 @@ ngx_http_markdown_stream_postcommit_safe_finish(
         "safe_finish", NGX_HTTP_MD_REASON_POST_COMMIT_ERROR);
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "markdown postcommit safe_finish: "
+                   "markdown: postcommit safe_finish: "
                    "response closed gracefully");
 
     return NGX_OK;
@@ -222,7 +222,7 @@ ngx_http_markdown_stream_postcommit_finish_via_rust(
 
     if (finish_rc == POST_COMMIT_ABORT) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                      "markdown postcommit safe_finish: "
+                      "markdown: postcommit safe_finish: "
                       "Rust could not safely close structures, "
                       "falling through to abort");
         return NGX_ERROR;
@@ -230,7 +230,7 @@ ngx_http_markdown_stream_postcommit_finish_via_rust(
 
     if (finish_rc != POST_COMMIT_SAFE_FINISH) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                      "markdown postcommit safe_finish: "
+                      "markdown: postcommit safe_finish: "
                       "unexpected return code %ui from Rust, "
                       "falling through to abort",
                       (ngx_uint_t) finish_rc);
@@ -254,7 +254,7 @@ ngx_http_markdown_stream_postcommit_finish_via_rust(
         }
 
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                       "markdown postcommit safe_finish: "
+                       "markdown: postcommit safe_finish: "
                        "sent %uz closing bytes", close_len);
         return NGX_OK;
     }
@@ -278,7 +278,7 @@ ngx_http_markdown_stream_postcommit_finish_via_rust(
     }
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "markdown postcommit safe_finish: "
+                   "markdown: postcommit safe_finish: "
                    "no closing bytes required");
     return NGX_OK;
 }
@@ -329,14 +329,14 @@ ngx_http_markdown_stream_postcommit_abort(
            != NGX_HTTP_MD_STATE_POST_COMMIT_ABORT)
     {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown postcommit abort: "
+                      "markdown: postcommit abort: "
                       "invalid state %ui, expected post-commit",
                       (ngx_uint_t) ctx->stream_sm.state);
         return NGX_ERROR;
     }
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "markdown postcommit abort: "
+                   "markdown: postcommit abort: "
                    "initiating protocol-safe abort");
 
 #ifdef MARKDOWN_STREAMING_ENABLED
@@ -408,7 +408,7 @@ ngx_http_markdown_stream_postcommit_abort(
         "abort", NGX_HTTP_MD_REASON_POST_COMMIT_ERROR);
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "markdown postcommit abort: "
+                   "markdown: postcommit abort: "
                    "response terminated");
 
     return NGX_OK;
@@ -491,7 +491,7 @@ ngx_http_markdown_stream_postcommit_guard(
                 buf->pos, len))
         {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                          "markdown postcommit guard: "
+                          "markdown: postcommit guard: "
                           "HTML signature detected post-commit");
             return NGX_ERROR;
         }
@@ -523,7 +523,7 @@ ngx_http_markdown_stream_postcommit_log(
     }
 
     ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                  "markdown stream: "
+                  "markdown: stream: "
                   "phase=postcommit action=%s committed=1 "
                   "reason=%ui state=%ui",
                   action,
@@ -627,7 +627,7 @@ ngx_http_markdown_stream_postcommit_send_chain(
 
     if (ctx->streaming.pending_output != NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown postcommit: "
+                      "markdown: postcommit: "
                       "pending output re-entry detected");
         ctx->streaming.classify.last_send_failure_origin =
             NGX_HTTP_MD_SEND_ORIGIN_INVARIANT;
@@ -850,14 +850,14 @@ ngx_http_markdown_stream_postcommit_handle_send_result(
 {
     if (rc == NGX_AGAIN) {
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                       "markdown postcommit %s: downstream backpressure",
+                       "markdown: postcommit %s: downstream backpressure",
                        action);
         return NGX_AGAIN;
     }
 
     if (rc != NGX_OK && rc != NGX_DONE) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown postcommit %s: failed to send terminal chain",
+                      "markdown: postcommit %s: failed to send terminal chain",
                       action);
         return NGX_ERROR;
     }

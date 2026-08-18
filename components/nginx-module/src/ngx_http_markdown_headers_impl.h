@@ -43,6 +43,7 @@ static u_char ngx_http_markdown_hdr_etag[] = "ETag";
 static u_char ngx_http_markdown_hdr_content_encoding[] = "Content-Encoding";
 static u_char ngx_http_markdown_hdr_accept_ranges[] = "Accept-Ranges";
 static u_char ngx_http_markdown_hdr_token_count[] = "X-Markdown-Tokens";
+static u_char ngx_http_markdown_hdr_last_modified[] = "Last-Modified";
 u_char ngx_http_markdown_content_type[] = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL;
 static u_char ngx_http_markdown_vary_suffix[] = ", Accept";
 
@@ -868,6 +869,40 @@ ngx_http_markdown_fullcov_commit(ngx_http_request_t *r,
     const struct MarkdownResult *result,
     const ngx_http_markdown_fullcov_prepared_t *prep)
 {
+    /* C0: Invalidate upstream representation-integrity metadata BEFORE the
+     * module pushes its own values to make the mutation contract uniform across paths. The 4 digest headers and any
+     * upstream X-Markdown-Tokens describe the source HTML body; leaving
+     * them on a converted response would make integrity-checking clients
+     * validate the wrong bytes.  Streaming (stream_commit.c) and 304
+     * (conditional.c) already strip these; this closes the full-buffer
+     * and incremental paths so the mutation contract is uniform. */
+    static u_char  hdr_content_md5[] = "Content-MD5";
+    static u_char  hdr_digest[] = "Digest";
+    static u_char  hdr_content_digest[] = "Content-Digest";
+    static u_char  hdr_repr_digest[] = "Repr-Digest";
+    static u_char  hdr_token_count[] = "X-Markdown-Tokens";
+    static u_char  hdr_trailer[] = "Trailer";
+
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_content_md5, sizeof(hdr_content_md5) - 1, 0, NULL);
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_digest, sizeof(hdr_digest) - 1, 0, NULL);
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_content_digest, sizeof(hdr_content_digest) - 1, 0, NULL);
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_repr_digest, sizeof(hdr_repr_digest) - 1, 0, NULL);
+    /* X-Markdown-Tokens: invalidate the upstream (HTML) value.  If the
+     * module's own token header is enabled (C5), the inert slot replaces
+     * it with the Markdown value; otherwise the upstream value stays
+     * invalidated. */
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_token_count, sizeof(hdr_token_count) - 1, 0, NULL);
+    /* Upstream trailers describe the HTML body (digests, token counts).
+     * The converted response replaces the body, so the Trailer declaration
+     * header must not be forwarded. */
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_trailer, sizeof(hdr_trailer) - 1, 0, NULL);
+
     /* C1: Content-Type dedicated field */
     r->headers_out.content_type.data = ngx_http_markdown_content_type;
     r->headers_out.content_type.len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
@@ -918,6 +953,16 @@ ngx_http_markdown_fullcov_commit(ngx_http_request_t *r,
     ngx_http_markdown_invalidate_headers(r,
         ngx_http_markdown_hdr_accept_ranges,
         sizeof(ngx_http_markdown_hdr_accept_ranges) - 1,
+        1, NULL);
+
+    /* C7: Last-Modified removal — the converted representation's weak
+     * validator must not describe the source HTML mtime (decision G).
+     * ETag (Markdown-derived, strong) is the sole validator for converted
+     * responses; the 304 path must not restore the source mtime either. */
+    r->headers_out.last_modified_time = (time_t) -1;
+    ngx_http_markdown_invalidate_headers(r,
+        ngx_http_markdown_hdr_last_modified,
+        sizeof(ngx_http_markdown_hdr_last_modified) - 1,
         1, NULL);
 }
 
