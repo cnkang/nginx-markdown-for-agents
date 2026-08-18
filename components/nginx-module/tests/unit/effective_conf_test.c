@@ -295,7 +295,7 @@ test_build_effective_conf_from_valid_snapshot(void)
     conf.enabled_source = 2;
     conf.advanced.prune_noise = 1;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
-    conf.advanced.memory_budget = 4 * 1024 * 1024;
+    conf.limits.conversion_memory = 4 * 1024 * 1024;
     conf.stream.budget = 2 * 1024 * 1024;
 
     ngx_http_markdown_dynconf_snapshot_from_conf(&snap, &conf);
@@ -334,7 +334,7 @@ test_build_effective_conf_null_snapshot_falls_back_to_conf(void)
     conf.enabled_source = 3;
     conf.advanced.prune_noise = 0;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
-    conf.advanced.memory_budget = 8 * 1024 * 1024;
+    conf.limits.conversion_memory = 8 * 1024 * 1024;
     conf.stream.budget = 4 * 1024 * 1024;
 
     ngx_http_markdown_build_effective_conf(&eff, NULL, &conf);
@@ -371,7 +371,7 @@ test_build_effective_conf_invalid_snapshot_falls_back(void)
 
     conf.enabled = 1;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
-    conf.advanced.memory_budget = 16 * 1024 * 1024;
+    conf.limits.conversion_memory = 16 * 1024 * 1024;
     conf.stream.budget = 8 * 1024 * 1024;
 
     snap.valid = 0;
@@ -402,7 +402,7 @@ test_effective_helpers_read_from_eff_when_present(void)
 
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
     conf.advanced.prune_noise = 0;
-    conf.advanced.memory_budget = 1024;
+    conf.limits.conversion_memory = 1024;
     conf.stream.budget = 512;
 
     eff.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
@@ -448,7 +448,7 @@ test_effective_helpers_fall_back_when_eff_null(void)
     conf.enabled_source = 5;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
     conf.advanced.prune_noise = 1;
-    conf.advanced.memory_budget = 4096;
+    conf.limits.conversion_memory = 4096;
     conf.stream.budget = 2048;
 
     TEST_ASSERT(
@@ -524,7 +524,7 @@ test_request_snapshot_consistency_after_conf_change(void)
     conf.enabled = 1;
     conf.advanced.prune_noise = 1;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
-    conf.advanced.memory_budget = 4 * 1024 * 1024;
+    conf.limits.conversion_memory = 4 * 1024 * 1024;
     conf.stream.budget = 2 * 1024 * 1024;
 
     ngx_http_markdown_dynconf_snapshot_from_conf(&snap_at_request_start, &conf);
@@ -543,7 +543,7 @@ test_request_snapshot_consistency_after_conf_change(void)
 
     conf.advanced.prune_noise = 0;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
-    conf.advanced.memory_budget = 16 * 1024 * 1024;
+    conf.limits.conversion_memory = 16 * 1024 * 1024;
     conf.stream.budget = 8 * 1024 * 1024;
 
     TEST_ASSERT(eff.prune_noise == 1,
@@ -593,7 +593,7 @@ test_request_snapshot_consistency_with_dynconf_apply_snapshot(void)
     conf.enabled = 1;
     conf.advanced.prune_noise = 1;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
-    conf.advanced.memory_budget = 4 * 1024 * 1024;
+    conf.limits.conversion_memory = 4 * 1024 * 1024;
     conf.stream.budget = 2 * 1024 * 1024;
 
     ngx_http_markdown_dynconf_snapshot_from_conf(&snap_at_request_start, &conf);
@@ -604,7 +604,7 @@ test_request_snapshot_consistency_with_dynconf_apply_snapshot(void)
     reload_snapshot.enabled = 1;
     reload_snapshot.prune_noise = 0;
     reload_snapshot.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
-    reload_snapshot.memory_budget = 32 * 1024 * 1024;
+    reload_snapshot.conversion_memory = 32 * 1024 * 1024;
     reload_snapshot.streaming_budget = 16 * 1024 * 1024;
     reload_snapshot.valid = 1;
 
@@ -614,7 +614,7 @@ test_request_snapshot_consistency_with_dynconf_apply_snapshot(void)
                 "live conf prune_noise changed by apply_snapshot");
     TEST_ASSERT(conf.policy.log_verbosity == NGX_HTTP_MARKDOWN_LOG_ERROR,
                 "live conf log_verbosity changed by apply_snapshot");
-    TEST_ASSERT(conf.advanced.memory_budget == 32 * 1024 * 1024,
+    TEST_ASSERT(conf.limits.conversion_memory == 32 * 1024 * 1024,
                 "live conf memory_budget changed by apply_snapshot");
 
     TEST_ASSERT(
@@ -668,7 +668,7 @@ test_effective_helpers_edge_values(void)
     ngx_memzero(&eff, sizeof(eff));
 
     conf.policy.log_verbosity = 0;
-    conf.advanced.memory_budget = 0;
+    conf.limits.conversion_memory = 0;
     conf.stream.budget = 0;
 
     eff.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
@@ -737,7 +737,7 @@ test_bind_request_snapshot_preserves_captured_snapshot(void)
     conf.enabled = 1;
     conf.advanced.prune_noise = 1;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
-    conf.advanced.memory_budget = 4 * 1024 * 1024;
+    conf.limits.conversion_memory = 4 * 1024 * 1024;
     conf.stream.budget = 2 * 1024 * 1024;
     conf.advanced.dynconf_enabled = 1;
 
@@ -747,7 +747,7 @@ test_bind_request_snapshot_preserves_captured_snapshot(void)
     snap_b.enabled = 1;
     snap_b.prune_noise = 0;
     snap_b.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
-    snap_b.memory_budget = 32 * 1024 * 1024;
+    snap_b.conversion_memory = 32 * 1024 * 1024;
     snap_b.streaming_budget = 16 * 1024 * 1024;
     snap_b.valid = 1;
 
@@ -768,7 +768,7 @@ test_bind_request_snapshot_preserves_captured_snapshot(void)
     TEST_ASSERT(tctx.dynconf_snapshot->log_verbosity
                     == NGX_HTTP_MARKDOWN_LOG_INFO,
                 "ctx snapshot log_verbosity is from A (INFO)");
-    TEST_ASSERT(tctx.dynconf_snapshot->memory_budget == 4 * 1024 * 1024,
+    TEST_ASSERT(tctx.dynconf_snapshot->conversion_memory == 4 * 1024 * 1024,
                 "ctx snapshot memory_budget is from A (4M)");
     TEST_ASSERT(tctx.dynconf_snapshot->streaming_budget == 2 * 1024 * 1024,
                 "ctx snapshot streaming_budget is from A (2M)");
@@ -833,7 +833,7 @@ test_dynconf_snapshot_not_consumed_when_dynconf_disabled(void)
     conf.enabled = 1;
     conf.advanced.prune_noise = 0;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
-    conf.advanced.memory_budget = 1 * 1024 * 1024;
+    conf.limits.conversion_memory = 1 * 1024 * 1024;
     conf.stream.budget = 512 * 1024;
     conf.advanced.dynconf_enabled = 0;
 
@@ -841,7 +841,7 @@ test_dynconf_snapshot_not_consumed_when_dynconf_disabled(void)
     global_snap.enabled = 1;
     global_snap.prune_noise = 1;
     global_snap.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
-    global_snap.memory_budget = 32 * 1024 * 1024;
+    global_snap.conversion_memory = 32 * 1024 * 1024;
     global_snap.streaming_budget = 16 * 1024 * 1024;
     global_snap.valid = 1;
 

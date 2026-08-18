@@ -863,7 +863,7 @@ test_reload_replaces_omitted_fields(const char *path)
     sequence_conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
     sequence_conf.error_status = NGX_HTTP_SERVICE_UNAVAILABLE;
     sequence_conf.stream.budget = 131072;
-    sequence_conf.advanced.memory_budget = 262144;
+    sequence_conf.limits.conversion_memory = 262144;
     sequence_conf.limits.conversion_memory = 524288;
     ngx_http_markdown_dynconf_snapshot_from_conf(
         &sequence_watcher.static_snapshot, &sequence_conf);
@@ -906,8 +906,6 @@ test_reload_replaces_omitted_fields(const char *path)
                 "omitted error status must return to the static baseline");
     TEST_ASSERT(sequence_watcher.active_snapshot.streaming_budget == 131072,
                 "omitted streaming budget must return to the static baseline");
-    TEST_ASSERT(sequence_watcher.active_snapshot.memory_budget == 262144,
-                "omitted memory budget must return to the static baseline");
     TEST_ASSERT(sequence_watcher.active_snapshot.conversion_memory == 524288,
                 "omitted conversion memory must return to the static baseline");
 
@@ -918,7 +916,7 @@ test_reload_replaces_omitted_fields(const char *path)
     direct_conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
     direct_conf.error_status = NGX_HTTP_SERVICE_UNAVAILABLE;
     direct_conf.stream.budget = 131072;
-    direct_conf.advanced.memory_budget = 262144;
+    direct_conf.limits.conversion_memory = 262144;
     direct_conf.limits.conversion_memory = 524288;
     ngx_http_markdown_dynconf_snapshot_from_conf(
         &direct_watcher.static_snapshot, &direct_conf);
@@ -971,7 +969,7 @@ test_diagnostics_renderer_tracks_dynconf_lkg(const char *path)
     ngx_str_t path_str;
     ngx_int_t rc;
     char expected_lkg[128];
-    char first_active[NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_LEN];
+    char first_active[NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_LEN + 1];
     const char *json;
 
     TEST_SUBSECTION("dynconf watcher to diagnostics renderer contract");
@@ -1002,7 +1000,8 @@ test_diagnostics_renderer_tracks_dynconf_lkg(const char *path)
 
     memcpy(first_active,
            ngx_http_markdown_dynconf_watcher.digest_state.active_digest,
-           sizeof(first_active));
+           NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_LEN);
+    first_active[NGX_HTTP_MARKDOWN_DYNCONF_DIGEST_LEN] = '\0';
 
     memset(&request, 0, sizeof(request));
     memset(&connection, 0, sizeof(connection));

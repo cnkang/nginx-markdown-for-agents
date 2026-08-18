@@ -641,14 +641,18 @@ test_atomic_cmp_set(ngx_atomic_uint_t *lock, ngx_atomic_uint_t old,
     return 0;
 }
 
-static ngx_atomic_uint_t
+static ngx_atomic_int_t
 test_atomic_fetch_add(ngx_atomic_uint_t *value, ngx_atomic_int_t add)
 {
     ngx_atomic_uint_t old;
 
     old = *value;
-    *value = (ngx_atomic_uint_t) ((ngx_atomic_int_t) *value + add);
-    return old;
+    /* Unsigned arithmetic: the stored counter is unsigned; the addend
+     * is sign-extended through the unsigned domain so a negative addend
+     * (rollback) wraps correctly without casting the stored value to a
+     * signed type (GCC -Werror compatible). */
+    *value = old + (ngx_atomic_uint_t) add;
+    return (ngx_atomic_int_t) old;
 }
 
 #define ngx_atomic_cmp_set test_atomic_cmp_set

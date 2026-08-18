@@ -190,6 +190,9 @@ extract_prometheus_sum() {
     printf '%s\n' "$metrics" | awk -v family="$family" \
         -v label_fragment="$label_fragment" '
         index($0, family) == 1 && substr($0, 1, 1) != "#" \
+            && (length($0) == length(family) \
+                || substr($0, length(family) + 1, 1) == "{" \
+                || substr($0, length(family) + 1, 1) == " ") \
             && (label_fragment == "" || index($0, label_fragment) > 0) {
             sum += $NF
             found = 1

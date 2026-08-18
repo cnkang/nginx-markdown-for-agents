@@ -1700,6 +1700,16 @@ test_set_dynconf_path(void)
     rc = ngx_http_markdown_set_dynconf_path(&cf, &cmd, NULL);
     TEST_ASSERT(rc == NGX_CONF_OK,
                 "handler should resolve H-only loc conf from context");
+    TEST_ASSERT(mcf.advanced.dynconf_path.len
+                    == sizeof("/etc/nginx/dynconf.conf") - 1
+                && memcmp(mcf.advanced.dynconf_path.data,
+                          "/etc/nginx/dynconf.conf",
+                          mcf.advanced.dynconf_path.len) == 0,
+                "resolved loc conf must store the configured dynconf path");
+    TEST_ASSERT(g_main_conf.dynconf_path_configured == 1,
+                "main conf must record the dynconf path as configured");
+    TEST_ASSERT(g_main_conf.dynconf_owner_conf == &mcf,
+                "main conf must record the owning location configuration");
 
     g_module_loc_conf = NULL;
     TEST_PASS("set_dynconf_path branches covered");

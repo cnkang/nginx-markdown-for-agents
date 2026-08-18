@@ -570,6 +570,43 @@ test_update_headers_etag_existing_vary_accept(void)
 }
 
 static void
+test_update_headers_etag_existing_vary_accept_trailing_ows(void)
+{
+    ngx_http_request_t r = new_request();
+    ngx_http_markdown_conf_t conf;
+    MarkdownResult result;
+    static uint8_t etag_value[] = "\"abc123\"";
+    ngx_table_elt_t *vary;
+
+    TEST_SUBSECTION("Update headers with trailing OWS in Vary: Accept");
+
+    memset(&conf, 0, sizeof(conf));
+    conf.policy.generate_etag = 1;
+    conf.token_estimate = 0;
+
+    memset(&result, 0, sizeof(result));
+    result.markdown_len = 10;
+    result.etag = etag_value;
+    result.etag_len = sizeof(etag_value) - 1;
+
+    push_header(&r, "Vary", "User-Agent, Accept\t");
+    TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf) == NGX_OK,
+                "update_headers should accept trailing HTAB in Vary");
+
+    TEST_ASSERT(count_active_headers(&r, "Vary") == 1,
+                "Vary with trailing HTAB should not be duplicated");
+    vary = find_header(&r, "Vary");
+    TEST_ASSERT(vary != NULL, "Vary header should still exist");
+    TEST_ASSERT(vary->value.len == sizeof("User-Agent, Accept\t") - 1
+                && memcmp(vary->value.data, "User-Agent, Accept\t",
+                          vary->value.len) == 0,
+                "Vary header value should remain unchanged");
+
+    free_request(&r);
+    TEST_PASS("Trailing HTAB in Vary is handled");
+}
+
+static void
 test_update_headers_token_zero(void)
 {
     ngx_http_request_t r = new_request();
@@ -877,6 +914,7 @@ main(void)
     test_update_headers_null_args();
     test_update_headers_etag_no_existing();
     test_update_headers_etag_existing_vary_accept();
+    test_update_headers_etag_existing_vary_accept_trailing_ows();
     test_update_headers_token_zero();
     test_update_headers_ignores_invalidated_vary();
     test_update_headers_creates_vary_after_invalidated_only();

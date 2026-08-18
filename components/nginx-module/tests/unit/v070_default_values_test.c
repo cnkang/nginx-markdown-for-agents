@@ -360,7 +360,7 @@ test_decompress_max_size_tracks_memory_budget(void)
     TEST_ASSERT(child != NULL, "child conf allocation");
 
     /* Set memory_budget on child (simulates markdown_memory_budget 20m) */
-    child->advanced.memory_budget = 20 * 1024 * 1024;
+    child->limits.conversion_memory = 20 * 1024 * 1024;
 
     rc = ngx_http_markdown_merge_conf(&cf, parent, child);
     TEST_ASSERT(rc == NGX_CONF_OK, "merge_conf should succeed");

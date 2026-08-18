@@ -271,7 +271,7 @@ test_default_config_all_keys_present(void)
     conf.decompress.parser_budget = 64 * 1024 * 1024;
     conf.routing.large_body_threshold = 0;
     conf.advanced.prune_noise = 1;
-    conf.advanced.memory_budget = 0;
+    conf.limits.conversion_memory = 0;
     conf.advanced.dynconf_enabled = 0;
     conf.advanced.dynconf_dry_run = 0;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
@@ -415,7 +415,7 @@ test_custom_config_values_reflected(void)
     conf.decompress.parser_budget = 32 * 1024 * 1024;
     conf.routing.large_body_threshold = 1024;
     conf.advanced.prune_noise = 0;
-    conf.advanced.memory_budget = 16 * 1024 * 1024;
+    conf.limits.conversion_memory = 16 * 1024 * 1024;
     conf.advanced.dynconf_enabled = 1;
     conf.advanced.dynconf_dry_run = 1;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
