@@ -43,7 +43,12 @@ impl MarkdownConverter {
     /// HTML parsing can split adjacent text and whitespace into multiple nodes.
     /// This helper normalizes node-local content and then reconstructs inter-node
     /// spacing so Markdown tokens are not accidentally concatenated.
-    pub(super) fn write_normalized_text_node(&self, text: &str, output: &mut String) {
+    pub(super) fn write_normalized_text_node(
+        &self,
+        text: &str,
+        output: &mut String,
+        ctx: Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
         let normalized = self.normalize_text(text);
         if normalized.is_empty() {
             if text.chars().all(char::is_whitespace)
@@ -52,7 +57,7 @@ impl MarkdownConverter {
             {
                 output.push(' ');
             }
-            return;
+            return Ok(());
         }
 
         if text.starts_with(char::is_whitespace)
@@ -62,11 +67,16 @@ impl MarkdownConverter {
             output.push(' ');
         }
 
-        output.push_str(&crate::security::escape_markdown_text(&normalized));
+        let escaped = crate::security::escape_markdown_text(&normalized);
+        if let Some(ctx) = ctx {
+            ctx.check_output_budget(output.len() + escaped.len())?;
+        }
+        output.push_str(&escaped);
 
         if text.ends_with(char::is_whitespace) {
             output.push(' ');
         }
+        Ok(())
     }
 
     /// Traverse all child nodes in source order.
@@ -308,7 +318,7 @@ impl MarkdownConverter {
             }
             NodeData::Text { ref contents } => {
                 let text = contents.borrow();
-                self.write_normalized_text_node(text.as_ref(), output);
+                self.write_normalized_text_node(text.as_ref(), output, None)?;
             }
             NodeData::Comment { .. }
             | NodeData::Doctype { .. }
@@ -335,7 +345,7 @@ impl MarkdownConverter {
             }
             NodeData::Text { ref contents } => {
                 let text = contents.borrow();
-                self.write_normalized_text_node(text.as_ref(), output);
+                self.write_normalized_text_node(text.as_ref(), output, Some(ctx))?;
             }
             NodeData::Comment { .. }
             | NodeData::Doctype { .. }

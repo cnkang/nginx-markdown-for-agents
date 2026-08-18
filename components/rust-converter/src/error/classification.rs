@@ -667,7 +667,7 @@ mod tests {
         assert_eq!(ErrorPolicy::Status(429).as_str(), "status_429");
         assert_eq!(ErrorPolicy::Status(503).as_str(), "status_503");
         assert_eq!(ErrorPolicy::FailClosed.as_str(), "fail_closed");
-        /* Distinct status codes must produce distinct strings (P3-8). */
+        /* Distinct status codes must produce distinct strings. */
         assert_ne!(
             ErrorPolicy::Status(429).as_str(),
             ErrorPolicy::Status(503).as_str()

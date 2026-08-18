@@ -22,6 +22,13 @@
 //! Identical input always produces identical output for a given
 //! `chars_per_token`: no randomness, no language detection, no model-specific
 //! behavior.
+//!
+//! # Valid input domain
+//!
+//! `chars_per_token` must be finite and greater than zero.  A zero or
+//! non-finite value would make the estimate undefined (division by zero or
+//! NaN propagation); callers must validate the value before constructing a
+//! `TokenEstimator`.
 
 /// Token estimator using character-based heuristic
 pub struct TokenEstimator {
@@ -38,6 +45,10 @@ impl TokenEstimator {
     }
 
     /// Create a new estimator with custom chars_per_token
+    ///
+    /// `chars_per_token` must be finite and greater than zero.  A zero or
+    /// non-finite value makes the estimate undefined (division by zero or
+    /// NaN propagation); callers must validate the value before calling.
     pub fn with_chars_per_token(chars_per_token: f32) -> Self {
         Self { chars_per_token }
     }

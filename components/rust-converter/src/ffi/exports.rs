@@ -1049,7 +1049,7 @@ pub unsafe extern "C" fn markdown_decompress_bounded(
 
     let result_ref = unsafe { &mut *result };
     // Free any previous output before reusing the result buffer, matching
-    // the markdown_convert contract (P3-4: reuse previously leaked the old
+    // the markdown_convert contract (reuse previously leaked the old
     // Rust-allocated output when a caller invoked the FFI twice on the
     // same result without an intermediate free).
     free_buffer(&mut result_ref.output, &mut result_ref.output_len);
@@ -1351,6 +1351,16 @@ pub unsafe extern "C" fn markdown_chain_decode_result_init(result: *mut FFIChain
 /// the output is a copy of the input (decode(identity, input) == input),
 /// allocated by Rust and released with `markdown_chain_decode_free`.
 ///
+/// **Empty-input contract (empty-input):** an empty wire body (`input_len == 0`)
+/// is a legal empty payload regardless of the declared chain — the call
+/// succeeds with an empty output (NULL pointer, zero length) instead of
+/// classifying the empty input as truncation. This intentionally differs
+/// from the single-format decompressors, which classify an empty compressed
+/// input as `DECOMP_CATEGORY_TRUNCATED_INPUT`; the chain decoder treats a
+/// zero-byte body as "no content" per HTTP semantics. Callers that need
+/// strict single-format truncation semantics must use the single-format
+/// entry points directly.
+///
 /// # Return Value
 ///
 /// Returns the error category:
@@ -1404,7 +1414,12 @@ pub unsafe extern "C" fn markdown_decode_encoding_chain(
          * Clone the input into a Rust-allocated output buffer so the FFI
          * ownership contract holds — callers release the output with
          * markdown_chain_decode_free, so returning the input pointer itself
-         * would be double-freed. */
+         * would be double-freed.  The clone is still bounded by the
+         * decompressed-size budget: an identity-only chain must not bypass
+         * the max_output ceiling. */
+        if input_slice.len() > max_output {
+            return set_chain_decode_error(result_ref, DECOMP_CATEGORY_BUDGET_EXCEEDED);
+        }
         store_chain_decode_output(result_ref, input_slice.to_vec());
         return 0;
     }

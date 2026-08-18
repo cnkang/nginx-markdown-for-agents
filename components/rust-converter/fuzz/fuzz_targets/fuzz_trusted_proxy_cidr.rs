@@ -13,9 +13,9 @@
 //! - Self-containment: a parsed CIDR always contains its own base address
 //!   (canonical masking keeps the network base inside the network).
 
+use core::net::IpAddr;
 use libfuzzer_sys::fuzz_target;
 use nginx_markdown_converter::forwarded::parse_cidr;
-use core::net::IpAddr;
 
 /// Check the invariants for one string interpretation.
 fn check_cidr(s: &str) {

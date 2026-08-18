@@ -256,6 +256,16 @@ impl Default for DecodeLimits {
 /// layer's compressed input is at least [`RATIO_ACTIVATION_THRESHOLD`] bytes;
 /// zero compressed input is accepted for the initial decoder only. An empty
 /// intermediate output cannot feed another decoder layer.
+///
+/// **Empty-input contract (empty-input):** an empty wire body (`encoded` is empty)
+/// is a legal empty payload regardless of the declared chain — there is
+/// nothing to decode, so the call succeeds with an empty output instead of
+/// classifying the empty input as truncation. This intentionally differs
+/// from the single-format decompressors (`decompress_gzip`/`decompress_deflate`/
+/// `decompress_brotli`), which classify an empty compressed input as
+/// `TruncatedInput`; the chain decoder treats a zero-byte body as "no
+/// content" per HTTP semantics. Callers that need strict single-format
+/// truncation semantics must use the single-format entry points directly.
 pub fn decode_chain(
     encoded: &[u8],
     layers: &[Encoding],
@@ -271,7 +281,7 @@ pub fn decode_chain(
 
     /* An empty body is a legal empty payload: there is nothing to decode,
      * so return success immediately instead of classifying the empty
-     * input as truncation on a later layer (P3-6). */
+     * input as truncation on a later layer (empty-input). */
     if current.is_empty() {
         return Ok(Vec::new());
     }
@@ -648,7 +658,7 @@ mod tests {
 
     #[test]
     fn decode_chain_empty_input_is_empty_payload() {
-        /* P3-6: an empty body with declared encodings is a legal empty
+        /* empty-input: an empty body with declared encodings is a legal empty
          * payload — decode_chain returns an empty result instead of
          * misclassifying it as truncation. */
         let layers = vec![Encoding::Gzip, Encoding::Deflate];

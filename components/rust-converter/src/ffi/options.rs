@@ -58,9 +58,10 @@ pub(crate) fn clamp_chars_per_token(raw: f32) -> f32 {
 
 pub(crate) struct DecodedOptions<'a> {
     pub(crate) content_type: Option<&'a str>,
-    /// General timeout used by streaming/incremental paths.
-    /// The full-buffer path uses `parse_timeout` instead.
-    #[allow(dead_code)]
+    /// General conversion timeout (wall-clock deadline for the full
+    /// conversion pipeline).  `parse_timeout` limits only the parser
+    /// phase; this value limits the full pipeline independently
+    /// (see `resolve_conversion_deadlines` in ffi/convert.rs).
     pub(crate) timeout: Duration,
     pub(crate) generate_etag: bool,
     pub(crate) estimate_tokens: bool,

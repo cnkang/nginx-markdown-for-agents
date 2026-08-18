@@ -229,9 +229,11 @@ pub unsafe extern "C" fn markdown_dynconf_parse(
         return;
     }
 
-    // Release a prior parse before resetting to safe defaults.  If a panic occurs
-    // during parsing or result writing, the result struct retains this
-    // safe state (all pointers NULL, error_code = DYNCONF_ERR_INTERNAL).
+    // Release a prior parse before resetting to safe defaults.  Callers must
+    // initialize the result via markdown_dynconf_result_init before first
+    // use, as required by the FFI contract; that makes this cleanup safe on
+    // every subsequent reuse.  If a panic occurs during parsing or result
+    // writing, the result struct retains this safe state.
     unsafe {
         markdown_dynconf_result_free(result);
         markdown_dynconf_result_init(result);
@@ -445,7 +447,7 @@ unsafe fn write_error(result: *mut FFIDynconfResult, code: u32) {
 }
 
 /// Write an error result, optionally carrying the parser's detailed
-/// diagnostic message (P3-7: previously only the generic per-code text
+/// diagnostic message (previously only the generic per-code text
 /// crossed the FFI, losing "unknown key 'foo'"-style operator detail).
 unsafe fn write_error_with_message(result: *mut FFIDynconfResult, code: u32, detail: Option<&str>) {
     // Phase 1: Allocate the error message into a local Box.

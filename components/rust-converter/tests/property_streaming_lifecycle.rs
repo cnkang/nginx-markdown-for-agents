@@ -95,7 +95,7 @@ fn again_outcome() -> ActionOutcome {
         error_origin: None,
         produced_closing_bytes: false,
         /* Neutral: pending_kind is action-specific; the action helpers below
-         * set it explicitly.  P3-1 now validates pending_kind against the
+         * set it explicitly.  pending_kind is now validated pending_kind against the
          * action, so a generic helper must not hard-code Terminal. */
         pending_kind: None,
     }

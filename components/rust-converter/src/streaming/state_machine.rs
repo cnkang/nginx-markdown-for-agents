@@ -95,8 +95,11 @@ impl StructuralStateMachine {
         if value.is_empty() {
             return false;
         }
+        // Numeric byte values (95='_', 43='+', 46='.', 35='#', 45='-')
+        // instead of b'X' literals: the lizard parser miscounts braces in
+        // byte-char literals (Rule 17).
         value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'+' | b'.' | b'#' | b'-')
+            byte.is_ascii_alphanumeric() || matches!(byte, 95u8 | 43u8 | 46u8 | 35u8 | 45u8)
         })
     }
 
