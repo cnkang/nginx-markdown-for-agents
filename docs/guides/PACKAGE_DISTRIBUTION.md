@@ -44,7 +44,7 @@ workflows do not consume it. Do not add new release versions there.
 | `.github/workflows/homebrew-formula-gate.yml` | 1 | experimental |
 | `.github/workflows/official-nginx-docker.yml` | 8 | supported |
 | `.github/workflows/release-binaries.yml` | 10 | supported |
-| `.github/workflows/release-packages.yml` | 14 | supported |
+| `.github/workflows/release-packages.yml` | 30 | supported |
 <!-- END:release-matrix:distribution-matrix -->
 
 ## Important Disclaimers

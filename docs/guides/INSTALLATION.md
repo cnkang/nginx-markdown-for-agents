@@ -760,8 +760,16 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
+| 1.31.3 | mainline | debian12 | glibc | arm64 | supported |
+| 1.31.3 | mainline | debian12 | glibc | amd64 | supported |
+| 1.30.4 | stable | debian12 | glibc | arm64 | supported |
+| 1.30.4 | stable | debian12 | glibc | amd64 | supported |
+| 1.28.3 | stable | debian12 | glibc | arm64 | supported |
+| 1.28.3 | stable | debian12 | glibc | amd64 | supported |
 | 1.26.3 | stable | debian12 | glibc | arm64 | supported |
 | 1.26.3 | stable | debian12 | glibc | amd64 | supported |
+| 1.24.0 | oldstable | debian12 | glibc | arm64 | supported |
+| 1.24.0 | oldstable | debian12 | glibc | amd64 | supported |
 
 ### docker-image
 
@@ -811,8 +819,16 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
+| 1.31.3 | mainline | almalinux9 | glibc | arm64 | supported |
+| 1.31.3 | mainline | almalinux9 | glibc | amd64 | supported |
+| 1.30.4 | stable | almalinux9 | glibc | arm64 | supported |
+| 1.30.4 | stable | almalinux9 | glibc | amd64 | supported |
+| 1.28.3 | stable | almalinux9 | glibc | arm64 | supported |
+| 1.28.3 | stable | almalinux9 | glibc | amd64 | supported |
 | 1.26.3 | stable | almalinux9 | glibc | arm64 | supported |
 | 1.26.3 | stable | almalinux9 | glibc | amd64 | supported |
+| 1.24.0 | oldstable | almalinux9 | glibc | arm64 | supported |
+| 1.24.0 | oldstable | almalinux9 | glibc | amd64 | supported |
 
 ### source
 

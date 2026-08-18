@@ -43,6 +43,12 @@ Full-buffer mode computes an ETag from the complete Markdown output and supports
 the response headers before the full output is available, so ETag generation and
 conditional request handling are not possible.
 
+**Known constraint (user-confirmed):** the same URL can therefore
+yield an ETag for small responses (full-buffer path) and no ETag for large
+responses (streaming path). Clients and caches lose strong validation for
+large pages. This is an accepted trade-off of streaming header commitment.
+A deferred header commit is out of scope for 0.9.2.
+
 ### Fail-open behavior
 
 With `markdown_error_policy pass`, full-buffer conversion errors return the
@@ -96,6 +102,7 @@ Use **auto** (default since 0.8.0) to let the module choose based on response si
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-19 | Hermes | Document the accepted no-ETag-for-streaming constraint (full-buffer vs streaming path divergence, user-confirmed) |
 | 0.9.2 | 2026-08-15 | Hermes | Deflate streaming misclassification reports a format error instead of failing closed |
 | 0.9.1 | 2026-07-18 | Kang | Added streaming decompression rows (gzip, deflate, Brotli) to compatibility matrix |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
