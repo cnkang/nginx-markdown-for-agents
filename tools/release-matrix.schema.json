@@ -92,6 +92,7 @@
         },
         "abi_version": {
           "type": "integer",
+          "minimum": 1,
           "description": "Frozen ABI version this row's artifacts are bound to (canonical release matrix contract)."
         }
       }

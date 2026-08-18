@@ -108,6 +108,9 @@ RUN set -eux; \
 COPY Makefile /src/Makefile
 COPY components/rust-converter /src/components/rust-converter
 COPY components/nginx-module /src/components/nginx-module
+# make build's rust-lib step runs tools/harness/normalize_cbindgen_header.py
+# after cbindgen; the script must be present in the build image.
+COPY tools/harness/normalize_cbindgen_header.py /src/tools/harness/normalize_cbindgen_header.py
 
 WORKDIR /src
 RUN rm -rf components/rust-converter/target \
