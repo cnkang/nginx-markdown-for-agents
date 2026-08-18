@@ -85,6 +85,9 @@ pub enum EncodingFault {
     DepthOverflow,
     /// Truncated compressed payload for the outer layer.
     Truncated,
+    /// Zero-byte wire body with a declared chain: the empty payload is a
+    /// legal empty body (empty-input contract), distinct from truncated.
+    EmptyWire,
 }
 
 /// Optional mutation applied after creating a valid Brotli stream.
