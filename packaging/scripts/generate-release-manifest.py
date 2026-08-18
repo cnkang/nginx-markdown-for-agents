@@ -51,6 +51,9 @@ DEB_PATTERN = re.compile(
 RPM_PATTERN = re.compile(
     r"^nginx-module-markdown-for-agents-(?P<version>[0-9][^-]*)-nginx(?P<nginx_version>[0-9][^-]*)-[0-9]+\.(?P<rpm_arch>x86_64|aarch64)\.rpm$"
 )
+TARBALL_PATTERN = re.compile(
+    r"^ngx_http_markdown_filter_module-(?P<nginx_version>[0-9]+\.[0-9]+\.[0-9]+)-(?P<os_type>glibc|musl)-(?P<tarball_arch>x86_64|aarch64)\.tar\.gz$"
+)
 
 ARCH_NORMALIZE = {"x86_64": "amd64", "aarch64": "arm64"}
 SEMVER_PATTERN = re.compile(
@@ -128,6 +131,21 @@ def parse_package(path: Path, expected_version: str | None = None) -> dict:
                 f"WARNING: {name} version {version} != expected {expected_version}",
                 file=sys.stderr,
             )
+        return entry
+
+    m = TARBALL_PATTERN.match(name)
+    if m:
+        nginx_version = m.group("nginx_version")
+        os_type = m.group("os_type")
+        tarball_arch = m.group("tarball_arch")
+        entry = {
+            "filename": name,
+            "format": "dynamic-module",
+            "nginx_version": nginx_version,
+            "libc": os_type,
+            "arch": ARCH_NORMALIZE.get(tarball_arch, tarball_arch),
+            "sha256": sha256_file(path),
+        }
         return entry
 
     print(f"ERROR: Cannot parse package filename: {name}", file=sys.stderr)
@@ -231,12 +249,13 @@ def build_manifest(
     # that matches the validator's global-filename-sort check.
     all_files = sorted(
         f for f in artifact_dir.iterdir()
-        if f.suffix in (".deb", ".rpm") and f.is_file()
+        if f.suffix in (".deb", ".rpm") or f.name.endswith(".tar.gz")
+        if f.is_file()
     )
 
     if not all_files:
         print(
-            f"ERROR: No .deb or .rpm files found in {artifact_dir}", file=sys.stderr
+            f"ERROR: No .deb, .rpm, or .tar.gz files found in {artifact_dir}", file=sys.stderr
         )
         raise SystemExit(1)
 
@@ -245,7 +264,9 @@ def build_manifest(
     for f in all_files:
         entry = parse_package(f, expected_version=version)
         packages.append(entry)
-        if not detected_version:
+        # dynamic-module tarballs carry nginx_version/libc/arch instead of a
+        # project version; only deb/rpm entries can supply the version.
+        if not detected_version and entry.get("version"):
             detected_version = entry["version"]
 
     if not detected_version:
