@@ -53,13 +53,14 @@ stat_field() {
     local path="$3"
     local value=""
 
-    value="$(stat -f "$bsd_format" "$path" 2>/dev/null || true)"
-    if [[ "$value" =~ ^[0-9]+(:[0-9]+)?$ ]]; then
-        printf '%s\n' "$value"
-        return 0
+    # Detect the stat implementation once: GNU stat supports -c, BSD stat
+    # supports -f.  Do not rely on GNU's -f (filesystem) output as a
+    # fallback — it reports filesystem metadata, not the requested field.
+    if stat -c '%n' /dev/null >/dev/null 2>&1; then
+        stat -c "$gnu_format" "$path" 2>/dev/null
+    else
+        stat -f "$bsd_format" "$path" 2>/dev/null
     fi
-
-    stat -c "$gnu_format" "$path" 2>/dev/null
 }
 
 canonical_target_path() {

@@ -188,7 +188,7 @@ trap cleanup_tmpdir EXIT
 # Preflight: verify the resolved NGINX binary accepts a minimal
 # markdown-module configuration before running any expectation, so an
 # unavailable or unusable module cannot count as a passing rejection
-# (run12 MAJOR: test_error_policy_values.sh preflight).
+# (preflight).
 preflight_conf="${TMPDIR_BASE}/preflight.conf"
 preflight_log="${TMPDIR_BASE}/preflight.log"
 cat > "${preflight_conf}" <<EOF
@@ -200,6 +200,7 @@ events { worker_connections 64; }
 
 http {
     markdown_filter on;
+    markdown_error_policy pass;
     server {
         listen 127.0.0.1:19998;
         location / {

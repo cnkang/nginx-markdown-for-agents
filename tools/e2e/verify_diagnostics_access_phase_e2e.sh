@@ -355,9 +355,35 @@ EOF
 # ── Execute all policy cases ───────────────────────────────────────
 total_failures=0
 
-run_case allow_deny || total_failures=$((total_failures + $?))
-run_case auth_basic || total_failures=$((total_failures + $?))
-run_case satisfy_any || total_failures=$((total_failures + $?))
+if run_case allow_deny; then
+  rc=0
+else
+  rc=$?
+fi
+if [[ ${rc} -eq 2 ]]; then
+  exit 2
+fi
+total_failures=$((total_failures + rc))
+
+if run_case auth_basic; then
+  rc=0
+else
+  rc=$?
+fi
+if [[ ${rc} -eq 2 ]]; then
+  exit 2
+fi
+total_failures=$((total_failures + rc))
+
+if run_case satisfy_any; then
+  rc=0
+else
+  rc=$?
+fi
+if [[ ${rc} -eq 2 ]]; then
+  exit 2
+fi
+total_failures=$((total_failures + rc))
 
 # ── Report result ──────────────────────────────────────────────────
 if [[ "${total_failures}" -eq 0 ]]; then
@@ -385,7 +411,7 @@ for line in open(sys.argv[1]).read().splitlines():
             'config_digest': 'sha256:' + parts[6]
         })
 print(json.dumps(rows))
-" "${RESULT_TSV}" 2>/dev/null || echo "[]")"
+" "${RESULT_TSV}")"
   fi
 
   cat > "${RESULT_FILE}" <<EOF

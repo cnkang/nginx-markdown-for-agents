@@ -316,7 +316,7 @@ http {
         location /md-small/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_limits conversion_memory=64k parser_memory=64k streaming_buffer=64k conversion_timeout=120s;
+            markdown_limits conversion_memory=64k parser_memory=64k streaming_buffer=512k conversion_timeout=120s;
             markdown_error_policy pass;
 
             proxy_http_version 1.1;

@@ -35,6 +35,7 @@ SECURITY_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_security_e2e.sh"
 ERROR_HANDLING_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_error_handling_e2e.sh"
 CONFIG_MERGE_SCRIPT="${WORKSPACE_ROOT}/tools/e2e/verify_config_merge_e2e.sh"
 FILTER_ORDERING_SCRIPT="${WORKSPACE_ROOT}/tests/e2e/filter_ordering_test.sh"
+SUBREQUEST_SSI_SCRIPT="${WORKSPACE_ROOT}/tests/e2e/subrequest_ssi_test.sh"
 ERROR_POLICY_VALUES_SCRIPT="${WORKSPACE_ROOT}/tests/compatibility/test_error_policy_values.sh"
 E2E_HARNESS_BIN="${WORKSPACE_ROOT}/tools/e2e-harness/target/debug/e2e-harness"
 E2E_HARNESS_MANIFEST="${WORKSPACE_ROOT}/tools/e2e-harness/Cargo.toml"
@@ -212,8 +213,10 @@ fi
 env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${ERROR_POLICY_VALUES_SCRIPT}"
 if [[ -n "${NGINX_URL:-}" ]]; then
   env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${FILTER_ORDERING_SCRIPT}"
+  env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${SUBREQUEST_SSI_SCRIPT}"
 else
   echo "  filter_ordering=skipped (set NGINX_URL for a running fixture)"
+  echo "  subrequest_ssi=skipped (set NGINX_URL for a running fixture)"
 fi
 
 echo "Canonical E2E suite summary:"
@@ -232,5 +235,6 @@ echo "  auth_cache=passed"
   echo "  error_policy_values=passed"
   if [[ -n "${NGINX_URL:-}" ]]; then
     echo "  filter_ordering=passed"
+    echo "  subrequest_ssi=passed"
   fi
 echo "  reusable_nginx_bin=${SUITE_NGINX_BIN}"

@@ -106,10 +106,20 @@ def test_rejected_named_status_values(status_code):
 @given(st.text(alphabet="abcdefghijklmnopqrstuvwxyz 0123456789", min_size=1, max_size=24))
 def test_any_other_value_rejected(value):
     """Any value outside the accepted set is rejected."""
+    # Skip accepted values with an independent strict lexical check, NOT
+    # classify_policy: if the model under test wrongly accepts an
+    # unsupported value, using it as the skip predicate would hide the
+    # defect.  The skip predicate mirrors the documented contract exactly.
     if value in ACCEPTED_SINGLE:
         return
-    if value.startswith("status ") and _parse_status(value) in ACCEPTED_STATUS_CODES:
-        return
+    if value.startswith("status "):
+        suffix = value.split(" ", 1)[1]
+        if (
+            suffix.isascii()
+            and suffix.isdigit()
+            and int(suffix) in ACCEPTED_STATUS_CODES
+        ):
+            return
     kind, _ = classify_policy(value)
     assert kind == ErrorPolicyKind.REJECTED, f"value {value!r} must be rejected"
 

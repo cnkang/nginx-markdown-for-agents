@@ -374,6 +374,11 @@ if [[ -f "${CONFIGMAP_YAML}" ]]; then
             ;;
         esac
       done
+  if [[ ! -s "${CM_MAIN}" && ! -s "${CM_HTTP}" ]]; then
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+    FAILED_DETAILS+=("configmap extraction produced no directives (CM_MAIN and CM_HTTP empty)")
+    return 1
+  fi
   PREPARED_RAW="${RUNTIME_DIR}/configmap_test.raw.conf"
   {
     echo "worker_processes 1;"
@@ -389,10 +394,6 @@ if [[ -f "${CONFIGMAP_YAML}" ]]; then
     echo "    }"
     echo "}"
   } > "${PREPARED_RAW}"
-  if [[ ! -s "${CM_MAIN}" && ! -s "${CM_HTTP}" ]]; then
-    echo "FAIL: configmap extraction produced no directives (CM_MAIN and CM_HTTP empty)" >&2
-    exit 1
-  fi
   # sandbox_conf applies the path/cache/platform rewrites and rewrites the
   # load_module path to the built module (or comments it out). prepare_file_conf
   # also records whether the assembled config itself loads the module.
