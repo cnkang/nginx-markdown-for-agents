@@ -51,7 +51,7 @@ stat_field() {
     local bsd_format="$1"
     local gnu_format="$2"
     local path="$3"
-    local value=""
+
 
     # Detect the stat implementation once: GNU stat supports -c, BSD stat
     # supports -f.  Do not rely on GNU's -f (filesystem) output as a

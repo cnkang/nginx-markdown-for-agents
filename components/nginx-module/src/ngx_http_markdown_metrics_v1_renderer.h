@@ -180,8 +180,8 @@ ngx_http_markdown_metrics_v1_render_histogram(
      * bucket (Prometheus histogram monotonicity), and _count must equal
      * +Inf.  Use one total for both samples so a count that lags the
      * bucket increments cannot emit a decreasing or inconsistent series. */
-    total = (ngx_atomic_uint_t) (cumulative > histogram->count
-        ? cumulative : histogram->count);
+    total = cumulative > histogram->count
+        ? cumulative : histogram->count;
 
     p = ngx_slprintf(p, end,
         "nginx_markdown_conversion_duration_seconds_bucket"

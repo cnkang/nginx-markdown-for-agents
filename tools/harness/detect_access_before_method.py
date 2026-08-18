@@ -42,8 +42,10 @@ DEFAULT_DIR = REPO_ROOT / "components/nginx-module/src"
 # identifier is the function name.  Control-flow lines (if/while/for/return/
 # switch) never match because their condition is followed by '{' or ';',
 # not a bare ')' at end-of-line.
+# The type prefix uses non-overlapping character classes ([^\n( \t] vs [ \t])
+# to avoid super-linear backtracking (SonarCloud S8786).
 FUNC_DEF_RE = re.compile(
-    r"^[ \t]*(?:[^\n(]* )?(\w+)[ \t]*\([^)]*\)[ \t]*$",
+    r"^[ \t]*(?:[^\n( \t]+(?:[ \t]+[^\n( \t]+)*[ \t])?(\w+)[ \t]*\([^)]*\)[ \t]*$",
     re.MULTILINE,
 )
 # Function may span lines: collect braces by scanning from a def line.
