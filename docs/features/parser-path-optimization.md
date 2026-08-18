@@ -196,9 +196,12 @@ All other elements return `Traverse` and get normal handling.
   content heuristics, no `role` attribute matching.
 - The `RcDom` tree never mutates. Pruning operates at the traversal layer
   by returning early from `handle_element_internal`.
-- For `SkipChildren`: the element node itself processes (though
-  `SecurityValidator` removes it), but its children never get visited.
-- For `SkipSubtree`: the element and its entire subtree skip.
+- Call order per element: pruning (`should_prune_with_config`) runs first,
+  then `SecurityValidator::check_element`. For `SkipChildren`: the pruning
+  decision returns before the security validator runs, so the element node
+  and its children are never visited by the validator. For `SkipSubtree`:
+  the element and its entire subtree skip. Elements that pass pruning are
+  then checked by the security validator, which may remove them.
 - For elements not in the pruning list, the decision is deterministic:
   `Traverse`. There is no ambiguity state.
 

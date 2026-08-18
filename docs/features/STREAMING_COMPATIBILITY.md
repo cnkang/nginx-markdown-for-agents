@@ -8,7 +8,7 @@ mode. Use it to understand behavioral differences before enabling streaming.
 
 ## Compatibility Matrix
 
-|| Feature | Full-Buffer | Streaming | Notes ||
+| Feature | Full-Buffer | Streaming | Notes |
 |---------|:-----------:|:---------:|-------|
 | Content negotiation (Accept header) | ✅ | ✅ | Works identically in both modes |
 | HTML-to-Markdown conversion | ✅ | ✅ | Same output quality |
@@ -59,7 +59,7 @@ Markdown response.
 
 ### Token estimation
 
-The `X-Markdown-Token-Estimate` header requires knowing the full output length.
+The `X-Markdown-Tokens` header requires knowing the full output length.
 Since streaming sends chunks incrementally, this header is not emitted.
 
 ### Shadow mode

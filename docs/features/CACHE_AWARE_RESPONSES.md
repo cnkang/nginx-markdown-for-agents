@@ -181,6 +181,16 @@ If-Modified-Since: Wed, 21 Oct 2015 07:28:00 GMT
 
 NGINX core handles this before the module runs, so the module only processes requests that pass the time-based check.
 
+**Semantic note**: the preserved `Last-Modified` value is the upstream
+HTML representation's timestamp, not a timestamp derived from the
+converted Markdown body.  This is intentional: `ims_only` cache
+validation compares against the source document's modification time, so
+a client that revalidates with `If-Modified-Since` receives a 304 when
+the upstream HTML has not changed, even though the served body is
+Markdown.  The transformed ETag (when `full` mode is on) is the
+representation-specific validator.  `Last-Modified` remains the
+source-time validator.
+
 ## Caching Strategies
 
 ### Browser Caching
@@ -411,6 +421,7 @@ For implementation details, see the source code and inline comments.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-18 | Hermes | Document Last-Modified preservation semantics (upstream HTML timestamp, source-time validator) |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

@@ -178,6 +178,10 @@ Not all requests are eligible for conversion. The module checks:
   - **Streaming engine**: `auto` uses the internal bounded routing heuristic.
     `force` selects streaming where the request is otherwise eligible. The
     working buffer stays bounded by `markdown_limits streaming_buffer=<size>`.
+    `conversion_memory` remains the hard cumulative input limit for the
+    streaming path: the total bytes buffered across the request (pending
+    input plus replay window) never exceeds it, so a large response that
+    would exceed `conversion_memory` is not eligible for streaming either.
 - Responses that exceed all applicable limits → Not eligible (passthrough)
 
 ### Other Conditions
@@ -410,6 +414,7 @@ For implementation details, see the source code and inline comments.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-18 | Hermes | Document conversion_memory as the hard cumulative input limit for the streaming path |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

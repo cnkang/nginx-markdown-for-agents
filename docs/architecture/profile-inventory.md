@@ -94,7 +94,7 @@ Maps to two struct fields:
 | Directive | Default | Context | Notes |
 |-----------|---------|---------|-------|
 | `markdown_auth_policy` | allow | http, server, location | allow\|deny |
-| `markdown_auth_cookies` | (none) | http, server, location | Pattern list |
+| `markdown_auth_cookies` | built-in `session*`, `auth*`, `PHPSESSID`, `wordpress_logged_in_*` | http, server, location | Pattern list (explicit directive replaces built-ins) |
 
 ### Trusted Proxies (Config V2, CIDR trust model)
 

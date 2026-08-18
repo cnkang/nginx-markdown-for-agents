@@ -148,30 +148,24 @@ parser readiness, and resource policy still gate true streaming.
 
 ### 2.3 Pre-commit Replay Buffer
 
-```nginx
-markdown_stream_precommit_buffer 256k;
-```
+The pre-commit replay window is internal in 0.9.2. The removed
+`markdown_stream_precommit_buffer` directive (256k default) is gone.
+`markdown_limits streaming_buffer=<size>` (2 MiB default, 64k-1g)
+bounds the replay window.
 
-**Default**: `256k`
+The replay window holds raw upstream HTML bytes before the module
+commits to Markdown output. If the streaming parser determines during
+the pre-commit phase that the response is not convertible, the module
+replays these raw bytes and continues as a passthrough.
 
-This buffer holds raw upstream HTML bytes before the module commits to Markdown
-output. If the streaming parser determines during the pre-commit phase that the
-response is not convertible, the module replays these raw bytes and continues as
-a passthrough.
-
-This is NOT a full-response buffer. It is the window within which the module can
-still safely fall back to original HTML.
+This is NOT a full-response buffer. It is the window within which the
+module can still safely fall back to original HTML.
 
 ### 2.4 Output Flush Policy
 
-```nginx
-markdown_stream_flush_min 16k;
-```
-
-**Default**: `16k` minimum output size.
-
-The module flushes the Markdown output buffer when the pending output reaches
-the minimum size threshold.
+Flushing is internal in 0.9.2. The removed `markdown_stream_flush_min`
+directive (16k minimum output size) is gone. The module uses an
+internal heuristic to decide when to flush pending Markdown output.
 
 #### Reserved Directive (not implemented in 0.8.0)
 
