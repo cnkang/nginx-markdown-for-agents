@@ -1160,10 +1160,12 @@ request_failure_rate = sum(rate(nginx_markdown_requests_total{outcome=~"failed_.
 
 A healthy rollout keeps `conversion_failure_rate` within the pre-rollout
 baseline and keeps the delivery rate stable. The request-based
-`request_failure_rate` is always lower because its denominator includes
-skipped and disabled requests. Use it only when you want the share of failed
-requests over all requests, and do not compare it against the
-conversion-attempt-based rate. Use decision logs for reason distributions.
+`request_failure_rate` is always less than or equal to the
+conversion-attempt-based rate, because its denominator includes skipped and
+disabled requests. Equality occurs exactly when every request is a
+conversion attempt. Use it only when you want the share of failed requests
+over all requests, and do not compare it against the conversion-attempt-based
+rate. Use decision logs for reason distributions.
 
 ### Log Patterns to Check
 
@@ -1309,8 +1311,7 @@ curl -s -H "Accept: text/plain; version=0.0.4" \
 # at 5s, so p95 is only meaningful below that bound):
 curl -s -H "Accept: text/plain; version=0.0.4" \
   http://localhost/markdown-metrics > /tmp/markdown-metrics.txt
-promtool query instant \
-  --url=http://localhost:9090 \
+promtool query instant http://localhost:9090 \
   'histogram_quantile(0.95, sum by (le) (rate(nginx_markdown_conversion_duration_seconds_bucket[5m])))' \
   2>/dev/null \
   || echo "promtool/Prometheus not available — inspect the bucket output above for the distribution"
@@ -1347,7 +1348,7 @@ Stop expanding rollout scope and investigate if any of the following occur:
 
 | Trigger | What It Means | How to Detect |
 |---------|---------------|---------------|
-| Sudden increase in failed outcomes | Conversion failures are spiking — may indicate upstream HTML changes, resource pressure, or a converter bug | `grep -E "reason=(failed_open\|failed_closed)" /var/log/nginx/error.log \| tail -20` or watch the failed `requests_total` series |
+| Sudden increase in failed outcomes | Conversion failures are spiking — may indicate upstream HTML changes, resource pressure, or a converter bug | `grep -E "reason=(failed_open|failed_closed)" /var/log/nginx/error.log \| tail -20` or watch the failed `requests_total` series |
 | Repeated internal failure reasons | Internal failure categories appear repeatedly, for example `memory_budget_exceeded` or `ffi_panic` — check the decision logs | Inspect the `category=` field in decision log entries and the NGINX logs; these categories do not appear as `requests_total` reason labels |
 | Conversion latency exceeding `markdown_limits` | Conversions are taking too long — may indicate large pages, resource contention, or converter performance issues | Check latency buckets; look for conversions in the highest `le` bucket or timeouts in logs |
 | Upstream error rate increase | The module may be causing upstream issues (unlikely but possible with decompression or buffering interactions) | Compare upstream 5xx rates before and after enablement |

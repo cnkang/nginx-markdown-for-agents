@@ -222,11 +222,12 @@ fi
 
 # Use curl with explicit timeouts and fail-closed behavior
 set -e
-METRICS=$(curl --fail-with-body --max-time 10 --connect-timeout 5 \
+if METRICS=$(curl --fail-with-body --max-time 10 --connect-timeout 5 \
     -H "Accept: text/plain; version=0.0.4" \
-    "${METRICS_URL:-http://localhost/markdown-metrics}")
-CURL_EXIT=$?
-if [ $CURL_EXIT -ne 0 ]; then
+    "${METRICS_URL:-http://localhost/markdown-metrics}" 2>/dev/null); then
+    :
+else
+    CURL_EXIT=$?
     echo "CRITICAL: Metrics retrieval failed (curl exit $CURL_EXIT)"
     exit 2
 fi
@@ -1211,7 +1212,7 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 # Extract URIs that failed conversion
 grep "markdown decision:" /var/log/nginx/error.log | \
   grep -E 'reason=(failed_open|failed_closed)' | \
-  grep -oP 'uri=\K[^ ]+' | sort | uniq -c | sort -rn
+  sed -nE 's/.*uri=([^ ]+).*/\1/p' | sort | uniq -c | sort -rn
 ```
 
 #### Show reason code distribution per hour

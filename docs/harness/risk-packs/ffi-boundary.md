@@ -23,8 +23,8 @@ plumbing, or error-code classification change.
 - initialization of all FFI output fields before transferring ownership or
   consuming handles, so panic/error paths cannot expose stale values
 - fat-pointer safety when transferring slice/Vec ownership to C (Rule 53):
-  use `as_mut_ptr` + `mem::forget`, never `Box::into_raw` for slices,
-  empty buffers return NULL instead of zero-length allocations
+  use `as_mut_ptr` + `mem::forget`, never `Box::into_raw` for slices.
+- Empty results return NULL instead of zero-length allocations (Rule 53).
 
 ## Minimum Verification
 

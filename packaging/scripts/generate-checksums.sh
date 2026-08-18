@@ -139,8 +139,7 @@ if [[ ${#ALL_FILES[@]} -eq 0 ]]; then
 fi
 
 if [[ "$DEB_COUNT" -eq 0 && "$RPM_COUNT" -eq 0 && "$TARBALL_COUNT" -eq 0 ]]; then
-    die "No package artifacts (.deb/.rpm/.tar.gz) found in '$ARTIFACT_DIR'; " \
-        "refusing to generate checksums for release-manifest.json alone."
+    die "No package artifacts (.deb/.rpm/.tar.gz) found in '$ARTIFACT_DIR'; refusing to generate checksums for release-manifest.json alone."
 fi
 
 for artifact in "${ALL_FILES[@]}"; do

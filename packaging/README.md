@@ -135,8 +135,11 @@ gpg --verify SHA256SUMS.asc SHA256SUMS
 ```
 
 Expected output includes `Good signature from ...` and the key fingerprint.
-Compare the fingerprint with the value published in this repository:
-the signing subkey fingerprint is
+Compare the fingerprint with the value published through an **independently
+authenticated trusted channel** (for example the project's release
+announcement or key-management documentation), not only with the value
+printed in this repository — a repository value alone does not establish
+identity. The signing subkey fingerprint is
 `15C792438EAA762B421E60D21E8D41E7D19A8A75` (primary key
 `7A3743687FEEE0313128355038724643EA12C02A`). Confirm it with
 `gpg --show-keys nginx-markdown-for-agents-release.asc` before trusting the

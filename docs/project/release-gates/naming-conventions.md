@@ -62,15 +62,27 @@ New directives introduced in 0.4.0 must follow the same `markdown_` prefix and l
 
 ### Defined metrics
 
+The authoritative metric families are the twelve-family v1 freeze defined in
+`schemas/metrics-v1.registry.json` (0.9.2). Legacy families such as
+`nginx_markdown_conversions_total`, `nginx_markdown_failures_total`, and
+`nginx_markdown_failopen_total` no longer exist. The v1 renderer partitions
+conversion outcomes into `nginx_markdown_requests_total{outcome=...}` and
+`nginx_markdown_conversion_deliveries_total`.
+
 | Metric name                                       | Type      | Labels          |
 |---------------------------------------------------|-----------|-----------------|
-| `nginx_markdown_conversions_total`                | counter   | —               |
-| `nginx_markdown_conversions_bypassed_total`       | counter   | —               |
-| `nginx_markdown_conversion_latency_bucket_total` | counter   | `le`            |
+| `nginx_markdown_requests_total`                   | counter   | `outcome`,`reason`,`stage` |
+| `nginx_markdown_conversion_attempts_total`        | counter   | `engine`        |
+| `nginx_markdown_conversion_deliveries_total`      | counter   | `engine`        |
+| `nginx_markdown_conversion_duration_seconds`      | histogram | `engine`        |
 | `nginx_markdown_input_bytes_total`                | counter   | —               |
 | `nginx_markdown_output_bytes_total`               | counter   | —               |
-| `nginx_markdown_failures_total`                   | counter   | `reason`        |
-| `nginx_markdown_decompressions_total`             | counter   | `format`        |
+| `nginx_markdown_inflight_requests`                | gauge     | —               |
+| `nginx_markdown_streaming_peak_memory_bytes`      | gauge     | —               |
+| `nginx_markdown_streaming_events_total`            | counter   | `reason`,`transition` |
+| `nginx_markdown_decompression_events_total`       | counter   | `encoding`,`outcome`,`reason` |
+| `nginx_markdown_dynconf_reloads_total`            | counter   | `outcome`,`reason` |
+| `nginx_markdown_build_info`                       | gauge     | `features`,`nginx_version`,`version` |
 
 ### Label cardinality rules
 
@@ -82,6 +94,16 @@ Labels must be low-cardinality.
 | `stage`        |                                                         |
 | `format`       |                                                         |
 | `le`           |                                                         |
+| `engine`       |                                                         |
+| `encoding`     |                                                         |
+| `outcome`      |                                                         |
+| `transition`   |                                                         |
+| `features`     |                                                         |
+| `nginx_version`|                                                         |
+| `version`      |                                                         |
+
+The v1 registry (`schemas/metrics-v1.registry.json`) is the authoritative
+label contract. This table mirrors it for operator reference.
 
 ---
 

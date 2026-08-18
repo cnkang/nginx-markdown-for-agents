@@ -93,8 +93,8 @@ Required:
   `MarkdownConverterHandle`, `HeaderPlanHandle`) passes to a
   consumption function (for example `safe_finish`, `markdown_result_free`),
   the handle becomes **consumed** and the caller must not use it again.
-  After consumption, the underlying memory may free, zero, or
-  returned to the allocator.  The C caller must not retain any pointer
+  After consumption, the allocator may free, zero, or reclaim the
+  underlying memory.  The C caller must not retain any pointer
   derived from the handle (for example a pointer obtained via
   `markdown_converter_get_result()`) across the consumption call — capture
   needed data into local variables first, then consume the handle.  When

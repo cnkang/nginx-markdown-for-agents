@@ -3,7 +3,7 @@
 **Version**: 0.8.0
 **Audience**: Operators upgrading from 0.5.x/0.6.x/0.7.x to 0.8.0
 
-> **v0.9.1+ operators:** the 0.9.1 release removed `markdown_streaming_engine` and replaced it with `markdown_streaming`. If you are reading this guide for the streaming behavior changes, please replace `markdown_streaming_engine off;` with `markdown_streaming off;` in your configuration files. The configuration examples in this guide use the 0.8.0-era directive names.
+> **v0.9.1+ operators:** the 0.9.1 release removed `markdown_streaming_engine` and replaced it with `markdown_streaming`. If you are reading this guide for the streaming behavior changes, please replace `markdown_streaming_engine off;` with `markdown_streaming off;` in your configuration files. Only the historical sections below retain the obsolete `markdown_streaming_engine` directive for background. Current configuration examples use `markdown_streaming`.
 >
 > **v0.9.2 operators:** the 0.9.2 release also removed `markdown_stream_threshold` and `markdown_streaming_zero_copy`. The auto-route threshold is now fixed internally at 1 MiB and is not operator-configurable. The historical sections below that reference `markdown_stream_threshold` and `markdown_streaming_engine` remain for background only. They describe directives that no longer exist, and operators must not use them in current configurations.
 
@@ -20,9 +20,10 @@ v0.6.x compatibility bridge entirely:
 | `markdown_streaming_engine` `$variable` | Accepted | Accepted | **Removed** — `nginx -t` fails | Must use fixed `off`/`auto`/`force` in 0.9.2 (historical `on` value replaced by `force`) |
 
 **Key guarantee**: An explicit `off` configuration produces identical behavior
-to 0.5.x. `on` configurations are not part of the equivalence claim — 0.9.2
-treats the streaming engine as the default path, so describe `off` and `on`
-separately. Configurations using `markdown_streaming_auto_threshold` or
+to 0.5.x. The 0.9.2 policy values are `off`, `auto`, and `force`. The
+historical `on` value is not an accepted 0.9.2 value (the module replaces it
+with `force`), so the equivalence claim covers only `off`. Configurations using
+`markdown_streaming_auto_threshold` or
 `markdown_streaming_engine $variable` **need updating before you upgrade to 0.8.0**.
 You must update these configurations before the upgrade. The removed directives fail `nginx -t`. Update them or the upgrade fails.
 
@@ -69,7 +70,7 @@ Restore streaming default but keep pruning, or vice versa:
 markdown_prune_noise off;
 
 # Keep pruning, disable auto streaming
-markdown_streaming off   # 0.9.1+ syntax (0.8.0-era name was markdown_streaming_engine)
+markdown_streaming off;   # 0.9.1+ syntax (0.8.0-era name was markdown_streaming_engine)
 ```
 
 ## Streaming Auto Mode Details

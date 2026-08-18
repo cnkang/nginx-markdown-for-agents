@@ -211,9 +211,11 @@ When you rotate the signing key:
 gpg --no-default-keyring --keyring /tmp/markdown-keyring.gpg \
     --import packaging/nginx-markdown-for-agents-release.asc
 gpg --no-default-keyring --keyring /tmp/markdown-keyring.gpg --fingerprint
+# Install the keyring directly from the checked-in .asc file; the
+# /tmp keyring above is used only for fingerprint verification.
 sudo gpg --dearmor \
     -o /usr/share/keyrings/nginx-markdown-archive-keyring.gpg \
-    < /tmp/markdown-keyring.gpg
+    < packaging/nginx-markdown-for-agents-release.asc
 ```
 
 4. Remove the old key only after the overlap migration is complete.
@@ -233,7 +235,7 @@ If you encounter dependency errors:
 
 1. Verify your NGINX version: `nginx -V`
 2. Check the package requires a matching ABI version
-3. See the [troubleshooting guide](../../docs/guides/PACKAGE_INSTALLATION.md)
+3. See the [troubleshooting guide](../../../docs/guides/PACKAGE_INSTALLATION.md)
 
 ---
 

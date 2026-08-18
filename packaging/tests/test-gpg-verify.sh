@@ -28,7 +28,8 @@
 
 set -e
 
-GPG_KEY_URL="${GPG_KEY_URL:-file://packaging/nginx-markdown-for-agents-release.asc}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GPG_KEY_URL="${GPG_KEY_URL:-file://${SCRIPT_DIR}/../nginx-markdown-for-agents-release.asc}"
 REPO_BASE_URL="${REPO_BASE_URL:-https://packages.nginx-markdown.dev}"
 EXPECTED_FINGERPRINT="${EXPECTED_FINGERPRINT:-15C792438EAA762B421E60D21E8D41E7D19A8A75}"
 PASS_COUNT=0
@@ -134,9 +135,18 @@ if [ -f "$KEY_FILE" ] && [ -s "$KEY_FILE" ]; then
 
     # Verify fingerprint if expected value provided
     if [ -n "$EXPECTED_FINGERPRINT" ]; then
+        # Select a signing-capable subkey: field 12 must contain "s",
+        # and field 2 must not mark the subkey revoked/expired/invalid/
+        # disabled.  The fingerprint is the fpr record that follows the
+        # matching sub record.
         KEY_FP=$(gpg --no-default-keyring --keyring "$KEYRING" \
             --with-colons --list-keys 2>/dev/null \
-            | awk -F: '$1 == "fpr" && subfp { print $10; exit } $1 == "sub" { subfp = 1 }')
+            | awk -F: '
+                $1 == "sub" {
+                    want = ($12 ~ /s/ && $2 !~ /^[reid]/) ? 1 : 0
+                    next
+                }
+                $1 == "fpr" && want { print $10; exit }')
         if [ "$KEY_FP" = "$EXPECTED_FINGERPRINT" ]; then
             pass "key fingerprint matches expected value"
         else

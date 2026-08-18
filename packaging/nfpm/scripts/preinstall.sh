@@ -85,13 +85,27 @@ case "$ACTION" in
             exit 1
         fi
 
-        # Same branch — patch mismatch is a warning (proceed but inform)
+        # Same branch but different patch is fatal — NGINX dynamic modules
+        # require exact patch-level ABI compatibility (Rule 13).
         if [[ "${INSTALLED_PATCH}" != "${TARGET_PATCH}" ]]; then
-            warn "Installed NGINX ${INSTALLED_NGINX_VERSION} patch differs from module target ${TARGET_NGINX_VERSION}."
-            warn "Same branch (${TARGET_BRANCH}.x) — proceeding. Exact match recommended."
-        else
-            info "NGINX version ${INSTALLED_NGINX_VERSION} matches module target. Proceeding."
+            info "============================================================"
+            info "ERROR: NGINX version patch mismatch detected."
+            info ""
+            info "  Installed NGINX: ${INSTALLED_NGINX_VERSION}"
+            info "  Module compiled for: ${TARGET_NGINX_VERSION}"
+            info ""
+            info "NGINX dynamic modules require ABI compatibility with the"
+            info "exact NGINX version they were compiled against, including"
+            info "the patch release. Same-branch patch differences can break"
+            info "the module ABI."
+            info ""
+            info "Please install the module package matching your exact NGINX"
+            info "version, or upgrade/downgrade NGINX to ${TARGET_NGINX_VERSION}."
+            info "============================================================"
+            exit 1
         fi
+
+        info "NGINX version ${INSTALLED_NGINX_VERSION} matches module target. Proceeding."
         ;;
     abort-upgrade|abort-remove|abort-deconfigure)
         # dpkg-specific lifecycle events — no action needed

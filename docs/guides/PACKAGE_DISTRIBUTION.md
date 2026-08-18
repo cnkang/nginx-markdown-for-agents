@@ -226,15 +226,14 @@ verify the full fingerprint with `gpg --show-keys` after import. See
 [GPG Key Management](GPG_KEY_MANAGEMENT.md) for the verification contract.
 
 ```bash
-# Import the checked-in project public key, then confirm the fingerprint.
+# Import the checked-in project public key, then confirm the full
+# fingerprint with gpg --show-keys before running gpg --verify.
+gpg --import packaging/nginx-markdown-for-agents-release.asc
 gpg --show-keys packaging/nginx-markdown-for-agents-release.asc
 
 # Or import from a keyserver after checking the published full fingerprint
 # (replace KEY_ID with the published project key ID)
 gpg --keyserver hkps://keys.openpgp.org --recv-keys <KEY_ID>
-
-# Or import from a local file if provided
-gpg --import project-signing-key.asc
 ```
 
 ### Verifying the Signature

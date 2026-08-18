@@ -10,9 +10,8 @@ tutorial.
 
 | Directive | Syntax | Default | Context |
 |---|---|---|---|
-
 | `markdown_accept` | `strict|wildcard|force` | strict | http/server/location |
-| `markdown_auth_cookies` | `<pattern> [<pattern> ...]` | none | http/server/location |
+| `markdown_auth_cookies` | `<pattern> [<pattern> ...]` | built-in `session*`, `auth*`, `PHPSESSID`, `wordpress_logged_in_*` (explicit replaces) | http/server/location |
 | `markdown_auth_policy` | `allow|deny` | allow | http/server/location |
 | `markdown_auto_decompress` | `on|off` | on | http/server/location |
 | `markdown_cache_validation` | `off|ims_only|full` | ims_only | http/server/location |
@@ -46,7 +45,6 @@ equal `1`.
 
 | Key | Type | Allowed values | Default | Inheritance |
 |---|---|---|---|---|
-
 | `filter` | flag | `on`, `off` | inherited | per-key |
 | `prune_noise` | flag | `on`, `off` | inherited | per-key |
 | `log_verbosity` | enum | `error`, `warn`, `info`, `debug` | inherited | per-key |
@@ -61,7 +59,6 @@ Frozen v1 registry. `bounded` = labeled with bounded-cardinality values.
 
 | Metric | Type | Labels | Cardinality |
 |---|---|---|---|
-
 | `nginx_markdown_requests_total` | counter | `outcome`, `reason`, `stage` | bounded |
 | `nginx_markdown_conversion_attempts_total` | counter | `engine` | bounded |
 | `nginx_markdown_conversion_deliveries_total` | counter | `engine` | bounded |
@@ -79,7 +76,6 @@ Frozen v1 registry. `bounded` = labeled with bounded-cardinality values.
 
 | # | string | metric family |
 |---|---|---|
-
 | 0 | `converted` | `nginx_markdown_requests_total` |
 | 1 | `skipped_accept` | `nginx_markdown_requests_total` |
 | 2 | `skipped_no_accept` | `nginx_markdown_requests_total` |
