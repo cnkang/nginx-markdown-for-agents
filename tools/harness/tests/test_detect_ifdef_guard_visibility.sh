@@ -174,6 +174,7 @@ else
 fi
 
 rm -f "${src_dir}/def_impl.c" "${src_dir}/def_call.c" "${src_dir}/def_header.h"
+rm -f "${src_dir}/multi_call.c"
 
 # Test 6: Guarded definition plus an equivalent feature-disabled definition,
 # called outside the guard -> PASS (feature-disabled definition available)

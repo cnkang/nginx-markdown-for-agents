@@ -245,7 +245,7 @@ There are 2 `markdown_*` command-table entries: 1 active parser entries and
 def test_migration_removed_table_requires_row_with_replacement(tmp_path: Path) -> None:
     """A reject-only directive must appear as a ROW in the MIGRATION removed
     table with a non-empty replacement; a prose mention alone is not enough
-    (tests P3-2 / CR F1)."""
+   ."""
     _write_valid_fixture(tmp_path)
     directives = tmp_path / detector.DIRECTIVES_PATH
     content = directives.read_text(encoding="utf-8").replace(

@@ -24,6 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tools.lib.path_validation import validate_read_path  # noqa: E402
 from tools.lib.reason_code import REASON_C_ACCESSOR_ALIASES
 
 EXPECTED_VERSION = "0.9.2"
@@ -45,8 +46,9 @@ def _cargo_version_mismatch(path: Path) -> str | None:
     if not path.exists():
         return "Cargo.toml: file not found"
     try:
-        cargo_data = tomllib.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        validated = validate_read_path(path, purpose="Cargo.toml")
+        cargo_data = tomllib.loads(validated.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError, ValueError) as exc:
         return f"Cargo.toml: invalid TOML ({exc})"
     package = cargo_data.get("package")
     version = package.get("version") if isinstance(package, dict) else None
@@ -59,8 +61,9 @@ def _changelog_version_mismatch(path: Path) -> str | None:
     if not path.exists():
         return f"{CHANGELOG_FILENAME}: file not found"
     try:
-        content = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
+        validated = validate_read_path(path, purpose="CHANGELOG")
+        content = validated.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
         return f"{CHANGELOG_FILENAME}: cannot read ({exc})"
     if (
         f"## [{EXPECTED_VERSION}]" not in content
@@ -325,9 +328,12 @@ def _load_reason_registry_files(repo):
     if not inventory_file.exists():
         return None, None, "public-surface-inventory.json not found"
     try:
-        source_content = rc_file.read_text(encoding="utf-8")
-        inventory = json.loads(inventory_file.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        validated_rc = validate_read_path(rc_file, purpose="reason code registry")
+        source_content = validated_rc.read_text(encoding="utf-8")
+        validated_inv = validate_read_path(
+            inventory_file, purpose="public surface inventory")
+        inventory = json.loads(validated_inv.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
         return None, None, f"unable to read canonical reason registry: {exc}"
     return source_content, inventory, None
 
@@ -352,8 +358,9 @@ def _validate_c_reason_registry(repo, canonical):
     if not c_file.exists():
         return "ngx_http_markdown_reason.c not found"
     try:
-        c_content = c_file.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as exc:
+        validated = validate_read_path(c_file, purpose="C reason registry")
+        c_content = validated.read_text(encoding="utf-8")
+    except (OSError, UnicodeError, ValueError) as exc:
         return f"unable to read C reason registry: {exc}"
     c_accessors = set(re.findall(
         r"static[ \t]+ngx_str_t[ \t]+(reason_str_\w+)",
@@ -409,8 +416,10 @@ def check_public_surface_inventory(repo: Path) -> dict:
         return {"name": "public_surface_inventory", "status": "fail",
                 "message": "public-surface-inventory.json not found"}
     try:
-        data = json.loads(inventory.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        validated = validate_read_path(
+            inventory, purpose="public surface inventory")
+        data = json.loads(validated.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
         return {"name": "public_surface_inventory", "status": "fail",
                 "message": f"invalid JSON: {exc}"}
     if not isinstance(data, dict):

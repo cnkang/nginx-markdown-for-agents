@@ -28,14 +28,27 @@ QUALIFICATION_STAGES = {
 
 def _workflow_release_gate_body() -> str:
     text = WORKFLOW.read_text(encoding="utf-8")
-    start = text.index("  release-gate:")
-    end = text.index("  integrity-checksums:", start)
+    start = text.find("  release-gate:")
+    if start == -1:
+        raise AssertionError(
+            f"{WORKFLOW.name}: missing '  release-gate:' job marker"
+        )
+    end = text.find("  integrity-checksums:", start)
+    if end == -1:
+        raise AssertionError(
+            f"{WORKFLOW.name}: missing '  integrity-checksums:' job marker "
+            "after the release-gate job"
+        )
     return text[start:end]
 
 
 def _workflow_publish_body() -> str:
     text = WORKFLOW.read_text(encoding="utf-8")
-    start = text.index("  publish:")
+    start = text.find("  publish:")
+    if start == -1:
+        raise AssertionError(
+            f"{WORKFLOW.name}: missing '  publish:' job marker"
+        )
     rest = text[start:]
     # Stop at the next top-level job marker so a later job cannot leak
     # into the publish job's own configuration.  MULTILINE makes `$`
@@ -48,8 +61,18 @@ def _workflow_publish_body() -> str:
 
 def _makefile_092_target() -> str:
     text = MAKEFILE.read_text(encoding="utf-8")
-    start = text.index("release-gates-check-092: release-gates-check-091")
-    end = text.index("\nrelease-matrix-check:", start)
+    start = text.find("release-gates-check-092: release-gates-check-091")
+    if start == -1:
+        raise AssertionError(
+            f"{MAKEFILE.name}: missing 'release-gates-check-092: "
+            "release-gates-check-091' target line"
+        )
+    end = text.find("\nrelease-matrix-check:", start)
+    if end == -1:
+        raise AssertionError(
+            f"{MAKEFILE.name}: missing 'release-matrix-check:' target "
+            "after release-gates-check-092"
+        )
     return text[start:end]
 
 

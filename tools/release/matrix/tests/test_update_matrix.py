@@ -697,7 +697,17 @@ def test_replace_canonical_dynamic_entries_preserves_stale_supported_rows():
     assert len(dynamic) == 3
 
     keys = {
-        (entry.get("nginx_version"), entry.get("libc"), entry.get("arch"))
+        (
+            entry.get("nginx_version"),
+            entry.get("libc"),
+            # The shared identity resolver normalizes arch to the
+            # x86_64/aarch64 form; map back to the presentation form
+            # (amd64/arm64) used by the matrix document.
+            {"x86_64": "amd64", "aarch64": "arm64"}.get(
+                um._matrix_entry_identity(entry)[2],
+                um._matrix_entry_identity(entry)[2],
+            ),
+        )
         for entry in dynamic
     }
     assert ("1.26.3", "glibc", "amd64") in keys

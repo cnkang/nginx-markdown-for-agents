@@ -17,9 +17,10 @@ import json
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from lib.path_validation import validate_read_path
+from lib.path_validation import validate_read_path  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from normalize_matrix import (  # noqa: E402
+    canonical_arch,
     normalize_compatibility_document,
 )
 
@@ -58,19 +59,10 @@ def _normalize_tier(tier: str) -> str:
 def _normalize_target(target: str) -> str:
     """Normalize a target to canonical architecture identity.
 
-    Matches the canonical identity logic from _matrix_entry_identity in
-    update_matrix.py: x86_64-* -> x86_64, aarch64-* -> aarch64.
+    Delegates to the shared canonical_arch helper in normalize_matrix.py
+    so the doc-sync validator and the matrix normalizer never disagree.
     """
-    normalized = {
-        "amd64": "x86_64",
-        "arm64": "aarch64",
-    }.get(target, target)
-    if isinstance(normalized, str):
-        if normalized.startswith("x86_64-"):
-            normalized = "x86_64"
-        elif normalized.startswith("aarch64-"):
-            normalized = "aarch64"
-    return normalized
+    return canonical_arch(target)
 
 
 def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
@@ -101,6 +93,7 @@ def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
                 item.get("artifact_type") == "dynamic-module"
                 and item.get("support_tier") == "supported"
                 and item.get("libc") in {"glibc", "musl"}
+                and canonical_arch(item.get("target", "")) in {"x86_64", "aarch64"}
             )
             or (
                 item.get("artifact_type") == "source"

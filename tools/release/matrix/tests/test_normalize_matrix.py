@@ -167,7 +167,9 @@ class TestCompatibilityDocument:
         entry = normalized["entries"][0]
         assert entry["nginx_version"] == "1.26.3"
         assert entry["libc"] == "glibc"
-        assert entry["target"] == "amd64"
+        # arch: amd64 canonicalizes to x86_64 so equivalent rows
+        # (arch: amd64 vs target: x86_64) share one identity.
+        assert entry["target"] == "x86_64"
         assert entry["support_tier"] == "supported"
 
     def test_compatibility_alias_disagreement_fails_closed(self):

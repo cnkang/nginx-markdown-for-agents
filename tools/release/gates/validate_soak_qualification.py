@@ -351,7 +351,13 @@ def _peak_memory_issue(record: dict, manifest: dict) -> str | None:
     if not isinstance(peak, int) or isinstance(peak, bool) or peak <= 0:
         return PEAK_MEMORY_MISSING_ERROR
     ceiling = max(
-        (s.get("conversion_memory_bytes", 0) for s in manifest["corpus"]),
+        (
+            s.get("conversion_memory_bytes", 0)
+            for s in manifest["corpus"]
+            if isinstance(s.get("conversion_memory_bytes"), int)
+            and not isinstance(s.get("conversion_memory_bytes"), bool)
+            and s.get("conversion_memory_bytes", 0) > 0
+        ),
         default=0,
     )
     if not isinstance(ceiling, int) or isinstance(ceiling, bool) or ceiling <= 0:

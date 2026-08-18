@@ -130,13 +130,23 @@ def _holder_is_safe(body: str, holder: str) -> bool:
     """True when the elts holder is protected by a nelts bound or NULL guard."""
     # Only the holder's own indexing is relevant: another variable being
     # indexed in the same function must not make this holder look unsafe,
-    # and a nelts bound is only accepted when this holder is actually
-    # indexed (scoped to the holder, not any unrelated part->nelts use).
+    # and a nelts bound is only accepted when it bounds THIS holder's
+    # indexing loop (scoped to the holder, not any unrelated part->nelts
+    # use elsewhere in the function).
     holder_index_re = re.compile(rf"\b{re.escape(holder)}\s*\[")
     if not holder_index_re.search(body):
         return True  # this holder is never indexed
-    if re.search(r"\bpart\s*->\s*nelts\b", body):
-        return True  # standard bounded iteration
+    # A bounded iteration over this holder looks like:
+    #   for (i = 0; i < part->nelts; i++) { ... holder[i] ... }
+    # Accept the nelts bound only when the holder is indexed inside a
+    # loop whose bound references part->nelts.  A bare part->nelts
+    # reference elsewhere in the function does not protect this holder.
+    loop_re = re.compile(
+        rf"for\s*\([^;]*;\s*[^;]*<\s*part\s*->\s*nelts\s*;[^)]*\)"
+        rf"[^{{}}]*\{{[^}}]*\b{re.escape(holder)}\s*\["
+    )
+    if loop_re.search(body):
+        return True  # standard bounded iteration over this holder
     guard_re = re.compile(
         rf"\b{re.escape(holder)}\s*==\s*NULL\b"
         rf"|\bNULL\s*==\s*{re.escape(holder)}\b"

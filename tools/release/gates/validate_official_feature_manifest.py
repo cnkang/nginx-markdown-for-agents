@@ -137,7 +137,18 @@ def _forbidden_feature_values(
     """Yield forbidden values from one Cargo ``features`` array."""
     location = ".".join(path)
     for feature in values:
-        if feature in FORBIDDEN_FEATURE_NAMES:
+        # Normalize Cargo feature tokens: strip the optional-dependency
+        # prefix (`dep:`), the dependency-scoped prefix (`dependency/`),
+        # and the weak-dependency suffix (`?`) so `dep:brotli`,
+        # `brotli?`, and `dependency/brotli` all match the bare name.
+        normalized = feature
+        if normalized.startswith("dep:"):
+            normalized = normalized[4:]
+        if "/" in normalized:
+            normalized = normalized.split("/", 1)[1]
+        if normalized.endswith("?"):
+            normalized = normalized[:-1]
+        if normalized in FORBIDDEN_FEATURE_NAMES:
             yield feature, location
 
 

@@ -19,7 +19,13 @@ cleanup_test_files() {
     return 0
 }
 
-trap cleanup_test_files EXIT HUP INT TERM
+# EXIT performs cleanup only; HUP/INT/TERM clean up and then terminate
+# with the conventional signal-derived status (128 + signal) instead of
+# resuming the interrupted script.
+trap cleanup_test_files EXIT
+trap 'cleanup_test_files; exit $((128 + 1))' HUP
+trap 'cleanup_test_files; exit $((128 + 2))' INT
+trap 'cleanup_test_files; exit $((128 + 15))' TERM
 
 DYNCONF_RELOAD_ROLLBACK_LIBRARY=1 source "$SCRIPT"
 

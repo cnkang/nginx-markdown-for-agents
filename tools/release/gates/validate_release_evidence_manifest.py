@@ -109,7 +109,7 @@ def _verify_head_matches(candidate_sha: str | None, reasons: list[str]) -> None:
 
     The evidence manifest is regenerated at freeze; a committed manifest
     whose candidate_sha no longer equals the repository HEAD means the
-    evidence no longer describes the release candidate (P1-1).
+    evidence no longer describes the release candidate.
     """
     if not isinstance(candidate_sha, str):
         return
@@ -365,7 +365,7 @@ def _check_blocking_semantics(manifest: dict, reasons: list) -> None:
         if status != "pass":
             reasons.append(
                 f"blocking-pending: entries[{index}] "
-                f"(domain={entry.get('domain')!r}) is blocking with "
+                f"(category={entry.get('category')!r}) is blocking with "
                 f"status={status!r}; blocking entries must pass")
 
 

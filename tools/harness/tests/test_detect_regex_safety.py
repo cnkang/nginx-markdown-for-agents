@@ -545,7 +545,7 @@ class TestCLI:
 
 
 # ---------------------------------------------------------------------------
-# P1-1: keyword-argument regex calls
+# keyword-argument regex calls
 # ---------------------------------------------------------------------------
 
 class TestKeywordArguments:
@@ -617,7 +617,7 @@ class TestKeywordArguments:
 
 
 # ---------------------------------------------------------------------------
-# P1-2: static string constant propagation
+# static string constant propagation
 # ---------------------------------------------------------------------------
 
 class TestStaticPropagation:
@@ -690,7 +690,7 @@ class TestStaticPropagation:
 
 
 # ---------------------------------------------------------------------------
-# P1-3: re.escape composition
+# re.escape composition
 # ---------------------------------------------------------------------------
 
 class TestEscapeComposition:
@@ -736,7 +736,7 @@ class TestEscapeComposition:
 
 
 # ---------------------------------------------------------------------------
-# P1-4: nested quantifier detection
+# nested quantifier detection
 # ---------------------------------------------------------------------------
 
 class TestNestedQuantifier:
@@ -788,7 +788,7 @@ class TestQuantifierAtomBinding:
 
 
 # ---------------------------------------------------------------------------
-# P1-5: shell command argument extraction
+# shell command argument extraction
 # ---------------------------------------------------------------------------
 
 class TestShellArgumentExtraction:
@@ -825,7 +825,7 @@ class TestShellArgumentExtraction:
 
 
 # ---------------------------------------------------------------------------
-# P1-6: CLI contract — strict / fail-on-review / UNKNOWN
+# CLI contract — strict / fail-on-review / UNKNOWN
 # ---------------------------------------------------------------------------
 
 class TestCLIContract:

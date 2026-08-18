@@ -405,6 +405,16 @@ def _soak_outcome(invocation: dict) -> tuple[int, float, str | None]:
         invocation["stdout"], invocation["stderr"])
     if elapsed <= 0.0:
         elapsed = float(invocation.get("wall_elapsed", 0.0))
+    # Infrastructure failures (timeout, spawn failure) take precedence
+    # over any marker text: libFuzzer prints "ERROR: libFuzzer" on a
+    # timeout, which must classify as an infrastructure failure with zero
+    # crashes and zero sanitizer findings, not as a crash.
+    if invocation["returncode"] == -1:
+        stderr = invocation.get("stderr", "")
+        if "timed out:" in stderr:
+            return executions, elapsed, "timed out: fuzz invocation exceeded its time cap"
+        if "spawn failed:" in stderr:
+            return executions, elapsed, "spawn failed: fuzz target could not be launched"
     if finding:
         return executions, elapsed, finding
     if invocation["returncode"] != 0:
@@ -459,7 +469,7 @@ def _run_target_soak(target: str, seed: int, required_executions: int,
         # libFuzzer replays every seed present at launch, so an earlier
         # invocation that added corpus files increases THIS invocation's
         # startup-replay overhead.  Re-measuring here (instead of once
-        # before the loop) keeps the deduction accurate (tools P3-4).
+        # before the loop) keeps the deduction accurate.
         startup_overhead = _startup_corpus_size(target_corpus_dir) + 1
         invocation = _invoke_fuzz(
             validated_target, flags, timeout=time_cap + INVOCATION_TIMEOUT_MARGIN)
@@ -468,8 +478,9 @@ def _run_target_soak(target: str, seed: int, required_executions: int,
         # Exclude the empty-input callback and the startup-corpus replay
         # from the mutation-budget accounting: they are launch overhead
         # repeated on every invocation, not new executions.  startup_overhead
-        # was captured before the loop (tools P3-4) so corpus growth during
-        # the run does not inflate the deduction.
+        # is captured immediately before each invocation, so corpus growth
+        # from an earlier invocation is included in the next invocation's
+        # deduction.
         executions = max(0, executions - startup_overhead)
         total_executions += executions
         total_elapsed += elapsed

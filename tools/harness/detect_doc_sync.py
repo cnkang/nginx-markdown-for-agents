@@ -468,9 +468,7 @@ def _migration_removed_table_rows(migration: str) -> set[tuple[str, str]]:
 
 def _check_migration_removed_table(directives: str, migration: str) -> List[str]:
     """Require every reject-only directive to appear as a ROW in the 0.9.2
-    migration removed-directive table with a non-empty replacement (tests
-    P3-2: the reject-only test list and the migration replacement guide must
-    not drift).  A prose mention elsewhere in the document does NOT satisfy
+    migration removed-directive table with a non-empty replacement (the reject-only test list and the migration replacement guide must not drift).  A prose mention elsewhere in the document does NOT satisfy
     the check — the table row is what operators follow."""
     errors: List[str] = []
     _, rejected = _directive_registry(directives)

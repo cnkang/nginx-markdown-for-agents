@@ -607,8 +607,7 @@ def _write_repo_fixture(repo: Path, *, with_kiro: bool, kiro_has_links: bool = T
         encoding="utf-8",
     )
     (repo / "Makefile").write_text(
-        "harness-check:\n\t@true\n"
-        "--skip-dirs .codeartsdoer --skip-dirs .kiro --skip-dirs build\n",
+        "harness-check:\n\t@true --skip-dirs .codeartsdoer --skip-dirs .kiro --skip-dirs build\n",
         encoding="utf-8",
     )
 

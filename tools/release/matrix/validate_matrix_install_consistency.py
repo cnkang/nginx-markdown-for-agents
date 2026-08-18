@@ -19,10 +19,11 @@ import json
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from lib.path_validation import validate_read_path
+from lib.path_validation import validate_read_path  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from normalize_matrix import (  # noqa: E402
     MatrixNormalizationError,
+    canonical_arch,
     normalize_compatibility_document,
 )
 
@@ -82,8 +83,15 @@ def load_matrix(path: Path) -> list[dict]:
         if entry.get("artifact_type") == "dynamic-module" and entry.get(
             "support_tier"
         ) == "supported" and entry.get("libc") in INSTALL_DETECTABLE_OS_TYPES:
-            arch = {"amd64": "x86_64", "arm64": "aarch64"}.get(
-                entry.get("target"), entry.get("target")
+            # Compatibility normalization stores the architecture in the
+            # canonical `target` field; canonicalize it (amd64 -> x86_64,
+            # arm64 -> aarch64, target triples collapse to the bare arch)
+            # before projecting into the install-detectable vocabulary.
+            raw_arch = entry.get("target")
+            arch = (
+                canonical_arch(raw_arch)
+                if isinstance(raw_arch, str)
+                else None
             )
             if arch not in INSTALL_DETECTABLE_ARCHS:
                 continue
