@@ -157,6 +157,23 @@ def test_cargo_default_features_match_official_manifest() -> None:
 
 
 @pytest.mark.parametrize("workflow", OFFICIAL_PRODUCER_WORKFLOWS)
+def test_official_producer_exposes_feature_declaration(workflow: str) -> None:
+    """Every official artifact producer must expose at least one feature
+    declaration or assignment before its contents are validated.  A producer
+    with no feature signal would silently skip the fixed-feature-set check
+    and could drift from the official feature set unnoticed."""
+    path = WORKFLOW_DIR / workflow
+    assert path.is_file(), f"{workflow} must exist in this checkout"
+    flags = _workflow_feature_flags(path)
+    assignments = _workflow_feature_assignments(path)
+    assert flags or assignments, (
+        f"{workflow} must declare a feature set (--features/--all-features/"
+        f"--no-default-features or RUST_FEATURES) so the official "
+        f"feature-set contract can be validated"
+    )
+
+
+@pytest.mark.parametrize("workflow", OFFICIAL_PRODUCER_WORKFLOWS)
 def test_official_producer_uses_fixed_feature_set(workflow: str) -> None:
     """Every official artifact producer builds with the same fixed feature
     set; no producer may add, omit, or disable a feature."""

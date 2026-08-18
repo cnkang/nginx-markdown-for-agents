@@ -351,7 +351,7 @@ http {
             proxy_http_version 1.1;
 
             markdown_filter on;
-            markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_memory=${MARKDOWN_MAX_SIZE} streaming_buffer=${MARKDOWN_STREAMING_BUFFER} conversion_timeout=120s;
+            markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE} parser_memory=${MARKDOWN_STREAMING_BUFFER} streaming_buffer=${MARKDOWN_STREAMING_BUFFER} conversion_timeout=120s;
             markdown_error_policy pass;
             markdown_streaming force;
         }

@@ -126,11 +126,11 @@ test_markdown_gzip() {
 test_markdown_gunzip() {
     echo "--- Test 2: markdown + gunzip (upstream gzip) ---" >&2
 
-    # Request with Accept: text/markdown; upstream may send gzip-encoded HTML.
-    # With gunzip on or markdown_auto_decompress on, the client should receive
-    # uncompressed Markdown.
+    # Request with Accept: text/markdown; upstream sends gzip-encoded HTML
+    # via the test configuration (the client does NOT request gzip, so the
+    # upstream gzip scenario is preserved without the client negotiating it).
     local response headers content_type content_encoding status upstream_encoding
-    response="$(curl -sS -D - -o /dev/null -H "Accept: text/markdown" -H "Accept-Encoding: gzip" "${NGINX_URL}${GUNZIP_TEST_PATH}" 2>&1)" || true
+    response="$(curl -sS -D - -o /dev/null -H "Accept: text/markdown" "${NGINX_URL}${GUNZIP_TEST_PATH}" 2>&1)" || true
     headers="$response"
 
     status="$(echo "$headers" | head -1 | awk '{print $2}')"

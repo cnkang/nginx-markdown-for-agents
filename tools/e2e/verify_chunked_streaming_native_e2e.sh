@@ -961,8 +961,16 @@ def selector_matches(labels, raw_selector):
 
 found = 0
 matched = 0
+type_declared = False
 for line in sys.stdin:
-    if not line.strip() or line.lstrip().startswith("#"):
+    if not line.strip():
+        continue
+    if line.lstrip().startswith("#"):
+        # A `# TYPE <family> ...` line declares the family even when no
+        # sample is present yet (fresh endpoint); treat that as a
+        # legitimate zero rather than a missing family.
+        if line.lstrip().startswith("# TYPE ") and line.split()[2] == family:
+            type_declared = True
         continue
     match = sample_re.fullmatch(line.strip())
     if match is None or match.group("name") != family:
@@ -976,7 +984,7 @@ for line in sys.stdin:
         total += float(match.group("value"))
     except (IndexError, ValueError):
         continue
-if found == 0:
+if found == 0 and not type_declared:
     print(f"ERROR: metric family {family!r} not found in metrics output", file=sys.stderr)
     sys.exit(1)
 # A well-formed document whose family carries no sample matching the
