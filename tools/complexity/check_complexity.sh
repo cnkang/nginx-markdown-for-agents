@@ -119,7 +119,7 @@ if [[ -d "$C_SRC" ]]; then
         --length "$C_LENGTH_THRESHOLD" \
         --arguments "$C_PARAMS_THRESHOLD" \
         --ignore_warnings -1 \
-        -w > "$C_WARNINGS" 2>&1
+        -w > "$C_WARNINGS" 2>/dev/null
     c_lizard_warn_rc=$?
     set -e
     if [[ $c_lizard_rc -ne 0 || $c_lizard_warn_rc -ne 0 ]]; then
@@ -153,7 +153,7 @@ if [[ -d "$RUST_SRC" ]]; then
         --length "$RUST_LENGTH_THRESHOLD" \
         --arguments "$RUST_PARAMS_THRESHOLD" \
         --ignore_warnings -1 \
-        -w > "$RUST_WARNINGS" 2>&1
+        -w > "$RUST_WARNINGS" 2>/dev/null
     rust_lizard_warn_rc=$?
     set -e
     if [[ $rust_lizard_rc -ne 0 || $rust_lizard_warn_rc -ne 0 ]]; then
@@ -187,7 +187,7 @@ if [[ -d "$PY_SRC" ]]; then
         --length "$PY_LENGTH_THRESHOLD" \
         --arguments "$PY_PARAMS_THRESHOLD" \
         --ignore_warnings -1 \
-        -w > "$PY_LIZARD_WARNINGS" 2>&1
+        -w > "$PY_LIZARD_WARNINGS" 2>/dev/null
     py_lizard_warn_rc=$?
     set -e
     if [[ $py_lizard_rc -ne 0 || $py_lizard_warn_rc -ne 0 ]]; then

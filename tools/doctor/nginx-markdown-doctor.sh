@@ -591,6 +591,19 @@ check_rust_toolchain() {
             2>/dev/null || printf '')
     fi
 
+    # Escape before any branch so every emit_check JSON payload below uses
+    # initialized values even with set -u (the checkout-unavailable branch
+    # emits JSON that references these variables).  toolchain_file is
+    # declared here (default empty) and filled below only when the
+    # repository checkout is available; the escaped value stays "" on the
+    # checkout-unavailable branch.
+    local toolchain_file=""
+    local toolchain_file_exists="false"
+    local escaped_rustc_version escaped_expected_msrv escaped_toolchain_file
+    escaped_rustc_version=$(json_escape "$rustc_version")
+    escaped_expected_msrv=$(json_escape "$expected_msrv")
+    escaped_toolchain_file=$(json_escape "$toolchain_file")
+
     if [[ -z "$doctor_root" || "$checkout_root" != "$doctor_root" ]]; then
         # The MSRV verdict still applies without a checkout; only the
         # pinned-channel validation needs repository metadata.
@@ -606,23 +619,17 @@ check_rust_toolchain() {
         return 0
     fi
 
-    local toolchain_file=""
-    local toolchain_file_exists="false"
+    local pinned_ok="false"
     if [[ -n "$doctor_root" && -f "$doctor_root/rust-toolchain.toml" ]]; then
         toolchain_file_exists="true"
         toolchain_file=$(grep -E '^channel[[:space:]]*=' "$doctor_root/rust-toolchain.toml" \
             | head -1 | sed 's/^channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/' || true)
     fi
+    escaped_toolchain_file=$(json_escape "$toolchain_file")
 
-    local pinned_ok="false"
     if [[ -n "$toolchain_file" && "$toolchain_file" == "$expected_msrv" ]]; then
         pinned_ok="true"
     fi
-
-    local escaped_rustc_version escaped_expected_msrv escaped_toolchain_file
-    escaped_rustc_version=$(json_escape "$rustc_version")
-    escaped_expected_msrv=$(json_escape "$expected_msrv")
-    escaped_toolchain_file=$(json_escape "$toolchain_file")
 
     if [[ "$msrv_ok" == "true" ]]; then
         if [[ "$toolchain_file_exists" != "true" ]]; then
