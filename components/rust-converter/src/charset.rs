@@ -190,6 +190,85 @@ pub fn extract_charset_from_content_type(content_type: &str) -> Option<String> {
 /// let html = b"<html><body>No charset</body></html>";
 /// assert_eq!(extract_charset_from_html(html), None);
 /// ```
+/// One step of the meta-tag scan: continue at the given position, stop, or
+/// return a found charset.
+enum MetaScanStep {
+    Continue(usize),
+    Stop,
+    Found(String),
+}
+
+/// Process one position in the HTML prefix: skip comments and non-meta tags,
+/// and extract a charset from a `<meta>` element if present.
+fn scan_one_meta(html: &[u8], pos: usize) -> MetaScanStep {
+    // Skip HTML comments so a commented-out meta tag is not treated as
+    // a real declaration.
+    if html[pos..].starts_with(b"<!--") {
+        return match find_subslice(&html[pos + 4..], b"-->") {
+            Some(end) => MetaScanStep::Continue(pos + 4 + end + 3),
+            None => MetaScanStep::Stop,
+        };
+    }
+
+    // Find the next '<'.
+    let Some(lt) = find_byte(&html[pos..], b'<') else {
+        return MetaScanStep::Stop;
+    };
+    let pos = pos + lt;
+
+    // Must be a tag start (not `</` or `<!`).  Skip the whole
+    // declaration/comment to its closing '>' so inner '<' characters
+    // (e.g. a commented-out <meta>) cannot be misread as tag starts.
+    if pos + 1 >= html.len() {
+        return MetaScanStep::Stop;
+    }
+    if let Some(next) = skip_closing_or_declaration(html, pos) {
+        return MetaScanStep::Continue(next);
+    }
+
+    // Parse the tag name.
+    let mut tag_end = pos + 1;
+    while tag_end < html.len() && is_html_name_byte(html[tag_end]) {
+        tag_end += 1;
+    }
+    let tag_name = &html[pos + 1..tag_end];
+    if !tag_name.eq_ignore_ascii_case(b"meta") {
+        return match find_tag_end(html, tag_end) {
+            Some(next_pos) => MetaScanStep::Continue(next_pos),
+            None => MetaScanStep::Stop,
+        };
+    }
+
+    // Parse attributes until '>' and evaluate the charset declaration.
+    let (attrs, next_pos, closed) = parse_meta_attributes(html, tag_end);
+    if !closed {
+        return MetaScanStep::Stop;
+    }
+    if let Some(charset) = charset_from_meta_attrs(&attrs)
+        && encoding_rs::Encoding::for_label(charset.as_bytes()).is_some()
+    {
+        return MetaScanStep::Found(charset);
+    }
+    MetaScanStep::Continue(next_pos)
+}
+
+/// Skip a closing tag (`</...>`) or declaration (`<!...>`), including
+/// comments.  Returns the position after the skipped element, or `None`
+/// when the element is unterminated or `pos` does not start one.
+fn skip_closing_or_declaration(html: &[u8], pos: usize) -> Option<usize> {
+    if html[pos + 1] == b'/' {
+        find_byte(&html[pos..], b'>').map(|gt| pos + gt + 1)
+    } else if html[pos + 1] == b'!' {
+        if html[pos..].starts_with(b"<!--") {
+            find_subslice(&html[pos + 4..], b"-->").map(|end| pos + 4 + end + 3)
+        } else {
+            find_byte(&html[pos..], b'>').map(|gt| pos + gt + 1)
+        }
+    } else {
+        None
+    }
+}
+
 pub fn extract_charset_from_html(html: &[u8]) -> Option<String> {
     // Only scan the first META_SCAN_LIMIT bytes for performance.
     let scan_limit = std::cmp::min(html.len(), META_SCAN_LIMIT);
@@ -202,79 +281,11 @@ pub fn extract_charset_from_html(html: &[u8]) -> Option<String> {
     // inside comments.
     let mut pos = 0usize;
     while pos < html_prefix.len() {
-        // Skip HTML comments so a commented-out meta tag is not treated as
-        // a real declaration.
-        if html_prefix[pos..].starts_with(b"<!--") {
-            if let Some(end) = find_subslice(&html_prefix[pos + 4..], b"-->") {
-                pos += 4 + end + 3;
-                continue;
-            }
-            break;
+        match scan_one_meta(html_prefix, pos) {
+            MetaScanStep::Continue(next) => pos = next,
+            MetaScanStep::Stop => break,
+            MetaScanStep::Found(charset) => return Some(charset),
         }
-
-        // Find the next '<'.
-        let Some(lt) = find_byte(&html_prefix[pos..], b'<') else {
-            break;
-        };
-        pos += lt;
-
-        // Must be a tag start (not `</` or `<!`).  Skip the whole
-        // declaration/comment to its closing '>' so inner '<' characters
-        // (e.g. a commented-out <meta>) cannot be misread as tag starts.
-        if pos + 1 >= html_prefix.len() {
-            break;
-        }
-        if html_prefix[pos + 1] == b'/' {
-            if let Some(gt) = find_byte(&html_prefix[pos..], b'>') {
-                pos += gt + 1;
-            } else {
-                break;
-            }
-            continue;
-        }
-        if html_prefix[pos + 1] == b'!' {
-            if html_prefix[pos..].starts_with(b"<!--") {
-                if let Some(end) = find_subslice(&html_prefix[pos + 4..], b"-->") {
-                    pos += 4 + end + 3;
-                } else {
-                    break;
-                }
-            } else if let Some(gt) = find_byte(&html_prefix[pos..], b'>') {
-                pos += gt + 1;
-            } else {
-                break;
-            }
-            continue;
-        }
-
-        // Parse the tag name.
-        let mut tag_end = pos + 1;
-        while tag_end < html_prefix.len() && is_html_name_byte(html_prefix[tag_end]) {
-            tag_end += 1;
-        }
-        let tag_name = &html_prefix[pos + 1..tag_end];
-        if !tag_name.eq_ignore_ascii_case(b"meta") {
-            let Some(next_pos) = find_tag_end(html_prefix, tag_end) else {
-                break;
-            };
-            pos = next_pos;
-            continue;
-        }
-
-        // Parse attributes until '>' and evaluate the charset declaration.
-        let (attrs, next_pos, closed) = parse_meta_attributes(html_prefix, tag_end);
-        if !closed {
-            break;
-        }
-        if let Some(charset) = charset_from_meta_attrs(&attrs) {
-            // Skip unsupported labels: a bogus declaration must not
-            // terminate the scan.  Continue to the next meta tag so a
-            // later supported declaration (for example utf-8) wins.
-            if encoding_rs::Encoding::for_label(charset.as_bytes()).is_some() {
-                return Some(charset);
-            }
-        }
-        pos = next_pos;
     }
 
     None
@@ -291,9 +302,7 @@ fn parse_meta_attributes(html_prefix: &[u8], mut attr_pos: usize) -> (MetaAttrs,
     let mut attrs: MetaAttrs = Vec::new();
     while attr_pos < html_prefix.len() {
         // Skip whitespace.
-        while attr_pos < html_prefix.len() && is_html_space(html_prefix[attr_pos]) {
-            attr_pos += 1;
-        }
+        skip_html_space(html_prefix, &mut attr_pos);
         if attr_pos >= html_prefix.len() {
             break;
         }
@@ -328,37 +337,47 @@ fn parse_meta_attributes(html_prefix: &[u8], mut attr_pos: usize) -> (MetaAttrs,
 /// Parse the value of an attribute (quoted or bare) starting after the
 /// attribute name; advances `attr_pos` past the value.
 fn parse_attr_value(html_prefix: &[u8], attr_pos: &mut usize) -> Vec<u8> {
-    let mut value: Vec<u8> = Vec::new();
     let mut vp = *attr_pos;
-    while vp < html_prefix.len() && is_html_space(html_prefix[vp]) {
-        vp += 1;
-    }
+    skip_html_space(html_prefix, &mut vp);
     if vp < html_prefix.len() && html_prefix[vp] == b'=' {
         vp += 1;
-        while vp < html_prefix.len() && is_html_space(html_prefix[vp]) {
-            vp += 1;
-        }
+        skip_html_space(html_prefix, &mut vp);
         if vp < html_prefix.len() && (html_prefix[vp] == b'"' || html_prefix[vp] == b'\'') {
             let quote = html_prefix[vp];
             vp += 1;
-            while vp < html_prefix.len() && html_prefix[vp] != quote {
-                value.push(html_prefix[vp]);
-                vp += 1;
-            }
-            if vp < html_prefix.len() {
-                vp += 1; // closing quote
-            }
-        } else {
-            while vp < html_prefix.len()
-                && !is_html_space(html_prefix[vp])
-                && html_prefix[vp] != b'>'
-            {
-                value.push(html_prefix[vp]);
-                vp += 1;
-            }
+            let value = scan_quoted_value(html_prefix, &mut vp, quote);
+            *attr_pos = vp;
+            return value;
         }
+        let value = scan_bare_value(html_prefix, &mut vp);
+        *attr_pos = vp;
+        return value;
     }
     *attr_pos = vp;
+    Vec::new()
+}
+
+/// Scan a quoted attribute value, advancing `vp` past the closing quote.
+fn scan_quoted_value(html: &[u8], vp: &mut usize, quote: u8) -> Vec<u8> {
+    let mut value = Vec::new();
+    while *vp < html.len() && html[*vp] != quote {
+        value.push(html[*vp]);
+        *vp += 1;
+    }
+    if *vp < html.len() {
+        *vp += 1; // closing quote
+    }
+    value
+}
+
+/// Scan a bare (unquoted) attribute value, advancing `vp` to the next
+/// whitespace or `>`.
+fn scan_bare_value(html: &[u8], vp: &mut usize) -> Vec<u8> {
+    let mut value = Vec::new();
+    while *vp < html.len() && !is_html_space(html[*vp]) && html[*vp] != b'>' {
+        value.push(html[*vp]);
+        *vp += 1;
+    }
     value
 }
 
@@ -408,9 +427,7 @@ fn charset_from_content_value(content: &[u8]) -> Option<String> {
 
     while i < content.len() {
         // Skip whitespace and ';'.
-        while i < content.len() && (is_html_space(content[i]) || content[i] == b';') {
-            i += 1;
-        }
+        skip_space_and_semicolon(content, &mut i);
         if i >= content.len() {
             break;
         }
@@ -423,22 +440,16 @@ fn charset_from_content_value(content: &[u8]) -> Option<String> {
         let name = &content[name_start..i];
 
         // Skip whitespace and '='.
-        while i < content.len() && is_html_space(content[i]) {
-            i += 1;
-        }
+        skip_html_space(content, &mut i);
         if i >= content.len() || content[i] != b'=' {
             // No '=' after the parameter name (e.g. "text/html" where the
             // '/' terminates "text").  Advance past this parameter so the
             // scan cannot stall on the same position.
-            while i < content.len() && content[i] != b';' {
-                i += 1;
-            }
+            skip_to_semicolon(content, &mut i);
             continue;
         }
         i += 1;
-        while i < content.len() && is_html_space(content[i]) {
-            i += 1;
-        }
+        skip_html_space(content, &mut i);
 
         // Value (quoted or bare).
         let value = charset_scan_param_value(content, &mut i);
@@ -448,6 +459,20 @@ fn charset_from_content_value(content: &[u8]) -> Option<String> {
     }
 
     None
+}
+
+/// Advance `i` past consecutive whitespace and ';' bytes.
+fn skip_space_and_semicolon(content: &[u8], i: &mut usize) {
+    while *i < content.len() && (is_html_space(content[*i]) || content[*i] == b';') {
+        *i += 1;
+    }
+}
+
+/// Advance `i` to the next ';' or end of buffer.
+fn skip_to_semicolon(content: &[u8], i: &mut usize) {
+    while *i < content.len() && content[*i] != b';' {
+        *i += 1;
+    }
 }
 
 /// Read the value of one content-type parameter at `i`.
@@ -515,6 +540,13 @@ fn is_html_name_byte(b: u8) -> bool {
 
 fn is_html_space(b: u8) -> bool {
     b == b' ' || b == b'\t' || b == b'\n' || b == b'\r' || b == b'\x0c'
+}
+
+/// Advance `pos` past consecutive HTML whitespace bytes.
+fn skip_html_space(html: &[u8], pos: &mut usize) {
+    while *pos < html.len() && is_html_space(html[*pos]) {
+        *pos += 1;
+    }
 }
 
 /// Normalize charset name to uppercase
