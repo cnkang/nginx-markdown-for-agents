@@ -23,6 +23,7 @@ markdown_limits conversion_memory=64m conversion_timeout=10s
 ```nginx
 markdown_filter on;
 markdown_streaming off;
+markdown_auto_decompress on;
 markdown_cache_validation full;
 markdown_limits conversion_memory=64m conversion_timeout=10s
     parser_memory=32m parser_timeout=5s decompressed_size=16m
