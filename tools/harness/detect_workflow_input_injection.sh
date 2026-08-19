@@ -133,16 +133,34 @@ while IFS= read -r -d '' file; do
                 findings=$((findings + 1))
             fi
 
-            # Command outputs are executable data and must use a fixed
-            # allowlist rather than entering the shell source text.
+            # Step outputs are executable data unless the selector names a
+            # documented benign data value (version, sha, path, name, ...);
+            # anything else is treated as command-bearing and flagged.
             # Accept either dot or index syntax for both the step selector
             # and the output selector, including mixed forms such as
             # steps.build.outputs['command'] and steps['build'].outputs.command.
-            if [[ "$line" =~ \$\{\{[[:space:]]*steps(\.[a-zA-Z_][a-zA-Z0-9_-]*|\[[^]]*\])\.outputs(\.[a-zA-Z_][a-zA-Z0-9_-]*|\[[^]]*\])[[:space:]]*\}\} ]]; then
-                echo "ERROR: ${rel_path}:${line_num}: step output directly interpolated in run block" >&2
-                echo "  ${line}" >&2
-                echo "  Fix: map a fixed identifier through env and a shell case statement" >&2
-                findings=$((findings + 1))
+            # Benign selectors such as steps.meta.outputs.version are not
+            # command-bearing inputs and are not flagged; unknown selectors
+            # fail closed so a new command-shaped output cannot slip through.
+            if [[ "$line" =~ \$(\{\{[[:space:]]*steps(\.[a-zA-Z_][a-zA-Z0-9_-]*|\[[^]]*\])\.[[:space:]]*outputs(\.[a-zA-Z_][a-zA-Z0-9_-]*|\[[^]]*\])[[:space:]]*\}\}) ]]; then
+                output_selector="${BASH_REMATCH[3]}"
+                # Normalize the index form (steps['build'].outputs['version'])
+                # to the dot form before the allowlist match.
+                if [[ "$output_selector" == \[*\] ]]; then
+                    output_selector=".${output_selector#\[}"
+                    output_selector="${output_selector%\]}"
+                fi
+                benign_data_selector=".${output_selector#.}"
+                case "${benign_data_selector}" in
+                    sha|version|raw_version|bench_nginx_version|nginx_version|path|name|ref|commit|repo|title|body|buildroot|nginx_bin|checkout_ref|deb_filename|rpm_filename|tap_name|pull-request-number|enabled|supported|blocking|changed|has_changes|install_exit|nginx_test_exit|module_found|skip_reason|package_matrix|matrix_entries|smoke_matrix|musl_matrix|nginx_versions|targets|policy_reference)
+                        ;;
+                    *)
+                        echo "ERROR: ${rel_path}:${line_num}: step output directly interpolated in run block" >&2
+                        echo "  ${line}" >&2
+                        echo "  Fix: map a fixed identifier through env and a shell case statement" >&2
+                        findings=$((findings + 1))
+                        ;;
+                esac
             fi
 
             # External event data (PR head ref/title/body, release tag name,

@@ -75,6 +75,17 @@ _TOKEN_RE = re.compile(
     flags=re.DOTALL,
 )
 
+# Literal/comment tokenizer used only for locating the opening body brace:
+# it must NOT match braces (the blanked copy is searched for the first
+# real '{'), so it covers comments and quoted literals only.
+_LITERAL_ONLY_RE = re.compile(
+    r"//[^\n]*"
+    r"|/\*.*?\*/"
+    r'|"(?:\\.|[^"\\])*"'
+    r"|'(?:\\.|[^'\\])*'",
+    flags=re.DOTALL,
+)
+
 
 def _matching_brace(text: str, open_idx: int) -> int:
     """Return index of the '}' matching the '{' at open_idx.
@@ -99,7 +110,14 @@ def _iter_functions(text: str):
     """Yield (name, body) for each function with a braced body."""
     for m in FUNC_DEF_RE.finditer(text):
         name = m.group(1)
-        open_idx = text.find("{", m.end())
+        # Locate the opening body brace in comment- and literal-aware
+        # text: a '{' inside a doc comment or string literal between the
+        # signature and the real body must not be mistaken for the body
+        # opener.  The blanked copy keeps every character position, so
+        # the found offset maps back to the original text and the brace
+        # balance / body extraction use the original content.
+        blanked = _blank_literals_and_comments(text)
+        open_idx = blanked.find("{", m.end())
         if open_idx == -1:
             continue
         close_idx = _matching_brace(text, open_idx)
@@ -107,6 +125,17 @@ def _iter_functions(text: str):
             continue
         body = text[open_idx : close_idx + 1]
         yield name, body
+
+
+def _blank_literals_and_comments(text: str) -> str:
+    """Blank out comments, string literals, and char literals in-place.
+
+    Keeps every character position (replaced with spaces) so the
+    resulting offsets remain aligned with the original text.  Used only
+    to find the opening body brace; braces are preserved so the first
+    real '{' is discoverable.
+    """
+    return _LITERAL_ONLY_RE.sub(lambda m: " " * len(m.group(0)), text)
 
 
 def audit_dir(directory: Path) -> tuple[list[str], list[str]]:

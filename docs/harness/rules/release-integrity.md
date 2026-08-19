@@ -85,6 +85,16 @@ own objects. Do not copy provenance into every scenario record:
   and each scenario's evidence objects at their respective levels.
 - `make perf-evidence-check` — non-blocking report-only mode, validates the
   same invariant for PR visibility.
+- **Evidence-pack regeneration check (both gates above):** the gate must
+  regenerate the evidence pack twice from its retained inputs (raw report,
+  raw probe artifacts) and compare the regenerated pack and its digest with
+  the original values. `finalize_module_baseline.py` is the single
+  regeneration path; `evidence_gate.py` recomputes the raw artifact SHA-256
+  (`_verify_raw_digest`) and requires the finalized report to be
+  byte-identical to the raw report (minus `baseline_policy`), so running the
+  finalizer and the gate on the same retained inputs twice must yield the
+  same pack and the same digest. A mismatch indicates nondeterministic
+  generation or an unbound artifact and fails the gate (fail closed).
 - `python3 -m pytest tools/perf/tests/` — perf tooling test suite
   (692 tests), must pass.
 - Inspect `perf/baselines/module-baseline-092.json` `baseline_policy` and

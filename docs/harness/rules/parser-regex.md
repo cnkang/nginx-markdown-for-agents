@@ -66,9 +66,19 @@ Required:
   `del p` no longer removes a module binding, `global`/`nonlocal` are
   partially modeled (honored for delete routing) and otherwise conservative.
   Function/lambda defaults, decorators, return annotations, and parameter
-  Python evaluates annotations in the enclosing scope before the function name
+  annotations evaluate in the enclosing scope before the function name
   binds and before the body scope opens, matching Python's real
-  evaluation order.  Unknown RHS expressions produce DYNAMIC_VALUE (not
+  evaluation order.  Modules that import `from __future__ import annotations`
+  use postponed evaluation: their annotation AST nodes are string
+  `ast.Constant` nodes, which the visitor treats as inert — visiting them
+  performs no regex analysis and creates no bindings, matching the runtime
+  semantics where the annotation string is not evaluated.  Modules without
+  the future import analyze eagerly: the visitor walks their annotation
+  expressions (names, attribute accesses, and any embedded constants)
+  normally.  The detector therefore distinguishes the two modes implicitly
+  through the AST shape; postpone-mode annotation strings intentionally
+  produce no REVIEW.  Unknown RHS
+  expressions produce DYNAMIC_VALUE (not
   the old static binding).  Cross-module imports are NOT resolved (those
   resolve to REVIEW).
 - Tokenizer: `_merge_literal_atoms` preserves the last literal atom before a

@@ -65,8 +65,8 @@ verification families: 3
 ## Definition of Done
 
 - `resolve_spec.py` returns `PASS` for every checked spec or returns an explicitly documented `WARN_*` code with a recorded reason
-- matched verification families have been run and their outcomes are recorded in the evidence directory
-- repeated drift has either converged on the spec or escalated with concrete evidence attached to the escalation record
+- matched verification families have been run and their outcomes are recorded in the evidence directory — the concrete paths are `perf/reports/evidence-<version>.json` (perf evidence gate output; see `make perf-evidence-check`) and `docs/project/recent-git-harness-steering-analysis-*.md` (steering-analysis closeout reports)
+- repeated drift has either converged on the spec or escalated with concrete evidence attached to the escalation record — escalation records live in the user-local state carrier per `docs/harness/core.md` step 7 (reflection/promotion evidence), using the `harness-remediation` risk pack for closeout artifacts with stable finding IDs, final status, changed files, and verification evidence
 - the repo truth surfaces (`AGENTS.md`, `docs/harness/`, `tools/harness/`, `Makefile`, CI workflow) are updated in the same change set when harness behavior changes
 
 ## References

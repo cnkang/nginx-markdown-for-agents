@@ -646,7 +646,9 @@
         ".github/workflows/ci.yml",
         "tools/install.sh",
         "tools/ci/**",
-        "Makefile"
+        "Makefile",
+        "docs/releases/**",
+        "docs/releases/release-matrix.json"
       ],
       "keywords": [
         "release gate",

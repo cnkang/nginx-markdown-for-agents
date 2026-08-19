@@ -14,9 +14,12 @@ guard.  The defensive pattern required:
     }
 
 The detector is conservative: it reports REVIEW-level findings for
-element indexing of `->elts` (or an alias assigned from `->elts`)
-inside a loop that iterates `part->next`, when no NULL guard for the
-elts pointer appears in the surrounding function body.
+element indexing of `->elts` / `.elts` (or an alias assigned from
+`->elts` / `.elts`) inside a loop that iterates `part->next`, when no
+NULL guard for the elts pointer appears in the surrounding function
+body.  Both access forms are supported: an alias read
+(`headers = part->elts`) and a direct member index (`part->elts[i]` /
+`part.elts[i]`).
 
 Exit code is 1 only for hard violations under --strict, or when no
 source files are found.
@@ -35,7 +38,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DIR = REPO_ROOT / "components/nginx-module/src"
 
 # `foo->elts` or `foo.elts` access.
-ELTS_ACCESS_RE = re.compile(r"\b(\w+)\s*->\s*elts\b")
+ELTS_ACCESS_RE = re.compile(r"\b(\w+)\s*(?:->|\.)\s*elts\b")
 # Loop over part->next (chain traversal) signals.
 CHAIN_LOOP_RE = re.compile(
     r"\bpart\s*=\s*part\s*->\s*next\b|for\s*\([^)]*\bpart\b[^)]*->\s*next"
@@ -116,11 +119,26 @@ def audit_file(path: Path) -> list[str]:
 
 
 def _elts_holders(body: str) -> set[str]:
-    """Collect pointers holding part->elts, including aliases."""
-    holders = {m.group(1) for m in ELTS_ACCESS_RE.finditer(body)}
+    """Collect elts-member access expressions, including aliases.
+
+    Both the ``->elts`` and ``.elts`` access forms are detected.  For a
+    plain member read (``headers = part->elts``) the receiver variable
+    is recorded as the holder; for a direct member index
+    (``part->elts[i]`` / ``part.elts[i]``) the full member expression
+    is recorded instead, so direct indexing is audited against the elts
+    pointer itself and is not filtered out because the receiver happens
+    to be the chain-traversal variable ``part``.
+    """
+    holders: set[str] = set()
+    for m in ELTS_ACCESS_RE.finditer(body):
+        receiver = m.group(1)
+        if re.match(r"\s*\[", body[m.end():]):
+            holders.add(m.group(0).strip())
+        else:
+            holders.add(receiver)
     alias_re = re.compile(
         r"\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"
-        r"(?:[A-Za-z_][A-Za-z0-9_]*)\s*->\s*elts\b"
+        r"(?:[A-Za-z_][A-Za-z0-9_]*)\s*(?:->|\.)\s*elts\b"
     )
     holders.update(am.group(1) for am in alias_re.finditer(body))
     return {h for h in holders if h != "part"}

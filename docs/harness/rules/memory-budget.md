@@ -62,6 +62,15 @@ Required:
   a pool-internal pointer from `ngx_palloc`/`ngx_pcalloc`.  Conversely,
   a buffer allocated with `ngx_alloc` must never free via
   `ngx_pfree` — use `ngx_free` exclusively.
+- **Fixed-size pool buffers**: a buffer allocated once from the request
+  pool with `ngx_pnalloc`/`ngx_pcalloc` and never resized or
+  independently freed remains valid until pool teardown — it needs no
+  independent free at all. Only the rare eligible large-pool allocations
+  (allocations made from the large-block list,
+  which NGINX can return early) may use `ngx_pfree`; call it only on such pointers, and
+  handle its return value (`NGX_DECLINED` means the block was not
+  released because it is not a large-pool allocation). Never use
+  `ngx_pfree` as a substitute for `ngx_free` on heap pointers.
 - **Decompression finish workspace**: The zlib `finish()` path may
   need to grow its output buffer when compressed data expands beyond
   the initial allocation.  This workspace must be `ngx_alloc`-backed
