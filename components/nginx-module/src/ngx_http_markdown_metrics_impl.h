@@ -986,6 +986,15 @@ ngx_http_markdown_metrics_check_access(ngx_http_request_t *r)
         return NGX_HTTP_FORBIDDEN;
     }
 
+#if (NGX_HAVE_UNIX_DOMAIN)
+    if (r->connection->sockaddr->sa_family == AF_UNIX) {
+        /* UNIX-domain peers connect through a local socket path and
+         * cannot originate from a remote host, so the loopback-only
+         * boundary is inherently satisfied. */
+        return NGX_OK;
+    }
+#endif
+
     if (r->connection->sockaddr->sa_family == AF_INET) {
         const struct sockaddr_in *sin =
             (const struct sockaddr_in *) r->connection->sockaddr;

@@ -6,6 +6,12 @@
 #include "../../src/ngx_http_markdown_filter_module.h"
 #include "markdown_converter.h"
 
+/* Provide the content type literal that send_304 needs (the production
+ * symbol lives in headers_impl.h, which is not compiled into this test
+ * binary). */
+u_char ngx_http_markdown_content_type[] =
+    NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL;
+
 /* Define opaque handle for test stubs */
 struct MarkdownConverterHandle { int dummy; };
 

@@ -930,7 +930,10 @@ test_304_response_properties(void)
      * - Status: 304 (NGX_HTTP_NOT_MODIFIED)
      * - Body: absent (send_304 finalizes without body)
      * - Cache-Control: preserved from upstream (send_304 does not modify)
-     * - Last-Modified: preserved from upstream (send_304 does not modify)
+     * - Last-Modified: REMOVED by send_304 (Decision G: the converted
+     *   representation's weak validator must not describe the source
+     *   HTML mtime; ETag is the sole validator) — see conditional.c
+     *   send_304 and conversion_impl.h resolve_conditional_result
      */
 
     free_request(&r);

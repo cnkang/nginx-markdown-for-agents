@@ -1017,6 +1017,12 @@ typedef struct {
     struct {
         ngx_chain_t             *pending_output;
         ngx_flag_t               pending_has_data;
+        /* Fail-open delivery latch (Rule 38): set when a buffered
+         * fail-open send returns NGX_AGAIN (downstream backpressure) so
+         * the recovery pass-through can increment failopen_count after
+         * the downstream filter confirms delivery.  Mirrors the
+         * streaming path's pending_failopen_delivery latch. */
+        ngx_flag_t               failopen_delivery_pending;
     } fullbuffer;
 
     /* Threshold router path selection (NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
@@ -1041,7 +1047,6 @@ typedef struct {
      * back to static live-conf values and observe a different
      * configuration than the header phase (bind-once violation). */
     ngx_http_markdown_effective_conf_t  effective_conf_storage;
-    ngx_flag_t                          effective_conf_valid;
     ngx_http_markdown_effective_conf_t *effective_conf;
 
     /*

@@ -157,6 +157,8 @@ test_null_metrics_pointer_is_noop(void)
     ngx_http_markdown_metrics_record_postcommit_pending(4096);
     ngx_http_markdown_metrics_record_postcommit_copied_delivery(7);
     ngx_http_markdown_metrics_record_postcommit_abort();
+    ngx_http_markdown_metrics_record_postcommit_safe_finish();
+    ngx_http_markdown_metrics_record_terminal_abort();
 
     TEST_PASS("NULL metrics pointer is a no-op");
 }
