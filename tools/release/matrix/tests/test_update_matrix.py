@@ -760,7 +760,9 @@ def test_replace_canonical_dynamic_entries_normalizes_alias_rows():
     assert "nginx" not in dynamic[0]
     assert "os_type" not in dynamic[0]
     assert "arch" not in dynamic[0]
-    assert "support_tier" not in dynamic[0]
+    # support_tier is REQUIRED by the compatibility-document schema and
+    # is retained on existing rows (the alias row carries "supported").
+    assert dynamic[0]["support_tier"] == "supported"
 
 
 def test_replace_canonical_dynamic_entries_rejects_duplicate_identities():
@@ -1068,7 +1070,6 @@ def test_write_matrix_cleans_up_temp_on_failure(tmp_path, monkeypatch):
 DROPPED_CANONICAL_KEYS = {
     "nginx_channel",
     "test_level",
-    "support_tier",
     "release_blocking",
     "owner_workflow",
     "managed_by",
@@ -1082,6 +1083,7 @@ CANONICAL_REQUIRED_KEYS = {
     "libc",
     "target",
     "artifact_type",
+    "support_tier",
     "feature_manifest_digest",
     "abi_version",
 }
@@ -1184,3 +1186,7 @@ def test_canonical_dynamic_entry_existing_row_preserves_arch_key():
     assert row["abi_version"] == um._frozen_abi_version()
     assert not DROPPED_CANONICAL_KEYS.intersection(row)
     assert not {"nginx", "os_type"}.intersection(row)
+    # support_tier is REQUIRED by the compatibility-document schema and
+    # must be retained on existing rows (CRITICAL regression: it was
+    # previously dropped, producing schema-invalid rows).
+    assert row["support_tier"] == "supported"
