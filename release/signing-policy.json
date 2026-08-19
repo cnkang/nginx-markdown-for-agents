@@ -86,7 +86,7 @@
     "reference": "docs/guides/GPG_KEY_MANAGEMENT.md",
     "secret_storage": "GitHub Actions environment 'release-signing' secrets (GPG_PRIVATE_KEY, GPG_PASSPHRASE, GPG_KEY_ID); job-scoped to a dedicated signing job, injected only into the signing step and never exposed to build or test steps",
     "rotation": "Key rotation follows docs/guides/GPG_KEY_MANAGEMENT.md; rotated keys remain valid for verification of prior releases",
-    "revocation": "Revocation certificate location and announcement channel follow docs/guides/GPG_KEY_MANAGEMENT.md; artifacts previously signed by a compromised key are re-signed with the current key after fingerprint re-authentication"
+    "revocation": "Revocation certificate location and announcement channel follow docs/guides/GPG_KEY_MANAGEMENT.md; the revocation certificate MUST be published through the announced channel and packaging/nginx-markdown-for-agents-release.asc MUST be updated to the revoked state; signatures by an affected compromised key MUST be explicitly repudiated by release tag in the announcement; re-signing affected artifacts remains a separate remediation step performed only after fingerprint re-authentication"
   },
   "policy_reference_notes": [
     "Requirement 14 criterion 4: GPG for source/DEB/RPM after the pinned-key trust anchor is published; OCI signatures are a future Cosign/Sigstore requirement; checksum/provenance covers Homebrew without detached GPG",
