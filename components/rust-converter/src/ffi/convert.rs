@@ -197,9 +197,15 @@ pub(crate) fn convert_inner(
     let parse_start = Instant::now();
 
     // --- Pre-parse deadline check ---
-    // If the deadline is already expired (e.g., upstream processing consumed
-    // the budget), fail immediately without invoking the parser.
-    check_deadline(deadlines.parser, parse_start, ConversionError::ParseTimeout)?;
+    // If a deadline is already expired (e.g., upstream processing consumed
+    // the budget), fail immediately without invoking the parser.  The
+    // parser sub-deadline is measured from the pipeline entry
+    // (conversion_start), not from parse_start below: parse_start is
+    // created immediately before this check, so its elapsed time is ~0
+    // and the check could never fire — the intent is to bound
+    // pre-parse work (budget estimation, upstream delay) within the
+    // parser sub-limit too.
+    check_deadline(deadlines.parser, conversion_start, ConversionError::ParseTimeout)?;
     check_deadline(
         deadlines.overall,
         conversion_start,

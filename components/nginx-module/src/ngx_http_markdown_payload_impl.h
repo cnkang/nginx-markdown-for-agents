@@ -1252,6 +1252,7 @@ ngx_http_markdown_decompress_via_rust(
         (uintptr_t) input_size,
         format,
         (uintptr_t) conf->decompress.max_size,
+        (uint64_t) conf->limits.decompression_ratio,
         &result);
 
     if (ffi_rc != 0) {

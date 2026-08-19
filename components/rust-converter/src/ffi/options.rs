@@ -77,7 +77,6 @@ pub(crate) struct DecodedOptions<'a> {
     /// Unified memory budget (bytes). The full-buffer path applies it to
     /// generated Markdown output, and streaming/incremental paths apply it
     /// to their working-set budgets.
-    #[allow(dead_code)]
     pub(crate) memory_budget: u64,
     /// Raw chars-per-token from FFI options (before normalization).
     /// Retained for diagnostics/logging; all estimation paths use

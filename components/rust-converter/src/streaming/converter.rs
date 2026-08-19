@@ -94,6 +94,13 @@ pub struct StreamingConverter {
     commit_state: CommitState,
     /// Cooperative timeout deadline.
     deadline: Option<Instant>,
+    /// Cooperative parser-phase deadline (html5ever tokenization).
+    ///
+    /// Distinct from `deadline` (the overall conversion timeout): the
+    /// parser deadline bounds only the tokenizer phase, matching the
+    /// full-buffer path where `parse_timeout` limits parsing while
+    /// `conversion_timeout` bounds the whole pipeline.
+    parser_deadline: Option<Instant>,
     /// Conversion statistics.
     stats: StreamingStats,
     /// Total bytes of Markdown emitted so far (for PostCommitError reporting).
@@ -239,6 +246,7 @@ impl StreamingConverter {
             chars_per_token: clamp_chars_per_token(chars_per_token),
             commit_state: CommitState::PreCommit,
             deadline: None,
+            parser_deadline: None,
             stats: StreamingStats::default(),
             bytes_emitted: 0,
             metadata: PageMetadata::new(),
@@ -301,6 +309,19 @@ impl StreamingConverter {
         // (effectively infinite timeout) rather than setting an
         // already-passed deadline that would trigger immediate timeout.
         self.deadline = Instant::now().checked_add(timeout);
+    }
+
+    /// Set a cooperative parser-phase deadline.
+    ///
+    /// Bounds only the html5ever tokenization phase with `parse_timeout`,
+    /// distinct from the overall conversion `deadline`.  The converter
+    /// checks this deadline at the start of each tokenizer slice in
+    /// `feed_chunk` and at `finalize`; if the deadline has passed those
+    /// calls return [`ConversionError::ParseTimeout`]. An overflow of
+    /// `Instant::now() + timeout` leaves the deadline unset (no limit),
+    /// matching `set_timeout`.
+    pub fn set_parser_timeout(&mut self, timeout: Duration) {
+        self.parser_deadline = Instant::now().checked_add(timeout);
     }
 
     /// Set the flush threshold for the emitter.
@@ -565,6 +586,7 @@ impl StreamingConverter {
         self.charset_transcoded_bytes = 0;
 
         // 3. Finish tokenizer (signal end-of-input)
+        self.check_parser_timeout()?;
         self.update_peak_memory().map_err(|e| self.wrap_error(e))?;
         let final_batch = self.tokenizer.finish().map_err(|e| self.wrap_error(e))?;
 
@@ -690,6 +712,7 @@ impl StreamingConverter {
         while offset < input.len() {
             // Charge the full conservative tokenizer envelope before the next
             // bounded slice is handed to html5ever.
+            self.check_parser_timeout()?;
             self.update_peak_memory().map_err(|e| self.wrap_error(e))?;
             let step = self
                 .tokenizer
@@ -781,6 +804,20 @@ impl StreamingConverter {
         let utf8_str = match std::str::from_utf8(valid) {
             Ok(s) => std::borrow::Cow::Borrowed(s),
             Err(_) => {
+                /* Divergence fix: the full-buffer path rejects invalid
+                 * UTF-8 with EncodingError (parser.rs decode_html_to_utf8);
+                 * streaming previously replaced it with U+FFFD, silently
+                 * corrupting the content.  Unify on the fail-closed
+                 * behavior.  Only at EOF is the remaining tail a complete
+                 * document: mid-stream slices can legally end with an
+                 * incomplete code point (handled by split_utf8_tail), so
+                 * the strict check is deferred to the final input. */
+                if at_eof {
+                    return Err(self.wrap_error(ConversionError::EncodingError(
+                        "Invalid UTF-8 in HTML input (no declared charset)"
+                            .to_string(),
+                    )));
+                }
                 let lossy_upper_bound = valid.len().checked_mul(3).ok_or_else(|| {
                     self.wrap_error(ConversionError::BudgetExceeded {
                         stage: "lossy_utf8 (integer overflow)".to_string(),
@@ -1031,6 +1068,29 @@ impl StreamingConverter {
                 });
             }
             return Err(ConversionError::Timeout);
+        }
+        Ok(())
+    }
+
+    /// Checks whether the converter's parser-phase deadline has expired.
+    ///
+    /// Bounds only the html5ever tokenization phase (`parse_timeout`),
+    /// distinct from the overall conversion `deadline`.  Called at the
+    /// start of each tokenizer slice; a parser overrun reports
+    /// [`ConversionError::ParseTimeout`] with post-commit wrapping when
+    /// headers are already committed.
+    fn check_parser_timeout(&self) -> Result<(), ConversionError> {
+        if let Some(deadline) = self.parser_deadline
+            && Instant::now() >= deadline
+        {
+            if matches!(self.commit_state, CommitState::PostCommit) {
+                return Err(ConversionError::PostCommitError {
+                    reason: "parser timeout exceeded".to_string(),
+                    bytes_emitted: self.bytes_emitted,
+                    original_code: ConversionError::ParseTimeout.code(),
+                });
+            }
+            return Err(ConversionError::ParseTimeout);
         }
         Ok(())
     }
@@ -1673,6 +1733,33 @@ mod tests {
         out
     }
 
+    /// Like `convert_with_splits`, but returns the error code instead of
+    /// panicking, for fixtures that are invalid UTF-8 under the strict
+    /// (fail-closed) contract.
+    fn convert_with_splits_result(
+        html: &[u8],
+        split_sizes: &[usize],
+    ) -> Result<(), u32> {
+        let mut conv = make_converter();
+        let mut cursor = 0;
+
+        for &size in split_sizes {
+            if cursor >= html.len() {
+                break;
+            }
+            let end = cursor.saturating_add(size).min(html.len());
+            conv.feed_chunk(&html[cursor..end])
+                .map_err(|e| e.code())?;
+            cursor = end;
+        }
+
+        if cursor < html.len() {
+            conv.feed_chunk(&html[cursor..]).map_err(|e| e.code())?;
+        }
+
+        conv.finalize().map(|_| ()).map_err(|e| e.code())
+    }
+
     #[test]
     fn test_converter_uses_charset_sniff_budget() {
         let budget = MemoryBudget {
@@ -2278,6 +2365,50 @@ mod tests {
         let result = conv.feed_chunk(b"<p>more</p>");
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code(), 8); // PostCommitError
+    }
+
+    #[test]
+    fn test_parser_timeout_precommit() {
+        let mut conv = make_converter();
+        // A zero-duration parser deadline is already expired: the
+        // tokenizer slice must report ParseTimeout, distinct from the
+        // overall conversion Timeout.
+        conv.parser_deadline = Some(
+            Instant::now()
+                .checked_sub(Duration::from_secs(1))
+                .unwrap_or_else(Instant::now),
+        );
+        let result = conv.feed_chunk(b"<p>test</p>");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), 10); // ParseTimeout
+    }
+
+    #[test]
+    fn test_parser_timeout_postcommit() {
+        let mut conv = make_converter();
+        // Transition to PostCommit with output, then expire the parser
+        // deadline: the error must surface as PostCommitError (8) with
+        // the parse-timeout original code, not a bare ParseTimeout.
+        let output = conv.feed_chunk(b"<h1>Title</h1>").unwrap();
+        assert!(!output.markdown.is_empty() || matches!(conv.commit_state, CommitState::PreCommit));
+        conv.commit_state = CommitState::PostCommit;
+        conv.bytes_emitted = 10;
+        conv.parser_deadline = Some(
+            Instant::now()
+                .checked_sub(Duration::from_secs(1))
+                .unwrap_or_else(Instant::now),
+        );
+        let result = conv.feed_chunk(b"<p>more</p>");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), 8); // PostCommitError wrapping ParseTimeout
+    }
+
+    #[test]
+    fn test_parser_timeout_zero_disabled() {
+        // No parser deadline set: feed succeeds normally.
+        let mut conv = make_converter();
+        let result = conv.feed_chunk(b"<p>ok</p>");
+        assert!(result.is_ok(), "no parser deadline must not time out");
     }
 
     #[test]
@@ -3383,9 +3514,16 @@ mod tests {
             assert_eq!(conv.utf8_tail, tail);
             assert!(conv.utf8_tail.len() <= 3);
 
-            conv.process_utf8_bytes(&[], true)
-                .expect("EOF must flush the final incomplete sequence");
-            assert!(conv.utf8_tail.is_empty());
+            /* A multi-byte sequence truncated at EOF is invalid UTF-8 for
+             * the document as a whole; the strict (fail-closed) contract
+             * matches the full-buffer path (decode_html_to_utf8 returns
+             * EncodingError on invalid UTF-8 with a UTF-8 declaration). */
+            let rc = conv.process_utf8_bytes(&[], true);
+            assert!(rc.is_err(), "truncated code point at EOF must fail");
+            assert_eq!(
+                rc.unwrap_err().code(),
+                ConversionError::EncodingError("".to_string()).code()
+            );
         }
     }
 
@@ -3441,9 +3579,11 @@ mod tests {
             let _ = conv.feed_chunk(&input[cursor..]);
             assert!(conv.utf8_tail.len() <= 3);
         }
-        conv.process_utf8_bytes(&[], true)
-            .expect("EOF must flush the minimized regression tail");
-        assert!(conv.utf8_tail.is_empty());
+        /* A truncated code point at EOF (or invalid UTF-8) is now a
+         * fail-closed EncodingError, matching the full-buffer path.  The
+         * regression's point is that the converter must not panic or
+         * loop; an error return is the correct, graceful outcome. */
+        let _ = conv.process_utf8_bytes(&[], true);
         let _ = conv.finalize();
     }
 
@@ -3474,9 +3614,10 @@ mod tests {
                     .expect("boundary split must not fail precommit");
                 assert!(conv.utf8_tail.len() <= 3);
             }
-            conv.process_utf8_bytes(&[], true)
-                .expect("EOF must flush every final UTF-8 tail");
-            assert!(conv.utf8_tail.is_empty());
+            /* Trailing truncated code point: fail-closed at EOF, matching
+             * the full-buffer EncodingError contract. */
+            let rc = conv.process_utf8_bytes(&[], true);
+            assert!(rc.is_err(), "truncated code point at EOF must fail");
         }
     }
 
@@ -3628,6 +3769,10 @@ mod tests {
     #[test]
     fn test_bom_split_across_chunk_boundary() {
         // Input contains a BOM (0xEF 0xBB 0xBF) at byte 79, split at 80.
+        // The trailing bytes are invalid UTF-8 (a truncated code point),
+        // so under the fail-closed contract both paths must reject the
+        // document with the same EncodingError — the invariant is that
+        // chunk-boundary splitting never changes the outcome.
         let data: &[u8] = &[
             0x0a, 0x0a, 0x05, 0x0a, 0x0a, 0x55, 0xbd, 0x21, 0x0a, 0x0a, 0x13, 0x0a, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x2c, 0xbf, 0xbd, 0x00, 0xbe, 0xbe, 0xbe, 0xbe, 0xbe, 0xbe, 0xbe,
@@ -3638,11 +3783,15 @@ mod tests {
             0x0a, 0xed,
         ];
         let html = &data[1..]; // skip seed byte
-        let single = convert_with_splits(html, &[html.len()]);
-        let chunked = convert_with_splits(html, &[80, 5]);
+        let single_err = convert_with_splits_result(html, &[html.len()]);
+        let chunked_err = convert_with_splits_result(html, &[80, 5]);
         assert_eq!(
-            single, chunked,
-            "BOM split across chunk boundary must not change output"
+            single_err, chunked_err,
+            "BOM split across chunk boundary must not change the outcome"
+        );
+        assert!(
+            single_err.is_err(),
+            "trailing truncated UTF-8 must fail closed on both paths"
         );
     }
 

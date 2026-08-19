@@ -353,7 +353,7 @@ fn decode_layer(
         Encoding::Br => crate::decompress::Format::Brotli,
         Encoding::Identity => unreachable!("identity is skipped above"),
     };
-    crate::decompress::decompress_bounded(input, format, limits.max_output)
+    crate::decompress::decompress_bounded(input, format, limits.max_output, limits.ratio)
         .map_err(map_decomp_error)
         .map(|result| result.output)
 }
@@ -400,6 +400,7 @@ fn map_decomp_error(e: crate::decompress::DecompError) -> ChainDecodeError {
             ChainDecodeError::TruncatedInput(msg)
         }
         crate::decompress::DecompError::IoError(msg) => ChainDecodeError::IoError(msg),
+        crate::decompress::DecompError::RatioExceeded => ChainDecodeError::RatioExceeded,
     }
 }
 
@@ -778,7 +779,7 @@ mod tests {
     fn chain_decode_matches_single_decode() {
         let original = b"<html><body>parity</body></html>";
         let compressed = gzip_compress(original);
-        let single = decompress_bounded(&compressed, Format::Gzip, 10 * 1024 * 1024)
+        let single = decompress_bounded(&compressed, Format::Gzip, 10 * 1024 * 1024, 0)
             .unwrap()
             .output;
         let chained =
