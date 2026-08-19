@@ -13,7 +13,7 @@ mode. Use it to understand behavioral differences before enabling streaming.
 | Content negotiation (Accept header) | ✅ | ✅ | Works identically in both modes |
 | HTML-to-Markdown conversion | ✅ | ✅ | Same output quality |
 | ETag generation | ✅ | ❌ | No ETag for committed streaming responses |
-| Conditional requests (304) | ✅ | ❌ | Requires ETag; streaming bypasses |
+| Conditional requests (304) | ✅ | ⚠️ | Only If-None-Match/ETag validation requires full buffering; `ims_only` remains streaming-compatible via upstream Last-Modified and NGINX If-Modified-Since handling. Streaming mode is therefore not blanket-incompatible with conditional requests — it cannot validate via ETag, but IMS validation still works |
 | Fail-open (pre-commit) | ✅ | ✅ | Streaming: configurable via `markdown_error_policy` |
 | Fail-open (post-commit) | N/A | ❌ | Post-commit errors produce truncated output |
 | `parser_memory` budget | N/A | ✅ | Rust parser allocation bound; streaming path only |
@@ -40,8 +40,14 @@ mode. Use it to understand behavioral differences before enabling streaming.
 
 Full-buffer mode computes an ETag from the complete Markdown output and supports
 `If-None-Match` / `If-Modified-Since` for 304 responses. Streaming mode commits
-the response headers before the full output is available, so ETag generation and
-conditional request handling are not possible.
+the response headers before the full output is available, so ETag generation
+and `If-None-Match`-based conditional validation are not possible.
+
+Only ETag validation requires full buffering. With `markdown_cache_validation
+ims_only`, streaming remains compatible: the module forwards the upstream
+`Last-Modified` header and NGINX's standard `If-Modified-Since` handling
+performs the 304 decision, so the ims_only mode does not force the full-buffer
+path.
 
 **Known constraint (user-confirmed):** the same URL can therefore
 yield an ETag for small responses (full-buffer path) and no ETag for large

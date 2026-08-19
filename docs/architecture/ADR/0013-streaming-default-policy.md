@@ -40,6 +40,15 @@ The operator may override this default with `markdown_streaming off`
 every eligible response, see ADR-0023 for the exact contract term).
 `markdown_streaming auto` retains the default policy.
 
+**`markdown_cache_validation full` interaction (0.9.2 contract, see
+ADR-0023):** `markdown_cache_validation full` combined with
+`markdown_streaming auto` disables streaming for that request and uses
+full-buffer conversion (config-time warning, runtime reason
+`streaming_block_full_cache_validation`). `markdown_streaming force`
+combined with `markdown_cache_validation full` is a configuration error
+rejected at `nginx -t`. Only `ims_only` and `off` cache-validation modes
+are streaming-compatible.
+
 The threshold increase from 32K (0.6.0 ADR-0007) to 1m (0.8.0 RFC 0008)
 reflects the goal of reducing regression risk from the new true streaming code
 path: only responses large enough to materially benefit from bounded-memory

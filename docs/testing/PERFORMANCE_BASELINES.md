@@ -59,9 +59,13 @@ environment-consistency validation only when present.
 
 The canonical module benchmark retains response probes at
 `perf/baselines/module-baseline-092-raw-probes/`, derived from the raw report
-output path. The workflow validates non-empty `.headers`, `.body`, and `.json`
-files for all eight scenarios. It verifies each probe's verdict, curl exit code,
-and body SHA-256. It validates the complete response-correctness schema
+output path. The workflow validates `.headers`, `.body`, and `.json` files
+for all eight scenarios. Each scenario must produce a non-empty `.headers`
+and `.json` file. The `.body` file must **exist** for every scenario, but an
+empty body is valid for bodyless responses (for example 304/HEAD), so the
+workflow must not require non-zero body content. It verifies each probe's
+verdict, curl exit code, and body SHA-256 (the empty-body digest is the
+SHA-256 of zero bytes). It validates the complete response-correctness schema
 (`http_status`, normalized `headers`, content metadata, body metadata,
 correctness markers, verdict, failure reason, and artifact names). It parses
 the final HTTP response block from each retained `.headers` artifact and
@@ -281,9 +285,15 @@ Memory peak values in this document come from `tools/perf/memory_observer.sh`. T
 
 ### Linux — `os_reported_peak`
 
-On Linux, the script reads `VmHWM` from `/proc/<pid>/status` after the target process exits.
-`VmHWM` is the kernel-tracked high-water mark for resident set size over the entire process lifetime.
-This exact peak value comes from the OS.
+On Linux, the observer reads `VmHWM` from `/proc/<pid>/status` **before the
+target process exits or the OS reaps it**: the observer stores the `VmHWM` value
+the first time the process status becomes unreadable (process gone) and
+reports that stored value as `os_reported_peak`. `VmHWM` is the
+kernel-tracked high-water mark for resident set size over the entire process
+lifetime. The entry disappears once the OS reaps the process, so the observer
+captures the value at exit time, not after. The observer also polls `VmRSS`
+during the run as a fallback when `VmHWM` cannot be read at exit (the caller
+has already reaped the process). This exact peak value comes from the OS.
 
 ### macOS — `sampled_peak`
 

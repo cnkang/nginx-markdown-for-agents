@@ -257,12 +257,13 @@ curl -s http://localhost/nginx-markdown/diagnostics \
 import json, sys
 d = json.load(sys.stdin)
 assert d.get("version") == "0.9.2", f"version={d.get(\"version\")!r}"
-reasons = {r.get("reason") for r in d.get("recent_decisions", [])}
+recent = d.get("recent_decisions")
+assert isinstance(recent, list), f"recent_decisions is not a list: {type(recent).__name__}"
+reasons = [r.get("reason") for r in recent]
 # Recent decisions may not yet contain a bypass_no_transform entry (the
-# decision log is bounded and depends on traffic). Issue a deterministic
-# no-transform probe first, or validate that every returned entry exposes
-# a reason field rather than requiring a specific observed outcome.
-assert reasons, f"no recent_decisions entries returned: {sorted(reasons)}"
+# decision log is bounded and depends on traffic). Every returned entry
+# must expose a reason field; an empty log is acceptable because no
+# specific observed outcome is required.
 assert all(r is not None for r in reasons), "entry missing reason field"
 print("diagnostics contract verified")
 '

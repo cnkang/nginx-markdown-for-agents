@@ -122,6 +122,7 @@ nginx -t && nginx -s reload
 
 ```bash
 # Check metrics: zero_copy_output_total should stop incrementing
+# (0.9.1 only; 0.9.2 removed the counter — see the note below)
 curl -s http://localhost/markdown-metrics | \
   grep -E "zero_copy_output_total|copied_output_total"
 
@@ -132,6 +133,12 @@ curl -s http://localhost/markdown-metrics | \
 # zero_copy_output_total should be unchanged
 # copied_output_total should be incrementing
 ```
+
+> **0.9.2 note:** the 0.9.2 release removed `zero_copy_output_total` with the
+> `markdown_streaming_zero_copy` directive. The 0.9.2 metrics table carries
+> only `copied_output_total` (see [prometheus-metrics.md](prometheus-metrics.md)
+> for the frozen 12-family list). The 0.9.1 steps above stay for
+> rollback verification on the 0.9.1 release line only.
 
 **How it works:**
 

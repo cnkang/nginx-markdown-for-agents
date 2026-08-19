@@ -231,17 +231,28 @@ Request arrives
     │      parser_memory=, not this directive
     │
     ├─ markdown_limits conversion_timeout= / parser_timeout= post-parse check
-    │   └─ FAIL → pass-through, reason: timeout
+    │   └─ FAIL → outcome failed_open|failed_closed (per error policy), category: timeout
     │
     ├─ DOM traversal with cooperative checkpoints
     │   ├─ Every 100 nodes: check_timeout() against the earlier of conversion_timeout= and parser_timeout=
-    │   │   └─ FAIL → pass-through, reason: timeout
+    │   │   └─ FAIL → outcome failed_open|failed_closed (per error policy), category: timeout
     │   └─ Memory budget checks (streaming path)
-    │       └─ FAIL → pass-through, reason: budget_exceeded
+    │       └─ FAIL → outcome failed_open|failed_closed (per error policy), category: budget_exceeded
     │
     └─ Output normalization + final timeout check (earlier of conversion_timeout= and parser_timeout=)
-        └─ FAIL → pass-through, reason: timeout
+        └─ FAIL → outcome failed_open|failed_closed (per error policy), category: timeout
 ```
+
+The failure branches use the canonical lowercase codes from
+[DECISION_CHAIN.md](DECISION_CHAIN.md): the **primary outcome** is
+`failed_open` (with `markdown_error_policy pass`) or `failed_closed`
+(with `fail_closed`/`status N`), and the **failure category** is
+`timeout` or `budget_exceeded` (also `memory_budget_exceeded` for the
+`conversion_memory` cap). The category appears as the `reason` label on
+`nginx_markdown_requests_total`. The outcome appears in the `outcome`
+label. Both labels are lowercase canonical values — the internal
+converter constants (`PARSE_TIMEOUT`, `PARSE_BUDGET_EXCEEDED`) are not
+the public labels.
 
 ### Limit Priority
 

@@ -71,7 +71,7 @@ These paths build a complete response from scratch. There is no upstream
 |------|---------------|
 | Metrics endpoint (`metrics_impl.h`) | full-response synthesis (subrequest) |
 | Diagnostics endpoint (`diagnostics.c`) | full-response synthesis (subrequest) |
-| Stream post-commit error response (`stream_postcommit.c`) | full-response synthesis (error path) |
+| Stream post-commit error response (`stream_postcommit.c`) | post-commit error handling **only after headers are already committed**: it may send a terminal closing chain (empty `last_buf` or safe-finish closing bytes) over the already-committed response. It MUST NOT synthesize a new error body, MUST NOT replay the original content, MUST NOT replace the status, and MUST NOT call `ngx_http_send_header()` a second time. Pre-commit errors never enter this path — they follow `markdown_error_policy` instead |
 
 **Category 2 — Post-plan mutation of an upstream response:**
 These operations mutate headers on an existing upstream response after the
@@ -181,5 +181,6 @@ Kang
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-19 | Hermes | Clarify stream_postcommit exception: post-commit terminal closing only, never a synthesized error body, replay, status replacement, or second send_header |
 | 0.9.0 | 2026-07-02 | Kang | Documented atomic scope boundary: core plan vs post-plan best-effort with hard abort |
 | 0.9.0 | 2026-06-30 | Kang | Initial ADR — prepare/commit split, special-field atomicity, exception table, post-commit boundary |

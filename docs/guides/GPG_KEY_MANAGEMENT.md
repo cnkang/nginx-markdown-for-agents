@@ -200,9 +200,11 @@ Update the HTTPS distribution endpoint to serve the combined key file.
 #### Step 3: Sign New Packages with New Key
 
 Update CI/CD secrets (see Section 5) to use the new key for all new package
-builds:
+builds. Export only the armored signing subkey of the new key with the exact
+`<fingerprint>!` selector, never the primary secret key, and store that
+export in `GPG_PRIVATE_KEY`:
 
-- Update `GPG_PRIVATE_KEY` secret with new private key
+- Export the new signing subkey (`gpg --armor --export-secret-subkeys '<NEW_SIGNING_SUBKEY_FINGERPRINT>!' > private-signing-subkey.asc`, see Section 5 for the full command) and update the `GPG_PRIVATE_KEY` secret with that export
 - Update `GPG_PASSPHRASE` secret with new passphrase
 - Update `GPG_KEY_ID` secret with the new signing-subkey fingerprint
 
@@ -309,6 +311,13 @@ The `sign-and-publish.yml` workflow uses these secrets to:
 3. Sign all `.deb` and `.rpm` packages with `dpkg-sig` and `rpm --addsign`
 4. Sign APT repository metadata (`Release.gpg`, `InRelease`)
 5. Sign YUM repository metadata (`repomd.xml.asc`)
+
+Steps 4–5 are **future/planned**: they run only when the workflow's
+repository-metadata signing job executes for the planned self-hosted APT/YUM
+repositories (the current workflow dispatches it after package signing, but
+no public APT/YUM channel exists yet, so repository metadata is not consumed
+in production). They are not active requirements for the current GitHub
+Release DEB/RPM channel (see the Overview).
 
 ### Verifying CI Signing
 
