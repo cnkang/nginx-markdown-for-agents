@@ -737,10 +737,13 @@ jobs:
             exit 1
           fi
 
-          case "${MATRIX_ARCH}" in
+          # Map arch for tarball naming (amd64→x86_64, arm64→aarch64).
+          # Use NFPM_ARCH (exported to GITHUB_ENV by the pkg-env step) —
+          # MATRIX_ARCH was only a step-local env var and is undefined here.
+          case "${NFPM_ARCH}" in
             amd64) TARBALL_ARCH="x86_64" ;;
             arm64) TARBALL_ARCH="aarch64" ;;
-            *) echo "ERROR: Unsupported architecture: ${MATRIX_ARCH}" >&2; exit 1 ;;
+            *) echo "ERROR: Unsupported architecture: ${NFPM_ARCH}" >&2; exit 1 ;;
           esac
 
           TARBALL_NAME="ngx_http_markdown_filter_module-${NGINX_VERSION}-glibc-${TARBALL_ARCH}.tar.gz"
