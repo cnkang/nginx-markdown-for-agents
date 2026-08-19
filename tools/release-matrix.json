@@ -52,7 +52,7 @@
       "artifact_type": "dynamic-module",
       "test_level": "docker-validation",
       "support_tier": "supported",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-binaries.yml",
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
       "abi_version": 2
@@ -80,7 +80,7 @@
       "artifact_type": "dynamic-module",
       "test_level": "docker-validation",
       "support_tier": "supported",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-binaries.yml",
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
       "abi_version": 2
@@ -220,7 +220,7 @@
       "artifact_type": "dynamic-module",
       "test_level": "docker-validation",
       "support_tier": "supported",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-binaries.yml",
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
       "abi_version": 2
@@ -248,7 +248,7 @@
       "artifact_type": "dynamic-module",
       "test_level": "docker-validation",
       "support_tier": "supported",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-binaries.yml",
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
       "abi_version": 2
@@ -360,7 +360,7 @@
       "artifact_type": "dynamic-module",
       "test_level": "docker-validation",
       "support_tier": "supported",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-binaries.yml",
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
       "abi_version": 2
@@ -388,7 +388,7 @@
       "artifact_type": "dynamic-module",
       "test_level": "docker-validation",
       "support_tier": "supported",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-binaries.yml",
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
       "abi_version": 2
@@ -472,7 +472,7 @@
       "artifact_type": "dynamic-module",
       "test_level": "docker-validation",
       "support_tier": "supported",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-binaries.yml",
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
       "abi_version": 2
@@ -500,7 +500,7 @@
       "artifact_type": "dynamic-module",
       "test_level": "docker-validation",
       "support_tier": "supported",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-binaries.yml",
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
       "abi_version": 2
@@ -640,7 +640,7 @@
       "artifact_type": "dynamic-module",
       "test_level": "docker-validation",
       "support_tier": "supported",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-binaries.yml",
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
       "abi_version": 2
@@ -668,7 +668,7 @@
       "artifact_type": "dynamic-module",
       "test_level": "docker-validation",
       "support_tier": "supported",
-      "release_blocking": false,
+      "release_blocking": true,
       "owner_workflow": ".github/workflows/release-binaries.yml",
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
       "abi_version": 2
