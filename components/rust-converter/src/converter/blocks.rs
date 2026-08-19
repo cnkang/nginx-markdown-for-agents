@@ -204,6 +204,66 @@ impl MarkdownConverter {
         Ok(())
     }
 
+    /// Compute the exact byte length that `format_list_item_lines` will
+    /// append for `content`, including the list marker, base indentation,
+    /// continuation indentation, and trailing newlines.  Mirrors the
+    /// rendering logic so callers can validate the output budget with
+    /// checked arithmetic before mutating the output buffer.
+    fn format_list_item_rendered_len(
+        content: &str,
+        depth: usize,
+        ordered: bool,
+    ) -> usize {
+        let base_indent_len = depth * 2;
+        let marker_len = if ordered { 3 } else { 2 };
+        let continuation_indent_len = base_indent_len + marker_len;
+        let base_indent = "  ".repeat(depth);
+
+        let trimmed = content.trim_matches('\n');
+        if trimmed.is_empty() {
+            return base_indent_len + marker_len + 1;
+        }
+
+        let mut total = 0usize;
+        for (index, line) in trimmed.lines().enumerate() {
+            if index == 0 {
+                total += base_indent_len + marker_len;
+                let first_trimmed = line.trim_start();
+                if first_trimmed.starts_with("- ")
+                    || first_trimmed.starts_with("* ")
+                    || first_trimmed.starts_with("1. ")
+                {
+                    // Blank line after our marker, then the content with
+                    // continuation indentation unless already indented.
+                    total += 1;
+                    if !line.is_empty() {
+                        let already_indented = (!base_indent.is_empty()
+                            && line.starts_with(&base_indent))
+                            || line.starts_with(' ')
+                            || line.starts_with('\t');
+                        if !already_indented {
+                            total += continuation_indent_len;
+                        }
+                        total += line.len() + 1;
+                    }
+                    continue;
+                }
+            } else if !line.is_empty() {
+                let already_indented = (!base_indent.is_empty()
+                    && line.starts_with(&base_indent))
+                    || line.starts_with(' ')
+                    || line.starts_with('\t');
+                if !already_indented {
+                    total += continuation_indent_len;
+                }
+            }
+
+            total += line.len() + 1;
+        }
+
+        total
+    }
+
     /// Handle list elements (ul/ol) with optional timeout context.
     pub(super) fn handle_list_with_context(
         &self,
@@ -323,10 +383,14 @@ impl MarkdownConverter {
             }
 
             if let Some(context) = ctx.as_deref_mut() {
+                let rendered_len = Self::format_list_item_rendered_len(
+                    &item_output, depth, ordered,
+                );
                 let projected_len =
-                    output.len().checked_add(item_output.len()).ok_or_else(|| {
+                    output.len().checked_add(rendered_len).ok_or_else(|| {
                         ConversionError::MemoryLimit(
-                            "generated Markdown list output length overflow".to_string(),
+                            "generated Markdown list output length overflow"
+                                .to_string(),
                         )
                     })?;
                 context.check_output_budget(projected_len)?;
