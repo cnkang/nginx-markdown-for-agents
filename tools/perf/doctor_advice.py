@@ -2,7 +2,7 @@
 """Performance Doctor Advice Tool.
 
 Analyzes nginx-markdown module metrics and produces actionable tuning
-recommendations for operators. Implements 7 rules (D01-D07) mapping metric
+recommendations for operators. Implements 6 rules (D01-D06) mapping metric
 patterns to severity-tagged advice.
 
 Requirements: Python 3.8+ stdlib only — no external pip dependencies.
@@ -176,7 +176,7 @@ def _get_metric_path(metrics: Dict[str, Any], *path: str) -> Optional[float]:
 
 
 # ---------------------------------------------------------------------------
-# Rule Engine — D01 through D07
+# Rule Engine — D01 through D06
 # ---------------------------------------------------------------------------
 
 SEVERITY_ORDER = {"info": 0, "warn": 1, "critical": 2}
@@ -260,13 +260,6 @@ RULE_METRICS = {
         "metric_source": {
             "pending_output_high_watermark_bytes": _SOURCE_PERF_SPEC,
             "streaming_buffer_budget": _SOURCE_EXISTING,
-        },
-    },
-    "D07": {
-        "required": ["copied_output_total", "zero_copy_output_total"],
-        "metric_source": {
-            "copied_output_total": _SOURCE_PERF_SPEC,
-            "zero_copy_output_total": _SOURCE_PERF_SPEC,
         },
     },
 }
@@ -540,66 +533,8 @@ def _evaluate_d06(metrics: Dict[str, Any]) -> RuleResult:
     return RuleResult("D06")
 
 
-def _evaluate_d07(metrics: Dict[str, Any]) -> RuleResult:
-    """D07: High copied vs zero-copy output ratio (when zero-copy enabled).
 
-    Pattern: copied_output_total >> zero_copy_output_total (>5:1)
-    """
-    copied = _get_metric(metrics, "copied_output_total")
-    zero_copy = _get_metric(metrics, "zero_copy_output_total")
-
-    if copied is None or zero_copy is None:
-        missing = []
-        if copied is None:
-            missing.append("copied_output_total")
-        if zero_copy is None:
-            missing.append("zero_copy_output_total")
-        return RuleResult(
-            "D07", skipped=True, skip_reason=f"metric missing: {', '.join(missing)}"
-        )
-
-    # If zero_copy is 0, check if it's simply disabled (no zero-copy attempts)
-    # When zero-copy is disabled entirely, both counters may be present but
-    # zero_copy stays at 0 — we skip the rule in that case since the feature
-    # isn't enabled.
-    if zero_copy == 0 and copied == 0:
-        return RuleResult("D07")
-
-    if zero_copy == 0:
-        # Feature may not be enabled; skip if copied also low
-        if copied <= 0:
-            return RuleResult("D07")
-        ratio_str = f"{int(copied)}:0"
-        triggered = True
-    else:
-        ratio = copied / zero_copy
-        ratio_str = f"{ratio:.1f}:1"
-        triggered = ratio > 5.0
-
-    if triggered:
-        return RuleResult(
-            "D07",
-            finding=Finding(
-                rule_id="D07",
-                severity="info",
-                message=(
-                    f"Copied vs zero-copy output ratio = {ratio_str}"
-                ),
-                advice=(
-                    "Most output uses buffer copies instead of zero-copy. "
-                    "Review response eligibility, terminal-buffer ownership, "
-                    "and downstream backpressure; zero-copy selection is internal."
-                ),
-                metrics_used={
-                    "copied_output_total": copied,
-                    "zero_copy_output_total": zero_copy,
-                },
-            ),
-        )
-    return RuleResult("D07")
-
-
-# Rule registry (ordered D01-D07)
+# Rule registry (ordered D01-D06)
 _RULES: List[Any] = [
     _evaluate_d01,
     _evaluate_d02,
@@ -607,7 +542,6 @@ _RULES: List[Any] = [
     _evaluate_d04,
     _evaluate_d05,
     _evaluate_d06,
-    _evaluate_d07,
 ]
 
 

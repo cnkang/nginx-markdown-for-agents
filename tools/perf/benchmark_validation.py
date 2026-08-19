@@ -259,7 +259,6 @@ def merge_diagnostics_metrics(
     field_map = {
         "streaming_requests_total": (streaming, "requests_total"),
         "precommit_failopen_total": (streaming, "precommit_failopen_total"),
-        "zero_copy_output_total": (perf, "zero_copy_output_total"),
         "copied_output_total": (perf, "copied_output_total"),
     }
     for source_key, (target, target_key) in field_map.items():
@@ -706,7 +705,6 @@ def _scenario_metrics(
     }
     optional_fields = (
         ("precommit_failopen_total", streaming),
-        ("zero_copy_output_total", perf),
         ("copied_output_total", perf),
     )
     for field, source in optional_fields:

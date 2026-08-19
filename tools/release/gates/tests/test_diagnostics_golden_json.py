@@ -158,7 +158,6 @@ def _make_doc_with_dynconf(dynconf):
             "module_metrics": {
                 "streaming_requests_total": 0,
                 "precommit_failopen_total": 0,
-                "zero_copy_output_total": 0,
                 "copied_output_total": 0,
             },
         },

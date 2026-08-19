@@ -961,8 +961,16 @@ def _path_metric_value(metrics: dict, metric: str) -> float | int | None:
             else float(failopen) / float(requests)
         )
     if metric == "output_total":
+        # 0.9.2 dropped zero-copy output, so current diagnostics carry only
+        # copied_output_total; historical baselines (091) still carry a
+        # zero_copy_output_total alongside copied. Prefer the sum when the
+        # zero-copy field exists (historical), else the copied counter.
         zero_copy = metrics.get("zero_copy_output_total")
         copied = metrics.get("copied_output_total")
+        if zero_copy is None:
+            if _is_exact_int(copied) and copied >= 0:
+                return copied
+            return None
         if (
             not _is_exact_int(zero_copy)
             or zero_copy < 0
@@ -970,7 +978,7 @@ def _path_metric_value(metrics: dict, metric: str) -> float | int | None:
             or copied < 0
         ):
             return None
-        return zero_copy + copied
+        return zero_copy + copied  # type: ignore[operator]
     return metrics.get(metric)
 
 
