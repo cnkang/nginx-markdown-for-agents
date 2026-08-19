@@ -38,16 +38,15 @@ DEFAULT_DIR = REPO_ROOT / "components/nginx-module/src"
 #   ngx_int_t ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
 # or with the return type on its own line:
 #   ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
-# The optional type prefix consumes any leading type tokens; the captured
-# identifier is the function name.  Control-flow lines (if/while/for/return/
-# switch) never match because their condition is followed by '{' or ';',
-# not a bare ')' at end-of-line.
-# The type prefix uses non-overlapping character classes ([^\n( \t] vs [ \t])
-# to avoid super-linear backtracking (SonarCloud S8786).
+# Capture the signature prefix and extract its final identifier separately.
+# Keeping the expression to two flat character classes avoids the nested
+# quantifiers that make a type-prefix expression difficult to audit and cause
+# SonarCloud's regex-complexity rule to reject it.
 FUNC_DEF_RE = re.compile(
-    r"^[ \t]*(?:[^\n( \t]+(?:[ \t]+[^\n( \t]+){0,7}[ \t])?(\w+)[ \t]*\([^)]*\)[ \t]*$",
+    r"^[ \t]*([^()\n]+)\([^()\n]*\)[ \t]*$",
     re.MULTILINE,
 )
+FUNC_NAME_RE = re.compile(r"[A-Za-z_]\w*$")
 # Function may span lines: collect braces by scanning from a def line.
 
 # Access-control call signals.
@@ -109,7 +108,10 @@ def _matching_brace(text: str, open_idx: int) -> int:
 def _iter_functions(text: str):
     """Yield (name, body) for each function with a braced body."""
     for m in FUNC_DEF_RE.finditer(text):
-        name = m.group(1)
+        name_match = FUNC_NAME_RE.search(m.group(1).rstrip())
+        if name_match is None:
+            continue
+        name = name_match.group(0)
         # Locate the opening body brace in comment- and literal-aware
         # text: a '{' inside a doc comment or string literal between the
         # signature and the real body must not be mistaken for the body
