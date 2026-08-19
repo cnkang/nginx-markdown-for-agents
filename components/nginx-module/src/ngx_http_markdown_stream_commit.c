@@ -670,8 +670,11 @@ ngx_http_markdown_stream_commit_remove_representation_metadata(
 
     /* Decision G: the streamed Markdown representation must not carry the
      * source HTML mtime as its weak validator; ETag is the sole validator
-     * for converted responses. */
+     * for converted responses.  Clear the typed pointer too: the header
+     * filter synthesizes Last-Modified whenever last_modified_time != -1
+     * AND last_modified == NULL is false, so both fields must be reset. */
     r->headers_out.last_modified_time = (time_t) -1;
+    r->headers_out.last_modified = NULL;
     (void) ngx_http_markdown_stream_commit_invalidate_header(
         r, hdr_last_modified, sizeof(hdr_last_modified) - 1);
 
