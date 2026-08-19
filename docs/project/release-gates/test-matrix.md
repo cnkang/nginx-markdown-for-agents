@@ -30,14 +30,17 @@ If infrastructure or resource constraints block a test matrix cell, the team mus
 
 | Dimension | Uncovered Value | Justification | Approved Exception |
 |-----------|----------------|---------------|-------------------|
-| [dimension] | [value] | [reason the cell cannot be covered] | [Go/No-Go record: eligibility (non-P0, non-safety gates only), rationale, risk assessment, mitigation evidence, named approver] |
+| [dimension] | [value] | [reason the cell cannot be covered] | [Go/No-Go record link + approval status: release-owner authorization (non-P0, non-safety gates only), rationale, risk assessment, mitigation evidence] |
 
 Each documented uncovered cell remains a testing-gate failure until the
 Go/No-Go review records a complete exception: eligibility for non-P0,
 non-safety gates, exception rationale, risk assessment, mitigation evidence,
-and a named approver. Do not treat a gap as approved unless all required
-release evidence is present. The Go/No-Go review reviews gaps. A gap without
-justification counts as an unresolved testing gate failure.
+and explicit **release-owner** approval (not merely a named approver). The
+Approved Exception column must include the approval status or a link to the
+Go/No-Go decision recording that authorization. Do not treat a gap as
+approved unless all required release evidence is present. The Go/No-Go
+review reviews gaps. A gap without justification counts as an unresolved
+testing gate failure.
 
 ## Document Updates
 
