@@ -57,7 +57,7 @@ jobs:
             components/rust-converter/fuzz/artifacts
             components/rust-converter/fuzz/corpus
           if-no-files-found: ignore
-          retention-days: 30
+          retention-days: 90
 
   weekly-soak:
     name: Soak Qualification

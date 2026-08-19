@@ -474,13 +474,19 @@ def _check_directive_contract(
 
 
 def _read_c_sources() -> dict[str, str]:
-    """Read C source files used to prove removed fields are gone."""
+    """Read C source files used to prove removed fields are gone.
+
+    Discovered source paths are retained in the mapping even when
+    read_safe returns empty content, so a missing/unreadable file surfaces
+    as a source-file failure instead of silently dropping the file (which
+    would let a removed field hide in an unreadable source).
+    """
     src_dir = PROJECT_ROOT / "components" / "nginx-module" / "src"
-    return {
-        c_path.relative_to(PROJECT_ROOT).as_posix(): content
-        for c_path in src_dir.rglob("*.[ch]")
-        if (content := read_safe(c_path))
-    }
+    sources: dict[str, str] = {}
+    for c_path in src_dir.rglob("*.[ch]"):
+        rel = c_path.relative_to(PROJECT_ROOT).as_posix()
+        sources[rel] = read_safe(c_path)
+    return sources
 
 
 def validate_all(result: ValidationResult) -> None:

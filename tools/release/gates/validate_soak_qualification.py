@@ -63,6 +63,9 @@ RECORD_OUTPUT_ROOT = pathlib.Path("artifacts/release/0.9.2")
 RECORD_OUTPUT_LABEL = "soak qualification record"
 SOAK_RUNTIME_ROOT = REPO_ROOT / "build" / "soak-runtime"
 SOAK_PORT = 19200
+# Monotonic counter for raw ab chunk logs so repeated chunks (or
+# colliding wall-clock timestamps) never overwrite each other.
+_SOAK_LOG_COUNTER = 0
 SOAK_SCENARIO_FILES = {
     "small": "small.html",
     "medium": "medium.html",
@@ -524,7 +527,13 @@ def parse_ab_report(output: str) -> dict:
     }
 
 
-def run_ab_chunk(url: str, concurrency: int, seconds: int, output_dir: pathlib.Path) -> dict:
+def run_ab_chunk(
+    url: str,
+    concurrency: int,
+    seconds: int,
+    output_dir: pathlib.Path,
+    label: str = "",
+) -> dict:
     validated_url = _validated_local_url(url)
     validated_output_dir = validate_write_path_within_root(
         output_dir, REPO_ROOT, purpose="soak raw logs"
@@ -569,7 +578,15 @@ def run_ab_chunk(url: str, concurrency: int, seconds: int, output_dir: pathlib.P
     report = parse_ab_report(ab.stdout or ab.stderr)
     raw_dir = validated_output_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
-    (raw_dir / f"ab-{int(time.time())}.log").write_text(
+    # A per-scenario label plus a monotonic chunk counter keeps concurrent
+    # or repeated chunk logs from overwriting each other when the wall-clock
+    # timestamp collides; the raw content and report return code are unchanged.
+    label_token = re.sub(r"[^A-Za-z0-9_-]+", "_", label).strip("_")
+    if not label_token:
+        label_token = "ab"
+    global _SOAK_LOG_COUNTER
+    _SOAK_LOG_COUNTER += 1
+    (raw_dir / f"{label_token}-{_SOAK_LOG_COUNTER}-{int(time.time())}.log").write_text(
         ab.stdout + "\n" + ab.stderr, encoding="utf-8"
     )
     report["_returncode"] = ab.returncode
@@ -772,7 +789,7 @@ def run_load_loop(
                 1, min(60, int(remaining_now / max(1, len(corpus))))
             )
             url = f"http://127.0.0.1:{SOAK_PORT}/{corpus[sid]}"
-            report = run_ab_chunk(url, concurrency, chunk_seconds, runtime_dir)
+            report = run_ab_chunk(url, concurrency, chunk_seconds, runtime_dir, label=sid)
             scenario_metrics[sid].append(report)
         if worker_pid > 0:
             rss_series.append([round(time.time() - started, 1),

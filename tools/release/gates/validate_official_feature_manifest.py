@@ -131,23 +131,38 @@ def _forbidden_feature_list(
         yield from _forbidden_feature_consumers(child, (*path, str(index)))
 
 
+def _normalize_feature_token(feature: str) -> tuple[str, list[str]]:
+    """Normalize one Cargo feature token into (bare_name, extra_segments).
+
+    Strips the optional-dependency prefix (`dep:`), splits slash-delimited
+    dependency/feature tokens so both segments are checked, and strips the
+    weak-dependency suffix (`?`) so `dep:brotli`, `brotli?`,
+    `dependency/brotli`, and `dep:brotli/foo` all match the bare names.
+    """
+    normalized = feature
+    if normalized.startswith("dep:"):
+        normalized = normalized[4:]
+    if normalized.endswith("?"):
+        normalized = normalized[:-1]
+    segments = normalized.split("/") if "/" in normalized else []
+    if segments:
+        normalized = segments[0]
+    return normalized, segments[1:] if segments else []
+
+
 def _forbidden_feature_values(
     values: list, path: tuple[str, ...]
 ) -> Iterator[tuple[str, str]]:
     """Yield forbidden values from one Cargo ``features`` array."""
     location = ".".join(path)
     for feature in values:
-        # Normalize Cargo feature tokens: strip the optional-dependency
-        # prefix (`dep:`), the dependency-scoped prefix (`dependency/`),
-        # and the weak-dependency suffix (`?`) so `dep:brotli`,
-        # `brotli?`, and `dependency/brotli` all match the bare name.
-        normalized = feature
-        if normalized.startswith("dep:"):
-            normalized = normalized[4:]
-        if "/" in normalized:
-            normalized = normalized.split("/", 1)[1]
-        if normalized.endswith("?"):
-            normalized = normalized[:-1]
+        # Both the dependency segment and the feature segment are
+        # checked: a forbidden dependency name must not slip through as
+        # the prefix of a slash-delimited token.
+        normalized, extra_segments = _normalize_feature_token(feature)
+        for segment in extra_segments:
+            if segment in FORBIDDEN_FEATURE_NAMES:
+                yield feature, location
         if normalized in FORBIDDEN_FEATURE_NAMES:
             yield feature, location
 

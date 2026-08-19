@@ -149,6 +149,11 @@ def _validate_family_labels(
     """Validate family label uniqueness and the forbidden-label contract."""
     errors: list[str] = []
     labels = family.get("labels", [])
+    if not isinstance(labels, list):
+        errors.append(
+            f"Family '{name}' labels must be a list of label objects"
+        )
+        return errors
     label_names: list[str] = []
     for index, label in enumerate(labels):
         if not isinstance(label, dict):
@@ -181,7 +186,13 @@ def _validate_histogram_family(
     if family.get("type") != "histogram":
         return []
     errors: list[str] = []
-    bucket_count = len(family.get("bucket_boundaries", []))
+    boundaries = family.get("bucket_boundaries", [])
+    if not isinstance(boundaries, list):
+        errors.append(
+            f"Family '{name}' bucket_boundaries must be a list of numbers"
+        )
+        return errors
+    bucket_count = len(boundaries)
     max_buckets = constraints.get("max_histogram_buckets")
     if max_buckets is not None and bucket_count > max_buckets:
         errors.append(

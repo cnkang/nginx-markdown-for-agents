@@ -762,6 +762,39 @@ class TestValidateManifest(unittest.TestCase):
         errors = self._validate()
         self.assertEqual(errors, [], f"Unexpected errors: {errors}")
 
+    def test_dynamic_module_tarball_missing_identity_rejected(self):
+        """Validator must reject dynamic-module entries missing the
+        nginx_version/libc/arch identity keys (run20 P3-5 regression:
+        the required_keys negative branch was untested)."""
+        fname = "ngx_http_markdown_filter_module-1.28.3-glibc-x86_64.tar.gz"
+        self.artifact_dir.joinpath(fname).write_bytes(b"fake-glibc-tarball")
+        self._make_valid_manifest([
+            {
+                "filename": fname,
+                "format": "dynamic-module",
+                # nginx_version deliberately omitted
+                "libc": "glibc",
+                "arch": "amd64",
+                "sha256": sha256_bytes(b"fake-glibc-tarball"),
+            }
+        ])
+        # SHA256SUMS must include all artifacts + release-manifest.json
+        entries = []
+        for f in sorted(self.artifact_dir.iterdir()):
+            entries.append(f"{sha256_bytes(f.read_bytes())}  {f.name}")
+        (self.artifact_dir / "release-manifest.json").write_text(
+            self.manifest_path.read_text()
+        )
+        entries.append(
+            f"{sha256_bytes((self.artifact_dir / 'release-manifest.json').read_bytes())}  release-manifest.json"
+        )
+        self.sha256sums_path.write_text("\n".join(entries) + "\n")
+        errors = self._validate()
+        self.assertTrue(
+            any("packages[0]: missing nginx_version" in e for e in errors),
+            f"Expected missing nginx_version error, got: {errors}",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

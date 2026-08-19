@@ -188,7 +188,15 @@ def generate_diagnostics_field_contract() -> dict:
 
     effective_fields: dict[str, dict] = {}
     for name, prop in sorted(properties.items()):
-        field: dict = {"type": prop.get("type")}
+        # Fail fast when a property lacks a type instead of emitting a
+        # field with a null type into the generated artifact.
+        prop_type = prop.get("type")
+        if prop_type is None:
+            raise ValueError(
+                f"diagnostics.schema.json $defs.effective_config property "
+                f"{name!r} has no type"
+            )
+        field: dict = {"type": prop_type}
         if prop.get("enum") is not None:
             field["enum"] = prop["enum"]
         if prop.get("minimum") is not None or prop.get("maximum") is not None:

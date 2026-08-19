@@ -1141,4 +1141,46 @@ def test_canonical_dynamic_entry_existing_row_refreshes_bindings():
     assert row["feature_manifest_digest"] == um._feature_manifest_digest()
     assert row["abi_version"] == um._frozen_abi_version()
     assert not DROPPED_CANONICAL_KEYS.intersection(row)
-    assert not LEGACY_ALIAS_KEYS.intersection(row)
+    # `arch` is the compatibility document's presentation key (the
+    # evidence document's legacy-alias semantics do not apply here);
+    # only the true legacy updater aliases must be absent.
+    assert not {"nginx", "os_type"}.intersection(row)
+
+
+def test_canonical_dynamic_entry_existing_row_preserves_arch_key():
+    """An existing compatibility row carrying the `arch` presentation key
+    (the real tools/release-matrix.json shape, which has no `target` key)
+    must keep `arch` intact so the projected row still resolves a complete
+    nginx/os/arch identity."""
+    existing = {
+        "nginx_version": "1.24.0",
+        "os": "linux",
+        "libc": "glibc",
+        "arch": "amd64",
+        "artifact_type": "dynamic-module",
+        "feature_manifest_digest": "sha256:abc",
+        "abi_version": 2,
+        "nginx_channel": "oldstable",
+        "test_level": "smoke-test",
+        "support_tier": "supported",
+        "release_blocking": True,
+        "owner_workflow": ".github/workflows/release-packages.yml",
+    }
+    row = um._canonical_dynamic_entry(
+        {
+            "nginx_version": "1.24.0",
+            "libc": "glibc",
+            "arch": "amd64",
+        },
+        existing,
+    )
+    assert row["arch"] == "amd64"
+    assert row["nginx_version"] == "1.24.0"
+    assert row["libc"] == "glibc"
+    # The projected row must still resolve a complete identity (the P1
+    # regression: `entry.pop("arch")` made _matrix_entry_identity raise).
+    assert um._matrix_entry_identity(row) == ("1.24.0", "glibc", "x86_64")
+    assert row["feature_manifest_digest"] == um._feature_manifest_digest()
+    assert row["abi_version"] == um._frozen_abi_version()
+    assert not DROPPED_CANONICAL_KEYS.intersection(row)
+    assert not {"nginx", "os_type"}.intersection(row)

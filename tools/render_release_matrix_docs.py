@@ -247,7 +247,14 @@ def _validate_against_jsonschema(data, jsonschema, errors):
     try:
         jsonschema.validate(validate_data, schema)
     except jsonschema.ValidationError as e:
-        errors.append(f"Schema validation: {e.message}")
+        # Surface the failing row so a malformed entry is identifiable:
+        # prefix the message with the row-level location when the error
+        # path points into the entries/matrix array (Entry 0, Entry 1, ...).
+        row_prefix = ""
+        if len(e.path) >= 2 and isinstance(e.path[0], (int, str)):
+            row_index = e.path[1] if isinstance(e.path[0], str) else e.path[0]
+            row_prefix = f"Entry {row_index}: "
+        errors.append(f"Schema validation: {row_prefix}{e.message}")
     return errors
 
 
