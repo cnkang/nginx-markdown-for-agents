@@ -170,16 +170,28 @@ def _parse_prometheus_sample(
 
 def _parse_prometheus_families(
     content: str,
-) -> dict[str, list[tuple[dict[str, str], int | float]]]:
-    """Collect valid Prometheus samples by family name."""
+) -> tuple[dict[str, list[tuple[dict[str, str], int | float]]], int]:
+    """Collect valid Prometheus samples by family name.
+
+    Returns (families, malformed_count) where malformed_count counts
+    non-comment lines that were skipped because they could not be parsed
+    as a well-formed sample (unparseable labels, non-numeric values, or
+    non-finite values).  Exposing the count lets callers distinguish a
+    clean document from one with silently dropped samples.
+    """
     families: dict[str, list[tuple[dict[str, str], int | float]]] = {}
+    malformed_count = 0
     for raw_line in content.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
         sample = _parse_prometheus_sample(raw_line)
         if sample is None:
+            malformed_count += 1
             continue
         name, labels, value = sample
         families.setdefault(name, []).append((labels, value))
-    return families
+    return families, malformed_count
 
 
 def _prometheus_total(
@@ -200,9 +212,12 @@ def parse_prometheus_metrics(content: str) -> dict[str, Any]:
 
     The benchmark report keeps its historical, tool-owned metric names, while
     the module endpoint is intentionally Prometheus-only in 0.9.2. Unknown
-    families and malformed samples are ignored at this compatibility boundary.
+    families are ignored at this compatibility boundary, but malformed or
+    skipped samples are counted and exposed as ``malformed_samples`` so the
+    benchmark validation can fail closed when a metrics document silently
+    drops evidence.
     """
-    families = _parse_prometheus_families(content)
+    families, malformed_count = _parse_prometheus_families(content)
     streaming_attempts = _prometheus_total(
         families, "nginx_markdown_conversion_attempts_total", engine="streaming"
     )
@@ -212,6 +227,7 @@ def parse_prometheus_metrics(content: str) -> dict[str, Any]:
     return {
         "streaming_path_hits": streaming_attempts,
         "fullbuffer_path_hits": full_buffer_attempts,
+        "malformed_samples": malformed_count,
         "streaming": {
             "requests_total": streaming_attempts,
             "fallback_total": _prometheus_total(
@@ -723,6 +739,14 @@ def build_scenario_result(data: ScenarioResultInput) -> dict:
     if data.diagnostics_exit_code != 0:
         endpoint_failures.append(
             f"diagnostics_curl_exit: {data.diagnostics_exit_code}"
+        )
+    # Malformed or skipped Prometheus samples silently drop evidence: a
+    # metrics document carrying unparseable lines must fail the scenario's
+    # endpoint integrity instead of being treated as a clean snapshot.
+    malformed_samples = data.nginx_metrics.get("malformed_samples", 0)
+    if malformed_samples:
+        endpoint_failures.append(
+            f"metrics_malformed_samples: {malformed_samples}"
         )
 
     result = {

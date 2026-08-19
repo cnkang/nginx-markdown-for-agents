@@ -184,6 +184,13 @@ def test_approved_rustfmt_accepts_standard_rustup_dispatcher(
         'default_toolchain = "stable"\n', encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
+    # Clear the runner-environment Rustup overrides so the settings.toml
+    # default is the sole active-toolchain input: a leaked RUSTUP_TOOLCHAIN
+    # (or RUSTUP_HOME pointing elsewhere) would otherwise redirect the
+    # dispatcher to a different toolchain than the fixture pins.
+    monkeypatch.delenv("RUSTUP_TOOLCHAIN", raising=False)
+    monkeypatch.delenv("RUSTUP_HOME", raising=False)
+
     monkeypatch.setattr(executable_validation.Path, "home", lambda: tmp_path)
     monkeypatch.setattr(
         executable_validation.shutil,
