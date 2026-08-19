@@ -377,28 +377,32 @@ if [[ -f "${CONFIGMAP_YAML}" ]]; then
   if [[ ! -s "${CM_MAIN}" && ! -s "${CM_HTTP}" ]]; then
     FAIL_COUNT=$((FAIL_COUNT + 1))
     FAILED_DETAILS+=("configmap extraction produced no directives (CM_MAIN and CM_HTTP empty)")
-    return 1
+    # No directives extracted: skip the configmap nginx -t check but
+    # keep going through Section 4 and the final summary so the full
+    # suite outcome is reported (top-level `return`/`exit` here would
+    # silently truncate the rest of the script).
+  else
+    PREPARED_RAW="${RUNTIME_DIR}/configmap_test.raw.conf"
+    {
+      echo "worker_processes 1;"
+      echo "error_log logs/error.log crit;"
+      echo "pid logs/nginx.pid;"
+      cat "${CM_MAIN}"
+      echo "events { worker_connections 64; }"
+      echo "http {"
+      cat "${CM_HTTP}"
+      echo "    server {"
+      echo "        listen 18180;"
+      echo "        location / { return 200 'ok'; }"
+      echo "    }"
+      echo "}"
+    } > "${PREPARED_RAW}"
+    # sandbox_conf applies the path/cache/platform rewrites and rewrites the
+    # load_module path to the built module (or comments it out). prepare_file_conf
+    # also records whether the assembled config itself loads the module.
+    prepare_file_conf "${PREPARED_RAW}"
+    check_conf "kubernetes/configmap (data section)" pass || true
   fi
-  PREPARED_RAW="${RUNTIME_DIR}/configmap_test.raw.conf"
-  {
-    echo "worker_processes 1;"
-    echo "error_log logs/error.log crit;"
-    echo "pid logs/nginx.pid;"
-    cat "${CM_MAIN}"
-    echo "events { worker_connections 64; }"
-    echo "http {"
-    cat "${CM_HTTP}"
-    echo "    server {"
-    echo "        listen 18180;"
-    echo "        location / { return 200 'ok'; }"
-    echo "    }"
-    echo "}"
-  } > "${PREPARED_RAW}"
-  # sandbox_conf applies the path/cache/platform rewrites and rewrites the
-  # load_module path to the built module (or comments it out). prepare_file_conf
-  # also records whether the assembled config itself loads the module.
-  prepare_file_conf "${PREPARED_RAW}"
-  check_conf "kubernetes/configmap (data section)" pass || true
 else
   echo "ERROR: missing ${CONFIGMAP_YAML}" >&2
   FAIL_COUNT=$((FAIL_COUNT + 1))

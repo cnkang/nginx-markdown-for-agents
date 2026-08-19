@@ -108,8 +108,10 @@ echo "=== Scenario 1: SSI subrequest is converted to Markdown ===" >&2
 # support (subrequest option B), the fragment body must be converted even
 # though it is delivered via an internal subrequest.
 body="$(curl -sS -H "Accept: text/markdown" "${NGINX_URL}${PAGE_PATH}" 2>&1)" || true
-if echo "$body" | grep -qE "# |^[-*] |markdown"; then
+if echo "$body" | grep -qE "^# |^[-*] "; then
     pass "SSI page contains converted fragment output (markdown markers present)"
+elif echo "$body" | grep -qE "<h1|<html|<body|<p[ >]"; then
+    fail "SSI page returned unconverted HTML fragment: $(echo "$body" | head -3)"
 else
     fail "SSI page lacks converted fragment output: $(echo "$body" | head -3)"
 fi
@@ -121,8 +123,10 @@ if echo "$page" | grep -q "<!--# include"; then
 else
     pass "SSI include expanded in page response"
 fi
-if echo "$page" | grep -qE "text/markdown|# |^[-*] " ; then
+if echo "$page" | grep -qE "^# |^[-*] "; then
     pass "page contains converted subrequest output"
+elif echo "$page" | grep -qE "<h1|<html|<body|<p[ >]"; then
+    fail "page returned unconverted HTML fragment: $(echo "$page" | head -3)"
 else
     fail "page lacks converted subrequest output: $(echo "$page" | head -3)"
 fi
@@ -160,8 +164,10 @@ echo "=== Scenario 5: auth_request subrequest_in_memory conversion ===" >&2
 # must still be converted and the inflight slot released at its terminal.
 if curl -sf "${NGINX_URL}${AUTH_PAGE_PATH}" >/dev/null 2>&1; then
     auth_body="$(curl -sS "${NGINX_URL}${AUTH_PAGE_PATH}" 2>&1 || true)"
-    if echo "$auth_body" | grep -qE "text/markdown|# |^[-*] "; then
+    if echo "$auth_body" | grep -qE "^# |^[-*] "; then
         pass "auth_request-protected page served with converted content"
+    elif echo "$auth_body" | grep -qE "<h1|<html|<body|<p[ >]"; then
+        fail "auth_request-protected page returned unconverted HTML fragment: $(echo "$auth_body" | head -3)"
     else
         fail "auth_request-protected page lacks converted content: $(echo "$auth_body" | head -3)"
     fi

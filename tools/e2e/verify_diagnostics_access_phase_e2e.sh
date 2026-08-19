@@ -121,6 +121,11 @@ stop_case_nginx() {
 }
 
 # ── Run a single access-policy case ───────────────────────────────
+# CASE_FAILURES accumulates assertion failures across run_case calls;
+# run_case returns 0 on success, 1 for hard setup failures, and 2
+# exclusively for unknown-policy / prerequisite errors so callers can
+# abort without conflating assertion counts with control-flow status.
+CASE_FAILURES=0
 run_case() {
   local policy="$1"
   local prefix="${WORK}/${policy}"
@@ -217,6 +222,14 @@ EOF
     if [[ "${primary_probe}" != "000" ]]; then
       loopback_alias_available=0
       echo "SKIP: 127.0.0.2 is unavailable; skipping allow_deny unauthorized probes" >&2
+    else
+      # Neither the alias probe nor the primary loopback probe reached
+      # nginx: the server is unavailable, and running unauthorized probes
+      # now would only produce meaningless 000 results.  Report a clear
+      # readiness error and abort this case.
+      echo "FAIL: nginx not reachable for policy=${policy} (primary probe and 127.0.0.2 alias probe both returned 000)" >&2
+      stop_case_nginx
+      return 1
     fi
   fi
 
@@ -349,41 +362,42 @@ EOF
 
   stop_case_nginx
 
-  return "${fail_count}"
+  # Assertion failures are recorded in the global CASE_FAILURES counter;
+  # the return status stays 0 so callers can distinguish assertion
+  # failures from control-flow (setup/prereq) errors.
+  CASE_FAILURES=$((CASE_FAILURES + fail_count))
+  return 0
 }
 
 # ── Execute all policy cases ───────────────────────────────────────
 total_failures=0
 
-if run_case allow_deny; then
-  rc=0
-else
+if ! run_case allow_deny; then
   rc=$?
+  if [[ ${rc} -eq 2 ]]; then
+    exit 2
+  fi
+  # A hard setup/prerequisite failure (rc=1) means the case could not
+  # run; record it as a failure so the summary stays honest.
+  total_failures=$((total_failures + 1))
 fi
-if [[ ${rc} -eq 2 ]]; then
-  exit 2
-fi
-total_failures=$((total_failures + rc))
 
-if run_case auth_basic; then
-  rc=0
-else
+if ! run_case auth_basic; then
   rc=$?
+  if [[ ${rc} -eq 2 ]]; then
+    exit 2
+  fi
+  total_failures=$((total_failures + 1))
 fi
-if [[ ${rc} -eq 2 ]]; then
-  exit 2
-fi
-total_failures=$((total_failures + rc))
 
-if run_case satisfy_any; then
-  rc=0
-else
+if ! run_case satisfy_any; then
   rc=$?
+  if [[ ${rc} -eq 2 ]]; then
+    exit 2
+  fi
+  total_failures=$((total_failures + 1))
 fi
-if [[ ${rc} -eq 2 ]]; then
-  exit 2
-fi
-total_failures=$((total_failures + rc))
+total_failures=$((total_failures + CASE_FAILURES))
 
 # ── Report result ──────────────────────────────────────────────────
 if [[ "${total_failures}" -eq 0 ]]; then
