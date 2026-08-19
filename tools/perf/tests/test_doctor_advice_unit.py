@@ -1,7 +1,7 @@
-"""Unit tests for the Doctor Advice tool (rules D01–D07).
+"""Unit tests for the Doctor Advice tool (rules D01–D06).
 
 Covers:
-  - Each rule D01-D07 with synthetic metrics at threshold boundary
+  - Each rule D01-D06 with synthetic metrics at threshold boundary
   - Missing metric graceful skip (no crash)
   - JSON output format validity (parseable, required keys)
   - Exit codes: 0 for info-only, 1 for warn, 2 for critical
@@ -29,7 +29,6 @@ from doctor_advice import (
     _evaluate_d04,
     _evaluate_d05,
     _evaluate_d06,
-    _evaluate_d07,
     compute_exit_code,
     evaluate_rules,
     fetch_metrics_file,
@@ -388,69 +387,6 @@ class TestD06:
 
 
 # ---------------------------------------------------------------------------
-# D07: High copied vs zero-copy ratio (threshold > 5:1)
-# ---------------------------------------------------------------------------
-
-
-class TestD07:
-    """D07: copied_output_total >> zero_copy_output_total (>5:1)."""
-
-    def test_triggers_above_ratio(self):
-        """Ratio > 5:1 triggers info."""
-        metrics = {
-            "copied_output_total": 60,
-            "zero_copy_output_total": 10,
-        }
-        result = _evaluate_d07(metrics)
-        assert result.finding is not None
-        assert result.finding.severity == "info"
-        assert result.finding.rule_id == "D07"
-
-    def test_triggers_when_zero_copy_zero_but_copies_present(self):
-        """copied > 0 with zero_copy == 0 triggers info."""
-        metrics = {
-            "copied_output_total": 10,
-            "zero_copy_output_total": 0,
-        }
-        result = _evaluate_d07(metrics)
-        assert result.finding is not None
-        assert result.finding.severity == "info"
-
-    def test_no_trigger_balanced_ratio(self):
-        """Ratio at 5:1 does not trigger."""
-        self._assert_no_finding(50, 10)
-
-    def test_no_trigger_both_zero(self):
-        """Both zero means feature not used — no finding."""
-        result = self._assert_no_finding(0, 0)
-        assert not result.skipped
-
-    def _assert_no_finding(self, copied, zero_copy):
-        metrics = {"copied_output_total": copied, "zero_copy_output_total": zero_copy}
-        result = _evaluate_d07(metrics)
-        assert result.finding is None
-        return result
-
-    def test_skipped_missing_copied(self):
-        """Missing copied_output_total skips gracefully."""
-        self._assert_skipped_missing(
-            "zero_copy_output_total", 10, "copied_output_total"
-        )
-
-    def test_skipped_missing_zero_copy(self):
-        """Missing zero_copy_output_total skips gracefully."""
-        self._assert_skipped_missing(
-            "copied_output_total", 100, "zero_copy_output_total"
-        )
-
-    def _assert_skipped_missing(self, present_key, present_val, missing_key):
-        metrics = {present_key: present_val}
-        result = _evaluate_d07(metrics)
-        assert result.skipped
-        assert missing_key in result.skip_reason
-
-
-# ---------------------------------------------------------------------------
 # JSON format validity
 # ---------------------------------------------------------------------------
 
@@ -578,7 +514,7 @@ class TestEvaluateRulesSkipping:
         """Empty metrics dict causes all rules to be skipped gracefully."""
         findings, skipped = evaluate_rules({})
         assert findings == []
-        assert len(skipped) == 7  # All D01-D07 skipped
+        assert len(skipped) == 6  # All D01-D06 skipped
 
     def test_partial_metrics_skip_subset(self):
         """Only rules with available metrics produce findings or pass cleanly."""
@@ -602,7 +538,6 @@ class TestEvaluateRulesSkipping:
         assert "D03" in skipped_ids
         assert "D04" in skipped_ids
         assert "D06" in skipped_ids
-        assert "D07" in skipped_ids
 
     def test_nested_metrics_lookup(self):
         """Metrics can be found in nested sub-objects."""

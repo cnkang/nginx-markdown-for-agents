@@ -46,7 +46,6 @@ RULE_SEVERITIES = {
     "D04": "info",   # decompression full-buffer >> streaming (>10:1)
     "D05": "warn",   # decompression budget exceeded > 0
     "D06": "warn",   # pending watermark > 80% budget
-    "D07": "info",   # copied >> zero_copy (>5:1)
 }
 
 ALL_RULE_IDS = list(RULE_SEVERITIES.keys())
@@ -120,14 +119,6 @@ def _build_triggering_metrics_d06() -> dict:
     }
 
 
-def _build_triggering_metrics_d07() -> dict:
-    """Build metrics that trigger D07 (copied >> zero_copy, >5:1)."""
-    return {
-        "copied_output_total": 600.0,
-        "zero_copy_output_total": 10.0,
-    }
-
-
 TRIGGER_BUILDERS = {
     "D01": lambda: _build_triggering_metrics_d01(1000.0),
     "D02": _build_triggering_metrics_d02,
@@ -135,7 +126,6 @@ TRIGGER_BUILDERS = {
     "D04": _build_triggering_metrics_d04,
     "D05": _build_triggering_metrics_d05,
     "D06": _build_triggering_metrics_d06,
-    "D07": _build_triggering_metrics_d07,
 }
 
 

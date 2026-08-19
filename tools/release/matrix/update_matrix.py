@@ -1111,6 +1111,7 @@ def _canonical_dynamic_entry(
         entry.pop("release_blocking", None)
         entry.pop("owner_workflow", None)
         entry.pop("managed_by", None)
+        entry.pop("arch", None)
         entry["nginx_version"] = version
         entry["libc"] = libc
         # Refresh the binding keys with the same computed values as the

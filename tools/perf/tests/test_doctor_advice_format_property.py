@@ -41,7 +41,7 @@ from doctor_advice import (
 # ---------------------------------------------------------------------------
 
 severity_st = st.sampled_from(["info", "warn", "critical"])
-rule_id_st = st.sampled_from(["D01", "D02", "D03", "D04", "D05", "D06", "D07"])
+rule_id_st = st.sampled_from(["D01", "D02", "D03", "D04", "D05", "D06"])
 
 # Printable strings for messages and advice text (non-empty)
 text_st = st.text(
@@ -284,7 +284,7 @@ def test_property11_text_contains_severity_tag(findings, skipped, source):
 def test_property11_text_contains_rule_id(findings, skipped, source):
     """**Validates: Requirements 8.4**
 
-    The human-readable text output SHALL contain the rule ID (D01-D07)
+    The human-readable text output SHALL contain the rule ID (D01-D06)
     for each finding.
     """
     output = format_text(findings, skipped, source)

@@ -122,7 +122,6 @@ def test_merge_diagnostics_metrics_preserves_exact_counter_sources():
                 "module_metrics": {
                     "streaming_requests_total": 3,
                     "precommit_failopen_total": 0,
-                    "zero_copy_output_total": 3,
                     "copied_output_total": 1,
                 }
             }
@@ -130,7 +129,7 @@ def test_merge_diagnostics_metrics_preserves_exact_counter_sources():
     )
     assert merged["streaming"]["requests_total"] == 3
     assert merged["streaming"]["precommit_failopen_total"] == 0
-    assert merged["perf"]["zero_copy_output_total"] == 3
+    assert "zero_copy_output_total" not in merged["perf"]
     assert merged["perf"]["copied_output_total"] == 1
 
 

@@ -247,9 +247,6 @@ def _valid_diagnostics(draw):
                 "precommit_failopen_total": draw(
                     st.integers(min_value=0, max_value=10000)
                 ),
-                "zero_copy_output_total": draw(
-                    st.integers(min_value=0, max_value=10000)
-                ),
                 "copied_output_total": draw(
                     st.integers(min_value=0, max_value=10000)
                 ),

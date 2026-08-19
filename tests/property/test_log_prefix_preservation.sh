@@ -43,7 +43,10 @@ echo ""
 # Observed on unfixed code: 278 log call sites
 # Updated 2026-08-19: 375 (codebase grew since the original 278 baseline;
 # the count is verified constant between HEAD and working tree).
-BASELINE_LOG_SITES=375
+# Updated 2026-08-19 (P2 batch): 374 — the dynconf bind-once fix removed
+# the effective-conf allocation-failure log site (by-value copy has no
+# allocation failure path).
+BASELINE_LOG_SITES=374
 
 echo "--- Property 1: Log call site count remains constant ---"
 CURRENT_LOG_SITES=$(grep -crn 'ngx_log_error\|ngx_log_debug' "$SRCDIR" | awk -F: '{s+=$2}END{print s}')
@@ -88,8 +91,12 @@ echo ""
 
 # --- Property 4: git diff shows only string literal changes ---
 echo "--- Property 4: git diff shows only prefix string changes ---"
-# Check if there are any uncommitted changes to analyze
-GIT_DIFF=$(git diff -- "$SRCDIR" 2>/dev/null || true)
+# Scope the diff to the two files the log-prefix unification fix touched
+# (ngx_http_markdown_stream_commit.c / ngx_http_markdown_stream_postcommit.c).
+# Later fix batches legitimately change log components elsewhere (e.g. a
+# severity upgrade or a removed log site); those are covered by their own
+# gates and must not fail this prefix-preservation guard.
+GIT_DIFF=$(git diff -- "components/nginx-module/src/ngx_http_markdown_stream_commit.c" "components/nginx-module/src/ngx_http_markdown_stream_postcommit.c" 2>/dev/null || true)
 
 if [[ -z "$GIT_DIFF" ]]; then
     echo "PASS: No uncommitted changes in $SRCDIR (baseline state)"

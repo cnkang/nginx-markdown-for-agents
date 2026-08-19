@@ -244,9 +244,6 @@ def _valid_diagnostics(draw):
                 "precommit_failopen_total": draw(
                     st.integers(min_value=0, max_value=10000)
                 ),
-                "zero_copy_output_total": draw(
-                    st.integers(min_value=0, max_value=10000)
-                ),
                 "copied_output_total": draw(
                     st.integers(min_value=0, max_value=10000)
                 ),
@@ -659,7 +656,6 @@ def _make_doc_with_dynconf(dynconf):
             "module_metrics": {
                 "streaming_requests_total": 0,
                 "precommit_failopen_total": 0,
-                "zero_copy_output_total": 0,
                 "copied_output_total": 0,
             },
         },
@@ -700,7 +696,6 @@ def _make_doc_with_config(effective, sources):
             "module_metrics": {
                 "streaming_requests_total": 0,
                 "precommit_failopen_total": 0,
-                "zero_copy_output_total": 0,
                 "copied_output_total": 0,
             },
         },
