@@ -272,10 +272,12 @@ fn apply_mask(octets: &mut [u8], prefix_len: u8) {
 
 /// Return `true` if `source_ip` matches any trusted CIDR.
 ///
-/// The source IP is parsed from its textual form (the NGINX
-/// `connection->addr_text` value, already realip/PROXY-protocol resolved).
-/// A non-parseable or empty address never matches.  The `X-Forwarded-For`
-/// header is intentionally **not** consulted here (spoofing avoidance).
+/// The source IP is parsed from its textual form (the NGINX original
+/// transport peer: `connection->realip` when the realip module preserved
+/// it, otherwise `connection->addr_text` — never the realip-rewritten
+/// client address).  A non-parseable or empty address never matches.  The
+/// `X-Forwarded-For` header is intentionally **not** consulted here
+/// (spoofing avoidance).
 pub fn is_trusted_source(source_ip: &str, trusted: &[Cidr]) -> bool {
     let trimmed = source_ip.trim();
     /* validate_forwarded_addr returns bracketed IPv6 literals (e.g.
@@ -397,8 +399,10 @@ pub struct BaseUrlDecision {
 /// Inputs for [`decide_base_url`], marshaled by the C thin wrapper.
 #[derive(Debug, Default)]
 pub struct BaseUrlInput<'a> {
-    /// Textual source IP from `r->connection->addr_text` (realip/PROXY
-    /// resolved). Empty / non-parseable means "no usable source IP".
+    /// Textual source IP: the original transport peer
+    /// (`r->connection->realip` when the realip module preserved it,
+    /// otherwise `r->connection->addr_text`).  Empty / non-parseable
+    /// means "no usable source IP".
     pub source_ip: &'a str,
     /// `true` when the source is a Unix-domain socket peer (never trusted
     /// unless an explicit loopback CIDR is configured, which a Unix socket

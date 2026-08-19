@@ -48,6 +48,10 @@ ETag, `Vary: Accept`, token, and authentication-header operations are **not**
 handled in the HeaderPlan commit. They are C-side post-plan operations (see
 the atomic scope boundary below). This keeps them consistent with the
 rationale: ETag set/clear and Vary add execute in C after the plan commits.
+The HeaderPlan atomicity invariant therefore applies **only to the core
+wire-critical fields Content-Type, Content-Encoding, and Content-Length**;
+ETag, Vary, token, and authentication-header operations are explicitly
+exempt via the atomic-scope exception below.
 
 ### Streaming vs full-buffer header matrix
 
@@ -71,7 +75,17 @@ These paths build a complete response from scratch. There is no upstream
 |------|---------------|
 | Metrics endpoint (`metrics_impl.h`) | full-response synthesis (subrequest) |
 | Diagnostics endpoint (`diagnostics.c`) | full-response synthesis (subrequest) |
-| Stream post-commit error response (`stream_postcommit.c`) | post-commit error handling **only after headers are already committed**: it may send a terminal closing chain (empty `last_buf` or safe-finish closing bytes) over the already-committed response. It MUST NOT synthesize a new error body, MUST NOT replay the original content, MUST NOT replace the status, and MUST NOT call `ngx_http_send_header()` a second time. Pre-commit errors never enter this path — they follow `markdown_error_policy` instead |
+
+**Post-commit terminal exception (separate category):**
+`stream_postcommit.c` does not synthesize a full response and is therefore
+not a Category 1 exception. It is a distinct post-commit terminal category:
+after headers are already committed, the streaming post-commit error path
+may send a terminal closing chain (empty `last_buf` or safe-finish closing
+bytes) over the already-committed response. It MUST NOT synthesize a new
+error body, MUST NOT replay the original content, MUST NOT replace the
+status, and MUST NOT call `ngx_http_send_header()` a second time.
+Pre-commit errors never enter this path — they follow
+`markdown_error_policy` instead.
 
 **Category 2 — Post-plan mutation of an upstream response:**
 These operations mutate headers on an existing upstream response after the
@@ -181,6 +195,7 @@ Kang
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-20 | Hermes | Scope HeaderPlan atomicity invariant to core fields (Content-Type/Content-Encoding/Content-Length); move stream_postcommit into a distinct post-commit terminal exception category |
 | 0.9.2 | 2026-08-19 | Hermes | Clarify stream_postcommit exception: post-commit terminal closing only, never a synthesized error body, replay, status replacement, or second send_header |
 | 0.9.0 | 2026-07-02 | Kang | Documented atomic scope boundary: core plan vs post-plan best-effort with hard abort |
 | 0.9.0 | 2026-06-30 | Kang | Initial ADR — prepare/commit split, special-field atomicity, exception table, post-commit boundary |

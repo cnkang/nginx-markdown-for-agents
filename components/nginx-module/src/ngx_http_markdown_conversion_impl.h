@@ -396,8 +396,9 @@ ngx_http_markdown_set_base_url_header(
  * Decide the validated "scheme://host" authority via the Rust trusted-proxy
  * decision (markdown_decide_base_url).
  *
- * This is a thin wrapper: it marshals the realip/PROXY-resolved source IP
- * (r->connection->addr_text and the AF_UNIX flag), the forwarded request
+ * This is a thin wrapper: it marshals the original transport peer
+ * (r->connection->realip when the realip module preserved it, otherwise
+ * r->connection->addr_text, plus the AF_UNIX flag), the forwarded request
  * headers, the request Host, and the http-level trusted-proxy CIDR handle
  * into the FFI input, then copies the FFI-produced authority into out_buf.
  * It contains no trust, CIDR-matching, or host-validation branches.
@@ -473,8 +474,22 @@ ngx_http_markdown_decide_base_authority(const ngx_http_request_t *r,
     markdown_base_url_input_init(&input);
 
     if (r->connection != NULL) {
-        input.source_ip = r->connection->addr_text.data;
-        input.source_ip_len = r->connection->addr_text.len;
+        /*
+         * Trusted-proxy CIDR evaluation must use the original transport
+         * peer, not the realip-resolved address: when the realip module
+         * (or PROXY protocol) rewrites connection->addr_text to the
+         * X-Forwarded-For-derived client address, the original connecting
+         * peer is preserved in connection->realip.  Matching the CIDR
+         * against the rewritten addr_text would classify the request by
+         * the spoofable client address instead of the actual proxy.
+         */
+        if (r->connection->realip.len > 0) {
+            input.source_ip = r->connection->realip.data;
+            input.source_ip_len = r->connection->realip.len;
+        } else {
+            input.source_ip = r->connection->addr_text.data;
+            input.source_ip_len = r->connection->addr_text.len;
+        }
         if (r->connection->sockaddr != NULL
             && r->connection->sockaddr->sa_family == AF_UNIX)
         {

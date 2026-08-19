@@ -523,6 +523,7 @@ struct ngx_connection_s {
     ngx_log_t       *log;
     struct sockaddr *sockaddr;
     ngx_str_t        addr_text;
+    ngx_str_t        realip;
 };
 
 struct ngx_pool_s {
@@ -1420,6 +1421,60 @@ test_base_url_unix_socket_flag(void)
     r.connection->sockaddr = NULL;
 
     TEST_PASS("Unix-socket peers are flagged for the decision");
+}
+
+/*
+ * Test: when the realip module preserved the original transport peer in
+ * connection->realip, the wrapper marshals realip (not the rewritten
+ * addr_text) as the trusted-proxy evaluation source.
+ *
+ * Validates ADR-0016 trusted-proxies model: CIDR evaluation uses the
+ * original transport peer preserved by ngx_http_realip_module rather than
+ * r->connection->addr_text.
+ */
+static void
+test_base_url_prefers_realip_peer(void)
+{
+    ngx_http_request_t            r;
+    ngx_http_markdown_conf_t      conf;
+    ngx_http_markdown_main_conf_t main_conf;
+    ngx_str_t                     base_url;
+
+    TEST_SUBSECTION("base_url wrapper prefers connection realip peer");
+
+    reset_base_url_stub();
+    init_request(&r);
+    memset(&conf, 0, sizeof(conf));
+    memset(&main_conf, 0, sizeof(main_conf));
+
+    /* addr_text has been rewritten by realip to the XFF-derived client;
+     * realip preserves the original proxy peer that the CIDR must match. */
+    set_str(&r.connection->addr_text, "203.0.113.9");
+    set_str(&r.connection->realip, "10.1.2.3");
+    set_str(&r.uri, "/articles/page.html");
+    r.loc_conf = &conf;
+    r.main_conf = (void *) &main_conf;
+
+    TEST_ASSERT(ngx_http_markdown_construct_base_url(&r, r.pool, &base_url)
+                    == NGX_OK,
+                "construct_base_url should succeed via the FFI decision");
+    TEST_ASSERT(g_captured_base_url_input.source_ip_len == 8
+        && memcmp(g_captured_base_url_input.source_ip, "10.1.2.3", 8) == 0,
+        "source IP must be marshaled from connection realip when present");
+    free(base_url.data);
+
+    /* Without realip, the wrapper falls back to addr_text. */
+    reset_base_url_stub();
+    set_str(&r.connection->realip, "");
+    TEST_ASSERT(ngx_http_markdown_construct_base_url(&r, r.pool, &base_url)
+                    == NGX_OK,
+                "construct_base_url should succeed without realip");
+    TEST_ASSERT(g_captured_base_url_input.source_ip_len == 11
+        && memcmp(g_captured_base_url_input.source_ip, "203.0.113.9", 11) == 0,
+        "source IP must fall back to connection addr_text when realip is empty");
+    free(base_url.data);
+
+    TEST_PASS("realip peer takes precedence over rewritten addr_text");
 }
 
 /*
@@ -2603,6 +2658,7 @@ main(void)
     test_base_url_preserves_empty_forwarded_presence();
     test_base_url_preserves_oversized_forwarded_presence();
     test_base_url_unix_socket_flag();
+    test_base_url_prefers_realip_peer();
     test_base_url_not_configured_marshaled();
     test_base_url_decision_failure_propagates();
     test_base_url_add_len_overflow_guard();
