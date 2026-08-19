@@ -1130,16 +1130,22 @@ def _canonical_dynamic_entry(
         # canonical arch and the frozen binding keys intact.  `arch` is the
         # compatibility document's presentation key (normalize folds it to
         # the internal `target` identity), so it must be preserved.
+        # `support_tier` is REQUIRED by the compatibility-document schema
+        # (tools/release-matrix.schema.json entry.required), so it must be
+        # retained on existing rows rather than dropped.
         entry.pop("nginx", None)
         entry.pop("os_type", None)
         entry.pop("nginx_channel", None)
         entry.pop("test_level", None)
-        entry.pop("support_tier", None)
         entry.pop("release_blocking", None)
         entry.pop("owner_workflow", None)
         entry.pop("managed_by", None)
         entry["nginx_version"] = version
         entry["libc"] = libc
+        if entry.get("support_tier") is None:
+            # Existing rows that predate the tier vocabulary default to
+            # full support (the canonical generated tier).
+            entry["support_tier"] = SUPPORT_TIER
         # Refresh the binding keys with the same computed values as the
         # new-row branch so an existing row never carries stale digests.
         entry["feature_manifest_digest"] = _feature_manifest_digest()
@@ -1161,6 +1167,7 @@ def _canonical_dynamic_entry(
         "libc": libc,
         "target": target,
         "artifact_type": "dynamic-module",
+        "support_tier": SUPPORT_TIER,
         "feature_manifest_digest": _feature_manifest_digest(),
         "abi_version": _frozen_abi_version(),
     }
