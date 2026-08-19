@@ -64,9 +64,9 @@ rollback-mutation fields are not part of v2.
 
 The optional `runtime.module_metrics` object is a structured evidence bridge,
 not a second public metrics surface. When present, it carries exact integer
-counters for streaming requests, pre-commit fail-open decisions, zero-copy
-output, and copied output. The benchmark adapter fails closed when the object
-is absent rather than inferring these values from unrelated Prometheus labels.
+counters for streaming requests, pre-commit fail-open decisions, and copied
+output. The benchmark adapter fails closed when the object is absent rather
+than inferring these values from unrelated Prometheus labels.
 
 ## Prometheus Metrics v1
 

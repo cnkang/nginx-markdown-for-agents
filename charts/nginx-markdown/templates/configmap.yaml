@@ -12,6 +12,9 @@ data:
     {{- if and .Values.metrics.enabled (not .Values.markdown.enabled) }}
     {{- fail "metrics.enabled=true requires markdown.enabled=true because metrics directives are provided by the markdown module" }}
     {{- end }}
+    {{- if and .Values.metrics.enabled (not .Values.metrics.sidecar.enabled) }}
+    {{- fail "metrics.enabled=true requires metrics.sidecar.enabled=true: the module's metrics endpoint is loopback-only, so Prometheus can only scrape through the in-pod sidecar proxy" }}
+    {{- end }}
     {{- if and .Values.markdown.enabled .Values.markdown.loadModule }}
     load_module {{ .Values.markdown.loadModule }};
     {{- end }}

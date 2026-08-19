@@ -63,10 +63,10 @@ value overrides it. `markdown_limits` inherits each key independently.
 | Dynamic configuration | `markdown_dynamic_config`, `markdown_dynamic_config_path`, `markdown_dynconf_dry_run` | H | off; no path; off. One watcher per worker; requests bind one snapshot for their lifetime. | dynconf reload, snapshot, and effective-config tests |
 | Diagnostics | `markdown_diagnostics` | L | off; the built-in handler permits loopback clients only, while native NGINX access-phase directives may narrow access further. | diagnostics production/access/output tests |
 
-The streaming threshold is an internal 1 MiB heuristic. The module selects
-zero-copy delivery automatically from ownership and backpressure state.
-Neither zero-copy nor shadow comparison is a public directive. Dynamic
-configuration
+The streaming threshold is an internal 1 MiB heuristic. Converted output
+is delivered through pool-copied buffers; zero-copy delivery was removed
+in 0.9.2. Neither zero-copy nor shadow comparison is a public directive.
+Dynamic configuration
 is stable and uses atomic staged promotion, request snapshot binding, and
 bounded diagnostics state.
 

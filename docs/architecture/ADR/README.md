@@ -73,7 +73,7 @@ What other options were considered and why were they not chosen?
 | [0017](0017-090-headerplan-atomic-apply.md) | 0.9.0 HeaderPlan Atomic Apply (Prepare/Commit) | Accepted | 2026-06-30 |
 | [0018](0018-090-observability-schema-v1-reason-registry.md) | 0.9.0 Observability Schema v1 and Reason Code Registry | Accepted | 2026-06-30 |
 | [0019](0019-090-production-readiness-release-gates.md) | 0.9.0 Production Readiness Release Gate Framework | Accepted | 2026-06-30 |
-| [0020](0020-hybrid-zero-copy-pool-cleanup.md) | Hybrid Zero-Copy Streaming Output with Pool Cleanup | Accepted | 2026-07-08 |
+| [0020](0020-hybrid-zero-copy-pool-cleanup.md) | Hybrid Zero-Copy Streaming Output with Pool Cleanup | Superseded (removed in 0.9.2) | 2026-07-08 |
 | [0021](0021-gzip-deflate-streaming-decompression-routing.md) | Gzip and Deflate Streaming Decompression Routing | Accepted | 2026-07-08 |
 | [0022](0022-performance-evidence-release-gate.md) | 0.9.1 Performance Evidence Release Gate | Accepted | 2026-07-08 |
 | [0023](0023-single-streaming-policy.md) | Single Public Streaming Policy Before v1.0 | Accepted | 2026-07-14 |

@@ -20,7 +20,7 @@ normalized performance thresholds. You must copy the following fields
 verbatim from the real canonical run: `streaming_path_hits`,
 `fullbuffer_path_hits`, `streaming_requests_total`,
 `precommit_failopen_total`, `decompression_streaming_total`,
-`decompression_fullbuffer_total`, `zero_copy_output_total`,
+`decompression_fullbuffer_total`,
 `copied_output_total`, `baseline_rss_bytes`, `peak_rss_bytes`, `input_bytes`,
 scenario status and metadata, platform, load generator, and NGINX version.
 
