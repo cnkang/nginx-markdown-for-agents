@@ -1618,24 +1618,56 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     }
 
     /*
-     * Decision E (user-confirmed 2026-08-19): a HEAD request proxied to
-     * upstream carries no body — NGINX core delivers only the terminal
-     * last_buf chain after the upstream HEAD response.  Converting the
-     * empty buffer would commit Content-Length: 0 and an empty-input
-     * ETag that contradict the GET representation of the same URL.
-     * Fail open instead: forward the upstream headers unchanged so the
-     * response describes the original HTML representation rather than
-     * a fabricated empty Markdown one.
+     * HEAD representation contract (supersedes Decision E,
+     * user-confirmed 2026-08-19): a HEAD request proxied to upstream
+     * carries no body — NGINX core delivers only the terminal last_buf
+     * chain after the upstream HEAD response.  There is no body to
+     * convert, so no body-derived field (Content-Length, ETag) can be
+     * computed — fabricating an empty-input ETag or Content-Length: 0
+     * would contradict the GET representation of the same URL.
+     *
+     * Per the Rust-side HTTP representation contract
+     * (scenario_07_head_fullbuffer / scenario_08_head_streaming), the
+     * HEAD response must still describe the Markdown representation a
+     * GET with the same Accept header would select: Content-Type
+     * text/markdown, Vary: Accept, source HTML metadata stripped.
+     * Rewrite the representation headers here instead of failing open
+     * to the upstream HTML headers.
+     *
+     * NOTE: the method check must NOT require r->header_only.  NGINX
+     * core sets r->header_only inside ngx_http_header_filter_module's
+     * header filter (for HEAD requests), but this module defers its own
+     * header emission until the body filter, so the core's assignment
+     * has not run yet when this branch executes.  Rely on the method
+     * alone, matching the streaming path-selection rule.
+     *
+     * The eligibility guard ensures only responses the module would
+     * convert for GET (status/content-type/Accept negotiated) are
+     * rewritten: an error page or other non-eligible response keeps its
+     * original representation headers and passes through unchanged.
      */
-    if (r->method == NGX_HTTP_HEAD && r->header_only) {
-        ctx->eligible = 0;
-        ngx_http_markdown_log_decision(
-            r, conf, ctx->effective_conf,
-            ngx_http_markdown_reason_failed_open());
+    if (r->method == NGX_HTTP_HEAD && ctx->eligible) {
+        rc = ngx_http_markdown_head_representation_headers(r);
+        if (rc != NGX_OK) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                          "markdown: HEAD representation header "
+                          "rewrite failed");
+            return rc;
+        }
         /* Release the inflight slot: the HEAD request performs no
          * conversion, so holding the slot for the whole header-only
          * request wastes max_inflight capacity. */
         ngx_http_markdown_inflight_release(ctx);
+        /* Do not record a conversion bypass/failure: the HEAD request
+         * is not a conversion attempt — it is a representation-header
+         * only response.  Mark ineligible so the passthrough below
+         * forwards the (rewritten) headers with an empty body. */
+        ctx->eligible = 0;
+        ctx->conversion.bypass_counted = 1;
+        /* The forward helper restores the source Last-Modified mtime
+         * from ctx->last_modified; the HEAD representation must not
+         * carry the HTML mtime, so forget the preserved source time. */
+        ctx->last_modified.has_last_modified_time = 0;
     }
 
     /*

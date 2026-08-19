@@ -481,7 +481,7 @@ curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost:8080/docs/ |
 curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost:8080/api/health | grep -i content-type
 ```
 
-Note: Prefer GET-based header checks (`curl -sD - -o /dev/null ...`) over `curl -I` for verification. In proxied deployments, `HEAD` requests may not carry an upstream body, which can cause fail-open behavior.
+Note: `curl -I` (HEAD) is a valid verification method: HEAD responses carry the same representation headers as a GET would select (`Content-Type: text/markdown; charset=utf-8`, `Vary: Accept`) with an empty body. Body-derived fields (`Content-Length`, `ETag`) are omitted on HEAD because no conversion body is available. GET-based header checks (`curl -sD - -o /dev/null ...`) remain the preferred way to also confirm body conversion and ETag generation.
 
 ### If It Does Not Convert
 

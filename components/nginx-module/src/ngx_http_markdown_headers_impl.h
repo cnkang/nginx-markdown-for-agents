@@ -1079,4 +1079,105 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+/*
+ * Rewrite response headers for a HEAD request so they describe the
+ * Markdown representation that a GET with the same Accept header would
+ * select (HTTP semantics: HEAD carries the same headers as GET, no body).
+ *
+ * The upstream HEAD response carries no body, so no body-derived field
+ * (Content-Length, ETag) can be computed.  Those fields are removed
+ * rather than fabricated: a fabricated Content-Length or empty-input
+ * ETag would contradict the GET representation of the same URL.  The
+ * header set still describes the Markdown representation (Content-Type,
+ * Vary: Accept) and strips all source-HTML representation metadata.
+ *
+ * Replaces the former Decision E fail-open behavior (superseded
+ * 2026-08-19): the body filter previously forwarded the upstream HTML
+ * headers unchanged for header-only HEAD requests, which contradicted
+ * the Rust-side HTTP representation contract (scenario_07_head_fullbuffer,
+ * scenario_08_head_streaming).
+ *
+ * r - current HTTP request
+ *
+ * Returns:
+ *   NGX_OK    on success
+ *   NGX_ERROR on allocation failure (Vary append)
+ */
+ngx_int_t
+ngx_http_markdown_head_representation_headers(ngx_http_request_t *r)
+{
+    static u_char  hdr_content_md5[] = "Content-MD5";
+    static u_char  hdr_digest[] = "Digest";
+    static u_char  hdr_content_digest[] = "Content-Digest";
+    static u_char  hdr_repr_digest[] = "Repr-Digest";
+    static u_char  hdr_token_count[] = "X-Markdown-Tokens";
+    static u_char  hdr_trailer[] = "Trailer";
+    static u_char  hdr_content_length[] = "Content-Length";
+    static u_char  hdr_etag[] = "ETag";
+
+    if (r == NULL) {
+        return NGX_ERROR;
+    }
+
+    /* The HEAD response describes the Markdown representation: strip
+     * source-HTML representation-integrity metadata (digests, token
+     * counts, Trailer declaration) exactly like the conversion commit
+     * paths (fullcov / streaming / 304) so the header contract is
+     * uniform across paths. */
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_content_md5, sizeof(hdr_content_md5) - 1, 0, NULL);
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_digest, sizeof(hdr_digest) - 1, 0, NULL);
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_content_digest, sizeof(hdr_content_digest) - 1, 0, NULL);
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_repr_digest, sizeof(hdr_repr_digest) - 1, 0, NULL);
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_token_count, sizeof(hdr_token_count) - 1, 0, NULL);
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_trailer, sizeof(hdr_trailer) - 1, 0, NULL);
+
+    /* Content-Type: point at the Markdown media type a GET conversion
+     * would select, using the shared writable array so all paths
+     * reference the same storage. */
+    r->headers_out.content_type.data = ngx_http_markdown_content_type;
+    r->headers_out.content_type.len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
+    r->headers_out.content_type_len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
+    r->headers_out.charset.len = 0;
+    r->headers_out.charset.data = NULL;
+
+    /* Content-Encoding: the Markdown representation is not the
+     * compressed HTML body; drop the upstream encoding. */
+    r->headers_out.content_encoding = NULL;
+
+    /* Content-Length / ETag: body-derived fields are unknowable for a
+     * HEAD response (no body was converted); remove rather than
+     * fabricate, per the representation contract. */
+    ngx_http_clear_content_length(r);
+    r->headers_out.content_length_n = -1;
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_content_length, sizeof(hdr_content_length) - 1, 0, NULL);
+    r->headers_out.etag = NULL;
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_etag, sizeof(hdr_etag) - 1, 0, NULL);
+
+    /* Last-Modified: the weak validator must not reference the source
+     * HTML mtime (Decision G applies to HEAD representation headers). */
+    r->headers_out.last_modified_time = (time_t) -1;
+    ngx_http_markdown_invalidate_headers(r,
+        ngx_http_markdown_hdr_last_modified,
+        sizeof(ngx_http_markdown_hdr_last_modified) - 1, 1, NULL);
+
+    /* Accept-Ranges: byte ranges apply to the HTML representation;
+     * the Markdown representation does not support them. */
+    r->allow_ranges = 0;
+    r->headers_out.accept_ranges = NULL;
+    ngx_http_markdown_invalidate_headers(r,
+        ngx_http_markdown_hdr_accept_ranges,
+        sizeof(ngx_http_markdown_hdr_accept_ranges) - 1, 0, NULL);
+
+    /* Vary: Accept — the representation varies by Accept negotiation. */
+    return ngx_http_markdown_add_vary_accept(r);
+}
+
 #endif /* NGX_HTTP_MARKDOWN_HEADERS_IMPL_H */

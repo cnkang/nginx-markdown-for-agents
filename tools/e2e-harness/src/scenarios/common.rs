@@ -114,6 +114,25 @@ pub fn try_head(
     }
 }
 
+/// Send HEAD with custom headers and append a failed assertion on error.
+pub fn try_head_with_headers(
+    url: &str,
+    headers: &HashMap<String, String>,
+    assertions: &mut Vec<AssertionResult>,
+    failure_assertion_name: &str,
+) -> Option<HttpResponse> {
+    match http::head_with_headers(url, headers) {
+        Ok(resp) => Some(resp),
+        Err(e) => {
+            assertions.push(failed_request_assertion(
+                failure_assertion_name,
+                &e.to_string(),
+            ));
+            None
+        }
+    }
+}
+
 /// Extract a header value as a string, returning empty string if absent.
 pub fn header_value(headers: &reqwest::header::HeaderMap, name: &str) -> String {
     headers

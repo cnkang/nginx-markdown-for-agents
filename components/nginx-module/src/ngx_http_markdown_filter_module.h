@@ -1909,6 +1909,7 @@ uint32_t ngx_http_markdown_reason_code_total_count(void);
 /* Update response headers after successful conversion */
 ngx_int_t ngx_http_markdown_update_headers(ngx_http_request_t *r,
     const struct MarkdownResult *result, const ngx_http_markdown_conf_t *conf);
+ngx_int_t ngx_http_markdown_head_representation_headers(ngx_http_request_t *r);
 
 /* Remove Content-Encoding header (called after decompression) */
 void ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r);
