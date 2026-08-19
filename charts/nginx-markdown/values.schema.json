@@ -11,11 +11,23 @@
         "maxSize": { "type": "string" },
         "timeout": { "type": "string" },
         "onError": { "type": "string" },
-        "flavor": { "type": "string" },
+        "flavor": {
+          "type": "string",
+          "enum": ["commonmark", "gfm"],
+          "description": "Markdown dialect; see the markdown_flavor directive values."
+        },
         "tokenEstimate": { "type": "boolean" },
         "etag": { "type": "boolean" },
-        "conditionalRequests": { "type": "string" },
-        "logVerbosity": { "type": "string" },
+        "conditionalRequests": {
+          "type": "string",
+          "enum": ["off", "ims_only", "full"],
+          "description": "Cache validation mode; see the markdown_cache_validation directive values."
+        },
+        "logVerbosity": {
+          "type": "string",
+          "enum": ["error", "warn", "info", "debug"],
+          "description": "Decision log verbosity; see the markdown_log_verbosity directive values."
+        },
         "autoDecompress": {
           "type": "boolean",
           "description": "Must be a real boolean. String overrides such as \"on\" are rejected during values validation instead of being coerced in the configmap template."
@@ -24,7 +36,11 @@
         "streaming": {
           "type": "object",
           "properties": {
-            "mode": { "type": "string" },
+            "mode": {
+              "type": "string",
+              "enum": ["off", "auto", "force"],
+              "description": "Processing-path policy; see the markdown_streaming directive values."
+            },
             "budget": { "type": "string" }
           }
         },
