@@ -81,7 +81,7 @@ Maps to two struct fields:
 | `markdown_stream_flush_min` | 16k | http, server, location | Min batch before flush |
 | `markdown_stream_excluded_types` | (none) | http, server, location | Additive to built-in exclusions |
 | `markdown_streaming_shadow` | off | http, server, location | Shadow mode |
-| `markdown_streaming_zero_copy` | off | http, server, location | Opt-in Rust-owned output buffers |
+| `markdown_streaming_zero_copy` | off | http, server, location | Opt-in Rust-owned output buffers (removed in 0.9.2) |
 
 ### Error Policy (Config V2)
 

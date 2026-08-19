@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted
+Superseded
+
+**Superseded by 0.9.2:** the `markdown_streaming_zero_copy` directive and
+the entire zero-copy output path were removed in 0.9.2. All converted
+output is delivered through pool-copied buffers; this ADR is retained as
+a historical record of the 0.9.1 design only.
 
 ## Context
 
