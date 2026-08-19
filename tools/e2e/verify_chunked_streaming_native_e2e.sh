@@ -768,6 +768,7 @@ http {
             markdown_streaming force;
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}
                 parser_memory=${MARKDOWN_MAX_SIZE} conversion_timeout=120s
+                parser_timeout=120s
                 streaming_buffer=${MARKDOWN_MAX_SIZE};
             markdown_error_policy pass;
             markdown_log_verbosity info;
@@ -784,6 +785,7 @@ http {
             markdown_streaming force;
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}
                 parser_memory=${MARKDOWN_MAX_SIZE} conversion_timeout=120s
+                parser_timeout=120s
                 streaming_buffer=${MARKDOWN_MAX_SIZE};
             markdown_error_policy pass;
             markdown_log_verbosity info;
@@ -802,6 +804,7 @@ http {
             markdown_streaming force;
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}
                 parser_memory=${MARKDOWN_MAX_SIZE} conversion_timeout=120s
+                parser_timeout=120s
                 streaming_buffer=256k;
             markdown_error_policy pass;
             markdown_log_verbosity info;
