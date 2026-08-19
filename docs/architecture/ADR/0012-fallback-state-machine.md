@@ -21,13 +21,13 @@ output is already partially delivered and cannot retract).
 Implement a two-phase fallback state machine per RFC 0008 section 3:
 
 1. **Pre-commit phase**: no Markdown output has flushed downstream. On
-   error, the module MAY replay the original HTML response (fail-open) or
-   reject the request (fail-closed), depending on the configured
-   `markdown_error_policy` policy. Fail-open replay stays available only
-   while every consumed upstream byte is still retained in the module's
-   replay buffer; if any consumed input is no longer available for
-   replay, the module MUST fail-closed instead of re-reading upstream
-   data without bound.
+   error, the module MAY replay the original HTML response (fail-open),
+   reject the request (fail-closed), or return the configured error
+   status, depending on the configured `markdown_error_policy` policy.
+   Fail-open replay stays available only while every consumed upstream
+   byte is still retained in the module's replay buffer; if any consumed
+   input is no longer available for replay, the module MUST fail-closed
+   instead of re-reading upstream data without bound.
 2. **Post-commit phase**: Markdown output has been partially delivered. On
    error, the module MUST NOT attempt to replay the original HTML. The
    module terminates the response with whatever Markdown it produced.
@@ -37,6 +37,17 @@ Implement a two-phase fallback state machine per RFC 0008 section 3:
 
 The commit boundary is the point at which the first Markdown output buffer is
 sent to the next body filter in the NGINX chain.
+
+### Status policy (pre-commit)
+
+When `markdown_error_policy` is set to `status`, a pre-commit conversion
+failure discards the original HTML and returns the configured error status
+(`429` for resource-limit/overload failures or `503` for system failures,
+per `markdown_error_policy error_status`). The module emits the
+corresponding reason code and metrics exactly as on the fail-closed path:
+`failed_closed` is logged with the error-category reason, and the failure
+counters (`conversions_failed`, `failures_*`) are incremented. The original
+upstream response is never delivered and no replay is attempted.
 
 ## Consequences
 
