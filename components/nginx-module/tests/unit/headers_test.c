@@ -115,6 +115,7 @@ typedef struct {
 ngx_int_t ngx_http_markdown_update_headers(ngx_http_request_t *r,
                                            const MarkdownResult *result,
                                            const ngx_http_markdown_conf_t *conf);
+ngx_int_t ngx_http_markdown_head_representation_headers(ngx_http_request_t *r);
 
 /* Mocks required by ngx_http_markdown_headers_standalone.c */
 void *
@@ -903,6 +904,96 @@ test_update_headers_multipart_failure_restores_chain(void)
     TEST_PASS("Multipart header rollback restores list links");
 }
 
+/* ══════════════════════════════════════════════════════════════════
+ * HEAD representation headers
+ * ══════════════════════════════════════════════════════════════════ */
+
+static void
+test_head_representation_headers_strips_html_metadata(void)
+{
+    ngx_http_request_t r = new_request();
+    ngx_table_elt_t   *vary;
+
+    TEST_SUBSECTION("HEAD representation headers describe Markdown");
+
+    /* Upstream HTML representation metadata the HEAD must strip. */
+    push_header(&r, "Content-Type", "text/html");
+    push_header(&r, "Content-Encoding", "gzip");
+    push_header(&r, "Content-Length", "2048");
+    push_header(&r, "ETag", "\"html-etag\"");
+    push_header(&r, "Last-Modified", "Wed, 01 Jan 2025 00:00:00 GMT");
+    push_header(&r, "Accept-Ranges", "bytes");
+    push_header(&r, "Content-MD5", "abc123");
+    push_header(&r, "Digest", "sha-256=:abc123:");
+    push_header(&r, "Content-Digest", "sha-256=:abc123:");
+    push_header(&r, "Repr-Digest", "sha-256=:abc123:");
+    push_header(&r, "X-Markdown-Tokens", "42");
+    push_header(&r, "Trailer", "Content-Digest");
+    r.headers_out.content_type.data = (u_char *) "text/html";
+    r.headers_out.content_type.len = sizeof("text/html") - 1;
+    r.headers_out.content_type_len = sizeof("text/html") - 1;
+    r.headers_out.content_length_n = 2048;
+    r.headers_out.last_modified_time = 1234567890;
+    r.headers_out.etag = push_header(&r, "ETag", "\"html-etag\"");
+    r.headers_out.accept_ranges = (ngx_table_elt_t *) 1;
+
+    TEST_ASSERT(ngx_http_markdown_head_representation_headers(&r) == NGX_OK,
+                "HEAD representation headers should succeed");
+
+    TEST_ASSERT(STR_EQ((char *) r.headers_out.content_type.data,
+                        "text/markdown; charset=utf-8"),
+                "HEAD Content-Type should be Markdown");
+    TEST_ASSERT(r.headers_out.content_encoding == NULL,
+                "HEAD Content-Encoding should be cleared");
+    TEST_ASSERT(r.headers_out.content_length_n == -1,
+                "HEAD Content-Length should be removed (not fabricated)");
+    TEST_ASSERT(r.headers_out.etag == NULL,
+                "HEAD ETag should be removed (not fabricated)");
+    TEST_ASSERT(r.headers_out.last_modified_time == (time_t) -1,
+                "HEAD Last-Modified should be removed");
+    TEST_ASSERT(r.headers_out.accept_ranges == NULL,
+                "HEAD Accept-Ranges should be cleared");
+
+    TEST_ASSERT(find_header(&r, "Content-MD5") == NULL,
+                "HEAD strips Content-MD5");
+    TEST_ASSERT(find_header(&r, "Digest") == NULL,
+                "HEAD strips Digest");
+    TEST_ASSERT(find_header(&r, "Content-Digest") == NULL,
+                "HEAD strips Content-Digest");
+    TEST_ASSERT(find_header(&r, "Repr-Digest") == NULL,
+                "HEAD strips Repr-Digest");
+    TEST_ASSERT(find_header(&r, "X-Markdown-Tokens") == NULL,
+                "HEAD strips X-Markdown-Tokens");
+    TEST_ASSERT(find_header(&r, "Trailer") == NULL,
+                "HEAD strips Trailer declaration");
+    TEST_ASSERT(find_header(&r, "ETag") == NULL,
+                "HEAD strips ETag entries");
+    TEST_ASSERT(find_header(&r, "Content-Length") == NULL,
+                "HEAD strips Content-Length entries");
+    TEST_ASSERT(find_header(&r, "Last-Modified") == NULL,
+                "HEAD strips Last-Modified entries");
+
+    vary = find_header(&r, "Vary");
+    TEST_ASSERT(vary != NULL, "HEAD has Vary");
+    TEST_ASSERT(find_substr(vary->value.data, vary->value.len, "Accept", 6),
+                "HEAD Vary includes Accept");
+
+    free_request(&r);
+    TEST_PASS("HEAD representation headers verified");
+}
+
+static void
+test_head_representation_headers_null(void)
+{
+    TEST_SUBSECTION("HEAD representation headers NULL request");
+
+    TEST_ASSERT(ngx_http_markdown_head_representation_headers(NULL)
+                    == NGX_ERROR,
+                "NULL request should fail");
+
+    TEST_PASS("NULL request validation works");
+}
+
 int
 main(void)
 {
@@ -923,6 +1014,8 @@ main(void)
     test_update_headers_skips_invalidated_accept_ranges();
     test_update_headers_prepare_failure_rolls_back();
     test_update_headers_multipart_failure_restores_chain();
+    test_head_representation_headers_strips_html_metadata();
+    test_head_representation_headers_null();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

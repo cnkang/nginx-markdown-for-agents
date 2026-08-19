@@ -13,7 +13,8 @@
 //! 7. Weak ETag (W/"") match returns 304
 //! 8. Wildcard If-None-Match: * returns 304
 //! 9. 304 response contains Vary: Accept
-//! 10. HEAD request returns same ETag as GET
+//! 10. HEAD request describes the Markdown representation (Content-Type
+//!     text/markdown, Vary: Accept, no fabricated Content-Length/ETag)
 
 use crate::assertions;
 use crate::http;
@@ -216,25 +217,96 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         ));
     }
 
-    // Case 10: HEAD request returns same ETag as GET
-    if let Some(resp10) = common::try_head(&url, &mut assertions, "case10_head_etag_matches_get") {
+    // Case 10: HEAD request describes the Markdown representation a GET
+    // would select (Rust contract scenario_07/08): Content-Type
+    // text/markdown, Vary: Accept, and NO body-derived fields — the
+    // upstream HEAD carries no body, so Content-Length and ETag cannot
+    // be computed and must not be fabricated from the HTML response.
+    let mut head_headers = headers.clone();
+    if let Some(resp10) =
+        common::try_head_with_headers(&url, &head_headers, &mut assertions, "case10_head_200")
+    {
         assertions.push(assertions::assert_status(
             "case10_head_200",
             resp10.status,
             200,
         ));
-        let head_etag = resp10
-            .headers
-            .get("ETag")
-            .and_then(|v: &reqwest::header::HeaderValue| v.to_str().ok())
-            .unwrap_or("")
-            .to_string();
-        let etag_matches = head_etag == response_etag;
+
+        // Representation headers match the GET conversion plan.
+        let head_ct = common::header_value(&resp10.headers, "content-type");
         assertions.push(AssertionResult {
-            name: "case10_head_etag_matches_get".to_string(),
-            passed: etag_matches,
-            expected: response_etag.clone(),
-            actual: head_etag,
+            name: "case10_head_content_type_markdown".to_string(),
+            passed: head_ct.starts_with("text/markdown"),
+            expected: "text/markdown".to_string(),
+            actual: head_ct,
+            message: None,
+        });
+
+        // Vary: Accept present (same negotiation contract as GET).
+        let vary_check = header_contains_token_case_insensitive(&resp10.headers, "Vary", "Accept");
+        assertions.push(AssertionResult {
+            name: "case10_head_vary_accept".to_string(),
+            passed: vary_check,
+            expected: "Vary contains Accept".to_string(),
+            actual: if vary_check {
+                "contains Accept".to_string()
+            } else {
+                "does not contain Accept".to_string()
+            },
+            message: None,
+        });
+
+        // No body-derived fields may be fabricated for a HEAD response:
+        // the upstream HEAD carries no body, so Content-Length and ETag
+        // are unknowable and must be absent (not the HTML values).
+        let head_etag = common::header_value(&resp10.headers, "etag");
+        assertions.push(AssertionResult {
+            name: "case10_head_no_etag".to_string(),
+            passed: head_etag.is_empty(),
+            expected: "no ETag (body-derived, not fabricatable)".to_string(),
+            actual: if head_etag.is_empty() {
+                "absent".to_string()
+            } else {
+                head_etag
+            },
+            message: None,
+        });
+        let head_cl = common::header_value(&resp10.headers, "content-length");
+        assertions.push(AssertionResult {
+            name: "case10_head_no_content_length".to_string(),
+            passed: head_cl.is_empty(),
+            expected: "no Content-Length (body-derived, not fabricatable)".to_string(),
+            actual: if head_cl.is_empty() {
+                "absent".to_string()
+            } else {
+                head_cl
+            },
+            message: None,
+        });
+
+        // Source-HTML metadata must not leak into the Markdown HEAD.
+        let head_ce = common::header_value(&resp10.headers, "content-encoding");
+        assertions.push(AssertionResult {
+            name: "case10_head_no_content_encoding".to_string(),
+            passed: head_ce.is_empty(),
+            expected: "no Content-Encoding (HTML body encoding)".to_string(),
+            actual: if head_ce.is_empty() {
+                "absent".to_string()
+            } else {
+                head_ce
+            },
+            message: None,
+        });
+        let head_lm = common::header_value(&resp10.headers, "last-modified");
+        assertions.push(AssertionResult {
+            name: "case10_head_no_last_modified".to_string(),
+            passed: head_lm.is_empty(),
+            expected: "no Last-Modified (HTML mtime)".to_string(),
+            actual: if head_lm.is_empty() {
+                "absent".to_string()
+            } else {
+                head_lm
+            },
             message: None,
         });
     }

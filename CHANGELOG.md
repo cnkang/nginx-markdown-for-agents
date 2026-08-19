@@ -82,6 +82,22 @@ before/after examples.
 
 ### Fixed
 
+- DEB/RPM packages now require the EXACT NGINX version they were compiled
+  against. The `preinstall.sh` script rejects any full-version difference
+  (including a patch release) as fatal, the DEB/RPM dependency metadata
+  pins the exact version (`nginx (= X.Y.Z)` / `nginx = 1:X.Y.Z`), and the
+  misleading "--with-compat same-minor compatibility" claim was removed.
+  NGINX's dynamic module loader rejects a version mismatch before
+  signature checks, so the previous branch-scoped tolerance produced
+  packages that installed but failed to load.
+- DEB enablement for nginx.org builds now uses a main-context
+  `load_module` directive. The previous guidance told users to symlink
+  into `/etc/nginx/modules-enabled/`, which the nginx.org default
+  `nginx.conf` never includes — the module was silently never loaded.
+  The install smoke test now verifies real module loadability
+  (`load_module` + `markdown_filter on` + `nginx -t`), and
+  `preremove.sh` only removes a symlink whose target is exactly this
+  module's config file (operator-owned regular files are never deleted).
 - Diagnostics `reason_to_code` mapping was missing `bypass_no_transform`
   entry. The diagnostics endpoint now returns the complete mapping.
 - C reason code constants were missing the decompression error series
@@ -102,11 +118,17 @@ before/after examples.
   responses no longer restore the source mtime. Conditional requests
   (`ims_only`) still accept `If-Modified-Since` for eligibility decisions.
   The response validator surface is what changed.
-- HEAD requests to upstream no longer commit a fabricated empty Markdown
-  representation. A proxied HEAD carries no body, so the module now fails
-  open (forwards the upstream headers unchanged) instead of converting the
-  empty buffer into `Content-Length: 0` with an empty-input ETag that
-  contradicts the GET representation of the same URL.
+- HEAD requests now describe the Markdown representation a GET would
+  select: the module rewrites the upstream headers to
+  `Content-Type: text/markdown; charset=utf-8` with `Vary: Accept` and
+  strips source-HTML metadata (`Content-Encoding`, `Last-Modified`,
+  `Accept-Ranges`, digest headers, `Trailer`). Body-derived fields
+  (`Content-Length`, `ETag`) are removed rather than fabricated: a
+  proxied HEAD carries no body, so committing an empty-input ETag or
+  `Content-Length: 0` would contradict the GET representation of the
+  same URL (Rust contract scenarios 07/08). This supersedes the
+  previous fail-open behavior that forwarded the upstream HTML headers
+  unchanged.
 
 ### Added
 

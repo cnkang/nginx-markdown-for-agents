@@ -248,7 +248,7 @@ HEAD requests, 304 responses, and fail-open replays always use the full-buffer p
 
 | Special Path | Behavior | Rationale |
 |-------------|----------|-----------|
-| HEAD request | Full-buffer path | No body is sent; conversion may still run for ETag/conditional support but the incremental path adds no value |
+| HEAD request | Full-buffer path | No body is sent; representation headers describe the Markdown representation a GET would select (no fabricated body-derived fields) but the incremental path adds no value |
 | 304 Not Modified | Full-buffer path | No body conversion needed; conditional logic operates on cached state |
 | Fail-open replay | Full-buffer path | The module is replaying already-buffered original HTML; incremental processing does not apply |
 

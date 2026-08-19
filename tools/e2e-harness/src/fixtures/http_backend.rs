@@ -511,6 +511,16 @@ fn md_html_response(
         Some("Accept")
     };
 
+    /* HEAD requests: the upstream serves its source representation
+     * (HTML) exactly like it would for GET — the conversion module is
+     * responsible for rewriting the representation headers.  Returning
+     * Markdown here would make the fixture mimic a converter that does
+     * not exist upstream, and the module would pass the already-Markdown
+     * response through untouched. */
+    if method == Method::HEAD {
+        return html_response(method, 200, "<h1>fixture html</h1>", true, Some(etag), vary);
+    }
+
     html_or_markdown_by_accept(
         &state,
         method,
