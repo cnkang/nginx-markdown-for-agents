@@ -107,7 +107,11 @@ def _active_rustup_toolchain() -> str | None:
     """
     env_toolchain = os.environ.get("RUSTUP_TOOLCHAIN")
     if env_toolchain:
-        return env_toolchain
+        # Match the directory-override and settings.toml branches: a bare
+        # channel (e.g. "1.97.1") is expanded to its installed host-triple
+        # toolchain name so the dispatcher resolves against the same
+        # concrete toolchain Rustup would select.
+        return _expand_toolchain_name(env_toolchain)
 
     try:
         cwd = Path.cwd()
@@ -207,6 +211,14 @@ def resolve_approved_executable(name: str) -> str | None:
     regular executable with the expected basename under a trusted system
     executable directory.  This prevents a writable PATH entry or symlink from
     selecting an unintended binary.
+
+    The trusted-system-directory guarantee is stronger for ordinary
+    executables than for Rustup-shimmed tools: a standard Rustup shim is
+    accepted at ``~/.cargo/bin/<name>`` even though ``~/.cargo/bin`` and the
+    ``~/.rustup/toolchains`` roots are user-writable, because the shim is
+    additionally constrained to resolve into the *active* toolchain per
+    Rustup's own selection rules (see ``_is_rustup_tool_shim``).  Every
+    non-shim executable must sit under a trusted system root.
     """
     if name not in _APPROVED_EXECUTABLES:
         raise ValueError(f"executable is not approved: {name!r}")

@@ -110,7 +110,10 @@ def _parse_table(text: str, heading_pattern: str) -> tuple[list[str], list[dict[
 def _clean(value: object) -> str:
     if isinstance(value, list):
         value = ", ".join(str(item) for item in value)
-    return re.sub(r"\s+", " ", str(value).replace("`", "").strip())
+    # Unescape \| (GFM table-cell escape) back to the literal | before
+    # comparison; the inventory stores unescaped syntax.
+    cleaned = str(value).replace("`", "").replace("\\|", "|").strip()
+    return re.sub(r"\s+", " ", cleaned)
 
 
 def _compare_maps(
