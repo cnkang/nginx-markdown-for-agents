@@ -94,6 +94,7 @@ typedef struct {
     ngx_table_elt_t *content_encoding;
     ngx_table_elt_t *accept_ranges;
     ngx_list_t headers;
+    ngx_list_t trailers;
 } ngx_http_headers_out_t;
 
 typedef struct {
@@ -485,6 +486,7 @@ new_request(void)
     r.pool = pool;
     r.connection = conn;
     init_headers_list(&r.headers_out.headers, 32);
+    init_headers_list(&r.headers_out.trailers, 4);
     return r;
 }
 
@@ -497,6 +499,9 @@ free_request(ngx_http_request_t *r)
     free(r->headers_out.headers.part.elts);
     r->headers_out.headers.part.elts = NULL;
     r->headers_out.headers.part.nelts = 0;
+    free(r->headers_out.trailers.part.elts);
+    r->headers_out.trailers.part.elts = NULL;
+    r->headers_out.trailers.part.nelts = 0;
     free(r->connection);
     r->connection = NULL;
     destroy_pool(r->pool);

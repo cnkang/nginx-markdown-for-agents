@@ -69,6 +69,7 @@ typedef struct {
     ngx_table_elt_t *content_encoding;
     ngx_table_elt_t *accept_ranges;
     ngx_list_t headers;
+    ngx_list_t trailers;
 } ngx_http_headers_out_t;
 
 typedef struct {

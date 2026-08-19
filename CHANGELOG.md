@@ -82,6 +82,13 @@ before/after examples.
 
 ### Fixed
 
+- Upstream response trailers are now suppressed after an HTML-to-Markdown
+  representation change. `headers_out.trailers` is an independent list
+  that HTTP/2/3 and chunked encodings emit without an HTTP/1.1 `Trailer`
+  declaration, so invalidating only the declaration left real trailers
+  (Content-Digest, Repr-Digest, ...) propagating with the Markdown body.
+  All conversion paths (full-buffer, streaming, 304, HEAD) now clear the
+  trailer list (`ngx_http_markdown_clear_trailers`).
 - DEB/RPM packages now require the EXACT NGINX version they were compiled
   against. The `preinstall.sh` script rejects any full-version difference
   (including a patch release) as fatal, the DEB/RPM dependency metadata

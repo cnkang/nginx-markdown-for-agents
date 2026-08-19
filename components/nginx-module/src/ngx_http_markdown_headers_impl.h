@@ -251,6 +251,44 @@ ngx_http_markdown_invalidate_headers(ngx_http_request_t *r,
 }
 
 /*
+ * Invalidate every entry in r->headers_out.trailers.
+ *
+ * The response trailer list is a second, independent ngx_list_t
+ * (headers_out.trailers) that HTTP/2/3 and chunked encodings emit
+ * WITHOUT requiring an HTTP/1.1 `Trailer` declaration header.  After an
+ * HTML->Markdown representation change, upstream trailers (Content-Digest,
+ * Repr-Digest, Digest, Content-MD5, X-Markdown-Tokens, ...) describe the
+ * source HTML body and must not be propagated; invalidating the `Trailer`
+ * declaration header alone is insufficient (HTTP/2/3 do not depend on it).
+ *
+ * The output filters (ngx_http_chunked_filter_module,
+ * ngx_http_v2_filter_module) skip entries whose hash == 0, so marking
+ * every entry hash=0 fully suppresses the trailer block.
+ *
+ * r - current HTTP request
+ */
+void
+ngx_http_markdown_clear_trailers(ngx_http_request_t *r)
+{
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *elts;
+
+    part = &r->headers_out.trailers.part;
+
+    while (part != NULL) {
+        elts = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            elts[i].hash = 0;
+        }
+        part = part->next;
+    }
+
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "markdown: cleared upstream response trailers "
+                   "(representation change)");
+}
+
+/*
  * Check whether a comma-separated header value contains a specific token.
  *
  * Parses the value as a comma-delimited list, trims whitespace from
@@ -902,6 +940,11 @@ ngx_http_markdown_fullcov_commit(ngx_http_request_t *r,
      * header must not be forwarded. */
     ngx_http_markdown_invalidate_headers(r,
         hdr_trailer, sizeof(hdr_trailer) - 1, 0, NULL);
+    /* Clear the actual trailer entries too: headers_out.trailers is an
+     * independent list that HTTP/2/3 and chunked encodings emit without
+     * an HTTP/1.1 Trailer declaration.  Suppress them so the Markdown
+     * response never propagates source-HTML representation trailers. */
+    ngx_http_markdown_clear_trailers(r);
 
     /* C1: Content-Type dedicated field */
     r->headers_out.content_type.data = ngx_http_markdown_content_type;

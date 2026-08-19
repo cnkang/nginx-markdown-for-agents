@@ -72,6 +72,7 @@ typedef struct {
     ngx_table_elt_t *content_encoding;
     ngx_table_elt_t *accept_ranges;
     ngx_list_t headers;
+    ngx_list_t trailers;
 } ngx_http_headers_out_t;
 
 typedef struct {
@@ -116,6 +117,7 @@ ngx_int_t ngx_http_markdown_update_headers(ngx_http_request_t *r,
                                            const MarkdownResult *result,
                                            const ngx_http_markdown_conf_t *conf);
 ngx_int_t ngx_http_markdown_head_representation_headers(ngx_http_request_t *r);
+void ngx_http_markdown_clear_trailers(ngx_http_request_t *r);
 
 /* Mocks required by ngx_http_markdown_headers_standalone.c */
 void *
@@ -374,8 +376,10 @@ new_request(void)
     r.pool = pool;
     r.connection = conn;
     init_headers_list(&r.headers_out.headers, 32, pool);
+    init_headers_list(&r.headers_out.trailers, 4, pool);
     /* The returned request is copied, so never retain a stack address. */
     r.headers_out.headers.last = NULL;
+    r.headers_out.trailers.last = NULL;
     return r;
 }
 
@@ -389,6 +393,10 @@ free_request(ngx_http_request_t *r)
     free(r->headers_out.headers.part.elts);
     r->headers_out.headers.part.elts = NULL;
     r->headers_out.headers.part.nelts = 0;
+
+    free(r->headers_out.trailers.part.elts);
+    r->headers_out.trailers.part.elts = NULL;
+    r->headers_out.trailers.part.nelts = 0;
 
     free(r->connection);
     r->connection = NULL;
@@ -994,6 +1002,66 @@ test_head_representation_headers_null(void)
     TEST_PASS("NULL request validation works");
 }
 
+/* ══════════════════════════════════════════════════════════════════
+ * Response trailers clearing
+ * ══════════════════════════════════════════════════════════════════ */
+
+static void
+push_trailer(ngx_http_request_t *r, const char *name, const char *value)
+{
+    ngx_table_elt_t *h = ngx_list_push(&r->headers_out.trailers);
+    TEST_ASSERT(h != NULL, "trailer push should succeed");
+    h->hash = 1;
+    h->key.data = (u_char *) name;
+    h->key.len = strlen(name);
+    h->value.data = (u_char *) value;
+    h->value.len = strlen(value);
+}
+
+static void
+test_clear_trailers_suppresses_all_entries(void)
+{
+    ngx_http_request_t r = new_request();
+    ngx_table_elt_t *elts;
+    ngx_uint_t i;
+
+    TEST_SUBSECTION("clear_trailers suppresses upstream representation trailers");
+
+    push_trailer(&r, "Content-Digest", "sha-256=:abc123:");
+    push_trailer(&r, "Repr-Digest", "sha-256=:abc123:");
+    push_trailer(&r, "Digest", "sha-256=:abc123:");
+    push_trailer(&r, "X-Markdown-Tokens", "42");
+
+    ngx_http_markdown_clear_trailers(&r);
+
+    elts = (ngx_table_elt_t *) r.headers_out.trailers.part.elts;
+    for (i = 0; i < r.headers_out.trailers.part.nelts; i++) {
+        TEST_ASSERT(elts[i].hash == 0,
+                    "every trailer entry must be invalidated (hash=0)");
+    }
+    TEST_ASSERT(r.headers_out.trailers.part.nelts == 4,
+                "trailer entries remain in the list but are suppressed");
+
+    free_request(&r);
+    TEST_PASS("clear_trailers suppresses all trailer entries");
+}
+
+static void
+test_clear_trailers_empty_list(void)
+{
+    ngx_http_request_t r = new_request();
+
+    TEST_SUBSECTION("clear_trailers handles an empty trailer list");
+
+    ngx_http_markdown_clear_trailers(&r);
+
+    TEST_ASSERT(r.headers_out.trailers.part.nelts == 0,
+                "empty trailer list stays empty");
+
+    free_request(&r);
+    TEST_PASS("clear_trailers handles empty list");
+}
+
 int
 main(void)
 {
@@ -1016,6 +1084,8 @@ main(void)
     test_update_headers_multipart_failure_restores_chain();
     test_head_representation_headers_strips_html_metadata();
     test_head_representation_headers_null();
+    test_clear_trailers_suppresses_all_entries();
+    test_clear_trailers_empty_list();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");
