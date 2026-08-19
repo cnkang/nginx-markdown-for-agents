@@ -341,8 +341,9 @@ module functionality after Kubernetes deployment.
    response contains markdown content
 3. **Accept negotiation** — Sends `Accept: text/html` and confirms the module
    does NOT convert (pass-through)
-4. **Metrics endpoint** — Verifies `/metrics` returns HTTP 200 with
-   Prometheus-format data
+4. **Metrics endpoint** — Verifies the module metrics path (default
+   `/_markdown_metrics`, matching `values.metrics.uri`; override with
+   `-m/--metrics`) returns HTTP 200 with Prometheus-format data
 
 #### Usage
 
@@ -370,10 +371,15 @@ All options:
 | Option | Default | Description |
 |--------|---------|-------------|
 | `-u, --url URL` | (port-forward) | Service base URL |
-| `-n, --namespace NS` | `ingress-nginx` | Kubernetes namespace |
-| `-l, --label LABEL` | `app=nginx-markdown` | Pod label selector |
+| `-n, --namespace NS` | `default` (`$K8S_NAMESPACE`) | Kubernetes namespace |
+| `-l, --label LABEL` | `app.kubernetes.io/name=nginx-markdown` | Pod label selector (Helm selectorLabels) |
 | `-p, --port PORT` | `8080` | Local port for port-forward |
+| `-m, --metrics PATH` | `/_markdown_metrics` | Module metrics path (`values.metrics.uri`) |
 | `-t, --timeout SECS` | `10` | Curl timeout in seconds |
+
+The port-forward targets the Pod's container port `8080` (the chart's
+NGINX `listen`; the Service maps `80 → 8080`), so direct Pod forwarding
+uses `8080`, not `80`.
 
 #### Expected Output
 
