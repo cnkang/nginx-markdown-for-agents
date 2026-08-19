@@ -12,6 +12,16 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
+/*
+ * Public module version reported in diagnostics/metrics.  This is the
+ * single definition; release tooling may override it via -D at build
+ * time (mirrors the NGX_HTTP_MARKDOWN_SOURCE_SHA / RUST_VERSION pattern).
+ * Bump together with the release version.
+ */
+#ifndef NGX_HTTP_MARKDOWN_PRODUCT_VERSION
+#define NGX_HTTP_MARKDOWN_PRODUCT_VERSION "0.9.2"
+#endif
+
 struct MarkdownOptions;
 struct MarkdownResult;
 
@@ -767,7 +777,6 @@ typedef struct {
         ngx_flag_t    policy_explicit;     /* 1 if operator set markdown_streaming */
         ngx_array_t  *excluded_types;      /* markdown_stream_excluded_types (default: NULL) */
         size_t        budget;              /* markdown_limits streaming_buffer (default: 2m) */
-        ngx_flag_t    budget_explicit;     /* 1 if operator set streaming_buffer */
     } stream;
 
     /*
@@ -850,7 +859,6 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
 
     NGX_MD_MERGE_STREAM(budget, size_t, -1,
                         NGX_HTTP_MARKDOWN_LIMITS_STREAMING_BUFFER_DEFAULT);
-    NGX_MD_MERGE_STREAM(budget_explicit, ngx_flag_t, -1, 0);
 
 #undef NGX_MD_MERGE_STREAM
 }
@@ -1026,7 +1034,14 @@ typedef struct {
      * Provides request-consistent values for all dynconf-mutable fields.
      * All body/conversion/logging/budget code should read mutable fields
      * through this view instead of directly from ngx_http_markdown_conf_t.
-     * NULL only on pool allocation failure (falls back to live conf). */
+     *
+     * Stored inline (by value) in the context so that no pool allocation
+     * is needed: a request whose snapshot allocation failed must still
+     * bind the header-time view, otherwise the body phase would fall
+     * back to static live-conf values and observe a different
+     * configuration than the header phase (bind-once violation). */
+    ngx_http_markdown_effective_conf_t  effective_conf_storage;
+    ngx_flag_t                          effective_conf_valid;
     ngx_http_markdown_effective_conf_t *effective_conf;
 
     /*
@@ -1652,7 +1667,6 @@ typedef struct {
         ngx_atomic_t  decompression_streaming_total;
         ngx_atomic_t  decompression_fullbuffer_total;
         ngx_atomic_t  decompression_budget_exceeded_total;
-        ngx_atomic_t  zero_copy_output_total;
         ngx_atomic_t  copied_output_total;
     } perf;
 

@@ -557,9 +557,16 @@ ngx_http_markdown_build_effective_conf(
 
 
 /*
- * Bind the captured snapshot and effective view into request-pool storage.
+ * Bind the captured snapshot and effective view into request storage.
  * Production request code and conformance tests use this same seam so the
  * allocation and dynconf gating rules cannot silently diverge.
+ *
+ * The effective view is copied by value into `eff_storage` (owned by the
+ * caller, typically the request context).  There is no pool allocation for
+ * the effective view: a request whose allocation failed must still bind
+ * the header-time view, otherwise the body phase would fall back to
+ * static live-conf values and observe a different configuration than the
+ * header phase (bind-once violation).
  */
 static void
 ngx_http_markdown_bind_request_snapshot(
@@ -568,11 +575,12 @@ ngx_http_markdown_bind_request_snapshot(
     const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_dynconf_snapshot_t *snap_copy,
     const ngx_http_markdown_effective_conf_t *early_eff,
+    ngx_http_markdown_effective_conf_t *eff_storage,
     ngx_http_markdown_dynconf_snapshot_t **snapshot_slot,
     ngx_http_markdown_effective_conf_t **effective_slot)
 {
     if (pool == NULL || conf == NULL || snapshot_slot == NULL
-        || effective_slot == NULL)
+        || effective_slot == NULL || eff_storage == NULL)
     {
         return;
     }
@@ -600,15 +608,9 @@ ngx_http_markdown_bind_request_snapshot(
         return;
     }
 
-    *effective_slot = ngx_pcalloc(
-        pool, sizeof(ngx_http_markdown_effective_conf_t));
-    if (*effective_slot != NULL) {
-        **effective_slot = *early_eff;
-    } else {
-        ngx_log_error(NGX_LOG_WARN, log, 0,
-                      "markdown: failed to allocate effective conf "
-                      "from request pool; request will use live conf values");
-    }
+    /* By-value copy: no allocation, no failure path, bind-once preserved. */
+    *eff_storage = *early_eff;
+    *effective_slot = eff_storage;
 }
 
 
@@ -2989,6 +2991,17 @@ ngx_http_markdown_dynconf_read_file(
         ngx_close_file(fd);
         ngx_http_markdown_record_dynconf_reload(
             NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO);
+        ngx_http_markdown_dynconf_record_static_error(
+            watcher, NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO);
+        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;
+    }
+    /* Reject non-regular files (FIFO, device, socket): opening a FIFO from
+     * the worker timer with a blocking O_RDONLY would stall the event
+     * loop until a writer appears.  Only regular files are valid dynconf
+     * sources. */
+    if (!S_ISREG(file_info.st_mode)) {
+        ngx_close_file(fd);
+        ngx_http_markdown_record_dynconf_reload(NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO);
         ngx_http_markdown_dynconf_record_static_error(
             watcher, NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO);
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_IO_ERROR;

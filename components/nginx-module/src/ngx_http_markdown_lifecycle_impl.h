@@ -106,8 +106,10 @@ ngx_http_markdown_filter_init(ngx_conf_t *cf)
  *
  * @param cycle Pointer to the nginx cycle (used for logging and to obtain the HTTP configuration).
  * @return NGX_OK on successful initialization;
- *         NGX_ERROR if the metrics shared-memory zone is missing or the converter creation fails.
- *         Note: failure to start the dynamic configuration watcher is logged as a warning but is non-fatal.
+ *         NGX_ERROR if the metrics shared-memory zone is missing, the converter
+ *         creation fails, or the dynamic-configuration watcher cannot be
+ *         started (a worker without the watcher would permanently diverge
+ *         from its peers on configuration reload).
  */
 static ngx_int_t
 ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
@@ -181,9 +183,12 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
                     cycle, &dynconf_conf->advanced.dynconf_path,
                     dynconf_conf, cycle->log) != NGX_OK)
             {
-                ngx_log_error(NGX_LOG_WARN, cycle->log, 0,
-                              "markdown: failed to start watcher");
-                /* Non-fatal: worker continues without hot-reload. */
+                ngx_log_error(NGX_LOG_CRIT, cycle->log, 0,
+                              "markdown: failed to start dynconf watcher; "
+                              "refusing to start worker without hot-reload "
+                              "(worker would permanently diverge from "
+                              "peers on configuration reload)");
+                return NGX_ERROR;
             }
         }
 

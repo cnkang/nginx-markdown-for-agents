@@ -16,6 +16,7 @@
 #ifdef MARKDOWN_STREAMING_ENABLED
 
 #include "ngx_http_markdown_streaming_decomp_impl.h"
+#include "ngx_http_markdown_inflight_impl.h"
 #include "ngx_http_markdown_stream_postcommit.h"
 #include "ngx_http_markdown_stream_commit.h"
 
@@ -3630,6 +3631,15 @@ ngx_http_markdown_streaming_finalize_request(
 
     /* Handle is consumed by finalize regardless of result */
     ctx->streaming.handle = NULL;
+
+    /* Conversion is complete once the FFI handle is consumed: release
+     * the inflight slot immediately instead of holding it until the
+     * terminal last_buf is delivered.  A slow client can otherwise
+     * occupy the slot for the whole transfer, letting a few clients
+     * exhaust max_inflight while the worker is idle.  The terminal
+     * delivery release in stream_postcommit remains as an idempotent
+     * backstop for paths that never reach finalize. */
+    ngx_http_markdown_inflight_release(ctx);
 
     if (rc_ffi != ERROR_SUCCESS) {
         return ngx_http_markdown_streaming_handle_finalize_ffi_error(

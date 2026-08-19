@@ -185,6 +185,7 @@ ngx_http_markdown_bind_request_context_snapshot(
 {
     ngx_http_markdown_bind_request_snapshot(
         r->pool, r->connection->log, conf, snap_copy, early_eff,
+        &ctx->effective_conf_storage,
         &ctx->dynconf_snapshot, &ctx->effective_conf);
 }
 
@@ -254,8 +255,13 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
      * publish; the body filter sees ctx == NULL and passes through without
      * re-entering the header chain.
      */
-    /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
-    if (rc == NGX_OK || rc == NGX_DONE) {
+    /* Rule 38/23: failopen_count is a delivery counter, not a decision counter.
+     * NGX_AGAIN means the write filter queued the header block — the headers
+     * are accepted — so it counts as a delivered fail-open exactly like
+     * NGX_OK/NGX_DONE.  (The streaming path defers counting via a pending
+     * latch for backpressure; this path has no ctx to hang a latch on and
+     * the header block is accepted either way.) */
+    if (rc == NGX_OK || rc == NGX_DONE || rc == NGX_AGAIN) {
         ngx_http_markdown_metric_inc_failopen(eff, conf);
     }
     return rc;
@@ -1221,6 +1227,13 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * and reset the request's phase latches. */
     ctx = ngx_http_get_module_ctx(r, ngx_http_markdown_filter_module);
     if (ctx != NULL) {
+        /* Re-entry after headers were already forwarded: NGINX core does
+         * not re-enter the header chain once header_sent is set, but if a
+         * re-entry ever did occur, forwarding a second time would corrupt
+         * the response.  Short-circuit instead. */
+        if (ctx->headers_forwarded) {
+            return NGX_OK;
+        }
         return ngx_http_next_header_filter(r);
     }
 
