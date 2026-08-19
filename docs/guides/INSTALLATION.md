@@ -195,9 +195,9 @@ VERSION="<published-version>"
 NGINX_VERSION=1.26.3
 ARCH=amd64
 
-curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS"
-curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS.asc"
-curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
+curl -fSL "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS"
+curl -fSL "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS.asc"
+curl -fSL "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
 # Import the release signing key through an independently authenticated channel before GPG verification.
 # Example: curl -fsSL https://example.com/nginx-markdown-gpg.key | gpg --import
 # Then validate the imported key fingerprint matches TRUSTED_FINGERPRINT.
@@ -223,9 +223,9 @@ VERSION="<published-version>"
 NGINX_VERSION=1.26.3
 ARCH=x86_64
 
-curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS"
-curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS.asc"
-curl -fSLO "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
+curl -fSL "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS"
+curl -fSL "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/SHA256SUMS.asc"
+curl -fSL "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}/nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
 # Import the release signing key through an independently authenticated channel before GPG verification.
 # Example: curl -fsSL https://example.com/nginx-markdown-gpg.key | gpg --import
 # Then validate the imported key fingerprint matches TRUSTED_FINGERPRINT.
