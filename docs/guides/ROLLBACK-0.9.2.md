@@ -26,10 +26,20 @@ Publication and artifact availability are separate release gates.
 
    ```bash
    sudo nginx -s quit
-   timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
-   if sudo systemctl is-active --quiet nginx; then
-     echo "NGINX did not stop within 30s — investigate before continuing" >&2
-     exit 1
+   if command -v systemctl >/dev/null 2>&1 && sudo systemctl is-active --quiet nginx 2>/dev/null; then
+     # systemd-managed NGINX: wait for a confirmed shutdown.
+     timeout 30 sh -c 'while sudo systemctl is-active --quiet nginx; do sleep 1; done'
+     if sudo systemctl is-active --quiet nginx; then
+       echo "NGINX did not stop within 30s — investigate before continuing" >&2
+       exit 1
+     fi
+   else
+     # systemctl unavailable or does not manage NGINX: independently verify
+     # that no NGINX master process remains before replacing the module.
+     if pgrep -x nginx >/dev/null 2>&1; then
+       echo "NGINX master process still running after 'nginx -s quit' — investigate before continuing" >&2
+       exit 1
+     fi
    fi
    ```
 

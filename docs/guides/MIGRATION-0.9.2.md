@@ -257,7 +257,9 @@ markdown_stream_excluded_types text/csv application/xml;
 ### `markdown_stream_threshold` → removed (internalized)
 
 The streaming threshold is now a fixed internal constant (1 MiB). Chunked
-responses (no Content-Length) always stream.
+responses (no Content-Length) stream only when `markdown_streaming` permits
+streaming. The directive's `off` behavior stays unchanged. Chunked
+responses do not stream unconditionally.
 
 ```nginx
 # BEFORE (0.9.1)

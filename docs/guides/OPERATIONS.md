@@ -189,8 +189,9 @@ grep "conversion time" /var/log/nginx/error.log | awk '{print $NF}' | sort -n | 
 | Pattern | Severity | Meaning |
 |---------|----------|---------|
 | `markdown filter: conversion failed, category=conversion_error` | WARN | HTML parsing or Markdown generation failed |
-| `markdown filter: conversion failed, category=resource_limit` | WARN | Size limit or timeout exceeded |
-| `markdown filter: conversion failed, category=system_error` | ERROR | Memory allocation or system error |
+| `markdown filter: conversion failed, category=memory_budget_exceeded` | WARN | Memory limit or timeout exceeded |
+| `markdown filter: conversion failed, category=timeout` | WARN | Parser execution exceeded `parser_timeout` |
+| `markdown filter: conversion failed, category=ffi_panic` | ERROR | Internal/system error (Rust↔C panic) |
 | `markdown filter: conversion succeeded, time=XXXms` | INFO | Successful conversion with timing |
 
 
@@ -352,8 +353,9 @@ grep "conversion failed" /var/log/nginx/error.log | \
 | Category | Cause | Solution |
 |----------|-------|----------|
 | `conversion_error` | Malformed HTML | Investigate HTML source, improve error handling |
-| `resource_limit` | Size/timeout exceeded | Increase limits or optimize content |
-| `system_error` | Memory allocation failed | Increase system resources, check for leaks |
+| `memory_budget_exceeded` | Memory limit reached (`markdown_limits conversion_memory=...` or `parser_memory=...`) | Increase the relevant `markdown_limits` key, or exclude large/complex pages from conversion scope |
+| `timeout` | Parser execution exceeded `markdown_limits parser_timeout=...` | Increase `markdown_limits parser_timeout=...` or exclude slow pages |
+| `ffi_panic` | Internal/system error (Rust↔C panic) | Collect logs (`dmesg`) and report a bug |
 
 **Solutions:**
 
@@ -362,16 +364,21 @@ grep "conversion failed" /var/log/nginx/error.log | \
   - Validate HTML: Use W3C validator
   - Report bug if HTML is valid but conversion fails
 
-- **For resource_limit:**
+- **For memory_budget_exceeded:**
   - Increase limits: `markdown_limits conversion_memory=20m conversion_timeout=10s;`
   - Optimize content: Reduce HTML size at source
   - Use fail-open: `markdown_error_policy pass;`
 
-- **For system_error:**
+- **For timeout:**
+  - Increase `markdown_limits parser_timeout=...`
+  - Exclude slow pages from conversion scope
+  - Use fail-open: `markdown_error_policy pass;`
+
+- **For ffi_panic:**
   - Check memory: `free -h`, `top`
   - Check disk space: `df -h`
   - Review system logs: `dmesg | tail -50`
-  - Restart NGINX if memory leak suspected
+  - Report a bug with the collected logs
 
 
 #### Issue 3: Slow Conversion Performance
@@ -548,7 +555,7 @@ curl -H "Accept: text/plain; version=0.0.4" "${METRICS_URL:-http://localhost/mar
 2. **Identify failure category:**
 ```bash
 grep "conversion failed" /var/log/nginx/error.log | tail -50
-# Look for: category=conversion_error|resource_limit|system_error
+# Look for: category=conversion_error|memory_budget_exceeded|timeout|ffi_panic
 ```
 
 3. **Take action based on category:**
@@ -558,15 +565,19 @@ grep "conversion failed" /var/log/nginx/error.log | tail -50
    - Check HTML validity
    - Report bug if needed
 
-   **If resource_limit:**
+   **If memory_budget_exceeded:**
    - Increase limits temporarily: `markdown_limits conversion_memory=20m conversion_timeout=10s;`
    - Reload NGINX: `nginx -s reload`
    - Investigate root cause
 
-   **If system_error:**
+   **If timeout:**
+   - Increase `markdown_limits parser_timeout=...`
+   - Exclude slow pages from conversion scope
+
+   **If ffi_panic:**
    - Check system resources: `free -h`, `df -h`
    - Check for memory leaks
-   - Consider restart if needed
+   - Report a bug with collected logs
 
 4. **Monitor for improvement:**
 ```bash

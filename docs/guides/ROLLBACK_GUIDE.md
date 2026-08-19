@@ -350,6 +350,8 @@ nginx -t && nginx -s reload
 
 Follow the [Verification Steps](#verification-steps) section. The key signal is that `failed_closed` entries stop appearing in decision logs. Do **not** require a `failed_open` log entry after rollback, and do not expect `failed_open` entries to replace `failed_closed` entries. Both are terminal outcomes of failed conversions, and after rollback to `pass` the module records `failed_open` only when a conversion actually fails. Verify that `failed_closed` entries stop appearing, then trigger a conversion failure. Confirm the client receives original HTML instead of a 502. Successful conversions produce no log entry, so expect none.
 
+**Drain before checking:** a graceful reload keeps existing workers alive until their keep-alive connections close. Requests on old workers still run the pre-rollback policy and can emit `failed_closed` entries after the reload. Wait for old workers to drain (typically until `worker_shutdown_timeout` expires or old worker PIDs disappear). Alternatively, scope the `failed_closed` check to traffic handled by newly loaded workers. Only then conclude the rollback took effect.
+
 ---
 
 ## Rollback Trigger Conditions
