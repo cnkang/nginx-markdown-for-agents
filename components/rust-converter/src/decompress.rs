@@ -422,7 +422,11 @@ fn append_deflate_output(
 }
 
 /// Decompress brotli data with budget enforcement.
-fn decompress_brotli(input: &[u8], budget: usize, ratio: u64) -> Result<DecompResult, DecompError> {
+fn decompress_brotli(
+    input: &[u8],
+    budget: usize,
+    ratio: u64,
+) -> Result<DecompResult, DecompError> {
     if input.is_empty() {
         return Err(DecompError::TruncatedInput(
             "empty input for brotli decompression".to_string(),
@@ -510,8 +514,7 @@ mod tests {
         let mut compressed = gzip_compress(first);
         compressed.extend_from_slice(&gzip_compress(second));
 
-        let result =
-            decompress_bounded(&compressed, Format::Gzip, first.len() + second.len() - 1, 0);
+        let result = decompress_bounded(&compressed, Format::Gzip, first.len() + second.len() - 1, 0);
 
         assert_eq!(result.unwrap_err(), DecompError::BudgetExceeded);
     }
