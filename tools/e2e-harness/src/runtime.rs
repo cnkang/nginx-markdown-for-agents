@@ -361,7 +361,7 @@ http {{\n\
             markdown_streaming force;\n\
             markdown_auto_decompress on;\n\
             markdown_cache_validation off;\n\
-            markdown_limits conversion_memory=64m conversion_timeout=120s\n\
+            markdown_limits conversion_memory=64m conversion_timeout=120s parser_timeout=120s\n\
                 streaming_buffer=64m;\n\
             markdown_error_policy pass;\n\
             markdown_log_verbosity info;\n\
