@@ -129,6 +129,7 @@ typedef struct { /* SONAR_NOTE */
         ngx_atomic_t  no_accept;
         ngx_atomic_t  conditional;
         ngx_atomic_t  compression_passthrough;
+        ngx_atomic_t  no_transform;
     } skips;
     struct {
         ngx_atomic_t  failopen_count;

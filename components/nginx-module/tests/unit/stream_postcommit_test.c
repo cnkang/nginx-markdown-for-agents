@@ -1103,6 +1103,8 @@ static void test_abort_happy_path(void)
                 "state = POST_COMMIT_ABORT");
     TEST_ASSERT(test_output_filter_called == 1,
                 "send_terminal called output_filter");
+    TEST_ASSERT(test_terminal_abort_metric_count == 1,
+                "terminal abort metric recorded once on delivery");
     TEST_PASS("abort happy path");
 }
 
@@ -1120,6 +1122,8 @@ static void test_abort_from_safe_finish_state(void)
     TEST_ASSERT(rc == NGX_OK, "abort from SAFE_FINISH returns NGX_OK");
     TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_POST_COMMIT_ABORT,
                 "state = POST_COMMIT_ABORT");
+    TEST_ASSERT(test_terminal_abort_metric_count == 1,
+                "terminal abort metric recorded once on delivery");
     TEST_PASS("abort from POST_COMMIT_SAFE_FINISH state");
 }
 
@@ -1195,6 +1199,8 @@ static void test_abort_send_terminal_fails(void)
 
     TEST_ASSERT(rc == NGX_ERROR,
                 "abort send_terminal fails -> NGX_ERROR");
+    TEST_ASSERT(test_terminal_abort_metric_count == 0,
+                "terminal abort metric NOT recorded on failed delivery");
     TEST_PASS("abort send_terminal failure propagates");
 }
 

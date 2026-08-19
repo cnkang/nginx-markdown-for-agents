@@ -1619,6 +1619,7 @@ typedef struct {
         ngx_atomic_t  no_accept;     /* SKIPPED_NO_ACCEPT */
         ngx_atomic_t  conditional;   /* SKIPPED_CONDITIONAL */
         ngx_atomic_t  compression_passthrough; /* SKIP_COMPRESSION_PASSTHROUGH */
+        ngx_atomic_t  no_transform;  /* BYPASS_NO_TRANSFORM */
     } skips;
 
     /*
