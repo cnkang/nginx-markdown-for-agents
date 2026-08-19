@@ -115,6 +115,6 @@ Required:
   ```
   (Python `re` patterns inside detectors are exempt: they use Python
   regex semantics, not POSIX ERE. The `detect_header_hash_filter.sh`
-  historical false-negative came from `\s` matching nothing on macOS
-  BSD grep; `[[:space:]]`/`[[:digit:]]`/`[[:word:]]` remain the only
+  historical false-negative came from `\\s` matching nothing on macOS
+  BSD grep; `[[:space:]]`/`[[:digit:]]`/`[[:alnum:]_]` remain the only
   accepted forms in detector scripts.)
