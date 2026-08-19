@@ -271,20 +271,11 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
         ngx_http_markdown_reason_from_error_category(
             NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
     rc = ngx_http_next_header_filter(r);
-    /*
-     * Canonical NGINX model: header-chain NGX_AGAIN means the write filter
-     * queued the header block — the headers are accepted.  No ctx exists on
-     * this path (allocation failed), so there is no delivery latch to
-     * publish; the body filter sees ctx == NULL and passes through without
-     * re-entering the header chain.
-     */
-    /* Rule 38/23: failopen_count is a delivery counter, not a decision counter.
-     * NGX_AGAIN means the write filter queued the header block — the headers
-     * are accepted — so it counts as a delivered fail-open exactly like
-     * NGX_OK/NGX_DONE.  (The streaming path defers counting via a pending
-     * latch for backpressure; this path has no ctx to hang a latch on and
-     * the header block is accepted either way.) */
-    if (rc == NGX_OK || rc == NGX_DONE || rc == NGX_AGAIN) {
+    /* No request context exists on this allocation-failure path, so an
+     * NGX_AGAIN return cannot be settled on a later body-filter resume.
+     * Keep delivery accounting conservative: only definitive downstream
+     * success publishes failopen_count. */
+    if (rc == NGX_OK || rc == NGX_DONE) {
         ngx_http_markdown_metric_inc_failopen(eff, conf);
     }
     return rc;
