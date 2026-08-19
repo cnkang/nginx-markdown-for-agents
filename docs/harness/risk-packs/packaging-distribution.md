@@ -67,8 +67,10 @@ or packaging documentation.
   generated packages before upload.  They must validate package version inputs
   before using them in generated paths or metadata.
 - Package dependencies must be satisfiable by the target package manager. Exact
-  constraints must use distro-resolvable EVRs, not naked upstream source
-  versions when release suffixes or epochs appear.
+  constraints must use distro-resolvable EVRs (Epoch-Version-Release) for RPM
+  metadata and Debian version strings (including any release suffixes/epochs)
+  for DEB metadata, not naked upstream source versions when release suffixes or
+  epochs appear.
 - RPM smoke tests must derive nginx.org repository family from the target
   distribution instead of assuming CentOS-compatible paths for every RPM image.
 - Release package build environments must use a glibc baseline compatible with
