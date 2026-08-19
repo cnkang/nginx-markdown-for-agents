@@ -72,6 +72,20 @@ The Go/No-Go decision must rest on the following verifiable artifacts:
 
 | # | Gate Item | Exception Rationale | Risk Assessment | Mitigation Strategy |
 |---|----------|--------------------|-----------------|--------------------|
+
+### Release-Owner Authorization (for P0 overrides)
+
+Any recorded exception that overrides a failed P0 gate requires explicit,
+written authorization from the release owner. Capture the authorization
+artifact and its required fields:
+
+| Field | Value |
+|-------|-------|
+| Authorization artifact | [link/path to the written authorization] |
+| Gate name | [e.g. streaming-parity-diff-testing] |
+| Candidate | [release candidate / commit SHA] |
+| Override scope | [which gates/items the authorization covers] |
+| Written authorization | [sign-off text/approval record] |
 ```
 
 ## Document Updates
