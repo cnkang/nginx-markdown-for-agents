@@ -728,10 +728,10 @@
    "classification": "INTERNAL_ONLY",
    "generated_header": "components/rust-converter/include/markdown_converter.h",
    "name": "markdown_decompress_bounded",
-   "params": "input: *const u8, input_len: usize, format: u8, budget: usize, result: *mut FFIDecompResult",
+   "params": "input: *const u8, input_len: usize, format: u8, budget: usize, ratio: u64, result: *mut FFIDecompResult",
    "return_type": "u32",
    "safety": "unsafe",
-   "signature": "markdown_decompress_bounded(input: *const u8, input_len: usize, format: u8, budget: usize, result: *mut FFIDecompResult) -> u32"
+   "signature": "markdown_decompress_bounded(input: *const u8, input_len: usize, format: u8, budget: usize, ratio: u64, result: *mut FFIDecompResult) -> u32"
   },
   {
    "abi_version": 2,
