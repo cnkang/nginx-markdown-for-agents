@@ -140,7 +140,7 @@ if [ -f "$KEY_FILE" ] && [ -s "$KEY_FILE" ]; then
         # disabled.  The fingerprint is the fpr record that follows the
         # matching sub record.
         KEY_FP=$(gpg --no-default-keyring --keyring "$KEYRING" \
-            --with-colons --list-keys 2>/dev/null \
+            --with-colons --with-subkey-fingerprint --list-keys 2>/dev/null \
             | awk -F: '
                 $1 == "sub" {
                     want = ($12 ~ /s/ && $2 !~ /^[reid]/) ? 1 : 0
