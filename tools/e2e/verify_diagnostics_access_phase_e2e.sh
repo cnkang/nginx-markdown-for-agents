@@ -372,29 +372,38 @@ EOF
 # ── Execute all policy cases ───────────────────────────────────────
 total_failures=0
 
-if ! run_case allow_deny; then
-  rc=$?
-  if [[ ${rc} -eq 2 ]]; then
-    exit 2
-  fi
+# Capture the ORIGINAL exit status of each run_case before applying
+# failure branching: inside `if ! run_case; then`, `$?` reflects the
+# negated status (always 0 on failure), so the exit-2 usage-error branch
+# would never fire.  `run_case ... || rc=$?` captures the original
+# status and is safe under `set -e` (a failing command in a `||` list
+# does not abort).
+rc=0
+run_case allow_deny || rc=$?
+if [[ ${rc} -eq 2 ]]; then
+  exit 2
+fi
+if [[ ${rc} -ne 0 ]]; then
   # A hard setup/prerequisite failure (rc=1) means the case could not
   # run; record it as a failure so the summary stays honest.
   total_failures=$((total_failures + 1))
 fi
 
-if ! run_case auth_basic; then
-  rc=$?
-  if [[ ${rc} -eq 2 ]]; then
-    exit 2
-  fi
+rc=0
+run_case auth_basic || rc=$?
+if [[ ${rc} -eq 2 ]]; then
+  exit 2
+fi
+if [[ ${rc} -ne 0 ]]; then
   total_failures=$((total_failures + 1))
 fi
 
-if ! run_case satisfy_any; then
-  rc=$?
-  if [[ ${rc} -eq 2 ]]; then
-    exit 2
-  fi
+rc=0
+run_case satisfy_any || rc=$?
+if [[ ${rc} -eq 2 ]]; then
+  exit 2
+fi
+if [[ ${rc} -ne 0 ]]; then
   total_failures=$((total_failures + 1))
 fi
 total_failures=$((total_failures + CASE_FAILURES))
