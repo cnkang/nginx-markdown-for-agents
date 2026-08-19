@@ -1216,7 +1216,7 @@ ngx_http_markdown_record_path_hit(const ngx_http_markdown_ctx_t *ctx)
 static ngx_int_t
 ngx_http_markdown_header_filter_handle_reentry(ngx_http_request_t *r)
 {
-    ngx_http_markdown_ctx_t  *ctx;
+    const ngx_http_markdown_ctx_t  *ctx;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_markdown_filter_module);
     if (ctx == NULL) {
