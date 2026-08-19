@@ -100,11 +100,25 @@ def redact_last_error(error_text):
     encoded = redacted.encode("utf-8")
     if len(encoded) > 512:
         redacted = encoded[:512].decode("utf-8", errors="ignore")
+        # A truncation boundary can split a path/filename pattern, leaving
+        # a newly-formed forbidden suffix (for example a config filename
+        # ending in ".conf").  Re-run the scrub after clamping so the
+        # result satisfies the contract for every truncation point.
+        for pattern in _PATH_PATTERNS + _SECRET_PATTERNS:
+            redacted = pattern.sub("<redacted>", redacted)
     return redacted
 
 
 def _redact_error_for_test(error_text):
-    """Redact error text through the real production redactor binding."""
+    """Redact error text through the redaction model under test.
+
+    ``redact_last_error`` is a model / Python reimplementation of the
+    production last_error redaction contract, not a binding to the C
+    implementation.  It is kept aligned with the production C redactor
+    (ngx_http_markdown_diagnostics.c) by asserting the same forbidden
+    patterns and 512-byte clamp here, so a drift in either side fails the
+    golden-JSON suite instead of silently diverging.
+    """
     return redact_last_error(error_text)
 
 

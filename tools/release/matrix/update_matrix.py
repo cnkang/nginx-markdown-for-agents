@@ -40,6 +40,7 @@ try:
     from .normalize_matrix import (
         MatrixNormalizationError,
         normalize_compatibility_document,
+        normalize_compatibility_entries,
         normalize_compatibility_entry,
         normalize_entry_aliases,
     )
@@ -47,6 +48,7 @@ except ImportError:
     from normalize_matrix import (
         MatrixNormalizationError,
         normalize_compatibility_document,
+        normalize_compatibility_entries,
         normalize_compatibility_entry,
         normalize_entry_aliases,
     )
@@ -450,7 +452,22 @@ def _read_matrix_json(path: Path) -> dict:
             f"Invalid matrix structure in {path}: missing 'matrix' or 'entries' key"
         )
     try:
-        normalize_compatibility_document(data)
+        if "entries" in data:
+            # Canonical documents are validated with the field-optional
+            # path so generated rows (which intentionally carry no
+            # support_tier until projection) can be read back and
+            # retained by _supported_dynamic_entry.  Legacy 'matrix'
+            # documents keep the strict field-required validation.
+            raw_entries = data["entries"]
+            if not isinstance(raw_entries, list):
+                _matrix_error(
+                    f"Invalid compatibility matrix in {path}: entries must be a list"
+                )
+            normalize_compatibility_entries(
+                raw_entries, require_fields=False
+            )
+        else:
+            normalize_compatibility_document(data)
     except MatrixNormalizationError as exc:
         _matrix_error(
             f"Invalid compatibility matrix in {path}: missing required keys "
@@ -489,12 +506,17 @@ def _supported_dynamic_entry(entry: dict) -> dict | None:
 
     Only ``dynamic-module`` rows are eligible for generated support entries;
     source rows use the explicit doc-sync projection above and all other
-    artifact types are ignored.
+    artifact types are ignored.  Canonical generated rows carry no
+    ``support_tier`` (projection happens here), so the optional path keeps
+    them eligible instead of dropping them for a missing tier field.
     """
-    normalized = normalize_compatibility_entry(entry)
+    normalized = normalize_compatibility_entry(entry, require_fields=False)
     if normalized.get("artifact_type") != "dynamic-module":
         return _source_only_entry(normalized)
-    if normalized.get("support_tier") != "supported":
+    if (
+        normalized.get("support_tier") is not None
+        and normalized.get("support_tier") != "supported"
+    ):
         return None
     try:
         version, os_type, arch = _matrix_entry_identity(normalized)
@@ -523,7 +545,10 @@ def _matrix_entry_list(data: dict, path: Path) -> list:
 
     try:
         normalized_entries = [
-            normalize_compatibility_entry(entry) for entry in raw_entries
+            normalize_compatibility_entry(
+                entry, require_fields=not canonical_entries_shape
+            )
+            for entry in raw_entries
         ]
     except MatrixNormalizationError as exc:
         _matrix_error(
@@ -1102,7 +1127,9 @@ def _canonical_dynamic_entry(
         entry = dict(existing)
         # The compatibility matrix writes canonical presentation keys.
         # Strip legacy updater aliases and dropped legacy keys; keep the
-        # canonical target and the frozen binding keys intact.
+        # canonical arch and the frozen binding keys intact.  `arch` is the
+        # compatibility document's presentation key (normalize folds it to
+        # the internal `target` identity), so it must be preserved.
         entry.pop("nginx", None)
         entry.pop("os_type", None)
         entry.pop("nginx_channel", None)
@@ -1111,7 +1138,6 @@ def _canonical_dynamic_entry(
         entry.pop("release_blocking", None)
         entry.pop("owner_workflow", None)
         entry.pop("managed_by", None)
-        entry.pop("arch", None)
         entry["nginx_version"] = version
         entry["libc"] = libc
         # Refresh the binding keys with the same computed values as the

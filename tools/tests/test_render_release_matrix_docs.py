@@ -366,11 +366,17 @@ def test_validate_schema_rejects_malformed_entry():
     """Malformed matrix rows must fail validation rather than render partial docs."""
     errors = rmd.validate_schema(
         {
-            "schema_version": "1.0.0",
+            "schema_version": "1.0",
             "matrix": [{"nginx": "1.26.3", "os_type": "glibc"}],
         }
     )
     assert errors
+    # The schema validator (or the structural fallback) must report the
+    # row-level error prefix naming the offending entry, so a malformed
+    # row cannot slip through as a generic non-empty error list.
+    assert any("Entry 0:" in error or "row" in error.lower() for error in errors), (
+        f"expected a row-level error prefix, got {errors}"
+    )
 
 
 def test_check_file_reports_missing_registered_target():

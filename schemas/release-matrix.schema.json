@@ -157,14 +157,23 @@
         },
         "artifact_type": {
           "type": "string",
-          "description": "Artifact kind."
+          "enum": [
+            "dynamic-module",
+            "deb-package",
+            "rpm-package",
+            "docker-image",
+            "homebrew-formula",
+            "source"
+          ],
+          "description": "Artifact kind (same closed set as the canonical entry; validated fail-closed before normalization)."
         },
         "feature_manifest_digest": {
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$"
         },
         "abi_version": {
-          "type": "integer"
+          "type": "integer",
+          "minimum": 1
         },
         "support_tier": {
           "type": "string",

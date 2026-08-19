@@ -27,6 +27,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -259,6 +260,33 @@ def _validate_seed_path(seed_path, target: str) -> str | None:
     return None
 
 
+def _validate_seed_digest(entry: dict, target: str) -> str | None:
+    """Return an error string when the seed file content mismatches its
+    manifest digest.
+
+    Verifying only path and existence lets a seed file drift from the
+    digest recorded in the manifest; the content check fails closed so a
+    modified or replaced seed is rejected before fuzzing runs.
+    """
+    seed_path = entry.get("seed_path")
+    manifest_digest = entry.get("digest")
+    if not isinstance(seed_path, str) or not isinstance(manifest_digest, str):
+        return None  # shape errors are reported by _validate_seed_entry
+    if not manifest_digest.startswith("sha256:"):
+        return (f"malformed: seed digest for {target} must use the "
+                "sha256: prefix")
+    try:
+        raw = (REPO_ROOT / seed_path).read_bytes()
+    except OSError as exc:
+        return f"seed corpus for {target} is unreadable: {exc}"
+    actual = "sha256:" + hashlib.sha256(raw).hexdigest()
+    if actual != manifest_digest:
+        return (f"stale-digest: seed corpus for {target} content does not "
+                f"match the manifest digest ({manifest_digest[:16]}... != "
+                f"{actual[:16]}...)")
+    return None
+
+
 def _validate_seed_entry(entry, index: int) -> str | None:
     """Return an error string when a seed manifest entry is malformed."""
     if not isinstance(entry, dict):
@@ -303,6 +331,9 @@ def validate_corpus_seeds(data: dict, expected_sha: str,
                          + ", ".join(missing_seeds))
     for name in blocking_names:
         error = _validate_seed_path(by_target[name]["seed_path"], name)
+        if error:
+            raise ValueError(error)
+        error = _validate_seed_digest(by_target[name], name)
         if error:
             raise ValueError(error)
     return by_target

@@ -62,7 +62,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
 .PHONY: all build rust-lib rust-lib-debug copy-headers check-headers \
         install \
         test test-rust test-rust-doc test-nginx-unit test-c-unit-gcc test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
-        test-nginx-integration test-e2e test-e2e-rust test-e2e-contract-scripts test-all test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
+        test-nginx-integration test-e2e test-e2e-rust test-e2e-contract-scripts test-all test-property test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
         test-corpus-determinism reason-codegen-generate reason-codegen-check \
         official-feature-manifest-generate \
@@ -70,7 +70,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         security-static security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny \
         supply-chain supply-chain-trivy supply-chain-sbom \
         complexity-check \
-	docs-check license-check release-notes release-gates-check release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x         release-gates-check-090 release-gates-check-091 release-gates-check-092 release-gates-check-all release-gates-check-legacy release-gates-check-strict \
+	docs-check docs-style-check docs-style-check-strict docs-style-check-regression docs-style-check-baseline license-check release-notes release-gates-check release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x         release-gates-check-090 release-gates-check-091 release-gates-check-092 release-gates-check-all release-gates-check-legacy release-gates-check-strict \
         release-matrix-check \
         release-candidate-evidence-check artifact-registry-check release-evidence-manifest-check \
         test-rust-fuzz-qualification test-e2e-rust-soak \
@@ -339,6 +339,7 @@ harness-check:
 
 public-surface-drift-check:
 	python3 tools/harness/detect_public_surface_drift.py
+	python3 tools/release/gates/compute_abi_fingerprints.py
 
 schema-drift-check:
 	python3 tools/release/gates/generate_schema_artifacts.py --version "$(SCHEMA_RELEASE_VERSION)"

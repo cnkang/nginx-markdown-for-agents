@@ -223,21 +223,21 @@
       "labels": [
         {
           "name": "features",
-          "values": [
-            "%s"
-          ]
+          "values": [],
+          "dynamic": true,
+          "description": "Runtime-determined value rendered from module build identity; not a closed allowlist."
         },
         {
           "name": "nginx_version",
-          "values": [
-            "%s"
-          ]
+          "values": [],
+          "dynamic": true,
+          "description": "Runtime-determined value rendered from module build identity; not a closed allowlist."
         },
         {
           "name": "version",
-          "values": [
-            "%s"
-          ]
+          "values": [],
+          "dynamic": true,
+          "description": "Runtime-determined value rendered from module build identity; not a closed allowlist."
         }
       ],
       "value": 1

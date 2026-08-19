@@ -49,15 +49,32 @@ def _resolve_manifest_path() -> pathlib.Path:
         name = path.parent.name
         base, separator, pre = name.partition("-")
         main = tuple(int(part) for part in re.findall(r"\d+", base))
-        pre_nums = (
-            tuple(int(part) for part in re.findall(r"\d+", pre))
-            if separator
-            else ()
-        )
-        # With reverse=True: the highest main version wins; among equal
-        # main versions a stable release (1) ranks above a prerelease
-        # (0); prerelease numbers break ties between prereleases.
-        return (main, 0 if separator else 1, pre_nums)
+        if not separator:
+            # Stable release: ranks above every prerelease of the same
+            # main version (SemVer precedence).
+            return (main, 1, ())
+        # SemVer prerelease ordering: dot-separated identifiers compared
+        # left to right; numeric identifiers rank lower than non-numeric
+        # ones at the same position and compare numerically; missing
+        # identifiers sort before present ones.  The directory name uses
+        # a single "-" separator (for example 0.9.2-beta.1), so the
+        # prerelease string is the whole suffix.
+        pre_idents = pre.split(".")
+        key_idents = []
+        for ident in pre_idents:
+            if ident.isdigit():
+                # Numeric identifiers have LOWER precedence than
+                # non-numeric ones at the same position, so the numeric
+                # marker (0) sorts below the non-numeric marker (1) under
+                # reverse=True.
+                key_idents.append((0, int(ident), ""))
+            else:
+                key_idents.append((1, 0, ident))
+        # reverse=True sorting: a shorter identifier list (fewer dots)
+        # sorts after a longer one when all shared identifiers are equal,
+        # matching SemVer's "larger set of pre-release fields has a
+        # higher precedence".
+        return (main, 0, key_idents, len(pre_idents))
 
     return sorted(manifests, key=_version_key, reverse=True)[0]
 

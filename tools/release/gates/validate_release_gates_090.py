@@ -126,11 +126,15 @@ def check_diagnostics_schema_version(repo: Path) -> dict:
         return {"name": gate_name, "status": "fail",
                 "message": "observability-schema-v2.md not found"}
     documentation = schema_file.read_text(encoding="utf-8")
+    # Accept valid schema_version declarations across markdown formatting
+    # variants: backticked/emphasized names, bullet or table-row framing,
+    # and reworded prose, as long as the line declares an integer constant
+    # 1 or 2 (the supported schema versions).
     documentation_match = re.search(
-        r"^\s*(?:-\s*)?`schema_version`\s*:\s*"
-        r"integer\s+constant\s*`([12])`\s*\.?\s*$",
+        r"^\s*(?:\|\s*)?(?:[-*]\s*)?`?\*?schema_version\*?`?\s*[:\-|]?\s*"
+        r"[\w\s,'\"-]*?integer\s+constant\s*`?([12])`?\s*\.?\s*(?:\|\s*)?\s*$",
         documentation,
-        flags=re.MULTILINE,
+        flags=re.MULTILINE | re.IGNORECASE,
     )
     if documentation_match is None:
         return {"name": gate_name, "status": "fail",

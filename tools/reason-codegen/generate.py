@@ -199,6 +199,15 @@ def _validate_reason_metadata(index: int, entry: dict) -> list[str]:
         errors.append(f"reasons[{index}] default_stage {stage!r} is invalid")
 
     origins = entry["allowed_origins"]
+    if not isinstance(origins, list):
+        errors.append(f"reasons[{index}] allowed_origins must be an array")
+        # A malformed non-list value must not reach membership checks or
+        # default-origin validation (which would iterate or probe it).
+        # Record the error above and continue with a safe empty-origin
+        # collection so the remaining metadata is still validated and the
+        # ERROR output path is preserved.
+        origins = []
+
     errors.extend(_validate_allowed_origins(index, origins))
 
     if not isinstance(entry["operator_visible"], bool):
@@ -599,8 +608,22 @@ def generate_rust_impl_continued(reasons) -> str:
     lines.append(RUST_DOC_CODE_FENCE)
     lines.append(RUST_DOC_REASON_USE)
     lines.append(RUST_DOC_LINE)
-    lines.append("    /// assert_eq!(ReasonCode::Converted.discriminant(), 0);")
-    lines.append("    /// assert_eq!(ReasonCode::Timeout.discriminant(), 9);")
+    # The doctest assertions use discriminant values derived from the
+    # reasons registry data (looked up by key) rather than hardcoded
+    # constants, so renumbering a registry entry cannot silently stale
+    # the generated documentation.
+    converted_disc = next(
+        (r["discriminant"] for r in reasons if r["key"] == "converted"), 0
+    )
+    timeout_disc = next(
+        (r["discriminant"] for r in reasons if r["key"] == "timeout"), 9
+    )
+    lines.append(
+        f"    /// assert_eq!(ReasonCode::Converted.discriminant(), {converted_disc});"
+    )
+    lines.append(
+        f"    /// assert_eq!(ReasonCode::Timeout.discriminant(), {timeout_disc});"
+    )
     lines.append(RUST_DOC_CODE_FENCE)
     lines.append("    pub fn discriminant(self) -> u32 {")
     lines.append("        self as u32")

@@ -74,13 +74,27 @@ def run_normalization(doc: dict) -> tuple[bool, str]:
 
 def check_schema_shape(schema: dict, failures: list) -> None:
     """Validate the schema declares the canonical contract."""
-    schema_version_prop = schema.get("properties", {}).get("schema_version", {})
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        failures.append(
+            "schema must declare 'properties' as an object (got "
+            f"{type(properties).__name__ if properties is not None else 'missing'})"
+        )
+        return
+    schema_version_prop = properties.get("schema_version", {})
     if schema_version_prop.get("const") != 1:
         failures.append("schema must declare schema_version const 1")
-    if "entries" not in schema.get("properties", {}):
+    if "entries" not in properties:
         failures.append("schema must declare the canonical top-level 'entries'")
 
-    entry_props = schema.get("$defs", {}).get("entry", {}).get("properties", {})
+    defs = schema.get("$defs")
+    if not isinstance(defs, dict):
+        failures.append(
+            "schema must declare '$defs' as an object (got "
+            f"{type(defs).__name__ if defs is not None else 'missing'})"
+        )
+        return
+    entry_props = defs.get("entry", {}).get("properties", {})
     for key in CANONICAL_KEYS:
         if key not in entry_props:
             failures.append(f"schema entry must declare canonical key {key!r}")

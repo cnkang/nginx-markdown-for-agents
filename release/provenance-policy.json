@@ -66,7 +66,7 @@
       },
       "verification_commands": [
         "make artifact-registry-check",
-        "dpkg-deb --info <package>.deb"
+        "dpkg-deb --info \"${DEB_ARTIFACT_PATH}\""
       ]
     },
     "rpm": {
@@ -95,7 +95,7 @@
       },
       "verification_commands": [
         "make artifact-registry-check",
-        "rpm -qip <package>.rpm"
+        "rpm -qip \"${RPM_ARTIFACT_PATH}\""
       ]
     },
     "oci": {
@@ -135,7 +135,7 @@
       },
       "verification_commands": [
         "python3 packaging/scripts/verify_homebrew_formula.py",
-        "python3 packaging/scripts/verify_git_archive.py --tag <tag>"
+        "python3 packaging/scripts/verify_git_archive.py --tag \"${RELEASE_TAG}\""
       ]
     },
     "homebrew_bottle": {
@@ -163,7 +163,7 @@
         "validator": "Homebrew bottle provenance validator"
       },
       "verification_commands": [
-        "test \"$(shasum -a 256 <bottle>.tar.gz | awk '{print $1}')\" = \"<recorded_bottle_sha256>\""
+        "test \"$(shasum -a 256 \"${BOTTLE_PATH}\" | awk '{print $1}')\" = \"${RECORDED_BOTTLE_SHA256}\""
       ]
     }
   },

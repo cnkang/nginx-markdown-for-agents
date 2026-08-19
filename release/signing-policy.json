@@ -35,9 +35,9 @@
       "attachment_name": "dpkg-sig embedded signature (no separate attachment)",
       "digest_binding": "The .deb control and payload digests are covered by the embedded dpkg-sig signature; package sha256 also listed in SHA256SUMS",
       "verification_commands": [
-        "dpkg-sig --verify <package>.deb",
+        "dpkg-sig --verify \"${DEB_ARTIFACT_PATH}\"",
         "gpg --verify SHA256SUMS.asc SHA256SUMS",
-        "dpkg-deb --info <package>.deb"
+        "dpkg-deb --info \"${DEB_ARTIFACT_PATH}\""
       ],
       "release_pipeline": "canonical 0.9.2 release-packages.yml integrity-signing step signs .deb artifacts with dpkg-sig before integrity-checksums generates SHA256SUMS; integrity-signature then signs SHA256SUMS.asc"
     },
@@ -47,7 +47,7 @@
       "attachment_name": "Embedded RPM PGP header signature",
       "digest_binding": "RPM header signature covers package content digest; package sha256 also listed in SHA256SUMS",
       "verification_commands": [
-        "rpm -Kv <package>.rpm",
+        "rpm -Kv \"${RPM_ARTIFACT_PATH}\"",
         "gpg --verify SHA256SUMS.asc SHA256SUMS"
       ],
       "release_pipeline": "canonical 0.9.2 release-packages.yml integrity-signing step signs .rpm artifacts with rpm --addsign before integrity-checksums generates SHA256SUMS; integrity-signature then signs SHA256SUMS.asc"
@@ -67,7 +67,7 @@
       "digest_binding": "Formula sha256 MUST equal the digest of the exact bytes served by the formula URL (verified by packaging/scripts/verify_homebrew_formula.py and verify_git_archive.py)",
       "verification_commands": [
         "python3 packaging/scripts/verify_homebrew_formula.py",
-        "python3 packaging/scripts/verify_git_archive.py --tag <tag>"
+        "python3 packaging/scripts/verify_git_archive.py --tag \"${RELEASE_TAG}\""
       ],
       "release_pipeline": "packaging/homebrew/nginx-markdown-module.rb rendered by packaging/scripts/render_homebrew_formula.py; homebrew-formula-gate.yml and homebrew-tap-publish.yml"
     },
@@ -77,7 +77,7 @@
       "attachment_name": "Bottle sha256 in the formula/bottle JSON",
       "digest_binding": "Bottle sha256 binds the exact bottle artifact bytes",
       "verification_commands": [
-        "test \"$(shasum -a 256 <bottle>.tar.gz | awk '{print $1}')\" = \"<recorded_bottle_sha256>\""
+        "test \"$(shasum -a 256 \"${BOTTLE_PATH}\" | awk '{print $1}')\" = \"${RECORDED_BOTTLE_SHA256}\""
       ],
       "release_pipeline": "Homebrew bottle production (when applicable); bottle sha256 embedded in formula JSON"
     }
