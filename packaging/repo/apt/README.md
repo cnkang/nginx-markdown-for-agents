@@ -40,16 +40,14 @@ sudo apt-get install nginx-module-markdown-for-agents
 
 ### 4. Enable the module
 
-After installation, enable the module in your NGINX configuration:
+After installation, enable the module in your NGINX configuration.
+This package targets nginx.org builds, whose default `nginx.conf` does
+**not** include `/etc/nginx/modules-enabled/*.conf` — use a top-level
+`load_module` directive instead:
 
 ```bash
-# Uncomment the load_module line in the snippet:
-sudo sed -i 's/^#load_module/load_module/' \
-    /etc/nginx/modules-available/mod-markdown.conf
-
-# Symlink to modules-enabled (if your NGINX uses this pattern):
-sudo ln -sf /etc/nginx/modules-available/mod-markdown.conf \
-    /etc/nginx/modules-enabled/50-mod-markdown.conf
+# Add at the TOP LEVEL of /etc/nginx/nginx.conf (before the http block):
+#   load_module /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so;
 
 # Test and reload
 sudo nginx -t && sudo systemctl reload nginx
@@ -58,8 +56,13 @@ sudo nginx -t && sudo systemctl reload nginx
 ### 5. Verify
 
 ```bash
-# Check module is loaded
-nginx -V 2>&1 | grep -o 'markdown'
+# Confirm the module loads and the directive parses (dynamic modules do
+# not appear in `nginx -V` — that output reflects the build, not runtime
+# load_module).  Use the doctor or an explicit load test instead:
+nginx-markdown-doctor
+
+# Or manually: create a temp config with load_module + markdown_filter on,
+# then `nginx -t -c <tmp.conf>`.
 
 # Test conversion
 curl -H "Accept: text/markdown" http://localhost/

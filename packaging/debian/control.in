@@ -6,11 +6,12 @@ Description: NGINX Markdown filter module for AI agents
  Converts HTML responses to Markdown when clients request text/markdown.
  Built against nginx.org stable @NGINX_VERSION@.
  .
- WARNING: This module is compatible with nginx.org releases
-  @NGINX_VERSION_FLOOR@ (inclusive) through @NGINX_VERSION_CEIL@ (exclusive).
-  It will NOT work with distro-provided, vendor-patched, OpenResty, Tengine,
-  or custom-built NGINX binaries. NGINX validates module binary compatibility
-  signature at load time; mismatched versions will fail to load.
+ WARNING: This module is compatible with nginx.org release
+  @NGINX_VERSION@ ONLY. NGINX dynamic modules require an exact version
+  match — the core loader rejects any version difference (including a
+  patch release) before signature checks. It will NOT work with
+  distro-provided, vendor-patched, OpenResty, Tengine, or custom-built
+  NGINX binaries, or with any other NGINX version.
  .
  Features include:
   * Streaming and full-buffer conversion engines
@@ -21,6 +22,6 @@ Description: NGINX Markdown filter module for AI agents
  .
  The module is installed as a dynamic module (.so) and must be explicitly
  enabled via load_module directive in nginx.conf.
-Depends: nginx (>= @NGINX_VERSION_FLOOR@), nginx (<< @NGINX_VERSION_CEIL@)
+Depends: nginx (= @NGINX_VERSION@)
 Section: httpd
 Priority: optional

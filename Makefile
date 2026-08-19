@@ -685,6 +685,13 @@ release-gates-check-070:
 	else \
 	echo "  SKIP: tools/release/gates/check_postinst_safety.sh not found"; \
 	fi
+	@echo "  [preinstall-version-policy] Validating exact NGINX version policy..."
+	@if test -f packaging/tests/test-preinstall-version-policy.sh; then \
+	bash packaging/tests/test-preinstall-version-policy.sh || \
+		{ echo "FAIL: preinstall exact-version policy test failed" >&2; exit 1; }; \
+	else \
+	echo "  SKIP: packaging/tests/test-preinstall-version-policy.sh not found"; \
+	fi
 	@echo "  Package Compatibility Gate: ALL PASSED"
 	@echo "=== Fuzz CI Gate ==="
 	@if cargo +nightly --version >/dev/null 2>&1; then \
