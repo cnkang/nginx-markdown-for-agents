@@ -66,17 +66,20 @@ Required:
   Forward declarations belong at file scope in the impl header, not
   inside function bodies or local blocks.
 - **NOSONAR annotation discipline**: When suppressing a SonarCloud
-  false positive for a NGINX callback signature or API-mandated cast,
-  use the ``/* NOSONAR: <reason> (Rule 24) */`` annotation pattern.
+  false positive for a callback signature or API-mandated cast, use the
+  ``/* NOSONAR: <reason> (Rule 24) */`` annotation pattern.
   The annotation MUST include a human-readable reason explaining why
   the finding is a false positive.  Bare ``/* NOSONAR */`` without a
   reason is forbidden — it does not document why the suppression is
   safe and makes future audits impossible.  Valid reasons include:
   ``NGINX callback signature``, ``ngx_str_t.data is u_char* per NGINX
   API``, ``zlib z_stream.next_in requires Bytef* without ZLIB_CONST``,
-  ``callback typedef dictates parameter type``.  NOSONAR must not apply
+  ``callback typedef dictates parameter type``.  The contract may be an
+  external API contract (for example the zlib C API) or an NGINX API
+  contract — both cover mandated casts that no const-qualification of
+  the parameter can resolve.  NOSONAR must not apply
   to non-callback const issues that qualifying the parameter fixes
-  — it is only for cases where the NGINX API contract
+  — it is only for cases where the external/NGINX API contract
   prevents the fix.
 - Treat static-analysis findings that imply undefined behavior, data truncation,
   or invalid memory access risk as correctness/security issues and fix them in

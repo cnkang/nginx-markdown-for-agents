@@ -15,16 +15,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import detect_elts_null_guard as module
 
 
-def _audit_text(content: str):
-    path = (
-        Path(module.__file__).resolve().parents[1]
-        / "_fixture_elts_null_guard.c"
-    )
+def _audit_text(content: str, tmp_path):
+    """Audit a fixture file created beneath the per-test tmp_path directory
+    instead of a shared tools path, so concurrent runs cannot clobber the
+    fixture and cleanup is scoped to the generated temporary file."""
+    path = tmp_path / "_fixture_elts_null_guard.c"
     path.write_text(content, encoding="utf-8")
     try:
         return module.audit_file(path)
     finally:
-        path.unlink()
+        path.unlink(missing_ok=True)
 
 
 UNGUARDED_LOOP = """\
@@ -109,22 +109,22 @@ ngx_http_markdown_parse(ngx_str_t *s)
 """
 
 
-def test_unguarded_loop_flagged() -> None:
-    findings = _audit_text(UNGUARDED_LOOP)
+def test_unguarded_loop_flagged(tmp_path) -> None:
+    findings = _audit_text(UNGUARDED_LOOP, tmp_path)
     assert len(findings) >= 1, f"expected findings, got {findings}"
     assert "NULL" in findings[0]
 
 
-def test_guarded_loop_passes() -> None:
-    findings = _audit_text(GUARDED_LOOP)
+def test_guarded_loop_passes(tmp_path) -> None:
+    findings = _audit_text(GUARDED_LOOP, tmp_path)
     assert findings == []
 
 
-def test_no_index_not_flagged() -> None:
-    findings = _audit_text(NO_INDEX)
+def test_no_index_not_flagged(tmp_path) -> None:
+    findings = _audit_text(NO_INDEX, tmp_path)
     assert findings == []
 
 
-def test_non_chain_skipped() -> None:
-    findings = _audit_text(NON_CHAIN)
+def test_non_chain_skipped(tmp_path) -> None:
+    findings = _audit_text(NON_CHAIN, tmp_path)
     assert findings == []

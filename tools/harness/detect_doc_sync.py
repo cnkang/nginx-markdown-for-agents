@@ -443,12 +443,13 @@ def _check_public_inventory(directives: str, inventory: str) -> List[str]:
 def _migration_removed_table_rows(migration: str) -> set[tuple[str, str]]:
     """Parse the \"| Removed Directive | Replacement |\" markdown table into
     (directive, replacement) rows.  The header line anchors the section; a
-    non-table line ends it."""
+    non-table line ends it.  The header is matched case-insensitively so
+    reworded or capitalized headings still anchor the table."""
     rows: set[tuple[str, str]] = set()
     in_table = False
     for line in migration.splitlines():
         stripped = line.strip()
-        if stripped.startswith("| Removed Directive"):
+        if stripped.lower().startswith("| removed directive"):
             in_table = True
             continue
         if not in_table:
@@ -564,22 +565,33 @@ def _check_active_directive_inventory(
     return errors
 
 
+def _normalize_histogram_suffix(name: str, raw_families: set[str]) -> str:
+    """Map one family name to its canonical base name.
+
+    Histogram suffix families (`_bucket`, `_sum`, `_count`) normalize to
+    the shared base name, but only when the `_bucket` family is actually
+    present (a plain metric whose name ends in `_sum`/`_count` is kept
+    verbatim unless the matching bucket family exists).
+    """
+    base = name
+    for suffix in ("_bucket", "_sum", "_count"):
+        if (
+            name.endswith(suffix)
+            and len(name) > len(suffix)
+            and (
+                suffix == "_bucket"
+                or name[: -len(suffix)] + "_bucket" in raw_families
+            )
+        ):
+            base = name[: -len(suffix)]
+            break
+    return base
+
+
 def _check_prometheus_catalog(renderer: str, guide: str) -> List[str]:
     """Require every production renderer family to appear in the guide."""
     raw_families = set(re.findall(r"nginx_markdown_[a-z0-9_]+\b", renderer))
-    histogram_suffixes = ("_bucket", "_sum", "_count")
-    families = set()
-    for name in raw_families:
-        base = name
-        # Derive the histogram base name from the "_bucket" family alone:
-        # a renderer commonly emits only histogram suffix families (e.g.
-        # `foo_bucket`) without the unsuffixed base metric, so requiring the
-        # bare base to exist in raw_families would mis-flag legitimate docs.
-        for suffix in histogram_suffixes:
-            if name.endswith(suffix) and len(name) > len(suffix):
-                base = name[: -len(suffix)]
-                break
-        families.add(base)
+    families = {_normalize_histogram_suffix(n, raw_families) for n in raw_families}
     return [
         f"{PROMETHEUS_GUIDE_PATH}: production metric family {name} is missing"
         for name in sorted(families)

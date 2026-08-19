@@ -8,6 +8,19 @@ Tracked files own the repository contract, not local adapters.
 - Harness overlays: `docs/harness/`
 - Executable checks: `tools/harness/`, `Makefile`, `.github/workflows/ci.yml`
 
+## Evidence Records
+
+- Perf evidence gate output: `perf/reports/evidence-<version>.json`
+  (written by `make perf-evidence-check` /
+  `tools/perf/evidence_gate.py --output`)
+- Steering-analysis closeout reports:
+  `docs/project/recent-git-harness-steering-analysis-*.md`
+  (validated by `make harness-check` via `check_harness_sync.py`)
+- Escalation records: user-local state carrier per `docs/harness/core.md`
+  step 7, using the `harness-remediation` risk pack for closeout
+  artifacts (stable finding IDs, final status, changed files,
+  verification evidence).
+
 ## Optional Local Inputs
 
 - `.kiro/active-spec.json`

@@ -104,8 +104,13 @@ while IFS= read -r -d '' file; do
             var_name=$(echo "$content" | sed -E "s/^[[:space:]]*${type}[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*).*/\1/")
             [[ -z "$var_name" ]] && continue
 
-            # Look at the following 15 lines for whole-init or field access
-            window_start=$((line_num + 1))
+            # Look at the preceding 8 lines and the following 15 lines for
+            # whole-init or field access.  A memset/zero-init/helper call
+            # that precedes the declaration (for example a helper that
+            # initializes the struct just before it is declared) must
+            # suppress the finding just like a following whole-init.
+            window_start=$((line_num - 8))
+            [[ $window_start -lt 1 ]] && window_start=1
             window_end=$((line_num + 15))
             tail_code=$(sed -n "${window_start},${window_end}p" "$file")
 

@@ -106,10 +106,14 @@ while IFS= read -r -d '' file; do
 
             # 1. NGX_AGAIN must be explicitly branched, not folded into error.
             #    Look at the code after the call site: an explicit branch has
-            #    'NGX_AGAIN' within the next ~20 lines.
-            tail_code=$(echo "$surrounding_code" | tail -12)
+            #    'NGX_AGAIN' within the next ~20 lines.  Only lines strictly
+            #    after the call site count — a mention of NGX_AGAIN in the
+            #    code before the call (or in the wider surrounding window)
+            #    is not a branch on this call's result.
+            after_end=$((line_num + 12))
+            after_code=$(sed -n "$((line_num + 1)),${after_end}p" "$file")
             has_again_branch=0
-            if echo "$tail_code" | grep -q 'NGX_AGAIN'; then
+            if echo "$after_code" | grep -q 'NGX_AGAIN'; then
                 has_again_branch=1
             fi
 
@@ -117,7 +121,7 @@ while IFS= read -r -d '' file; do
             #    treat non-NGX_OK as error (rc != NGX_OK / rc == NGX_ERROR),
             #    that is a violation when NGX_AGAIN is not distinguished.
             fold_pattern=''
-            if echo "$tail_code" | grep -qE 'rc[[:space:]]*!=[[:space:]]*NGX_OK|rc[[:space:]]*==[[:space:]]*NGX_ERROR|!= NGX_OK'; then
+            if echo "$after_code" | grep -qE 'rc[[:space:]]*!=[[:space:]]*NGX_OK|rc[[:space:]]*==[[:space:]]*NGX_ERROR|!= NGX_OK'; then
                 fold_pattern='error-fold'
             fi
 

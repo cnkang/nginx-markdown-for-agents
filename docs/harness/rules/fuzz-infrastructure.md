@@ -211,6 +211,12 @@ following paths change:
 - `docs/harness/**`
 - `tools/release/gates/**`
 
+> **Intentional exception:** `docs/harness/**` appears in the trigger paths
+> because harness rule documentation is executable policy — it defines the
+> fuzz-qualification contract that FUZZ-001..FUZZ-007 enforce, so changing it
+> can change fuzz gate behavior. It is the only documentation subtree treated
+> this way. Ordinary operator/feature documentation stays excluded below.
+
 **Excluded paths (do not trigger fuzz):**
 - `docs/guides/**`, `docs/features/**`, `docs/architecture/**` and other
   documentation-only directories

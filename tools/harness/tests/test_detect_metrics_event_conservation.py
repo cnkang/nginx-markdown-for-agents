@@ -65,36 +65,36 @@ MISSING_FAILOPEN_RENDERER = CLEAN_RENDERER.replace(
 )
 
 
-def _audit_text(content: str):
-    path = (
-        Path(module.__file__).resolve().parents[1]
-        / "_fixture_metrics_conservation.h"
-    )
+def _audit_text(content: str, tmp_path):
+    """Audit a fixture file created beneath the per-test tmp_path directory
+    instead of a shared tools path, so concurrent runs cannot clobber the
+    fixture and cleanup is scoped to the generated temporary file."""
+    path = tmp_path / "_fixture_metrics_conservation.h"
     path.write_text(content, encoding="utf-8")
     try:
         return module.audit(path)
     finally:
-        path.unlink()
+        path.unlink(missing_ok=True)
 
 
-def test_clean_renderer_has_no_violations() -> None:
-    violations, reviews = _audit_text(CLEAN_RENDERER)
+def test_clean_renderer_has_no_violations(tmp_path) -> None:
+    violations, reviews = _audit_text(CLEAN_RENDERER, tmp_path)
     assert violations == []
     assert reviews == []
 
 
-def test_stale_aborted_source_is_violation() -> None:
-    violations, _ = _audit_text(STALE_ABORT_RENDERER)
+def test_stale_aborted_source_is_violation(tmp_path) -> None:
+    violations, _ = _audit_text(STALE_ABORT_RENDERER, tmp_path)
     assert any(
         "streaming_failure_postcommit_abort" in v for v in violations
     )
 
 
-def test_missing_failopen_deduction_is_violation() -> None:
-    violations, _ = _audit_text(MISSING_FAILOPEN_RENDERER)
+def test_missing_failopen_deduction_is_violation(tmp_path) -> None:
+    violations, _ = _audit_text(MISSING_FAILOPEN_RENDERER, tmp_path)
     assert any("failopen_count" in v for v in violations)
 
 
-def test_missing_renderer_is_hard_violation() -> None:
-    violations, _ = _audit_text("/* no renderer here */\n")
+def test_missing_renderer_is_hard_violation(tmp_path) -> None:
+    violations, _ = _audit_text("/* no renderer here */\n", tmp_path)
     assert len(violations) >= 1

@@ -75,6 +75,27 @@ FAILED_CLOSED_ASSIGN_RE = re.compile(
 )
 
 
+def _strip_c_comments(text: str) -> str:
+    """Remove C block and line comments, preserving newlines and offsets.
+
+    The conservation regexes must not fire on prose inside comments (a
+    comment that merely mentions ``failed_closed = conversions_failed``
+    or the stale abort counter name is not a real assignment).  Block
+    comments are replaced with spaces and line comments are truncated
+    at their newline, so statement structure, string literals, and
+    preprocessor directives stay intact for the block audit.
+    """
+    pattern = re.compile(r"/\*.*?\*/|//[^\n]*", flags=re.DOTALL)
+
+    def _blank(match: re.Match) -> str:
+        token = match.group(0)
+        if token.startswith("//"):
+            return " " * len(token.rstrip("\n")) + token[len(token.rstrip("\n")):]
+        return " " * len(token)
+
+    return pattern.sub(_blank, text)
+
+
 def _audit_aborted(
     text: str, name: str
 ) -> tuple[list[str], list[str]]:
@@ -258,10 +279,16 @@ def audit(path: Path) -> tuple[list[str], list[str]]:
             [],
         )
 
+    # Conservation statements are real C code, not comment prose: strip
+    # comments before applying the assignment regexes so a comment that
+    # merely mentions failed_closed or the stale counter name cannot
+    # satisfy (or trip) the conservation audit.
+    code_text = _strip_c_comments(text)
+
     violations: list[str] = []
     reviews: list[str] = []
     for check in (_audit_aborted, _audit_failed_closed):
-        v, r = check(text, name)
+        v, r = check(code_text, name)
         violations.extend(v)
         reviews.extend(r)
     return violations, reviews

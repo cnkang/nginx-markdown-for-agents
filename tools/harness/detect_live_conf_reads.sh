@@ -105,8 +105,19 @@ function_contains_line() {
     end="$(awk -v start="${start}" '
         NR < start { next }
         {
-            opens += gsub(/\{/, "{")
-            closes += gsub(/\}/, "}")
+            line = $0
+            # Ignore braces inside line comments, block comments,
+            # string literals, and character literals so a brace in
+            # prose or a quoted value cannot close the function early.
+            # Each matched token is replaced in place with same-length
+            # spaces so offsets stay aligned across iterations.
+            while (match(line, /\/\/.*|\/\*.*\*\/|"(\\\\.|[^"\\\\])*"|'"'"'.'"'"'/)) {
+                token = substr(line, RSTART, RLENGTH)
+                gsub(/./, " ", token)
+                line = substr(line, 1, RSTART - 1) token substr(line, RSTART + RLENGTH)
+            }
+            opens += gsub(/\{/, "{", line)
+            closes += gsub(/\}/, "}", line)
             if (NR > start && opens > 0 && opens == closes) {
                 print NR
                 exit

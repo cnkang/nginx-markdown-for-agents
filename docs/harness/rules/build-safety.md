@@ -42,6 +42,12 @@ and implementation outside the `#ifdef` (or provide equivalent definitions in
 both branches). This catches the common mistake of adding a function inside a
 feature guard but forgetting that non-feature-gated paths still call it.
 
+The detector enforces this today for `MARKDOWN_STREAMING_ENABLED` — the only
+feature guard that gates function visibility in the module. A new feature
+guard that gates functions must extend `GUARD_NAME` in
+`detect_ifdef_guard_visibility.sh` (and its tests) before the rule claims
+coverage for it.
+
 **Historical issue**: `a29d1a7b` — `ngx_http_markdown_reason_streaming_skip_compressed`
 the function sat inside `#ifdef MARKDOWN_STREAMING_ENABLED` but code referenced it
 from non-streaming code paths. The team had to move the function outside the
