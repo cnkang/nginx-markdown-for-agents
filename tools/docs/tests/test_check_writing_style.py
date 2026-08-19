@@ -307,10 +307,11 @@ def test_resolve_base_matches_only_fixed_git_ref_output(monkeypatch):
     assert cws._resolve_base("HEAD") == "a" * 40
     assert cws._resolve_base("main") == "a" * 40
     assert cws._resolve_base("HEAD~1") == "a" * 40
+    git = cws._require_git()
     assert commands == [
-        ["git", "cat-file", "--batch-check"],
-        ["git", "cat-file", "--batch-check"],
-        ["git", "cat-file", "--batch-check"],
+        [git, "cat-file", "--batch-check"],
+        [git, "cat-file", "--batch-check"],
+        [git, "cat-file", "--batch-check"],
     ]
     assert inputs == ["HEAD^{commit}\n", "main^{commit}\n", "HEAD~1^{commit}\n"]
 

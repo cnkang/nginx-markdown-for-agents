@@ -91,12 +91,17 @@ grep -Fq '"artifact":"ngx_http_markdown_filter_module-1.26.3-glibc-x86_64.tar.gz
     "$tmpdir/output.json"
 grep -Fq '"name":"rust_linkage","status":"pass"' "$tmpdir/output.json"
 grep -Fq '"markdown_abi_version"' "$tmpdir/output.json"
+git_root=""
 if command -v git >/dev/null 2>&1 \
-    && git -C "$repo_root" rev-parse --show-toplevel >/dev/null 2>&1; then
+    && git_root=$(git -C "$repo_root" rev-parse --show-toplevel 2>/dev/null || true) \
+    && [[ -n "$git_root" && "$git_root" == "$repo_root" ]]; then
     grep -Fq '"name":"rust_toolchain","status":"pass"' "$tmpdir/output.json"
     grep -Fq '"pinned_channel":"1.97.1"' "$tmpdir/output.json"
+    grep -Fq '"pinned_channel_expected":"1.97.1"' "$tmpdir/output.json"
+    grep -Fq '"msrv":"1.97"' "$tmpdir/output.json"
 else
-    # Without a usable git checkout the doctor cannot validate the pinned
+    # Without a usable git checkout (git missing, or the resolved toplevel
+    # differs from the doctor root) the doctor cannot validate the pinned
     # toolchain channel; it reports a warn with repository_checkout:false.
     grep -Fq '"name":"rust_toolchain","status":"warn"' "$tmpdir/output.json"
     grep -Fq '"repository_checkout":false' "$tmpdir/output.json"

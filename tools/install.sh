@@ -993,33 +993,45 @@ fi
 # Verify the extracted object is an ELF of the expected architecture before
 # installing: a checksum-matching but wrong-arch artifact (or a future
 # multi-file archive) must not be copied into the modules directory.
-MODULE_FILE_DESC="$(file "$MODULE_SO" 2>/dev/null || true)"
-case "$MODULE_FILE_DESC" in
-  *"ELF 64-bit"*)
-    ;;
-  *)
-    die_with_error "$CATEGORY_CONFIG" \
-      "Extracted ${MODULE_SO} is not a 64-bit ELF object (file: ${MODULE_FILE_DESC:-unknown})." \
-      "The archive may be corrupted or built for a different platform. Re-download and try again."
-    ;;
-esac
-case "$ARCH" in
-  x86_64)
-    if [[ "$MODULE_FILE_DESC" != *"x86-64"* ]] && [[ "$MODULE_FILE_DESC" != *"x86_64"* ]]; then
+# `file` is not part of POSIX; on minimal containers it may be absent.  The
+# sha256 check above already guarantees byte-exact content, so skip the ELF
+# probe with a warning instead of misreporting a valid archive as broken.
+if command -v file >/dev/null 2>&1; then
+  MODULE_FILE_DESC="$(file "$MODULE_SO" 2>/dev/null || true)"
+  case "$MODULE_FILE_DESC" in
+    *"ELF 64-bit"*)
+      ;;
+    *)
       die_with_error "$CATEGORY_CONFIG" \
-        "Extracted ${MODULE_SO} is not built for x86_64 (file: ${MODULE_FILE_DESC})." \
-        "Requested architecture ${ARCH} does not match the artifact. Re-download the correct asset."
-    fi
-    ;;
-  aarch64)
-    if [[ "$MODULE_FILE_DESC" != *"ARM aarch64"* ]] && [[ "$MODULE_FILE_DESC" != *"AArch64"* ]]; then
+        "Extracted ${MODULE_SO} is not a 64-bit ELF object (file: ${MODULE_FILE_DESC:-unknown})." \
+        "The archive may be corrupted or built for a different platform. Re-download and try again."
+      ;;
+  esac
+  case "$ARCH" in
+    x86_64)
+      if [[ "$MODULE_FILE_DESC" != *"x86-64"* ]] && [[ "$MODULE_FILE_DESC" != *"x86_64"* ]]; then
+        die_with_error "$CATEGORY_CONFIG" \
+          "Extracted ${MODULE_SO} is not built for x86_64 (file: ${MODULE_FILE_DESC})." \
+          "Requested architecture ${ARCH} does not match the artifact. Re-download the correct asset."
+      fi
+      ;;
+    aarch64)
+      if [[ "$MODULE_FILE_DESC" != *"ARM aarch64"* ]] && [[ "$MODULE_FILE_DESC" != *"AArch64"* ]]; then
+        die_with_error "$CATEGORY_CONFIG" \
+          "Extracted ${MODULE_SO} is not built for aarch64 (file: ${MODULE_FILE_DESC})." \
+          "Requested architecture ${ARCH} does not match the artifact. Re-download the correct asset."
+      fi
+      ;;
+    *)
       die_with_error "$CATEGORY_CONFIG" \
-        "Extracted ${MODULE_SO} is not built for aarch64 (file: ${MODULE_FILE_DESC})." \
-        "Requested architecture ${ARCH} does not match the artifact. Re-download the correct asset."
-    fi
-    ;;
-esac
-echo "[+] Extracted module verified: 64-bit ELF for ${ARCH}"
+        "Unsupported architecture for ELF verification: ${ARCH}." \
+        "Supported architectures are x86_64 and aarch64."
+      ;;
+  esac
+  echo "[+] Extracted module verified: 64-bit ELF for ${ARCH}"
+else
+  echo "[!] file(1) not found; skipping ELF architecture verification (sha256 already verified the archive)." >&2
+fi
 
 # Determine NGINX modules directory
 # Prefer the build-time path from nginx -V when available.

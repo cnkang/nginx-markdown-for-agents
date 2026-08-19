@@ -35,8 +35,8 @@ def test_contract_matches_inventory():
 def test_directive_drift_is_reported():
     inventory, contract, readme = _inputs()
     contract = contract.replace(
-        "| `markdown_filter` | `on|off|$variable` | off | http/server/location |",
-        "| `markdown_filter` | `on|off|$variable` | on | http/server/location |",
+        "| `markdown_filter` | `on\\|off\\|$variable` | off | http/server/location |",
+        "| `markdown_filter` | `on\\|off\\|$variable` | on | http/server/location |",
     )
     errors = checker.validate_contract(inventory, contract, readme)
     assert any("directives markdown_filter: default" in error for error in errors)
