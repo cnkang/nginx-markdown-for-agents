@@ -65,6 +65,11 @@ Run the canonical E2E suite:
 Environment variables:
   NGINX_BIN       Optional reusable module-enabled nginx binary
   NGINX_VERSION   Optional nginx version forwarded to the self-building checks
+  NGINX_URL       Required for filter_ordering and subrequest_ssi: a running
+                  module-enabled fixture (SSI + gzip + proxy_cache).  Final
+                  E2E qualification FAILS when unset; set
+                  RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 to skip these two
+                  scripts (non-release local runs only).
 EOF
   return 0
 }
@@ -226,10 +231,22 @@ if [[ -n "${NGINX_URL:-}" ]]; then
   require_suite_script "${FILTER_ORDERING_SCRIPT}" "filter_ordering"
   require_suite_script "${SUBREQUEST_SSI_SCRIPT}" "subrequest_ssi"
   env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${FILTER_ORDERING_SCRIPT}"
-  env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${SUBREQUEST_SSI_SCRIPT}"
+  # Final qualification requires the subrequest_in_memory path
+  # (decision D6): REQUIRE_AUTH_SUBREQUEST turns the optional scenario 5
+  # into a hard requirement so an incomplete fixture cannot pass.
+  env NGINX_BIN="${SUITE_NGINX_BIN}" REQUIRE_AUTH_SUBREQUEST=1 \
+    bash "${SUBREQUEST_SSI_SCRIPT}"
+elif [[ "${RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E:-0}" == "1" ]]; then
+  echo "  filter_ordering=skipped (RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1)"
+  echo "  subrequest_ssi=skipped (RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1)"
 else
-  echo "  filter_ordering=skipped (set NGINX_URL for a running fixture)"
-  echo "  subrequest_ssi=skipped (set NGINX_URL for a running fixture)"
+  # Final E2E qualification must not silently skip filter-ordering / SSI /
+  # subrequest_in_memory (decision D6): without an explicit opt-out the
+  # suite FAILS so a release cannot pass with these unexercised.
+  echo "FAIL: filter_ordering and subrequest_ssi are part of final E2E qualification and must not be skipped." >&2
+  echo "      Provide NGINX_URL pointing at a running module-enabled fixture (SSI + gzip + proxy_cache)," >&2
+  echo "      or set RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 for non-release local runs." >&2
+  exit 1
 fi
 
 echo "Canonical E2E suite summary:"

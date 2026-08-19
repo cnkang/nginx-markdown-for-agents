@@ -224,8 +224,12 @@ test-e2e-contract-scripts:
 	NGINX_BIN="$${NGINX_BIN}" bash tests/compatibility/test_error_policy_values.sh
 	@if test -n "$${NGINX_URL:-}"; then \
 		bash tests/e2e/filter_ordering_test.sh; \
+		REQUIRE_AUTH_SUBREQUEST=1 bash tests/e2e/subrequest_ssi_test.sh; \
+	elif test "$${RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E:-0}" = "1"; then \
+		echo "SKIP: filter ordering / subrequest_ssi require NGINX_URL and a running fixture (RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1)" >&2; \
 	else \
-		echo "SKIP: filter ordering requires NGINX_URL and a running fixture" >&2; \
+		echo "FAIL: filter ordering / subrequest_ssi are part of final E2E qualification and must not be skipped; provide NGINX_URL pointing at a module-enabled fixture (set RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 only for non-release local runs)" >&2; \
+		exit 1; \
 	fi
 
 test-all: build test-rust test-nginx-unit test-property
