@@ -701,6 +701,7 @@ test_effective_helpers_edge_values(void)
 typedef struct {
     ngx_http_markdown_dynconf_snapshot_t *dynconf_snapshot;
     ngx_http_markdown_effective_conf_t   *effective_conf;
+    ngx_http_markdown_effective_conf_t    effective_conf_storage;
 } test_ctx_t;
 
 
@@ -756,6 +757,7 @@ test_bind_request_snapshot_preserves_captured_snapshot(void)
 
     ngx_http_markdown_bind_request_snapshot(
         r.pool, conn.log, &conf, &snap_a, &early_eff_a,
+        &tctx.effective_conf_storage,
         &tctx.dynconf_snapshot, &tctx.effective_conf);
 
     TEST_ASSERT(tctx.dynconf_snapshot != NULL,
@@ -789,7 +791,6 @@ test_bind_request_snapshot_preserves_captured_snapshot(void)
                 "global snapshot B log_verbosity is ERROR (different)");
 
     free(tctx.dynconf_snapshot);
-    free(tctx.effective_conf);
 
     TEST_PASS("bind_request_snapshot preserves captured snapshot A "
               "even after global snapshot becomes B");
@@ -854,6 +855,7 @@ test_dynconf_snapshot_not_consumed_when_dynconf_disabled(void)
     /* Bind: with dynconf_enabled=0, dynconf_snapshot must NOT be allocated */
     ngx_http_markdown_bind_request_snapshot(
         r.pool, conn.log, &conf, &global_snap, &early_eff,
+        &tctx.effective_conf_storage,
         &tctx.dynconf_snapshot, &tctx.effective_conf);
 
     TEST_ASSERT(tctx.dynconf_snapshot == NULL,
@@ -872,8 +874,6 @@ test_dynconf_snapshot_not_consumed_when_dynconf_disabled(void)
                 "effective memory_budget from conf (1M), not snapshot (32M)");
     TEST_ASSERT(tctx.effective_conf->streaming_budget == 512 * 1024,
                 "effective streaming_budget from conf (512K), not snapshot (16M)");
-
-    free(tctx.effective_conf);
 
     TEST_PASS("dynconf snapshot not consumed when dynconf_enabled=0");
 }
