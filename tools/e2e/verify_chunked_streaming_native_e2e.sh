@@ -903,6 +903,7 @@ get_metric_value() {
   METRIC_FAMILY="${metric_family}" METRIC_SELECTOR="${metric_selector}" \
     python3 -c '
 import json
+import math
 import os
 import re
 import sys
@@ -968,9 +969,13 @@ for line in sys.stdin:
     if line.lstrip().startswith("#"):
         # A `# TYPE <family> ...` line declares the family even when no
         # sample is present yet (fresh endpoint); treat that as a
-        # legitimate zero rather than a missing family.
-        if line.lstrip().startswith("# TYPE ") and line.split()[2] == family:
-            type_declared = True
+        # legitimate zero rather than a missing family.  Malformed
+        # `# TYPE` comments without a family token are ignored so a
+        # truncated or hand-edited document cannot raise IndexError.
+        if line.lstrip().startswith("# TYPE "):
+            parts = line.split()
+            if len(parts) >= 3 and parts[2] == family:
+                type_declared = True
         continue
     match = sample_re.fullmatch(line.strip())
     if match is None or match.group("name") != family:
@@ -981,9 +986,15 @@ for line in sys.stdin:
         continue
     matched += 1
     try:
-        total += float(match.group("value"))
+        value = float(match.group("value"))
     except (IndexError, ValueError):
         continue
+    # Non-finite totals (+Inf/-Inf/NaN) cannot be summed into an integer
+    # counter; count them as seen but skip them so the scenario exits
+    # with a readable result instead of OverflowError.
+    if not math.isfinite(value):
+        continue
+    total += value
 if found == 0 and not type_declared:
     print(f"ERROR: metric family {family!r} not found in metrics output", file=sys.stderr)
     sys.exit(1)

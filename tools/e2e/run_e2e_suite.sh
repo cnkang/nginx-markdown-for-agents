@@ -207,11 +207,24 @@ fi
 "${E2E_HARNESS_BIN}" scenario auth-cache "${e2e_harness_args[@]}"
 "${E2E_HARNESS_BIN}" scenario status-codes "${e2e_harness_args[@]}"
 
-# These two contract scripts are intentionally wired into the canonical suite:
+# These three contract scripts are intentionally wired into the canonical suite:
 # the error-policy script is binary-only, while filter ordering additionally
-# needs a caller-provided running NGINX_URL and fixture paths.
+# needs a caller-provided running NGINX_URL and fixture paths.  Validate each
+# referenced script exists before invoking it so a missing file surfaces as a
+# clear suite-step error instead of bash's generic missing-file failure.
+require_suite_script() {
+  local script_path="$1" step_name="$2"
+  if [[ ! -f "${script_path}" ]]; then
+    echo "ERROR: canonical suite step ${step_name} references missing script: ${script_path}" >&2
+    exit 1
+  fi
+  return 0
+}
+require_suite_script "${ERROR_POLICY_VALUES_SCRIPT}" "error_policy_values"
 env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${ERROR_POLICY_VALUES_SCRIPT}"
 if [[ -n "${NGINX_URL:-}" ]]; then
+  require_suite_script "${FILTER_ORDERING_SCRIPT}" "filter_ordering"
+  require_suite_script "${SUBREQUEST_SSI_SCRIPT}" "subrequest_ssi"
   env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${FILTER_ORDERING_SCRIPT}"
   env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${SUBREQUEST_SSI_SCRIPT}"
 else

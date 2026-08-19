@@ -136,6 +136,10 @@ prepare_dynconf_ownership() {
         ORIGINAL_FILE_EXISTED=1
         ORIGINAL_FILE_MODE="$(stat_field '%Lp' '%a' "$DYNCONF_FILE")" || return 1
         backup_owner="$(stat_field '%u:%g' '%u:%g' "$DYNCONF_FILE")" || return 1
+        if [[ -z "$ORIGINAL_FILE_MODE" || -z "$backup_owner" ]]; then
+            echo "Error: stat returned an empty value for $DYNCONF_FILE" >&2
+            return 1
+        fi
         ORIGINAL_FILE_UID="${backup_owner%%:*}"
         ORIGINAL_FILE_GID="${backup_owner##*:}"
 
