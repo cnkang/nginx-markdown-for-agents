@@ -655,8 +655,10 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
 
     /* The 304 describes the Markdown representation: point Content-Type
      * at the Markdown media type instead of leaving the upstream
-     * text/html that describes the original body. */
-    r->headers_out.content_type.data = (u_char *) NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL;
+     * text/html that describes the original body.  Use the shared
+     * writable array (not the string literal) so all conversion paths
+     * (fullcov, streaming, 304) reference the same storage. */
+    r->headers_out.content_type.data = ngx_http_markdown_content_type;
     r->headers_out.content_type.len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
     r->headers_out.content_type_len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
     r->headers_out.charset.len = 0;

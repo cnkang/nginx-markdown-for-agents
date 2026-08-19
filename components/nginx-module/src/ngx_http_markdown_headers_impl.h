@@ -950,10 +950,13 @@ ngx_http_markdown_fullcov_commit(ngx_http_request_t *r,
     /* C6: Accept-Ranges removal — scalar assignment */
     r->allow_ranges = 0;
     r->headers_out.accept_ranges = NULL;
+    /* Invalidate every matching list entry (stop_after_first=0), matching
+     * the ETag invalidation path: a duplicate upstream Accept-Ranges must
+     * not survive in the headers list. */
     ngx_http_markdown_invalidate_headers(r,
         ngx_http_markdown_hdr_accept_ranges,
         sizeof(ngx_http_markdown_hdr_accept_ranges) - 1,
-        1, NULL);
+        0, NULL);
 
     /* C7: Last-Modified removal — the converted representation's weak
      * validator must not describe the source HTML mtime (decision G).

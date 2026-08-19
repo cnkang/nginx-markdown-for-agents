@@ -1081,6 +1081,18 @@ test_access_json_and_logging_failure_branches(void)
     TEST_ASSERT(rc == NGX_HTTP_FORBIDDEN,
                 "missing sockaddr should be forbidden");
 
+#if (NGX_HAVE_UNIX_DOMAIN)
+    reset_test_state();
+    init_request(&r, &c, &conf, &addr);
+    struct sockaddr unix_addr;
+    memset(&unix_addr, 0, sizeof(unix_addr));
+    unix_addr.sa_family = AF_UNIX;
+    c.sockaddr = &unix_addr;
+    rc = ngx_http_markdown_diagnostics_check_access(&r);
+    TEST_ASSERT(rc == NGX_OK,
+                "AF_UNIX local peer should be allowed");
+#endif
+
     reset_test_state();
     init_request(&r, &c, &conf, &addr);
     g_alloc_fail_after = 0;

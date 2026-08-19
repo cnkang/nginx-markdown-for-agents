@@ -863,7 +863,6 @@ test_reload_replaces_omitted_fields(const char *path)
     sequence_conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
     sequence_conf.error_status = NGX_HTTP_SERVICE_UNAVAILABLE;
     sequence_conf.stream.budget = 131072;
-    sequence_conf.limits.conversion_memory = 262144;
     sequence_conf.limits.conversion_memory = 524288;
     ngx_http_markdown_dynconf_snapshot_from_conf(
         &sequence_watcher.static_snapshot, &sequence_conf);
@@ -916,7 +915,6 @@ test_reload_replaces_omitted_fields(const char *path)
     direct_conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
     direct_conf.error_status = NGX_HTTP_SERVICE_UNAVAILABLE;
     direct_conf.stream.budget = 131072;
-    direct_conf.limits.conversion_memory = 262144;
     direct_conf.limits.conversion_memory = 524288;
     ngx_http_markdown_dynconf_snapshot_from_conf(
         &direct_watcher.static_snapshot, &direct_conf);

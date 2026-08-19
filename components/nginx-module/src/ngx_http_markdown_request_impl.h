@@ -107,6 +107,29 @@ static void ngx_http_markdown_log_streaming_terminal_decision(
 static void ngx_http_markdown_metric_inc_failopen(
     const ngx_http_markdown_effective_conf_t *eff,
     const ngx_http_markdown_conf_t *conf);
+/*
+ * Settle a deferred buffered fail-open delivery counter after the
+ * recovery pass-through confirms downstream delivery (Rule 38/23).
+ * A buffered fail-open send that hit NGX_AGAIN set
+ * fullbuffer.failopen_delivery_pending; this helper publishes the
+ * delivery count exactly once, guarded by failopen_completed.
+ */
+static ngx_inline void
+ngx_http_markdown_settle_buffered_failopen_delivery(
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    ngx_int_t rc)
+{
+    if ((rc == NGX_OK || rc == NGX_DONE)
+        && ctx->fullbuffer.failopen_delivery_pending
+        && !ctx->failopen_completed)
+    {
+        ngx_http_markdown_metric_inc_failopen(
+            ctx->effective_conf, conf);
+        ctx->failopen_completed = 1;
+        ctx->fullbuffer.failopen_delivery_pending = 0;
+    }
+}
 static ngx_http_output_header_filter_pt ngx_http_next_header_filter;
 static ngx_http_output_body_filter_pt ngx_http_next_body_filter;
 const ngx_str_t *ngx_http_markdown_reason_failed_closed(void);
@@ -1186,6 +1209,35 @@ ngx_http_markdown_record_path_hit(const ngx_http_markdown_ctx_t *ctx)
  *         header emission is deferred to the body filter; otherwise returns
  *         the result of passing the request to the next header filter.
  */
+/*
+ * Handle header-filter re-entry.  NGINX core does not re-enter the
+ * header chain once header_sent is set, but a defensive short-circuit
+ * keeps a hypothetical re-entry from forwarding headers twice.  The
+ * request context created by the first pass is reused (a second context
+ * would duplicate cleanup hooks and reset phase latches).
+ *
+ * Returns:
+ *   NGX_OK           - re-entry with headers already forwarded (no-op)
+ *   NGX_DECLINED     - first pass or re-entry before forwarding (caller
+ *                      continues building the request context)
+ *   otherwise        - the result of forwarding to the next filter
+ */
+static ngx_int_t
+ngx_http_markdown_header_filter_handle_reentry(ngx_http_request_t *r)
+{
+    ngx_http_markdown_ctx_t  *ctx;
+
+    ctx = ngx_http_get_module_ctx(r, ngx_http_markdown_filter_module);
+    if (ctx == NULL) {
+        return NGX_DECLINED;
+    }
+    if (ctx->headers_forwarded) {
+        return NGX_OK;
+    }
+    return ngx_http_next_header_filter(r);
+}
+
+
 static ngx_int_t
 ngx_http_markdown_header_filter(ngx_http_request_t *r)
 {
@@ -1225,16 +1277,9 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     /* Header-filter re-entry must reuse the request context created by the
      * first pass; allocating a second context would duplicate cleanup hooks
      * and reset the request's phase latches. */
-    ctx = ngx_http_get_module_ctx(r, ngx_http_markdown_filter_module);
-    if (ctx != NULL) {
-        /* Re-entry after headers were already forwarded: NGINX core does
-         * not re-enter the header chain once header_sent is set, but if a
-         * re-entry ever did occur, forwarding a second time would corrupt
-         * the response.  Short-circuit instead. */
-        if (ctx->headers_forwarded) {
-            return NGX_OK;
-        }
-        return ngx_http_next_header_filter(r);
+    precheck_rc = ngx_http_markdown_header_filter_handle_reentry(r);
+    if (precheck_rc != NGX_DECLINED) {
+        return precheck_rc;
     }
 
     /*
@@ -1660,7 +1705,15 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
          * (NGINX core model).  Continue so the pass-through body is
          * always delivered; returning early here sends headers only
          * under backpressure. */
-        return ngx_http_next_body_filter(r, in);
+        rc = ngx_http_next_body_filter(r, in);
+        /*
+         * Rule 38/23: a buffered fail-open send that hit downstream
+         * backpressure (NGX_AGAIN) deferred its delivery counter to
+         * this recovery pass-through.
+         */
+        ngx_http_markdown_settle_buffered_failopen_delivery(
+            ctx, conf, rc);
+        return rc;
     }
 
 #ifdef MARKDOWN_STREAMING_ENABLED

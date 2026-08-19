@@ -117,7 +117,16 @@ ngx_http_markdown_fail_open_buffered_response(ngx_http_request_t *r,
 
     r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
 
-    return ngx_http_markdown_send_buffered_original_response(r, ctx);
+    rc = ngx_http_markdown_send_buffered_original_response(r, ctx);
+
+    if (rc == NGX_AGAIN) {
+        /* Downstream backpressure: the recovery pass-through (body
+         * filter with !eligible) counts failopen_count after the
+         * downstream filter confirms delivery (Rule 38). */
+        ctx->fullbuffer.failopen_delivery_pending = 1;
+    }
+
+    return rc;
 }
 
 /* Apply error strategy: reject (return error) or fail-open (return original). */
@@ -546,6 +555,10 @@ ngx_http_markdown_handle_buffer_init_failure(ngx_http_request_t *r,
     if (rc == NGX_OK || rc == NGX_DONE) {
         ngx_http_markdown_metric_inc_failopen(
             ctx->effective_conf, conf);
+    } else if (rc == NGX_AGAIN) {
+        /* Downstream backpressure: defer counting to the recovery
+         * pass-through (Rule 38). */
+        ctx->fullbuffer.failopen_delivery_pending = 1;
     }
 
     /*
@@ -623,6 +636,10 @@ ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
     if (rc == NGX_OK || rc == NGX_DONE) {
         ngx_http_markdown_metric_inc_failopen(
             ctx->effective_conf, conf);
+    } else if (rc == NGX_AGAIN) {
+        /* Downstream backpressure: defer counting to the recovery
+         * pass-through (Rule 38). */
+        ctx->fullbuffer.failopen_delivery_pending = 1;
     }
 
     /*
