@@ -150,7 +150,7 @@ proptest! {
         let compressed = deflate_compress(&payload);
 
         // Full-buffer path: decompress in one shot
-        let fullbuffer_result = decompress_bounded(&compressed, Format::Deflate, budget);
+        let fullbuffer_result = decompress_bounded(&compressed, Format::Deflate, budget, 0);
 
         // Streaming path: decompress in chunks
         let streaming_result = decompress_deflate_streaming(&compressed, chunk_size, budget);

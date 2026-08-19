@@ -1041,6 +1041,7 @@ pub unsafe extern "C" fn markdown_decompress_bounded(
     input_len: usize,
     format: u8,
     budget: usize,
+    ratio: u64,
     result: *mut FFIDecompResult,
 ) -> u32 {
     if result.is_null() {
@@ -1089,7 +1090,7 @@ pub unsafe extern "C" fn markdown_decompress_bounded(
     // return Err on bad input, a panic here would unwind into C (UB). On
     // panic we report a generic io_error category and emit no output.
     let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        crate::decompress::decompress_bounded(input_slice, fmt, budget)
+        crate::decompress::decompress_bounded(input_slice, fmt, budget, ratio)
     }));
     match outcome {
         Ok(Ok(decomp_result)) => {
@@ -2061,6 +2062,7 @@ mod tests {
                 compressed.len(),
                 0, // gzip
                 1024,
+                0, // ratio disabled
                 &mut result,
             )
         };
@@ -2097,7 +2099,7 @@ mod tests {
 
         let mut result: FFIDecompResult = unsafe { std::mem::zeroed() };
         let rc = unsafe {
-            markdown_decompress_bounded(compressed.as_ptr(), compressed.len(), 0, 1024, &mut result)
+            markdown_decompress_bounded(compressed.as_ptr(), compressed.len(), 0, 1024, 0, &mut result)
         };
 
         assert_eq!(rc, 0, "Expected success (0), got {rc}");
@@ -2132,6 +2134,7 @@ mod tests {
                 compressed.len(),
                 0, // gzip
                 1024,
+                0, // ratio disabled
                 &mut result,
             )
         };
@@ -2167,6 +2170,7 @@ mod tests {
                 compressed.len(),
                 0,   // gzip
                 100, // budget too small
+                0, // ratio disabled
                 &mut result,
             )
         };
@@ -2267,6 +2271,7 @@ mod tests {
                 data.len(),
                 99, // invalid format
                 1024,
+                0, // ratio disabled
                 &mut result,
             )
         };
@@ -2281,7 +2286,7 @@ mod tests {
     fn decompress_bounded_null_result_returns_invalid_args() {
         let data = b"some data";
         let rc = unsafe {
-            markdown_decompress_bounded(data.as_ptr(), data.len(), 0, 1024, std::ptr::null_mut())
+            markdown_decompress_bounded(data.as_ptr(), data.len(), 0, 1024, 0, std::ptr::null_mut())
         };
         assert_eq!(rc, 105);
     }
@@ -2289,7 +2294,7 @@ mod tests {
     #[test]
     fn decompress_bounded_empty_input_returns_truncated() {
         let mut result: FFIDecompResult = unsafe { std::mem::zeroed() };
-        let rc = unsafe { markdown_decompress_bounded(std::ptr::null(), 0, 0, 1024, &mut result) };
+        let rc = unsafe { markdown_decompress_bounded(std::ptr::null(), 0, 0, 1024, 0, &mut result) };
         assert_eq!(
             rc, 103,
             "Expected truncated_input (103) for empty input, got {rc}"
@@ -2300,7 +2305,7 @@ mod tests {
     #[test]
     fn decompress_bounded_null_with_nonzero_len_returns_invalid_args() {
         let mut result: FFIDecompResult = unsafe { std::mem::zeroed() };
-        let rc = unsafe { markdown_decompress_bounded(std::ptr::null(), 10, 0, 1024, &mut result) };
+        let rc = unsafe { markdown_decompress_bounded(std::ptr::null(), 10, 0, 1024, 0, &mut result) };
         assert_eq!(
             rc, 105,
             "Expected invalid_args (105) for NULL input with non-zero length, got {rc}"

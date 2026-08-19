@@ -99,23 +99,29 @@ impl MemoryBudget {
             };
         }
 
+        let sniff_fixed = defaults.charset_sniff.min(total);
+        let remaining = total.saturating_sub(sniff_fixed);
+
+        // The charset sniff cap is documented as fixed (1024 B): a smaller
+        // total must not shrink it, or a meta charset declared after the
+        // reduced sniff window would be missed and change decode behavior.
+        // Scale the remaining variable stages against `remaining`.
         let weights = [
             defaults.state_stack,
             defaults.output_buffer,
-            defaults.charset_sniff,
             defaults.lookahead,
         ];
         let weight_sum = weights.iter().copied().sum::<usize>();
 
-        let mut scaled = [0usize; 4];
+        let mut scaled = [0usize; 3];
         for (idx, weight) in weights.iter().copied().enumerate() {
-            scaled[idx] = total.saturating_mul(weight) / weight_sum;
+            scaled[idx] = remaining.saturating_mul(weight) / weight_sum.max(1);
         }
 
         // Distribute integer-division remainder deterministically so the
         // sub-budget sum stays exactly equal to `total`.
-        let mut assigned = scaled.iter().copied().sum::<usize>();
-        let priority = [1usize, 0usize, 3usize, 2usize];
+        let mut assigned = scaled.iter().copied().sum::<usize>() + sniff_fixed;
+        let priority = [0usize, 2usize, 1usize];
         let mut pidx = 0usize;
         while assigned < total {
             let slot = priority[pidx % priority.len()];
@@ -128,8 +134,8 @@ impl MemoryBudget {
             total,
             state_stack: scaled[0],
             output_buffer: scaled[1],
-            charset_sniff: scaled[2],
-            lookahead: scaled[3],
+            charset_sniff: sniff_fixed,
+            lookahead: scaled[2],
         }
     }
 

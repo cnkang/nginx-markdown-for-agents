@@ -66,6 +66,8 @@ pub enum DecompError {
     TruncatedInput(String),
     /// Generic I/O error during decompression.
     IoError(String),
+    /// Decompressed output exceeded the per-layer expansion ratio.
+    RatioExceeded,
 }
 
 impl DecompError {
@@ -77,12 +79,14 @@ impl DecompError {
     /// - 102 = format_error
     /// - 103 = truncated_input
     /// - 104 = io_error
+    /// - 106 = ratio_exceeded
     pub fn error_category(&self) -> u32 {
         match self {
             Self::BudgetExceeded => crate::ffi::abi::DECOMP_CATEGORY_BUDGET_EXCEEDED,
             Self::FormatError(_) => crate::ffi::abi::DECOMP_CATEGORY_FORMAT_ERROR,
             Self::TruncatedInput(_) => crate::ffi::abi::DECOMP_CATEGORY_TRUNCATED_INPUT,
             Self::IoError(_) => crate::ffi::abi::DECOMP_CATEGORY_IO_ERROR,
+            Self::RatioExceeded => crate::ffi::abi::DECOMP_CATEGORY_RATIO_EXCEEDED,
         }
     }
 }
@@ -117,28 +121,47 @@ pub struct DecompResult {
 ///
 /// // Decompress gzip data with a 1MB budget
 /// let compressed = vec![/* gzip bytes */];
-/// let result = decompress_bounded(&compressed, Format::Gzip, 1_048_576);
+/// let result = decompress_bounded(&compressed, Format::Gzip, 1_048_576, 0);
 /// ```
 pub fn decompress_bounded(
     input: &[u8],
     format: Format,
     budget: usize,
+    ratio: u64,
 ) -> Result<DecompResult, DecompError> {
     match format {
-        Format::Gzip => decompress_gzip(input, budget),
-        Format::Deflate => decompress_deflate(input, budget),
-        Format::Brotli => decompress_brotli(input, budget),
+        Format::Gzip => decompress_gzip(input, budget, ratio),
+        Format::Deflate => decompress_deflate(input, budget, ratio),
+        Format::Brotli => decompress_brotli(input, budget, ratio),
     }
 }
 
 /// Read from a decoder into a budget-limited buffer.
 ///
 /// Returns the filled buffer on success, or an appropriate `DecompError`
-/// if the budget is exceeded or an I/O error occurs.
-fn read_bounded<R: Read>(mut reader: R, budget: usize) -> Result<Vec<u8>, DecompError> {
+/// if the budget is exceeded or an I/O error occurs.  When `ratio` is
+/// non-zero and the compressed input is at least
+/// [`RATIO_ACTIVATION_THRESHOLD`] bytes, the decompressed output is also
+/// capped at `input_len * ratio`; exceeding that ceiling is classified as
+/// `RatioExceeded` (distinct from the absolute-budget `BudgetExceeded`),
+/// matching the multi-layer chain decoder semantics.
+fn read_bounded<R: Read>(
+    mut reader: R,
+    budget: usize,
+    input_len: usize,
+    ratio: u64,
+) -> Result<Vec<u8>, DecompError> {
     let mut output = Vec::new();
     let chunk_size = 8192.min(budget.saturating_add(1));
     let mut buf = vec![0u8; chunk_size];
+
+    /* Ratio ceiling: only activates above the fixed activation threshold,
+     * mirroring encoding.rs RATIO_ACTIVATION_THRESHOLD (256 bytes). */
+    let ratio_cap = if ratio > 0 && input_len >= crate::encoding::RATIO_ACTIVATION_THRESHOLD {
+        usize::try_from((input_len as u64).saturating_mul(ratio)).unwrap_or(usize::MAX)
+    } else {
+        usize::MAX
+    };
 
     loop {
         match reader.read(&mut buf) {
@@ -149,6 +172,13 @@ fn read_bounded<R: Read>(mut reader: R, budget: usize) -> Result<Vec<u8>, Decomp
                  *.  BudgetExceeded is returned either way. */
                 if output.len().saturating_add(n) > budget {
                     return Err(DecompError::BudgetExceeded);
+                }
+                /* Ratio ceiling: a high-expansion bomb is reported as a
+                 * ratio violation before the absolute budget fires, keeping
+                 * the operator-configured limit meaningful on single-layer
+                 * paths. */
+                if output.len().saturating_add(n) > ratio_cap {
+                    return Err(DecompError::RatioExceeded);
                 }
                 /* Reserve exactly the needed capacity to prevent Vec
                  * growth strategy from allocating beyond the budget. */
@@ -214,7 +244,7 @@ fn classify_deflate_error(e: flate2::DecompressError) -> DecompError {
 }
 
 /// Decompress gzip data with budget enforcement.
-fn decompress_gzip(input: &[u8], budget: usize) -> Result<DecompResult, DecompError> {
+fn decompress_gzip(input: &[u8], budget: usize, ratio: u64) -> Result<DecompResult, DecompError> {
     use flate2::read::MultiGzDecoder;
 
     if input.is_empty() {
@@ -224,7 +254,7 @@ fn decompress_gzip(input: &[u8], budget: usize) -> Result<DecompResult, DecompEr
     }
 
     let decoder = MultiGzDecoder::new(input);
-    let output = read_bounded(decoder, budget)?;
+    let output = read_bounded(decoder, budget, input.len(), ratio)?;
     Ok(DecompResult { output })
 }
 
@@ -262,7 +292,11 @@ fn has_zlib_header(input: &[u8]) -> bool {
 /// error classification stays intact.  This matches the C full-buffer
 /// decompressor's FORMAT_ERROR fallback so the decoding paths accept the
 /// same inputs.
-fn decompress_deflate(input: &[u8], budget: usize) -> Result<DecompResult, DecompError> {
+fn decompress_deflate(
+    input: &[u8],
+    budget: usize,
+    ratio: u64,
+) -> Result<DecompResult, DecompError> {
     if input.is_empty() {
         return Err(DecompError::TruncatedInput(
             "empty input for deflate decompression".to_string(),
@@ -272,9 +306,9 @@ fn decompress_deflate(input: &[u8], budget: usize) -> Result<DecompResult, Decom
     let mut output = Vec::new();
     let zlib_wrapped = has_zlib_header(input);
 
-    match deflate_decode_into(input, budget, zlib_wrapped, &mut output) {
+    match deflate_decode_into(input, budget, zlib_wrapped, ratio, &mut output) {
         Ok(()) => Ok(DecompResult { output }),
-        Err(e) => retry_raw_deflate(input, budget, zlib_wrapped, output, e),
+        Err(e) => retry_raw_deflate(input, budget, zlib_wrapped, ratio, output, e),
     }
 }
 
@@ -282,6 +316,7 @@ fn retry_raw_deflate(
     input: &[u8],
     budget: usize,
     zlib_wrapped: bool,
+    ratio: u64,
     mut output: Vec<u8>,
     err: DecompError,
 ) -> Result<DecompResult, DecompError> {
@@ -291,7 +326,7 @@ fn retry_raw_deflate(
         return Err(err);
     }
     output.clear();
-    deflate_decode_into(input, budget, false, &mut output)?;
+    deflate_decode_into(input, budget, false, ratio, &mut output)?;
     Ok(DecompResult { output })
 }
 
@@ -300,6 +335,7 @@ fn deflate_decode_into(
     input: &[u8],
     budget: usize,
     zlib_wrapped: bool,
+    ratio: u64,
     output: &mut Vec<u8>,
 ) -> Result<(), DecompError> {
     use flate2::{Decompress, FlushDecompress, Status};
@@ -332,7 +368,7 @@ fn deflate_decode_into(
             .map_err(|_| DecompError::BudgetExceeded)?;
 
         if produced_now > 0 {
-            append_deflate_output(output, &buf[..produced_now], budget)?;
+            append_deflate_output(output, &buf[..produced_now], budget, ratio, input.len())?;
         }
 
         match status {
@@ -349,11 +385,14 @@ fn deflate_decode_into(
 }
 
 /// Append `produced` bytes to `output` under the cumulative decompression
-/// budget. Grows the buffer only when the budget allows it.
+/// budget and per-layer ratio ceiling. Grows the buffer only when the
+/// budget allows it.
 fn append_deflate_output(
     output: &mut Vec<u8>,
     produced: &[u8],
     budget: usize,
+    ratio: u64,
+    input_len: usize,
 ) -> Result<(), DecompError> {
     let needed = output
         .len()
@@ -361,6 +400,17 @@ fn append_deflate_output(
         .ok_or(DecompError::BudgetExceeded)?;
     if needed > budget {
         return Err(DecompError::BudgetExceeded);
+    }
+    /* Ratio ceiling mirrors read_bounded: activates only above the fixed
+     * activation threshold and classifies as RatioExceeded, keeping the
+     * operator-configured limit meaningful on the deflate single-layer
+     * path. */
+    if ratio > 0 && input_len >= crate::encoding::RATIO_ACTIVATION_THRESHOLD {
+        let ratio_cap =
+            usize::try_from((input_len as u64).saturating_mul(ratio)).unwrap_or(usize::MAX);
+        if needed > ratio_cap {
+            return Err(DecompError::RatioExceeded);
+        }
     }
     if output.capacity() < needed {
         output
@@ -372,7 +422,11 @@ fn append_deflate_output(
 }
 
 /// Decompress brotli data with budget enforcement.
-fn decompress_brotli(input: &[u8], budget: usize) -> Result<DecompResult, DecompError> {
+fn decompress_brotli(
+    input: &[u8],
+    budget: usize,
+    ratio: u64,
+) -> Result<DecompResult, DecompError> {
     if input.is_empty() {
         return Err(DecompError::TruncatedInput(
             "empty input for brotli decompression".to_string(),
@@ -380,7 +434,7 @@ fn decompress_brotli(input: &[u8], budget: usize) -> Result<DecompResult, Decomp
     }
 
     let decoder = brotli::Decompressor::new(input, 4096);
-    let output = read_bounded(decoder, budget)?;
+    let output = read_bounded(decoder, budget, input.len(), ratio)?;
     Ok(DecompResult { output })
 }
 
@@ -434,7 +488,7 @@ mod tests {
     fn gzip_decompresses_within_budget() {
         let original = b"Hello, world! This is a test of bounded decompression.";
         let compressed = gzip_compress(original);
-        let result = decompress_bounded(&compressed, Format::Gzip, 1024).unwrap();
+        let result = decompress_bounded(&compressed, Format::Gzip, 1024, 0).unwrap();
         assert_eq!(result.output, original);
     }
 
@@ -445,7 +499,7 @@ mod tests {
         let mut compressed = gzip_compress(first);
         compressed.extend_from_slice(&gzip_compress(second));
 
-        let result = decompress_bounded(&compressed, Format::Gzip, 1024).unwrap();
+        let result = decompress_bounded(&compressed, Format::Gzip, 1024, 0).unwrap();
 
         assert_eq!(
             result.output,
@@ -460,7 +514,7 @@ mod tests {
         let mut compressed = gzip_compress(first);
         compressed.extend_from_slice(&gzip_compress(second));
 
-        let result = decompress_bounded(&compressed, Format::Gzip, first.len() + second.len() - 1);
+        let result = decompress_bounded(&compressed, Format::Gzip, first.len() + second.len() - 1, 0);
 
         assert_eq!(result.unwrap_err(), DecompError::BudgetExceeded);
     }
@@ -472,7 +526,7 @@ mod tests {
         second.truncate(second.len() - 4);
         compressed.extend_from_slice(&second);
 
-        let result = decompress_bounded(&compressed, Format::Gzip, 1024);
+        let result = decompress_bounded(&compressed, Format::Gzip, 1024, 0);
 
         assert_eq!(result.unwrap_err().error_category(), 103);
     }
@@ -481,7 +535,7 @@ mod tests {
     fn deflate_decompresses_within_budget() {
         let original = b"Deflate test data for bounded decompression.";
         let compressed = deflate_compress(original);
-        let result = decompress_bounded(&compressed, Format::Deflate, 1024).unwrap();
+        let result = decompress_bounded(&compressed, Format::Deflate, 1024, 0).unwrap();
         assert_eq!(result.output, original);
     }
 
@@ -491,7 +545,7 @@ mod tests {
         // lizard's brace counting).
         let original = vec![68u8; 65_536];
         let compressed = deflate_compress(&original);
-        let result = decompress_bounded(&compressed, Format::Deflate, original.len()).unwrap();
+        let result = decompress_bounded(&compressed, Format::Deflate, original.len(), 0).unwrap();
         assert_eq!(result.output, original);
     }
 
@@ -499,7 +553,7 @@ mod tests {
     fn brotli_decompresses_within_budget() {
         let original = b"Brotli test data for bounded decompression.";
         let compressed = brotli_compress(original);
-        let result = decompress_bounded(&compressed, Format::Brotli, 1024).unwrap();
+        let result = decompress_bounded(&compressed, Format::Brotli, 1024, 0).unwrap();
         assert_eq!(result.output, original);
     }
 
@@ -508,7 +562,7 @@ mod tests {
         // Create data larger than budget
         let original = vec![65u8; 10_000];
         let compressed = gzip_compress(&original);
-        let result = decompress_bounded(&compressed, Format::Gzip, 100);
+        let result = decompress_bounded(&compressed, Format::Gzip, 100, 0);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err, DecompError::BudgetExceeded);
@@ -519,7 +573,7 @@ mod tests {
     fn deflate_budget_exceeded() {
         let original = vec![66u8; 10_000];
         let compressed = deflate_compress(&original);
-        let result = decompress_bounded(&compressed, Format::Deflate, 100);
+        let result = decompress_bounded(&compressed, Format::Deflate, 100, 0);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), DecompError::BudgetExceeded);
     }
@@ -528,7 +582,7 @@ mod tests {
     fn brotli_budget_exceeded() {
         let original = vec![b'C'; 10_000];
         let compressed = brotli_compress(&original);
-        let result = decompress_bounded(&compressed, Format::Brotli, 100);
+        let result = decompress_bounded(&compressed, Format::Brotli, 100, 0);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), DecompError::BudgetExceeded);
     }
@@ -543,8 +597,8 @@ mod tests {
         let gzip = gzip_compress(&original);
         let brotli = brotli_compress(&original);
 
-        let gzip_result = decompress_bounded(&gzip, Format::Gzip, original.len()).unwrap();
-        let brotli_result = decompress_bounded(&brotli, Format::Brotli, original.len()).unwrap();
+        let gzip_result = decompress_bounded(&gzip, Format::Gzip, original.len(), 0).unwrap();
+        let brotli_result = decompress_bounded(&brotli, Format::Brotli, original.len(), 0).unwrap();
 
         assert_eq!(gzip_result.output, original);
         assert_eq!(brotli_result.output, original);
@@ -556,17 +610,85 @@ mod tests {
         let gzip = gzip_compress(&original);
         let brotli = brotli_compress(&original);
 
-        let gzip_result = decompress_bounded(&gzip, Format::Gzip, 128);
-        let brotli_result = decompress_bounded(&brotli, Format::Brotli, 128);
+        let gzip_result = decompress_bounded(&gzip, Format::Gzip, 128, 0);
+        let brotli_result = decompress_bounded(&brotli, Format::Brotli, 128, 0);
 
         assert_eq!(gzip_result.unwrap_err(), DecompError::BudgetExceeded);
         assert_eq!(brotli_result.unwrap_err(), DecompError::BudgetExceeded);
     }
 
     #[test]
+    fn gzip_ratio_exceeded_above_threshold() {
+        /* A wire body that expands far beyond input_len * ratio must be
+         * rejected as RatioExceeded on the single-layer path, matching the
+         * multi-layer chain semantics (input >= 256 bytes activates the
+         * ceiling; ratio 2 caps output at 2x input).  Use near-incompressible
+         * bytes so the compressed wire body stays above the activation
+         * threshold while the decompressed output far exceeds 2x. */
+        let original: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
+        let compressed = gzip_compress(&original);
+        assert!(
+            compressed.len() >= crate::encoding::RATIO_ACTIVATION_THRESHOLD,
+            "fixture must exceed the ratio activation threshold (compressed={})",
+            compressed.len()
+        );
+        let result = decompress_bounded(&compressed, Format::Gzip, 10 * 1024 * 1024, 2);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err, DecompError::RatioExceeded);
+        assert_eq!(err.error_category(), 106);
+    }
+
+    #[test]
+    fn deflate_ratio_exceeded_above_threshold() {
+        let original: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
+        let compressed = deflate_compress(&original);
+        assert!(
+            compressed.len() >= crate::encoding::RATIO_ACTIVATION_THRESHOLD,
+            "fixture must exceed the ratio activation threshold (compressed={})",
+            compressed.len()
+        );
+        let result = decompress_bounded(&compressed, Format::Deflate, 10 * 1024 * 1024, 2);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err, DecompError::RatioExceeded);
+        assert_eq!(err.error_category(), 106);
+    }
+
+    #[test]
+    fn brotli_ratio_exceeded_above_threshold() {
+        let original: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
+        let compressed = brotli_compress(&original);
+        assert!(
+            compressed.len() >= crate::encoding::RATIO_ACTIVATION_THRESHOLD,
+            "fixture must exceed the ratio activation threshold (compressed={})",
+            compressed.len()
+        );
+        let result = decompress_bounded(&compressed, Format::Brotli, 10 * 1024 * 1024, 2);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err, DecompError::RatioExceeded);
+        assert_eq!(err.error_category(), 106);
+    }
+
+    #[test]
+    fn ratio_exempt_below_threshold() {
+        /* Inputs below the 256-byte activation threshold are not subject to
+         * the ratio ceiling (mirrors encoding.rs semantics). */
+        let original = vec![b'T'; 100];
+        let compressed = gzip_compress(&original);
+        let result = decompress_bounded(&compressed, Format::Gzip, 10 * 1024, 2);
+        assert!(
+            result.is_ok(),
+            "below-threshold input must pass ratio check"
+        );
+        assert_eq!(result.unwrap().output, original);
+    }
+
+    #[test]
     fn gzip_format_error_on_invalid_input() {
         let garbage = b"this is not gzip data at all";
-        let result = decompress_bounded(garbage, Format::Gzip, 1024);
+        let result = decompress_bounded(garbage, Format::Gzip, 1024, 0);
         assert!(result.is_err());
         let err = result.unwrap_err();
         // Should be FormatError or TruncatedInput depending on how flate2 reports it
@@ -580,7 +702,7 @@ mod tests {
     #[test]
     fn deflate_format_error_on_invalid_input() {
         let garbage = b"\xff\xfe\xfd\xfc\xfb\xfa";
-        let result = decompress_bounded(garbage, Format::Deflate, 1024);
+        let result = decompress_bounded(garbage, Format::Deflate, 1024, 0);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
@@ -599,7 +721,7 @@ mod tests {
             !has_zlib_header(&raw),
             "raw deflate must not look zlib-wrapped"
         );
-        let result = decompress_bounded(&raw, Format::Deflate, 4096).unwrap();
+        let result = decompress_bounded(&raw, Format::Deflate, 4096, 0).unwrap();
         assert_eq!(result.output, original);
     }
 
@@ -611,7 +733,7 @@ mod tests {
             has_zlib_header(&zlib),
             "zlib-wrapped must carry a zlib header"
         );
-        let result = decompress_bounded(&zlib, Format::Deflate, 4096).unwrap();
+        let result = decompress_bounded(&zlib, Format::Deflate, 4096, 0).unwrap();
         assert_eq!(result.output, original);
     }
 
@@ -666,7 +788,7 @@ mod tests {
             has_zlib_header(&stream),
             "fixture must satisfy the CMF/FLG sniff"
         );
-        let result = decompress_bounded(&stream, Format::Deflate, 4096).unwrap();
+        let result = decompress_bounded(&stream, Format::Deflate, 4096, 0).unwrap();
         assert_eq!(result.output, payload);
     }
 
@@ -675,7 +797,7 @@ mod tests {
         let original = b"payload that gets cut off mid-stream";
         let raw = raw_deflate_compress(original);
         let truncated = &raw[..raw.len() / 2];
-        let result = decompress_bounded(truncated, Format::Deflate, 4096);
+        let result = decompress_bounded(truncated, Format::Deflate, 4096, 0);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
@@ -688,7 +810,7 @@ mod tests {
     #[test]
     fn brotli_format_error_on_invalid_input() {
         let garbage = b"not brotli data";
-        let result = decompress_bounded(garbage, Format::Brotli, 1024);
+        let result = decompress_bounded(garbage, Format::Brotli, 1024, 0);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
@@ -706,7 +828,7 @@ mod tests {
         let compressed = gzip_compress(original);
         // Truncate the compressed data
         let truncated = &compressed[..compressed.len() / 2];
-        let result = decompress_bounded(truncated, Format::Gzip, 1024);
+        let result = decompress_bounded(truncated, Format::Gzip, 1024, 0);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
@@ -721,7 +843,7 @@ mod tests {
         let original = vec![b'D'; 10_000];
         let compressed = deflate_compress(&original);
         let truncated = &compressed[..compressed.len() / 2];
-        let result = decompress_bounded(truncated, Format::Deflate, 20_000);
+        let result = decompress_bounded(truncated, Format::Deflate, 20_000, 0);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(
@@ -734,15 +856,15 @@ mod tests {
 
     #[test]
     fn empty_input_returns_truncated() {
-        let result = decompress_bounded(&[], Format::Gzip, 1024);
+        let result = decompress_bounded(&[], Format::Gzip, 1024, 0);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().error_category(), 103);
 
-        let result = decompress_bounded(&[], Format::Deflate, 1024);
+        let result = decompress_bounded(&[], Format::Deflate, 1024, 0);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().error_category(), 103);
 
-        let result = decompress_bounded(&[], Format::Brotli, 1024);
+        let result = decompress_bounded(&[], Format::Brotli, 1024, 0);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().error_category(), 103);
     }
@@ -765,7 +887,7 @@ mod tests {
         // Data that decompresses to exactly the budget size should succeed
         let original = vec![b'X'; 100];
         let compressed = gzip_compress(&original);
-        let result = decompress_bounded(&compressed, Format::Gzip, 100).unwrap();
+        let result = decompress_bounded(&compressed, Format::Gzip, 100, 0).unwrap();
         assert_eq!(result.output.len(), 100);
     }
 
@@ -774,7 +896,7 @@ mod tests {
         // Data that decompresses to budget+1 should fail
         let original = vec![b'Y'; 101];
         let compressed = gzip_compress(&original);
-        let result = decompress_bounded(&compressed, Format::Gzip, 100);
+        let result = decompress_bounded(&compressed, Format::Gzip, 100, 0);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), DecompError::BudgetExceeded);
     }
@@ -789,7 +911,7 @@ mod tests {
             "Expected high compression ratio, got {} bytes",
             compressed.len()
         );
-        let result = decompress_bounded(&compressed, Format::Gzip, 100_000).unwrap();
+        let result = decompress_bounded(&compressed, Format::Gzip, 100_000, 0).unwrap();
         assert_eq!(result.output.len(), 50_000);
     }
 
@@ -816,7 +938,7 @@ mod tests {
     #[test]
     fn gzip_empty_payload_decompresses_to_empty() {
         let compressed = gzip_compress(b"");
-        let result = decompress_bounded(&compressed, Format::Gzip, 1024).unwrap();
+        let result = decompress_bounded(&compressed, Format::Gzip, 1024, 0).unwrap();
         assert_eq!(result.output.len(), 0);
     }
 
@@ -825,7 +947,7 @@ mod tests {
     #[test]
     fn deflate_empty_payload_decompresses_to_empty() {
         let compressed = deflate_compress(b"");
-        let result = decompress_bounded(&compressed, Format::Deflate, 1024).unwrap();
+        let result = decompress_bounded(&compressed, Format::Deflate, 1024, 0).unwrap();
         assert_eq!(result.output.len(), 0);
     }
 
@@ -834,7 +956,7 @@ mod tests {
     #[test]
     fn brotli_empty_payload_decompresses_to_empty() {
         let compressed = brotli_compress(b"");
-        let result = decompress_bounded(&compressed, Format::Brotli, 1024).unwrap();
+        let result = decompress_bounded(&compressed, Format::Brotli, 1024, 0).unwrap();
         assert_eq!(result.output.len(), 0);
     }
 }

@@ -255,12 +255,24 @@ pub struct StreamingConverterHandle {
     estimate_tokens: bool,
 }
 
-fn budget_from_streaming_total(streaming_budget: u64) -> MemoryBudget {
-    if streaming_budget > 0 {
+fn budget_from_streaming_total(streaming_budget: u64, memory_budget: u64) -> MemoryBudget {
+    /* Unified memory budget (conversion_memory) is the documented upper
+     * bound for the whole conversion working set.  When both are set,
+     * the streaming working set must not exceed the conversion_memory
+     * cap even if the operator configured a larger streaming_buffer. */
+    let effective_total = if memory_budget > 0 && streaming_budget > 0 {
+        memory_budget.min(streaming_budget)
+    } else if memory_budget > 0 {
+        memory_budget
+    } else {
+        streaming_budget
+    };
+
+    if effective_total > 0 {
         // Saturate rather than wrap when usize is narrower than u64 (e.g. on
         // 32-bit targets); on 64-bit targets this is an identity conversion.
         // Wrapping here would silently shrink the configured budget.
-        let total = usize::try_from(streaming_budget).unwrap_or(usize::MAX);
+        let total = usize::try_from(effective_total).unwrap_or(usize::MAX);
         MemoryBudget::for_total(total)
     } else {
         MemoryBudget::default()
@@ -278,7 +290,7 @@ fn markdown_streaming_new_impl(
     let opts_ref = unsafe { &*options };
     let decoded = decode_options(opts_ref).map_err(|err| err.code())?;
 
-    let budget = budget_from_streaming_total(decoded.streaming_budget);
+    let budget = budget_from_streaming_total(decoded.streaming_budget, decoded.memory_budget);
 
     let mut converter = StreamingConverter::with_chars_per_token(
         decoded.conversion,
@@ -288,6 +300,9 @@ fn markdown_streaming_new_impl(
     converter.set_content_type(decoded.content_type.map(ToOwned::to_owned));
     if !decoded.timeout.is_zero() {
         converter.set_timeout(decoded.timeout);
+    }
+    if !decoded.parse_timeout.is_zero() {
+        converter.set_parser_timeout(decoded.parse_timeout);
     }
     if decoded.parser_memory_budget > 0 {
         converter.set_parser_budget(decoded.parser_memory_budget);
@@ -699,7 +714,13 @@ pub unsafe extern "C" fn markdown_streaming_safe_finish(
 ///   dereferenced.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn markdown_streaming_output_free(data: *mut u8, len: usize) {
-    if data.is_null() {
+    /* Defensive guard mirrors free_buffer: a zero-length slice with a
+     * non-NULL pointer would otherwise reach Box::from_raw on a
+     * slice_from_raw_parts_mut(data, 0) — if that pointer is not
+     * allocator-owned the free is UB.  The C caller always passes a
+     * valid (data, len) pair, but the guard keeps the defensive
+     * posture consistent with the other FFI free entry points. */
+    if data.is_null() || len == 0 {
         return;
     }
     let _ = panic::catch_unwind(AssertUnwindSafe(|| {
@@ -1160,12 +1181,22 @@ mod tests {
 
     #[test]
     fn test_budget_from_streaming_total_scales_down() {
-        let budget = budget_from_streaming_total(64 * 1024);
+        // With no unified memory budget set, the streaming budget alone
+        // drives the working-set caps.
+        let budget = budget_from_streaming_total(64 * 1024, 0);
         let sum =
             budget.state_stack + budget.output_buffer + budget.charset_sniff + budget.lookahead;
 
         assert_eq!(budget.total, 64 * 1024);
         assert_eq!(sum, budget.total);
+    }
+
+    #[test]
+    fn test_unified_memory_budget_caps_streaming() {
+        // The unified conversion_memory budget must cap the streaming
+        // working set even when streaming_buffer is configured larger.
+        let budget = budget_from_streaming_total(64 * 1024 * 1024, 16 * 1024 * 1024);
+        assert_eq!(budget.total, 16 * 1024 * 1024);
     }
 
     // ================================================================
