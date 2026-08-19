@@ -110,6 +110,7 @@ typedef struct {
     ngx_table_elt_t   *etag;
     ngx_table_elt_t   *accept_ranges;
     ngx_list_t         headers;
+    ngx_list_t         trailers;
 } ngx_http_headers_out_t;
 
 struct ngx_http_request_s {
@@ -403,6 +404,27 @@ ngx_pnalloc(ngx_pool_t *pool, size_t size)
 
 /* Include the commit source after mocks */
 #include "../../src/ngx_http_markdown_stream_commit.c"
+
+/* Stub for ngx_http_markdown_clear_trailers: the production implementation
+ * lives in ngx_http_markdown_headers_impl.h (not included by this test's
+ * standalone harness).  Mirror the production semantics: mark every
+ * trailer entry hash=0 so output filters suppress the trailer block. */
+void
+ngx_http_markdown_clear_trailers(ngx_http_request_t *r)
+{
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *elts;
+
+    part = &r->headers_out.trailers.part;
+
+    while (part != NULL) {
+        elts = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            elts[i].hash = 0;
+        }
+        part = part->next;
+    }
+}
 
 
 static ngx_table_elt_t test_headers_storage[32];

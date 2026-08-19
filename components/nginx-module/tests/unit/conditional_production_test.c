@@ -149,6 +149,7 @@ struct ngx_http_request_s {
         ngx_uint_t status;
         ngx_str_t  status_line;
         ngx_list_t headers;
+        ngx_list_t trailers;
         ngx_str_t  content_type;
         ngx_str_t  charset;
         size_t     content_type_len;
@@ -470,6 +471,27 @@ markdown_reason_code_count(void)
 
 #include "../../src/ngx_http_markdown_conditional.c"
 #include "../../src/ngx_http_markdown_auth.c"
+
+/* Stub for ngx_http_markdown_clear_trailers: the production implementation
+ * lives in ngx_http_markdown_headers_impl.h (not compiled into this test
+ * binary).  Mirror the production semantics: mark every trailer entry
+ * hash=0 so output filters suppress the trailer block. */
+void
+ngx_http_markdown_clear_trailers(ngx_http_request_t *r)
+{
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *elts;
+
+    part = &r->headers_out.trailers.part;
+
+    while (part != NULL) {
+        elts = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            elts[i].hash = 0;
+        }
+        part = part->next;
+    }
+}
 
 static ngx_list_t *
 create_header_list(void)

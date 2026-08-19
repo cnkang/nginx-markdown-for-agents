@@ -681,6 +681,11 @@ ngx_http_markdown_stream_commit_remove_representation_metadata(
     (void) ngx_http_markdown_stream_commit_invalidate_header(
         r, hdr_trailer, sizeof(hdr_trailer) - 1);
 
+    /* Clear the actual trailer entries too: headers_out.trailers is an
+     * independent list emitted by HTTP/2/3 and chunked encodings without
+     * an HTTP/1.1 Trailer declaration.  Suppress source-HTML trailers. */
+    ngx_http_markdown_clear_trailers(r);
+
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "markdown: stream commit: "
                    "removed representation-integrity metadata");

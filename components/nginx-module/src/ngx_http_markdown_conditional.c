@@ -645,6 +645,10 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
      * representation must not declare them. */
     ngx_http_markdown_invalidate_response_header(
         r, (const u_char *) "Trailer", sizeof("Trailer") - 1);
+    /* Clear the actual trailer entries too: headers_out.trailers is an
+     * independent list emitted by HTTP/2/3 and chunked encodings without
+     * an HTTP/1.1 Trailer declaration.  Suppress source-HTML trailers. */
+    ngx_http_markdown_clear_trailers(r);
 
     /* Decision G: the 304 describes the Markdown representation; the weak
      * validator must not reference the source HTML mtime.  ETag is the
