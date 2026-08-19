@@ -739,7 +739,6 @@ create_unset_conf(void)
     conf->stream.policy_explicit = -1;
     conf->stream.excluded_types = NGX_CONF_UNSET_PTR;
     conf->stream.budget = NGX_CONF_UNSET_SIZE;
-    conf->stream.budget_explicit = -1;
 
     conf->limits.conversion_timeout = NGX_CONF_UNSET_MSEC;
     conf->limits.parser_timeout = NGX_CONF_UNSET_MSEC;

@@ -725,7 +725,6 @@ ngx_http_markdown_collect_performance_snapshot(
         metrics->perf.decompression_fullbuffer_total;
     snapshot->perf.decompression_budget_exceeded_total =
         metrics->perf.decompression_budget_exceeded_total;
-    snapshot->perf.zero_copy_output_total = metrics->perf.zero_copy_output_total;
     snapshot->perf.copied_output_total = metrics->perf.copied_output_total;
 }
 
@@ -964,7 +963,7 @@ ngx_http_markdown_metrics_to_v1(
         snapshot->results.dynconf_reloads.failure_file_error;
 
     /* Build metadata is part of the public v1 response contract. */
-    v1->build_info.version = (const u_char *) "0.9.2";
+    v1->build_info.version = (const u_char *) NGX_HTTP_MARKDOWN_PRODUCT_VERSION;
     v1->build_info.nginx_version_text = (const u_char *) NGINX_VERSION;
 #ifdef MARKDOWN_STREAMING_ENABLED
     v1->build_info.features = (const u_char *) "streaming";
@@ -1232,7 +1231,6 @@ ngx_http_markdown_metrics_write_text_perf(
         "- Decompression Streaming Total: %uA\n"
         "- Decompression Full-Buffer Total: %uA\n"
         "- Decompression Budget Exceeded Total: %uA\n"
-        "- Zero-Copy Output Total: %uA\n"
         "- Copied Output Total: %uA\n",
         perf->backpressure_total,
         perf->backpressure_resume_total,
@@ -1240,7 +1238,6 @@ ngx_http_markdown_metrics_write_text_perf(
         perf->decompression_streaming_total,
         perf->decompression_fullbuffer_total,
         perf->decompression_budget_exceeded_total,
-        perf->zero_copy_output_total,
         perf->copied_output_total);
 }
 

@@ -82,7 +82,6 @@ typedef struct {
         ngx_atomic_t  decompression_streaming_total;
         ngx_atomic_t  decompression_fullbuffer_total;
         ngx_atomic_t  decompression_budget_exceeded_total;
-        ngx_atomic_t  zero_copy_output_total;
         ngx_atomic_t  copied_output_total;
     } perf;
 } ngx_http_markdown_metrics_t;
@@ -201,7 +200,6 @@ test_collect_metrics_with_data(void)
     g_metrics_data.results.delivery_count = 100;
     g_metrics_data.requests_entered = 200;
     g_metrics_data.results.failopen_count = 3;
-    g_metrics_data.perf.zero_copy_output_total = 7;
     g_metrics_data.perf.copied_output_total = 2;
     ngx_http_markdown_metrics = &g_metrics_data;
     g_pending_output_requests = 3;
@@ -212,8 +210,6 @@ test_collect_metrics_with_data(void)
     TEST_ASSERT(out.delivery_total == 100, "delivery should be 100");
     TEST_ASSERT(out.requests_total == 200, "requests should be 200");
     TEST_ASSERT(out.failopen_total == 3, "failopen should be 3");
-    TEST_ASSERT(out.zero_copy_output_total == 7,
-                "zero_copy_output should be 7");
     TEST_ASSERT(out.copied_output_total == 2,
                 "copied_output should be 2");
     TEST_ASSERT(out.pending_output == 3,

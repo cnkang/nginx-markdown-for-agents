@@ -481,7 +481,6 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->stream.policy_explicit = -1;
     conf->stream.excluded_types = NGX_CONF_UNSET_PTR;
     conf->stream.budget = NGX_CONF_UNSET_SIZE;
-    conf->stream.budget_explicit = -1;
 
     /* 0.9.2 unified limits */
     conf->limits.conversion_timeout = NGX_CONF_UNSET_MSEC;

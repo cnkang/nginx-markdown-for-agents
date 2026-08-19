@@ -140,7 +140,6 @@
           "required": [
             "streaming_requests_total",
             "precommit_failopen_total",
-            "zero_copy_output_total",
             "copied_output_total"
           ],
           "additionalProperties": false,
@@ -150,10 +149,6 @@
               "minimum": 0
             },
             "precommit_failopen_total": {
-              "type": "integer",
-              "minimum": 0
-            },
-            "zero_copy_output_total": {
               "type": "integer",
               "minimum": 0
             },

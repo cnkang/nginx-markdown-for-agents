@@ -662,7 +662,6 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     mcf->stream.policy_explicit = -1;
     mcf->stream.excluded_types = NGX_CONF_UNSET_PTR;
     mcf->stream.budget = NGX_CONF_UNSET_SIZE;
-    mcf->stream.budget_explicit = -1;
 
 }
 

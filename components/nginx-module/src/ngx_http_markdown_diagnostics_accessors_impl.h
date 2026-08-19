@@ -55,8 +55,6 @@ ngx_http_markdown_diagnostics_collect_metrics(
     out->backpressure_total =
         ngx_http_markdown_metrics->perf.backpressure_total;
     out->inflight = (ngx_atomic_uint_t) ngx_http_markdown_inflight_current();
-    out->zero_copy_output_total =
-        ngx_http_markdown_metrics->perf.zero_copy_output_total;
     out->copied_output_total =
         ngx_http_markdown_metrics->perf.copied_output_total;
 

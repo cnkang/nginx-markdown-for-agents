@@ -31,7 +31,6 @@ typedef struct {
     ngx_atomic_uint_t decompression_streaming_total;
     ngx_atomic_uint_t decompression_fullbuffer_total;
     ngx_atomic_uint_t decompression_budget_exceeded_total;
-    ngx_atomic_uint_t zero_copy_output_total;
     ngx_atomic_uint_t copied_output_total;
     struct {
         ngx_atomic_uint_t current;

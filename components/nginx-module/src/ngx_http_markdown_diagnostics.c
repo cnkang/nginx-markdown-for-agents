@@ -1221,11 +1221,12 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
 
     dynconf_state = ngx_http_markdown_diag_dynconf_state_name(dynconf.state);
     p = ngx_slprintf(p, last,
-        "{\"schema_version\":2,\"product_version\":\"0.9.2\","
+        "{\"schema_version\":2,\"product_version\":\"%s\","
         "\"worker\":{\"pid\":%P,\"scope\":\"worker-local\"},"
         "\"build\":{\"source_sha\":\"%s\","
         "\"nginx_version\":\"%s\",\"rust_version\":\"%s\","
         "\"features\":[",
+        NGX_HTTP_MARKDOWN_PRODUCT_VERSION,
         ngx_pid, NGX_HTTP_MARKDOWN_SOURCE_SHA, NGINX_VERSION,
         NGX_HTTP_MARKDOWN_RUST_VERSION);
 #ifdef MARKDOWN_STREAMING_ENABLED
@@ -1261,7 +1262,6 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
         "\"runtime\":{\"inflight\":%uA,\"pending_output\":%uA,"
         "\"module_metrics\":{\"streaming_requests_total\":%uA,"
         "\"precommit_failopen_total\":%uA,"
-        "\"zero_copy_output_total\":%uA,"
         "\"copied_output_total\":%uA}},"
         "\"recent_decisions\":[",
         ngx_http_markdown_diag_bool(effective.filter),
@@ -1277,7 +1277,7 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
         ngx_http_markdown_diag_source_name(effective.streaming_buffer_source),
         metrics.inflight, metrics.pending_output,
         metrics.streaming_requests_total, metrics.precommit_failopen_total,
-        metrics.zero_copy_output_total, metrics.copied_output_total);
+        metrics.copied_output_total);
     if (ngx_http_markdown_diagnostics_fmt_decisions(&p, last, state)
         != NGX_OK)
     {

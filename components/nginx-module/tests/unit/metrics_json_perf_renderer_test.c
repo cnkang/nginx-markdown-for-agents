@@ -86,7 +86,6 @@ test_json_perf_renderer_emits_all_fields(void)
     perf.decompression_streaming_total = 12;
     perf.decompression_fullbuffer_total = 8;
     perf.decompression_budget_exceeded_total = 2;
-    perf.zero_copy_output_total = 50;
     perf.copied_output_total = 30;
 
     p = ngx_http_markdown_metrics_write_json_perf(
@@ -113,8 +112,6 @@ test_json_perf_renderer_emits_all_fields(void)
     TEST_ASSERT(contains((char *) buf,
         "\"decompression_budget_exceeded_total\": 2"),
         "JSON has decompression_budget_exceeded_total");
-    TEST_ASSERT(contains((char *) buf, "\"zero_copy_output_total\": 50"),
-        "JSON has zero_copy_output_total");
     TEST_ASSERT(contains((char *) buf, "\"copied_output_total\": 30"),
         "JSON has copied_output_total");
 

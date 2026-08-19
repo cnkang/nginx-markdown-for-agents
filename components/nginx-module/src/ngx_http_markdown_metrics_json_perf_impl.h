@@ -8,7 +8,6 @@ typedef struct {
     ngx_atomic_uint_t decompression_streaming_total;
     ngx_atomic_uint_t decompression_fullbuffer_total;
     ngx_atomic_uint_t decompression_budget_exceeded_total;
-    ngx_atomic_uint_t zero_copy_output_total;
     ngx_atomic_uint_t copied_output_total;
 
     /* Inflight guard metrics (spec 52, per-worker) */
@@ -27,12 +26,11 @@ typedef struct {
     "    \"decompression_streaming_total\": %uA,\n"                         \
     "    \"decompression_fullbuffer_total\": %uA,\n"                       \
     "    \"decompression_budget_exceeded_total\": %uA,\n"                  \
-    "    \"zero_copy_output_total\": %uA,\n"                                \
     "    \"copied_output_total\": %uA\n"                                    \
     "  }\n"
 
 #define NGX_HTTP_MARKDOWN_JSON_PERF_MAX_SIZE \
-    (sizeof(NGX_HTTP_MARKDOWN_JSON_PERF_FORMAT) - 1 + 8 * 20)
+    (sizeof(NGX_HTTP_MARKDOWN_JSON_PERF_FORMAT) - 1 + 7 * 20)
 
 
 static u_char *
@@ -49,7 +47,6 @@ ngx_http_markdown_metrics_write_json_perf(
         perf->decompression_streaming_total,
         perf->decompression_fullbuffer_total,
         perf->decompression_budget_exceeded_total,
-        perf->zero_copy_output_total,
         perf->copied_output_total);
 }
 
