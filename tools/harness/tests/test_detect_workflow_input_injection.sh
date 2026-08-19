@@ -293,6 +293,52 @@ check_index_variant "event.pull_request['head'] bracket field" "github.event.pul
 check_index_variant "github.head_ref alias" "github.head_ref"
 check_index_variant "github.ref_name alias" "github.ref_name"
 
+# Test 10: Bracket-form benign step outputs (allowlisted selector) must NOT
+# be flagged: dot-form and bracket-form selectors normalize to the same
+# bare identifier before the allowlist comparison.
+cat >"${wf_dir}/bracket-benign.yml" <<'Y'
+name: bracket-benign
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - id: meta
+        run: echo 'version=1.2.3' >> "$GITHUB_OUTPUT"
+      - name: Use
+        run: echo "${{ steps['meta'].outputs['version'] }}"
+Y
+${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 0 ]]; then
+    pass "bracket-form benign output selector (version) not flagged"
+else
+    fail "bracket-form benign output selector (version) not flagged" "expected exit 0, got ${exit_code}"
+    cat "${output_file}" >&2
+fi
+rm -f "${wf_dir}/bracket-benign.yml"
+
+# Test 11: Dot-form benign step output must also pass (regression guard).
+cat >"${wf_dir}/dot-benign.yml" <<'Y'
+name: dot-benign
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - id: meta
+        run: echo 'version=1.2.3' >> "$GITHUB_OUTPUT"
+      - name: Use
+        run: echo "${{ steps.meta.outputs.version }}"
+Y
+${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 0 ]]; then
+    pass "dot-form benign output selector (version) not flagged"
+else
+    fail "dot-form benign output selector (version) not flagged" "expected exit 0, got ${exit_code}"
+    cat "${output_file}" >&2
+fi
+rm -f "${wf_dir}/dot-benign.yml"
+
 printf '\n%d passed, %d failed\n' "${PASS_COUNT}" "${FAIL_COUNT}"
 if [[ ${FAIL_COUNT} -gt 0 ]]; then
     exit 1

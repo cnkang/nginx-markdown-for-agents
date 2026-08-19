@@ -445,6 +445,13 @@ class RegexASTVisitor(ast.NodeVisitor):
         self._file_path: str = ""
         self._tree: ast.AST | None = None
         self._scope_stack: list[_Scope] = _new_scope_stack()
+        # True when the scanned module imports
+        # ``from __future__ import annotations``.  With postponed
+        # evaluation, annotation expressions are stored as inert strings
+        # and never evaluated at runtime, so the visitor must not analyze
+        # them for regex usage.  Detected explicitly from the AST import
+        # (not inferred from ast.Constant shape, which is ambiguous).
+        self._postponed_annotations = False
         # Per-scope ``global``/``nonlocal`` declaration sets (indexed by
         # position in the scope stack).  ``global``/``nonlocal`` are only
         # partially modeled: a ``del`` honoring them is applied against the
@@ -483,6 +490,12 @@ class RegexASTVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        if node.module == "__future__" and any(
+            alias.name == "annotations" for alias in node.names
+        ):
+            # Postponed evaluation: annotation expressions are inert
+            # strings at runtime and must not be analyzed for regex use.
+            self._postponed_annotations = True
         if node.module == "re":
             for alias in node.names:
                 real_name = alias.name
@@ -530,11 +543,16 @@ class RegexASTVisitor(ast.NodeVisitor):
         # 2. Default value expressions (positional + keyword-only),
         #    evaluated in the enclosing scope.
         self._visit_function_defaults(node.args)
-        # 3. Return annotation, evaluated in the enclosing scope.
-        if getattr(node, "returns", None) is not None:
+        # 3. Return annotation, evaluated in the enclosing scope — unless
+        #    postponed evaluation (`from __future__ import annotations`)
+        #    makes it an inert string.
+        if getattr(node, "returns", None) is not None \
+                and not self._postponed_annotations:
             self.visit(node.returns)
-        # 4. Parameter annotations, evaluated in the enclosing scope.
-        self._visit_param_annotations(node.args)
+        # 4. Parameter annotations, evaluated in the enclosing scope —
+        #    skipped under postponed evaluation.
+        if not self._postponed_annotations:
+            self._visit_param_annotations(node.args)
         # 5. Bind the function name in the enclosing scope as DYNAMIC_VALUE
         #    (the function object is opaque to regex analysis).
         _scope_assign(self._scope_stack, node.name, _Binding(
@@ -572,7 +590,8 @@ class RegexASTVisitor(ast.NodeVisitor):
         the enclosing scope.
         """
         self._visit_function_defaults(node.args)
-        self._visit_param_annotations(node.args)
+        if not self._postponed_annotations:
+            self._visit_param_annotations(node.args)
         self._enter_scope()
         self._bind_function_params(node.args)
         self.visit(node.body)

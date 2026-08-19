@@ -206,7 +206,12 @@ Required:
   ```
   This ensures that only the data pointer passes to C. The allocation
   leaks intentionally so the C-side free helper manages it.
-- **Empty-result NULL convention**: FFI functions that return a pointer to a buffer (for example a string or byte array) must return `NULL` if the result is empty, rather than a pointer to a zero-length allocation. This allows C free helpers to simply check `if (ptr == NULL) return;` and avoid calling the allocator for empty buffers, reducing overhead and avoiding implementation-defined behavior of zero-length allocations.
+- **Empty-result NULL convention**: pointer-returning FFI APIs must return
+  `NULL` for empty results, while APIs that populate output fields must
+  assign `NULL` to the relevant field instead of returning it.  This allows
+  C free helpers to simply check `if (ptr == NULL) return;` and avoid
+  calling the allocator for empty buffers, reducing overhead and avoiding
+  implementation-defined behavior of zero-length allocations.
 
 Verification:
 - `grep -rn 'as_mut_ptr' components/rust-converter/src/` — verify ownership transfer uses the `as_mut_ptr` + `mem::forget` pattern for slices.
