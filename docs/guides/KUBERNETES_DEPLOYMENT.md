@@ -286,10 +286,16 @@ destination accordingly.
 
 ## Helm Chart
 
-The chart is installable by default with a stock `nginx` image. The default
-`markdown.enabled=false` keeps `load_module` and `markdown_*` directives out of
-the rendered `nginx.conf`, which is the path used by the local stock-nginx
-smoke test.
+The chart does NOT default the runtime image: Helm refuses to render the
+Deployment until both `image.repository` and `image.tag` are set explicitly.
+The chart is therefore not installable with zero overrides — a stock `nginx`
+image must be supplied when `markdown.enabled=false` (the path used by the
+local stock-nginx smoke test):
+
+```bash
+helm install nginx-markdown charts/nginx-markdown \
+  --set image.repository=nginx --set image.tag=1.26.3
+```
 
 To enable the markdown module, use an image that already contains
 `ngx_http_markdown_filter_module.so`, then set both values:

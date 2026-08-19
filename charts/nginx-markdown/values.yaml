@@ -2,8 +2,15 @@
 
 replicaCount: 1
 
+# The runtime image is intentionally NOT defaulted: this chart has no
+# stock-runtime contract (the documented "installable with a stock nginx
+# image" applies only to local smoke with explicit overrides).  Helm
+# refuses to render the Deployment until BOTH image.repository and
+# image.tag are set explicitly, e.g.:
+#   --set image.repository=nginx --set image.tag=1.26.3
+# or the markdown-enabled image your release provides.
 image:
-  repository: nginx-markdown
+  repository: ""
   pullPolicy: IfNotPresent
   tag: ""
 

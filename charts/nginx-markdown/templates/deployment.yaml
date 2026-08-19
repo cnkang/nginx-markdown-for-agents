@@ -35,7 +35,9 @@ spec:
         - name: {{ .Chart.Name }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          {{- $imageRepo := required "image.repository must be set explicitly (no default runtime image)" .Values.image.repository }}
+          {{- $imageTag := required "image.tag must be set explicitly (no default runtime image)" (.Values.image.tag | default "") }}
+          image: "{{ $imageRepo }}:{{ $imageTag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           volumeMounts:
             - name: nginx-config
