@@ -130,8 +130,8 @@ pub struct StreamingConverter {
     /// an explicit fallback on budget exhaustion.
     head_bytes_seen: usize,
     /// Trailing bytes from the previous chunk that form an incomplete UTF-8
-    /// sequence. Prepended to the next chunk before `String::from_utf8_lossy`
-    /// so multibyte characters split across chunk boundaries are preserved.
+    /// sequence. Prepended to the next chunk before UTF-8 validation so
+    /// multibyte characters split across chunk boundaries are preserved.
     utf8_tail: Vec<u8>,
     /// Parser memory budget in bytes (0 = unlimited).
     /// Tracks cumulative input bytes fed to the converter and rejects when
@@ -808,26 +808,15 @@ impl StreamingConverter {
                  * UTF-8 with EncodingError (parser.rs decode_html_to_utf8);
                  * streaming previously replaced it with U+FFFD, silently
                  * corrupting the content.  Unify on the fail-closed
-                 * behavior.  Only at EOF is the remaining tail a complete
-                 * document: mid-stream slices can legally end with an
-                 * incomplete code point (handled by split_utf8_tail), so
-                 * the strict check is deferred to the final input. */
-                if at_eof {
-                    return Err(self.wrap_error(ConversionError::EncodingError(
-                        "Invalid UTF-8 in HTML input (no declared charset)".to_string(),
-                    )));
-                }
-                let lossy_upper_bound = valid.len().checked_mul(3).ok_or_else(|| {
-                    self.wrap_error(ConversionError::BudgetExceeded {
-                        stage: "lossy_utf8 (integer overflow)".to_string(),
-                        used: usize::MAX,
-                        limit: self.budget.total,
-                    })
-                })?;
-                self.budget
-                    .check_total(self.estimate_working_set(), lossy_upper_bound)
-                    .map_err(|e| self.wrap_error(e))?;
-                String::from_utf8_lossy(valid)
+                 * behavior.  split_utf8_tail already removed a trailing
+                 * incomplete code point from mid-stream slices, so a
+                 * from_utf8 failure here is a genuinely invalid byte
+                 * sequence regardless of chunk boundaries — reject it
+                 * consistently instead of applying lossy replacement
+                 * mid-stream and failing only at EOF. */
+                return Err(self.wrap_error(ConversionError::EncodingError(
+                    "Invalid UTF-8 in HTML input (no declared charset)".to_string(),
+                )));
             }
         };
         let saved_transcoded = self.charset_transcoded_bytes;
@@ -3459,26 +3448,24 @@ mod tests {
             0x3E, 0x3E, 0x3E, 0x81, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0x7B,
             0x7B, 0x7B, 0x7B,
         ];
-        let single = convert_with_splits(html, &[html.len()]);
-        let chunked = convert_with_splits(html, &[1, 24, 28, 5, 5, 1, 1, 5, 88]);
-
-        if single != chunked {
-            let first_diff = single
-                .iter()
-                .zip(chunked.iter())
-                .position(|(left, right)| left != right)
-                .unwrap_or_else(|| single.len().min(chunked.len()));
-            let start = first_diff.saturating_sub(16);
-            let single_end = first_diff.saturating_add(48).min(single.len());
-            let chunked_end = first_diff.saturating_add(48).min(chunked.len());
-            panic!(
-                "first_diff={first_diff}, single_len={}, chunked_len={}, single={:?}, chunked={:?}",
-                single.len(),
-                chunked.len(),
-                String::from_utf8_lossy(&single[start..single_end]),
-                String::from_utf8_lossy(&chunked[start..chunked_end])
-            );
-        }
+        // The fixture contains genuinely invalid UTF-8 bytes (0xFF, 0x81,
+        // 0xA5).  Under the fail-closed contract the outcome must be the
+        // same EncodingError regardless of how the input is chunked.
+        let single_err = convert_with_splits_result(html, &[html.len()]);
+        let chunked_err = convert_with_splits_result(html, &[1, 24, 28, 5, 5, 1, 1, 5, 88]);
+        assert!(
+            single_err.is_err(),
+            "invalid UTF-8 must fail closed on single-pass conversion"
+        );
+        assert_eq!(
+            single_err, chunked_err,
+            "invalid UTF-8 rejection must not depend on chunk boundaries"
+        );
+        assert_eq!(
+            single_err.unwrap_err(),
+            ConversionError::EncodingError("".to_string()).code(),
+            "invalid UTF-8 must surface as EncodingError"
+        );
     }
 
     #[test]
@@ -3489,12 +3476,15 @@ mod tests {
             .expect("one-byte UTF-8 tail should be retained");
         assert_eq!(conv.utf8_tail, [0xE2]);
 
-        conv.process_utf8_bytes(&[0x00, 0x00, 0xE2, 0xF0, 0x80], false)
+        // Complete the 3-byte sequence (é = 0xE2 0x82 0xAC) and start a
+        // new 4-byte sequence (💀 = 0xF0 0x9F 0x92 0x80): the pending tail
+        // recovery must not append a second tail.
+        conv.process_utf8_bytes(&[0x82, 0xAC, 0xF0, 0x9F], false)
             .expect("pending tail recovery must not append a second tail");
-        assert!(conv.utf8_tail.len() <= 3);
-        assert_eq!(conv.utf8_tail, [0xF0, 0x80]);
+        assert_eq!(conv.utf8_tail, [0xF0, 0x9F]);
 
-        conv.process_utf8_bytes(&[0x80, 0x80, b'<'], false)
+        // Complete the 4-byte sequence; no stale continuation remains.
+        conv.process_utf8_bytes(&[0x92, 0x80, b'<'], false)
             .expect("completed tail should not leave a stale continuation");
         assert!(conv.utf8_tail.is_empty());
     }
