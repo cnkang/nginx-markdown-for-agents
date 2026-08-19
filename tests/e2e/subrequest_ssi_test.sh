@@ -184,6 +184,10 @@ if curl -sf "${NGINX_URL}${AUTH_PAGE_PATH}" >/dev/null 2>&1; then
     else
         skip "inflight gauge unavailable (cannot verify auth_request release)"
     fi
+elif [[ "${REQUIRE_AUTH_SUBREQUEST:-0}" == "1" ]]; then
+    # Final E2E qualification (decision D6): the subrequest_in_memory
+    # path must be exercised; an absent fixture is a failure, not a skip.
+    fail "auth_request fixture not present at ${AUTH_PAGE_PATH} (REQUIRE_AUTH_SUBREQUEST=1)"
 else
     skip "auth_request fixture not present at ${AUTH_PAGE_PATH} (scenario 5 skipped)"
 fi
