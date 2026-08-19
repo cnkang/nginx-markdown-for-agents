@@ -30,6 +30,8 @@
 
 #ifdef MARKDOWN_STREAMING_ENABLED
 
+#include "ngx_http_markdown_filter_module.h"
+
 #include <zlib.h>
 
 #ifdef NGX_HTTP_BROTLI
@@ -99,8 +101,8 @@ typedef struct ngx_http_markdown_streaming_decomp_s {
     u_char                               *brotli_next_out;
     size_t                                brotli_avail_out;
     /* Decoder-owned allocations are bounded across requests in a worker. */
-    ngx_atomic_uint_t                     brotli_workspace_bytes;
-    ngx_atomic_uint_t                    *brotli_workspace_bytes_shared;
+    ngx_atomic_t                     brotli_workspace_bytes;
+    ngx_atomic_t                    *brotli_workspace_bytes_shared;
     size_t                                brotli_workspace_limit;
     ngx_log_t                            *brotli_log;
 #endif
@@ -162,12 +164,12 @@ typedef struct ngx_http_markdown_streaming_decomp_s {
 
 #ifdef NGX_HTTP_BROTLI
 typedef struct {
-    ngx_atomic_uint_t  *counter;
+    ngx_atomic_t  *counter;
     size_t              size;
 } ngx_http_markdown_brotli_allocation_t;
 
 
-static ngx_atomic_uint_t *
+static ngx_atomic_t *
 ngx_http_markdown_brotli_workspace_counter(
     ngx_http_markdown_streaming_decomp_t *decomp)
 {
@@ -179,10 +181,10 @@ ngx_http_markdown_brotli_workspace_counter(
 
 static ngx_int_t
 ngx_http_markdown_brotli_reserve(
-    ngx_atomic_uint_t *counter, size_t limit, size_t size)
+    ngx_atomic_t *counter, size_t limit, size_t size)
 {
-    ngx_atomic_uint_t  current;
-    ngx_atomic_uint_t  next;
+    ngx_atomic_t  current;
+    ngx_atomic_t  next;
 
     if (counter == NULL || size == 0 || size > limit) {
         return NGX_ERROR;
@@ -190,13 +192,13 @@ ngx_http_markdown_brotli_reserve(
 
     current = *counter;
     for ( ;; ) {
-        if (current > (ngx_atomic_uint_t) limit
+        if (current > (ngx_atomic_t) limit
             || size > limit - (size_t) current)
         {
             return NGX_ERROR;
         }
 
-        next = current + (ngx_atomic_uint_t) size;
+        next = current + (ngx_atomic_t) size;
         if (ngx_atomic_cmp_set(counter, current, next)) {
             return NGX_OK;
         }
@@ -210,7 +212,7 @@ ngx_http_markdown_brotli_alloc(void *opaque, size_t size)
 {
     ngx_http_markdown_streaming_decomp_t *decomp;
     ngx_http_markdown_brotli_allocation_t *allocation;
-    ngx_atomic_uint_t                    *counter;
+    ngx_atomic_t                    *counter;
     size_t                                total;
 
     decomp = opaque;
@@ -257,7 +259,7 @@ static void
 ngx_http_markdown_brotli_free(void *opaque, void *address)
 {
     ngx_http_markdown_brotli_allocation_t *allocation;
-    ngx_atomic_uint_t                    *counter;
+    ngx_atomic_t                    *counter;
     size_t                                size;
 
     (void) opaque;
