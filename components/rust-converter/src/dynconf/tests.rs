@@ -123,7 +123,8 @@ fn test_document_too_large() {
 
 #[test]
 fn test_nesting_depth_exceeded() {
-    // Create deeply nested JSON: {{{{{{{{{}}}}}}}}}  (9 levels)
+    // Create deeply nested JSON: 9 levels of {"a": ...} wrapping the
+    // value "x", i.e. {"a":{"a":{...{"a":"x"}...}}} (9 levels).
     let mut input = String::new();
     for _ in 0..9 {
         input.push_str(r#"{"a":"#);

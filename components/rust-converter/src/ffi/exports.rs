@@ -1048,15 +1048,13 @@ pub unsafe extern "C" fn markdown_decompress_bounded(
         return DECOMP_CATEGORY_INVALID_ARGS;
     }
 
+    // Zero-initialize the caller-provided storage before touching it (the
+    // same pattern as markdown_parse_encoding_chain and the other FFI entry
+    // points).  Callers that reuse a result structure must release a
+    // previous output with markdown_decompress_free first; freeing the
+    // previous output here would read potentially uninitialized fields.
+    unsafe { ptr::write(result, std::mem::zeroed()) };
     let result_ref = unsafe { &mut *result };
-    // Free any previous output before reusing the result buffer, matching
-    // the markdown_convert contract (reuse previously leaked the old
-    // Rust-allocated output when a caller invoked the FFI twice on the
-    // same result without an intermediate free).
-    free_buffer(&mut result_ref.output, &mut result_ref.output_len);
-    // Initialize result to safe defaults
-    result_ref.output = ptr::null_mut();
-    result_ref.output_len = 0;
     result_ref.error_category = 0;
 
     // Validate format

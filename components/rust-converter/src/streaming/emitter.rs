@@ -622,13 +622,12 @@ impl IncrementalEmitter {
         };
 
         if self.in_link {
-            // Code-span text inside a link label must not be able to close
-            // the label early or open a nested link. Escape the
-            // label-structure characters so that a sequence like `](`
-            // cannot inject a destination into the emitted Markdown. A
-            // backslash is literal inside a code span, so only the two
-            // bracket characters are escaped here.
-            let content = Self::escape_link_code_content(&content);
+            // Code-span content inside a link label is atomic: the
+            // backtick delimiters prevent `[`/`]` from closing the label
+            // or opening a nested link, so no label-structure escaping is
+            // needed.  Backslash-escaping would corrupt the literal code
+            // content (backslashes render verbatim inside a code span),
+            // so the original content is appended between the fences.
             self.append_link_text(&fence);
             self.append_link_text(&content);
             self.append_link_text(&fence);
@@ -1067,27 +1066,6 @@ impl IncrementalEmitter {
             return;
         }
         self.link_text.push_str(s);
-    }
-
-    /// Escape characters that can break the structure of a link label when
-    /// a code span is emitted inside a link.
-    ///
-    /// A backslash is literal inside a code span, so this function escapes
-    /// only the two bracket characters that the surrounding label structure
-    /// depends on. Escaping them prevents a sequence such as `](` in the
-    /// code text from closing the label and injecting a destination.
-    fn escape_link_code_content(s: &str) -> String {
-        if !s.contains(['[', ']']) {
-            return s.to_string();
-        }
-        let mut out = String::with_capacity(s.len() + 4);
-        for ch in s.chars() {
-            if ch == '[' || ch == ']' {
-                out.push('\\');
-            }
-            out.push(ch);
-        }
-        out
     }
 
     /// Writes a string into the pending output buffer while applying output normalization.
@@ -3165,9 +3143,10 @@ mod tests {
     #[test]
     fn test_code_span_inside_link_escapes_bracket_structure() {
         // A code span whose text contains a `](...)` sequence must not be
-        // able to close the link label early and inject a destination. The
-        // bracket characters are escaped with backslashes, matching the
-        // label-escaping protection used for ordinary link text.
+        // able to close the link label early and inject a destination.
+        // Code-span content is atomic inside the backtick delimiters, so
+        // the brackets are emitted verbatim and the label still closes
+        // exactly once with the original destination.
         let output = emit_html(&[
             start_tag("p"),
             start_tag_with_attrs("a", vec![("href", "https://example.com")]),
@@ -3184,16 +3163,18 @@ mod tests {
             output
         );
         assert!(
-            output.contains(r"[`\](javascript:alert(1))`](https://example.com)"),
-            "code-span bracket characters must be escaped inside a link label, got: {}",
+            output.contains(r"[`](javascript:alert(1))`](https://example.com)"),
+            "code-span brackets must stay verbatim inside a link label, got: {}",
             output
         );
     }
 
     #[test]
     fn test_code_span_inside_link_escapes_plain_brackets() {
-        // Ordinary bracket characters in code-span text are escaped too, so
-        // they cannot alter the surrounding label structure.
+        // Ordinary bracket characters in code-span text are emitted
+        // verbatim: the backtick delimiters already prevent them from
+        // altering the surrounding label structure, and backslashes would
+        // corrupt the literal code content.
         let output = emit_html(&[
             start_tag("p"),
             start_tag_with_attrs("a", vec![("href", "https://example.com")]),
@@ -3204,8 +3185,8 @@ mod tests {
             end_tag("p"),
         ]);
         assert!(
-            output.contains(r"[`items\[0\]`](https://example.com)"),
-            "bracket characters in code-span text must be escaped, got: {}",
+            output.contains(r"[`items[0]`](https://example.com)"),
+            "bracket characters in code-span text must stay verbatim, got: {}",
             output
         );
     }
