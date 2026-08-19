@@ -624,6 +624,7 @@ ngx_http_markdown_header_precheck(ngx_http_request_t *r,
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                       "markdown: Cache-Control: no-transform present, "
                       "bypassing conversion");
+        NGX_HTTP_MARKDOWN_METRIC_INC(skips.no_transform);
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
         ngx_http_markdown_log_decision(r, conf, early_eff,
             ngx_http_markdown_reason_bypass_no_transform());
