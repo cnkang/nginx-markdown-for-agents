@@ -34,9 +34,15 @@ Required:
   `ngx_http_markdown_dynconf_parse_size_safe()` (or an equivalent
   parse→validate→safe-cast helper).  Direct calls to `ngx_parse_size()` with
   immediate `(size_t)` cast are forbidden in new code.
-- In Rust, `as usize` casts from `u64` or `i64` must include a runtime bounds
-  check on 32-bit targets or a `#[cfg(target_pointer_width = "64")]` guard.
-  `as u32` / `as u8` narrowing casts must include a bounds check or clamp.
+- In Rust, converting a signed value to `usize`, `u32`, or `u8` requires an
+  explicit non-negative check first (for example `if value < 0 { return Err(...) }`
+  or `value.try_into()`), followed by the appropriate upper-bound check or
+  clamp against the destination type's maximum.  `#[cfg(target_pointer_width = "64")]`
+  architecture guards alone do NOT satisfy signed-input validation: a guard
+  only narrows the target range for `usize` width, it cannot reject a
+  negative `i64`/`isize` value.  Keep the existing 32-bit target handling
+  for `usize` (runtime bounds check or explicit 64-bit-only guard) in
+  addition to the non-negative check.
 - Addition of two `size_t` values that will feed memory allocation or
   buffer sizing must include an overflow guard:
   `if (a > (size_t)-1 - b) { /* saturate or error */ }`.

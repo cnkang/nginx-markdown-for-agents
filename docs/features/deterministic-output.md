@@ -187,12 +187,12 @@ fn normalize_output(&self, output: String) -> String {
     for line in output.lines() {
         let trimmed_start = line.trim_start();
         // CommonMark: a fence must be indented at most 3 spaces.  A line
-        // indented 4+ spaces is an indented code block, not a fence.
-        // Note: indent counts bytes, so a leading tab reports 1 instead of
-        // advancing to CommonMark column 4; the parser can therefore
-        // recognize a tab-indented fence.  This matches the production
-        // FusedNormalizer::push_line behavior.
-        let indent = line.len() - trimmed_start.len();
+        // indented 4+ columns is an indented code block, not a fence.
+        // Indentation counts Markdown columns, not bytes: a tab advances
+        // to the next four-column tab stop (e.g. `\t` reaches column 4),
+        // so a tab-indented fence is never recognized.  This matches the
+        // production FusedNormalizer::push_line behavior.
+        let indent = leading_indent_columns(line);
         let fence_len = if indent > 3 {
             0
         } else {

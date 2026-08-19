@@ -69,15 +69,17 @@ Required:
   annotations evaluate in the enclosing scope before the function name
   binds and before the body scope opens, matching Python's real
   evaluation order.  Modules that import `from __future__ import annotations`
-  use postponed evaluation: their annotation AST nodes are string
-  `ast.Constant` nodes, which the visitor treats as inert — visiting them
-  performs no regex analysis and creates no bindings, matching the runtime
-  semantics where the annotation string is not evaluated.  Modules without
-  the future import analyze eagerly: the visitor walks their annotation
+  use postponed evaluation: their annotation AST nodes are inert string
+  constants at runtime.  The visitor detects the future import **explicitly**
+  from the AST (`visit_ImportFrom` matching `__future__` + `annotations`)
+  and skips return/parameter/annotation traversal entirely under that flag —
+  it never infers postponed mode from `ast.Constant` node shape, which is
+  ambiguous (a genuine string literal annotation without the future import
+  evaluates eagerly and still requires analysis).  Preserving the
+  annotation AST nodes matters for eager mode: the visitor walks their
   expressions (names, attribute accesses, and any embedded constants)
-  normally.  The detector therefore distinguishes the two modes implicitly
-  through the AST shape; postpone-mode annotation strings intentionally
-  produce no REVIEW.  Unknown RHS
+  normally.  Modules without the future import analyze eagerly; postponed
+  annotation strings intentionally produce no REVIEW.  Unknown RHS
   expressions produce DYNAMIC_VALUE (not
   the old static binding).  Cross-module imports are NOT resolved (those
   resolve to REVIEW).

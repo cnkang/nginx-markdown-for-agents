@@ -147,13 +147,30 @@ impl MarkdownConverter {
     }
 }
 
+/// Count the leading whitespace of `line` in Markdown columns.
+///
+/// CommonMark indentation counts columns, not bytes: a tab advances to
+/// the next four-column tab stop.  For example `\t` reaches column 4,
+/// ` \t` reaches column 4, and `\t\t` reaches column 8.
+fn leading_indent_columns(line: &str) -> usize {
+    let mut columns = 0usize;
+    for byte in line.bytes() {
+        match byte {
+            b' ' => columns += 1,
+            b'\t' => columns = (columns / 4 + 1) * 4,
+            _ => break,
+        }
+    }
+    columns
+}
+
 fn measure_fence_len(line: &str) -> usize {
     // CommonMark: a fence must be indented at most 3 spaces.  A line
-    // indented 4+ spaces is an indented code block, not a fence, so
+    // indented 4+ columns is an indented code block, not a fence, so
     // count the backtick run only when the leading indentation is
-    // within the fence limit.
-    let indent = line.len() - line.trim_start().len();
-    if indent > 3 {
+    // within the fence limit.  A leading tab advances to column 4 (or
+    // beyond), so a tab-indented fence is never recognized.
+    if leading_indent_columns(line) > 3 {
         return 0;
     }
     line.trim_start().bytes().take_while(|&b| b == b'`').count()
@@ -184,6 +201,41 @@ mod tests {
         assert_eq!(measure_fence_len(" ```"), 3);
         assert_eq!(measure_fence_len("```"), 3);
         assert_eq!(measure_fence_len("    ````"), 0);
+    }
+
+    #[test]
+    fn fence_indent_counts_columns_with_tabs() {
+        // CommonMark indentation counts columns, not bytes.  A tab
+        // advances to the next four-column tab stop, so any leading tab
+        // reaches column 4 or beyond and the backtick run is indented
+        // code, never a fence.
+        assert_eq!(measure_fence_len("\t```"), 0, "tab reaches column 4");
+        assert_eq!(measure_fence_len(" \t```"), 0, "space+tab reaches column 4");
+        assert_eq!(measure_fence_len("  \t```"), 0, "2 spaces+tab reaches column 4");
+        assert_eq!(measure_fence_len("   \t```"), 0, "3 spaces+tab reaches column 4");
+        assert_eq!(measure_fence_len("\t\t```"), 0, "tab+tab reaches column 8");
+        // A tab inside the 3-column limit cannot exist: the first tab
+        // always jumps to column 4.  Pure-space prefixes stay bounded.
+        assert_eq!(measure_fence_len(" ```"), 3);
+        assert_eq!(measure_fence_len("  ```"), 3);
+        assert_eq!(measure_fence_len("   ```"), 3);
+    }
+
+    #[test]
+    fn normalize_output_tab_indented_backticks_are_code_not_fence() {
+        // A tab-indented backtick run is indented code content (column 4);
+        // the normalizer must not enter fence mode and must collapse its
+        // internal whitespace like any other non-fence line.
+        let converter = MarkdownConverter::with_options(Default::default());
+        let out = converter.normalize_output("\t```\n\ta  b\n\t```\n".to_string());
+        assert!(
+            out.contains("a b"),
+            "tab-indented code content normalized: {out:?}"
+        );
+        assert!(
+            !out.contains("a  b"),
+            "no fence mode entered (double space would be preserved): {out:?}"
+        );
     }
 
     #[test]

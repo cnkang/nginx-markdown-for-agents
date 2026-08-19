@@ -145,12 +145,17 @@ while IFS= read -r -d '' file; do
             if [[ "$line" =~ \$(\{\{[[:space:]]*steps(\.[a-zA-Z_][a-zA-Z0-9_-]*|\[[^]]*\])\.[[:space:]]*outputs(\.[a-zA-Z_][a-zA-Z0-9_-]*|\[[^]]*\])[[:space:]]*\}\}) ]]; then
                 output_selector="${BASH_REMATCH[3]}"
                 # Normalize the index form (steps['build'].outputs['version'])
-                # to the dot form before the allowlist match.
+                # to the dot form before the allowlist match: strip the
+                # surrounding brackets AND any single/double quotes so both
+                # forms become the same bare identifier the case patterns
+                # compare against.
                 if [[ "$output_selector" == \[*\] ]]; then
-                    output_selector=".${output_selector#\[}"
+                    output_selector="${output_selector#[}"
                     output_selector="${output_selector%\]}"
+                    output_selector="${output_selector//\'/}"
+                    output_selector="${output_selector//\"/}"
                 fi
-                benign_data_selector=".${output_selector#.}"
+                benign_data_selector="${output_selector#.}"
                 case "${benign_data_selector}" in
                     sha|version|raw_version|bench_nginx_version|nginx_version|path|name|ref|commit|repo|title|body|buildroot|nginx_bin|checkout_ref|deb_filename|rpm_filename|tap_name|pull-request-number|enabled|supported|blocking|changed|has_changes|install_exit|nginx_test_exit|module_found|skip_reason|package_matrix|matrix_entries|smoke_matrix|musl_matrix|nginx_versions|targets|policy_reference)
                         ;;
