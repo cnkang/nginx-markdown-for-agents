@@ -22,8 +22,10 @@ Establish a single machine-readable release matrix per RFC 0008 section 4:
 
 1. The canonical release matrix is a JSON file at
    `tools/release-matrix.json`. If a `packaging/matrix.yaml` exists for
-   packaging tooling, it MUST generate from or validate against the
-   canonical JSON via `python3 tools/render_release_matrix_docs.py --check`.
+   packaging tooling, it is a packaging input only, never an authority:
+   every NGINX version it lists MUST be a subset of the canonical JSON
+   (validated by `python3 tools/docs/validate_packaging_matrix.py`), and
+   the YAML MUST NOT add support declarations absent from the JSON.
 2. CI workflows, documentation generators, packaging scripts, and release-gate
    validators MUST consume `tools/release-matrix.json` as their authoritative
    source for platform and version support declarations.

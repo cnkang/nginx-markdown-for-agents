@@ -497,7 +497,10 @@ pub const DECIDE_BASE_URL_INVALID: u8 = 1;
 /// `ngx_http_request_t *` nor any NGINX pool.
 #[repr(C)]
 pub struct FFIBaseUrlInput {
-    /// Textual source IP (`r->connection->addr_text`), realip/PROXY resolved.
+    /// Textual source IP: the original transport peer
+    /// (`r->connection->realip` when preserved by the realip module,
+    /// otherwise `r->connection->addr_text`).  Never the realip-rewritten
+    /// client address, which would make trusted-CIDR evaluation spoofable.
     pub source_ip: *const u8,
     /// Length of `source_ip`.
     pub source_ip_len: usize,
