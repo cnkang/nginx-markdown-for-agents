@@ -1564,6 +1564,138 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
 }
 
 /*
+ * Handle HEAD request representation rewriting.
+ * Returns NGX_OK on success, NGX_ERROR on failure, NGX_DECLINED to continue.
+ */
+static ngx_int_t
+ngx_http_markdown_body_filter_handle_head(ngx_http_request_t *r,
+                                           ngx_http_markdown_ctx_t *ctx)
+{
+    ngx_int_t rc;
+
+    if (r->method == NGX_HTTP_HEAD && ctx->eligible) {
+        rc = ngx_http_markdown_head_representation_headers(r);
+        if (rc != NGX_OK) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                          "markdown: HEAD representation header "
+                          "rewrite failed");
+            return rc;
+        }
+        /* Release the inflight slot: the HEAD request performs no
+         * conversion, so holding the slot for the whole header-only
+         * request wastes max_inflight capacity. */
+        ngx_http_markdown_inflight_release(ctx);
+        /* Do not record a conversion bypass/failure: the HEAD request
+         * is not a conversion attempt — it is a representation-header
+         * only response.  Mark ineligible so the passthrough below
+         * forwards the (rewritten) headers with an empty body. */
+        ctx->eligible = 0;
+        ctx->conversion.bypass_counted = 1;
+        /* The forward helper restores the source Last-Modified mtime
+         * from ctx->last_modified; the HEAD representation must not
+         * carry the HTML mtime, so forget the preserved source time. */
+        ctx->last_modified.has_last_modified_time = 0;
+    }
+    return NGX_DECLINED;
+}
+
+
+/*
+ * Pass-through path for non-eligible requests.
+ * Handles header forwarding, body pass-through, and fail-open delivery settlement.
+ */
+static ngx_int_t
+ngx_http_markdown_body_filter_pass_through(ngx_http_request_t *r, ngx_chain_t *in,
+                                            ngx_http_markdown_ctx_t *ctx,
+                                            const ngx_http_markdown_conf_t *conf)
+{
+    ngx_int_t rc;
+
+    r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
+    if (!ctx->conversion.bypass_counted && !ctx->error.has_category) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
+        ctx->conversion.bypass_counted = 1;
+    }
+    rc = ngx_http_markdown_forward_headers(r, ctx);
+    if (rc != NGX_OK && rc != NGX_AGAIN) {
+        return rc;
+    }
+    rc = ngx_http_next_body_filter(r, in);
+    ngx_http_markdown_settle_buffered_failopen_delivery(ctx, conf, rc);
+    return rc;
+}
+
+
+/*
+ * Main body filter logic after HEAD handling.
+ * Returns NGX_OK, NGX_AGAIN, NGX_ERROR, or NGX_DECLINED to continue processing.
+ */
+static ngx_int_t
+ngx_http_markdown_body_filter_main(ngx_http_request_t *r, ngx_chain_t *in,
+                                    ngx_http_markdown_ctx_t *ctx,
+                                    const ngx_http_markdown_conf_t *conf)
+{
+    ngx_int_t rc;
+
+    /* Rule 1 / Rule 38: resume full-buffer pending chain. */
+    if (ctx->fullbuffer.pending_has_data) {
+        return ngx_http_markdown_body_filter_resume_pending(r, ctx);
+    }
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    /* Drain pending streaming output after fail-open. */
+    if (ctx->processing_path == NGX_HTTP_MARKDOWN_PATH_STREAMING
+        && ctx->streaming.pending_output != NULL)
+    {
+        if (in != NULL) {
+            return ngx_http_markdown_streaming_handle_new_input_with_pending(
+                r, ctx, conf, in);
+        }
+        return ngx_http_markdown_streaming_body_filter(r, NULL);
+    }
+#endif
+
+    /* If not eligible for conversion, pass through */
+    if (!ctx->eligible) {
+        return ngx_http_markdown_body_filter_pass_through(r, in, ctx, conf);
+    }
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    /* Streaming path: delegate to streaming body filter */
+    if (ctx->processing_path == NGX_HTTP_MARKDOWN_PATH_STREAMING) {
+        return ngx_http_markdown_streaming_body_filter(r, in);
+    }
+#endif
+
+    /* If conversion already completed, do not pass original input through. */
+    if (ctx->conversion.attempted) {
+        if (!ctx->fullbuffer.pending_has_data) {
+            r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
+        }
+        return NGX_OK;
+    }
+
+    rc = ngx_http_markdown_body_filter_buffer_input(r, in, ctx, conf);
+    if (rc == NGX_AGAIN) {
+        return NGX_OK;
+    }
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
+    ctx->conversion.attempted = 1;
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
+
+    rc = ngx_http_markdown_body_filter_decompress_if_needed(r, ctx, conf);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
+    return ngx_http_markdown_body_filter_convert_and_output(r, ctx, conf);
+}
+
+
+/*
  * Body filter
  *
  * Called for each chunk of the response body.
@@ -1617,169 +1749,14 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         return ngx_http_next_body_filter(r, in);
     }
 
-    /*
-     * HEAD representation contract (supersedes Decision E,
-     * user-confirmed 2026-08-19): a HEAD request proxied to upstream
-     * carries no body — NGINX core delivers only the terminal last_buf
-     * chain after the upstream HEAD response.  There is no body to
-     * convert, so no body-derived field (Content-Length, ETag) can be
-     * computed — fabricating an empty-input ETag or Content-Length: 0
-     * would contradict the GET representation of the same URL.
-     *
-     * Per the Rust-side HTTP representation contract
-     * (scenario_07_head_fullbuffer / scenario_08_head_streaming), the
-     * HEAD response must still describe the Markdown representation a
-     * GET with the same Accept header would select: Content-Type
-     * text/markdown, Vary: Accept, source HTML metadata stripped.
-     * Rewrite the representation headers here instead of failing open
-     * to the upstream HTML headers.
-     *
-     * NOTE: the method check must NOT require r->header_only.  NGINX
-     * core sets r->header_only inside ngx_http_header_filter_module's
-     * header filter (for HEAD requests), but this module defers its own
-     * header emission until the body filter, so the core's assignment
-     * has not run yet when this branch executes.  Rely on the method
-     * alone, matching the streaming path-selection rule.
-     *
-     * The eligibility guard ensures only responses the module would
-     * convert for GET (status/content-type/Accept negotiated) are
-     * rewritten: an error page or other non-eligible response keeps its
-     * original representation headers and passes through unchanged.
-     */
-    if (r->method == NGX_HTTP_HEAD && ctx->eligible) {
-        rc = ngx_http_markdown_head_representation_headers(r);
-        if (rc != NGX_OK) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                          "markdown: HEAD representation header "
-                          "rewrite failed");
-            return rc;
-        }
-        /* Release the inflight slot: the HEAD request performs no
-         * conversion, so holding the slot for the whole header-only
-         * request wastes max_inflight capacity. */
-        ngx_http_markdown_inflight_release(ctx);
-        /* Do not record a conversion bypass/failure: the HEAD request
-         * is not a conversion attempt — it is a representation-header
-         * only response.  Mark ineligible so the passthrough below
-         * forwards the (rewritten) headers with an empty body. */
-        ctx->eligible = 0;
-        ctx->conversion.bypass_counted = 1;
-        /* The forward helper restores the source Last-Modified mtime
-         * from ctx->last_modified; the HEAD representation must not
-         * carry the HTML mtime, so forget the preserved source time. */
-        ctx->last_modified.has_last_modified_time = 0;
-    }
-
-    /*
-     * Rule 1 / Rule 38: resume full-buffer pending chain.
-     * If the full-buffer path previously returned NGX_AGAIN from
-     * send_conversion_output, the pending output must be drained
-     * before accepting new input.  This is triggered by NGINX
-     * re-invoking the body filter (typically with in == NULL)
-     * after the downstream filter becomes writable again.
-     */
-    if (ctx->fullbuffer.pending_has_data) {
-        return ngx_http_markdown_body_filter_resume_pending(r, ctx);
-    }
-
-#ifdef MARKDOWN_STREAMING_ENABLED
-    /*
-     * A fail-open send can mark the request ineligible while downstream owns
-     * a pending streaming chain after NGX_AGAIN.  Drain that chain before the
-     * generic ineligible passthrough clears our buffered bit.
-     *
-     * When new non-NULL input arrives while pending output exists, enqueue
-     * it to pending_input instead of rejecting it.  Rejecting (returning
-     * NGX_AGAIN without retaining the chain) would strand the input in
-     * u->busy_bufs — the same lost-continuation bug as process_chain.
-     * The enqueue copies chain links (sharing ngx_buf_t) so NGINX keeps
-     * the busy buffers alive until we feed them to Rust after the
-     * pending output drains.
-     */
-    if (ctx->processing_path == NGX_HTTP_MARKDOWN_PATH_STREAMING
-        && ctx->streaming.pending_output != NULL)
-    {
-        if (in != NULL) {
-            return ngx_http_markdown_streaming_handle_new_input_with_pending(
-                r, ctx, conf, in);
-        }
-        return ngx_http_markdown_streaming_body_filter(r, NULL);
-    }
-#endif
-
-    /* If not eligible for conversion, pass through */
-    if (!ctx->eligible) {
-        r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
-        if (!ctx->conversion.bypass_counted && !ctx->error.has_category) {
-            /*
-             * Track bypassed request once even if the body
-             * arrives in chunks.  Do not count requests that
-             * already recorded a failure (has_error_category)
-             * — those are accounted for by conversions_failed.
-             */
-            NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
-            ctx->conversion.bypass_counted = 1;
-        }
-        rc = ngx_http_markdown_forward_headers(r, ctx);
-        if (rc != NGX_OK && rc != NGX_AGAIN) {
-            return rc;
-        }
-        /* Header-chain NGX_AGAIN = headers queued by the write filter
-         * (NGINX core model).  Continue so the pass-through body is
-         * always delivered; returning early here sends headers only
-         * under backpressure. */
-        rc = ngx_http_next_body_filter(r, in);
-        /*
-         * Rule 38/23: a buffered fail-open send that hit downstream
-         * backpressure (NGX_AGAIN) deferred its delivery counter to
-         * this recovery pass-through.
-         */
-        ngx_http_markdown_settle_buffered_failopen_delivery(
-            ctx, conf, rc);
+    /* Handle HEAD request representation rewriting */
+    rc = ngx_http_markdown_body_filter_handle_head(r, ctx);
+    if (rc != NGX_DECLINED) {
         return rc;
     }
 
-#ifdef MARKDOWN_STREAMING_ENABLED
-    /* Streaming path: delegate to streaming body filter */
-    if (ctx->processing_path
-        == NGX_HTTP_MARKDOWN_PATH_STREAMING)
-    {
-        return ngx_http_markdown_streaming_body_filter(
-            r, in);
-    }
-#endif
-
-    /* If conversion already completed, do not pass original input through. */
-    if (ctx->conversion.attempted) {
-        if (!ctx->fullbuffer.pending_has_data) {
-            r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
-        }
-        return NGX_OK;
-    }
-
-    rc = ngx_http_markdown_body_filter_buffer_input(r, in, ctx, conf);
-    if (rc == NGX_AGAIN) {
-        return NGX_OK;
-    }
-    if (rc != NGX_OK) {
-        return rc;
-    }
-
-    /*
-     * Mark conversion as attempted before decompression so that any
-     * failure path that increments conversions_failed is always
-     * preceded by a conversions_attempted increment.  This keeps
-     * the two counters consistent (attempted >= failed).
-     */
-    ctx->conversion.attempted = 1;
-    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
-
-    rc = ngx_http_markdown_body_filter_decompress_if_needed(r, ctx, conf);
-    if (rc != NGX_OK) {
-        return rc;
-    }
-
-    return ngx_http_markdown_body_filter_convert_and_output(r, ctx, conf);
+    /* Delegate to main body filter logic */
+    return ngx_http_markdown_body_filter_main(r, in, ctx, conf);
 }
 
 #endif /* NGX_HTTP_MARKDOWN_REQUEST_IMPL_H */
