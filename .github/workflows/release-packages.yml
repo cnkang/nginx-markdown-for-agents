@@ -219,6 +219,8 @@ jobs:
                   out.write(f"musl_matrix={json.dumps(musl_entries)}\n")
               else:
                   out.write("musl_matrix=[]\n")
+                  print("ERROR: No musl dynamic-module entries found in tools/release-matrix.json for release-binaries.yml ownership")
+                  raise SystemExit(1)
 
           print(f"Resolved {len(versions)} NGINX versions: {versions}")
           print(f"Package matrix: {len(package_matrix)} entries")
