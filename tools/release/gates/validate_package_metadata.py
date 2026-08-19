@@ -69,9 +69,8 @@ NFPM_REQUIRED_SNIPPETS = [
     'name: "nginx-module-markdown-for-agents"',
     'version: "${PKG_VERSION}"',
     'arch: "${NFPM_ARCH}"',
-    'nginx (>= ${NGINX_VERSION_FLOOR})',
-    'nginx (<< ${NGINX_VERSION_CEIL})',
-    "nginx >= 1:${NGINX_VERSION_FLOOR}",
+    'nginx (= ${NGINX_VERSION})',
+    "nginx = 1:${NGINX_VERSION}",
     "/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so",
     "packager: deb",
     "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so",
@@ -142,8 +141,7 @@ STANDALONE_DEB_SNIPPETS = [
     "/usr/share/licenses/nginx-markdown-for-agents",
     "docs/guides/INSTALL.md",
     "docs/COMPATIBILITY.md",
-    'NGINX_VERSION_FLOOR="${NGINX_MAJOR}.${NGINX_MINOR}.0"',
-    'NGINX_VERSION_CEIL="${NGINX_MAJOR}.$((NGINX_MINOR + 1)).0"',
+    "Depends: nginx (= ${NGINX_VERSION})",
     "tools/release/gates/check_install_layout.sh dist/*.deb",
     '"dist/${PKG_NAME}_${PKG_VERSION}_nginx-${NGINX_VERSION}_${PKG_ARCH}.deb"',
 ]
@@ -153,8 +151,7 @@ STANDALONE_RPM_WORKFLOW_SNIPPETS = [
     f'PKG_NAME="{CANONICAL_PACKAGE_NAME}"',
     "docs/guides/INSTALL.md",
     "docs/COMPATIBILITY.md",
-    'NGINX_VERSION_FLOOR="${NGINX_MAJOR}.${NGINX_MINOR}.0"',
-    'NGINX_VERSION_CEIL="${NGINX_MAJOR}.$((NGINX_MINOR + 1)).0"',
+    '--define "nginx_version ${NGINX_VERSION}"',
     "tools/release/gates/check_install_layout.sh dist/*.rpm",
 ]
 STANDALONE_VERSION_FORBIDDEN_SNIPPETS = [
@@ -178,7 +175,7 @@ SIGN_AND_PUBLISH_FORBIDDEN_SNIPPETS = [
 ]
 STANDALONE_RPM_SPEC_SNIPPETS = [
     f"Name:           {CANONICAL_PACKAGE_NAME}",
-    "Requires:       nginx >= 1:%{nginx_version_floor}",
+    "Requires:       nginx = 1:%{nginx_version}",
     "Source0:        %{name}-%{version}.tar.gz",
     f"%setup -q -n {CANONICAL_PACKAGE_NAME}-%{{version}}",
     "# No-op: release-rpm.yml packages a prebuilt dynamic module.",
@@ -186,7 +183,6 @@ STANDALONE_RPM_SPEC_SNIPPETS = [
     "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so",
 ]
 FORBIDDEN_NAKED_EXACT_NGINX_DEPS = [
-    "nginx (= ${NGINX_VERSION})",
     "Requires:       nginx = %{nginx_version}",
 ]
 SMOKE_RPM_REPO_SNIPPETS = [
@@ -428,7 +424,15 @@ def validate_rpm_spec(result: ValidationResult) -> None:
 
 
 def validate_nginx_dependency_constraints(result: ValidationResult) -> None:
-    """Reject exact dependencies that use only the upstream source version."""
+    """Reject naked exact RPM dependencies without the nginx.org epoch prefix.
+
+    RPM requires the epoch prefix (1:) to disambiguate nginx.org package
+    epochs across minor branches; a naked `nginx = %{nginx_version}`
+    resolves against whatever epoch the local distro's nginx carries and
+    is therefore not a reliable exact pin.  DEB has no epoch concept and
+    `nginx (= ${NGINX_VERSION})` IS the correct exact form (asserted
+    positively via NFPM_REQUIRED_SNIPPETS).
+    """
     for path in (NFPM_CONFIG, RPM_SPEC):
         rel = path.relative_to(PROJECT_ROOT)
         content = read_safe(path)

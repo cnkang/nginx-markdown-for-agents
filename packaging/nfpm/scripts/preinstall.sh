@@ -1,17 +1,19 @@
 #!/bin/bash
 # preinstall.sh — nFPM pre-installation script for nginx-module-markdown-for-agents.
 #
-# Validates that the installed NGINX version is ABI-compatible with this
-# module package. NGINX dynamic modules require exact version matching;
-# loading a module compiled for a different NGINX version causes segfaults
-# or immediate load failures.
+# Validates that the installed NGINX version exactly matches the version this
+# module package was compiled against. NGINX dynamic modules require exact
+# version matching; the core module loader rejects a module whose
+# ngx_module_t.version differs from nginx_version before any signature or
+# --with-compat consideration. Loading a module compiled for a different
+# NGINX version causes immediate load failures or segfaults.
 #
 # Usage:
 #   preinstall.sh [install|upgrade|1|2]
 #
 # Exit codes:
-#   0  NGINX version matches or NGINX is not yet installed
-#   1  NGINX major.minor branch mismatch — abort installation
+#   0  NGINX version matches exactly or NGINX is not yet installed
+#   1  NGINX version mismatch (any full-version difference, including patch) — abort installation
 
 set -e
 
@@ -30,11 +32,6 @@ TARGET_NGINX_VERSION="%%NGINX_VERSION%%"
 
 info() {
     printf '[nginx-module-markdown] %s\n' "$1" >&2
-    return 0
-}
-
-warn() {
-    printf '[nginx-module-markdown] WARNING: %s\n' "$1" >&2
     return 0
 }
 
@@ -62,42 +59,29 @@ case "$ACTION" in
             exit 0
         fi
 
-        # Decompose versions into branch (major.minor) and patch
-        TARGET_BRANCH="${TARGET_NGINX_VERSION%.*}"
-        TARGET_PATCH="${TARGET_NGINX_VERSION##*.}"
-        INSTALLED_BRANCH="${INSTALLED_NGINX_VERSION%.*}"
-        INSTALLED_PATCH="${INSTALLED_NGINX_VERSION##*.}"
-
-        # Branch mismatch is fatal — different ABI
-        if [[ "${INSTALLED_BRANCH}" != "${TARGET_BRANCH}" ]]; then
+        # NGINX dynamic modules require an EXACT version match: the core
+        # loader compares ngx_module_t.version against nginx_version and
+        # rejects any difference (including patch-level) before signature
+        # checks.  --with-compat does not bypass this version check.
+        if [[ "${INSTALLED_NGINX_VERSION}" != "${TARGET_NGINX_VERSION}" ]]; then
             info "============================================================"
-            info "ERROR: NGINX version branch mismatch detected."
+            info "ERROR: NGINX version mismatch detected."
             info ""
-            info "  Installed NGINX: ${INSTALLED_NGINX_VERSION} (branch ${INSTALLED_BRANCH}.x)"
-            info "  Module compiled for: ${TARGET_NGINX_VERSION} (branch ${TARGET_BRANCH}.x)"
+            info "  Installed NGINX: ${INSTALLED_NGINX_VERSION}"
+            info "  Module compiled for: ${TARGET_NGINX_VERSION}"
             info ""
-            info "NGINX dynamic modules require ABI compatibility with the"
-            info "exact NGINX version branch they were compiled against."
+            info "NGINX dynamic modules require the EXACT NGINX version they"
+            info "were compiled against. Any difference, including a patch"
+            info "release (e.g. 1.26.3 vs 1.26.4), causes the NGINX loader to"
+            info "reject the module."
             info ""
-            info "Please install the module package matching your NGINX version,"
-            info "or upgrade/downgrade NGINX to the ${TARGET_BRANCH}.x branch."
+            info "Please install the module package matching your NGINX"
+            info "version, or upgrade/downgrade NGINX to ${TARGET_NGINX_VERSION}."
             info "============================================================"
             exit 1
         fi
 
-        # Same branch but different patch: NGINX dynamic modules built with
-        # --with-compat are ABI-compatible across patch releases within the
-        # same major.minor branch (Rule 13 / decision D).  The DEB dependency
-        # metadata already declares branch-scoped bounds (>= X.Y.0, < X.(Y+1).0),
-        # so a patch-level difference is a warning, not a fatal error.
-        if [[ "${INSTALLED_PATCH}" != "${TARGET_PATCH}" ]]; then
-            warn "Installed NGINX ${INSTALLED_NGINX_VERSION} differs at the patch level"
-            warn "from the module target ${TARGET_NGINX_VERSION}."
-            warn "Same major.minor branch — ABI-compatible under --with-compat;"
-            warn "verify module loading with 'nginx -t' after install."
-        fi
-
-        info "NGINX branch ${INSTALLED_BRANCH} matches module target branch ${TARGET_BRANCH}. Proceeding."
+        info "NGINX version ${INSTALLED_NGINX_VERSION} exactly matches module target ${TARGET_NGINX_VERSION}. Proceeding."
         ;;
     abort-upgrade|abort-remove|abort-deconfigure)
         # dpkg-specific lifecycle events — no action needed

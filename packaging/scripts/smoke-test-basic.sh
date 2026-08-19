@@ -242,18 +242,34 @@ case "$PKG_FORMAT" in
         fi
         info "Module .so exists: $(ls -la "${MODULE_PATH}" 2>&1)"
 
-        # --- DEB: Create load_module config snippet ---
-        info "Creating load_module configuration in modules-enabled/..."
-        mkdir -p /etc/nginx/modules-enabled
-        printf 'load_module %s;\n' "${MODULE_PATH}" \
-            > /etc/nginx/modules-enabled/50-mod-markdown.conf \
-            || die "Failed to create modules-enabled config"
-
-        # --- DEB: Verify nginx -t (ABI compatibility) ---
-        info "Running nginx -t to verify module loads correctly..."
-        if ! nginx -t 2>&1; then
-            die "nginx -t failed — module ABI compatibility check FAILED"
+        # --- DEB: Real module-load verification ---
+        # nginx.org builds do NOT include /etc/nginx/modules-enabled/*.conf
+        # by default, so a snippet there would be silently ignored and
+        # `nginx -t` would pass without the module ever loading.  Verify
+        # loadability with an explicit main-context load_module against a
+        # temporary config (the doctor's verification pattern): this
+        # proves the module actually loads and markdown_filter parses.
+        info "Verifying module loads (load_module + markdown_filter on + nginx -t)..."
+        TMP_CONF="$(mktemp "${TMPDIR:-/tmp}/markdown-smoke-XXXXXX.conf")"
+        cat > "${TMP_CONF}" <<CONF
+load_module "${MODULE_PATH}";
+daemon off;
+worker_processes 1;
+events { worker_connections 64; }
+http {
+    markdown_filter on;
+    server {
+        listen 127.0.0.1:19999;
+        location / { return 200 "ok"; }
+    }
+}
+CONF
+        if ! nginx -t -c "${TMP_CONF}" 2>&1; then
+            rm -f "${TMP_CONF}"
+            die "nginx -t with load_module failed — module did not load"
         fi
+        rm -f "${TMP_CONF}"
+        info "Module loads successfully (load_module + markdown_filter on verified)"
         ;;
 
     rpm)

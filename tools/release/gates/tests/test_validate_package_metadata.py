@@ -383,17 +383,31 @@ class TestContainsMakeBuildCommand:
 class TestReleaseGateSnippetExpectations:
     """Validate regression guard snippets for release/package review findings."""
 
-    def test_nfpm_dependency_uses_non_exact_floor(self) -> None:
-        """Ensure NFPM dependency uses non-exact floor version and correct module path."""
-        assert 'nginx (>= ${NGINX_VERSION_FLOOR})' in validator.NFPM_REQUIRED_SNIPPETS
-        assert 'nginx (<< ${NGINX_VERSION_CEIL})' in validator.NFPM_REQUIRED_SNIPPETS
-        assert 'nginx (= ${NGINX_VERSION})' not in validator.NFPM_REQUIRED_SNIPPETS
+    def test_nfpm_dependency_uses_exact_nginx_version(self) -> None:
+        """Ensure NFPM dependency pins the EXACT NGINX version and correct module path.
+
+        NGINX dynamic modules require an exact version match; the core
+        loader rejects any difference (including patch) before signature
+        checks.  The DEB/RPM dependency metadata must therefore pin the
+        exact target version rather than a branch-scoped floor/ceiling.
+        """
+        assert 'nginx (= ${NGINX_VERSION})' in validator.NFPM_REQUIRED_SNIPPETS
+        assert "nginx = 1:${NGINX_VERSION}" in validator.NFPM_REQUIRED_SNIPPETS
+        assert 'nginx (>= ${NGINX_VERSION_FLOOR})' not in validator.NFPM_REQUIRED_SNIPPETS
+        assert 'nginx (<< ${NGINX_VERSION_CEIL})' not in validator.NFPM_REQUIRED_SNIPPETS
         assert "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so" in validator.NFPM_REQUIRED_SNIPPETS
         assert "packager: deb" in validator.NFPM_DEB_ONLY_MODULES_AVAILABLE_PATTERN
 
-    def test_rpm_spec_dependency_uses_non_exact_floor(self) -> None:
-        """Ensure RPM spec uses non-exact floor dependency and correct module path."""
-        assert "Requires:       nginx >= 1:%{nginx_version_floor}" in validator.STANDALONE_RPM_SPEC_SNIPPETS
+    def test_rpm_spec_dependency_uses_exact_nginx_version(self) -> None:
+        """Ensure RPM spec pins the EXACT NGINX version (epoch-aware) and correct module path.
+
+        NGINX dynamic modules require an exact version match; the core
+        loader rejects any difference (including patch) before signature
+        checks.  The RPM spec must pin the exact version with the
+        nginx.org epoch prefix (1:), never a branch-scoped floor, and
+        never a naked exact dep without the epoch.
+        """
+        assert "Requires:       nginx = 1:%{nginx_version}" in validator.STANDALONE_RPM_SPEC_SNIPPETS
         assert "Requires:       nginx = %{nginx_version}" in validator.FORBIDDEN_NAKED_EXACT_NGINX_DEPS
         assert "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so" in validator.STANDALONE_RPM_SPEC_SNIPPETS
 

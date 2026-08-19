@@ -7,9 +7,11 @@
 # This script is invoked by the package manager after successful installation.
 # It displays instructions for enabling the module. It does NOT modify any
 # system state: no nginx.conf edits, no reload/restart, no snippet enablement.
+# The DEB enablement path is a main-context load_module in nginx.conf
+# (nginx.org builds do not include /etc/nginx/modules-enabled/*.conf by
+# default), and the RPM path is the same main-context directive.
 #
 # Exit codes:
-#   0  Success
 #   0  Success
 
 set -e
@@ -37,9 +39,14 @@ nginx-module-markdown-for-agents module installed successfully.
 To enable the module:
 
   --- Debian/Ubuntu (DEB) ---
-  1. Create a symlink to enable the module configuration:
-       sudo ln -sf /usr/share/nginx/modules-available/mod-markdown.conf \
-           /etc/nginx/modules-enabled/50-mod-markdown.conf
+  1. Add the load_module directive at the TOP LEVEL of /etc/nginx/nginx.conf
+     (before the http block):
+       load_module /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so;
+
+     NOTE: this package targets nginx.org builds, whose default nginx.conf
+     does NOT include /etc/nginx/modules-enabled/*.conf.  A symlink in
+     modules-enabled is therefore ignored by the default configuration —
+     the main-context load_module above is the supported enablement path.
 
   2. Verify configuration:
        sudo nginx -t
