@@ -93,12 +93,8 @@ inflight_current() {
         echo ""
         return
     fi
-    if command -v jq >/dev/null 2>&1; then
-        # Prometheus text format — extract the frozen v1 gauge name.
-        echo "$body" | grep -E "^nginx_markdown_inflight_requests" | awk '{print $2}' | head -1
-    else
-        echo "$body" | grep -E "^nginx_markdown_inflight_requests" | awk '{print $2}' | head -1
-    fi
+    # Prometheus text format — extract the frozen v1 gauge name.
+    echo "$body" | grep -E "^nginx_markdown_inflight_requests" | awk '{print $2}' | head -1
 }
 
 check_prerequisites

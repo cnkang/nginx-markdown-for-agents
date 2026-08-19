@@ -314,21 +314,31 @@ main() {
     echo "Running filter ordering E2E tests against ${NGINX_URL}" >&2
     echo >&2
 
-    test_markdown_gzip
+    if [[ "${TEST_PATH_CONFIGURED}" -eq 1 ]]; then
+        test_markdown_gzip
+    else
+        skip "Test 1 skipped: TEST_PATH was not configured"
+    fi
     if [[ "${GUNZIP_TEST_PATH_CONFIGURED}" -eq 1 ]]; then
         test_markdown_gunzip
     else
         skip "Test 2 skipped: GUNZIP_TEST_PATH was not configured"
     fi
-    test_markdown_brotli
+    if [[ "${TEST_PATH_CONFIGURED}" -eq 1 ]]; then
+        test_markdown_brotli
+    else
+        skip "Test 3 skipped: TEST_PATH was not configured"
+    fi
     if [[ "${TEST_PATH_CONFIGURED}" -eq 1 ]]; then
         test_markdown_proxy_cache
     else
         skip "Test 4 skipped: TEST_PATH was not configured"
     fi
-    test_markdown_no_compression
-
-    echo >&2
+    if [[ "${TEST_PATH_CONFIGURED}" -eq 1 ]]; then
+        test_markdown_no_compression
+    else
+        skip "Test 5 skipped: TEST_PATH was not configured"
+    fi
     echo "Results: ${PASS_COUNT} passed, ${FAIL_COUNT} failed, ${SKIP_COUNT} skipped" >&2
 
     if [[ ${FAIL_COUNT} -gt 0 ]]; then
