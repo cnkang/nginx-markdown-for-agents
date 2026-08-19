@@ -138,6 +138,7 @@ typedef struct {
         ngx_atomic_uint_t no_accept;
         ngx_atomic_uint_t conditional;
         ngx_atomic_uint_t compression_passthrough;
+        ngx_atomic_uint_t no_transform;
     } skips;
 
     /* Conversion result counters */
@@ -407,7 +408,8 @@ ngx_http_markdown_metrics_write_json_routing(
         "    \"accept\": %uA,\n"
         "    \"no_accept\": %uA,\n"
         "    \"conditional\": %uA,\n"
-        "    \"compression_passthrough\": %uA\n"
+        "    \"compression_passthrough\": %uA,\n"
+        "    \"no_transform\": %uA\n"
         "  },\n"
         "  \"failopen_count\": %uA,\n"
         "  \"delivery_count\": %uA,\n"
@@ -445,6 +447,7 @@ ngx_http_markdown_metrics_write_json_routing(
         snapshot->skips.no_accept,
         snapshot->skips.conditional,
         snapshot->skips.compression_passthrough,
+        snapshot->skips.no_transform,
         snapshot->results.failopen_count,
         snapshot->results.delivery_count,
         snapshot->results.decision_count,
@@ -596,6 +599,7 @@ ngx_http_markdown_collect_core_snapshot(
     snapshot->skips.conditional = metrics->skips.conditional;
     snapshot->skips.compression_passthrough =
         metrics->skips.compression_passthrough;
+    snapshot->skips.no_transform = metrics->skips.no_transform;
 }
 
 #ifdef MARKDOWN_STREAMING_ENABLED
@@ -828,7 +832,7 @@ ngx_http_markdown_metrics_to_v1(
     v1->requests.skipped_conditional = snapshot->skips.conditional;
     v1->requests.skipped_disabled = snapshot->skips.config;
     v1->requests.skipped_bypass_no_transform =
-        snapshot->skips.compression_passthrough;
+        snapshot->skips.no_transform;
     v1->requests.failed_open = snapshot->results.failopen_count;
 #ifdef MARKDOWN_STREAMING_ENABLED
     /* Subtract each classified outcome independently to avoid overflow in
@@ -1388,6 +1392,7 @@ ngx_http_markdown_metrics_write_text_decision(
         "- Skips (No Accept): %uA\n"
         "- Skips (Conditional): %uA\n"
         "- Skips (Compression Passthrough): %uA\n"
+        "- Skips (No Transform): %uA\n"
         "- Fail-Open Count: %uA\n"
         "- Delivery Count: %uA\n"
         "- Decision Count: %uA\n"
@@ -1407,6 +1412,7 @@ ngx_http_markdown_metrics_write_text_decision(
         snapshot->skips.no_accept,
         snapshot->skips.conditional,
         snapshot->skips.compression_passthrough,
+        snapshot->skips.no_transform,
         snapshot->results.failopen_count,
         snapshot->results.delivery_count,
         snapshot->results.decision_count,
