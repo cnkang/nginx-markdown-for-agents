@@ -652,8 +652,12 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
 
     /* Decision G: the 304 describes the Markdown representation; the weak
      * validator must not reference the source HTML mtime.  ETag is the
-     * sole validator for converted responses. */
+     * sole validator for converted responses.  Clear the typed pointer
+     * too: the header filter synthesizes Last-Modified whenever
+     * last_modified_time != -1 AND last_modified == NULL is false, so
+     * both fields must be reset to guarantee no stale mtime is emitted. */
     r->headers_out.last_modified_time = (time_t) -1;
+    r->headers_out.last_modified = NULL;
     ngx_http_markdown_invalidate_response_header(
         r, (const u_char *) "Last-Modified", sizeof("Last-Modified") - 1);
 
@@ -667,6 +671,12 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
     r->headers_out.content_type_len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
     r->headers_out.charset.len = 0;
     r->headers_out.charset.data = NULL;
+    /* Clear the lowercased/hash cache of the upstream media type: the
+     * header filter matches against content_type_lowcase/hash, so a
+     * stale text/html cache would let downstream matching (e.g. gzip
+     * or SSI) treat the Markdown response as HTML. */
+    r->headers_out.content_type_lowcase = NULL;
+    r->headers_out.content_type_hash = 0;
 
     if (result != NULL && result->etag != NULL && result->etag_len > 0) {
         rc = ngx_http_markdown_set_etag(r, result->etag, result->etag_len);

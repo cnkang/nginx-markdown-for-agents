@@ -102,12 +102,14 @@ typedef struct {
     ngx_str_t          content_type;
     size_t             content_type_len;
     u_char            *content_type_lowcase;
+    ngx_uint_t         content_type_hash;
     ngx_str_t          charset;
     ngx_uint_t         status;
     off_t              content_length_n;
     time_t             last_modified_time;
     ngx_table_elt_t   *content_length;
     ngx_table_elt_t   *etag;
+    ngx_table_elt_t   *last_modified;
     ngx_table_elt_t   *accept_ranges;
     ngx_list_t         headers;
     ngx_list_t         trailers;
