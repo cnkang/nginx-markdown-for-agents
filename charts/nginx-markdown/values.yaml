@@ -151,3 +151,4 @@ metrics:
       tag: "1.27-alpine"
       pullPolicy: IfNotPresent
     port: 9113
+    resources: {}

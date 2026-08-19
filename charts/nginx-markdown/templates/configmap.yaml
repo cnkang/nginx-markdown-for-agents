@@ -85,6 +85,11 @@ data:
     events { worker_connections 256; }
     http {
       access_log off;
+      client_body_temp_path /var/cache/nginx/metrics-sidecar/client_body_temp;
+      proxy_temp_path /var/cache/nginx/metrics-sidecar/proxy_temp;
+      fastcgi_temp_path /var/cache/nginx/metrics-sidecar/fastcgi_temp;
+      uwsgi_temp_path /var/cache/nginx/metrics-sidecar/uwsgi_temp;
+      scgi_temp_path /var/cache/nginx/metrics-sidecar/scgi_temp;
       server {
         listen {{ .Values.metrics.sidecar.port }};
         location /metrics {
