@@ -86,6 +86,8 @@ spec:
               mountPath: /tmp
             - name: nginx-cache
               mountPath: /var/cache/nginx
+            - name: metrics-sidecar-cache
+              mountPath: /var/cache/nginx/metrics-sidecar
           ports:
             - name: metrics
               containerPort: {{ .Values.metrics.sidecar.port }}
@@ -98,6 +100,8 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 3
+          resources:
+            {{- toYaml .Values.metrics.sidecar.resources | nindent 12 }}
         {{- end }}
       volumes:
         - name: nginx-config
@@ -117,6 +121,10 @@ spec:
         - name: metrics-sidecar-config
           configMap:
             name: {{ include "nginx-markdown.fullname" . }}-config
+        {{- end }}
+        {{- if and .Values.markdown.enabled .Values.metrics.enabled .Values.metrics.sidecar.enabled }}
+        - name: metrics-sidecar-cache
+          emptyDir: {}
         {{- end }}
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}
