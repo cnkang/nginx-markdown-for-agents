@@ -253,9 +253,9 @@ freeze:
 
 - `nginx_markdown_failures_total` now uses truthful bounded categories:
   `conversion_error`, `resource_limit`, and `system_error`.
-- The misleading gauge-like `nginx_markdown_conversion_duration_seconds{le=...}`
-  the cumulative counter family replaces it
-  `nginx_markdown_conversion_latency_bucket_total{le=...}`.
+- The cumulative counter family `nginx_markdown_conversion_latency_bucket_total{le=...}`
+  replaces the misleading gauge-like
+  `nginx_markdown_conversion_duration_seconds{le=...}`.
 
 **Dashboard migration:**
 

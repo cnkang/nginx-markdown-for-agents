@@ -17,8 +17,9 @@
 
 Dynamic configuration (dynconf) enables runtime modification of select
 module parameters without restarting NGINX. A periodic timer (1s interval)
-polls a configuration file for changes and applies them using a two-phase,
-staged-commit model.
+polls a configuration file for changes and applies them using a three-phase
+staged-commit model (parse, validate, promote — see
+[Reload Semantics](#reload-semantics)).
 
 The project classifies dynconf as `STABLE_FOR_1_0`. The supported key set, atomic staged
 promotion, one-snapshot-per-request rule, dry-run behavior, and

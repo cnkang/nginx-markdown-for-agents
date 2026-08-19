@@ -131,7 +131,10 @@ library. The ABI boundary — the `#[repr(C)]` structs, function signatures, and
 memory ownership contracts defined in `markdown_converter.h` — must validate
 from the C side. This includes verifying that the header compiles
 cleanly, that struct layouts match expectations, and that the C module correctly
-handles all FFI error codes and result fields. These checks require C
+handles all FFI error codes and result fields. The C-compilation requirement
+here covers only `markdown_converter.h` compatibility and the C
+module's handling of FFI error codes and result fields — it does not require
+compiling Rust code from the C side. These checks require C
 compilation. Rust cannot express them without a circular dependency.
 
 **Concrete examples:**

@@ -73,7 +73,8 @@ markdown_limits max_inflight=64;
 - **Parameter**: `max_inflight=N`
 - **Default**: 64
 - **Scope**: `http`, `server`, `location`
-- **Value 0**: Unlimited (no inflight guard)
+- **Value 0**: Rejected at config time — `max_inflight` must be an integer
+  from 1 to 65535 (there is no "unlimited" value; see Overload Behavior)
 
 The default value of 64 is a conservative guardrail, not a capacity or
 concurrency promise. The actual per-worker working set depends on the
@@ -84,7 +85,12 @@ concurrency is not used as a safety assumption.
 
 ## Overload Behavior
 
-When `current >= max_inflight`:
+The overload condition applies only when a positive bound is set.
+Config time validates `max_inflight` as an integer greater than 0
+(1–65535), so **`max_inflight=0` is never accepted** — there is no
+"unlimited" configuration value. The overload branch triggers when
+`current >= max_inflight`. With the enforced positive bound the worker
+has always reached the configured limit at that point.
 
 1. The module records a terminal request outcome in the frozen
    `nginx_markdown_requests_total{outcome,stage,reason}` family with

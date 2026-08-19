@@ -15,7 +15,7 @@ streaming-default conversion model with full-buffer fallback,
 Rust-first
 architecture modules for Accept negotiation, conditional requests, decision
 logic, and header plan application, unified decompression budget via
-markdown_limits (conversion_memory, parser_memory, decompressed_size), read-only runtime diagnostics endpoint,
+markdown_limits (conversion_memory, parser_memory, decompressed_size, conversion_timeout, parser_timeout), read-only runtime diagnostics endpoint,
 dynconf dry-run and last-known-good failed-reload protection with atomic file
 restore, DEB/RPM packaging pipeline, Kubernetes
 deployment examples, FFI ABI layout verification, CI supply-chain hardening,

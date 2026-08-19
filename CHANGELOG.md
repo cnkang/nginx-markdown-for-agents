@@ -94,6 +94,19 @@ before/after examples.
   the fallback decision) instead of the incorrect
   `reason="bypass_no_transform"`. Operators must update dashboards that use
   the previous label value.
+- Converted responses no longer carry the source HTML `Last-Modified` as a
+  weak validator. The Markdown-derived strong ETag is the sole validator:
+  200/streaming/full-buffer responses strip the upstream `Last-Modified`,
+  `Trailer`, and representation-digest headers (`Content-MD5`, `Digest`,
+  `Content-Digest`, `Repr-Digest`, upstream `X-Markdown-Tokens`), and 304
+  responses no longer restore the source mtime. Conditional requests
+  (`ims_only`) still accept `If-Modified-Since` for eligibility decisions.
+  The response validator surface is what changed.
+- HEAD requests to upstream no longer commit a fabricated empty Markdown
+  representation. A proxied HEAD carries no body, so the module now fails
+  open (forwards the upstream headers unchanged) instead of converting the
+  empty buffer into `Content-Length: 0` with an empty-input ETag that
+  contradicts the GET representation of the same URL.
 
 ### Added
 

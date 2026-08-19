@@ -322,8 +322,10 @@ http {
 
 #### Strict cache validation — CDN / caching proxy
 
-Full ETag-based conditional request support. Streaming stays disabled (forced off)
-so the module can generate a transformed ETag for the complete Markdown output.
+Full ETag-based conditional request support. Streaming stays disabled: the
+server configuration sets `markdown_streaming off` (`markdown_cache_validation
+full` also forces the `auto` default onto the full-buffer path), so the
+module can generate a transformed ETag for the complete Markdown output.
 
 ```nginx
 load_module modules/ngx_http_markdown_filter_module.so;

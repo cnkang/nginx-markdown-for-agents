@@ -507,7 +507,7 @@ Check the repository for sponsorship information (if available).
 
 ---
 
-*Last updated: July 13, 2026*
+*Last updated: August 18, 2026*
 
 
 ## Document Updates

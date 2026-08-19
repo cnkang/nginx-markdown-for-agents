@@ -348,7 +348,7 @@ nginx -t && nginx -s reload
 
 #### Verify
 
-Follow the [Verification Steps](#verification-steps) section. The key signal is that `failed_closed` entries stop appearing in decision logs and `failed_open` entries replace them. Do **not** require a `failed_open` log entry after rollback. Verify that `failed_closed` entries stop appearing, then trigger a conversion failure. Confirm the client receives original HTML instead of a 502. Successful conversions produce no log entry, so expect none.
+Follow the [Verification Steps](#verification-steps) section. The key signal is that `failed_closed` entries stop appearing in decision logs. Do **not** require a `failed_open` log entry after rollback, and do not expect `failed_open` entries to replace `failed_closed` entries. Both are terminal outcomes of failed conversions, and after rollback to `pass` the module records `failed_open` only when a conversion actually fails. Verify that `failed_closed` entries stop appearing, then trigger a conversion failure. Confirm the client receives original HTML instead of a 502. Successful conversions produce no log entry, so expect none.
 
 ---
 

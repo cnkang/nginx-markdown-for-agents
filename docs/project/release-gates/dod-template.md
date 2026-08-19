@@ -37,7 +37,7 @@ Each sub-spec records its evaluation as a Markdown table in its completion artif
 3. Replace `✅/❌` with the actual status. Use ✅ only when the verification method is fully satisfied.
 4. Replace the bracketed placeholder in the Evidence column with a concrete reference. Use a CI run number, test file path, doc path, PR link, or review reference.
 5. If a checkpoint cannot pass, record ❌ with a brief explanation in the Evidence column. Escalate to the Go/No-Go review with a documented exception.
-6. The sub-spec needs the completed DoD evaluation before it counts as complete (Requirement 5.2). The team archives the evaluation as part of the 0.4.0 release record (Requirement 5.3).
+6. The sub-spec is complete **only when all six checkpoints pass** (Requirement 5.2). A single ❌ means the sub-spec is not complete: the owner either fixes the gap and re-evaluates, or escalates the exception to the Go/No-Go review, which decides whether the release accepts the documented exception. The team archives the evaluation as part of the 0.4.0 release record (Requirement 5.3).
 
 ## Document Updates
 

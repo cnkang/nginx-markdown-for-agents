@@ -76,9 +76,10 @@ For each stage, record:
 Use requests that exercise both uncompressed and compressed upstreams:
 
 ```bash
-curl -sD - -o /tmp/markdown.out \
+SNAPSHOT_DIR="${SNAPSHOT_DIR:-$(mktemp -d)}"
+curl -sD - -o "$SNAPSHOT_DIR/markdown.out" \
   -H 'Accept: text/markdown' http://staging.example.com/docs/
-curl -sD - -o /tmp/markdown-gzip.out \
+curl -sD - -o "$SNAPSHOT_DIR/markdown-gzip.out" \
   -H 'Accept: text/markdown' http://staging.example.com/gzip-docs/
 ```
 
@@ -118,11 +119,17 @@ location /docs {
 ```
 
 Apply with `nginx -t && nginx -s reload`, then wait for the graceful reload to
-drain (in-flight requests from before the reload reach zero — poll the
-`nginx_markdown_inflight_requests` gauge or the diagnostics inflight field
-until it returns to zero. Do not poll the cumulative
+drain. The aggregate `nginx_markdown_inflight_requests` gauge (or the
+diagnostics inflight field) returns to zero when the request population is
+quiescent, but it is not proof that pre-reload requests have drained: it only
+shows that no request is currently mid-conversion, and new requests admitted
+after the reload keep it at or above one while they convert. To verify
+pre-reload drain, record a baseline of `nginx_markdown_inflight_requests`
+and the conversion counters immediately before the reload, then compare
+**deltas after quiescence**, or wait until the diagnostics/error logs show the
+pre-reload requests reaching terminal. Do not poll the cumulative
 `nginx_markdown_requests_total` counter, which only advances and cannot show
-drain). Only then compare counters scoped to requests started after the
+drain. Only then compare counters scoped to requests started after the
 reload. Verify that streaming attempts stop and full-buffer attempts remain
 healthy. Preserve the diagnostics JSON, Prometheus snapshot, error-log
 excerpts, and the exact configuration used for the incident.

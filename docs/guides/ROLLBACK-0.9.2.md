@@ -61,6 +61,11 @@ Publication and artifact availability are separate release gates.
      echo "ERROR: cannot locate the NGINX modules directory" >&2
      exit 1
    fi
+   if [[ ! -f "$MODULES_DIR/ngx_http_markdown_filter_module.so.0.9.1.bak" ]]; then
+     echo "ERROR: $MODULES_DIR/ngx_http_markdown_filter_module.so.0.9.1.bak not found;" >&2
+     echo "       obtain a verified 0.9.1 release artifact before restoring" >&2
+     exit 1
+   fi
    sudo cp "$MODULES_DIR/ngx_http_markdown_filter_module.so.0.9.1.bak" \
        "$MODULES_DIR/ngx_http_markdown_filter_module.so"
    ```

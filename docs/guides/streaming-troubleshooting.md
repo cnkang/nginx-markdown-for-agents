@@ -161,10 +161,19 @@ separate budget-limit failure classification. The module records the event in
 
 ## Rollback checklist
 
-1. Save diagnostics and Prometheus output.
+1. Save diagnostics and Prometheus output (record a pre-reload baseline of
+   `nginx_markdown_conversion_attempts_total` and
+   `nginx_markdown_inflight_requests`).
 2. Set `markdown_streaming off` (and, if needed,
    `markdown_auto_decompress off`).
 3. Run `nginx -t && nginx -s reload`.
-4. Verify `conversion_attempts_total{engine="streaming"}` stops increasing.
+4. Wait for pre-reload requests to drain, then verify the **post-reload
+   delta** of `conversion_attempts_total{engine="streaming"}` stops
+   increasing: `conversion_attempts_total` is cumulative, so an absolute
+   comparison against a pre-reload value is not meaningful while in-flight
+   requests from before the reload are still converting. Compare the delta
+   from your pre-reload baseline only after quiescence
+   (`nginx_markdown_inflight_requests` has returned to zero and no pre-reload
+   request remains in flight).
 5. Re-enable with `auto` only after reviewing the reason labels and
    compressed-input evidence.

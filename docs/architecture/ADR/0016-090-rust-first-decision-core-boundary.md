@@ -53,20 +53,24 @@ ADR-justified exception.
 
 ### Trusted proxies — http-only CIDR trust
 
-Source IP comes from `r->connection->addr_text` (the original transport
-peer address captured at connection establishment, before the realip
-module rewrites `r->connection->sockaddr`). `markdown_trusted_proxies`
-is **http context only**, CIDR-based (IPv4 + IPv6, parsed at config
-time). An immediate peer that is **outside** `markdown_trusted_proxies`
-is the client: the module ignores any `Forwarded` or `X-Forwarded-*`
-headers it carries and uses the peer address directly, before any
-right-to-left traversal. Otherwise the module begins with the
-connection peer, walks aligned `Forwarded` or `X-Forwarded-*` hops from
-right to left, strips trusted hops, and selects the first untrusted hop
-as the client-facing value. `Forwarded` takes precedence over
-`X-Forwarded-*`. `proto` accepts only `http` or `https`. Untrusted
-sources produce a reason code and never leak raw header values into
-logs or metrics.
+Source IP comes from `r->connection->addr_text`. When the operator
+enables the NGINX `realip` module (or PROXY protocol), NGINX rewrites
+`r->connection->addr_text` to the resolved client address before the
+request reaches the content phase. The module therefore consumes the
+**realip/PROXY-resolved** peer address, not the raw transport peer.
+`markdown_trusted_proxies` is **http context only**, CIDR-based (IPv4 +
+IPv6, parsed at config time). An immediate peer that is **outside**
+`markdown_trusted_proxies` is the client: the module ignores any
+`Forwarded` or `X-Forwarded-*` headers it carries and uses the peer
+address directly, before any right-to-left traversal. Otherwise the
+module begins with the connection peer, walks aligned `Forwarded` or
+`X-Forwarded-*` hops from right to left, strips trusted hops, and
+selects the first untrusted hop as the client-facing value. `Forwarded`
+takes precedence over `X-Forwarded-*`. `proto` accepts only `http` or
+`https`. An unavailable or non-parseable source address never matches a
+trusted CIDR and fails closed to the untrusted path. Untrusted sources
+produce a reason code and never leak raw header values into logs or
+metrics.
 
 ### C complexity reduction acceptance (per migrated file)
 
@@ -120,5 +124,5 @@ Kang
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.2 | 2026-08-18 | Hermes | Correct trusted-proxies source-IP description: original transport peer (addr_text), not realip-rewritten sockaddr |
+| 0.9.2 | 2026-08-19 | Hermes | Correct trusted-proxies source-IP description: `addr_text` carries the realip/PROXY-resolved peer; unavailable address fails closed to untrusted |
 | 0.9.0 | 2026-06-30 | Kang | Initial ADR — small-API decision boundary freeze, trusted-proxies model, C complexity reduction acceptance |

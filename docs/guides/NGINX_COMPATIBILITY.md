@@ -126,10 +126,15 @@ NGINX source tree and configuration.
 ### Fail-Open Behavior
 
 The module defaults to `markdown_error_policy pass` (fail-open). If the
-conversion fails at runtime (timeout, memory budget exceeded, converter
-error), the module returns the original HTML response unchanged. This is a safety
+conversion fails **before the module commits the response headers** —
+pre-commit or full-buffer conversion failure (timeout, memory budget
+exceeded, converter error) — the module returns the original HTML
+response unchanged, because the original content is still available for
+pass-through. After the module has committed the converted headers and
+begun streaming the body, the module can no longer return the original
+HTML. Post-commit errors follow the safe-finish-or-abort contract instead. This is a safety
 design choice, not a compatibility limitation, but operators should be aware
-that conversion failures are silent from the client perspective.
+that pre-commit conversion failures are silent from the client perspective.
 
 ---
 

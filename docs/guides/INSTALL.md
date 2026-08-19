@@ -153,18 +153,26 @@ and assert the converted Markdown body. For example, an `<h1>Welcome</h1>`
 heading must appear as `# Welcome` in the response body. Do not treat a
 `Content-Type: text/markdown` response alone as evidence that conversion
 succeeded — it only confirms the label applied to the response. The check
-below fails (non-zero exit) unless the body actually contains the converted
-heading, so a successful exit is deterministic evidence of conversion:
+below captures the HTTP status and Content-Type from the response headers and
+fails (non-zero exit) unless the status is `200`, the media type is
+`text/markdown`, and the body actually contains the converted heading, so a
+successful exit is deterministic evidence of conversion:
 
 ```bash
 # Serve an <h1>Welcome</h1> page from a local fixture, or point the first
 # curl at any page on your site that renders a known <h1>:
-response=$(curl -s -H "Accept: text/markdown" http://localhost/)
-if printf '%s' "$response" | grep -Fq '# Welcome'; then
+headers=$(mktemp)
+body=$(mktemp)
+status=$(curl -s -o "$body" -D "$headers" -H "Accept: text/markdown" \
+    -w '%{http_code}' http://localhost/)
+content_type=$(awk 'BEGIN{IGNORECASE=1} /^Content-Type:/{sub(/\r$/,""); print $2}' "$headers")
+if [[ "$status" == "200" ]] \
+    && [[ "$content_type" == text/markdown* ]] \
+    && grep -Fq '# Welcome' "$body"; then
     echo "conversion verified"
     exit 0
 else
-    echo "conversion NOT verified"
+    echo "conversion NOT verified: status=$status content_type=$content_type" >&2
     exit 1
 fi
 ```

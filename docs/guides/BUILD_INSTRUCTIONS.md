@@ -89,7 +89,10 @@ Available targets include:
 - `make clean` - Clean Rust and selected NGINX module test artifacts
 
 CI generates release and performance evidence under `artifacts/`. Git ignores
-this directory, so the generated evidence never enters the repository. CI
+this directory except for the six frozen 0.9.2 contract artifacts that release
+gates require checked in (`artifacts/release/0.9.2/{reason-registry-report,generated-reason-artifacts,official-build-feature-manifest,metrics-registry,diagnostics-field-contract,dynconf-precedence-report}.json` —
+see the `artifacts/*` whitelist in `.gitignore`). All other generated evidence
+never enters the repository. CI
 validates generated evidence against checked-in source and schema before
 upload. Do not commit local copies of those files. The canonical module
 benchmark environment stays tracked as source configuration in

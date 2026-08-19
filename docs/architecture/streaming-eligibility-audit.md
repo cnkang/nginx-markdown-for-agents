@@ -37,9 +37,9 @@ encoding, memory, or backpressure safety rules.
 | Excluded types | `markdown_stream_excluded_types` | Case-insensitive media-type matcher |
 | Streaming memory | `markdown_limits streaming_buffer=` | Bounded working/replay storage |
 | Conversion memory | `markdown_limits conversion_memory=` and `parser_memory=` | C/Rust budget enforcement |
-| Decompression safety | `decompressed_size=` and `decompression_ratio=` | Response-wide decoder budget |
-| Time bounds | `conversion_timeout=` and `parser_timeout=` | C/Rust timeout checks |
-| Concurrency | `max_inflight=` | Per-worker inflight guard |
+| Decompression safety | `markdown_limits decompressed_size=` and `decompression_ratio=` | Response-wide decoder budget |
+| Time bounds | `markdown_limits conversion_timeout=` and `parser_timeout=` | C/Rust timeout checks |
+| Concurrency | `markdown_limits max_inflight=` | Per-worker inflight guard |
 
 ## Compressed response routing
 

@@ -242,7 +242,7 @@ make -C components/nginx-module/tests unit-streaming_equiv_brotli_property
 
 6. **Size Limit Enforcement**
    - Upstream returns large compressed content
-   - Decompressed size exceeds `markdown_limits conversion_memory=<size>`
+   - Decompressed size exceeds `markdown_limits decompressed_size=<size>`
    - Module applies fail-open strategy
    - Logs error with category=resource_limit
 

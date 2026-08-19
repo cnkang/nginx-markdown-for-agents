@@ -9,10 +9,12 @@
 
 ## Overview
 
-**0.8.x → 0.9.0 is a breaking release.** This is the last breaking opportunity
-before the 1.0.0 API freeze. The release removes all deprecated directives from
-prior releases, introduces the profile system, consolidates error policy, and
-restructures the observability surface.
+**0.8.x → 0.9.0 is a breaking release.** As of 0.9.0, the release removed all
+deprecated directives from prior releases, introduced the profile system,
+consolidated error policy, and restructured the observability surface. The
+"last breaking opportunity before 1.0" framing was accurate for 0.9.0. The
+0.9.2 release later performed a further breaking configuration-surface
+reduction (63 → 25 directives).
 
 If you are running 0.8.x in production, you must follow this guide before
 upgrading. There is **no backward-compatible mode** — 0.9.0 rejects old

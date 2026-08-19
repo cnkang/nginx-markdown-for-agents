@@ -10,31 +10,31 @@ tutorial.
 
 | Directive | Syntax | Default | Context |
 |---|---|---|---|
-| `markdown_accept` | `strict|wildcard|force` | strict | http/server/location |
+| `markdown_accept` | `strict\|wildcard\|force` | strict | http/server/location |
 | `markdown_auth_cookies` | `<pattern> [<pattern> ...]` | built-in `session*`, `auth*`, `PHPSESSID`, `wordpress_logged_in_*` (explicit replaces) | http/server/location |
-| `markdown_auth_policy` | `allow|deny` | allow | http/server/location |
-| `markdown_auto_decompress` | `on|off` | on | http/server/location |
-| `markdown_cache_validation` | `off|ims_only|full` | ims_only | http/server/location |
+| `markdown_auth_policy` | `allow\|deny` | allow | http/server/location |
+| `markdown_auto_decompress` | `on\|off` | on | http/server/location |
+| `markdown_cache_validation` | `off\|ims_only\|full` | ims_only | http/server/location |
 | `markdown_content_types` | `<type> [<type> ...]` | text/html | http/server/location |
-| `markdown_diagnostics` | `on|off` | off | location |
-| `markdown_dynamic_config` | `on|off` | off | http |
+| `markdown_diagnostics` | `on\|off` | off | location |
+| `markdown_dynamic_config` | `on\|off` | off | http |
 | `markdown_dynamic_config_path` | `<path>` | (none) | http |
-| `markdown_dynconf_dry_run` | `on|off` | off | http |
-| `markdown_error_policy` | `pass|fail_closed|status <code>` | pass | http/server/location |
-| `markdown_filter` | `on|off|$variable` | off | http/server/location |
-| `markdown_flavor` | `commonmark|gfm` | commonmark | http/server/location |
-| `markdown_front_matter` | `on|off` | off | http/server/location |
+| `markdown_dynconf_dry_run` | `on\|off` | off | http |
+| `markdown_error_policy` | `pass\|fail_closed\|status <code>` | pass | http/server/location |
+| `markdown_filter` | `on\|off\|$variable` | off | http/server/location |
+| `markdown_flavor` | `commonmark\|gfm` | commonmark | http/server/location |
+| `markdown_front_matter` | `on\|off` | off | http/server/location |
 | `markdown_limits` | `key=value ...` | (per-key inheritance) | http/server/location |
-| `markdown_log_verbosity` | `error|warn|info|debug` | info | http/server/location |
+| `markdown_log_verbosity` | `error\|warn\|info\|debug` | info | http/server/location |
 | `markdown_metrics` | `(no args)` | off | location |
 | `markdown_metrics_shm_size` | `<size>` | 8*pagesize | http |
-| `markdown_prune_noise` | `on|off` | on | http/server/location |
+| `markdown_prune_noise` | `on\|off` | on | http/server/location |
 | `markdown_prune_protection_selectors` | `<string>` | empty | http/server/location |
 | `markdown_prune_selectors` | `<string>` | nav footer aside | http/server/location |
 | `markdown_stream_excluded_types` | `<type> [<type> ...]` | none | http/server/location |
-| `markdown_streaming` | `off|auto|force` | auto | http/server/location |
-| `markdown_token_estimate` | `on|off` | off | http/server/location |
-| `markdown_trusted_proxies` | `<CIDR>... | off` | off | http |
+| `markdown_streaming` | `off\|auto\|force` | auto | http/server/location |
+| `markdown_token_estimate` | `on\|off` | off | http/server/location |
+| `markdown_trusted_proxies` | `<CIDR>... \| off` | off | http |
 
 ## Dynconf Keys (5 runtime-mutable + schema_version metadata)
 

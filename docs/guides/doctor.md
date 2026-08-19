@@ -34,7 +34,7 @@ bash tools/doctor/nginx-markdown-doctor.sh [OPTIONS]
 
 ## Checks by release line (core and extended checks cover 0.9.2)
 
-### Core Checks (0.9.0)
+### Core Checks (introduced 0.9.0, still part of the 0.9.2 check set)
 
 | Check | Description |
 |-------|-------------|
@@ -42,7 +42,7 @@ bash tools/doctor/nginx-markdown-doctor.sh [OPTIONS]
 | `module_exists` | Verifies that `ngx_http_markdown_filter_module.so` exists at the expected path |
 | `config_valid` | Validates basic NGINX configuration syntax via `nginx -t` |
 
-### Extended Checks (0.9.1)
+### Extended Checks (introduced 0.9.1, still part of the 0.9.2 check set)
 
 | Check | Description |
 |-------|-------------|

@@ -78,15 +78,22 @@ The frozen event model is:
 3. A successful attempt produces at most one request-level successful delivery.
 4. `inflight_requests` returns to zero after quiescence.
 
-Therefore, after the system is quiescent:
+Therefore, after the system is quiescent (no in-flight requests, so the
+counters have stopped advancing), the conservation equations hold on
+**deltas measured from one shared counter baseline** taken before the
+observation window (for example the previous scrape):
 
 ```text
-sum(requests_total) == requests entering the decision chain
-sum(conversion_attempts_total) <= sum(requests_total)
-sum(conversion_deliveries_total) <= sum(conversion_attempts_total)
-conversion_duration_seconds_count <= sum(conversion_attempts_total)
+delta(sum(requests_total)) == requests entering the decision chain during the window
+delta(sum(conversion_attempts_total)) <= delta(sum(requests_total))
+delta(sum(conversion_deliveries_total)) <= delta(sum(conversion_attempts_total))
+delta(conversion_duration_seconds_count) <= delta(sum(conversion_attempts_total))
 inflight_requests == 0
 ```
+
+Compare deltas from the same baseline for every family. Raw cumulative
+values from different points in time are not comparable because the
+counters never reset.
 
 HTML passthrough, failed-open HTML, failed-closed responses, and abort-terminal
 responses do not increment `conversion_deliveries_total`. They appear
