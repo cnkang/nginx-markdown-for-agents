@@ -168,12 +168,6 @@ ngx_http_markdown_metrics_write_prometheus_perf(
         "counter\n"
         "nginx_markdown_perf_decompression_budget_exceeded_total %uA\n\n",
         perf->decompression_budget_exceeded_total);
-    p = ngx_slprintf(p, end,
-        "# HELP nginx_markdown_zero_copy_output_total "
-        "Output chains delivered via zero-copy on NGX_OK.\n"
-        "# TYPE nginx_markdown_zero_copy_output_total counter\n"
-        "nginx_markdown_zero_copy_output_total %uA\n\n",
-        perf->zero_copy_output_total);
     return ngx_slprintf(p, end,
         "# HELP nginx_markdown_copied_output_total "
         "Output chains delivered via buffer copy on NGX_OK.\n"

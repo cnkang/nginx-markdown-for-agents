@@ -180,7 +180,6 @@ typedef struct ngx_http_markdown_conf_s {
         size_t        flush_min;
         ngx_array_t  *excluded_types;
         size_t        budget;
-        ngx_flag_t    budget_explicit;
         ngx_flag_t    shadow;
     } stream;
 } ngx_http_markdown_conf_t;
@@ -373,6 +372,9 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
 #ifndef NGX_HTTP_MARKDOWN_STREAM_FLUSH_MIN_FIXED
 #define NGX_HTTP_MARKDOWN_STREAM_FLUSH_MIN_FIXED  16384
 #endif
+#ifndef NGX_HTTP_MARKDOWN_PRODUCT_VERSION
+#define NGX_HTTP_MARKDOWN_PRODUCT_VERSION "0.9.2"
+#endif
 
 #include "../src/ngx_http_markdown_diagnostics.c"
 
@@ -402,7 +404,6 @@ ngx_http_markdown_diagnostics_collect_metrics(
     out->failopen_total = 1;
     out->streaming_requests_total = 9;
     out->precommit_failopen_total = 0;
-    out->zero_copy_output_total = 8;
     out->copied_output_total = 1;
 }
 
@@ -738,7 +739,6 @@ test_access_and_json_builder(void)
     TEST_ASSERT(strstr(json, "\"recent_decisions\"") != NULL,
                 "JSON should include recent decisions");
     TEST_ASSERT(strstr(json, "\"module_metrics\":") != NULL
-                && strstr(json, "\"zero_copy_output_total\":8") != NULL
                 && strstr(json, "\"copied_output_total\":1") != NULL,
                 "JSON should include exact module evidence counters");
     TEST_ASSERT(strstr(json, "\"profile\"") == NULL

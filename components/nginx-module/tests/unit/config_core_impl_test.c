@@ -599,7 +599,6 @@ test_merge_conf(void)
     parent.stream.policy_explicit = -1;
     parent.stream.excluded_types = NGX_CONF_UNSET_PTR;
     parent.stream.budget = NGX_CONF_UNSET_SIZE;
-    parent.stream.budget_explicit = -1;
     parent.limits.conversion_timeout = NGX_CONF_UNSET_MSEC;
     parent.limits.parser_timeout = NGX_CONF_UNSET_MSEC;
     parent.limits.conversion_memory = NGX_CONF_UNSET_SIZE;
@@ -669,7 +668,6 @@ test_merge_conf(void)
     child.stream.policy_explicit = -1;
     child.stream.excluded_types = NGX_CONF_UNSET_PTR;
     child.stream.budget = NGX_CONF_UNSET_SIZE;
-    child.stream.budget_explicit = -1;
     child.advanced.prune_noise = NGX_CONF_UNSET;
     child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
     child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
@@ -725,7 +723,6 @@ test_merge_conf(void)
     child.routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
     child.stream.policy = NGX_CONF_UNSET_UINT;
     child.stream.budget = NGX_CONF_UNSET_SIZE;
-    child.stream.budget_explicit = 0;
     child.stream.excluded_types = NGX_CONF_UNSET_PTR;
     child.advanced.prune_noise = NGX_CONF_UNSET;
     child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
@@ -1129,7 +1126,6 @@ test_merge_conf_double_unset(void)
     child.routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
     child.stream.policy = NGX_CONF_UNSET_UINT;
     child.stream.budget = NGX_CONF_UNSET_SIZE;
-    child.stream.budget_explicit = 0;
     child.stream.excluded_types = NGX_CONF_UNSET_PTR;
     child.advanced.prune_noise = NGX_CONF_UNSET;
     child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
@@ -1157,54 +1153,6 @@ test_merge_conf_double_unset(void)
         "double-UNSET should clear complex pointer");
 
     TEST_PASS("merge_conf double-UNSET path covered");
-}
-
-static void
-test_stream_budget_explicit_maps_to_stream(void)
-{
-    ngx_conf_t cf;
-    ngx_http_markdown_conf_t *parent;
-    ngx_http_markdown_conf_t *child;
-    char *rc;
-
-    TEST_SUBSECTION("stream.budget explicit mapping");
-
-    memset(&cf, 0, sizeof(cf));
-    cf.pool = &g_pool;
-    parent = ngx_http_markdown_create_conf(&cf);
-    child = ngx_http_markdown_create_conf(&cf);
-    TEST_ASSERT(parent != NULL && child != NULL,
-                "create_conf should allocate parent and child");
-
-    child->limits.streaming_buffer = 4 * 1024 * 1024;
-
-    rc = ngx_http_markdown_merge_conf(&cf, parent, child);
-
-    TEST_ASSERT(rc == NGX_CONF_OK,
-                "merge_conf should accept stream budget");
-    TEST_ASSERT(child->limits.streaming_buffer == 4 * 1024 * 1024,
-                "stream budget should be preserved");
-    TEST_ASSERT(child->stream.budget_explicit == 1,
-                "stream budget should stay explicit");
-
-    parent = ngx_http_markdown_create_conf(&cf);
-    child = ngx_http_markdown_create_conf(&cf);
-    TEST_ASSERT(parent != NULL && child != NULL,
-                "create_conf should allocate inherited budget fixtures");
-
-    parent->limits.streaming_buffer = 8 * 1024 * 1024;
-    parent->stream.budget_explicit = 1;
-    child->limits.streaming_buffer = 4 * 1024 * 1024;
-
-    rc = ngx_http_markdown_merge_conf(&cf, parent, child);
-
-    TEST_ASSERT(rc == NGX_CONF_OK,
-                "merge_conf should accept child stream budget override");
-    TEST_ASSERT(child->limits.streaming_buffer == 4 * 1024 * 1024,
-                "child stream budget should override parent stream budget");
-    TEST_ASSERT(child->stream.budget_explicit == 1,
-                "child stream budget override should mark explicit");
-    TEST_PASS("stream.budget explicit mapping");
 }
 
 static void
@@ -1309,36 +1257,6 @@ test_memory_budget_priority_chain(void)
                     "default max_size when nothing explicitly set");
     }
 
-    /* Case 4: streaming_budget_explicit flag works correctly */
-    {
-        ngx_flag_t streaming_budget_explicit = 0;
-        size_t memory_budget = 50 * 1024 * 1024;
-        size_t streaming_budget = NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT;
-
-        /* memory_budget should apply when streaming_budget not explicit */
-        if (memory_budget != NGX_CONF_UNSET_SIZE
-            && !streaming_budget_explicit)
-        {
-            streaming_budget = memory_budget;
-        }
-
-        TEST_ASSERT(streaming_budget == 50 * 1024 * 1024,
-                    "memory_budget applies to streaming_budget when not explicit");
-
-        /* Now with explicit streaming_budget */
-        streaming_budget_explicit = 1;
-        streaming_budget = NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT;
-
-        if (memory_budget != NGX_CONF_UNSET_SIZE
-            && !streaming_budget_explicit)
-        {
-            streaming_budget = memory_budget;
-        }
-
-        TEST_ASSERT(streaming_budget == NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT,
-                    "explicit streaming_budget wins over memory_budget");
-    }
-
     /*
      * Cases 5-7: Exercise the production merge_conf path directly,
      * verifying that the save-before-merge priority chain works end-to-end.
@@ -1364,14 +1282,12 @@ test_memory_budget_priority_chain(void)
         parent_conf.enabled = 1;
         parent_conf.limits.conversion_memory = 10 * 1024 * 1024;
         parent_conf.stream.budget = NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT;
-        parent_conf.stream.budget_explicit = 0;
         parent_conf.advanced.prune_noise = 1;
         parent_conf.limits.conversion_memory = 50 * 1024 * 1024;
 
         child_conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
         child_conf.max_size = NGX_CONF_UNSET_SIZE;
         child_conf.stream.budget = NGX_CONF_UNSET_SIZE;
-        child_conf.stream.budget_explicit = 0;
         child_conf.advanced.prune_noise = NGX_CONF_UNSET;
         child_conf.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
         child_conf.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
@@ -1398,7 +1314,6 @@ test_memory_budget_priority_chain(void)
         child_conf.max_size = 5 * 1024 * 1024;
         child_conf.limits.conversion_memory = 5 * 1024 * 1024;
         child_conf.stream.budget = NGX_CONF_UNSET_SIZE;
-        child_conf.stream.budget_explicit = 0;
         child_conf.advanced.prune_noise = NGX_CONF_UNSET;
         child_conf.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
         child_conf.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
@@ -1593,7 +1508,6 @@ main(void)
     test_dynconf_owner_uses_merged_config();
     test_dynconf_block_mask_propagates_from_parent();
     test_merge_conf_double_unset();
-    test_stream_budget_explicit_maps_to_stream();
     test_stream_preserves_explicit_defaults();
     test_name_helpers_and_levels();
     test_name_helpers_unknown_branches();

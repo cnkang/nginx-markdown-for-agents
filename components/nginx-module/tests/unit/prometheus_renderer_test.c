@@ -30,7 +30,6 @@ typedef struct {
     ngx_atomic_uint_t decompression_streaming_total;
     ngx_atomic_uint_t decompression_fullbuffer_total;
     ngx_atomic_uint_t decompression_budget_exceeded_total;
-    ngx_atomic_uint_t zero_copy_output_total;
     ngx_atomic_uint_t copied_output_total;
     struct {
         ngx_atomic_uint_t current;
@@ -374,7 +373,6 @@ test_known_values(void)
     s.perf.decompression_streaming_total = 12;
     s.perf.decompression_fullbuffer_total = 8;
     s.perf.decompression_budget_exceeded_total = 2;
-    s.perf.zero_copy_output_total = 50;
     s.perf.copied_output_total = 30;
 
     p = ngx_http_markdown_metrics_write_prometheus(
@@ -449,9 +447,6 @@ test_known_values(void)
         contains((char *) buf,
             "nginx_markdown_perf_decompression_budget_exceeded_total 2"),
         "perf decompression budget exceeded should be 2");
-    TEST_ASSERT(
-        contains((char *) buf, "nginx_markdown_zero_copy_output_total 50"),
-        "zero-copy output total should be 50");
     TEST_ASSERT(
         contains((char *) buf, "nginx_markdown_copied_output_total 30"),
         "copied output total should be 30");
@@ -548,7 +543,6 @@ test_help_and_type_lines(void)
         "nginx_markdown_decompression_streaming_total",
         "nginx_markdown_decompression_fullbuffer_total",
         "nginx_markdown_perf_decompression_budget_exceeded_total",
-        "nginx_markdown_zero_copy_output_total",
         "nginx_markdown_copied_output_total",
     };
 

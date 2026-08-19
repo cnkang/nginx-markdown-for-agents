@@ -162,9 +162,6 @@ ngx_http_markdown_merge_inherited_values(ngx_http_markdown_conf_t *conf,
     ngx_flag_t  conversion_memory_explicit;
     ngx_flag_t  parser_memory_explicit;
     ngx_flag_t  streaming_buffer_explicit;
-#ifdef MARKDOWN_STREAMING_ENABLED
-    ngx_flag_t  stream_budget_set;
-#endif
 
     max_size_set = (conf->max_size != NGX_CONF_UNSET_SIZE);
     conversion_timeout_explicit =
@@ -177,20 +174,11 @@ ngx_http_markdown_merge_inherited_values(ngx_http_markdown_conf_t *conf,
         (conf->limits.parser_memory != NGX_CONF_UNSET_SIZE);
     streaming_buffer_explicit =
         (conf->limits.streaming_buffer != NGX_CONF_UNSET_SIZE);
-#ifdef MARKDOWN_STREAMING_ENABLED
-    stream_budget_set =
-        (conf->limits.streaming_buffer != NGX_CONF_UNSET_SIZE);
-#endif
 
     ngx_http_markdown_merge_enabled(conf, prev);
     ngx_http_markdown_merge_core_values(conf, prev);
     ngx_http_markdown_merge_stream_values(conf, prev);
 
-#ifdef MARKDOWN_STREAMING_ENABLED
-    if (stream_budget_set) {
-        conf->stream.budget_explicit = 1;
-    }
-#endif
 
     ngx_http_markdown_merge_advanced_values(conf, prev);
 

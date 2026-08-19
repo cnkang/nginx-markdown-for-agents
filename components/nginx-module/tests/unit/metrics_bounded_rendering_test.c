@@ -271,7 +271,6 @@ typedef struct {
         ngx_atomic_t  decompression_streaming_total;
         ngx_atomic_t  decompression_fullbuffer_total;
         ngx_atomic_t  decompression_budget_exceeded_total;
-        ngx_atomic_t  zero_copy_output_total;
         ngx_atomic_t  copied_output_total;
     } perf;
 } ngx_http_markdown_metrics_t;
@@ -539,6 +538,7 @@ ngx_create_temp_buf(void *pool, size_t size)
 #define NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS  1
 #define NGX_HTTP_HEADERS 1
 #define NGINX_VERSION "1.26.3"
+#define NGX_HTTP_MARKDOWN_PRODUCT_VERSION "0.9.2"
 
 /* Keep the overflow injection local to this translation unit. */
 #define NGX_MAX_SIZE_T_VALUE ((size_t) 4096)

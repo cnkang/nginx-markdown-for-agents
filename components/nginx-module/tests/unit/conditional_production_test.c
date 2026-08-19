@@ -433,10 +433,10 @@ markdown_decomp_result_init(struct FFIDecompResult *result)
 uint32_t
 markdown_decompress_bounded(const uint8_t *input,
     uintptr_t input_len, uint8_t format,
-    uintptr_t budget, struct FFIDecompResult *result)
+    uintptr_t budget, uint64_t ratio, struct FFIDecompResult *result)
 {
     UNUSED(input); UNUSED(input_len); UNUSED(format);
-    UNUSED(budget); UNUSED(result);
+    UNUSED(budget); UNUSED(ratio); UNUSED(result);
     return 0;
 }
 

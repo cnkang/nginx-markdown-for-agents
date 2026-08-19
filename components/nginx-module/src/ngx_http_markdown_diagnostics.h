@@ -321,7 +321,6 @@ typedef struct {
     ngx_atomic_uint_t  pending_output;
     ngx_atomic_uint_t  streaming_requests_total;
     ngx_atomic_uint_t  precommit_failopen_total;
-    ngx_atomic_uint_t  zero_copy_output_total;
     ngx_atomic_uint_t  copied_output_total;
 #ifdef MARKDOWN_STREAMING_ENABLED
     /* Streaming metrics (streaming observability) */
