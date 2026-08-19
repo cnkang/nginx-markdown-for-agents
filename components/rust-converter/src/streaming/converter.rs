@@ -814,8 +814,7 @@ impl StreamingConverter {
                  * the strict check is deferred to the final input. */
                 if at_eof {
                     return Err(self.wrap_error(ConversionError::EncodingError(
-                        "Invalid UTF-8 in HTML input (no declared charset)"
-                            .to_string(),
+                        "Invalid UTF-8 in HTML input (no declared charset)".to_string(),
                     )));
                 }
                 let lossy_upper_bound = valid.len().checked_mul(3).ok_or_else(|| {
@@ -1736,10 +1735,7 @@ mod tests {
     /// Like `convert_with_splits`, but returns the error code instead of
     /// panicking, for fixtures that are invalid UTF-8 under the strict
     /// (fail-closed) contract.
-    fn convert_with_splits_result(
-        html: &[u8],
-        split_sizes: &[usize],
-    ) -> Result<(), u32> {
+    fn convert_with_splits_result(html: &[u8], split_sizes: &[usize]) -> Result<(), u32> {
         let mut conv = make_converter();
         let mut cursor = 0;
 
@@ -1748,8 +1744,7 @@ mod tests {
                 break;
             }
             let end = cursor.saturating_add(size).min(html.len());
-            conv.feed_chunk(&html[cursor..end])
-                .map_err(|e| e.code())?;
+            conv.feed_chunk(&html[cursor..end]).map_err(|e| e.code())?;
             cursor = end;
         }
 

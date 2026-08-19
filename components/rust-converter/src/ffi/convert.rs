@@ -205,7 +205,11 @@ pub(crate) fn convert_inner(
     // and the check could never fire — the intent is to bound
     // pre-parse work (budget estimation, upstream delay) within the
     // parser sub-limit too.
-    check_deadline(deadlines.parser, conversion_start, ConversionError::ParseTimeout)?;
+    check_deadline(
+        deadlines.parser,
+        conversion_start,
+        ConversionError::ParseTimeout,
+    )?;
     check_deadline(
         deadlines.overall,
         conversion_start,
