@@ -454,12 +454,14 @@ def _read_matrix_json(path: Path) -> dict:
             f"Invalid matrix structure in {path}: missing 'matrix' or 'entries' key"
         )
     try:
-        if "entries" in data:
+        if _is_canonical_document(data):
             # Canonical documents are validated with the field-optional
             # path so generated rows (which intentionally carry no
             # support_tier until projection) can be read back and
             # retained by _supported_dynamic_entry.  Legacy 'matrix'
-            # documents keep the strict field-required validation.
+            # documents — and documents containing BOTH 'entries' and
+            # 'matrix' — keep the strict legacy validation path, matching
+            # the shape _matrix_entry_list uses for projection.
             raw_entries = data["entries"]
             if not isinstance(raw_entries, list):
                 _matrix_error(
