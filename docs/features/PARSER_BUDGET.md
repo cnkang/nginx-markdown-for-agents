@@ -96,13 +96,19 @@ has no interruption mechanism, limiting input size bounds the worst-case parse t
 
 - **Default**: 32 MiB
 - **Enforcement**:
-  - **Streaming path**: The `MemoryBudget` struct tracks allocations across
-    pipeline stages (state stack, output buffer, charset sniff, lookahead).
-    The struct checks each allocation against stage-specific and total limits.
-    Exceeding any limit returns `ConversionError::BudgetExceeded`.
-  - **Full-buffer path**: Enforced as a pre-check on input size (since
-    html5ever's DOM tree size is roughly proportional to input size, the
-    input size limit serves as a proxy for memory budget).
+  - **Streaming path**: The converter enforces a conservative modeled
+    resident-working-set ceiling at allocation preflight and parser
+    checkpoints. The estimate includes retained `Vec`/`String` capacities,
+    tokenizer reservations, state-machine and emitter storage, metadata,
+    charset buffers, and incomplete UTF-8 tails. It is a bounded contract
+    estimate, not an exact process-RSS measurement; html5ever does not expose
+    allocator accounting. Exceeding it returns
+    `ConversionError::ParseBudgetExceeded`.
+  - **Full-buffer path**: Enforced before parsing with a conservative estimate
+    derived from input bytes, tag openers, transcoding, parser scratch, and
+    DOM amplification. This path cannot observe html5ever's internal
+    allocations during `parse_document`, so it fails closed before parsing
+    when the estimate exceeds the configured budget.
 - **Error code**: `ERROR_PARSE_BUDGET_EXCEEDED` (11)
 - **Reason code**: `PARSE_BUDGET_EXCEEDED`
 - **Fail-open behavior**: Pass-through original content
@@ -120,8 +126,10 @@ sub-budgets:
 | `charset_sniff` | 1024 B | Charset detection scan buffer |
 | `lookahead` | 64 KiB | Front-matter / head metadata buffering |
 
-When `parser_memory` is set, the streaming budget scales proportionally
-via `MemoryBudget::for_total(budget)`.
+The separate streaming pipeline budget is still built with
+`MemoryBudget::for_total(...)` from the effective `conversion_memory` and
+`streaming_buffer` limits. `parser_memory` is an independent modeled
+parser-working-set ceiling; it does not accumulate all bytes ever received.
 
 ### 2.3 Parse Timeout (Cooperative Checkpoints)
 
@@ -315,8 +323,8 @@ Additional notes:
 |-------|--------|------|-------------------|
 | Input size (`markdown_limits conversion_memory=`) | ✅ Implemented | Both | C body filter pre-check |
 | Parse timeout (`markdown_limits parser_timeout=`) | ✅ Implemented | Both | Cooperative checkpoints in Rust |
-| Parser memory budget (`markdown_limits parser_memory=`) | ✅ Implemented | Streaming | `MemoryBudget` stage checks |
-| Parser memory budget (full-buffer) | ✅ Implemented | Full-buffer | Input size proxy pre-check |
+| Parser memory budget (`markdown_limits parser_memory=`) | ✅ Implemented | Streaming | Modeled working-set checkpoints |
+| Parser memory budget (full-buffer) | ✅ Implemented | Full-buffer | Conservative pre-parse estimate |
 | Depth limit (explicit directive) | ⏳ Planned | — | Future: configurable max nesting |
 | Node-count limit (explicit directive) | ⏳ Planned | — | Future: configurable max nodes |
 | Mid-parse cooperative cancellation | ❌ Not feasible | — | html5ever lacks abort mechanism |

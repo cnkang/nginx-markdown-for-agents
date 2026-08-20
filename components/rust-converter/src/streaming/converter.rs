@@ -134,13 +134,10 @@ pub struct StreamingConverter {
     /// multibyte characters split across chunk boundaries are preserved.
     utf8_tail: Vec<u8>,
     /// Parser memory budget in bytes (0 = unlimited).
-    /// Tracks cumulative input bytes fed to the converter and rejects when
-    /// the total exceeds this limit. Uses input size as a proxy for parser
-    /// memory pressure (matching the full-buffer path). Populated from the
-    /// `markdown_limits parser_memory=` limit via FFI.
+    /// Limits the conservative resident working-set estimate used by the
+    /// streaming parser. Populated from the `markdown_limits parser_memory=`
+    /// limit via FFI.
     parser_budget: u64,
-    /// Cumulative input bytes fed to the converter (for parser budget enforcement).
-    cumulative_input_bytes: u64,
     /// Whether a leading UTF-8 BOM (U+FEFF) has been checked/stripped from the
     /// first chunk.  The full-buffer path uses html5ever's `discard_bom: true`
     /// to strip a BOM at stream start; the streaming path sets `discard_bom:
@@ -258,7 +255,6 @@ impl StreamingConverter {
             head_bytes_seen: 0,
             utf8_tail: Vec::new(),
             parser_budget: 0,
-            cumulative_input_bytes: 0,
             bom_stripped: false,
             charset_transcoded_bytes: 0,
             charset_preflight_error: None,
@@ -347,20 +343,24 @@ impl StreamingConverter {
         self.emitter.set_flush_threshold(threshold);
     }
 
-    /// Set the parser memory budget (cumulative input byte ceiling).
+    /// Set the parser memory budget (modeled resident working-set ceiling).
     ///
-    /// When non-zero, the converter tracks cumulative input bytes across all
-    /// `feed_chunk` calls. If the total exceeds this budget, `feed_chunk`
-    /// returns [`ConversionError::ParseBudgetExceeded`]. A value of 0 (the
-    /// default) disables this enforcement.
+    /// When non-zero, the converter checks its conservative resident working
+    /// set at allocation preflight and parser checkpoints. If the estimate
+    /// exceeds this budget, `feed_chunk` or `finalize` returns
+    /// [`ConversionError::ParseBudgetExceeded`]. A value of 0 (the default)
+    /// disables this enforcement.
     ///
-    /// This mirrors the full-buffer path's pre-check where input size is used
-    /// as a proxy for parser memory pressure (html5ever does not expose
-    /// internal memory tracking).
+    /// The estimate charges retained capacities and reservations for the
+    /// tokenizer, state machine, emitter, metadata, charset buffers, and
+    /// incomplete UTF-8 tails. It is a conservative contract estimate, not a
+    /// claim about exact process RSS; html5ever does not expose allocator
+    /// accounting.
     ///
     /// # Arguments
     ///
-    /// * `budget` - Maximum cumulative input bytes allowed, or 0 for unlimited.
+    /// * `budget` - Maximum modeled working-set bytes allowed, or 0 for
+    ///   unlimited.
     ///
     /// # Examples
     ///
@@ -411,23 +411,6 @@ impl StreamingConverter {
             return Err(self.wrap_error(error));
         }
 
-        // 1b. Parser budget enforcement (cumulative input size limit).
-        // Track cumulative input bytes and reject when the total exceeds
-        // the configured parser_budget. Uses input size as a proxy for
-        // parser memory pressure (matching the full-buffer path).
-        if self.parser_budget > 0 {
-            self.cumulative_input_bytes = self
-                .cumulative_input_bytes
-                .saturating_add(data.len() as u64);
-            if self.cumulative_input_bytes > self.parser_budget {
-                let err = ConversionError::ParseBudgetExceeded {
-                    used: self.cumulative_input_bytes as usize,
-                    limit: self.parser_budget as usize,
-                };
-                return Err(self.wrap_error(err));
-            }
-        }
-
         // Noise-region pruning is supported at the
         // streaming tokenizer level via should_prune_with_config().
         // The pre-commit fallback is no longer needed when pruning
@@ -456,6 +439,14 @@ impl StreamingConverter {
                 self.charset_preflight_error = Some(error.clone());
                 return Err(self.wrap_error(error));
             }
+            if let Err(error) =
+                self.check_parser_budget(current_working_set.saturating_add(charset_allocation))
+            {
+                self.charset_preflight_error = Some(error.clone());
+                return Err(self.wrap_error(error));
+            }
+        } else if let Err(error) = self.check_parser_budget(self.estimate_working_set()) {
+            return Err(self.wrap_error(error));
         }
 
         let transcoded = self
@@ -471,6 +462,9 @@ impl StreamingConverter {
             std::borrow::Cow::Borrowed(_) => 0,
             std::borrow::Cow::Owned(v) => v.capacity(),
         };
+
+        self.check_parser_budget(self.estimate_working_set())
+            .map_err(|error| self.wrap_error(error))?;
 
         // If charset is still pending (accumulating sniff buffer), no tokens yet
         if transcoded.is_empty() {
@@ -567,6 +561,12 @@ impl StreamingConverter {
             if let Err(error) = self
                 .budget
                 .check_total(current_working_set, flush_allocation)
+            {
+                self.charset_preflight_error = Some(error.clone());
+                return Err(self.wrap_error(error));
+            }
+            if let Err(error) =
+                self.check_parser_budget(current_working_set.saturating_add(flush_allocation))
             {
                 self.charset_preflight_error = Some(error.clone());
                 return Err(self.wrap_error(error));
@@ -1146,9 +1146,29 @@ impl StreamingConverter {
         let working_set = self.estimate_working_set();
         self.stats.peak_memory_estimate = self.stats.peak_memory_estimate.max(working_set);
 
+        self.check_parser_budget(working_set)?;
+
         // Enforce budget.total: the working set must not exceed the
         // declared total-memory cap.
         self.budget.check_total(0, working_set)?;
+        Ok(())
+    }
+
+    /// Enforce the configured parser-memory contract against the modeled
+    /// resident working set.
+    fn check_parser_budget(&self, working_set: usize) -> Result<(), ConversionError> {
+        if self.parser_budget == 0 {
+            return Ok(());
+        }
+
+        let limit = usize::try_from(self.parser_budget).unwrap_or(usize::MAX);
+        if working_set > limit {
+            return Err(ConversionError::ParseBudgetExceeded {
+                used: working_set,
+                limit,
+            });
+        }
+
         Ok(())
     }
 
@@ -3656,19 +3676,20 @@ mod tests {
         assert!(matches!(err, ConversionError::PostCommitError { .. }));
     }
 
-    /// Parser budget enforcement: when the cumulative input bytes exceed
+    /// Parser budget enforcement: when the modeled working set exceeds
     /// parser_budget, feed_chunk must return ParseBudgetExceeded (code 11).
     #[test]
     fn test_parser_budget_exceeded() {
         let mut conv = make_converter();
-        conv.set_parser_budget(50); // very small budget
+        let working_set = conv.estimate_working_set();
+        assert!(working_set > 0);
+        conv.set_parser_budget((working_set - 1) as u64);
 
-        // Feed more than 50 bytes total
-        let chunk = b"<p>Hello world, this is a paragraph that exceeds the parser budget.</p>";
+        let chunk = b"<p>small input</p>";
         let result = conv.feed_chunk(chunk);
         assert!(
             result.is_err(),
-            "feed_chunk should fail when parser budget exceeded"
+            "feed_chunk should fail when the resident working set exceeds the parser budget"
         );
         let err = result.unwrap_err();
         assert_eq!(
@@ -3690,29 +3711,18 @@ mod tests {
         assert!(result.is_ok(), "parser_budget=0 should not limit input");
     }
 
-    /// Parser budget enforcement: cumulative tracking across multiple
-    /// feed_chunk calls.
+    /// Parser budget enforcement: cumulative input is not itself a parser
+    /// memory breach when the modeled resident working set remains bounded.
     #[test]
-    fn test_parser_budget_cumulative_across_chunks() {
+    fn test_parser_budget_allows_bounded_cumulative_input() {
         let mut conv = make_converter();
-        conv.set_parser_budget(100); // 100 byte budget
+        let budget = conv.estimate_working_set().saturating_add(32 * 1024);
+        conv.set_parser_budget(budget as u64);
 
-        // First chunk: within budget (must not produce output to stay pre-commit)
-        let chunk1 = b"<head><title>Small</title></head>";
-        let r1 = conv.feed_chunk(chunk1);
-        assert!(r1.is_ok(), "First chunk within budget should succeed");
-
-        // Second chunk: pushes total over 100 bytes (still pre-commit)
-        let chunk2 =
-            b"<body><p>Second chunk of data that exceeds the cumulative budget limit here.</p>";
-        let r2 = conv.feed_chunk(chunk2);
-        assert!(
-            r2.is_err(),
-            "Second chunk should exceed cumulative parser budget"
-        );
-        let err = r2.unwrap_err();
-        // In pre-commit state, the raw ParseBudgetExceeded error is returned
-        assert_eq!(err.code(), 11);
+        for _ in 0..2_000 {
+            conv.feed_chunk(b"<p>bounded chunk</p>")
+                .expect("bounded working set should not charge cumulative input");
+        }
     }
 
     /// Parser budget enforcement: when exceeded post-commit, the error is
@@ -3720,18 +3730,19 @@ mod tests {
     #[test]
     fn test_parser_budget_exceeded_post_commit() {
         let mut conv = make_converter();
-        conv.set_parser_budget(200); // budget large enough for first chunks
+        let budget = conv.estimate_working_set().saturating_add(1024);
+        conv.set_parser_budget(budget as u64);
 
         // Feed enough to produce output (transition to post-commit)
         let chunk1 = b"<h1>Title</h1><p>Paragraph one.</p>";
         let r1 = conv.feed_chunk(chunk1);
         assert!(r1.is_ok(), "First chunk should succeed");
 
-        // Feed more to push past budget in post-commit state
-        let chunk2_data = vec![b'x'; 200];
+        // Keep an unclosed block resident until the modeled working set
+        // exceeds the parser budget. This must be reported post-commit.
+        let chunk2_data = vec![b'x'; 16 * 1024];
         let mut chunk2 = b"<p>".to_vec();
         chunk2.extend_from_slice(&chunk2_data);
-        chunk2.extend_from_slice(b"</p>");
         let r2 = conv.feed_chunk(&chunk2);
         assert!(
             r2.is_err(),
