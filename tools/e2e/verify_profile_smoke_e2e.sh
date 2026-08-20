@@ -301,29 +301,41 @@ for path in /strict/diagnostics /balanced/diagnostics /streaming/diagnostics; do
     assert_diag_field "${path}" configuration.effective.error_policy pass
 done
 
-# Every explicitly configured replacement setting must surface in the
-# effective configuration for each profile.
-assert_diag_field /strict/diagnostics configuration.effective.cache_validation full
-assert_diag_field /strict/diagnostics configuration.effective.streaming off
-assert_diag_field /strict/diagnostics configuration.effective.conversion_memory 134217728
-assert_diag_field /strict/diagnostics configuration.effective.conversion_timeout 10000
-assert_diag_field /strict/diagnostics configuration.effective.parser_timeout 10000
-assert_diag_field /strict/diagnostics configuration.effective.max_inflight 32
+# Static (non-dynconf) settings are represented by the location-specific
+# static digest. The effective object intentionally contains only the five
+# dynconf-mutable fields asserted above.
+assert_static_digest() {
+    local path="$1" actual
+    if actual="$(extract_diag_field "${path}" configuration.static_digest)"; then
+        if [[ "${actual}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            pass "${path} configuration.static_digest has sha256 shape"
+            STATIC_DIGEST="${actual}"
+            return 0
+        fi
+    else
+        fail "${path} configuration.static_digest: diagnostics parse failed"
+        return 1
+    fi
 
-assert_diag_field /balanced/diagnostics configuration.effective.cache_validation ims_only
-assert_diag_field /balanced/diagnostics configuration.effective.streaming auto
-assert_diag_field /balanced/diagnostics configuration.effective.conversion_memory 67108864
-assert_diag_field /balanced/diagnostics configuration.effective.conversion_timeout 30000
-assert_diag_field /balanced/diagnostics configuration.effective.parser_timeout 10000
-assert_diag_field /balanced/diagnostics configuration.effective.max_inflight 64
+    fail "${path} configuration.static_digest: invalid digest ${actual}"
+    return 1
+}
 
-assert_diag_field /streaming/diagnostics configuration.effective.accept wildcard
-assert_diag_field /streaming/diagnostics configuration.effective.cache_validation off
-assert_diag_field /streaming/diagnostics configuration.effective.streaming force
-assert_diag_field /streaming/diagnostics configuration.effective.conversion_memory 268435456
-assert_diag_field /streaming/diagnostics configuration.effective.conversion_timeout 30000
-assert_diag_field /streaming/diagnostics configuration.effective.parser_timeout 10000
-assert_diag_field /streaming/diagnostics configuration.effective.max_inflight 128
+STATIC_DIGEST=""
+assert_static_digest /strict/diagnostics
+strict_static_digest="${STATIC_DIGEST}"
+assert_static_digest /balanced/diagnostics
+balanced_static_digest="${STATIC_DIGEST}"
+assert_static_digest /streaming/diagnostics
+streaming_static_digest="${STATIC_DIGEST}"
+
+if [[ "${strict_static_digest}" != "${balanced_static_digest}" &&
+    "${strict_static_digest}" != "${streaming_static_digest}" &&
+    "${balanced_static_digest}" != "${streaming_static_digest}" ]]; then
+    pass "static configuration digest distinguishes explicit locations"
+else
+    fail "static configuration digest does not distinguish explicit locations"
+fi
 
 if "${NGINX_EXECUTABLE}" -p "${RUNTIME}" \
     -c conf/invalid-strict-streaming.conf -t >/dev/null 2>&1; then
