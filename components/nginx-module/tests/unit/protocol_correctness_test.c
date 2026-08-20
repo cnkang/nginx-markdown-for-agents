@@ -937,7 +937,9 @@ test_304_response_properties(void)
      * by e2e tests instead:
      * - Status: 304 (NGX_HTTP_NOT_MODIFIED)
      * - Body: absent (send_304 finalizes without body)
-     * - Cache-Control: preserved from upstream (send_304 does not modify)
+     * - Cache-Control: authenticated responses are normalized through the
+     *   shared auth helper before send_304 sends headers; no-store remains
+     *   preserved. The auth-cache e2e covers this production-only branch.
      * - Last-Modified: REMOVED by send_304 (Decision G: the converted
      *   representation's weak validator must not describe the source
      *   HTML mtime; ETag is the sole validator) — see conditional.c
