@@ -836,6 +836,65 @@ test_tiny_chunks_do_not_amplify_request_pool(void)
 }
 
 
+/*
+ * Regression: the configured expansion ratio applies to small compressed
+ * inputs and is accumulated across the complete response rather than reset
+ * for each feed call.  The fixture is intentionally described by its size
+ * and compression type; no attack payload is embedded in the test output.
+ */
+static void
+test_ratio_limit_applies_to_small_stream(void)
+{
+    u_char                              *compressed;
+    size_t                               compressed_len;
+    test_pool_t                          tp;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+    ngx_http_markdown_decomp_failure_origin_e origin;
+    u_char                              *out;
+    size_t                               out_len;
+    ngx_int_t                            rc;
+    u_char                              text[1024];
+
+    TEST_SUBSECTION("small streaming inputs enforce decompression ratio");
+
+    compressed = NULL;
+    test_pool_reset(&tp);
+    memset(text, 'A', sizeof(text));
+    rc = compress_payload(text, sizeof(text),
+                          NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
+                          &compressed, &compressed_len);
+    TEST_ASSERT(rc == NGX_OK, "ratio fixture compression should succeed");
+    TEST_ASSERT(compressed_len < 256,
+        "ratio fixture should remain below the historical threshold");
+
+    origin = NGX_HTTP_MD_DECOMP_ORIGIN_NONE;
+    decomp = ngx_http_markdown_streaming_decomp_create_with_origin(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
+        sizeof(text) * 10, 1, NULL,
+        NGX_HTTP_MARKDOWN_BROTLI_WORKSPACE_LIMIT, &test_log, &origin);
+    TEST_ASSERT(decomp != NULL, "ratio decompressor should be created");
+
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, compressed, compressed_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_RATIO_EXCEEDED,
+        "small stream must return the ratio-exceeded classification");
+    TEST_ASSERT(out == NULL && out_len == 0,
+        "ratio-exceeded feed must not expose partial output");
+    TEST_ASSERT(decomp->total_compressed == compressed_len,
+        "raw compressed bytes must be counted before decoding");
+    TEST_ASSERT(decomp->total_decompressed == 0,
+        "rejected output must not advance decompressed accounting");
+
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+    free(compressed);
+    TEST_PASS("small streaming input enforces ratio limit");
+}
+
+
 /* Forward declaration: defined after the #ifdef NGX_HTTP_BROTLI block. */
 static void test_pool_run_cleanups(test_pool_t *tp);
 
@@ -5373,6 +5432,7 @@ main(void)
     test_brotli_truncation_detection_property();
 #endif
     test_tiny_chunks_do_not_amplify_request_pool();
+    test_ratio_limit_applies_to_small_stream();
     test_budget_and_invalid_type_branches();
     test_truncated_finish_errors();
     test_malformed_zlib_formats_are_classified();

@@ -139,10 +139,9 @@ pub fn decompress_bounded(
 /// Read from a decoder into a budget-limited buffer.
 ///
 /// Returns the filled buffer on success, or an appropriate `DecompError`
-/// if the budget is exceeded or an I/O error occurs.  When `ratio` is
-/// non-zero and the compressed input is at least
-/// [`RATIO_ACTIVATION_THRESHOLD`] bytes, the decompressed output is also
-/// capped at `input_len * ratio`; exceeding that ceiling is classified as
+/// if the budget is exceeded or an I/O error occurs. When `ratio` is
+/// non-zero, every non-empty compressed input is also capped at
+/// `input_len * ratio`; exceeding that ceiling is classified as
 /// `RatioExceeded` (distinct from the absolute-budget `BudgetExceeded`),
 /// matching the multi-layer chain decoder semantics.
 fn read_bounded<R: Read>(
@@ -155,9 +154,8 @@ fn read_bounded<R: Read>(
     let chunk_size = 8192.min(budget.saturating_add(1));
     let mut buf = vec![0u8; chunk_size];
 
-    /* Ratio ceiling: only activates above the fixed activation threshold,
-     * mirroring encoding.rs RATIO_ACTIVATION_THRESHOLD (256 bytes). */
-    let ratio_cap = if ratio > 0 && input_len >= crate::encoding::RATIO_ACTIVATION_THRESHOLD {
+    /* Ratio ceiling applies to every non-empty compressed input. */
+    let ratio_cap = if ratio > 0 && input_len > 0 {
         usize::try_from((input_len as u64).saturating_mul(ratio)).unwrap_or(usize::MAX)
     } else {
         usize::MAX
@@ -401,11 +399,9 @@ fn append_deflate_output(
     if needed > budget {
         return Err(DecompError::BudgetExceeded);
     }
-    /* Ratio ceiling mirrors read_bounded: activates only above the fixed
-     * activation threshold and classifies as RatioExceeded, keeping the
-     * operator-configured limit meaningful on the deflate single-layer
-     * path. */
-    if ratio > 0 && input_len >= crate::encoding::RATIO_ACTIVATION_THRESHOLD {
+    /* Ratio ceiling mirrors read_bounded and applies to every non-empty
+     * compressed input on the deflate single-layer path. */
+    if ratio > 0 && input_len > 0 {
         let ratio_cap =
             usize::try_from((input_len as u64).saturating_mul(ratio)).unwrap_or(usize::MAX);
         if needed > ratio_cap {
@@ -422,11 +418,7 @@ fn append_deflate_output(
 }
 
 /// Decompress brotli data with budget enforcement.
-fn decompress_brotli(
-    input: &[u8],
-    budget: usize,
-    ratio: u64,
-) -> Result<DecompResult, DecompError> {
+fn decompress_brotli(input: &[u8], budget: usize, ratio: u64) -> Result<DecompResult, DecompError> {
     if input.is_empty() {
         return Err(DecompError::TruncatedInput(
             "empty input for brotli decompression".to_string(),
@@ -514,7 +506,8 @@ mod tests {
         let mut compressed = gzip_compress(first);
         compressed.extend_from_slice(&gzip_compress(second));
 
-        let result = decompress_bounded(&compressed, Format::Gzip, first.len() + second.len() - 1, 0);
+        let result =
+            decompress_bounded(&compressed, Format::Gzip, first.len() + second.len() - 1, 0);
 
         assert_eq!(result.unwrap_err(), DecompError::BudgetExceeded);
     }
@@ -621,15 +614,15 @@ mod tests {
     fn gzip_ratio_exceeded_above_threshold() {
         /* A wire body that expands far beyond input_len * ratio must be
          * rejected as RatioExceeded on the single-layer path, matching the
-         * multi-layer chain semantics (input >= 256 bytes activates the
-         * ceiling; ratio 2 caps output at 2x input).  Use near-incompressible
-         * bytes so the compressed wire body stays above the activation
-         * threshold while the decompressed output far exceeds 2x. */
+         * multi-layer chain semantics (ratio 2 caps output at 2x input).
+         * Use near-incompressible bytes so the compressed wire body stays
+         * above the legacy fixture threshold while the decompressed output
+         * far exceeds 2x. */
         let original: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
         let compressed = gzip_compress(&original);
         assert!(
             compressed.len() >= crate::encoding::RATIO_ACTIVATION_THRESHOLD,
-            "fixture must exceed the ratio activation threshold (compressed={})",
+            "fixture must exceed the legacy fixture threshold (compressed={})",
             compressed.len()
         );
         let result = decompress_bounded(&compressed, Format::Gzip, 10 * 1024 * 1024, 2);
@@ -645,7 +638,7 @@ mod tests {
         let compressed = deflate_compress(&original);
         assert!(
             compressed.len() >= crate::encoding::RATIO_ACTIVATION_THRESHOLD,
-            "fixture must exceed the ratio activation threshold (compressed={})",
+            "fixture must exceed the legacy fixture threshold (compressed={})",
             compressed.len()
         );
         let result = decompress_bounded(&compressed, Format::Deflate, 10 * 1024 * 1024, 2);
@@ -661,7 +654,7 @@ mod tests {
         let compressed = brotli_compress(&original);
         assert!(
             compressed.len() >= crate::encoding::RATIO_ACTIVATION_THRESHOLD,
-            "fixture must exceed the ratio activation threshold (compressed={})",
+            "fixture must exceed the legacy fixture threshold (compressed={})",
             compressed.len()
         );
         let result = decompress_bounded(&compressed, Format::Brotli, 10 * 1024 * 1024, 2);
@@ -672,17 +665,13 @@ mod tests {
     }
 
     #[test]
-    fn ratio_exempt_below_threshold() {
-        /* Inputs below the 256-byte activation threshold are not subject to
-         * the ratio ceiling (mirrors encoding.rs semantics). */
+    fn ratio_enforced_for_small_input() {
+        /* Inputs below the historical threshold are still subject to the
+         * ratio ceiling. */
         let original = vec![b'T'; 100];
         let compressed = gzip_compress(&original);
         let result = decompress_bounded(&compressed, Format::Gzip, 10 * 1024, 2);
-        assert!(
-            result.is_ok(),
-            "below-threshold input must pass ratio check"
-        );
-        assert_eq!(result.unwrap().output, original);
+        assert_eq!(result.unwrap_err(), DecompError::RatioExceeded);
     }
 
     #[test]

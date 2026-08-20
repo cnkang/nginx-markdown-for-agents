@@ -92,8 +92,9 @@ fn build_payload(kind: u8, src: &[u8], layers: &[Encoding]) -> (Vec<u8>, Option<
         4 => {
             /* Expansion bomb: highly repetitive data whose decoded size
              * always exceeds MAX_OUTPUT (budget path) while its compressed
-             * representation stays above RATIO_ACTIVATION_THRESHOLD (ratio
-             * path), so the single-layer case exercises both limits. */
+             * representation stays above the historical
+             * RATIO_ACTIVATION_THRESHOLD fixture value, so the single-layer
+             * case exercises both limits. */
             let size = MAX_OUTPUT
                 + u32::from_le_bytes([
                     src.first().copied().unwrap_or(0),
