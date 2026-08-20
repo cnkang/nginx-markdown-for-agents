@@ -41,6 +41,26 @@ pub enum StructuralContext {
     Table,
 }
 
+impl StructuralContext {
+    /// Estimated heap bytes retained by this context's variable-sized payloads.
+    ///
+    /// Fixed-size variants (unit variants, `u8`/`u32` scalars, and a `None`
+    /// code-language) retain no heap storage beyond the enum slot itself.
+    /// String-backed variants account for the capacity of each owned String,
+    /// which is the actual heap allocation retained for the lifetime of the
+    /// context.  The fixed enum-slot overhead is charged separately by the
+    /// caller so the total estimate never under-counts retained state.
+    pub fn retained_heap_bytes(&self) -> usize {
+        match self {
+            StructuralContext::CodeBlock(Some(lang)) => lang.capacity(),
+            StructuralContext::CodeBlock(None) => 0,
+            StructuralContext::Link(href) => href.capacity(),
+            StructuralContext::Image { src, alt } => src.capacity().saturating_add(alt.capacity()),
+            _ => 0,
+        }
+    }
+}
+
 /// Action produced by the state machine for the emitter.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StateMachineAction {
@@ -106,7 +126,9 @@ impl StructuralStateMachine {
     /// Create a StructuralStateMachine with a maximum stack depth derived from `budget`.
     ///
     /// The `state_stack` byte allowance from `MemoryBudget` is enforced using
-    /// an estimated 64 bytes per `StructuralContext` stack entry.
+    /// an estimated 64 bytes per `StructuralContext` stack slot plus the
+    /// retained heap bytes of each context's variable-sized String payloads
+    /// (link hrefs, image src/alt text, and code-language identifiers).
     ///
     /// # Examples
     ///
@@ -444,8 +466,11 @@ impl StructuralStateMachine {
     ///
     /// If pushing another entry would exceed `budget.state_stack`, this returns
     /// `ConversionError::BudgetExceeded` with `stage` set to `"state_stack"` and
-    /// `used`/`limit` reporting the estimated bytes consumed and allowed (each
-    /// stack slot is accounted as 64 bytes).
+    /// `used`/`limit` reporting the estimated bytes consumed and allowed.
+    /// Each stack slot is accounted as its fixed enum-slot overhead plus the
+    /// retained heap bytes of its variable-sized String payloads, so retained
+    /// link hrefs, image src/alt text, and code-language identifiers count
+    /// against the state-stack budget.
     ///
     /// # Examples
     ///
@@ -454,8 +479,10 @@ impl StructuralStateMachine {
     /// let _ = machine.push_context(StructuralContext::Paragraph);
     /// ```
     fn push_context(&mut self, ctx: StructuralContext) -> Result<(), ConversionError> {
-        let current_stack_bytes = self.stack.len().saturating_mul(64);
-        self.budget.check_state_stack(current_stack_bytes, 64)?;
+        let slot_bytes = 64usize.saturating_add(ctx.retained_heap_bytes());
+        let current_stack_bytes = self.stack_bytes_estimate();
+        self.budget
+            .check_state_stack(current_stack_bytes, slot_bytes)?;
         self.stack.push(ctx);
         Ok(())
     }
@@ -626,9 +653,15 @@ impl StructuralStateMachine {
     }
 
     /// Estimated bytes consumed by the state stack (for working set tracking).
+    ///
+    /// Includes the fixed enum-slot overhead plus the retained heap bytes of
+    /// every variable-sized String payload currently on the stack, so the
+    /// estimate never omits input-derived retained state.
     pub fn stack_bytes_estimate(&self) -> usize {
-        // Each StructuralContext is roughly 64 bytes.
-        self.stack.len().saturating_mul(64)
+        self.stack
+            .iter()
+            .map(|ctx| 64usize.saturating_add(ctx.retained_heap_bytes()))
+            .fold(0usize, |acc, bytes| acc.saturating_add(bytes))
     }
 }
 
@@ -1096,6 +1129,84 @@ mod tests {
         sm.process_event(&start_tag("strong")).unwrap();
         let err = sm.process_event(&start_tag("em")).unwrap_err();
         assert_eq!(err.code(), 6);
+    }
+
+    /// Regression (F5): retained link href Strings must count against the
+    /// state-stack budget, not a fixed 64-byte slot charge.
+    #[test]
+    fn test_link_href_retained_bytes_count_against_state_stack() {
+        // state_stack of 64 KiB allows 1024 fixed slots; a 16 KiB href plus
+        // slot overhead must consume most of the allowance for a single entry.
+        let budget = MemoryBudget {
+            state_stack: 64 * 1024,
+            ..MemoryBudget::default()
+        };
+        let mut sm = StructuralStateMachine::new(&budget);
+
+        let big_href = "x".repeat(16 * 1024);
+        sm.process_event(&start_tag_with_attrs("a", vec![("href", &big_href)]))
+            .unwrap();
+        let estimate = sm.stack_bytes_estimate();
+        // 64-byte slot + 16 KiB retained href.
+        assert!(
+            estimate >= 16 * 1024,
+            "stack estimate must include the retained href bytes, got {estimate}"
+        );
+    }
+
+    /// Regression (F5): a stack of many large-href link contexts must be
+    /// rejected once the retained payloads exceed the state-stack budget.
+    #[test]
+    fn test_many_large_href_links_exceed_state_stack_budget() {
+        let budget = MemoryBudget {
+            state_stack: 64 * 1024,
+            ..MemoryBudget::default()
+        };
+        let mut sm = StructuralStateMachine::new(&budget);
+
+        let href = "y".repeat(8 * 1024);
+        let mut pushed = 0usize;
+        let mut exceeded = false;
+        while pushed < 256 {
+            match sm.process_event(&start_tag_with_attrs("a", vec![("href", &href)])) {
+                Ok(_) => pushed += 1,
+                Err(err) => {
+                    assert_eq!(err.code(), 6); // BudgetExceeded
+                    exceeded = true;
+                    break;
+                }
+            }
+        }
+        assert!(exceeded, "large-href link stack must exceed the budget");
+        // 8 KiB * 8 pushes = 64 KiB: budget must trip well before 256 pushes.
+        assert!(pushed < 32, "budget tripped too late: pushed {pushed}");
+    }
+
+    /// Regression (F5): image src/alt retained bytes must be included when an
+    /// image context is pushed through the stack estimate path.
+    #[test]
+    fn test_image_src_alt_retained_bytes_count_in_estimate() {
+        // Image contexts are emitted immediately for void <img>, so exercise
+        // the estimate directly through a pushed Image-bearing path is not
+        // available; instead verify retained_heap_bytes on the variant.
+        let img = StructuralContext::Image {
+            src: "s".repeat(2048),
+            alt: "a".repeat(1024),
+        };
+        assert!(img.retained_heap_bytes() >= 3072);
+    }
+
+    /// Regression (F5): retained_heap_bytes must be zero for fixed-size
+    /// contexts and include capacity for String-backed ones.
+    #[test]
+    fn test_retained_heap_bytes_variant_matrix() {
+        assert_eq!(StructuralContext::Paragraph.retained_heap_bytes(), 0);
+        assert_eq!(StructuralContext::Heading(1).retained_heap_bytes(), 0);
+        assert_eq!(StructuralContext::CodeBlock(None).retained_heap_bytes(), 0);
+        let lang = "rust".to_string();
+        assert!(StructuralContext::CodeBlock(Some(lang)).retained_heap_bytes() >= 4);
+        let href = "https://example.com".to_string();
+        assert!(StructuralContext::Link(href).retained_heap_bytes() >= 19);
     }
 
     #[test]
