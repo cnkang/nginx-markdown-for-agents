@@ -200,6 +200,7 @@ def validate_schema(data: dict[str, Any]) -> list[str]:
         "nginx_version", "nginx_channel", "os", "libc", "arch",
         "artifact_type", "test_level", "support_tier",
         "release_blocking", "owner_workflow",
+        "feature_manifest_digest", "abi_version",
     }
     valid_tiers = {"supported", "experimental", "best-effort", "unsupported"}
     valid_channels = {"stable", "mainline", "oldstable"}
