@@ -3114,40 +3114,6 @@ ngx_http_markdown_streaming_track_feed_budget(
         }
     }
 
-    /*
-     * Parser budget enforcement (cumulative input size limit).
-     *
-     * Use cumulative input bytes as a proxy for parser memory
-     * pressure — matching the full-buffer path which rejects when
-     * input_size > parser_memory_budget (html5ever does not expose
-     * internal memory tracking).
-     *
-     * parser_budget == 0 means unlimited (no enforcement).
-     */
-    if (conf->decompress.parser_budget > 0
-        && ctx->streaming.total_input_bytes
-           > conf->decompress.parser_budget)
-    {
-        ngx_log_error(NGX_LOG_WARN,
-            r->connection->log, 0,
-            "markdown: parser budget "
-            "exceeded, total=%uz, budget=%uz",
-            ctx->streaming.total_input_bytes,
-            conf->decompress.parser_budget);
-
-        if (ctx->streaming.commit_state
-            == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
-        {
-            return
-                ngx_http_markdown_streaming_handle_postcommit_error(
-                    r, ctx, conf,
-                    ERROR_PARSE_BUDGET_EXCEEDED);
-        }
-
-        return ngx_http_markdown_streaming_precommit_error(
-            r, ctx, conf, ERROR_PARSE_BUDGET_EXCEEDED);
-    }
-
     if (ctx->streaming.commit_state
         == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE
         && ctx->streaming.prebuffer_initialized)
@@ -3175,7 +3141,7 @@ ngx_http_markdown_streaming_track_feed_budget(
  *
  * Steps:
  * 1. Decompress (if needed)
- * 2. Track cumulative input size (size limit check)
+ * 2. Track cumulative input size (conversion-memory limit check)
  * 3. Save to prebuffer (Pre-Commit only)
  * 4. Feed to Rust streaming engine
  * 5. Handle output / errors based on commit state
