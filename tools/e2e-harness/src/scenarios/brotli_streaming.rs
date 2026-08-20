@@ -16,12 +16,15 @@ const SMALL_END: &str = "BROTLI_SMALL_STREAM_END";
 const LARGE_END: &str = "BROTLI_LARGE_STREAM_END";
 const PRESSURE_END: &str = "BROTLI_PRESSURE_STREAM_END";
 const SLOW_READER_BUFFER_SIZE: usize = 16 * 1024;
+const PRESSURE_PARAGRAPHS: usize = 20_000;
 
 /// Return deterministic Brotli upstream routes for this scenario.
 pub fn fixture_spec(listen_port: u16) -> FixtureSpec {
     let small = html_document("Brotli Small", SMALL_END, 1);
     let large = html_document("Brotli Large", LARGE_END, 10_000);
-    let pressure = html_document("Brotli Pressure", PRESSURE_END, 150_000);
+    // Keep the fixture below the configured 10,000:1 ratio ceiling while
+    // retaining enough output to exercise a slow-reader backpressure path.
+    let pressure = html_document("Brotli Pressure", PRESSURE_END, PRESSURE_PARAGRAPHS);
     FixtureSpec {
         listen_port: Some(listen_port),
         routes: vec![
