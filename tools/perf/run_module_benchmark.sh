@@ -616,7 +616,7 @@ http {
             # conversion and backpressure rather than ratio rejection.
             markdown_limits conversion_memory=64m parser_memory=64m
                 conversion_timeout=2s parser_timeout=2s streaming_buffer=16m
-                decompression_ratio=1000 max_inflight=64;
+                decompression_ratio=2000 max_inflight=64;
             $profile_directives
         }
 
