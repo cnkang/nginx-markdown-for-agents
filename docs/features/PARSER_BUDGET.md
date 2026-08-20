@@ -101,7 +101,7 @@ has no interruption mechanism, limiting input size bounds the worst-case parse t
     checkpoints. The estimate includes retained `Vec`/`String` capacities,
     tokenizer reservations, state-machine and emitter storage, metadata,
     charset buffers, and incomplete UTF-8 tails. It is a bounded contract
-    estimate, not an exact process-RSS measurement; html5ever does not expose
+    estimate, not an exact process-RSS measurement. html5ever does not expose
     allocator accounting. Exceeding it returns
     `ConversionError::ParseBudgetExceeded`.
   - **Full-buffer path**: Enforced before parsing with a conservative estimate
@@ -129,7 +129,7 @@ sub-budgets:
 The separate streaming pipeline budget is still built with
 `MemoryBudget::for_total(...)` from the effective `conversion_memory` and
 `streaming_buffer` limits. `parser_memory` is an independent modeled
-parser-working-set ceiling; it does not accumulate all bytes ever received.
+parser-working-set ceiling. It does not accumulate all bytes ever received.
 
 ### 2.3 Parse Timeout (Cooperative Checkpoints)
 
