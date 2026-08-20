@@ -87,6 +87,8 @@ cd "$ARTIFACT_DIR"
 DEB_COUNT=0
 RPM_COUNT=0
 TARBALL_COUNT=0
+INSTALLER_COUNT=0
+RELEASE_KEY_COUNT=0
 MANIFEST_FILE=""
 ALL_FILES=()
 
@@ -121,6 +123,12 @@ while IFS= read -r -d '' f; do
         *.tar.gz)
             TARBALL_COUNT=$((TARBALL_COUNT + 1))
             ;;
+        nginx-markdown-for-agents-installer-*.sh)
+            INSTALLER_COUNT=$((INSTALLER_COUNT + 1))
+            ;;
+        nginx-markdown-for-agents-release.asc)
+            RELEASE_KEY_COUNT=$((RELEASE_KEY_COUNT + 1))
+            ;;
         release-manifest.json)
             MANIFEST_FILE="$name"
             ;;
@@ -131,6 +139,8 @@ while IFS= read -r -d '' f; do
     append_sorted_file "$name"
 done < <(find . -type f \( \
     -name '*.deb' -o -name '*.rpm' -o -name '*.tar.gz' \
+    -o -name 'nginx-markdown-for-agents-installer-*.sh' \
+    -o -name 'nginx-markdown-for-agents-release.asc' \
     -o -name 'release-manifest.json' \
     \) -print0)
 
@@ -148,7 +158,7 @@ for artifact in "${ALL_FILES[@]}"; do
     fi
 done
 
-info "Found ${DEB_COUNT} .deb, ${RPM_COUNT} .rpm, ${TARBALL_COUNT} .tar.gz, and manifest=${MANIFEST_FILE:-none}"
+info "Found ${DEB_COUNT} .deb, ${RPM_COUNT} .rpm, ${TARBALL_COUNT} .tar.gz, ${INSTALLER_COUNT} installer, ${RELEASE_KEY_COUNT} release key, and manifest=${MANIFEST_FILE:-none}"
 
 ##############################################################################
 # Generate SHA256SUMS

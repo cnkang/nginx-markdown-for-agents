@@ -35,11 +35,30 @@ This guide covers every supported installation method. Methods range from a sing
 
 ## 2. Shortest Success Path
 
-For a system with NGINX already installed (official build), four commands get you to a verified conversion:
+For a system with NGINX already installed (official build), the following
+release-bound sequence downloads and authenticates the installer before any
+privileged execution, then verifies both Markdown and HTML responses:
 
 ```bash
-# Step 1: Install the module (auto-detects version, downloads binary, wires config)
-curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
+# Step 1: Download and authenticate the versioned release installer
+RELEASE_TAG=v0.9.2
+RELEASE_BASE="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"
+INSTALLER="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"
+curl -fsSLo "${INSTALLER}" "${RELEASE_BASE}/${INSTALLER}"
+curl -fsSLo SHA256SUMS "${RELEASE_BASE}/SHA256SUMS"
+curl -fsSLo SHA256SUMS.asc "${RELEASE_BASE}/SHA256SUMS.asc"
+curl -fsSLo nginx-markdown-for-agents-release.asc \
+  "${RELEASE_BASE}/nginx-markdown-for-agents-release.asc"
+TRUSTED_FINGERPRINT=15C792438EAA762B421E60D21E8D41E7D19A8A75
+GNUPGHOME="$(mktemp -d)"
+trap 'rm -rf "$GNUPGHOME"' EXIT
+gpg --batch --homedir "$GNUPGHOME" --import nginx-markdown-for-agents-release.asc
+VALIDSIG="$(gpg --batch --homedir "$GNUPGHOME" --status-fd=1 \
+  --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
+  | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
+[[ "$VALIDSIG" == "$TRUSTED_FINGERPRINT" ]] || exit 1
+grep -E "  ${INSTALLER}$" SHA256SUMS | sha256sum -c -
+sudo env VERSION="${RELEASE_TAG}" bash "${INSTALLER}"
 
 # Step 2: Reload NGINX
 sudo nginx -t && sudo nginx -s reload
@@ -99,15 +118,16 @@ The install script (`tools/install.sh`) is the recommended installation method f
 
 ### Usage
 
-```bash
-curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
-```
+Use the authenticated release-bound sequence in [Shortest Success Path](#2-shortest-success-path), setting `RELEASE_TAG` to the exact published tag.
 
 Optional safety switch for NGINX-upgrade scenarios with stale module snippets:
 
 ```bash
-AUTO_DISABLE_STALE_MODULE=1 curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
+AUTO_DISABLE_STALE_MODULE=1 sudo env VERSION="${RELEASE_TAG}" bash "${INSTALLER}"
 ```
+
+Run the optional command only after the release-bound download, signature, and
+installer checksum steps above have passed.
 
 The script requires `sudo` (root privileges) to write the module binary and modify NGINX configuration files.
 By default, the installer requires a release-signed `SHA256SUMS` manifest and refuses artifacts whose signature, key, manifest entry, or digest verification is unavailable.
@@ -1060,10 +1080,8 @@ The `load_module` directive is missing from `nginx.conf`, or the path to the `.s
    fi
    ```
    If `MODULES_PATH` is empty, resolve the path first (see the error message above) before continuing with the steps below.
-2. If the file is missing, re-run the install script:
-   ```bash
-   curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
-   ```
+2. If the file is missing, repeat the authenticated release-bound sequence in
+   [Shortest Success Path](#2-shortest-success-path).
 3. If the file exists, confirm the `load_module` directive is present at the top of `nginx.conf` (before the `http {}` block):
    ```bash
    # If your NGINX uses a custom --conf-path, replace /etc/nginx/nginx.conf accordingly
@@ -1129,14 +1147,11 @@ still enabled in config.
    # or comment out the load_module line in that file.
    sudo nginx -t
    ```
-6. Re-run installer only after cleanup:
-   ```bash
-   curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
-   ```
-7. For automated cleanup during reinstall, you can enable:
-   ```bash
-   AUTO_DISABLE_STALE_MODULE=1 curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
-   ```
+6. Re-run the installer only after cleanup, using the authenticated
+   release-bound sequence in [Shortest Success Path](#2-shortest-success-path).
+7. For automated cleanup during reinstall, set
+   `AUTO_DISABLE_STALE_MODULE=1` on the verified installer invocation from
+   [Primary: Install Script](#4-primary-install-script).
    This mode renames matched loader snippets to `*.disabled` before exiting with
    `version_mismatch` when no prebuilt binary exists for your exact NGINX version.
 
@@ -1217,10 +1232,9 @@ The user installed a glibc-linked binary on a musl-based system (for example Alp
    If `MODULES_PATH` is empty, resolve the path first (see the error message above) before continuing with the steps below.
    - **glibc**: output references `libc.so.6` and `/lib/x86_64-linux-gnu/` (or similar)
    - **musl**: output references `ld-musl-*.so.1` or shows "statically linked"
-4. Re-run the install script — it auto-detects the libc type from `nginx -V` metadata:
-   ```bash
-   curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
-   ```
+4. Re-run the install script — it auto-detects the libc type from `nginx -V`
+   metadata. Use the authenticated release-bound sequence in [Shortest
+   Success Path](#2-shortest-success-path).
 5. If the auto-detection fails, build from source using the [Manual Source Build](#6-secondary-manual-source-build) instructions to ensure native libc linkage.
 
 ---
@@ -1298,10 +1312,8 @@ The SHA-256 hash of the downloaded binary does not match the expected checksum f
 
 **Resolution Steps:**
 
-1. Remove the cached download and retry:
-   ```bash
-   curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
-   ```
+1. Remove the cached download and repeat the authenticated release-bound
+   sequence in [Shortest Success Path](#2-shortest-success-path).
 2. If the failure persists, manually verify the checksum.
    Use manual download only for troubleshooting. Prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
@@ -1433,10 +1445,11 @@ The upstream server sends a compressed response (gzip, brotli, or deflate). The 
 
 ### Bare-Metal Linux (glibc)
 
-This is the standard path. The install script runs with `sudo` and auto-detects the glibc environment. No special considerations.
+This is the standard path. The install script runs with `sudo` and auto-detects the glibc environment. Use the authenticated release-bound sequence in [Shortest Success Path](#2-shortest-success-path). Do not execute a mutable branch copy.
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
+# After completing the authenticated release-bound download and verification:
+sudo env VERSION="${RELEASE_TAG}" bash "${INSTALLER}"
 ```
 
 ### Alpine Linux (musl)

@@ -3,8 +3,10 @@ set -euo pipefail
 
 # NGINX Markdown for Agents Install Script
 # Usage:
-#   curl -fsSLo /tmp/nginx-markdown-install.sh https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh
-#   sudo bash /tmp/nginx-markdown-install.sh
+#   VERSION=v0.9.2
+#   curl -fsSLo /tmp/nginx-markdown-installer.sh \
+#     https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${VERSION}/nginx-markdown-for-agents-installer-${VERSION}.sh
+#   sudo env VERSION="${VERSION}" bash /tmp/nginx-markdown-installer.sh
 # OR (if using specific release version):
 #   VERSION=v0.9.2 sudo -E bash /tmp/nginx-markdown-install.sh
 # OR (in Docker, skip root check):
@@ -29,6 +31,21 @@ MIN_SUPPORTED_NGINX_VERSION="1.24.0"
 SOURCE_BUILD_URL="https://github.com/cnkang/nginx-markdown-for-agents/tree/main/docs/guides/INSTALLATION.md#6-secondary-manual-source-build"
 SUPPORTED_ARCHITECTURES="x86_64, aarch64"
 readonly SED_STRIP_LEADING_ZEROS='s/^0*//'
+readonly TRUSTED_COMMAND_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/homebrew/sbin:/opt/homebrew/bin"
+readonly TRUSTED_COMMAND_ROOTS=(
+  /usr/local/sbin
+  /usr/local/bin
+  /usr/sbin
+  /usr/bin
+  /sbin
+  /bin
+  /opt/homebrew/sbin
+  /opt/homebrew/bin
+  /opt/homebrew/opt
+  /opt/homebrew/Cellar
+  /usr/local/opt
+  /usr/local/Cellar
+)
 readonly CATEGORY_FILESYSTEM="filesystem"
 readonly MSG_CHECK_PERMS_DISK="check filesystem permissions and disk space"
 readonly MSG_CHECK_PERMS_TMP_DISK="check temporary directory permissions and disk space"
@@ -52,6 +69,41 @@ _json_error_category=""
 _json_error_message=""
 _json_available_versions=""
 _json_suggestions=()
+
+# Every external executable used by the installer is resolved once from a
+# fixed system PATH and then invoked by its absolute path.  This prevents a
+# hostile caller-controlled PATH from redirecting a root installation to a
+# wrapper or symlink in a writable directory.
+AWK_BIN=""
+BASENAME_BIN=""
+CAT_BIN=""
+CHMOD_BIN=""
+CP_BIN=""
+CURL_BIN=""
+CUT_BIN=""
+DIRNAME_BIN=""
+FIND_BIN=""
+GREP_BIN=""
+HEAD_BIN=""
+LDD_BIN=""
+MKDIR_BIN=""
+MKTEMP_BIN=""
+MV_BIN=""
+PYTHON3_BIN=""
+RM_BIN=""
+SED_BIN=""
+SH_BIN=""
+STAT_BIN=""
+TAR_BIN=""
+TR_BIN=""
+UNAME_BIN=""
+XARGS_BIN=""
+GPG_BIN=""
+JQ_BIN=""
+FILE_BIN=""
+SHA256SUM_BIN=""
+SHASUM_BIN=""
+OPENSSL_BIN=""
 
 # --- Structured error helpers ---
 
@@ -90,24 +142,24 @@ json_output() {
   local json_arch="${_json_arch}"
 
   # Prefer jq for correct escaping and structure when available
-  if command -v jq >/dev/null 2>&1; then
+  if [[ -n "$JQ_BIN" ]]; then
     local jq_error="null"
     if [[ -n "$_json_error_category" ]]; then
-      jq_error="$(jq -cn --arg cat "$_json_error_category" --arg msg "$_json_error_message" \
+      jq_error="$("$JQ_BIN" -cn --arg cat "$_json_error_category" --arg msg "$_json_error_message" \
         '{category: $cat, message: $msg}')"
     fi
 
     local jq_suggestions="[]"
     if [[ "${#_json_suggestions[@]}" -gt 0 ]]; then
-      jq_suggestions="$(printf '%s\0' "${_json_suggestions[@]}" | jq -Rsc 'split("\u0000") | .[:-1]')"
+      jq_suggestions="$(printf '%s\0' "${_json_suggestions[@]}" | "$JQ_BIN" -Rsc 'split("\u0000") | .[:-1]')"
     fi
 
     local jq_versions="[]"
     if [[ -n "$_json_available_versions" ]]; then
-      jq_versions="$(printf '%s\n' "$_json_available_versions" | tr ' ' '\n' | jq -Rsc 'split("\n") | map(select(length > 0))')"
+      jq_versions="$(printf '%s\n' "$_json_available_versions" | "$TR_BIN" ' ' '\n' | "$JQ_BIN" -Rsc 'split("\n") | map(select(length > 0))')"
     fi
 
-    jq -cn \
+    "$JQ_BIN" -cn \
       --argjson success "$json_success" \
       --arg nginx_version "$json_nginx_version" \
       --arg os_type "$json_os_type" \
@@ -208,12 +260,12 @@ semver_lt() {
   # octal interpretation; sed removes leading zeros then falls
   # back to 0 for empty strings.  This avoids the 10# prefix
   # which SonarCloud's shell parser cannot handle.
-  l1=$(echo "$l1" | sed "$SED_STRIP_LEADING_ZEROS"); l1=${l1:-0}
-  l2=$(echo "$l2" | sed "$SED_STRIP_LEADING_ZEROS"); l2=${l2:-0}
-  l3=$(echo "$l3" | sed "$SED_STRIP_LEADING_ZEROS"); l3=${l3:-0}
-  r1=$(echo "$r1" | sed "$SED_STRIP_LEADING_ZEROS"); r1=${r1:-0}
-  r2=$(echo "$r2" | sed "$SED_STRIP_LEADING_ZEROS"); r2=${r2:-0}
-  r3=$(echo "$r3" | sed "$SED_STRIP_LEADING_ZEROS"); r3=${r3:-0}
+  l1=$(printf '%s\n' "$l1" | "$SED_BIN" "$SED_STRIP_LEADING_ZEROS"); l1=${l1:-0}
+  l2=$(printf '%s\n' "$l2" | "$SED_BIN" "$SED_STRIP_LEADING_ZEROS"); l2=${l2:-0}
+  l3=$(printf '%s\n' "$l3" | "$SED_BIN" "$SED_STRIP_LEADING_ZEROS"); l3=${l3:-0}
+  r1=$(printf '%s\n' "$r1" | "$SED_BIN" "$SED_STRIP_LEADING_ZEROS"); r1=${r1:-0}
+  r2=$(printf '%s\n' "$r2" | "$SED_BIN" "$SED_STRIP_LEADING_ZEROS"); r2=${r2:-0}
+  r3=$(printf '%s\n' "$r3" | "$SED_BIN" "$SED_STRIP_LEADING_ZEROS"); r3=${r3:-0}
 
   if ((l1 < r1)); then
     return 0
@@ -247,18 +299,18 @@ semver_lt() {
 sha256_file() {
   local file="$1"
 
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$file" | awk '{print $1}'
+  if [[ -n "$SHA256SUM_BIN" ]]; then
+    "$SHA256SUM_BIN" "$file" | "$AWK_BIN" '{print $1}'
     return 0
   fi
 
-  if command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$file" | awk '{print $1}'
+  if [[ -n "$SHASUM_BIN" ]]; then
+    "$SHASUM_BIN" -a 256 "$file" | "$AWK_BIN" '{print $1}'
     return 0
   fi
 
-  if command -v openssl >/dev/null 2>&1; then
-    openssl dgst -sha256 "$file" | awk '{print $2}'
+  if [[ -n "$OPENSSL_BIN" ]]; then
+    "$OPENSSL_BIN" dgst -sha256 "$file" | "$AWK_BIN" '{print $2}'
     return 0
   fi
 
@@ -303,6 +355,8 @@ canonicalize_path() {
   local file=""
   local target=""
   local i=0
+  local basename_bin="${BASENAME_BIN:-/usr/bin/basename}"
+  local dirname_bin="${DIRNAME_BIN:-/usr/bin/dirname}"
 
   if [[ -z "$path" ]]; then
     return 1
@@ -311,16 +365,16 @@ canonicalize_path() {
     path="$(pwd)/$path"
   fi
 
-  dir="$(cd "$(/usr/bin/dirname "$path")" 2>/dev/null && pwd -P)" || dir="$(/usr/bin/dirname "$path")"
-  file="$(/usr/bin/basename "$path")"
+  dir="$(cd "$("$dirname_bin" "$path")" 2>/dev/null && pwd -P)" || dir="$("$dirname_bin" "$path")"
+  file="$("$basename_bin" "$path")"
 
   while [[ -L "$dir/$file" ]] && [[ $i -lt 40 ]]; do
     target="$(/usr/bin/readlink "$dir/$file" 2>/dev/null)" || break
     if [[ "$target" != /* ]]; then
       target="$dir/$target"
     fi
-    dir="$(cd "$(/usr/bin/dirname "$target")" 2>/dev/null && pwd -P)" || dir="$(/usr/bin/dirname "$target")"
-    file="$(/usr/bin/basename "$target")"
+    dir="$(cd "$("$dirname_bin" "$target")" 2>/dev/null && pwd -P)" || dir="$("$dirname_bin" "$target")"
+    file="$("$basename_bin" "$target")"
     i=$((i + 1))
   done
 
@@ -355,13 +409,15 @@ is_trusted_nginx_path() {
 # stat_owner prints the numeric owner of a file using the host's stat syntax.
 stat_owner() {
   local path="$1"
-  case "$(/usr/bin/uname -s 2>/dev/null)" in
+  local uname_bin="${UNAME_BIN:-/usr/bin/uname}"
+  local stat_bin="${STAT_BIN:-/usr/bin/stat}"
+  case "$("$uname_bin" -s 2>/dev/null)" in
     Darwin)
-      /usr/bin/stat -f '%u' "$path"
+      "$stat_bin" -f '%u' "$path"
       return $?
       ;;
     *)
-      /usr/bin/stat -c '%u' "$path"
+      "$stat_bin" -c '%u' "$path"
       return $?
       ;;
   esac
@@ -371,13 +427,15 @@ stat_owner() {
 # syntax. A failed stat is propagated so privileged checks fail closed.
 stat_mode() {
   local path="$1"
-  case "$(/usr/bin/uname -s 2>/dev/null)" in
+  local uname_bin="${UNAME_BIN:-/usr/bin/uname}"
+  local stat_bin="${STAT_BIN:-/usr/bin/stat}"
+  case "$("$uname_bin" -s 2>/dev/null)" in
     Darwin)
-      /usr/bin/stat -f '%Lp' "$path"
+      "$stat_bin" -f '%Lp' "$path"
       return $?
       ;;
     *)
-      /usr/bin/stat -c '%a' "$path"
+      "$stat_bin" -c '%a' "$path"
       return $?
       ;;
   esac
@@ -404,6 +462,157 @@ is_secure_root_file() {
     return 0
   fi
   return 1
+}
+
+# is_trusted_command_path returns 0 when a command path is directly under one
+# of the fixed system executable roots.  The check is applied to both the
+# PATH candidate and its canonical target so a symlink in a writable location
+# cannot be used to bypass the allowlist.
+is_trusted_command_path() {
+  local path="$1"
+  local root=""
+
+  for root in "${TRUSTED_COMMAND_ROOTS[@]}"; do
+    case "$path" in
+      "$root"|"$root"/*)
+        return 0
+        ;;
+      *)
+        ;;
+    esac
+  done
+  return 1
+}
+
+# is_secure_root_path checks every existing component of an absolute path.
+# Checking only the final executable is insufficient: a non-root-writable
+# parent can replace a symlink or the executable between validation and use.
+is_secure_root_path() {
+  local path="$1"
+  local current="/"
+  local remainder=""
+  local component=""
+
+  [[ "$path" = /* ]] || return 1
+  remainder="${path#/}"
+  while [[ -n "$remainder" ]]; do
+    component="${remainder%%/*}"
+    if [[ "$remainder" == */* ]]; then
+      remainder="${remainder#*/}"
+    else
+      remainder=""
+    fi
+    [[ -n "$component" ]] || continue
+    current="${current%/}/${component}"
+    [[ -e "$current" ]] || return 1
+    is_secure_root_file "$current" || return 1
+  done
+  return 0
+}
+
+# resolve_trusted_executable resolves a command name using only the fixed
+# system PATH.  It prints a canonical absolute path and never executes the
+# candidate.  Root callers additionally require root-owned, non-writable path
+# components; non-root development runs still get the same allowlist and
+# canonical-target checks without requiring system ownership.
+resolve_trusted_executable() {
+  local name="$1"
+  local candidate=""
+  local resolved=""
+
+  [[ "$name" =~ ^[A-Za-z0-9._+-]+$ ]] || return 1
+  if ! candidate="$(PATH="$TRUSTED_COMMAND_PATH" command -v "$name" 2>/dev/null)"; then
+    return 1
+  fi
+  [[ "$candidate" = /* ]] || return 1
+  [[ "$(${BASENAME_BIN:-/usr/bin/basename} "$candidate")" = "$name" ]] || return 1
+  [[ -f "$candidate" ]] && [[ -x "$candidate" ]] || return 1
+
+  if ! resolved="$(canonicalize_path "$candidate")"; then
+    return 1
+  fi
+  [[ -f "$resolved" ]] && [[ -x "$resolved" ]] || return 1
+  is_trusted_command_path "$candidate" || return 1
+  is_trusted_command_path "$resolved" || return 1
+
+  if [[ "$EUID" -eq 0 ]]; then
+    is_secure_root_path "$candidate" || return 1
+    is_secure_root_path "$resolved" || return 1
+  fi
+
+  printf '%s\n' "$resolved"
+  return 0
+}
+
+# cache_required_executable stores one validated absolute path in the named
+# global variable.  Keeping this operation in one helper makes it difficult
+# for a newly added command to accidentally reintroduce bare PATH execution.
+cache_required_executable() {
+  local variable="$1"
+  local name="$2"
+  local resolved=""
+
+  if ! resolved="$(resolve_trusted_executable "$name")"; then
+    die_with_error "$CATEGORY_CONFIG" \
+      "Required executable is missing or untrusted: ${name}" \
+      "Install ${name} in a root-owned system executable directory." \
+      "Do not run the installer with a PATH entry pointing to a writable directory."
+  fi
+  printf -v "$variable" '%s' "$resolved"
+  return 0
+}
+
+# cache_optional_executable records an empty path when an optional utility is
+# unavailable.  Callers must branch on the cached value before invoking it.
+cache_optional_executable() {
+  local variable="$1"
+  local name="$2"
+  local resolved=""
+
+  if resolved="$(resolve_trusted_executable "$name")"; then
+    printf -v "$variable" '%s' "$resolved"
+  else
+    printf -v "$variable" '%s' ''
+  fi
+  return 0
+}
+
+# Resolve all utilities before any installer-controlled operation.  The
+# installer then invokes these absolute paths throughout the privileged path;
+# changing PATH after this point cannot redirect execution.
+cache_trusted_executables() {
+  cache_required_executable AWK_BIN awk
+  cache_required_executable BASENAME_BIN basename
+  cache_required_executable CAT_BIN cat
+  cache_required_executable CHMOD_BIN chmod
+  cache_required_executable CP_BIN cp
+  cache_required_executable CURL_BIN curl
+  cache_required_executable CUT_BIN cut
+  cache_required_executable DIRNAME_BIN dirname
+  cache_required_executable FIND_BIN find
+  cache_required_executable GREP_BIN grep
+  cache_required_executable HEAD_BIN head
+  cache_required_executable MKDIR_BIN mkdir
+  cache_required_executable MKTEMP_BIN mktemp
+  cache_required_executable MV_BIN mv
+  cache_required_executable RM_BIN rm
+  cache_required_executable SED_BIN sed
+  cache_required_executable SH_BIN sh
+  cache_required_executable STAT_BIN stat
+  cache_required_executable TAR_BIN tar
+  cache_required_executable TR_BIN tr
+  cache_required_executable UNAME_BIN uname
+  cache_required_executable XARGS_BIN xargs
+
+  cache_optional_executable FILE_BIN file
+  cache_optional_executable GPG_BIN gpg
+  cache_optional_executable JQ_BIN jq
+  cache_optional_executable LDD_BIN ldd
+  cache_optional_executable OPENSSL_BIN openssl
+  cache_optional_executable PYTHON3_BIN python3
+  cache_optional_executable SHA256SUM_BIN sha256sum
+  cache_optional_executable SHASUM_BIN shasum
+  return 0
 }
 
 # resolve_nginx_binary resolves and validates the nginx executable, storing the
@@ -440,7 +649,8 @@ resolve_nginx_binary() {
         "Set NGINX_BIN to the absolute path of a trusted nginx executable."
     fi
     if [[ "$EUID" -eq 0 ]]; then
-      if ! is_secure_root_file "$resolved"; then
+      if ! is_secure_root_path "$candidate" \
+        || ! is_secure_root_path "$resolved"; then
         die_with_error "$CATEGORY_CONFIG" \
           "NGINX_BIN is not root-owned and non-writable by group/other: ${resolved}" \
           "Set NGINX_BIN to the absolute path of a trusted nginx executable."
@@ -450,7 +660,7 @@ resolve_nginx_binary() {
     return 0
   fi
 
-  if ! candidate="$(command -v nginx 2>/dev/null)"; then
+  if ! candidate="$(resolve_trusted_executable nginx)"; then
     die_with_error "$CATEGORY_CONFIG" "nginx is not installed or not in PATH." \
       "Install NGINX first: https://nginx.org/en/linux_packages.html" \
       "Ensure the nginx binary is in your PATH."
@@ -470,7 +680,8 @@ resolve_nginx_binary() {
   fi
 
   if [[ "$EUID" -eq 0 ]]; then
-    if ! is_secure_root_file "$resolved"; then
+    if ! is_secure_root_path "$candidate" \
+      || ! is_secure_root_path "$resolved"; then
       die_with_error "$CATEGORY_CONFIG" \
         "Resolved nginx binary is not root-owned and non-writable by group/other: ${resolved}" \
         "Set NGINX_BIN to the absolute path of a trusted nginx executable."
@@ -507,7 +718,7 @@ verify_release_signature() {
   local validsig=""
   local expected_upper=""
 
-  if ! command -v gpg >/dev/null 2>&1; then
+  if [[ -z "$GPG_BIN" ]]; then
     _json_error_message="gpg is required to verify the release signature but was not found."
     return 1
   fi
@@ -517,23 +728,23 @@ verify_release_signature() {
     return 1
   fi
 
-  if ! gpg_home="$(mktemp -d)"; then
+  if ! gpg_home="$($MKTEMP_BIN -d)"; then
     _json_error_message="Failed to create a temporary gpg home directory."
     return 1
   fi
-  chmod 700 "$gpg_home" 2>/dev/null || true
+  "$CHMOD_BIN" 700 "$gpg_home" 2>/dev/null || true
 
-  if ! GNUPGHOME="$gpg_home" gpg --batch --import "$key_file" >/dev/null 2>&1; then
-    rm -rf "$gpg_home" || true
+  if ! GNUPGHOME="$gpg_home" "$GPG_BIN" --batch --import "$key_file" >/dev/null 2>&1; then
+    "$RM_BIN" -rf "$gpg_home" || true
     _json_error_message="Failed to import the trusted release signing key."
     return 1
   fi
 
-  verify_out="$(GNUPGHOME="$gpg_home" gpg --batch --status-fd=1 --verify "$signature" "$manifest" 2>/dev/null || true)"
-  rm -rf "$gpg_home" || true
+  verify_out="$(GNUPGHOME="$gpg_home" "$GPG_BIN" --batch --status-fd=1 --verify "$signature" "$manifest" 2>/dev/null || true)"
+  "$RM_BIN" -rf "$gpg_home" || true
 
-  validsig="$(printf '%s\n' "$verify_out" | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
-  expected_upper="$(printf '%s' "$expected_fpr" | tr '[:lower:]' '[:upper:]')"
+  validsig="$(printf '%s\n' "$verify_out" | "$AWK_BIN" '$2 == "VALIDSIG" { print toupper($3); exit }')"
+  expected_upper="$(printf '%s' "$expected_fpr" | "$TR_BIN" '[:lower:]' '[:upper:]')"
   if [[ -z "$validsig" ]]; then
     _json_error_message="Release signature verification failed; no valid signature was produced."
     return 1
@@ -562,7 +773,7 @@ verify_release_signature() {
 manifest_digest_for() {
   local asset_name="$1"
   local manifest_file="$2"
-  awk -v want="$asset_name" '
+  "$AWK_BIN" -v want="$asset_name" '
     ($2 == want || $2 == "*" want) {
       print tolower($1); found=1; exit
     }
@@ -591,7 +802,7 @@ fetch_release_json() {
     release_api="https://api.github.com/repos/${REPO}/releases/tags/${RELEASE_VERSION}"
   fi
 
-  if ! response="$(curl --proto '=https' --tlsv1.2 -fsSL -H 'Accept: application/vnd.github+json' "$release_api" 2>/dev/null)"; then
+  if ! response="$("$CURL_BIN" --proto '=https' --tlsv1.2 -fsSL -H 'Accept: application/vnd.github+json' "$release_api" 2>/dev/null)"; then
     return 1
   fi
   printf '%s\n' "$response"
@@ -603,7 +814,7 @@ fetch_dist_index_json() {
   local ref_name="$1"
   local dist_api="https://api.github.com/repos/${REPO}/contents/dist?ref=${ref_name}"
   local response=""
-  if ! response="$(curl --proto '=https' --tlsv1.2 -fsSL -H 'Accept: application/vnd.github+json' "$dist_api" 2>/dev/null)"; then
+  if ! response="$("$CURL_BIN" --proto '=https' --tlsv1.2 -fsSL -H 'Accept: application/vnd.github+json' "$dist_api" 2>/dev/null)"; then
     return 1
   fi
   printf '%s\n' "$response"
@@ -611,12 +822,12 @@ fetch_dist_index_json() {
 }
 
 # resolve_download_info determines the download URL, SHA-256 digest, available prebuilt nginx versions,
-# SHA256SUMS manifest URL, and SHA256SUMS.asc signature URL for a requested asset and prints them as
-# five newline-separated lines.
+# SHA256SUMS manifest URL, SHA256SUMS.asc signature URL, and release tag for a
+# requested asset and prints them as six newline-separated lines.
 # It accepts: asset_name, os_type, arch, nginx_version, ref_name, and optional release_json and dist_index_json (raw JSON strings).
-# Output: line 1 = download URL (empty if not found), line 2 = sha256 digest without any prefix (empty if not present), line 3 = space-separated sorted list of available versions, line 4 = SHA256SUMS manifest URL, line 5 = SHA256SUMS.asc signature URL.
+# Output: line 1 = download URL (empty if not found), line 2 = sha256 digest without any prefix (empty if not present), line 3 = space-separated sorted list of available versions, line 4 = SHA256SUMS manifest URL, line 5 = SHA256SUMS.asc signature URL, line 6 = immutable release tag.
 # If DOWNLOAD_URL_OVERRIDE is set, that URL, DOWNLOAD_SHA256, and empty manifest/signature URLs are printed immediately.
-# resolve_download_info discovers the download URL, SHA-256 digest (if present), available prebuilt versions, SHA256SUMS manifest URL, and SHA256SUMS.asc signature URL for the specified asset and prints them as five newline-separated lines (URL, digest, space-separated versions, manifest URL, signature URL); if DOWNLOAD_URL_OVERRIDE is set it prints that URL, DOWNLOAD_SHA256, and empty manifest/signature fields, and if python3 is unavailable it emits a structured config error and returns non-zero so the caller can fail once from the parent shell.
+# resolve_download_info discovers the download URL, SHA-256 digest (if present), available prebuilt versions, SHA256SUMS manifest URL, SHA256SUMS.asc signature URL, and immutable release tag for the specified asset and prints them as six newline-separated lines (URL, digest, space-separated versions, manifest URL, signature URL, release tag); if DOWNLOAD_URL_OVERRIDE is set it prints that URL, DOWNLOAD_SHA256, and empty manifest/signature/tag fields, and if python3 is unavailable it emits a structured config error and returns non-zero so the caller can fail once from the parent shell.
 resolve_download_info() {
   local asset_name="$1"
   local os_type="$2"
@@ -628,11 +839,11 @@ resolve_download_info() {
   local parse_result=""
 
   if [[ -n "$DOWNLOAD_URL_OVERRIDE" ]]; then
-    printf '%s\n%s\n%s\n%s\n%s\n' "$DOWNLOAD_URL_OVERRIDE" "$DOWNLOAD_SHA256" "" "" ""
+    printf '%s\n%s\n%s\n%s\n%s\n%s\n' "$DOWNLOAD_URL_OVERRIDE" "$DOWNLOAD_SHA256" "" "" "" ""
     return 0
   fi
 
-  if ! command -v python3 >/dev/null 2>&1; then
+  if [[ -z "$PYTHON3_BIN" ]]; then
     _json_error_category="$CATEGORY_CONFIG"
     _json_error_message="python3 is required by the installer but was not found."
     _json_suggestions=("Install python3: apt-get install python3 / apk add python3")
@@ -648,7 +859,7 @@ resolve_download_info() {
     NGINX_VERSION="$nginx_version" \
     REPO_NAME="$REPO" \
     REF_NAME="$ref_name" \
-    python3 - <<'PY'
+    "$PYTHON3_BIN" - <<'PY'
 import json
 import os
 import re
@@ -689,10 +900,12 @@ digest = ""
 versions = set()
 sha256sums_url = ""
 sha256sums_asc_url = ""
+release_tag = ""
 
 if release_json:
     try:
         release_data = json.loads(release_json)
+        release_tag = release_data.get("tag_name", "")
         assets = release_data.get("assets", [])
         for asset in assets:
             name = asset.get("name", "")
@@ -725,11 +938,10 @@ if dist_index_json:
                 if match:
                     version = match.group(1)
                     versions.add(version)
-                    if version == nginx_version and not url:
-                        url = (
-                            f"https://raw.githubusercontent.com/{repo_name}/{ref_name}"
-                            f"/dist/{name}/{asset_name}"
-                        )
+                    # The contents API is useful for listing available
+                    # versions, but it is not an authenticated release asset
+                    # source.  Keep URL resolution release-bound so a mutable
+                    # branch cannot become the installer trust anchor.
     except json.JSONDecodeError:
         pass
 
@@ -743,13 +955,14 @@ print(digest)
 print(" ".join(sorted_versions))
 print(sha256sums_url)
 print(sha256sums_asc_url)
+print(release_tag)
 PY
   )"
 
   if [[ -n "$parse_result" ]]; then
     printf '%s\n' "$parse_result"
   else
-    printf '\n\n\n\n\n'
+    printf '\n\n\n\n\n\n'
   fi
   return 0
 }
@@ -772,11 +985,11 @@ format_versions_by_series() {
     return 0
   fi
 
-  if ! command -v python3 >/dev/null 2>&1; then
+  if [[ -z "$PYTHON3_BIN" ]]; then
     return 0
   fi
 
-  python3 - "$versions" <<'PY'
+  "$PYTHON3_BIN" - "$versions" <<'PY'
 import sys
 
 raw = sys.argv[1] if len(sys.argv) > 1 else ""
@@ -821,17 +1034,18 @@ conf_tree_contains_pattern() {
   fi
 
   match_marker="$(
-    find "${search_dir}" -type f -name "${file_glob}" \
-      -exec sh -c '
-        pattern="$1"
-        shift
+      "$FIND_BIN" "${search_dir}" -type f -name "${file_glob}" \
+      -exec "$SH_BIN" -c '
+        grep_bin="$1"
+        pattern="$2"
+        shift 2
         for candidate do
-          if grep -Eq "$pattern" "$candidate"; then
+          if "$grep_bin" -Eq "$pattern" "$candidate"; then
             printf "%s\n" matched
             break
           fi
         done
-      ' _ "${pattern}" {} + 2>/dev/null
+      ' _ "$GREP_BIN" "${pattern}" {} + 2>/dev/null
   )"
   [[ -n "${match_marker}" ]]
 }
@@ -859,23 +1073,23 @@ collect_stale_module_suggestions() {
     return 0
   fi
 
-  if ! test_log="$(mktemp)"; then
+  if ! test_log="$($MKTEMP_BIN)"; then
     return 0
   fi
 
   if "$NGINX_BIN" -t >"$test_log" 2>&1; then
-    rm -f "$test_log" || true
+    "$RM_BIN" -f "$test_log" || true
     return 0
   fi
 
-  if grep -Eq "module \".*${module_so}\" version [0-9]+ instead of [0-9]+" "$test_log"; then
+  if "$GREP_BIN" -Eq "module \".*${module_so}\" version [0-9]+ instead of [0-9]+" "$test_log"; then
     hints+=("Detected an already-enabled stale ${module_so} that does not match current NGINX ABI.")
     hints+=("List loader snippets: sudo find ${nginx_conf_dir} -type f -name '${CONF_GLOB}' -exec grep -l '${module_so}' {} +")
     hints+=("Disable each matched snippet by renaming it to *.disabled (or comment out its load_module line), then run: sudo ${NGINX_BIN} -t")
     hints+=("After cleanup, build from source for this NGINX version: ${SOURCE_BUILD_URL}")
   fi
 
-  rm -f "$test_log" || true
+  "$RM_BIN" -f "$test_log" || true
   if [[ "${#hints[@]}" -gt 0 ]]; then
     local i=0
     while [[ $i -lt ${#hints[@]} ]]; do
@@ -909,15 +1123,15 @@ auto_disable_stale_module_loaders() {
     if [[ "$file" == *.disabled ]]; then
       continue
     fi
-    if mv "$file" "${file}.disabled"; then
+    if "$MV_BIN" "$file" "${file}.disabled"; then
       echo "[+] Disabled stale module snippet: ${file} -> ${file}.disabled"
       disabled_count=$((disabled_count + 1))
     else
       echo "[!] Failed to disable stale module snippet: ${file}" >&2
     fi
   done < <(
-    find "$nginx_conf_dir" -type f -name "$CONF_GLOB" -print0 2>/dev/null \
-      | xargs -0 grep -l "load_module .*${module_so}" 2>/dev/null || true
+    "$FIND_BIN" "$nginx_conf_dir" -type f -name "$CONF_GLOB" -print0 2>/dev/null \
+      | "$XARGS_BIN" -0 "$GREP_BIN" -l "load_module .*${module_so}" 2>/dev/null || true
   )
 
   if [[ "$disabled_count" -gt 0 ]]; then
@@ -944,7 +1158,7 @@ auto_disable_stale_module_loaders() {
 extract_configure_arg() {
   local key="$1"
   local nginx_v_output="$2"
-  printf '%s\n' "$nginx_v_output" | sed -n "s/.*--${key}=\\([^ ]*\\).*/\\1/p" | head -n1
+  printf '%s\n' "$nginx_v_output" | "$SED_BIN" -n "s/.*--${key}=\\([^ ]*\\).*/\\1/p" | "$HEAD_BIN" -n1
   return 0
 }
 
@@ -987,7 +1201,7 @@ resolve_include_dir() {
   local conf_dir="$2"
   local include_dir
 
-  include_dir="$(dirname "$include_pattern")"
+  include_dir="$("$DIRNAME_BIN" "$include_pattern")"
   if [[ "$include_dir" = "." ]]; then
     include_dir="$conf_dir"
   fi
@@ -1003,7 +1217,7 @@ resolve_include_dir() {
 backup_file_once() {
   local file="$1"
   local backup_file="${file}.bak.nginx-markdown-for-agents"
-  if [[ ! -f "$backup_file" ]] && ! cp "$file" "$backup_file"; then
+  if [[ ! -f "$backup_file" ]] && ! "$CP_BIN" "$file" "$backup_file"; then
     die_with_error "$CATEGORY_FILESYSTEM" \
       "Failed to create backup file: ${backup_file}" \
       "$MSG_CHECK_PERMS_DISK"
@@ -1016,20 +1230,20 @@ ensure_main_include_directive() {
   local conf_file="$1"
   local include_directive="$2"
 
-  if grep -Fq "$include_directive" "$conf_file"; then
+  if "$GREP_BIN" -Fq "$include_directive" "$conf_file"; then
     return 0
   fi
 
   backup_file_once "$conf_file"
 
   local tmp_file
-  if ! tmp_file="$(mktemp)"; then
+  if ! tmp_file="$("$MKTEMP_BIN")"; then
     die_with_error "$CATEGORY_FILESYSTEM" \
       "Failed to create a temporary file while updating ${conf_file}" \
       "$MSG_CHECK_PERMS_TMP_DISK"
   fi
 
-  if ! awk -v include_line="$include_directive" '
+  if ! "$AWK_BIN" -v include_line="$include_directive" '
     BEGIN { inserted = 0 }
     /^[[:space:]]*(events|http|stream|mail)[[:space:]]*\{/ && inserted == 0 {
       print include_line
@@ -1042,19 +1256,19 @@ ensure_main_include_directive() {
       }
     }
   ' "$conf_file" > "$tmp_file"; then
-    rm -f "$tmp_file" || true
+    "$RM_BIN" -f "$tmp_file" || true
     die_with_error "$CATEGORY_FILESYSTEM" \
       "Failed to update nginx config contents for ${conf_file}" \
       "$MSG_CHECK_PERMS_DISK"
   fi
 
-  if ! cat "$tmp_file" > "$conf_file"; then
-    rm -f "$tmp_file" || true
+  if ! "$CAT_BIN" "$tmp_file" > "$conf_file"; then
+    "$RM_BIN" -f "$tmp_file" || true
     die_with_error "$CATEGORY_FILESYSTEM" \
       "Failed to write updated nginx config: ${conf_file}" \
       "$MSG_CHECK_PERMS_DISK"
   fi
-  rm -f "$tmp_file" || true
+  "$RM_BIN" -f "$tmp_file" || true
   return 0
 }
 
@@ -1064,13 +1278,13 @@ insert_markdown_filter_into_http_block() {
   local conf_file="$1"
 
   local tmp_file
-  if ! tmp_file="$(mktemp)"; then
+  if ! tmp_file="$("$MKTEMP_BIN")"; then
     die_with_error "$CATEGORY_FILESYSTEM" \
       "Failed to create a temporary file while updating ${conf_file}" \
       "$MSG_CHECK_PERMS_TMP_DISK"
   fi
 
-  if ! awk '
+  if ! "$AWK_BIN" '
     BEGIN { inserted = 0 }
     /^[[:space:]]*http[[:space:]]*\{/ && inserted == 0 {
       print
@@ -1085,18 +1299,18 @@ insert_markdown_filter_into_http_block() {
       }
     }
   ' "$conf_file" > "$tmp_file"; then
-    rm -f "$tmp_file"
+    "$RM_BIN" -f "$tmp_file"
     return 1
   fi
 
   backup_file_once "$conf_file"
-  if ! cat "$tmp_file" > "$conf_file"; then
-    rm -f "$tmp_file" || true
+  if ! "$CAT_BIN" "$tmp_file" > "$conf_file"; then
+    "$RM_BIN" -f "$tmp_file" || true
     die_with_error "$CATEGORY_FILESYSTEM" \
       "Failed to write updated nginx config: ${conf_file}" \
       "$MSG_CHECK_PERMS_DISK"
   fi
-  rm -f "$tmp_file" || true
+  "$RM_BIN" -f "$tmp_file" || true
   return 0
 }
 
@@ -1119,10 +1333,13 @@ if [[ "${SKIP_ROOT_CHECK:-0}" != "1" ]] && [[ "$EUID" -ne 0 ]]; then
     "Or set SKIP_ROOT_CHECK=1 if running inside a container."
 fi
 
+cache_trusted_executables
+export PATH="$TRUSTED_COMMAND_PATH"
+
 # Detect Nginx runtime/build metadata using a validated nginx executable.
 resolve_nginx_binary
 NGINX_V_OUTPUT="$("$NGINX_BIN" -V 2>&1)"
-NGINX_VERSION="$(printf '%s\n' "$NGINX_V_OUTPUT" | grep -oE 'nginx/[0-9]+\.[0-9]+\.[0-9]+' | cut -d/ -f2)"
+NGINX_VERSION="$(printf '%s\n' "$NGINX_V_OUTPUT" | "$GREP_BIN" -oE 'nginx/[0-9]+\.[0-9]+\.[0-9]+' | "$CUT_BIN" -d/ -f2)"
 if [[ -z "$NGINX_VERSION" ]]; then
   die_with_error "$CATEGORY_CONFIG" "Could not determine NGINX version from '${NGINX_BIN} -V' output." \
     "Verify NGINX is installed correctly: ${NGINX_BIN} -V" \
@@ -1142,7 +1359,7 @@ NGINX_CONF_PATH="$(resolve_path_with_prefix "$NGINX_CONF_PATH_RAW" "$NGINX_PREFI
 if [[ -z "$NGINX_CONF_PATH" ]]; then
   NGINX_CONF_PATH="/etc/nginx/nginx.conf"
 fi
-NGINX_CONF_DIR="$(dirname "$NGINX_CONF_PATH")"
+NGINX_CONF_DIR="$("$DIRNAME_BIN" "$NGINX_CONF_PATH")"
 
 echo "[+] NGINX conf path: $NGINX_CONF_PATH"
 if [[ -n "$NGINX_MODULES_PATH_RAW" ]]; then
@@ -1158,7 +1375,7 @@ fi
 
 # Detect OS type (glibc vs musl)
 OS_TYPE="glibc"
-if command -v ldd >/dev/null 2>&1 && ldd /bin/sh 2>&1 | grep -iq musl; then
+if [[ -n "$LDD_BIN" ]] && "$LDD_BIN" /bin/sh 2>&1 | "$GREP_BIN" -iq musl; then
   OS_TYPE="musl"
 elif [[ -f /etc/alpine-release ]]; then
   OS_TYPE="musl"
@@ -1167,7 +1384,7 @@ echo "[+] Detected OS family: $OS_TYPE"
 _json_os_type="$OS_TYPE"
 
 # Detect Architecture
-ARCH="$(uname -m)"
+ARCH="$("$UNAME_BIN" -m)"
 if [[ "$ARCH" = "aarch64" ]] || [[ "$ARCH" = "arm64" ]]; then
   ARCH="aarch64"
 elif [[ "$ARCH" = "x86_64" ]] || [[ "$ARCH" = "amd64" ]]; then
@@ -1211,26 +1428,27 @@ ASSET_NAME="ngx_http_markdown_filter_module-${NGINX_VERSION}-${OS_TYPE}-${ARCH}.
 echo "----------------------------------------------------------------------------------"
 echo "Looking for binary: $ASSET_NAME"
 
-if ! RELEASE_INFO_FILE="$(mktemp)"; then
+if ! RELEASE_INFO_FILE="$("$MKTEMP_BIN")"; then
   die_with_error "$CATEGORY_FILESYSTEM" \
     "Failed to create a temporary file for release metadata." \
     "$MSG_CHECK_PERMS_TMP_DISK"
 fi
 
 if ! resolve_download_info "$ASSET_NAME" "$OS_TYPE" "$ARCH" "$NGINX_VERSION" "$source_ref" "$RELEASE_JSON" "$DIST_INDEX_JSON" > "$RELEASE_INFO_FILE"; then
-  rm -f "$RELEASE_INFO_FILE" || true
+  "$RM_BIN" -f "$RELEASE_INFO_FILE" || true
   die_with_error "${_json_error_category:-config}" \
     "${_json_error_message:-Failed to resolve download metadata.}" \
     "${_json_suggestions[@]:-Install python3: apt-get install python3 / apk add python3}"
 fi
 
 mapfile -t RELEASE_INFO < "$RELEASE_INFO_FILE"
-rm -f "$RELEASE_INFO_FILE" || true
+"$RM_BIN" -f "$RELEASE_INFO_FILE" || true
 DOWNLOAD_URL="${RELEASE_INFO[0]:-}"
 EXPECTED_SHA256="${RELEASE_INFO[1]:-}"
 AVAILABLE_VERSIONS="${RELEASE_INFO[2]:-}"
 SHA256SUMS_URL="${RELEASE_INFO[3]:-}"
 SHA256SUMS_ASC_URL="${RELEASE_INFO[4]:-}"
+RELEASE_TAG="${RELEASE_INFO[5]:-}"
 
 if [[ -z "$DOWNLOAD_URL" ]]; then
   _json_available_versions="$AVAILABLE_VERSIONS"
@@ -1258,14 +1476,14 @@ if [[ -z "$DOWNLOAD_URL" ]]; then
 fi
 
 echo "[+] Downloading $DOWNLOAD_URL ..."
-if ! TMP_DIR="$(mktemp -d)"; then
+if ! TMP_DIR="$("$MKTEMP_BIN" -d)"; then
   die_with_error "$CATEGORY_FILESYSTEM" \
     "Failed to create a temporary working directory." \
     "$MSG_CHECK_PERMS_TMP_DISK"
 fi
-trap 'rm -rf "$TMP_DIR"' EXIT
+trap '"$RM_BIN" -rf "$TMP_DIR"' EXIT
 
-if ! curl --proto '=https' --tlsv1.2 -fsSL -o "$TMP_DIR/$ASSET_NAME" "$DOWNLOAD_URL"; then
+if ! "$CURL_BIN" --proto '=https' --tlsv1.2 -fsSL -o "$TMP_DIR/$ASSET_NAME" "$DOWNLOAD_URL"; then
   _json_available_versions="$AVAILABLE_VERSIONS"
   if [[ -n "$AVAILABLE_VERSIONS" ]]; then
     echo "Available pre-built versions for ${OS_TYPE}/${ARCH} (grouped by major.minor):" >&2
@@ -1310,20 +1528,26 @@ else
       "See ${SOURCE_BUILD_URL}"
   fi
 
-  TRUSTED_KEY_URL="https://raw.githubusercontent.com/${REPO}/${source_ref}/packaging/nginx-markdown-for-agents-release.asc"
-  if ! curl --proto '=https' --tlsv1.2 -fsSL -o "$TMP_DIR/SHA256SUMS" "$SHA256SUMS_URL"; then
+  if [[ -z "$RELEASE_TAG" ]] || [[ ! "$RELEASE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    die_with_error "checksum" \
+      "Release metadata did not provide an immutable version tag for signed verification." \
+      "Use a published release tag or provide DOWNLOAD_URL_OVERRIDE together with DOWNLOAD_SHA256." \
+      "Build and install from source if no signed release is available."
+  fi
+  TRUSTED_KEY_URL="https://github.com/${REPO}/releases/download/${RELEASE_TAG}/nginx-markdown-for-agents-release.asc"
+  if ! "$CURL_BIN" --proto '=https' --tlsv1.2 -fsSL -o "$TMP_DIR/SHA256SUMS" "$SHA256SUMS_URL"; then
     die_with_error "network" \
       "Failed to download SHA256SUMS manifest." \
       "Check your network connection and try again." \
       "See ${SOURCE_BUILD_URL}"
   fi
-  if ! curl --proto '=https' --tlsv1.2 -fsSL -o "$TMP_DIR/SHA256SUMS.asc" "$SHA256SUMS_ASC_URL"; then
+  if ! "$CURL_BIN" --proto '=https' --tlsv1.2 -fsSL -o "$TMP_DIR/SHA256SUMS.asc" "$SHA256SUMS_ASC_URL"; then
     die_with_error "network" \
       "Failed to download SHA256SUMS.asc signature." \
       "Check your network connection and try again." \
       "See ${SOURCE_BUILD_URL}"
   fi
-  if ! curl --proto '=https' --tlsv1.2 -fsSL -o "$TMP_DIR/release-key.asc" "$TRUSTED_KEY_URL"; then
+  if ! "$CURL_BIN" --proto '=https' --tlsv1.2 -fsSL -o "$TMP_DIR/release-key.asc" "$TRUSTED_KEY_URL"; then
     die_with_error "network" \
       "Failed to download the trusted release signing key." \
       "Check your network connection and try again." \
@@ -1364,7 +1588,7 @@ fi
 cd "$TMP_DIR"
 # --no-same-owner: the archive may carry root ownership from the build
 # container; extracting as root would otherwise honor embedded ownership.
-if ! tar --no-same-owner -xzf "$ASSET_NAME"; then
+if ! "$TAR_BIN" --no-same-owner -xzf "$ASSET_NAME"; then
   die_with_error "extraction" \
     "Failed to extract ${ASSET_NAME}." \
     "The archive may be corrupted. Re-download and try again." \
@@ -1385,8 +1609,8 @@ fi
 # `file` is not part of POSIX; on minimal containers it may be absent.  The
 # sha256 check above already guarantees byte-exact content, so skip the ELF
 # probe with a warning instead of misreporting a valid archive as broken.
-if command -v file >/dev/null 2>&1; then
-  MODULE_FILE_DESC="$(file "$MODULE_SO" 2>/dev/null || true)"
+if [[ -n "$FILE_BIN" ]]; then
+  MODULE_FILE_DESC="$("$FILE_BIN" "$MODULE_SO" 2>/dev/null || true)"
   case "$MODULE_FILE_DESC" in
     *"ELF 64-bit"*)
       ;;
@@ -1438,19 +1662,19 @@ elif [[ -d "/usr/local/nginx/modules" ]]; then
 else
   MODULES_DIR="/etc/nginx/modules"
 fi
-if ! mkdir -p "$MODULES_DIR"; then
+if ! "$MKDIR_BIN" -p "$MODULES_DIR"; then
   die_with_error "$CATEGORY_FILESYSTEM" \
     "Failed to create modules directory: ${MODULES_DIR}" \
     "$MSG_CHECK_PERMS_DISK"
 fi
 
 echo "[+] Installing module to $MODULES_DIR/"
-if ! cp "$MODULE_SO" "$MODULES_DIR/"; then
+if ! "$CP_BIN" "$MODULE_SO" "$MODULES_DIR/"; then
   die_with_error "$CATEGORY_FILESYSTEM" \
     "Failed to copy ${MODULE_SO} to ${MODULES_DIR}/" \
     "$MSG_CHECK_PERMS_DISK"
 fi
-if ! chmod 644 "$MODULES_DIR/$MODULE_SO"; then
+if ! "$CHMOD_BIN" 644 "$MODULES_DIR/$MODULE_SO"; then
   die_with_error "$CATEGORY_FILESYSTEM" \
     "Failed to set permissions on ${MODULES_DIR}/${MODULE_SO}" \
     "Check filesystem permissions."
@@ -1474,7 +1698,7 @@ if [[ -f "$NGINX_CONF_PATH" ]]; then
     MODULE_ALREADY_CONFIGURED=1
   fi
 
-  MODULE_INCLUDE_PATTERN="$(grep -E '^[[:space:]]*include[[:space:]]+[^;]*(modules|modules-enabled)[^;]*\.conf[[:space:]]*;' "$NGINX_CONF_PATH" | sed -E 's/^[[:space:]]*include[[:space:]]+([^;]+);/\1/' | head -n1 || true)"
+  MODULE_INCLUDE_PATTERN="$("$GREP_BIN" -E '^[[:space:]]*include[[:space:]]+[^;]*(modules|modules-enabled)[^;]*\.conf[[:space:]]*;' "$NGINX_CONF_PATH" | "$SED_BIN" -E 's/^[[:space:]]*include[[:space:]]+([^;]+);/\1/' | "$HEAD_BIN" -n1 || true)"
   if [[ -z "$MODULE_INCLUDE_PATTERN" ]]; then
     MODULE_INCLUDE_PATTERN="${NGINX_CONF_DIR%/}/modules-enabled/*.conf"
     ensure_main_include_directive "$NGINX_CONF_PATH" "include ${MODULE_INCLUDE_PATTERN};"
@@ -1483,13 +1707,13 @@ if [[ -f "$NGINX_CONF_PATH" ]]; then
 
   if [[ "$MODULE_ALREADY_CONFIGURED" -eq 0 ]]; then
     MODULE_INCLUDE_DIR="$(resolve_include_dir "$MODULE_INCLUDE_PATTERN" "$NGINX_CONF_DIR")"
-    if ! mkdir -p "$MODULE_INCLUDE_DIR"; then
+    if ! "$MKDIR_BIN" -p "$MODULE_INCLUDE_DIR"; then
       die_with_error "$CATEGORY_FILESYSTEM" \
         "Failed to create module include directory: ${MODULE_INCLUDE_DIR}" \
         "$MSG_CHECK_PERMS_DISK"
     fi
     MODULE_CONF_SNIPPET="${MODULE_INCLUDE_DIR%/}/50-ngx-http-markdown-filter-module.conf"
-    if ! cat > "$MODULE_CONF_SNIPPET" <<EOF
+    if ! "$CAT_BIN" > "$MODULE_CONF_SNIPPET" <<EOF
 # Generated by nginx-markdown-for-agents install.sh
 load_module ${MODULE_LOAD_PATH};
 EOF
@@ -1498,7 +1722,7 @@ EOF
         "Failed to write module loader snippet: ${MODULE_CONF_SNIPPET}" \
         "$MSG_CHECK_PERMS_DISK"
     fi
-    if ! chmod 644 "$MODULE_CONF_SNIPPET"; then
+    if ! "$CHMOD_BIN" 644 "$MODULE_CONF_SNIPPET"; then
       die_with_error "$CATEGORY_FILESYSTEM" \
         "Failed to set permissions on ${MODULE_CONF_SNIPPET}" \
         "Check filesystem permissions."
@@ -1514,16 +1738,16 @@ EOF
   fi
 
   if [[ "$MARKDOWN_ALREADY_CONFIGURED" -eq 0 ]]; then
-    HTTP_INCLUDE_PATTERN="$(grep -E '^[[:space:]]*include[[:space:]]+[^;]*conf\.d/[^;]*\.conf[[:space:]]*;' "$NGINX_CONF_PATH" | sed -E 's/^[[:space:]]*include[[:space:]]+([^;]+);/\1/' | head -n1 || true)"
+    HTTP_INCLUDE_PATTERN="$("$GREP_BIN" -E '^[[:space:]]*include[[:space:]]+[^;]*conf\.d/[^;]*\.conf[[:space:]]*;' "$NGINX_CONF_PATH" | "$SED_BIN" -E 's/^[[:space:]]*include[[:space:]]+([^;]+);/\1/' | "$HEAD_BIN" -n1 || true)"
     if [[ -n "$HTTP_INCLUDE_PATTERN" ]]; then
       HTTP_INCLUDE_DIR="$(resolve_include_dir "$HTTP_INCLUDE_PATTERN" "$NGINX_CONF_DIR")"
-      if ! mkdir -p "$HTTP_INCLUDE_DIR"; then
+      if ! "$MKDIR_BIN" -p "$HTTP_INCLUDE_DIR"; then
         die_with_error "$CATEGORY_FILESYSTEM" \
           "Failed to create markdown include directory: ${HTTP_INCLUDE_DIR}" \
           "$MSG_CHECK_PERMS_DISK"
       fi
       MARKDOWN_CONF_SNIPPET="${HTTP_INCLUDE_DIR%/}/90-markdown-filter-enable.conf"
-      if ! cat > "$MARKDOWN_CONF_SNIPPET" <<'EOF'
+      if ! "$CAT_BIN" > "$MARKDOWN_CONF_SNIPPET" <<'EOF'
 # Generated by nginx-markdown-for-agents install.sh
 markdown_filter on;
 
@@ -1536,7 +1760,7 @@ EOF
           "Failed to write markdown enable snippet: ${MARKDOWN_CONF_SNIPPET}" \
           "$MSG_CHECK_PERMS_DISK"
       fi
-      if ! chmod 644 "$MARKDOWN_CONF_SNIPPET"; then
+      if ! "$CHMOD_BIN" 644 "$MARKDOWN_CONF_SNIPPET"; then
         die_with_error "$CATEGORY_FILESYSTEM" \
           "Failed to set permissions on ${MARKDOWN_CONF_SNIPPET}" \
           "Check filesystem permissions."
@@ -1558,7 +1782,7 @@ else
 fi
 
 NGINX_TEST_RESULT="not-run"
-if ! NGINX_TEST_LOG="$(mktemp)"; then
+if ! NGINX_TEST_LOG="$("$MKTEMP_BIN")"; then
   die_with_error "$CATEGORY_FILESYSTEM" \
     "Failed to create a temporary file for nginx -t output." \
     "$MSG_CHECK_PERMS_TMP_DISK"
@@ -1607,10 +1831,10 @@ if [[ "$NGINX_TEST_RESULT" = "ok" ]]; then
   echo "Run: ${NGINX_BIN} -s reload"
 else
   echo "[!] nginx -t failed. Review errors below:" >&2
-  sed -n '1,20p' "$NGINX_TEST_LOG"
+  "$SED_BIN" -n '1,20p' "$NGINX_TEST_LOG"
   echo "Fix config and run: ${NGINX_BIN} -t && ${NGINX_BIN} -s reload"
 fi
-rm -f "$NGINX_TEST_LOG" || true
+"$RM_BIN" -f "$NGINX_TEST_LOG" || true
 
 echo ""
 echo "You can continue fine-tuning later (recommended):"
