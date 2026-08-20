@@ -1052,6 +1052,12 @@ release-gates-check-091: release-gates-check-090
 #   NGINX_BIN                            - Path to module-enabled nginx binary
 #   RELEASE_GATE_ALLOW_SKIP_MODULE=1     - Allow proceeding without module
 #                                           benchmarks
+#   CANDIDATE_BENCHMARK_REPORT            - Optional repository-relative 092
+#                                           report measured immediately after
+#                                           the candidate baseline.  It is used
+#                                           only by the 092 stage; the 091
+#                                           prerequisite always measures its
+#                                           own report.
 #   RELEASE_GATE_ALLOW_SKIP_FUZZ=1       - (inherited) skip fuzz smoke
 #   RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 - (inherited) skip native E2E
 #   RELEASE_GATE_ALLOW_SKIP_COVERAGE=1   - (inherited) skip coverage
@@ -1060,7 +1066,11 @@ release-gates-check-091: release-gates-check-090
 release-gates-check-092-canonical: release-gates-check-091
 	@echo "=== 0.9.2 Canonical Performance/Contract Gates (blocking) ==="
 	@echo "  [1/7] 0.9.2 performance evidence gate (blocking mode, baseline 092)"
-	$(MAKE) release-perf-evidence-blocking BASELINE_VERSION=092
+	@if [ -n "$(CANDIDATE_BENCHMARK_REPORT)" ]; then \
+		echo "  Reusing candidate-bound 092 benchmark report: $(CANDIDATE_BENCHMARK_REPORT)"; \
+	fi
+	EVIDENCE_GATE_BENCHMARK_REPORT="$(CANDIDATE_BENCHMARK_REPORT)" \
+		$(MAKE) release-perf-evidence-blocking BASELINE_VERSION=092
 	@echo "  [2/7] Public surface and dynconf schema drift checks"
 	$(MAKE) public-surface-drift-check
 	$(MAKE) schema-drift-check SCHEMA_RELEASE_VERSION=0.9.2
