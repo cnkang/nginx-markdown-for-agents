@@ -83,7 +83,7 @@ def _is_inside_helper_or_awk(lines: list[str], index: int) -> bool:
     """
     for j in range(index, -1, -1):
         prev = lines[j].strip()
-        if "awk " in prev and "'" in prev:
+        if (("awk " in prev or "AWK_BIN" in prev) and "'" in prev):
             return True
         if HELPER_FUNCS_RE.match(prev):
             return True
@@ -126,6 +126,9 @@ def _check_risky_command(
         return None
     cmd_match = RISKY_COMMANDS_RE.search(stripped)
     if cmd_match is None:
+        return None
+    if stripped.startswith(("cache_required_executable ",
+                            "cache_optional_executable ")):
         return None
     if _is_inside_helper_or_awk(lines, index):
         return None

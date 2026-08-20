@@ -2,7 +2,7 @@
 # This demonstrates how to use the install script efficiently in Docker builds
 
 ARG NGINX_VERSION=1.31.3
-ARG MODULE_REF=v0.1.0
+ARG MODULE_REF=v0.9.2
 ARG INSTALL_SHA256
 FROM nginx:${NGINX_VERSION}-alpine
 
@@ -16,7 +16,9 @@ RUN apk add --no-cache \
     gzip \
     python3 \
     tar \
-    && curl --proto '=https' --tlsv1.2 -fsSL "https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/${MODULE_REF}/tools/install.sh" -o /tmp/install.sh \
+    && curl --proto '=https' --tlsv1.2 -fsSL \
+        "https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${MODULE_REF}/nginx-markdown-for-agents-installer-${MODULE_REF}.sh" \
+        -o /tmp/install.sh \
     && test -n "${INSTALL_SHA256}" \
     && echo "${INSTALL_SHA256}  /tmp/install.sh" | sha256sum -c - \
     && chmod +x /tmp/install.sh \
@@ -35,7 +37,7 @@ RUN apk add --no-cache \
         > /etc/nginx/conf.d/00-nonroot-runtime.conf
 
 # OR: If you need a specific version
-# ARG MODULE_REF=v0.1.0
+# ARG MODULE_REF=v0.9.2
 
 # OR: For local development/testing, copy only the install script
 # COPY tools/install.sh /tmp/install.sh

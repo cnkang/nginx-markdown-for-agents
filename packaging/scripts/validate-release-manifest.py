@@ -149,11 +149,11 @@ def validate_manifest(
                 check_no_placeholders(git["tag"], "git.tag", errors)
 
     # packages
+    manifest_filenames: set[str] = set()
     packages = manifest.get("packages", [])
     if not isinstance(packages, list) or len(packages) == 0:
         errors.append("packages must be a non-empty list")
     else:
-        manifest_filenames = set()
         for i, pkg in enumerate(packages):
             prefix = f"packages[{i}]"
             # dynamic-module tarballs carry nginx_version/libc/arch instead of
@@ -305,6 +305,23 @@ def validate_manifest(
         allowed_sha256_names = set(manifest_filenames)
         allowed_sha256_names.add("release-manifest.json")
 
+        bootstrap_filenames: set[str] = set()
+        if is_tag_release and isinstance(git, dict):
+            tag = git.get("tag", "")
+            if isinstance(tag, str) and re.fullmatch(
+                r"v?[0-9]+\.[0-9]+\.[0-9]+", tag
+            ):
+                bootstrap_filenames = {
+                    f"nginx-markdown-for-agents-installer-{tag}.sh",
+                    "nginx-markdown-for-agents-release.asc",
+                }
+            else:
+                errors.append(
+                    "git.tag must be a semantic release tag to validate bootstrap assets"
+                )
+
+        allowed_sha256_names.update(bootstrap_filenames)
+
         for pkg in packages:
             if "filename" not in pkg:
                 continue
@@ -322,6 +339,22 @@ def validate_manifest(
         for fname in sorted(sha256_entries):
             if fname not in allowed_sha256_names:
                 errors.append(f"Unexpected file in SHA256SUMS: {fname}")
+
+        for fname in sorted(bootstrap_filenames):
+            fpath = artifact_dir / fname
+            if not fpath.is_file():
+                errors.append(f"Bootstrap asset not found in artifacts: {fname}")
+                continue
+            sums_sha = sha256_entries.get(fname)
+            if sums_sha is None:
+                errors.append(f"Bootstrap asset {fname} not found in SHA256SUMS")
+                continue
+            actual_sha = sha256_file(fpath)
+            if sums_sha != actual_sha:
+                errors.append(
+                    f"SHA256SUMS digest mismatch for bootstrap asset {fname}: "
+                    f"sha256sums={sums_sha}, actual={actual_sha}"
+                )
     elif sha256sums_path:
         errors.append(f"SHA256SUMS file not found: {sha256sums_path}")
 
