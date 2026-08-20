@@ -836,7 +836,7 @@ if curl_exit:
     result["verdict"] = "fail"
     result["failure_reason"] = f"curl_exit: {curl_exit}"
 if result.get("verdict") == "fail" and error_log_path.exists():
-    error_log_artifact = error_log_path.parent / f"{headers_path.stem}.error.log"
+    error_log_artifact = headers_path.parent / f"{headers_path.stem}.error.log"
     error_log_artifact.write_bytes(error_log_path.read_bytes())
     result["error_log_artifact"] = error_log_artifact.name
 print(json.dumps(result))
