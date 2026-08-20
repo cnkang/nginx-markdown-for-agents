@@ -613,8 +613,29 @@ ngx_int_t
 ngx_http_markdown_send_304(ngx_http_request_t *r,
                            const struct MarkdownResult *result)
 {
-    ngx_table_elt_t  *h;
-    ngx_int_t         rc;
+    ngx_table_elt_t                    *h;
+    ngx_int_t                           rc;
+    const ngx_http_markdown_conf_t     *conf = NULL;
+
+#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
+    /*
+     * Conditional responses take a separate path from the normal header
+     * plan.  Apply the same authenticated-response cache policy before any
+     * 304 headers are sent, so a conditional hit cannot retain a shared
+     * cache directive from the source response.
+     */
+    conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
+    if (conf != NULL && ngx_http_markdown_is_authenticated(r, conf)) {
+        rc = ngx_http_markdown_modify_cache_control_for_auth(r);
+        if (rc != NGX_OK) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                          "markdown: 304 auth Cache-Control update failed");
+            return NGX_ERROR;
+        }
+    }
+#else
+    (void) conf;
+#endif
 
     r->headers_out.status = NGX_HTTP_NOT_MODIFIED;
     r->headers_out.status_line.len = 0;
