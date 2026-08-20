@@ -116,6 +116,12 @@ while IFS= read -r -d '' file; do
             if echo "$after_code" | grep -q 'NGX_AGAIN'; then
                 has_again_branch=1
             fi
+            # delivery_ok is the module's dedicated NGX_AGAIN-aware result
+            # predicate; a call that checks delivery_ok(rc) is treating
+            # NGX_AGAIN as an explicit branch and should not be flagged.
+            if echo "$after_code" | grep -q 'ngx_http_markdown_streaming_delivery_ok'; then
+                has_again_branch=1
+            fi
 
             # 2. If the call result is assigned and the very next statements
             #    treat non-NGX_OK as error (rc != NGX_OK / rc == NGX_ERROR),
@@ -127,15 +133,10 @@ while IFS= read -r -d '' file; do
 
             # 3. A return immediately after the call without NGX_AGAIN mention.
             immediate_return=0
-            # Clamp the sed start address to >= 1 so a short window near
-            # the top of the file cannot produce an invalid address 0.
-            total_lines=$(echo "$surrounding_code" | wc -l | tr -d ' ')
-            start_line=$((total_lines - 6))
-            if [[ "$start_line" -lt 1 ]]; then
-                start_line=1
-            fi
-            next_lines=$(echo "$surrounding_code" | sed -n "${start_line},\$p")
-            if echo "$next_lines" | grep -qE '^[[:space:]]*return[[:space:]]+(rc|[a-z_]+);'; then
+            # Inspect after_code, which holds the lines following the call
+            # site, rather than deriving a range from surrounding_code
+            # (whose tail may include lines before the call).
+            if echo "$after_code" | grep -qE '^[[:space:]]*return[[:space:]]+(rc|[a-z_]+);'; then
                 immediate_return=1
             fi
 
