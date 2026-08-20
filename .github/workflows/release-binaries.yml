@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Git ref to build (e.g. v1.0.0, main, or commit SHA)'
+        description: 'Stable release tag to publish, or any ref for build-only (e.g. v1.0.0 or main)'
         required: false
         default: ''
 
@@ -29,11 +29,55 @@ jobs:
     outputs:
       matrix_entries: ${{ steps.resolve.outputs.matrix_entries }}
       checkout_ref: ${{ steps.checkout_ref.outputs.checkout_ref }}
+      publication_tag: ${{ steps.validate_ref.outputs.publication_tag }}
     steps:
+      - name: Validate requested ref
+        id: validate_ref
+        env:
+          INPUT_VERSION: ${{ github.event_name == 'release' && github.ref_name || github.event.inputs.version || '' }}
+          DEFAULT_REF: ${{ github.ref }}
+        run: |
+          # Build-only dispatches may use a safe branch or commit ref.  Only an
+          # exact stable release tag is eligible for signing and publication.
+          checkout_ref="${DEFAULT_REF}"
+          publication_tag=""
+          if [[ -n "${INPUT_VERSION}" ]]; then
+            if [[ "${INPUT_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              checkout_ref="refs/tags/${INPUT_VERSION}"
+              publication_tag="${INPUT_VERSION}"
+            elif printf '%s' "${INPUT_VERSION}" | grep -qE '^[A-Za-z0-9._/-]+$' \
+              && [[ "${INPUT_VERSION}" != -* ]] \
+              && [[ "${INPUT_VERSION}" != */ ]] \
+              && [[ "${INPUT_VERSION}" != /* ]] \
+              && [[ "${INPUT_VERSION}" != *..* ]]; then
+              checkout_ref="${INPUT_VERSION}"
+            else
+              echo "ERROR: version must be a stable vX.Y.Z tag or a safe build-only ref." >&2
+              exit 1
+            fi
+          fi
+          echo "checkout_ref=${checkout_ref}" >> "$GITHUB_OUTPUT"
+          echo "publication_tag=${publication_tag}" >> "$GITHUB_OUTPUT"
+        shell: bash
+
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.inputs.version || github.ref }}
+          ref: ${{ steps.validate_ref.outputs.checkout_ref }}
+
+      - name: Verify publication tag binding
+        if: steps.validate_ref.outputs.publication_tag != ''
+        env:
+          PUBLICATION_TAG: ${{ steps.validate_ref.outputs.publication_tag }}
+        run: |
+          tag_commit="$(git rev-parse --verify "refs/tags/${PUBLICATION_TAG}^{commit}")"
+          head_commit="$(git rev-parse --verify HEAD^{commit})"
+          if [[ "${tag_commit}" != "${head_commit}" ]]; then
+            echo "ERROR: publication tag does not resolve to the prepared commit." >&2
+            exit 1
+          fi
+          echo "Verified ${PUBLICATION_TAG} at ${head_commit}"
+        shell: bash
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -201,9 +245,7 @@ jobs:
     name: Sign Binary Checksums
     needs: [prepare, integrity-checksums]
     if: >-
-      github.event_name == 'release'
-      || (github.event_name == 'workflow_dispatch'
-          && startsWith(github.event.inputs.version, 'v'))
+      needs.prepare.outputs.publication_tag != ''
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -256,16 +298,14 @@ jobs:
 
   publish-release:
     name: Publish Binaries to Release
-    needs: [completeness-check, integrity-checksums, integrity-signing]
+    needs: [prepare, completeness-check, integrity-checksums, integrity-signing]
     runs-on: ubuntu-latest
     if: >-
       always()
       && needs.completeness-check.result == 'success'
       && needs.integrity-checksums.result == 'success'
       && needs.integrity-signing.result == 'success'
-      && (github.event_name == 'release'
-          || (github.event_name == 'workflow_dispatch'
-              && startsWith(github.event.inputs.version, 'v')))
+      && needs.prepare.outputs.publication_tag != ''
     permissions:
       contents: write
     steps:
@@ -281,10 +321,7 @@ jobs:
           path: release-assets
 
       - name: Download SHA256SUMS.asc
-        if: >-
-          github.event_name == 'release'
-          || (github.event_name == 'workflow_dispatch'
-              && startsWith(github.event.inputs.version, 'v'))
+        if: needs.prepare.outputs.publication_tag != ''
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: binary-checksums-signature
@@ -374,7 +411,7 @@ jobs:
       - name: Upload Assets
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
-          tag_name: ${{ github.event.inputs.version || github.ref_name }}
+          tag_name: ${{ needs.prepare.outputs.publication_tag }}
           files: |
             artifacts/**/*.tar.gz
             artifacts/nginx-version-groups.json
