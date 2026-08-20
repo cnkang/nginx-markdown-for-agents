@@ -1169,6 +1169,21 @@ jobs:
           ls -la artifacts/
         shell: bash
 
+      - name: Add authenticated installer bootstrap assets (tag)
+        if: github.ref_type == 'tag'
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          installer="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"
+          cp tools/install.sh "artifacts/${installer}"
+          cp packaging/nginx-markdown-for-agents-release.asc \
+            artifacts/nginx-markdown-for-agents-release.asc
+          chmod 0755 "artifacts/${installer}"
+          test -s "artifacts/${installer}"
+          test -s artifacts/nginx-markdown-for-agents-release.asc
+        shell: bash
+
       - name: Generate release manifest
         env:
           GH_REF_TYPE: ${{ github.ref_type }}
@@ -1241,6 +1256,17 @@ jobs:
         with:
           name: release-manifest
           path: artifacts/release-manifest.json
+          if-no-files-found: error
+          retention-days: 5
+
+      - name: Upload installer bootstrap assets (tag)
+        if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-bootstrap
+          path: |
+            artifacts/nginx-markdown-for-agents-installer-${{ github.ref_name }}.sh
+            artifacts/nginx-markdown-for-agents-release.asc
           if-no-files-found: error
           retention-days: 5
 
@@ -1455,6 +1481,13 @@ jobs:
           name: signed-packages
           path: release-assets/
           merge-multiple: true
+
+      - name: Download installer bootstrap assets (tag)
+        if: github.ref_type == 'tag'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-bootstrap
+          path: release-assets/
 
       - name: Download all DEB artifacts
         if: github.ref_type != 'tag'

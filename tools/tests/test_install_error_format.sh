@@ -162,8 +162,14 @@ run_hiding_nginx() {
   shim_dir="$(cat "$shim_info")"
   rm -f "$shim_info"
 
+  cat > "$shim_dir/nginx" <<'EOF'
+#!/bin/sh
+exit 99
+EOF
+  chmod +x "$shim_dir/nginx"
+
   # Run install.sh with restricted PATH
-  SKIP_ROOT_CHECK=1 PATH="$restricted_path" \
+  SKIP_ROOT_CHECK=1 NGINX_BIN="$shim_dir/nginx" PATH="$restricted_path" \
     bash "$INSTALL_SCRIPT" "$@" >"$stdout_file" 2>"$stderr_file" || true
 
   local stderr_content stdout_content
@@ -195,6 +201,48 @@ run_hiding_nginx() {
   # Return stdout via a global variable for callers that need it
   _LAST_STDOUT="$stdout_content"
   _LAST_STDERR="$stderr_content"
+  return 0
+}
+
+# Verify that hostile PATH wrappers are not executed by the privileged
+# installer path.  The explicit nginx path is a writable-directory symlink
+# target, so resolution must fail before any network or archive command runs.
+run_hostile_path_guard() {
+  local stderr_file stdout_file shim_dir marker utility
+  shim_dir="$(mktemp -d)"
+  _SHIM_DIRS+=("$shim_dir")
+  marker="$shim_dir/invoked"
+
+  for utility in curl python3 tar grep; do
+    cat > "$shim_dir/$utility" <<EOF
+#!/bin/sh
+: > "$marker"
+exit 99
+EOF
+    chmod +x "$shim_dir/$utility"
+  done
+
+  ln -s /bin/true "$shim_dir/nginx"
+  stderr_file="$(mktemp)"
+  stdout_file="$(mktemp)"
+  SKIP_ROOT_CHECK=1 NGINX_BIN="$shim_dir/nginx" PATH="$shim_dir:$PATH" \
+    bash "$INSTALL_SCRIPT" >"$stdout_file" 2>"$stderr_file" || true
+
+  if [[ -e "$marker" ]]; then
+    fail "hostile PATH guard — a wrapper was executed"
+  else
+    pass "hostile PATH guard — wrappers were not executed"
+  fi
+
+  if grep -q "trusted nginx" "$stderr_file"; then
+    pass "hostile PATH guard — writable symlink was rejected"
+  else
+    fail "hostile PATH guard — writable symlink was not rejected" \
+      "stderr: $(head -5 "$stderr_file")"
+  fi
+
+  rm -f "$stderr_file" "$stdout_file"
+  rm -rf "$shim_dir"
   return 0
 }
 
@@ -248,6 +296,13 @@ echo ""
 # -----------------------------------------------------------------------
 echo "Test 1: nginx not found"
 run_hiding_nginx "nginx not found"
+echo ""
+
+# -----------------------------------------------------------------------
+# Test 1b: hostile PATH and writable symlink are rejected before execution
+# -----------------------------------------------------------------------
+echo "Test 1b: hostile PATH and writable nginx symlink"
+run_hostile_path_guard
 echo ""
 
 # -----------------------------------------------------------------------
