@@ -211,8 +211,16 @@ mod tests {
         // code, never a fence.
         assert_eq!(measure_fence_len("\t```"), 0, "tab reaches column 4");
         assert_eq!(measure_fence_len(" \t```"), 0, "space+tab reaches column 4");
-        assert_eq!(measure_fence_len("  \t```"), 0, "2 spaces+tab reaches column 4");
-        assert_eq!(measure_fence_len("   \t```"), 0, "3 spaces+tab reaches column 4");
+        assert_eq!(
+            measure_fence_len("  \t```"),
+            0,
+            "2 spaces+tab reaches column 4"
+        );
+        assert_eq!(
+            measure_fence_len("   \t```"),
+            0,
+            "3 spaces+tab reaches column 4"
+        );
         assert_eq!(measure_fence_len("\t\t```"), 0, "tab+tab reaches column 8");
         // A tab inside the 3-column limit cannot exist: the first tab
         // always jumps to column 4.  Pure-space prefixes stay bounded.

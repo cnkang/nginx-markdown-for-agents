@@ -209,11 +209,7 @@ impl MarkdownConverter {
     /// continuation indentation, and trailing newlines.  Mirrors the
     /// rendering logic so callers can validate the output budget with
     /// checked arithmetic before mutating the output buffer.
-    fn format_list_item_rendered_len(
-        content: &str,
-        depth: usize,
-        ordered: bool,
-    ) -> usize {
+    fn format_list_item_rendered_len(content: &str, depth: usize, ordered: bool) -> usize {
         let base_indent_len = depth * 2;
         let marker_len = if ordered { 3 } else { 2 };
         let continuation_indent_len = base_indent_len + marker_len;
@@ -249,8 +245,7 @@ impl MarkdownConverter {
                     continue;
                 }
             } else if !line.is_empty() {
-                let already_indented = (!base_indent.is_empty()
-                    && line.starts_with(&base_indent))
+                let already_indented = (!base_indent.is_empty() && line.starts_with(&base_indent))
                     || line.starts_with(' ')
                     || line.starts_with('\t');
                 if !already_indented {
@@ -383,16 +378,13 @@ impl MarkdownConverter {
             }
 
             if let Some(context) = ctx.as_deref_mut() {
-                let rendered_len = Self::format_list_item_rendered_len(
-                    &item_output, depth, ordered,
-                );
-                let projected_len =
-                    output.len().checked_add(rendered_len).ok_or_else(|| {
-                        ConversionError::MemoryLimit(
-                            "generated Markdown list output length overflow"
-                                .to_string(),
-                        )
-                    })?;
+                let rendered_len =
+                    Self::format_list_item_rendered_len(&item_output, depth, ordered);
+                let projected_len = output.len().checked_add(rendered_len).ok_or_else(|| {
+                    ConversionError::MemoryLimit(
+                        "generated Markdown list output length overflow".to_string(),
+                    )
+                })?;
                 context.check_output_budget(projected_len)?;
             }
         }

@@ -360,15 +360,11 @@ jobs:
           cache-bin: false
 
       - name: Check formatting
-        working-directory: components/rust-converter
-        run: cargo fmt --all -- --check
+        run: make rust-fmt-check
 
       - name: Clippy (deny warnings)
         working-directory: components/rust-converter
         run: cargo clippy --all-targets --all-features -- -D warnings
-
-      - name: Check corpus tool formatting
-        run: cargo fmt --manifest-path tools/corpus/test-corpus-conversion/Cargo.toml --all -- --check
 
       - name: Clippy corpus tool
         run: cargo clippy --manifest-path tools/corpus/test-corpus-conversion/Cargo.toml --all-targets -- -D warnings
