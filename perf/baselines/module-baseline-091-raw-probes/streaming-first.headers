@@ -1,8 +1,7 @@
 HTTP/1.1 200 OK
 Server: nginx/1.30.4
-Date: Thu, 20 Aug 2026 16:55:59 GMT
+Date: Thu, 20 Aug 2026 17:17:46 GMT
 Content-Type: text/markdown; charset=utf-8
-Content-Length: 417
+Transfer-Encoding: chunked
 Connection: keep-alive
 Vary: Accept
-
