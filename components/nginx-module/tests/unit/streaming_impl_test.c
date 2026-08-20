@@ -6685,6 +6685,23 @@ test_streaming_decompression_error_metric_mapping(void)
         "feed format sentinel must not increment truncated or I/O metrics");
 
     ngx_memzero(&metrics, sizeof(metrics));
+    error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
+        NGX_HTTP_MARKDOWN_DECOMP_RATIO_EXCEEDED, NULL, NULL);
+    TEST_ASSERT(error_code == ERROR_DECOMPRESSION_BUDGET_EXCEEDED,
+        "feed ratio sentinel should map to the budget error code");
+    TEST_ASSERT(metrics.decompressions.budget_exceeded_total == 1,
+        "feed ratio sentinel should increment budget exactly once");
+
+    ngx_memzero(&metrics, sizeof(metrics));
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+    error_code = ngx_http_markdown_streaming_map_finalize_decomp_error(
+        &ctx, NGX_HTTP_MARKDOWN_DECOMP_RATIO_EXCEEDED, NULL, NULL);
+    TEST_ASSERT(error_code == ERROR_DECOMPRESSION_BUDGET_EXCEEDED,
+        "finalize ratio sentinel should map to the budget error code");
+    TEST_ASSERT(metrics.decompressions.budget_exceeded_total == 1,
+        "finalize ratio sentinel should increment budget exactly once");
+
+    ngx_memzero(&metrics, sizeof(metrics));
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
     error_code = ngx_http_markdown_streaming_map_finalize_decomp_error(
         &ctx, NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT, NULL, NULL);
