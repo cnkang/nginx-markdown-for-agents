@@ -127,7 +127,7 @@ Section B: Rust Conversion Engine Dependencies
 
 --------------------------------------------------------------------------------
 
-7.  blake3 1.8.5
+7.  blake3 1.8.7
     https://github.com/BLAKE3-team/BLAKE3
     License: CC0-1.0 OR Apache-2.0
     Copyright (c) 2019-2024 Samuel Neves and Jack O'Connor
