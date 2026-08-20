@@ -920,10 +920,14 @@ test_update_headers_multipart_failure_restores_chain(void)
  * ══════════════════════════════════════════════════════════════════ */
 
 static void
+push_trailer(ngx_http_request_t *r, const char *name, const char *value);
+
+static void
 test_head_representation_headers_strips_html_metadata(void)
 {
     ngx_http_request_t r = new_request();
     ngx_table_elt_t   *vary;
+    ngx_table_elt_t   *trailer;
 
     TEST_SUBSECTION("HEAD representation headers describe Markdown");
 
@@ -940,6 +944,7 @@ test_head_representation_headers_strips_html_metadata(void)
     push_header(&r, "Repr-Digest", "sha-256=:abc123:");
     push_header(&r, "X-Markdown-Tokens", "42");
     push_header(&r, "Trailer", "Content-Digest");
+    push_trailer(&r, "Content-Digest", "sha-256=:abc123:");
     r.headers_out.content_type.data = (u_char *) "text/html";
     r.headers_out.content_type.len = sizeof("text/html") - 1;
     r.headers_out.content_type_len = sizeof("text/html") - 1;
@@ -983,6 +988,9 @@ test_head_representation_headers_strips_html_metadata(void)
                 "HEAD strips Content-Length entries");
     TEST_ASSERT(find_header(&r, "Last-Modified") == NULL,
                 "HEAD strips Last-Modified entries");
+    trailer = (ngx_table_elt_t *) r.headers_out.trailers.part.elts;
+    TEST_ASSERT(trailer != NULL && trailer[0].hash == 0,
+                "HEAD suppresses actual trailer entries");
 
     vary = find_header(&r, "Vary");
     TEST_ASSERT(vary != NULL, "HEAD has Vary");

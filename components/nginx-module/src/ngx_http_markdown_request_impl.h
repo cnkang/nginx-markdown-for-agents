@@ -187,9 +187,10 @@ ngx_http_markdown_log_failure_decision(ngx_http_request_t *r,
  *     passed NULL snapshot to build_effective_conf for non-dynconf
  *     locations).
  *
- * If pool allocation fails, the corresponding pointer remains NULL
- * and effective_conf helpers fall back to live conf values (degraded
- * mode).
+ * If the dynconf snapshot allocation fails, only the snapshot pointer
+ * remains NULL.  The effective view has already been copied by value into
+ * `eff_storage`, so effective_conf helpers continue using the header-time
+ * values and do not drift to live configuration during this request.
  *
  * Parameters:
  *   r         - NGINX request structure (for pool and logging)
@@ -1352,12 +1353,10 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * and a second read here.  We never re-read the global
      * active_snapshot in this function after the initial copy.
      *
-     * Degraded mode: if pool allocation fails, the pointer remains
-     * NULL and effective_conf helpers fall back to live conf values.
-     * In this state, a concurrent dynconf reload may cause
-     * mid-request drift.  This is a low-probability degraded mode
-     * under extreme memory pressure — the request still completes
-     * but without snapshot consistency guarantees.  The fallback
+     * Degraded mode: if the dynconf snapshot allocation fails, only
+     * ctx->dynconf_snapshot remains NULL.  ctx->effective_conf still
+     * points at the by-value early_eff copy, so a concurrent dynconf
+     * reload cannot cause mid-request drift.  The allocation failure
      * is logged at NGX_LOG_WARN.
      */
     ngx_http_markdown_bind_request_context_snapshot(
