@@ -2449,12 +2449,9 @@ def _resolve_baseline(
 
     baseline_report = json.loads(baseline_path.read_text(encoding="utf-8"))
 
-    integrity_rc = _validate_baseline_evidence(
-        report, args, baseline_report, blocking
-    )
-    if integrity_rc is not None:
-        return {}, False, integrity_rc
-
+    # Evaluate release_gate_eligible FIRST: an ineligible baseline is
+    # excluded from release-gate comparison regardless of evidence
+    # integrity, so skip the integrity validation entirely for it.
     policy = baseline_report.get("baseline_policy")
     if isinstance(policy, dict) and policy.get("release_gate_eligible") is False:
         reason = policy.get(
@@ -2486,6 +2483,12 @@ def _resolve_baseline(
             f"comparisons: {reason}"
         )
         return {}, False, None
+
+    integrity_rc = _validate_baseline_evidence(
+        report, args, baseline_report, blocking
+    )
+    if integrity_rc is not None:
+        return {}, False, integrity_rc
 
     if env_violations := _check_environment_compatibility(
         report or {},
