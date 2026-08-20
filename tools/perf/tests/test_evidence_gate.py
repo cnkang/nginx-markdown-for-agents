@@ -1272,7 +1272,7 @@ class TestPathCoverageInvariants:
                     {
                         "name": "streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "none",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -1299,7 +1299,7 @@ class TestPathCoverageInvariants:
                     {
                         "name": "streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "none",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -1339,7 +1339,7 @@ class TestPathCoverageInvariants:
                     {
                         "name": "gzip-large",
                         "status": "completed",
-                        "profile": "balanced",
+                        "scenario_config": "explicit-defaults",
                         "compression": "gzip",
                         "transfer_encoding": "identity",
                         "metrics": {
@@ -1362,7 +1362,7 @@ class TestPathCoverageInvariants:
                     {
                         "name": "gzip-large",
                         "status": "completed",
-                        "profile": "balanced",
+                        "scenario_config": "explicit-defaults",
                         "compression": "gzip",
                         "transfer_encoding": "identity",
                         "metrics": {
@@ -1423,23 +1423,48 @@ class TestBaselineEvidenceIntegrity:
 
         assert violations == []
 
+    def test_current_contract_rejects_legacy_profile_metadata(self):
+        """A non-0.9.1 report cannot reintroduce the removed profile field."""
+        report = {
+            "module_benchmark": {
+                "scenarios": [{
+                    "name": "plain-small",
+                    "profile": "balanced",
+                }],
+            },
+            "baseline_policy": {
+                "source_git_commit": "a" * 40,
+                "source_artifact": "perf/baselines/module-baseline-092-raw.json",
+            },
+        }
+
+        violations = evidence_gate._legacy_scenario_contract_violations(
+            report, role="current"
+        )
+
+        assert violations == [(
+            "current.scenario_metadata",
+            "plain-small: legacy profile field is not part of the 0.9.2 "
+            "evidence contract; use scenario_config",
+        )]
+
     @pytest.mark.parametrize(
         ("scenario", "field", "value"),
         [
-            ("plain-small", "profile", "streaming_first"),
+            ("plain-small", "scenario_config", "explicit-streaming"),
             ("plain-small", "compression", "gzip"),
             ("plain-small", "transfer_encoding", "chunked"),
-            ("chunked-medium", "profile", "streaming_first"),
+            ("chunked-medium", "scenario_config", "explicit-streaming"),
             ("chunked-medium", "compression", "gzip"),
             ("chunked-medium", "transfer_encoding", "identity"),
             ("gzip-large", "transfer_encoding", "chunked"),
-            ("large-body", "profile", "streaming_first"),
+            ("large-body", "scenario_config", "explicit-streaming"),
             ("large-body", "compression", "gzip"),
             ("large-body", "transfer_encoding", "chunked"),
-            ("streaming-first", "profile", "balanced"),
+            ("streaming-first", "scenario_config", "explicit-defaults"),
             ("streaming-first", "compression", "gzip"),
             ("streaming-first", "transfer_encoding", "identity"),
-            ("brotli-streaming-first", "profile", "balanced"),
+            ("brotli-streaming-first", "scenario_config", "explicit-defaults"),
             ("brotli-streaming-first", "compression", "gzip"),
             ("brotli-streaming-first", "transfer_encoding", "identity"),
         ],
@@ -1804,7 +1829,11 @@ class TestScenarioSourceEnvironment:
             scenarios.append({
                 "name": name,
                 "status": "completed",
-                "profile": profile,
+                "scenario_config": (
+                    "explicit-streaming"
+                    if profile == "streaming_first"
+                    else "explicit-defaults"
+                ),
                 "compression": comp,
                 "transfer_encoding": te,
                 "metrics": metrics,
@@ -1922,7 +1951,7 @@ class TestScenarioSourceEnvironment:
                     {
                         "name": "plain-small",
                         "status": "completed",
-                        "profile": "balanced",
+                        "scenario_config": "explicit-defaults",
                         "compression": "none",
                         "transfer_encoding": "identity",
                         "metrics": {
@@ -1937,7 +1966,7 @@ class TestScenarioSourceEnvironment:
                     {
                         "name": "large-body",
                         "status": "completed",
-                        "profile": "balanced",
+                        "scenario_config": "explicit-defaults",
                         "compression": "none",
                         "transfer_encoding": "identity",
                         "metrics": {
@@ -1950,7 +1979,7 @@ class TestScenarioSourceEnvironment:
                     {
                         "name": "chunked-medium",
                         "status": "completed",
-                        "profile": "balanced",
+                        "scenario_config": "explicit-defaults",
                         "compression": "none",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -1963,7 +1992,7 @@ class TestScenarioSourceEnvironment:
                     {
                         "name": "streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "none",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -1982,7 +2011,7 @@ class TestScenarioSourceEnvironment:
                     {
                         "name": "gzip-large",
                         "status": "completed",
-                        "profile": "balanced",
+                        "scenario_config": "explicit-defaults",
                         "compression": "gzip",
                         "transfer_encoding": "identity",
                         "metrics": {
@@ -1996,7 +2025,7 @@ class TestScenarioSourceEnvironment:
                     {
                         "name": "gzip-streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "gzip",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -2016,7 +2045,7 @@ class TestScenarioSourceEnvironment:
                     {
                         "name": "deflate-streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "deflate",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -2036,7 +2065,7 @@ class TestScenarioSourceEnvironment:
                     {
                         "name": "brotli-streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "brotli",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -2367,7 +2396,7 @@ class TestScenarioSourceEnvironment:
                     {
                         "name": "chunked-medium",
                         "status": "completed",
-                        "profile": "balanced",
+                        "scenario_config": "explicit-defaults",
                         "compression": "none",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -2379,7 +2408,7 @@ class TestScenarioSourceEnvironment:
                     {
                         "name": "streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "none",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -2715,6 +2744,58 @@ class TestEnvironmentCompatibility:
 
         with pytest.raises(ValueError, match="must be one of"):
             evidence_gate._module_baseline_version()
+
+    def test_baseline_head_binding_requires_both_provenance_fields(
+        self, monkeypatch,
+    ):
+        """The report and policy source must identify the same current HEAD."""
+        monkeypatch.setattr(
+            evidence_gate, "_get_git_commit_full", lambda: "c" * 40
+        )
+        report = {
+            "module_benchmark": {"git_commit": "a" * 40},
+            "baseline_policy": {"source_git_commit": "b" * 40},
+        }
+
+        violations = evidence_gate._baseline_head_violations(report)
+
+        assert {violation[0] for violation in violations} == {
+            "baseline.module_benchmark.git_commit",
+            "baseline.baseline_policy.source_git_commit",
+        }
+
+    def test_stale_ineligible_baseline_fails_head_binding_before_bypass(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        """An excluded stale baseline cannot silently bypass release binding."""
+        baseline_path = (
+            tmp_path / "perf" / "baselines" / "module-baseline-092.json"
+        )
+        baseline_path.parent.mkdir(parents=True)
+        baseline_path.write_text(json.dumps({
+            "module_benchmark": {"git_commit": "a" * 40},
+            "baseline_policy": {
+                "source_git_commit": "b" * 40,
+                "release_gate_eligible": False,
+                "release_gate_exclusion_reason": "remeasure first",
+            },
+        }), encoding="utf-8")
+        monkeypatch.setenv("MODULE_BASELINE_VERSION", "092")
+        monkeypatch.setenv("EVIDENCE_GATE_REQUIRE_BASELINE_HEAD", "1")
+        monkeypatch.setattr(evidence_gate, "REPO_ROOT", tmp_path)
+        monkeypatch.setattr(
+            evidence_gate, "_get_git_commit_full", lambda: "c" * 40
+        )
+
+        _metrics, has_baseline, exit_rc = evidence_gate._resolve_baseline(
+            {},
+            parse_args(["--output", str(tmp_path / "evidence.json")]),
+            blocking=True,
+        )
+
+        assert has_baseline is False
+        assert exit_rc == 1
+        assert "not bound to the current HEAD" in capsys.readouterr().err
 
     def test_missing_selected_baseline_reports_versioned_guidance(
         self, tmp_path, monkeypatch, capsys,
@@ -3342,7 +3423,7 @@ class TestCompressedStreamingPathTruthfulness:
                 "scenarios": [{
                     "name": "gzip-streaming-first",
                     "status": "completed",
-                    "profile": "streaming_first",
+                    "scenario_config": "explicit-streaming",
                     "compression": "gzip",
                     "transfer_encoding": "chunked",
                     "metrics": {
@@ -3503,7 +3584,7 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "none",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -3519,7 +3600,7 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "gzip-large",
                         "status": "completed",
-                        "profile": "balanced",
+                        "scenario_config": "explicit-defaults",
                         "compression": "gzip",
                         "transfer_encoding": "identity",
                         "metrics": {
@@ -3530,7 +3611,7 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "gzip-streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "gzip",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -3547,7 +3628,7 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "deflate-streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "deflate",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -3574,7 +3655,7 @@ class TestCompressedStreamingPathTruthfulness:
                 "scenarios": [{
                     "name": "gzip-streaming-first",
                     "status": "completed",
-                    "profile": "balanced",
+                    "scenario_config": "explicit-defaults",
                     "compression": "gzip",
                     "transfer_encoding": "chunked",
                     "metrics": {
@@ -3588,7 +3669,7 @@ class TestCompressedStreamingPathTruthfulness:
         }
         violations = _check_path_coverage(report)
         assert any(
-            v[0] == "gzip-streaming-first" and v[1] == "profile"
+            v[0] == "gzip-streaming-first" and v[1] == "scenario_config"
             for v in violations
         )
 
@@ -3599,7 +3680,7 @@ class TestCompressedStreamingPathTruthfulness:
                 "scenarios": [{
                     "name": "gzip-streaming-first",
                     "status": "completed",
-                    "profile": "streaming_first",
+                    "scenario_config": "explicit-streaming",
                     "compression": "deflate",
                     "transfer_encoding": "chunked",
                     "metrics": {
@@ -3624,7 +3705,7 @@ class TestCompressedStreamingPathTruthfulness:
                 "scenarios": [{
                     "name": "deflate-streaming-first",
                     "status": "completed",
-                    "profile": "streaming_first",
+                    "scenario_config": "explicit-streaming",
                     "compression": "deflate",
                     "transfer_encoding": "identity",
                     "metrics": {
@@ -3649,7 +3730,7 @@ class TestCompressedStreamingPathTruthfulness:
                 "scenarios": [{
                     "name": "brotli-streaming-first",
                     "status": "completed",
-                    "profile": "streaming_first",
+                    "scenario_config": "explicit-streaming",
                     "compression": "brotli",
                     "transfer_encoding": "chunked",
                     "metrics": {
@@ -3674,7 +3755,7 @@ class TestCompressedStreamingPathTruthfulness:
                 "scenarios": [{
                     "name": "brotli-streaming-first",
                     "status": "completed",
-                    "profile": "streaming_first",
+                    "scenario_config": "explicit-streaming",
                     "compression": "gzip",
                     "transfer_encoding": "chunked",
                     "metrics": {
@@ -3702,7 +3783,7 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "plain-small",
                         "status": "completed",
-                        "profile": "balanced",
+                        "scenario_config": "explicit-defaults",
                         "compression": "none",
                         "transfer_encoding": "identity",
                         "metrics": {
@@ -3719,7 +3800,7 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "large-body",
                         "status": "completed",
-                        "profile": "balanced",
+                        "scenario_config": "explicit-defaults",
                         "compression": "none",
                         "transfer_encoding": "identity",
                         "metrics": {
@@ -3735,7 +3816,7 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "chunked-medium",
                         "status": "completed",
-                        "profile": "balanced",
+                        "scenario_config": "explicit-defaults",
                         "compression": "none",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -3751,7 +3832,7 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "none",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -3771,7 +3852,7 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "gzip-large",
                         "status": "completed",
-                        "profile": "balanced",
+                        "scenario_config": "explicit-defaults",
                         "compression": "gzip",
                         "transfer_encoding": "identity",
                         "metrics": {
@@ -3788,7 +3869,7 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "gzip-streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "gzip",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -3809,7 +3890,7 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "deflate-streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "deflate",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -3830,7 +3911,7 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "brotli-streaming-first",
                         "status": "completed",
-                        "profile": "streaming_first",
+                        "scenario_config": "explicit-streaming",
                         "compression": "brotli",
                         "transfer_encoding": "chunked",
                         "metrics": {
@@ -3871,7 +3952,7 @@ def _full_valid_raw_report() -> dict:
     return {
         "module_benchmark": {
             "timestamp": "2026-07-28T00:00:00Z",
-            "git_commit": _FULL_SHA[:7],
+            "git_commit": _FULL_SHA,
             "platform": "linux-x86_64",
             "load_generator": "ab",
             "nginx_version": "nginx version: nginx/1.24.0",
@@ -3879,7 +3960,7 @@ def _full_valid_raw_report() -> dict:
                 {
                     "name": "plain-small",
                     "status": "completed",
-                    "profile": "balanced",
+                    "scenario_config": "explicit-defaults",
                     "compression": "none",
                     "transfer_encoding": "identity",
                     "metrics": {
@@ -3893,7 +3974,7 @@ def _full_valid_raw_report() -> dict:
                 {
                     "name": "chunked-medium",
                     "status": "completed",
-                    "profile": "balanced",
+                    "scenario_config": "explicit-defaults",
                     "compression": "none",
                     "transfer_encoding": "chunked",
                     "metrics": {
@@ -3906,7 +3987,7 @@ def _full_valid_raw_report() -> dict:
                 {
                     "name": "large-body",
                     "status": "completed",
-                    "profile": "balanced",
+                    "scenario_config": "explicit-defaults",
                     "compression": "none",
                     "transfer_encoding": "identity",
                     "metrics": {
@@ -3919,7 +4000,7 @@ def _full_valid_raw_report() -> dict:
                 {
                     "name": "gzip-large",
                     "status": "completed",
-                    "profile": "balanced",
+                    "scenario_config": "explicit-defaults",
                     "compression": "gzip",
                     "transfer_encoding": "identity",
                     "metrics": {
@@ -3933,7 +4014,7 @@ def _full_valid_raw_report() -> dict:
                 {
                     "name": "streaming-first",
                     "status": "completed",
-                    "profile": "streaming_first",
+                    "scenario_config": "explicit-streaming",
                     "compression": "none",
                     "transfer_encoding": "chunked",
                     "metrics": {
@@ -3952,7 +4033,7 @@ def _full_valid_raw_report() -> dict:
                 {
                     "name": "gzip-streaming-first",
                     "status": "completed",
-                    "profile": "streaming_first",
+                    "scenario_config": "explicit-streaming",
                     "compression": "gzip",
                     "transfer_encoding": "chunked",
                     "metrics": {
@@ -3972,7 +4053,7 @@ def _full_valid_raw_report() -> dict:
                 {
                     "name": "deflate-streaming-first",
                     "status": "completed",
-                    "profile": "streaming_first",
+                    "scenario_config": "explicit-streaming",
                     "compression": "deflate",
                     "transfer_encoding": "chunked",
                     "metrics": {
@@ -3992,7 +4073,7 @@ def _full_valid_raw_report() -> dict:
                 {
                     "name": "brotli-streaming-first",
                     "status": "completed",
-                    "profile": "streaming_first",
+                    "scenario_config": "explicit-streaming",
                     "compression": "brotli",
                     "transfer_encoding": "chunked",
                     "metrics": {

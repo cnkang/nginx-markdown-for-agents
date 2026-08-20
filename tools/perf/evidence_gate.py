@@ -177,6 +177,25 @@ def _git_rev_parse(resolved_git: str) -> str:
         return "unknown"
 
 
+def _git_rev_parse_full(resolved_git: str) -> str:
+    """Return the current full git commit hash via the resolved git binary."""
+    try:
+        result = subprocess.run(
+            [resolved_git, "rev-parse", "--verify", "HEAD^{commit}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            cwd=str(REPO_ROOT),
+        )
+        value = result.stdout.strip()
+        if result.returncode == 0 and _SHA_RE.fullmatch(value):
+            return value
+        return "unknown"
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+
+
 def _git_describe(resolved_git: str) -> str:
     """Return the exact tag at HEAD via the resolved git binary, or ''."""
     with contextlib.suppress(Exception):
@@ -199,6 +218,14 @@ def _get_git_commit() -> str:
     if not resolved_git:
         return "unknown"
     return _git_rev_parse(resolved_git)
+
+
+def _get_git_commit_full() -> str:
+    """Return the current full git commit hash, or ``unknown``."""
+    resolved_git = _git_bin()
+    if not resolved_git:
+        return "unknown"
+    return _git_rev_parse_full(resolved_git)
 
 
 def _nginx_bin_available() -> bool:
@@ -779,6 +806,12 @@ _HISTORICAL_BASELINE_PATH = "perf/baselines/module-baseline-091.json"
 _HISTORICAL_BASELINE_SHA256 = (
     "5f2c70110458d4758f35c0c650ebbb2e43b06e0a86a5483579c8be6fe65a120c"
 )
+_LEGACY_091_BASELINE_COMMIT = (
+    "cab92df229b0b68cb02d88817a208e009f3ce106"
+)
+_LEGACY_091_BASELINE_ARTIFACT = (
+    "perf/baselines/module-baseline-091-raw.json"
+)
 _DEFAULT_MODULE_BASELINE_VERSION = "092"
 _SUPPORTED_MODULE_BASELINE_VERSIONS = frozenset({"091", "092"})
 
@@ -823,14 +856,24 @@ def _is_acceptable_fallback_rate(value: float | int | None) -> bool:
 
 
 def _scenario_metadata_checks(
-    profile: str, compression: str, transfer_encoding: str,
+    scenario_config: str, compression: str, transfer_encoding: str,
+    *, legacy: bool = False,
 ) -> list[dict]:
     """Return the frozen configuration contract for one scenario."""
-    return [
+    if legacy:
+        scenario_config = {
+            "explicit-defaults": "balanced",
+            "explicit-streaming": "streaming_first",
+            "explicit-strict-cache": "strict_cache",
+        }[scenario_config]
+        config_field = "profile"
+    else:
+        config_field = "scenario_config"
+    checks = [
         {
-            "field": "profile",
-            "expected": profile,
-            "label": f"profile must be {profile!r}",
+            "field": config_field,
+            "expected": scenario_config,
+            "label": f"{config_field} must be {scenario_config!r}",
         },
         {
             "field": "compression",
@@ -843,6 +886,13 @@ def _scenario_metadata_checks(
             "label": f"transfer_encoding must be {transfer_encoding!r}",
         },
     ]
+    if legacy:
+        checks.append({
+            "field": "scenario_config",
+            "forbidden": True,
+            "label": "scenario_config is not part of the 0.9.1 evidence contract",
+        })
+    return checks
 
 
 # Path-coverage invariants: a "completed" scenario must actually exercise
@@ -855,7 +905,7 @@ def _scenario_metadata_checks(
 # tuples.  ``predicate`` is a callable taking the metric value and
 # returning True when the path was genuinely exercised.  ``label`` is
 # used in the breach/evidence message.
-def _fullbuffer_path_invariants() -> list[dict]:
+def _fullbuffer_path_invariants(*, legacy: bool = False) -> list[dict]:
     fullbuffer_hits_label = "fullbuffer_path_hits > 0"
     return [
         {
@@ -873,7 +923,7 @@ def _fullbuffer_path_invariants() -> list[dict]:
                 },
             ],
             "metadata_checks": _scenario_metadata_checks(
-                "balanced", "none", "identity"
+                "explicit-defaults", "none", "identity", legacy=legacy
             ),
         },
         {
@@ -884,7 +934,7 @@ def _fullbuffer_path_invariants() -> list[dict]:
                 "label": fullbuffer_hits_label,
             }],
             "metadata_checks": _scenario_metadata_checks(
-                "balanced", "none", "chunked"
+                "explicit-defaults", "none", "chunked", legacy=legacy
             ),
         },
         {
@@ -895,7 +945,7 @@ def _fullbuffer_path_invariants() -> list[dict]:
                 "label": fullbuffer_hits_label,
             }],
             "metadata_checks": _scenario_metadata_checks(
-                "balanced", "none", "identity"
+                "explicit-defaults", "none", "identity", legacy=legacy
             ),
         },
     ]
@@ -955,7 +1005,7 @@ def _gzip_large_invariant() -> dict:
             },
         ],
         "metadata_checks": _scenario_metadata_checks(
-            "balanced", "gzip", "identity"
+            "explicit-defaults", "gzip", "identity"
         ),
     }
 
@@ -974,31 +1024,51 @@ def _compressed_streaming_invariant(name: str, compression: str) -> dict:
         "scenario": name,
         "checks": checks,
         "metadata_checks": _scenario_metadata_checks(
-            "streaming_first", compression, "chunked"
+            "explicit-streaming", compression, "chunked"
         ),
     }
 
 
-def _path_coverage_invariants() -> list[dict]:
+def _path_coverage_invariants(*, legacy: bool = False) -> list[dict]:
     return [
-        *_fullbuffer_path_invariants(),
+        *_fullbuffer_path_invariants(legacy=legacy),
         {
             "scenario": "streaming-first",
             "checks": _streaming_checks(),
             "metadata_checks": _scenario_metadata_checks(
-                "streaming_first", "none", "chunked"
+                "explicit-streaming", "none", "chunked", legacy=legacy
             ),
         },
-        _gzip_large_invariant(),
-        _compressed_streaming_invariant(
-            "gzip-streaming-first", "gzip"
-        ),
-        _compressed_streaming_invariant(
-            "deflate-streaming-first", "deflate"
-        ),
-        _compressed_streaming_invariant(
-            "brotli-streaming-first", "brotli"
-        ),
+        {
+            **_gzip_large_invariant(),
+            "metadata_checks": _scenario_metadata_checks(
+                "explicit-defaults", "gzip", "identity", legacy=legacy
+            ),
+        },
+        {
+            **_compressed_streaming_invariant(
+                "gzip-streaming-first", "gzip"
+            ),
+            "metadata_checks": _scenario_metadata_checks(
+                "explicit-streaming", "gzip", "chunked", legacy=legacy
+            ),
+        },
+        {
+            **_compressed_streaming_invariant(
+                "deflate-streaming-first", "deflate"
+            ),
+            "metadata_checks": _scenario_metadata_checks(
+                "explicit-streaming", "deflate", "chunked", legacy=legacy
+            ),
+        },
+        {
+            **_compressed_streaming_invariant(
+                "brotli-streaming-first", "brotli"
+            ),
+            "metadata_checks": _scenario_metadata_checks(
+                "explicit-streaming", "brotli", "chunked", legacy=legacy
+            ),
+        },
     ]
 
 def _check_path_coverage(report: dict) -> list[tuple[str, str, str]]:
@@ -1007,7 +1077,7 @@ def _check_path_coverage(report: dict) -> list[tuple[str, str, str]]:
     A violation occurs when a critical scenario is marked "completed"
     but its target production path was never exercised (the invariant
     metric predicate returned False), or when scenario metadata does
-    not match the expected configuration (wrong profile, compression,
+    not match the expected configuration (wrong scenario_config, compression,
     or transfer_encoding).
 
     Each violation is evidence that the benchmark did not actually test
@@ -1021,7 +1091,9 @@ def _check_path_coverage(report: dict) -> list[tuple[str, str, str]]:
             by_name[name] = s
 
     violations: list[tuple[str, str, str]] = []
-    for invariant in _path_coverage_invariants():
+    for invariant in _path_coverage_invariants(
+        legacy=_uses_legacy_profile_contract(report)
+    ):
         name = invariant["scenario"]
         scenario = by_name.get(name)
         if scenario is None or scenario.get("status") != "completed":
@@ -1091,6 +1163,14 @@ def _check_metadata_fields(
     """Check metadata field expectations for a single scenario."""
     for meta_check in invariant.get("metadata_checks", []):
         field = meta_check["field"]
+        if meta_check.get("forbidden"):
+            if field in scenario:
+                violations.append((
+                    name,
+                    field,
+                    f"{meta_check['label']} (actual={scenario[field]!r})",
+                ))
+            continue
         expected = meta_check["expected"]
         actual = scenario.get(field, "")
         if actual != expected:
@@ -1099,6 +1179,24 @@ def _check_metadata_fields(
                 field,
                 f"{meta_check['label']} (actual={actual!r})",
             ))
+
+
+def _legacy_scenario_contract_violations(
+    report: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Reject removed public profile metadata in frozen 0.9.2 evidence."""
+    if _uses_legacy_profile_contract(report):
+        return []
+    violations: list[tuple[str, str]] = []
+    for scenario in _report_scenarios(report):
+        if "profile" in scenario:
+            violations.append((
+                f"{role}.scenario_metadata",
+                f"{scenario.get('name', '<unnamed>')}: legacy profile field is "
+                "not part of the 0.9.2 evidence contract; use "
+                "scenario_config",
+            ))
+    return violations
 
 
 def _check_skipped_scenarios(report: dict) -> list[tuple[str, str]]:
@@ -1122,6 +1220,36 @@ def _check_skipped_scenarios(report: dict) -> list[tuple[str, str]]:
 
 _SUPPORTED_POLICY_TYPES = frozenset({"verbatim_run", "conservative_normalized"})
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _baseline_head_binding_required() -> bool:
+    """Return whether the selected baseline must match the current HEAD."""
+    return os.environ.get("EVIDENCE_GATE_REQUIRE_BASELINE_HEAD", "0") == "1"
+
+
+def _baseline_head_violations(report: dict) -> list[tuple[str, str]]:
+    """Require both report identities to bind to the current full commit."""
+    head = _get_git_commit_full()
+    if not _SHA_RE.fullmatch(head):
+        return [("baseline.head", "cannot resolve a full current git HEAD SHA")]
+
+    module_benchmark = report.get("module_benchmark", {})
+    policy = report.get("baseline_policy", {})
+    if not isinstance(module_benchmark, dict):
+        module_benchmark = {}
+    if not isinstance(policy, dict):
+        policy = {}
+    violations: list[tuple[str, str]] = []
+    for field, value in (
+        ("module_benchmark.git_commit", module_benchmark.get("git_commit")),
+        ("baseline_policy.source_git_commit", policy.get("source_git_commit")),
+    ):
+        if value != head:
+            violations.append((
+                f"baseline.{field}",
+                f"{field}={value!r} does not match current git HEAD {head}",
+            ))
+    return violations
 
 
 def _is_scoped_historical_exception(report: dict) -> bool:
@@ -1150,6 +1278,24 @@ def _is_scoped_historical_exception(report: dict) -> bool:
     except (OSError, RuntimeError, ValueError):
         return False
     return report == historical_report
+
+
+def _uses_legacy_profile_contract(report: dict) -> bool:
+    """Return whether the report is the explicitly supported 0.9.1 format.
+
+    The 0.9.1 baseline is retained as a comparison input and therefore keeps
+    its historical ``profile`` field.  This exception is bound to that
+    baseline's immutable provenance; a 0.9.2 report cannot opt into the old
+    vocabulary by merely adding the old field.
+    """
+    if _is_scoped_historical_exception(report):
+        return True
+    policy = report.get("baseline_policy")
+    return (
+        isinstance(policy, dict)
+        and policy.get("source_git_commit") == _LEGACY_091_BASELINE_COMMIT
+        and policy.get("source_artifact") == _LEGACY_091_BASELINE_ARTIFACT
+    )
 
 
 def _policy_type_violations(
@@ -2345,6 +2491,7 @@ def _validate_benchmark_evidence(
     violations.extend(
         _fallback_rate_consistency_violations(report, role)
     )
+    violations.extend(_legacy_scenario_contract_violations(report, role))
     violations.extend(_baseline_policy_violations(report, role))
     violations.extend(_scenario_source_environment_violations(report, role))
     violations.extend(_raw_artifact_binding_violations(report, role))
@@ -2548,6 +2695,18 @@ def _resolve_baseline(
         return _resolve_missing_baseline(report, args, blocking)
 
     baseline_report = json.loads(baseline_path.read_text(encoding="utf-8"))
+
+    if _baseline_head_binding_required():
+        if head_violations := _baseline_head_violations(baseline_report):
+            return {}, False, _report_integrity_failure(
+                report,
+                args,
+                head_violations,
+                "FAIL: Checked-in baseline is not bound to the current HEAD:",
+                "  Regenerate the 0.9.2 module baseline from a real module-enabled "
+                "benchmark at this exact commit before release qualification.",
+                exit_code=1 if blocking else 0,
+            )
 
     # Evaluate release_gate_eligible FIRST: an ineligible baseline is
     # excluded from release-gate comparison regardless of evidence

@@ -1418,7 +1418,7 @@ fi
 ###############################################################################
 
 TIMESTAMP="$("$RESOLVED_PYTHON3" -c 'import datetime; print(datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"))' 2>/dev/null || "$RESOLVED_DATE" -u +%Y-%m-%dT%H:%M:%SZ)"
-GIT_COMMIT="$("$RESOLVED_GIT" -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo "unknown")"
+GIT_COMMIT="$("$RESOLVED_GIT" -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo "unknown")"
 PLATFORM="$("$RESOLVED_UNAME" -s | "$RESOLVED_TR" '[:upper:]' '[:lower:]')-$("$RESOLVED_UNAME" -m)"
 
 # Capture the NGINX version for the benchmark environment identity
