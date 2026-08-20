@@ -7,11 +7,6 @@ on:
   # it never runs on release publication (F-01 fix: supported musl artifacts
   # must exist before the release goes public).
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Stable release tag to publish, or any ref for build-only (e.g. v1.0.0 or main)'
-        required: false
-        default: ''
 
 permissions: {}
 
@@ -28,42 +23,36 @@ jobs:
       contents: read
     outputs:
       matrix_entries: ${{ steps.resolve.outputs.matrix_entries }}
-      checkout_ref: ${{ steps.checkout_ref.outputs.checkout_ref }}
       publication_tag: ${{ steps.validate_ref.outputs.publication_tag }}
     steps:
       - name: Validate requested ref
         id: validate_ref
         env:
-          INPUT_VERSION: ${{ github.event_name == 'release' && github.ref_name || github.event.inputs.version || '' }}
-          DEFAULT_REF: ${{ github.ref }}
+          WORKFLOW_REF: ${{ github.ref }}
+          WORKFLOW_REF_NAME: ${{ github.ref_name }}
+          WORKFLOW_SHA: ${{ github.sha }}
         run: |
-          # Build-only dispatches may use a safe branch or commit ref.  Only an
-          # exact stable release tag is eligible for signing and publication.
-          checkout_ref="${DEFAULT_REF}"
-          publication_tag=""
-          if [[ -n "${INPUT_VERSION}" ]]; then
-            if [[ "${INPUT_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              checkout_ref="refs/tags/${INPUT_VERSION}"
-              publication_tag="${INPUT_VERSION}"
-            elif printf '%s' "${INPUT_VERSION}" | grep -qE '^[A-Za-z0-9._/-]+$' \
-              && [[ "${INPUT_VERSION}" != -* ]] \
-              && [[ "${INPUT_VERSION}" != */ ]] \
-              && [[ "${INPUT_VERSION}" != /* ]] \
-              && [[ "${INPUT_VERSION}" != *..* ]]; then
-              checkout_ref="${INPUT_VERSION}"
-            else
-              echo "ERROR: version must be a stable vX.Y.Z tag or a safe build-only ref." >&2
-              exit 1
-            fi
+          # The event SHA is the immutable source revision for every job.
+          # Manual inputs must not select code that release jobs execute.
+          if [[ ! "${WORKFLOW_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "ERROR: workflow SHA is not a full commit ID." >&2
+            exit 1
           fi
-          echo "checkout_ref=${checkout_ref}" >> "$GITHUB_OUTPUT"
+
+          publication_tag=""
+          if [[ "${WORKFLOW_REF}" == refs/tags/* ]] \
+            && [[ "${WORKFLOW_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            publication_tag="${WORKFLOW_REF_NAME}"
+          fi
           echo "publication_tag=${publication_tag}" >> "$GITHUB_OUTPUT"
         shell: bash
 
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ steps.validate_ref.outputs.checkout_ref }}
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Verify publication tag binding
         if: steps.validate_ref.outputs.publication_tag != ''
@@ -138,12 +127,6 @@ jobs:
           print(f"Resolved {len(entries)} build entries from release-matrix.json")
           PY
 
-      - id: checkout_ref
-        run: |
-          # The prepare checkout resolves the requested tag/branch once; all
-          # downstream jobs consume the resulting immutable commit SHA.
-          echo "checkout_ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
   build-binaries:
     name: Build - NGINX ${{ matrix.nginx }} - ${{ matrix.os_type }} - ${{ matrix.arch }}
     needs: prepare
@@ -157,7 +140,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
@@ -182,7 +166,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -218,7 +203,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
       - name: Download all binary artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -271,7 +257,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
       - name: Download SHA256SUMS
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8

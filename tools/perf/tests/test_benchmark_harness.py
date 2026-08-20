@@ -1499,6 +1499,7 @@ class TestNginxConfigGeneration:
         assert "required_commands=(" in script_content
         assert 'command -v "$name"' in script_content
         assert "resolve_tool" in script_content
+        assert "/opt/hostedtoolcache" in script_content
         assert "RESOLVED_PS" in script_content
         assert "RSS_SUPPORTED=1" in script_content
         assert "RSS_SUPPORTED=0" in script_content

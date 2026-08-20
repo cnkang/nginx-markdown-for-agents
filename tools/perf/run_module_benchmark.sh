@@ -100,6 +100,9 @@ readonly TRUSTED_TOOL_ROOTS=(
   /opt/homebrew/Cellar
   /usr/local/Cellar
   /usr/lib/nginx
+  # actions/setup-python installs the runner interpreter here on GitHub-hosted
+  # Linux runners; the runner image owns this immutable toolcache.
+  /opt/hostedtoolcache
 )
 
 # is_trusted_tool_path returns 0 when the given path lives directly under one

@@ -61,16 +61,14 @@ def test_release_binaries_resolves_current_schema_without_mutating_matrix() -> N
 
 
 def test_release_binaries_workflow_dispatch_can_publish_tag_assets() -> None:
-    """Manual recovery runs for release tags must upload assets to that tag."""
+    """Manual recovery runs publish only after prepare resolves a stable tag."""
     workflow = _workflow_data("release-binaries.yml")
+    assert "workflow_dispatch" in workflow["on"]
     publish = workflow["jobs"]["publish-release"]
     upload = _step_by_name(publish["steps"], "Upload Assets")
 
-    assert "workflow_dispatch" in publish["if"]
-    assert "startsWith(github.event.inputs.version, 'v')" in publish["if"]
-    assert upload["with"]["tag_name"] == (
-        "${{ github.event.inputs.version || github.ref_name }}"
-    )
+    assert "needs.prepare.outputs.publication_tag != ''" in publish["if"]
+    assert upload["with"]["tag_name"] == "${{ needs.prepare.outputs.publication_tag }}"
 
 
 def test_release_binaries_publishes_signed_checksum_chain() -> None:
@@ -89,7 +87,7 @@ def test_release_binaries_publishes_signed_checksum_chain() -> None:
     assert "generate-checksums.sh -d artifacts/" in checksum_step["run"]
     assert "sha256sum --check SHA256SUMS" in checksum_step["run"]
     assert set(signing_job["needs"]) == {"prepare", "integrity-checksums"}
-    assert "github.event_name == 'release'" in signing_job["if"]
+    assert "needs.prepare.outputs.publication_tag != ''" in signing_job["if"]
     assert signing_job["environment"] == "release-signing"
     assert "gpg-sign-checksums.sh" in workflow_text
     assert "binary-checksums-signature" in workflow_text
