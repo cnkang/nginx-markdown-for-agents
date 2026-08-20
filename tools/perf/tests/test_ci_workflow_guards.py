@@ -170,6 +170,30 @@ def test_release_gate_declares_statuses_read_permission() -> None:
     assert "statuses: read" in workflow
 
 
+def test_release_gate_generates_candidate_bound_092_baseline() -> None:
+    """Release qualification must create 092 evidence at the candidate SHA."""
+    repo_root = Path(__file__).resolve().parents[3]
+    workflow = (repo_root / ".github" / "workflows" / "release-packages.yml").read_text(
+        encoding="utf-8"
+    )
+
+    benchmark = workflow.index("tools/perf/run_module_benchmark.sh")
+    gate = workflow.index(
+        "make release-perf-evidence-blocking BASELINE_VERSION=092"
+    )
+    assert benchmark < gate
+    for snippet in (
+        '--env GITHUB_RUN_ATTEMPT',
+        'CANDIDATE_SHA="$(git rev-parse HEAD)"',
+        "tools/perf/validate_module_probe_artifacts.py",
+        "tools/perf/finalize_module_baseline.py",
+        '--source-git-commit "${CANDIDATE_SHA}"',
+        "--source-run \"${CANDIDATE_RUN}\"",
+        "--baseline perf/baselines/module-baseline-092.json",
+    ):
+        assert snippet in workflow
+
+
 # ---------------------------------------------------------------------------
 # Nightly perf workflow guards (canonical module baseline generation)
 # ---------------------------------------------------------------------------
