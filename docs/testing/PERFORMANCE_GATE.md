@@ -89,6 +89,17 @@ For deep analysis, use:
 - `python3 tools/perf/doctor_advice.py`: Analyzes measurement reports and suggests configuration tuning.
 - `tools/perf/run_module_benchmark.sh`: Runs a standalone benchmark of the module.
 
+The benchmark harness and evidence gate never execute PATH-shadowable helper
+binaries. Every external helper (`bash`, `git`, `curl`, `python3`, `ps`, `awk`,
+`cat`, `cp`, `cut`, `head`, `mkdir`, `mktemp`, `rm`, `sleep`, `tr`, `uname`,
+`wc`, `date`, and the load generator `hey`/`ab`) passes through an approved
+absolute-executable resolver that rejects candidates outside trusted system
+roots and, when running as root, candidates not owned by root or writable by
+group/other. The harness records the resolved toolchain in the benchmark
+report and the release evidence pack (`module_benchmark.toolchain` and
+`toolchain.git` respectively), so release gates consume only evidence that
+comes from the validated toolchain.
+
 When invoked directly, `threshold_engine.py` emits the Verdict Report JSON to
 stdout and diagnostics to stderr. Redirect stdout to the intended artifact.
 The Python process does not accept a caller-controlled output path.

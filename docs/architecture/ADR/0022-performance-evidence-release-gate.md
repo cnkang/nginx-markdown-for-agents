@@ -53,6 +53,15 @@ relative to a baseline:
   development-only skip is not release evidence.
 - Increases the time required for the final release check.
 
+### Toolchain Security
+- All external helpers executed by the benchmark harness and the evidence gate
+  (`bash`, `git`, `curl`, `python3`, `ps`, `awk`, `cat`, `cp`, `cut`, `head`, `mkdir`,
+  `mktemp`, `rm`, `sleep`, `tr`, `uname`, `wc`, `date`, and the load generator)
+  pass through a trusted-root resolver that returns approved absolute paths.
+  The harness and gate never invoke a bare PATH-shadowable executable, so
+  evidence cannot come from a hijacked binary.  The toolchain paths appear in
+  the report and evidence pack.
+
 ## Alternatives Considered
 - **Microbenchmarks (Criterion/etc)**: Rejected because they fail to capture NGINX's interaction with the OS network stack and pool management.
 - **Manual Verification**: Rejected as it is non-repeatable and prone to operator error.

@@ -19,6 +19,8 @@ Requirements: 9.1, 9.3, 9.4
 import copy
 import hashlib
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -924,6 +926,117 @@ class TestRCAndReleaseTagEnforcement:
         is_rc = _RC_RE.search(value) is not None
         is_release = _RELEASE_TAG_RE.search(value) is not None
         assert is_rc or is_release, f"tag {value} matched neither RC nor release pattern"
+
+
+class TestToolResolution:
+    """PATH-shadowable helper execution must never be used (perf-evidence F4)."""
+
+    def test_resolve_tool_rejects_missing_binary(self, monkeypatch):
+        """A command absent from PATH must not resolve."""
+        monkeypatch.setattr(evidence_gate.shutil, "which", lambda name: None)
+        assert evidence_gate._resolve_tool("nonexistent-tool") is None
+
+    def test_resolve_tool_rejects_untracked_location(self, monkeypatch):
+        """A candidate outside a trusted system root must be rejected."""
+        untrusted = "/tmp/untrusted/tool"
+        monkeypatch.setattr(evidence_gate.shutil, "which", lambda name: untrusted)
+        assert evidence_gate._is_trusted_tool_path(untrusted) is False
+        assert evidence_gate._resolve_tool("tool") is None
+
+    def test_resolve_tool_accepts_trusted_location(self, monkeypatch):
+        """A candidate inside a trusted system root resolves to its real path."""
+        trusted = "/usr/bin/env"
+        monkeypatch.setattr(evidence_gate.shutil, "which", lambda name: trusted)
+        monkeypatch.setattr(evidence_gate.os.path, "isfile", lambda path: True)
+        monkeypatch.setattr(evidence_gate.os, "access", lambda path, mode: True)
+        monkeypatch.setattr(evidence_gate.os.path, "realpath", lambda path: trusted)
+        monkeypatch.setattr(evidence_gate.os, "geteuid", lambda: 1000)
+        resolved = evidence_gate._resolve_tool("env")
+        assert resolved is not None
+        assert evidence_gate.os.path.isabs(resolved)
+
+    def test_git_functions_use_resolved_binary(self, monkeypatch):
+        """git subprocess invocations must use the resolved absolute path."""
+        captured = []
+
+        def fake_run(cmd, **kwargs):
+            captured.append(cmd[0])
+            return type(
+                "Proc",
+                (),
+                {"returncode": 0, "stdout": "abc123\n", "stderr": ""},
+            )()
+
+        monkeypatch.setattr(evidence_gate.subprocess, "run", fake_run)
+        monkeypatch.setattr(
+            evidence_gate, "_git_bin", lambda: "/usr/bin/git"
+        )
+        assert evidence_gate._get_git_commit() == "abc123"
+        assert captured and captured[0] == "/usr/bin/git"
+
+    def test_git_bin_returns_none_when_untrusted(self, monkeypatch):
+        """An untrusted git candidate must yield 'unknown', never a bare run."""
+        monkeypatch.setattr(
+            evidence_gate, "_resolve_tool", lambda name: None
+        )
+        assert evidence_gate._git_bin() is None
+        assert evidence_gate._get_git_commit() == "unknown"
+
+    def test_evidence_pack_records_resolved_git_toolchain(self, monkeypatch):
+        """The evidence pack must record the resolved git path (F4)."""
+        monkeypatch.setattr(
+            evidence_gate, "_git_bin", lambda: "/usr/bin/git"
+        )
+        pack = evidence_gate._build_evidence_pack(
+            None, "GO", [], [], skipped=False, skip_reason=""
+        )
+        assert pack["toolchain"]["git"] == "/usr/bin/git"
+
+    def test_benchmark_invocation_uses_resolved_bash(self, monkeypatch, tmp_path):
+        """The harness must not re-enter PATH through an env-based shebang."""
+        script = tmp_path / "tools" / "perf" / "run_module_benchmark.sh"
+        script.parent.mkdir(parents=True)
+        script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        monkeypatch.setattr(evidence_gate, "REPO_ROOT", tmp_path)
+        monkeypatch.setattr(
+            evidence_gate,
+            "_resolve_tool",
+            lambda name: "/usr/bin/bash" if name == "bash" else None,
+        )
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            return type("Proc", (), {"returncode": 75, "stderr": "skipped"})()
+
+        monkeypatch.setattr(evidence_gate.subprocess, "run", fake_run)
+        rc, stderr = evidence_gate._run_module_benchmark(tmp_path / "out.json")
+
+        assert rc == 75
+        assert stderr == "skipped"
+        assert captured["cmd"][0] == "/usr/bin/bash"
+
+    def test_wrapper_uses_fixed_python_with_hostile_path(self, tmp_path):
+        """The public wrapper must not select Python from PATH."""
+        wrapper = evidence_gate.REPO_ROOT / "tools" / "perf" / "run_evidence_gate.sh"
+        env = os.environ.copy()
+        env["PATH"] = str(tmp_path)
+        env.pop("NGINX_BIN", None)
+        env["EVIDENCE_GATE_MODE"] = "non-blocking"
+        env["MODULE_BASELINE_VERSION"] = "092"
+
+        result = subprocess.run(
+            [str(wrapper)],
+            cwd=evidence_gate.REPO_ROOT,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=20,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert "SKIP_NOT_PRESENT" in result.stderr
 
 
 # ---------------------------------------------------------------------------
