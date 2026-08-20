@@ -972,7 +972,8 @@ class TestToolResolution:
             evidence_gate, "_git_bin", lambda: "/usr/bin/git"
         )
         assert evidence_gate._get_git_commit() == "abc123"
-        assert captured and captured[0] == "/usr/bin/git"
+        assert captured
+        assert captured[0] == "/usr/bin/git"
 
     def test_git_bin_returns_none_when_untrusted(self, monkeypatch):
         """An untrusted git candidate must yield 'unknown', never a bare run."""

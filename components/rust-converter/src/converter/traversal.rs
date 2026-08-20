@@ -117,6 +117,16 @@ impl MarkdownConverter {
     }
 
     /// Internal element dispatcher shared by context and non-context entry points.
+    fn append_escaped_control_text(output: &mut String, text: Option<String>) {
+        if let Some(text) = text {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                output.push_str(&crate::security::escape_markdown_text(trimmed));
+                output.push(' ');
+            }
+        }
+    }
+
     fn handle_void_form_control(&self, node: &Handle, output: &mut String) {
         if let NodeData::Element { ref attrs, .. } = node.data {
             let attrs_borrowed = attrs.borrow();
@@ -134,11 +144,7 @@ impl MarkdownConverter {
                         .find(|a| a.name.local.as_ref() == "value")
                         .map(|a| a.value.to_string())
                 {
-                    let trimmed = value.trim();
-                    if !trimmed.is_empty() {
-                        output.push_str(&crate::security::escape_markdown_text(trimmed));
-                        output.push(' ');
-                    }
+                    Self::append_escaped_control_text(output, Some(value));
                 }
                 return;
             }
@@ -158,13 +164,7 @@ impl MarkdownConverter {
                 })
                 .map(|a| a.value.to_string());
 
-            if let Some(text) = text {
-                let trimmed = text.trim();
-                if !trimmed.is_empty() {
-                    output.push_str(&crate::security::escape_markdown_text(trimmed));
-                    output.push(' ');
-                }
-            }
+            Self::append_escaped_control_text(output, text);
         }
     }
 
@@ -443,7 +443,7 @@ impl MarkdownConverter {
     ) {
         let label = label_candidates
             .iter()
-            .filter_map(|opt| opt.map(|s| s.trim()).filter(|s| !s.is_empty()))
+            .filter_map(|opt| opt.map(str::trim).filter(|s| !s.is_empty()))
             .next()
             .unwrap_or(fallback_label);
         let escaped_label = Self::escape_link_label(label);

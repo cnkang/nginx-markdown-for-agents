@@ -41,33 +41,14 @@ fn header_contains_token_case_insensitive(
         .unwrap_or(false)
 }
 
-/// Run the conditional-requests scenario.
-pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
-    const SCENARIO: &str = "conditional-requests";
-    let start = std::time::Instant::now();
-    let mut assertions = Vec::new();
-
-    if let Err(report) = common::ensure_reuse_nginx_binary(&ctx, SCENARIO, start) {
-        return Ok(report);
-    }
-
-    let base_url = format!("http://127.0.0.1:{}", ctx.port);
-    let url = format!("{base_url}/md/html");
-
-    let mut headers = HashMap::new();
-    headers.insert("Accept".to_string(), "text/markdown".to_string());
-
-    // Case 1: Converted response contains ETag header
-    let resp = match http::get_with_headers(&url, &headers) {
-        Ok(r) => r,
-        Err(e) => {
-            return Ok(ScenarioReport::failing(
-                SCENARIO,
-                assertions,
-                start.elapsed().as_millis() as u64,
-                format!("Failed to connect to NGINX: {e}"),
-            ));
-        }
+fn append_initial_get_cases(
+    url: &str,
+    headers: &HashMap<String, String>,
+    assertions: &mut Vec<AssertionResult>,
+) -> std::result::Result<String, String> {
+    let resp = match http::get_with_headers(url, headers) {
+        Ok(response) => response,
+        Err(error) => return Err(format!("Failed to connect to NGINX: {error}")),
     };
 
     assertions.push(assertions::assert_status(
@@ -84,11 +65,9 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     let response_etag = resp
         .headers
         .get("ETag")
-        .and_then(|v: &reqwest::header::HeaderValue| v.to_str().ok())
+        .and_then(|value: &reqwest::header::HeaderValue| value.to_str().ok())
         .unwrap_or("")
         .to_string();
-
-    // Case 2: ETag differs from upstream original ETag
     let etag_differs = response_etag != UPSTREAM_ETAG;
     assertions.push(AssertionResult {
         name: "case2_etag_differs_from_upstream".to_string(),
@@ -104,19 +83,27 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         },
     });
 
-    // Case 3: If-None-Match match returns 304
+    Ok(response_etag)
+}
+
+fn append_if_none_match_cases(
+    url: &str,
+    headers: &HashMap<String, String>,
+    response_etag: &str,
+    assertions: &mut Vec<AssertionResult>,
+) {
     let mut inm_headers = headers.clone();
-    inm_headers.insert("If-None-Match".to_string(), response_etag.clone());
-    if let Some(resp3) =
-        common::try_get_with_headers(&url, &inm_headers, &mut assertions, "case3_inm_match_304")
+    inm_headers.insert("If-None-Match".to_string(), response_etag.to_string());
+    if let Some(response) =
+        common::try_get_with_headers(url, &inm_headers, assertions, "case3_inm_match_304")
     {
         assertions.push(assertions::assert_status(
             "case3_inm_match_304",
-            resp3.status,
+            response.status,
             304,
         ));
-        // Case 9: 304 response contains Vary: Accept
-        let vary_check = header_contains_token_case_insensitive(&resp3.headers, "Vary", "Accept");
+        let vary_check =
+            header_contains_token_case_insensitive(&response.headers, "Vary", "Accept");
         assertions.push(AssertionResult {
             name: "case9_vary_accept_in_304".to_string(),
             passed: vary_check,
@@ -130,120 +117,108 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         });
     }
 
-    // Case 4: If-None-Match non-match returns 200
-    let mut inm_nomatch_headers = headers.clone();
-    inm_nomatch_headers.insert(
+    let mut nomatch_headers = headers.clone();
+    nomatch_headers.insert(
         "If-None-Match".to_string(),
         "\"non-matching-etag-99999\"".to_string(),
     );
-    if let Some(resp4) = common::try_get_with_headers(
-        &url,
-        &inm_nomatch_headers,
-        &mut assertions,
-        "case4_inm_nomatch_200",
-    ) {
+    if let Some(response) =
+        common::try_get_with_headers(url, &nomatch_headers, assertions, "case4_inm_nomatch_200")
+    {
         assertions.push(assertions::assert_status(
             "case4_inm_nomatch_200",
-            resp4.status,
+            response.status,
             200,
         ));
     }
 
-    // Case 5: If-Modified-Since future returns 304
-    let mut ims_future_headers = headers.clone();
-    ims_future_headers.insert(
-        "If-Modified-Since".to_string(),
-        "Mon, 01 Jan 2030 00:00:00 GMT".to_string(),
-    );
-    if let Some(resp5) = common::try_get_with_headers(
-        &url,
-        &ims_future_headers,
-        &mut assertions,
-        "case5_ims_future_304",
-    ) {
-        assertions.push(assertions::assert_status(
-            "case5_ims_future_304",
-            resp5.status,
-            304,
-        ));
-    }
-
-    // Case 6: If-Modified-Since past returns 200
-    let mut ims_past_headers = headers.clone();
-    ims_past_headers.insert(
-        "If-Modified-Since".to_string(),
-        "Mon, 01 Jan 2020 00:00:00 GMT".to_string(),
-    );
-    if let Some(resp6) = common::try_get_with_headers(
-        &url,
-        &ims_past_headers,
-        &mut assertions,
-        "case6_ims_past_200",
-    ) {
-        assertions.push(assertions::assert_status(
-            "case6_ims_past_200",
-            resp6.status,
-            200,
-        ));
-    }
-
-    // Case 7: Weak ETag (W/"") match returns 304
     let weak_etag = format!("W/{response_etag}");
     let mut weak_headers = headers.clone();
     weak_headers.insert("If-None-Match".to_string(), weak_etag);
-    if let Some(resp7) =
-        common::try_get_with_headers(&url, &weak_headers, &mut assertions, "case7_weak_etag_304")
+    if let Some(response) =
+        common::try_get_with_headers(url, &weak_headers, assertions, "case7_weak_etag_304")
     {
         assertions.push(assertions::assert_status(
             "case7_weak_etag_304",
-            resp7.status,
+            response.status,
             304,
         ));
     }
 
-    // Case 8: Wildcard If-None-Match: * returns 304
     let mut wildcard_headers = headers.clone();
     wildcard_headers.insert("If-None-Match".to_string(), "*".to_string());
-    if let Some(resp8) = common::try_get_with_headers(
-        &url,
-        &wildcard_headers,
-        &mut assertions,
-        "case8_wildcard_inm_304",
-    ) {
+    if let Some(response) =
+        common::try_get_with_headers(url, &wildcard_headers, assertions, "case8_wildcard_inm_304")
+    {
         assertions.push(assertions::assert_status(
             "case8_wildcard_inm_304",
-            resp8.status,
+            response.status,
+            304,
+        ));
+    }
+}
+
+fn append_if_modified_since_cases(
+    url: &str,
+    headers: &HashMap<String, String>,
+    assertions: &mut Vec<AssertionResult>,
+) {
+    let mut future_headers = headers.clone();
+    future_headers.insert(
+        "If-Modified-Since".to_string(),
+        "Mon, 01 Jan 2030 00:00:00 GMT".to_string(),
+    );
+    if let Some(response) =
+        common::try_get_with_headers(url, &future_headers, assertions, "case5_ims_future_304")
+    {
+        assertions.push(assertions::assert_status(
+            "case5_ims_future_304",
+            response.status,
             304,
         ));
     }
 
-    // Case 10: HEAD request describes the Markdown representation a GET
-    // would select (Rust contract scenario_07/08): Content-Type
-    // text/markdown, Vary: Accept, and NO body-derived fields — the
-    // upstream HEAD carries no body, so Content-Length and ETag cannot
-    // be computed and must not be fabricated from the HTML response.
-    let mut head_headers = headers.clone();
-    if let Some(resp10) =
-        common::try_head_with_headers(&url, &head_headers, &mut assertions, "case10_head_200")
+    let mut past_headers = headers.clone();
+    past_headers.insert(
+        "If-Modified-Since".to_string(),
+        "Mon, 01 Jan 2020 00:00:00 GMT".to_string(),
+    );
+    if let Some(response) =
+        common::try_get_with_headers(url, &past_headers, assertions, "case6_ims_past_200")
+    {
+        assertions.push(assertions::assert_status(
+            "case6_ims_past_200",
+            response.status,
+            200,
+        ));
+    }
+}
+
+fn append_head_case(
+    url: &str,
+    headers: &HashMap<String, String>,
+    assertions: &mut Vec<AssertionResult>,
+) {
+    if let Some(response) =
+        common::try_head_with_headers(url, headers, assertions, "case10_head_200")
     {
         assertions.push(assertions::assert_status(
             "case10_head_200",
-            resp10.status,
+            response.status,
             200,
         ));
 
-        // Representation headers match the GET conversion plan.
-        let head_ct = common::header_value(&resp10.headers, "content-type");
+        let content_type = common::header_value(&response.headers, "content-type");
         assertions.push(AssertionResult {
             name: "case10_head_content_type_markdown".to_string(),
-            passed: head_ct.starts_with("text/markdown"),
+            passed: content_type.starts_with("text/markdown"),
             expected: "text/markdown".to_string(),
-            actual: head_ct,
+            actual: content_type,
             message: None,
         });
 
-        // Vary: Accept present (same negotiation contract as GET).
-        let vary_check = header_contains_token_case_insensitive(&resp10.headers, "Vary", "Accept");
+        let vary_check =
+            header_contains_token_case_insensitive(&response.headers, "Vary", "Accept");
         assertions.push(AssertionResult {
             name: "case10_head_vary_accept".to_string(),
             passed: vary_check,
@@ -256,60 +231,92 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
             message: None,
         });
 
-        // No body-derived fields may be fabricated for a HEAD response:
-        // the upstream HEAD carries no body, so Content-Length and ETag
-        // are unknowable and must be absent (not the HTML values).
-        let head_etag = common::header_value(&resp10.headers, "etag");
+        let etag = common::header_value(&response.headers, "etag");
         assertions.push(AssertionResult {
             name: "case10_head_no_etag".to_string(),
-            passed: head_etag.is_empty(),
+            passed: etag.is_empty(),
             expected: "no ETag (body-derived, not fabricatable)".to_string(),
-            actual: if head_etag.is_empty() {
+            actual: if etag.is_empty() {
                 "absent".to_string()
             } else {
-                head_etag
-            },
-            message: None,
-        });
-        let head_cl = common::header_value(&resp10.headers, "content-length");
-        assertions.push(AssertionResult {
-            name: "case10_head_no_content_length".to_string(),
-            passed: head_cl.is_empty(),
-            expected: "no Content-Length (body-derived, not fabricatable)".to_string(),
-            actual: if head_cl.is_empty() {
-                "absent".to_string()
-            } else {
-                head_cl
+                etag
             },
             message: None,
         });
 
-        // Source-HTML metadata must not leak into the Markdown HEAD.
-        let head_ce = common::header_value(&resp10.headers, "content-encoding");
+        let content_length = common::header_value(&response.headers, "content-length");
         assertions.push(AssertionResult {
-            name: "case10_head_no_content_encoding".to_string(),
-            passed: head_ce.is_empty(),
-            expected: "no Content-Encoding (HTML body encoding)".to_string(),
-            actual: if head_ce.is_empty() {
+            name: "case10_head_no_content_length".to_string(),
+            passed: content_length.is_empty(),
+            expected: "no Content-Length (body-derived, not fabricatable)".to_string(),
+            actual: if content_length.is_empty() {
                 "absent".to_string()
             } else {
-                head_ce
+                content_length
             },
             message: None,
         });
-        let head_lm = common::header_value(&resp10.headers, "last-modified");
+
+        let content_encoding = common::header_value(&response.headers, "content-encoding");
         assertions.push(AssertionResult {
-            name: "case10_head_no_last_modified".to_string(),
-            passed: head_lm.is_empty(),
-            expected: "no Last-Modified (HTML mtime)".to_string(),
-            actual: if head_lm.is_empty() {
+            name: "case10_head_no_content_encoding".to_string(),
+            passed: content_encoding.is_empty(),
+            expected: "no Content-Encoding (HTML body encoding)".to_string(),
+            actual: if content_encoding.is_empty() {
                 "absent".to_string()
             } else {
-                head_lm
+                content_encoding
+            },
+            message: None,
+        });
+
+        let last_modified = common::header_value(&response.headers, "last-modified");
+        assertions.push(AssertionResult {
+            name: "case10_head_no_last_modified".to_string(),
+            passed: last_modified.is_empty(),
+            expected: "no Last-Modified (HTML mtime)".to_string(),
+            actual: if last_modified.is_empty() {
+                "absent".to_string()
+            } else {
+                last_modified
             },
             message: None,
         });
     }
+}
+
+/// Run the conditional-requests scenario.
+pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
+    const SCENARIO: &str = "conditional-requests";
+    let start = std::time::Instant::now();
+    let mut assertions = Vec::new();
+
+    if let Err(report) = common::ensure_reuse_nginx_binary(&ctx, SCENARIO, start) {
+        return Ok(report);
+    }
+
+    let base_url = format!("http://127.0.0.1:{}", ctx.port);
+    let url = format!("{base_url}/md/html");
+
+    let mut headers = HashMap::new();
+    headers.insert("Accept".to_string(), "text/markdown".to_string());
+
+    let response_etag = match append_initial_get_cases(&url, &headers, &mut assertions) {
+        Ok(etag) => etag,
+        Err(message) => {
+            return Ok(ScenarioReport::failing(
+                SCENARIO,
+                assertions,
+                start.elapsed().as_millis() as u64,
+                message,
+            ));
+        }
+    };
+
+    append_if_none_match_cases(&url, &headers, &response_etag, &mut assertions);
+    append_if_modified_since_cases(&url, &headers, &mut assertions);
+
+    append_head_case(&url, &headers, &mut assertions);
 
     Ok(common::finalize_report(SCENARIO, start, assertions))
 }

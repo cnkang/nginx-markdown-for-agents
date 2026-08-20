@@ -155,24 +155,18 @@ fn reload_sequence(max_len: usize) -> impl Strategy<Value = Vec<String>> {
 /// Generate formatting variations of the same semantic JSON content.
 /// These produce different source_digest but identical active_digest.
 fn formatting_variants_of(base: &str) -> Vec<String> {
-    let mut variants = Vec::new();
-
-    // Variant 1: extra whitespace after colons
-    variants.push(base.replace(": ", ":  "));
-
-    // Variant 2: extra whitespace before closing brace
-    variants.push(base.replace("}", "  }"));
-
-    // Variant 3: newlines between fields
-    variants.push(base.replace(", ", ",\n  "));
-
-    // Variant 4: tabs instead of spaces
-    variants.push(base.replace(": ", ":\t"));
-
-    // Variant 5: trailing whitespace
-    variants.push(format!("{base}  \n"));
-
-    variants
+    vec![
+        // Variant 1: extra whitespace after colons
+        base.replace(": ", ":  "),
+        // Variant 2: extra whitespace before closing brace
+        base.replace("}", "  }"),
+        // Variant 3: newlines between fields
+        base.replace(", ", ",\n  "),
+        // Variant 4: tabs instead of spaces
+        base.replace(": ", ":\t"),
+        // Variant 5: trailing whitespace
+        format!("{base}  \n"),
+    ]
 }
 
 // ─── Property Tests ───────────────────────────────────────────────────────────

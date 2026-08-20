@@ -897,14 +897,8 @@ impl IncrementalEmitter {
     }
 
     fn normalize_text_fragment(&self, text: &str) -> (String, bool) {
-        let starts_with_whitespace = text
-            .chars()
-            .next()
-            .is_some_and(|character| character.is_whitespace());
-        let ends_with_whitespace = text
-            .chars()
-            .last()
-            .is_some_and(|character| character.is_whitespace());
+        let starts_with_whitespace = text.chars().next().is_some_and(char::is_whitespace);
+        let ends_with_whitespace = text.chars().last().is_some_and(char::is_whitespace);
         let mut normalized = normalize_text(text);
 
         if self.last_text_ended_whitespace && starts_with_whitespace && normalized.starts_with(' ')
