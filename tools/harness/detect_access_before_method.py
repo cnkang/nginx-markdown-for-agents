@@ -107,6 +107,9 @@ def _matching_brace(text: str, open_idx: int) -> int:
 
 def _iter_functions(text: str):
     """Yield (name, body) for each function with a braced body."""
+    # Compute the blanked copy once: every function match reuses the same
+    # comment/literal-aware text, avoiding O(functions × text) rescans.
+    blanked = _blank_literals_and_comments(text)
     for m in FUNC_DEF_RE.finditer(text):
         name_match = FUNC_NAME_RE.search(m.group(1).rstrip())
         if name_match is None:
@@ -118,7 +121,6 @@ def _iter_functions(text: str):
         # opener.  The blanked copy keeps every character position, so
         # the found offset maps back to the original text and the brace
         # balance / body extraction use the original content.
-        blanked = _blank_literals_and_comments(text)
         open_idx = blanked.find("{", m.end())
         if open_idx == -1:
             continue
