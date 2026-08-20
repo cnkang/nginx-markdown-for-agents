@@ -17,6 +17,14 @@ RELEASE_VERSION="${VERSION:-}"
 DOWNLOAD_URL_OVERRIDE="${DOWNLOAD_URL_OVERRIDE:-}"
 DOWNLOAD_SHA256="${DOWNLOAD_SHA256:-}"
 AUTO_DISABLE_STALE_MODULE="${AUTO_DISABLE_STALE_MODULE:-0}"
+# NGINX_BIN overrides PATH discovery with an operator-chosen absolute path to
+# the nginx executable; the installer validates it before any invocation.
+NGINX_BIN="${NGINX_BIN:-}"
+# TRUSTED_FINGERPRINT pins the release signing key.  The default matches the
+# checked-in release signing key in packaging/nginx-markdown-for-agents-release.asc
+# (signing subkey 15C792438EAA762B421E60D21E8D41E7D19A8A75).  Operators may
+# override it with an independently authenticated fingerprint.
+TRUSTED_FINGERPRINT="${TRUSTED_FINGERPRINT:-15C792438EAA762B421E60D21E8D41E7D19A8A75}"
 MIN_SUPPORTED_NGINX_VERSION="1.24.0"
 SOURCE_BUILD_URL="https://github.com/cnkang/nginx-markdown-for-agents/tree/main/docs/guides/INSTALLATION.md#6-secondary-manual-source-build"
 SUPPORTED_ARCHITECTURES="x86_64, aarch64"
@@ -257,6 +265,312 @@ sha256_file() {
   return 1
 }
 
+# Trusted system directories in which the nginx executable may legitimately
+# live.  Both the literal PATH entry and its resolved target must remain under
+# these roots so a symlink cannot escape the allowlist.
+readonly TRUSTED_NGINX_ROOTS=(
+  /usr/sbin
+  /usr/bin
+  /sbin
+  /bin
+  /usr/local/sbin
+  /usr/local/bin
+  /usr/local/nginx/sbin
+  /opt/nginx/sbin
+  /usr/local/opt/nginx/sbin
+  /opt/homebrew/bin
+  /opt/homebrew/sbin
+  /opt/homebrew/opt/nginx/sbin
+  /opt/homebrew/Cellar
+  /usr/local/Cellar
+  /usr/share/nginx/sbin
+  /usr/lib/nginx
+)
+
+# canonicalize_path resolves symlinks and prints the canonical absolute path.
+#
+# Arguments:
+#   $1 - path to canonicalize (relative paths are resolved from $PWD)
+#
+# Outputs:
+#   Writes the canonical absolute path to stdout
+#
+# Returns:
+#   0 on success; 1 if the input is empty
+canonicalize_path() {
+  local path="$1"
+  local dir=""
+  local file=""
+  local target=""
+  local i=0
+
+  if [[ -z "$path" ]]; then
+    return 1
+  fi
+  if [[ "$path" != /* ]]; then
+    path="$(pwd)/$path"
+  fi
+
+  dir="$(cd "$(/usr/bin/dirname "$path")" 2>/dev/null && pwd -P)" || dir="$(/usr/bin/dirname "$path")"
+  file="$(/usr/bin/basename "$path")"
+
+  while [[ -L "$dir/$file" ]] && [[ $i -lt 40 ]]; do
+    target="$(/usr/bin/readlink "$dir/$file" 2>/dev/null)" || break
+    if [[ "$target" != /* ]]; then
+      target="$dir/$target"
+    fi
+    dir="$(cd "$(/usr/bin/dirname "$target")" 2>/dev/null && pwd -P)" || dir="$(/usr/bin/dirname "$target")"
+    file="$(/usr/bin/basename "$target")"
+    i=$((i + 1))
+  done
+
+  printf '%s/%s\n' "$dir" "$file"
+  return 0
+}
+
+# is_trusted_nginx_path returns 0 when the given path lives directly under one
+# of the trusted system executable roots (the literal candidate location, so a
+# user-writable symlink pointing into a trusted root stays rejected).
+#
+# Arguments:
+#   $1 - path to check
+#
+# Returns:
+#   0 when trusted; 1 otherwise
+is_trusted_nginx_path() {
+  local path="$1"
+  local root=""
+  for root in "${TRUSTED_NGINX_ROOTS[@]}"; do
+    case "$path" in
+      "$root"|"$root"/*)
+        return 0
+        ;;
+      *)
+        ;;
+    esac
+  done
+  return 1
+}
+
+# stat_owner prints the numeric owner of a file using the host's stat syntax.
+stat_owner() {
+  local path="$1"
+  case "$(/usr/bin/uname -s 2>/dev/null)" in
+    Darwin)
+      /usr/bin/stat -f '%u' "$path"
+      return $?
+      ;;
+    *)
+      /usr/bin/stat -c '%u' "$path"
+      return $?
+      ;;
+  esac
+}
+
+# stat_mode prints the numeric permission mode of a file using the host's stat
+# syntax. A failed stat is propagated so privileged checks fail closed.
+stat_mode() {
+  local path="$1"
+  case "$(/usr/bin/uname -s 2>/dev/null)" in
+    Darwin)
+      /usr/bin/stat -f '%Lp' "$path"
+      return $?
+      ;;
+    *)
+      /usr/bin/stat -c '%a' "$path"
+      return $?
+      ;;
+  esac
+}
+
+# is_secure_root_file returns 0 only when the file is root-owned and has no
+# group/other write bits. Metadata lookup failures are unsafe and return 1.
+#
+# Arguments:
+#   $1 - path to check
+#
+# Returns:
+#   0 when secure; 1 otherwise
+is_secure_root_file() {
+  local path="$1"
+  local owner=""
+  local mode=""
+
+  owner="$(stat_owner "$path" 2>/dev/null)" || return 1
+  [[ "$owner" == "0" ]] || return 1
+  mode="$(stat_mode "$path" 2>/dev/null)" || return 1
+  [[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
+  if (( (8#$mode & 8#22) == 0 )); then
+    return 0
+  fi
+  return 1
+}
+
+# resolve_nginx_binary resolves and validates the nginx executable, storing the
+# canonical absolute path in the global NGINX_BIN.
+#
+# When NGINX_BIN is set it must be an absolute path to an executable file whose
+# literal location and resolved target are under the trusted roots.  Otherwise
+# PATH discovery is used with the same checks.  When running as root the final
+# target must additionally be owned by root and not writable by group or other
+# users.
+#
+# Returns:
+#   0 on success with NGINX_BIN set; exits with a structured error otherwise.
+resolve_nginx_binary() {
+  local candidate=""
+  local resolved=""
+
+  if [[ -n "$NGINX_BIN" ]]; then
+    if [[ "$NGINX_BIN" != /* ]]; then
+      die_with_error "$CATEGORY_CONFIG" "NGINX_BIN must be an absolute path." \
+        "Set NGINX_BIN to the absolute path of a trusted nginx executable."
+    fi
+    if [[ ! -f "$NGINX_BIN" ]] || [[ ! -x "$NGINX_BIN" ]]; then
+      die_with_error "$CATEGORY_CONFIG" "NGINX_BIN is not an executable file: ${NGINX_BIN}" \
+        "Set NGINX_BIN to the absolute path of a trusted nginx executable."
+    fi
+    candidate="$NGINX_BIN"
+    resolved="$(canonicalize_path "$candidate")"
+    if ! is_trusted_nginx_path "$candidate" \
+      || ! is_trusted_nginx_path "$resolved" \
+      || [[ ! -f "$resolved" ]] || [[ ! -x "$resolved" ]]; then
+      die_with_error "$CATEGORY_CONFIG" \
+        "NGINX_BIN is outside the trusted nginx executable roots: ${candidate}" \
+        "Set NGINX_BIN to the absolute path of a trusted nginx executable."
+    fi
+    if [[ "$EUID" -eq 0 ]]; then
+      if ! is_secure_root_file "$resolved"; then
+        die_with_error "$CATEGORY_CONFIG" \
+          "NGINX_BIN is not root-owned and non-writable by group/other: ${resolved}" \
+          "Set NGINX_BIN to the absolute path of a trusted nginx executable."
+      fi
+    fi
+    NGINX_BIN="$resolved"
+    return 0
+  fi
+
+  if ! candidate="$(command -v nginx 2>/dev/null)"; then
+    die_with_error "$CATEGORY_CONFIG" "nginx is not installed or not in PATH." \
+      "Install NGINX first: https://nginx.org/en/linux_packages.html" \
+      "Ensure the nginx binary is in your PATH."
+  fi
+
+  resolved="$(canonicalize_path "$candidate")"
+  if [[ -z "$resolved" ]] || [[ ! -f "$resolved" ]] || [[ ! -x "$resolved" ]]; then
+    die_with_error "$CATEGORY_CONFIG" "Resolved nginx binary is not an executable file: ${resolved}" \
+      "Set NGINX_BIN to the absolute path of a trusted nginx executable."
+  fi
+
+  if ! is_trusted_nginx_path "$candidate" \
+    || ! is_trusted_nginx_path "$resolved"; then
+    die_with_error "$CATEGORY_CONFIG" \
+      "nginx was discovered in an untrusted PATH location: ${candidate}" \
+      "Set NGINX_BIN to the absolute path of a trusted nginx executable."
+  fi
+
+  if [[ "$EUID" -eq 0 ]]; then
+    if ! is_secure_root_file "$resolved"; then
+      die_with_error "$CATEGORY_CONFIG" \
+        "Resolved nginx binary is not root-owned and non-writable by group/other: ${resolved}" \
+        "Set NGINX_BIN to the absolute path of a trusted nginx executable."
+    fi
+  fi
+
+  NGINX_BIN="$resolved"
+  return 0
+}
+
+# verify_release_signature verifies a detached ASCII-armored GPG signature
+# (SHA256SUMS.asc) over a checksum manifest (SHA256SUMS) using a trusted key
+# whose signing fingerprint must match the pinned expected fingerprint.
+#
+# Arguments:
+#   $1 - path to the checksum manifest (SHA256SUMS)
+#   $2 - path to the detached signature (SHA256SUMS.asc)
+#   $3 - path to the ASCII-armored trusted public key
+#   $4 - expected signing fingerprint (40 hex chars, case-insensitive)
+#
+# Outputs:
+#   Writes "[+] Release signature verified ..." to stdout on success.
+#
+# Returns:
+#   0 when the signature is valid and the fingerprint matches;
+#   1 otherwise (with _json_error_message set).
+verify_release_signature() {
+  local manifest="$1"
+  local signature="$2"
+  local key_file="$3"
+  local expected_fpr="$4"
+  local gpg_home=""
+  local verify_out=""
+  local validsig=""
+  local expected_upper=""
+
+  if ! command -v gpg >/dev/null 2>&1; then
+    _json_error_message="gpg is required to verify the release signature but was not found."
+    return 1
+  fi
+
+  if [[ ! "$expected_fpr" =~ ^[A-Fa-f0-9]{40}$ ]]; then
+    _json_error_message="TRUSTED_FINGERPRINT must be exactly 40 hexadecimal characters."
+    return 1
+  fi
+
+  if ! gpg_home="$(mktemp -d)"; then
+    _json_error_message="Failed to create a temporary gpg home directory."
+    return 1
+  fi
+  chmod 700 "$gpg_home" 2>/dev/null || true
+
+  if ! GNUPGHOME="$gpg_home" gpg --batch --import "$key_file" >/dev/null 2>&1; then
+    rm -rf "$gpg_home" || true
+    _json_error_message="Failed to import the trusted release signing key."
+    return 1
+  fi
+
+  verify_out="$(GNUPGHOME="$gpg_home" gpg --batch --status-fd=1 --verify "$signature" "$manifest" 2>/dev/null || true)"
+  rm -rf "$gpg_home" || true
+
+  validsig="$(printf '%s\n' "$verify_out" | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
+  expected_upper="$(printf '%s' "$expected_fpr" | tr '[:lower:]' '[:upper:]')"
+  if [[ -z "$validsig" ]]; then
+    _json_error_message="Release signature verification failed; no valid signature was produced."
+    return 1
+  fi
+  if [[ "$validsig" != "$expected_upper" ]]; then
+    _json_error_message="Release signature fingerprint mismatch: got ${validsig}, expected ${expected_upper}."
+    return 1
+  fi
+
+  echo "[+] Release signature verified (fingerprint ${expected_upper})"
+  return 0
+}
+
+# manifest_digest_for prints the 64-hex digest for the exact asset name listed
+# in a SHA256SUMS manifest.
+#
+# Arguments:
+#   $1 - exact asset name
+#   $2 - path to the SHA256SUMS manifest
+#
+# Outputs:
+#   Writes the digest to stdout when the asset is listed.
+#
+# Returns:
+#   0 when found; 1 when the asset is not listed.
+manifest_digest_for() {
+  local asset_name="$1"
+  local manifest_file="$2"
+  awk -v want="$asset_name" '
+    ($2 == want || $2 == "*" want) {
+      print tolower($1); found=1; exit
+    }
+    END { if (!found) exit 1 }
+  ' "$manifest_file"
+  return $?
+}
+
 # Fetch the GitHub release JSON for the project, selecting the latest release or a tagged version.
 #
 # Arguments:
@@ -296,11 +610,13 @@ fetch_dist_index_json() {
   return 0
 }
 
-# resolve_download_info determines the download URL, SHA-256 digest, and available prebuilt nginx versions for a requested asset and prints them as three newline-separated lines.
+# resolve_download_info determines the download URL, SHA-256 digest, available prebuilt nginx versions,
+# SHA256SUMS manifest URL, and SHA256SUMS.asc signature URL for a requested asset and prints them as
+# five newline-separated lines.
 # It accepts: asset_name, os_type, arch, nginx_version, ref_name, and optional release_json and dist_index_json (raw JSON strings).
-# Output: line 1 = download URL (empty if not found), line 2 = sha256 digest without any prefix (empty if not present), line 3 = space-separated sorted list of available versions.
-# If DOWNLOAD_URL_OVERRIDE is set, that URL and DOWNLOAD_SHA256 are printed immediately.
-# resolve_download_info discovers the download URL, SHA-256 digest (if present), and available prebuilt versions for the specified asset and prints them as three newline-separated lines (URL, digest, space-separated versions); if DOWNLOAD_URL_OVERRIDE is set it prints that URL, DOWNLOAD_SHA256, and an empty versions field, and if python3 is unavailable it emits a structured config error and returns non-zero so the caller can fail once from the parent shell.
+# Output: line 1 = download URL (empty if not found), line 2 = sha256 digest without any prefix (empty if not present), line 3 = space-separated sorted list of available versions, line 4 = SHA256SUMS manifest URL, line 5 = SHA256SUMS.asc signature URL.
+# If DOWNLOAD_URL_OVERRIDE is set, that URL, DOWNLOAD_SHA256, and empty manifest/signature URLs are printed immediately.
+# resolve_download_info discovers the download URL, SHA-256 digest (if present), available prebuilt versions, SHA256SUMS manifest URL, and SHA256SUMS.asc signature URL for the specified asset and prints them as five newline-separated lines (URL, digest, space-separated versions, manifest URL, signature URL); if DOWNLOAD_URL_OVERRIDE is set it prints that URL, DOWNLOAD_SHA256, and empty manifest/signature fields, and if python3 is unavailable it emits a structured config error and returns non-zero so the caller can fail once from the parent shell.
 resolve_download_info() {
   local asset_name="$1"
   local os_type="$2"
@@ -312,7 +628,7 @@ resolve_download_info() {
   local parse_result=""
 
   if [[ -n "$DOWNLOAD_URL_OVERRIDE" ]]; then
-    printf '%s\n%s\n%s\n' "$DOWNLOAD_URL_OVERRIDE" "$DOWNLOAD_SHA256" ""
+    printf '%s\n%s\n%s\n%s\n%s\n' "$DOWNLOAD_URL_OVERRIDE" "$DOWNLOAD_SHA256" "" "" ""
     return 0
   fi
 
@@ -371,6 +687,8 @@ dist_dir_pattern = re.compile(
 url = ""
 digest = ""
 versions = set()
+sha256sums_url = ""
+sha256sums_asc_url = ""
 
 if release_json:
     try:
@@ -381,6 +699,11 @@ if release_json:
             match = module_pattern.match(name)
             if match:
                 versions.add(match.group(1))
+
+            if name == "SHA256SUMS":
+                sha256sums_url = asset.get("browser_download_url", "")
+            elif name == "SHA256SUMS.asc":
+                sha256sums_asc_url = asset.get("browser_download_url", "")
 
             if name == asset_name:
                 url = asset.get("browser_download_url", "")
@@ -418,13 +741,15 @@ sorted_versions = sorted(
 print(url)
 print(digest)
 print(" ".join(sorted_versions))
+print(sha256sums_url)
+print(sha256sums_asc_url)
 PY
   )"
 
   if [[ -n "$parse_result" ]]; then
     printf '%s\n' "$parse_result"
   else
-    printf '\n\n\n'
+    printf '\n\n\n\n\n'
   fi
   return 0
 }
@@ -538,7 +863,7 @@ collect_stale_module_suggestions() {
     return 0
   fi
 
-  if nginx -t >"$test_log" 2>&1; then
+  if "$NGINX_BIN" -t >"$test_log" 2>&1; then
     rm -f "$test_log" || true
     return 0
   fi
@@ -546,7 +871,7 @@ collect_stale_module_suggestions() {
   if grep -Eq "module \".*${module_so}\" version [0-9]+ instead of [0-9]+" "$test_log"; then
     hints+=("Detected an already-enabled stale ${module_so} that does not match current NGINX ABI.")
     hints+=("List loader snippets: sudo find ${nginx_conf_dir} -type f -name '${CONF_GLOB}' -exec grep -l '${module_so}' {} +")
-    hints+=("Disable each matched snippet by renaming it to *.disabled (or comment out its load_module line), then run: sudo nginx -t")
+    hints+=("Disable each matched snippet by renaming it to *.disabled (or comment out its load_module line), then run: sudo ${NGINX_BIN} -t")
     hints+=("After cleanup, build from source for this NGINX version: ${SOURCE_BUILD_URL}")
   fi
 
@@ -596,7 +921,7 @@ auto_disable_stale_module_loaders() {
   )
 
   if [[ "$disabled_count" -gt 0 ]]; then
-    if nginx -t >/dev/null 2>&1; then
+    if "$NGINX_BIN" -t >/dev/null 2>&1; then
       echo "[+] nginx -t passed after disabling stale module snippets"
     else
       echo "[!] nginx -t still fails after auto-disable; manual review is required" >&2
@@ -794,18 +1119,13 @@ if [[ "${SKIP_ROOT_CHECK:-0}" != "1" ]] && [[ "$EUID" -ne 0 ]]; then
     "Or set SKIP_ROOT_CHECK=1 if running inside a container."
 fi
 
-# Detect Nginx runtime/build metadata
-if ! command -v nginx > /dev/null 2>&1; then
-  die_with_error "$CATEGORY_CONFIG" "nginx is not installed or not in PATH." \
-    "Install NGINX first: https://nginx.org/en/linux_packages.html" \
-    "Ensure the nginx binary is in your PATH."
-fi
-
-NGINX_V_OUTPUT="$(nginx -V 2>&1)"
+# Detect Nginx runtime/build metadata using a validated nginx executable.
+resolve_nginx_binary
+NGINX_V_OUTPUT="$("$NGINX_BIN" -V 2>&1)"
 NGINX_VERSION="$(printf '%s\n' "$NGINX_V_OUTPUT" | grep -oE 'nginx/[0-9]+\.[0-9]+\.[0-9]+' | cut -d/ -f2)"
 if [[ -z "$NGINX_VERSION" ]]; then
-  die_with_error "$CATEGORY_CONFIG" "Could not determine NGINX version from 'nginx -V' output." \
-    "Verify NGINX is installed correctly: nginx -V" \
+  die_with_error "$CATEGORY_CONFIG" "Could not determine NGINX version from '${NGINX_BIN} -V' output." \
+    "Verify NGINX is installed correctly: ${NGINX_BIN} -V" \
     "Ensure the nginx binary is the expected version."
 fi
 _json_nginx_version="$NGINX_VERSION"
@@ -909,6 +1229,8 @@ rm -f "$RELEASE_INFO_FILE" || true
 DOWNLOAD_URL="${RELEASE_INFO[0]:-}"
 EXPECTED_SHA256="${RELEASE_INFO[1]:-}"
 AVAILABLE_VERSIONS="${RELEASE_INFO[2]:-}"
+SHA256SUMS_URL="${RELEASE_INFO[3]:-}"
+SHA256SUMS_ASC_URL="${RELEASE_INFO[4]:-}"
 
 if [[ -z "$DOWNLOAD_URL" ]]; then
   _json_available_versions="$AVAILABLE_VERSIONS"
@@ -956,20 +1278,87 @@ if ! curl --proto '=https' --tlsv1.2 -fsSL -o "$TMP_DIR/$ASSET_NAME" "$DOWNLOAD_
     "See ${SOURCE_BUILD_URL}"
 fi
 
-if [[ -n "$EXPECTED_SHA256" ]]; then
-  ACTUAL_SHA256="$(sha256_file "$TMP_DIR/$ASSET_NAME")"
-  if [[ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
+# Verification strategy:
+#   - DOWNLOAD_URL_OVERRIDE (operator-provided URL + DOWNLOAD_SHA256): the
+#     operator-supplied digest is the independent trust anchor.
+#   - Release-API path (default): the asset digest from the release API is
+#     cross-checked against a signed SHA256SUMS manifest whose signature must
+#     verify against the pinned release signing key.  The manifest digest is
+#     authoritative; the API digest is a secondary consistency check.  Fail
+#     closed when the signature, key, manifest, or trust material is missing.
+if [[ -n "$DOWNLOAD_URL_OVERRIDE" ]]; then
+  if [[ -n "$DOWNLOAD_SHA256" ]]; then
+    ACTUAL_SHA256="$(sha256_file "$TMP_DIR/$ASSET_NAME")"
+    if [[ "$ACTUAL_SHA256" != "$DOWNLOAD_SHA256" ]]; then
+      die_with_error "checksum" \
+        "Checksum verification failed for ${ASSET_NAME}. Expected: ${DOWNLOAD_SHA256}, Actual: ${ACTUAL_SHA256}." \
+        "Re-download the file and try again." \
+        "If the problem persists, the artifact may be corrupted. Report at https://github.com/${REPO}/issues"
+    fi
+    echo "[+] SHA256 checksum verified (operator-supplied DOWNLOAD_SHA256)"
+  else
     die_with_error "checksum" \
-      "Checksum verification failed for ${ASSET_NAME}. Expected: ${EXPECTED_SHA256}, Actual: ${ACTUAL_SHA256}." \
+      "DOWNLOAD_URL_OVERRIDE requires DOWNLOAD_SHA256; checksumless installation is not supported." \
+      "Set DOWNLOAD_SHA256 to the trusted SHA-256 digest of the override artifact." \
+      "If no independently authenticated digest is available, build and install from source."
+  fi
+else
+  if [[ -z "$SHA256SUMS_URL" ]] || [[ -z "$SHA256SUMS_ASC_URL" ]]; then
+    die_with_error "checksum" \
+      "Release does not publish a signed SHA256SUMS manifest (SHA256SUMS/SHA256SUMS.asc); refusing to install unsigned artifact." \
+      "Provide DOWNLOAD_URL_OVERRIDE together with DOWNLOAD_SHA256, or build and install from source." \
+      "See ${SOURCE_BUILD_URL}"
+  fi
+
+  TRUSTED_KEY_URL="https://raw.githubusercontent.com/${REPO}/${source_ref}/packaging/nginx-markdown-for-agents-release.asc"
+  if ! curl --proto '=https' --tlsv1.2 -fsSL -o "$TMP_DIR/SHA256SUMS" "$SHA256SUMS_URL"; then
+    die_with_error "network" \
+      "Failed to download SHA256SUMS manifest." \
+      "Check your network connection and try again." \
+      "See ${SOURCE_BUILD_URL}"
+  fi
+  if ! curl --proto '=https' --tlsv1.2 -fsSL -o "$TMP_DIR/SHA256SUMS.asc" "$SHA256SUMS_ASC_URL"; then
+    die_with_error "network" \
+      "Failed to download SHA256SUMS.asc signature." \
+      "Check your network connection and try again." \
+      "See ${SOURCE_BUILD_URL}"
+  fi
+  if ! curl --proto '=https' --tlsv1.2 -fsSL -o "$TMP_DIR/release-key.asc" "$TRUSTED_KEY_URL"; then
+    die_with_error "network" \
+      "Failed to download the trusted release signing key." \
+      "Check your network connection and try again." \
+      "See ${SOURCE_BUILD_URL}"
+  fi
+
+  if ! verify_release_signature "$TMP_DIR/SHA256SUMS" "$TMP_DIR/SHA256SUMS.asc" \
+      "$TMP_DIR/release-key.asc" "$TRUSTED_FINGERPRINT"; then
+    die_with_error "checksum" "${_json_error_message}" \
+      "Re-run with the correct TRUSTED_FINGERPRINT or DOWNLOAD_URL_OVERRIDE + DOWNLOAD_SHA256." \
+      "See ${SOURCE_BUILD_URL}"
+  fi
+
+  MANIFEST_SHA256="$(manifest_digest_for "$ASSET_NAME" "$TMP_DIR/SHA256SUMS")" || true
+  if [[ -z "$MANIFEST_SHA256" ]]; then
+    die_with_error "checksum" \
+      "Verified SHA256SUMS manifest does not list ${ASSET_NAME}." \
+      "The release may not contain a module for NGINX ${NGINX_VERSION} (${OS_TYPE} ${ARCH})." \
+      "See ${SOURCE_BUILD_URL}"
+  fi
+
+  ACTUAL_SHA256="$(sha256_file "$TMP_DIR/$ASSET_NAME")"
+  if [[ "$ACTUAL_SHA256" != "$MANIFEST_SHA256" ]]; then
+    die_with_error "checksum" \
+      "Checksum verification failed for ${ASSET_NAME} against the signed manifest. Expected: ${MANIFEST_SHA256}, Actual: ${ACTUAL_SHA256}." \
       "Re-download the file and try again." \
       "If the problem persists, the release artifact may be corrupted. Report at https://github.com/${REPO}/issues"
   fi
-  echo "[+] SHA256 checksum verified"
-else
-  die_with_error "checksum" \
-    "Release asset does not provide a SHA256 digest; refusing to install unsigned artifact." \
-    "Provide DOWNLOAD_SHA256 together with DOWNLOAD_URL_OVERRIDE, or use a release asset with a digest." \
-    "If no independently authenticated digest is available, build and install from source."
+  echo "[+] SHA256 checksum verified against signed SHA256SUMS manifest"
+
+  if [[ -n "$EXPECTED_SHA256" ]] && [[ "$EXPECTED_SHA256" != "$MANIFEST_SHA256" ]]; then
+    die_with_error "checksum" \
+      "Release API digest disagrees with the signed manifest for ${ASSET_NAME}. API: ${EXPECTED_SHA256}, manifest: ${MANIFEST_SHA256}." \
+      "Report the inconsistency at https://github.com/${REPO}/issues"
+  fi
 fi
 
 cd "$TMP_DIR"
@@ -1174,7 +1563,7 @@ if ! NGINX_TEST_LOG="$(mktemp)"; then
     "Failed to create a temporary file for nginx -t output." \
     "$MSG_CHECK_PERMS_TMP_DISK"
 fi
-if nginx -t >"$NGINX_TEST_LOG" 2>&1; then
+if "$NGINX_BIN" -t >"$NGINX_TEST_LOG" 2>&1; then
   NGINX_TEST_RESULT="ok"
 else
   NGINX_TEST_RESULT="failed"
@@ -1215,11 +1604,11 @@ fi
 echo ""
 if [[ "$NGINX_TEST_RESULT" = "ok" ]]; then
   echo "[+] nginx -t passed"
-  echo "Run: nginx -s reload"
+  echo "Run: ${NGINX_BIN} -s reload"
 else
   echo "[!] nginx -t failed. Review errors below:" >&2
   sed -n '1,20p' "$NGINX_TEST_LOG"
-  echo "Fix config and run: nginx -t && nginx -s reload"
+  echo "Fix config and run: ${NGINX_BIN} -t && ${NGINX_BIN} -s reload"
 fi
 rm -f "$NGINX_TEST_LOG" || true
 
@@ -1231,6 +1620,7 @@ echo "$SEPARATOR_LINE"
 
 # Emit JSON output if --json was requested
 if [[ "$NGINX_TEST_RESULT" = "failed" ]]; then
+  emit_error "$CATEGORY_CONFIG" "nginx -t failed after installation; the generated configuration is not loadable."
   json_output false
   # A failed nginx -t means the install produced a broken
   # config; the exit code must reflect that so automation does not treat a
