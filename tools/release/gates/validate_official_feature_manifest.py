@@ -136,18 +136,21 @@ def _normalize_feature_token(feature: str) -> tuple[str, list[str]]:
 
     Strips the optional-dependency prefix (`dep:`), splits slash-delimited
     dependency/feature tokens so both segments are checked, and strips the
-    weak-dependency suffix (`?`) so `dep:brotli`, `brotli?`,
-    `dependency/brotli`, and `dep:brotli/foo` all match the bare names.
+    weak-dependency suffix (`?`) from EACH slash-delimited segment (not
+    only from the whole token) so `dep:brotli`, `brotli?`,
+    `brotli?/std`, `dependency/brotli`, and `dep:brotli/foo` all match the
+    bare names.
     """
     normalized = feature
     if normalized.startswith("dep:"):
         normalized = normalized[4:]
-    if normalized.endswith("?"):
-        normalized = normalized[:-1]
     segments = normalized.split("/") if "/" in normalized else []
     if segments:
-        normalized = segments[0]
-    return normalized, segments[1:] if segments else []
+        stripped = [seg[:-1] if seg.endswith("?") else seg for seg in segments]
+        return stripped[0], stripped[1:]
+    if normalized.endswith("?"):
+        normalized = normalized[:-1]
+    return normalized, []
 
 
 def _forbidden_feature_values(
