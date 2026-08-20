@@ -661,7 +661,7 @@ impl StructuralStateMachine {
         self.stack
             .iter()
             .map(|ctx| 64usize.saturating_add(ctx.retained_heap_bytes()))
-            .fold(0usize, |acc, bytes| acc.saturating_add(bytes))
+            .fold(0usize, usize::saturating_add)
     }
 }
 

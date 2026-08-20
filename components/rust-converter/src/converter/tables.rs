@@ -404,12 +404,12 @@ impl MarkdownConverter {
     ) -> Result<(), ConversionError> {
         let max_cols = headers
             .len()
-            .max(rows.iter().map(|r| r.len()).max().unwrap_or(0));
+            .max(rows.iter().map(Vec::len).max().unwrap_or(0));
 
         output.push('|');
         for i in 0..max_cols {
             output.push(' ');
-            let header = headers.get(i).map(|s| s.as_str()).unwrap_or("");
+            let header = headers.get(i).map(String::as_str).unwrap_or("");
             output.push_str(&self.escape_gfm_table_cell(header));
             output.push_str(" |");
         }

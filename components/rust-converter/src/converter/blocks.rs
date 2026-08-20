@@ -209,6 +209,29 @@ impl MarkdownConverter {
     /// continuation indentation, and trailing newlines.  Mirrors the
     /// rendering logic so callers can validate the output budget with
     /// checked arithmetic before mutating the output buffer.
+    fn list_line_is_indented(line: &str, base_indent: &str) -> bool {
+        (!base_indent.is_empty() && line.starts_with(base_indent))
+            || line.starts_with(' ')
+            || line.starts_with('\t')
+    }
+
+    fn list_line_continuation_indent(
+        line: &str,
+        base_indent: &str,
+        continuation_indent_len: usize,
+    ) -> usize {
+        if line.is_empty() || Self::list_line_is_indented(line, base_indent) {
+            0
+        } else {
+            continuation_indent_len
+        }
+    }
+
+    fn list_line_is_nested(line: &str) -> bool {
+        let trimmed = line.trim_start();
+        trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("1. ")
+    }
+
     fn format_list_item_rendered_len(content: &str, depth: usize, ordered: bool) -> usize {
         let base_indent_len = depth * 2;
         let marker_len = if ordered { 3 } else { 2 };
@@ -224,33 +247,26 @@ impl MarkdownConverter {
         for (index, line) in trimmed.lines().enumerate() {
             if index == 0 {
                 total += base_indent_len + marker_len;
-                let first_trimmed = line.trim_start();
-                if first_trimmed.starts_with("- ")
-                    || first_trimmed.starts_with("* ")
-                    || first_trimmed.starts_with("1. ")
-                {
+                if Self::list_line_is_nested(line) {
                     // Blank line after our marker, then the content with
                     // continuation indentation unless already indented.
                     total += 1;
                     if !line.is_empty() {
-                        let already_indented = (!base_indent.is_empty()
-                            && line.starts_with(&base_indent))
-                            || line.starts_with(' ')
-                            || line.starts_with('\t');
-                        if !already_indented {
-                            total += continuation_indent_len;
-                        }
+                        total += Self::list_line_continuation_indent(
+                            line,
+                            &base_indent,
+                            continuation_indent_len,
+                        );
                         total += line.len() + 1;
                     }
                     continue;
                 }
-            } else if !line.is_empty() {
-                let already_indented = (!base_indent.is_empty() && line.starts_with(&base_indent))
-                    || line.starts_with(' ')
-                    || line.starts_with('\t');
-                if !already_indented {
-                    total += continuation_indent_len;
-                }
+            } else {
+                total += Self::list_line_continuation_indent(
+                    line,
+                    &base_indent,
+                    continuation_indent_len,
+                );
             }
 
             total += line.len() + 1;
