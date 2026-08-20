@@ -301,7 +301,7 @@ def test_manual_module_baseline_workflow_uses_canonical_native_runtime():
     assert "perf/baselines/module-baseline-092.json" in workflow
     assert "_validate_benchmark_evidence" in workflow
     assert "make perf-evidence-check" in workflow
-    assert "make release-gates-check-092" in workflow
+    assert "make release-gates-check-092-canonical" in workflow
     assert "module-baseline-092-${{ github.sha }}" in workflow
 
 

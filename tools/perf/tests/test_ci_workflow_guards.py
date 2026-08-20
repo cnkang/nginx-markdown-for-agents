@@ -292,12 +292,12 @@ def test_nightly_perf_uploads_debug_artifacts_on_failure() -> None:
     assert "perf/baselines/module-baseline-091-probes/" not in debug_block
 
 
-def test_nightly_perf_uploads_canonical_only_after_all_release_gates() -> None:
+def test_nightly_perf_uploads_canonical_only_after_canonical_gates() -> None:
     """A canonical artifact must not survive a later gate failure."""
     block = _module_baseline_job(_nightly_perf_text())
     upload = block.index("- name: Upload canonical module baseline")
     evidence_gate = block.index("make perf-evidence-check")
-    release_gates = block.index("make release-gates-check-092")
+    release_gates = block.index("make release-gates-check-092-canonical")
 
     assert evidence_gate < upload
     assert release_gates < upload
