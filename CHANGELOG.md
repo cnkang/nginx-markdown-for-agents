@@ -89,11 +89,12 @@ before/after examples.
   (Content-Digest, Repr-Digest, ...) propagating with the Markdown body.
   All conversion paths (full-buffer, streaming, 304, HEAD) now clear the
   trailer list (`ngx_http_markdown_clear_trailers`).
-- DEB/RPM packages now require the EXACT NGINX version they were compiled
-  against. The `preinstall.sh` script rejects any full-version difference
+- DEB/RPM packages now require the EXACT NGINX version that builds them. The
+  `preinstall.sh` script rejects any full-version difference
   (including a patch release) as fatal, the DEB/RPM dependency metadata
   pins the exact version (`nginx (= X.Y.Z)` / `nginx = 1:X.Y.Z`), and the
-  misleading "--with-compat same-minor compatibility" claim was removed.
+  project no longer makes the misleading "--with-compat same-minor
+  compatibility" claim.
   NGINX's dynamic module loader rejects a version mismatch before
   signature checks, so the previous branch-scoped tolerance produced
   packages that installed but failed to load.
@@ -130,7 +131,7 @@ before/after examples.
   `Content-Type: text/markdown; charset=utf-8` with `Vary: Accept` and
   strips source-HTML metadata (`Content-Encoding`, `Last-Modified`,
   `Accept-Ranges`, digest headers, `Trailer`). Body-derived fields
-  (`Content-Length`, `ETag`) are removed rather than fabricated: a
+  (`Content-Length`, `ETag`) receive no fabricated values: a
   proxied HEAD carries no body, so committing an empty-input ETag or
   `Content-Length: 0` would contradict the GET representation of the
   same URL (Rust contract scenarios 07/08). This supersedes the

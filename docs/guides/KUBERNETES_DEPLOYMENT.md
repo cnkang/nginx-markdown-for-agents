@@ -288,9 +288,8 @@ destination accordingly.
 
 The chart does NOT default the runtime image: Helm refuses to render the
 Deployment until both `image.repository` and `image.tag` are set explicitly.
-The chart is therefore not installable with zero overrides — a stock `nginx`
-image must be supplied when `markdown.enabled=false` (the path used by the
-local stock-nginx smoke test):
+The chart therefore cannot install with zero overrides. The local stock-nginx
+smoke test supplies a stock `nginx` image when `markdown.enabled=false`:
 
 ```bash
 helm install nginx-markdown charts/nginx-markdown \
