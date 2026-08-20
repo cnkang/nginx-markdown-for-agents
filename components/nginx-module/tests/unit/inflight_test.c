@@ -146,7 +146,9 @@ test_pool_destroy(ngx_pool_t *p)
  * the cleanup type before the include defines it (C allows implicit
  * void* <-> typed-pointer conversion in assignments). */
 typedef struct {
-    void  *inflight_cleanup;
+    struct {
+        void  *inflight_cleanup;
+    } lifecycle;
 } ngx_http_markdown_ctx_t;
 
 /* Include the implementation under test */
@@ -168,7 +170,7 @@ setup_request(ngx_http_request_t *r)
     g_conn.log = &g_log;
     r->pool = &g_pool;
     r->connection = &g_conn;
-    g_ctx.inflight_cleanup = NULL;
+    g_ctx.lifecycle.inflight_cleanup = NULL;
 }
 
 /* ----------------------------------------------------------------
@@ -524,7 +526,7 @@ test_active_release_decrements_early(void)
     TEST_ASSERT(rc == NGX_OK, "increment should succeed");
     TEST_ASSERT(ngx_http_markdown_inflight_current() == 1,
         "current should be 1 after increment");
-    TEST_ASSERT(g_ctx.inflight_cleanup != NULL,
+    TEST_ASSERT(g_ctx.lifecycle.inflight_cleanup != NULL,
         "ctx should carry the inflight cleanup pointer");
 
     /* Active release at conversion terminal (pool NOT destroyed). */
@@ -532,7 +534,7 @@ test_active_release_decrements_early(void)
 
     TEST_ASSERT(ngx_http_markdown_inflight_current() == 0,
         "current should be 0 after active release");
-    TEST_ASSERT(g_ctx.inflight_cleanup == NULL,
+    TEST_ASSERT(g_ctx.lifecycle.inflight_cleanup == NULL,
         "release should consume the ctx pointer (second call is no-op)");
 
     /* Second release must be a no-op (idempotent). */
@@ -556,7 +558,7 @@ test_active_release_noop_without_increment(void)
     ngx_http_markdown_ctx_t  ctx;
 
     ngx_http_markdown_inflight_reset();
-    ctx.inflight_cleanup = NULL;
+    ctx.lifecycle.inflight_cleanup = NULL;
 
     ngx_http_markdown_inflight_release(&ctx);
 

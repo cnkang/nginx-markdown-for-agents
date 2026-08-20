@@ -207,7 +207,7 @@ ngx_http_markdown_bind_request_context_snapshot(
     const ngx_http_markdown_conf_t *conf)
 {
     ngx_http_markdown_bind_request_snapshot(
-        r->pool, r->connection->log, conf, snap_copy, early_eff,
+        r, conf, snap_copy, early_eff,
         &ctx->effective_conf_storage,
         &ctx->dynconf_snapshot, &ctx->effective_conf);
 }
@@ -378,9 +378,9 @@ ngx_http_markdown_init_ctx(ngx_http_request_t *r,
     ctx->eligible = 1;
     ctx->buffer_initialized = 0;
     ctx->headers_forwarded = 0;
-    ctx->last_modified.source_last_modified_time =
+    ctx->lifecycle.last_modified.source_last_modified_time =
         r->headers_out.last_modified_time;
-    ctx->last_modified.has_last_modified_time =
+    ctx->lifecycle.last_modified.has_last_modified_time =
         (r->headers_out.last_modified_time != (time_t) -1);
     ctx->conversion.attempted = 0;
     ctx->conversion.succeeded = 0;
@@ -1593,9 +1593,9 @@ ngx_http_markdown_body_filter_handle_head(ngx_http_request_t *r,
         ctx->eligible = 0;
         ctx->conversion.bypass_counted = 1;
         /* The forward helper restores the source Last-Modified mtime
-         * from ctx->last_modified; the HEAD representation must not
+         * from ctx->lifecycle.last_modified; the HEAD representation must not
          * carry the HTML mtime, so forget the preserved source time. */
-        ctx->last_modified.has_last_modified_time = 0;
+        ctx->lifecycle.last_modified.has_last_modified_time = 0;
     }
     return NGX_DECLINED;
 }

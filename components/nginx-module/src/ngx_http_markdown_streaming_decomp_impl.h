@@ -76,6 +76,11 @@ typedef enum {
     NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL
 } ngx_http_markdown_decomp_failure_origin_e;
 
+typedef struct {
+    ngx_atomic_uint_t  *bytes;
+    size_t              limit;
+} ngx_http_markdown_brotli_workspace_t;
+
 /*
  * Streaming decompressor state.
  *
@@ -97,16 +102,18 @@ typedef struct ngx_http_markdown_streaming_decomp_s {
     } state;
 
 #ifdef NGX_HTTP_BROTLI
-    /* Brotli I/O cursors (mirrors zlib's next_in/avail_in/next_out/avail_out) */
-    const u_char                         *brotli_next_in;
-    size_t                                brotli_avail_in;
-    u_char                               *brotli_next_out;
-    size_t                                brotli_avail_out;
-    /* Decoder-owned allocations are bounded across requests in a worker. */
-    ngx_atomic_uint_t                brotli_workspace_bytes;
-    ngx_atomic_uint_t               *brotli_workspace_bytes_shared;
-    size_t                                brotli_workspace_limit;
-    ngx_log_t                            *brotli_log;
+    struct {
+        /* Brotli I/O cursors mirror zlib's input/output fields. */
+        const u_char                         *next_in;
+        size_t                                avail_in;
+        u_char                               *next_out;
+        size_t                                avail_out;
+        /* Decoder-owned allocations are bounded across requests. */
+        ngx_atomic_uint_t                     workspace_bytes;
+        ngx_atomic_uint_t                    *workspace_bytes_shared;
+        size_t                                workspace_limit;
+        ngx_log_t                            *log;
+    } brotli;
 #endif
 
     /*
@@ -175,9 +182,9 @@ static ngx_atomic_uint_t *
 ngx_http_markdown_brotli_workspace_counter(
     ngx_http_markdown_streaming_decomp_t *decomp)
 {
-    return decomp->brotli_workspace_bytes_shared != NULL
-        ? decomp->brotli_workspace_bytes_shared
-        : &decomp->brotli_workspace_bytes;
+    return decomp->brotli.workspace_bytes_shared != NULL
+        ? decomp->brotli.workspace_bytes_shared
+        : &decomp->brotli.workspace_bytes;
 }
 
 
@@ -194,8 +201,7 @@ ngx_http_markdown_brotli_reserve(
 
     current = *counter;
     for ( ;; ) {
-        if (current > (ngx_atomic_uint_t) limit
-            || size > limit - (size_t) current)
+        if (current > limit || size > limit - current)
         {
             return NGX_ERROR;
         }
@@ -233,18 +239,18 @@ ngx_http_markdown_brotli_alloc(void *opaque, size_t size)
 
     counter = ngx_http_markdown_brotli_workspace_counter(decomp);
     if (ngx_http_markdown_brotli_reserve(
-            counter, decomp->brotli_workspace_limit, total) != NGX_OK)
+            counter, decomp->brotli.workspace_limit, total) != NGX_OK)
     {
         return NULL;
     }
 
-    if (decomp->brotli_log == NULL) {
+    if (decomp->brotli.log == NULL) {
         (void) ngx_atomic_fetch_add(
             counter, -((ngx_atomic_int_t) total));
         return NULL;
     }
 
-    allocation = ngx_alloc(total, decomp->brotli_log);
+    allocation = ngx_alloc(total, decomp->brotli.log);
     if (allocation == NULL) {
         (void) ngx_atomic_fetch_add(
             counter, -((ngx_atomic_int_t) total));
@@ -524,8 +530,7 @@ ngx_http_markdown_streaming_decomp_create_with_origin(
     ngx_http_markdown_compression_type_e type,
     size_t max_decompressed_size,
     size_t decompression_ratio,
-    ngx_atomic_uint_t *brotli_workspace_bytes,
-    size_t brotli_workspace_limit,
+    const ngx_http_markdown_brotli_workspace_t *brotli_workspace,
     ngx_log_t *log,
     ngx_http_markdown_decomp_failure_origin_e *origin)
 {
@@ -561,13 +566,15 @@ ngx_http_markdown_streaming_decomp_create_with_origin(
     decomp->zlib_header_pending = 0;
     decomp->pending_header_len = 0;
 #ifdef NGX_HTTP_BROTLI
-    decomp->brotli_workspace_bytes_shared = brotli_workspace_bytes;
-    decomp->brotli_workspace_limit = brotli_workspace_limit;
-    if (decomp->brotli_workspace_limit == 0
-        || decomp->brotli_workspace_limit
+    decomp->brotli.workspace_bytes_shared = brotli_workspace == NULL
+        ? NULL : brotli_workspace->bytes;
+    decomp->brotli.workspace_limit = brotli_workspace == NULL
+        ? 0 : brotli_workspace->limit;
+    if (decomp->brotli.workspace_limit == 0
+        || decomp->brotli.workspace_limit
             > NGX_HTTP_MARKDOWN_BROTLI_WORKSPACE_LIMIT)
     {
-        decomp->brotli_workspace_limit =
+        decomp->brotli.workspace_limit =
             NGX_HTTP_MARKDOWN_BROTLI_WORKSPACE_LIMIT;
     }
     /*
@@ -576,14 +583,13 @@ ngx_http_markdown_streaming_decomp_create_with_origin(
      * log when the caller does not provide one.
      */
 #ifdef NGX_HTTP_MARKDOWN_STREAMING_DECOMP_DEFAULT_LOG
-    decomp->brotli_log = (log != NULL)
+    decomp->brotli.log = (log != NULL)
         ? log : NGX_HTTP_MARKDOWN_STREAMING_DECOMP_DEFAULT_LOG;
 #else
-    decomp->brotli_log = (log != NULL) ? log : ngx_cycle->log;
+    decomp->brotli.log = (log != NULL) ? log : ngx_cycle->log;
 #endif
 #else
-    (void) brotli_workspace_bytes;
-    (void) brotli_workspace_limit;
+    (void) brotli_workspace;
     (void) log;
 #endif
 
@@ -680,10 +686,13 @@ ngx_http_markdown_streaming_decomp_create(
 #else
     ngx_log_t  *default_log = NULL;
 #endif
+    ngx_http_markdown_brotli_workspace_t  brotli_workspace = {
+        NULL, NGX_HTTP_MARKDOWN_BROTLI_WORKSPACE_LIMIT
+    };
 
     return ngx_http_markdown_streaming_decomp_create_with_origin(
-        pool, type, max_decompressed_size, 0, NULL,
-        NGX_HTTP_MARKDOWN_BROTLI_WORKSPACE_LIMIT, default_log, NULL);
+        pool, type, max_decompressed_size, 0, &brotli_workspace,
+        default_log, NULL);
 }
 
 
@@ -1365,17 +1374,17 @@ ngx_http_markdown_streaming_decomp_brotli_probe(
     *using_heap_ptr = 1;
 
     /* Point decoder output at the single probe byte */
-    decomp->brotli_next_out = new_buf + old_size;
-    decomp->brotli_avail_out = 1;
+    decomp->brotli.next_out = new_buf + old_size;
+    decomp->brotli.avail_out = 1;
 
     brc = BrotliDecoderDecompressStream(
         decomp->state.brotli,
-        &decomp->brotli_avail_in,
-        &decomp->brotli_next_in,
-        &decomp->brotli_avail_out,
-        &decomp->brotli_next_out, NULL);
+        &decomp->brotli.avail_in,
+        &decomp->brotli.next_in,
+        &decomp->brotli.avail_out,
+        &decomp->brotli.next_out, NULL);
 
-    probe_produced = 1 - decomp->brotli_avail_out;
+    probe_produced = 1 - decomp->brotli.avail_out;
 
     /* Priority 1: ERROR → preserve classified error */
     if (brc == BROTLI_DECODER_RESULT_ERROR) {
@@ -1386,12 +1395,12 @@ ngx_http_markdown_streaming_decomp_brotli_probe(
     /* Priority 2: SUCCESS */
     if (brc == BROTLI_DECODER_RESULT_SUCCESS) {
         /* 2a: trailing data → FORMAT_ERROR */
-        if (decomp->brotli_avail_in > 0) {
+        if (decomp->brotli.avail_in > 0) {
             ngx_log_error(NGX_LOG_ERR, log, 0,
                 "markdown: reason=brotli_trailing_data "
                 "brotli trailing data: "
                 "%uz bytes after stream completion",
-                decomp->brotli_avail_in);
+                decomp->brotli.avail_in);
             ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
             return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
         }
@@ -1420,7 +1429,7 @@ ngx_http_markdown_streaming_decomp_brotli_probe(
     }
 
     if (brc == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT
-        && decomp->brotli_avail_in == 0)
+        && decomp->brotli.avail_in == 0)
     {
         *out_produced = old_size;
         return 1;
@@ -1429,7 +1438,7 @@ ngx_http_markdown_streaming_decomp_brotli_probe(
     ngx_log_error(NGX_LOG_ERR, log, 0,
         "markdown: brotli exact-budget probe returned invalid state "
         "(result=%d, avail_in=%uz)",
-        (int) brc, decomp->brotli_avail_in);
+        (int) brc, decomp->brotli.avail_in);
     ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
     decomp->failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
     return NGX_ERROR;
@@ -1448,13 +1457,13 @@ ngx_http_markdown_streaming_decomp_brotli_check_progress(
     size_t  consumed;
     size_t  produced;
 
-    consumed = previous_input - decomp->brotli_avail_in;
-    produced = previous_output - decomp->brotli_avail_out;
+    consumed = previous_input - decomp->brotli.avail_in;
+    produced = previous_output - decomp->brotli.avail_out;
     if (consumed > 0 || produced > 0
         || brc == BROTLI_DECODER_RESULT_SUCCESS
         || brc == BROTLI_DECODER_RESULT_ERROR
         || (brc == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT
-            && decomp->brotli_avail_in == 0))
+            && decomp->brotli.avail_in == 0))
     {
         return NGX_OK;
     }
@@ -1517,8 +1526,8 @@ ngx_http_markdown_streaming_decomp_brotli_expand(
     }
 
     *using_heap_ptr = 1;
-    decomp->brotli_next_out = *buf_ptr + old_size;
-    decomp->brotli_avail_out = *buf_size_ptr - old_size;
+    decomp->brotli.next_out = *buf_ptr + old_size;
+    decomp->brotli.avail_out = *buf_size_ptr - old_size;
     return 0;
 }
 
@@ -1553,10 +1562,10 @@ ngx_http_markdown_streaming_decomp_brotli_step(
     size_t               prev_avail_in;
     size_t               prev_avail_out;
 
-    avail_in = decomp->brotli_avail_in;
-    next_in = decomp->brotli_next_in;
-    avail_out = decomp->brotli_avail_out;
-    next_out = decomp->brotli_next_out;
+    avail_in = decomp->brotli.avail_in;
+    next_in = decomp->brotli.next_in;
+    avail_out = decomp->brotli.avail_out;
+    next_out = decomp->brotli.next_out;
 
     /* Save cursors before decode for no-progress guard */
     prev_avail_in = avail_in;
@@ -1567,10 +1576,10 @@ ngx_http_markdown_streaming_decomp_brotli_step(
         &avail_in, &next_in,
         &avail_out, &next_out, NULL);
 
-    decomp->brotli_avail_in = avail_in;
-    decomp->brotli_next_in = next_in;
-    decomp->brotli_avail_out = avail_out;
-    decomp->brotli_next_out = next_out;
+    decomp->brotli.avail_in = avail_in;
+    decomp->brotli.next_in = next_in;
+    decomp->brotli.avail_out = avail_out;
+    decomp->brotli.next_out = next_out;
 
     if (ngx_http_markdown_streaming_decomp_brotli_check_progress(
             decomp, brc, prev_avail_in, prev_avail_out,
@@ -1585,7 +1594,7 @@ ngx_http_markdown_streaming_decomp_brotli_step(
             decomp, heap_buf_ptr, log, "stream");
     }
 
-    *out_produced = *buf_size_ptr - decomp->brotli_avail_out;
+    *out_produced = *buf_size_ptr - decomp->brotli.avail_out;
 
     /*
      * Priority: trailing-data (FORMAT_ERROR) outranks budget check.
@@ -1597,12 +1606,12 @@ ngx_http_markdown_streaming_decomp_brotli_step(
      * BUDGET_EXCEEDED.
      */
     if (brc == BROTLI_DECODER_RESULT_SUCCESS) {
-        if (decomp->brotli_avail_in > 0) {
+        if (decomp->brotli.avail_in > 0) {
             ngx_log_error(NGX_LOG_ERR, log, 0,
                 "markdown: reason=brotli_trailing_data "
                 "brotli trailing data: "
                 "%uz bytes after stream completion",
-                decomp->brotli_avail_in);
+                decomp->brotli.avail_in);
             ngx_http_markdown_streaming_decomp_free_heap(
                 heap_buf_ptr);
             return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
@@ -1643,7 +1652,7 @@ ngx_http_markdown_streaming_decomp_brotli_step(
             heap_buf_ptr, using_heap_ptr, log);
     }
 
-    if (decomp->brotli_avail_in == 0) {
+    if (decomp->brotli.avail_in == 0) {
         return 1;
     }
 
@@ -1664,8 +1673,8 @@ ngx_http_markdown_streaming_decomp_brotli_loop(
     int                  using_heap;
     int                  step_rc;
 
-    decomp->brotli_avail_out = *buf_size_ptr;
-    decomp->brotli_next_out = *buf_ptr;
+    decomp->brotli.avail_out = *buf_size_ptr;
+    decomp->brotli.next_out = *buf_ptr;
     heap_buf = *buf_ptr;
     using_heap = 1;
 
@@ -1804,8 +1813,8 @@ ngx_http_markdown_streaming_decomp_feed_case_brotli(
     size_t in_len,
     const ngx_http_markdown_streaming_decomp_feed_ctx_t *ctx)
 {
-    decomp->brotli_next_in = in_data;
-    decomp->brotli_avail_in = in_len;
+    decomp->brotli.next_in = in_data;
+    decomp->brotli.avail_in = in_len;
 
     return ngx_http_markdown_streaming_decomp_brotli_loop(
         decomp, ctx->buf_ptr, ctx->buf_size_ptr,

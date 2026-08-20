@@ -870,8 +870,7 @@ test_ratio_limit_applies_to_small_stream(void)
     origin = NGX_HTTP_MD_DECOMP_ORIGIN_NONE;
     decomp = ngx_http_markdown_streaming_decomp_create_with_origin(
         &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
-        sizeof(text) * 10, 1, NULL,
-        NGX_HTTP_MARKDOWN_BROTLI_WORKSPACE_LIMIT, &test_log, &origin);
+        sizeof(text) * 10, 1, NULL, &test_log, &origin);
     TEST_ASSERT(decomp != NULL, "ratio decompressor should be created");
 
     out = NULL;
