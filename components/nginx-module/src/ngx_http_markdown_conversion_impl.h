@@ -392,16 +392,44 @@ ngx_http_markdown_set_base_url_header(
     *target_len = value->len;
 }
 
+/* Resolve the original transport peer through NGINX's public variable API. */
+static ngx_int_t
+ngx_http_markdown_source_peer(ngx_http_request_t *r, ngx_str_t *source)
+{
+    static ngx_str_t           realip_remote_addr =
+        ngx_string("realip_remote_addr");
+    ngx_http_variable_value_t *value;
+
+    if (r == NULL || r->connection == NULL || source == NULL) {
+        return NGX_ERROR;
+    }
+
+    *source = r->connection->addr_text;
+    value = ngx_http_get_variable(
+        r, &realip_remote_addr,
+        ngx_hash_key_lc(realip_remote_addr.data,
+                        realip_remote_addr.len));
+    if (value != NULL && value->valid && !value->not_found
+        && value->data != NULL && value->len > 0)
+    {
+        source->data = value->data;
+        source->len = value->len;
+    }
+
+    return NGX_OK;
+}
+
 /*
  * Decide the validated "scheme://host" authority via the Rust trusted-proxy
  * decision (markdown_decide_base_url).
  *
  * This is a thin wrapper: it marshals the original transport peer
- * (r->connection->realip when the realip module preserved it, otherwise
- * r->connection->addr_text, plus the AF_UNIX flag), the forwarded request
- * headers, the request Host, and the http-level trusted-proxy CIDR handle
- * into the FFI input, then copies the FFI-produced authority into out_buf.
- * It contains no trust, CIDR-matching, or host-validation branches.
+ * (the public realip_remote_addr variable when the realip module preserved
+ * it, otherwise r->connection->addr_text, plus the AF_UNIX flag), the
+ * forwarded request headers, the request Host, and the http-level
+ * trusted-proxy CIDR handle into the FFI input, then copies the FFI-produced
+ * authority into out_buf.  It contains no trust, CIDR-matching, or
+ * host-validation branches.
  *
  * Parameters:
  *   r        - HTTP request (NGINX glue source for IP/headers/config)
@@ -413,7 +441,7 @@ ngx_http_markdown_set_base_url_header(
  *   NGX_OK on success, NGX_ERROR when the FFI rejects the inputs.
  */
 static ngx_int_t
-ngx_http_markdown_decide_base_authority(const ngx_http_request_t *r,
+ngx_http_markdown_decide_base_authority(ngx_http_request_t *r,
                                         u_char *out_buf,
                                         size_t out_cap,
                                         size_t *out_len)
@@ -426,6 +454,7 @@ ngx_http_markdown_decide_base_authority(const ngx_http_request_t *r,
     ngx_str_t                             x_forwarded_port;
     FFIBaseUrlInput                       input;
     FFIBaseUrlDecision                    decision;
+    ngx_str_t                             source_peer;
     uint8_t                               rc;
     ngx_flag_t                             forwarded_present;
     ngx_flag_t                             x_forwarded_for_present;
@@ -476,20 +505,16 @@ ngx_http_markdown_decide_base_authority(const ngx_http_request_t *r,
     if (r->connection != NULL) {
         /*
          * Trusted-proxy CIDR evaluation must use the original transport
-         * peer, not the realip-resolved address: when the realip module
-         * (or PROXY protocol) rewrites connection->addr_text to the
-         * X-Forwarded-For-derived client address, the original connecting
-         * peer is preserved in connection->realip.  Matching the CIDR
-         * against the rewritten addr_text would classify the request by
-         * the spoofable client address instead of the actual proxy.
+         * peer, not the realip-resolved address.  The public
+         * realip_remote_addr variable exposes that peer without depending
+         * on private fields from ngx_http_realip_module.  When that module
+         * is absent, the variable lookup falls back to addr_text.
          */
-        if (r->connection->realip.len > 0) {
-            input.source_ip = r->connection->realip.data;
-            input.source_ip_len = r->connection->realip.len;
-        } else {
-            input.source_ip = r->connection->addr_text.data;
-            input.source_ip_len = r->connection->addr_text.len;
+        if (ngx_http_markdown_source_peer(r, &source_peer) != NGX_OK) {
+            return NGX_ERROR;
         }
+        input.source_ip = source_peer.data;
+        input.source_ip_len = source_peer.len;
         if (r->connection->sockaddr != NULL
             && r->connection->sockaddr->sa_family == AF_UNIX)
         {
