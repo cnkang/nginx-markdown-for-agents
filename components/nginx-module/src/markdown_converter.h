@@ -182,9 +182,8 @@
 #define MAX_TOKEN_LEN 128
 
 /**
- * Fixed internal ratio-activation threshold (bytes of compressed input per
- * layer). Not operator-configurable and not part of the `markdown_limits`
- * key set.
+ * Historical compatibility value for the former ratio activation threshold.
+ * Ratio enforcement applies to every non-empty compressed layer.
  */
 #define RATIO_ACTIVATION_THRESHOLD 256
 
@@ -1890,8 +1889,8 @@ void markdown_chain_decode_result_init(struct FFIChainDecodeResult *result);
  * removed. The cumulative output budget (`max_output` = configured
  * `decompressed_size`) applies across every non-identity intermediate
  * output; the per-layer expansion ratio (`ratio` = configured
- * `decompression_ratio`) activates only above the fixed 256-byte
- * internal threshold.
+ * `decompression_ratio`) applies to every non-empty compressed layer,
+ * including inputs below the historical 256-byte compatibility threshold.
  *
  * An identity-only chain (`layer_count == 0`) is a successful no-op:
  * the output is a copy of the input (decode(identity, input) == input),

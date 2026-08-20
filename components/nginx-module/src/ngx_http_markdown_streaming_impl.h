@@ -3698,7 +3698,9 @@ ngx_http_markdown_streaming_init_buffers(
         ctx->streaming.decompressor =
             ngx_http_markdown_streaming_decomp_create_with_origin(
                 r->pool, ctx->decompression.type,
-                conf->decompress.max_size, brotli_workspace_bytes,
+                conf->decompress.max_size,
+                conf->limits.decompression_ratio,
+                brotli_workspace_bytes,
                 brotli_workspace_limit, r->connection->log,
                 &create_origin);
         if (ctx->streaming.decompressor == NULL) {

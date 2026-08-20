@@ -20,7 +20,8 @@
 //!   precommit error policy
 //! - cumulative output exceeding the budget aborts with budget-exceeded
 //! - any layer exceeding the ratio limit aborts
-//! - inputs below the 256-byte ratio activation threshold are exempt
+//! - every non-empty compressed layer is subject to the ratio limit,
+//!   including inputs below the historical 256-byte fixture threshold
 //! - unknown tokens bypass decoder work; the C precommit router applies the
 //!   configured error policy rather than silently bypassing the request
 //! - malformed grammar produces the malformed classification with no
@@ -256,35 +257,35 @@ proptest! {
         assert_eq!(err, ChainDecodeError::BudgetExceeded);
     }
 
-    /// Per-layer ratio enforcement above the 256-byte activation threshold.
+    /// Per-layer ratio enforcement for a large fixture.
     #[test]
     fn p23_ratio_enforced_above_threshold(
         ratio in 2u64..50,
     ) {
         /* Highly compressible payload whose compressed size exceeds the
-         * 256-byte activation threshold. */
+         * historical 256-byte fixture threshold. */
         let original = vec![0u8; 4_000_000];
         let wire = gzip_compress(&original);
         assert!(
             wire.len() >= RATIO_ACTIVATION_THRESHOLD,
-            "test precondition: compressed input must exceed activation threshold"
+            "test precondition: compressed input must exceed legacy fixture threshold"
         );
         let limits = DecodeLimits { max_output: 10 * 1024 * 1024, ratio };
         let err = decode_chain(&wire, &[Encoding::Gzip], limits).unwrap_err();
         assert_eq!(err, ChainDecodeError::RatioExceeded);
     }
 
-    /// Inputs below the 256-byte threshold are exempt from ratio enforcement.
+    /// Inputs below the historical threshold are still ratio-checked.
     #[test]
-    fn p23_ratio_exempt_below_threshold(size in 1usize..RATIO_ACTIVATION_THRESHOLD) {
-        /* A small highly-compressible payload below the threshold decodes
-         * successfully even with ratio = 1. */
+    fn p23_ratio_enforced_for_small_input(size in 32usize..128) {
+        /* A small highly-compressible payload below the historical threshold
+         * is rejected when its expansion exceeds ratio = 1. */
         let original = vec![b'A'; size];
         let wire = gzip_compress(&original);
         assert!(wire.len() < RATIO_ACTIVATION_THRESHOLD);
         let limits = DecodeLimits { max_output: 10 * 1024 * 1024, ratio: 1 };
-        let out = decode_chain(&wire, &[Encoding::Gzip], limits).unwrap();
-        assert_eq!(out, original);
+        let err = decode_chain(&wire, &[Encoding::Gzip], limits).unwrap_err();
+        assert_eq!(err, ChainDecodeError::RatioExceeded);
     }
 
     /// Unknown tokens are classified without starting decoder work.

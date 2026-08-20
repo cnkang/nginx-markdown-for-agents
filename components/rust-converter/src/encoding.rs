@@ -25,9 +25,9 @@ pub const MAX_DECODER_DEPTH: usize = 3;
 /// Maximum accepted token length in bytes.
 pub const MAX_TOKEN_LEN: usize = 128;
 
-/// Fixed internal ratio-activation threshold (bytes of compressed input per
-/// layer). Not operator-configurable and not part of the `markdown_limits`
-/// key set.
+/// Historical compatibility value for the former ratio activation threshold.
+/// Ratio enforcement now applies to every non-empty compressed layer; the
+/// value is retained for downstream source compatibility only.
 pub const RATIO_ACTIVATION_THRESHOLD: usize = 256;
 
 /// Content-Encoding token.
@@ -252,10 +252,9 @@ impl Default for DecodeLimits {
 /// decoder work and consume neither ratio nor output budget.
 ///
 /// The cumulative output budget applies across every non-identity
-/// intermediate output. The per-layer ratio check activates only when that
-/// layer's compressed input is at least [`RATIO_ACTIVATION_THRESHOLD`] bytes;
-/// zero compressed input is accepted for the initial decoder only. An empty
-/// intermediate output cannot feed another decoder layer.
+/// intermediate output. The per-layer ratio check applies to every non-empty
+/// compressed input; zero compressed input is accepted for the initial decoder
+/// only. An empty intermediate output cannot feed another decoder layer.
 ///
 /// **Empty-input contract (empty-input):** an empty wire body (`encoded` is empty)
 /// is a legal empty payload regardless of the declared chain — there is
@@ -301,15 +300,14 @@ pub fn decode_chain(
             .max_output
             .checked_sub(cumulative)
             .ok_or(ChainDecodeError::BudgetExceeded)?;
-        /* Pre-decoder ratio ceiling: bound the decompression
-         * work itself, not only the accepted result.  When this layer's
-         * compressed input reaches RATIO_ACTIVATION_THRESHOLD, the decoder
-         * is allowed at most input_len * ratio bytes of output; hitting
-         * that ceiling is classified as RatioExceeded while the absolute
-         * cumulative ceiling keeps BudgetExceeded.  The post-decode
+        /* Pre-decoder ratio ceiling: bound the decompression work itself,
+         * not only the accepted result. Every non-empty compressed layer is
+         * allowed at most input_len * ratio bytes of output; hitting that
+         * ceiling is classified as RatioExceeded while the absolute
+         * cumulative ceiling keeps BudgetExceeded. The post-decode
          * validate_decoded_layer() below remains as a belt-and-suspenders
          * check with identical semantics. */
-        let ratio_budget = if input_len >= RATIO_ACTIVATION_THRESHOLD {
+        let ratio_budget = if limits.ratio > 0 && input_len > 0 {
             usize::try_from((input_len as u64).saturating_mul(limits.ratio)).unwrap_or(usize::MAX)
         } else {
             usize::MAX
@@ -361,19 +359,17 @@ fn decode_layer(
 /// Enforce the per-layer expansion ratio on a decoded layer's output and
 /// accumulate the cumulative output budget.
 ///
-/// Ratio semantics: the per-layer ratio ceiling activates only when the
-/// layer's compressed `input_len` is at least [`RATIO_ACTIVATION_THRESHOLD`]
-/// (256) bytes; inputs from 1 through 255 bytes are **not** subject to the
-/// ratio ceiling and are limited only by the cumulative `max_output` budget.
-/// (Zero-length input is accepted for the initial decoder only; a non-empty
-/// decoded output from an empty input is rejected as a ratio violation.)
+/// Ratio semantics: the per-layer ratio ceiling applies to every non-empty
+/// compressed `input_len`; there is no small-input exemption. (Zero-length
+/// input is accepted for the initial decoder only; a non-empty decoded output
+/// from an empty input is rejected as a ratio violation.)
 fn validate_decoded_layer(
     input_len: usize,
     decoded_len: usize,
     cumulative: &mut usize,
     limits: DecodeLimits,
 ) -> Result<(), ChainDecodeError> {
-    if input_len >= RATIO_ACTIVATION_THRESHOLD {
+    if limits.ratio > 0 && input_len > 0 {
         let allowed = (input_len as u64).saturating_mul(limits.ratio);
         if (decoded_len as u64) > allowed {
             return Err(ChainDecodeError::RatioExceeded);
@@ -651,7 +647,7 @@ mod tests {
         /* Budget below each intermediate output must fail. */
         let limits = DecodeLimits {
             max_output: 100_000,
-            ratio: 100,
+            ratio: 10_000,
         };
         let err = decode_chain(&outer, &layers, limits).unwrap_err();
         assert_eq!(err, ChainDecodeError::BudgetExceeded);
@@ -673,12 +669,12 @@ mod tests {
     #[test]
     fn ratio_exceeded_above_threshold() {
         /* Highly compressible payload: ratio far above 100:1, with a
-         * compressed size above the 256-byte activation threshold. */
+         * compressed size above the historical fixture threshold. */
         let original = vec![0u8; 1_000_000];
         let compressed = gzip_compress(&original);
         assert!(
             compressed.len() >= 256,
-            "expected compressed size above activation threshold, got {}",
+            "expected compressed size above legacy fixture threshold, got {}",
             compressed.len()
         );
         let limits = DecodeLimits {
@@ -690,18 +686,18 @@ mod tests {
     }
 
     #[test]
-    fn ratio_exempt_below_threshold() {
+    fn ratio_enforced_for_small_input() {
         let original = vec![0u8; 100_000];
         let compressed = gzip_compress(&original);
-        assert!(compressed.len() < 256);
-        /* ratio=1 would reject, but the 256-byte activation threshold
-         * exempts this small compressed input. */
+        assert!(compressed.len() < RATIO_ACTIVATION_THRESHOLD);
+        /* A small compressed input is still subject to the configured ratio;
+         * ratio=1 must reject the highly expanding layer. */
         let limits = DecodeLimits {
             max_output: 10 * 1024 * 1024,
             ratio: 1,
         };
-        let out = decode_chain(&compressed, &[Encoding::Gzip], limits).unwrap();
-        assert_eq!(out.len(), original.len());
+        let err = decode_chain(&compressed, &[Encoding::Gzip], limits).unwrap_err();
+        assert_eq!(err, ChainDecodeError::RatioExceeded);
     }
 
     #[test]
@@ -835,11 +831,7 @@ mod tests {
          * classifications must stay distinct). */
         let original = vec![0u8; 200_000];
         let compressed = gzip_compress(&original);
-        assert!(
-            compressed.len() < RATIO_ACTIVATION_THRESHOLD,
-            "ratio must be inactive for this input ({} bytes)",
-            compressed.len()
-        );
+        assert!(compressed.len() > 0);
         let limits = DecodeLimits {
             max_output: 100_000,
             ratio: 10_000,
