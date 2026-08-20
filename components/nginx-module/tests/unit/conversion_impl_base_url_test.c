@@ -496,6 +496,7 @@ typedef struct ngx_http_core_srv_conf_s ngx_http_core_srv_conf_t;
 typedef struct ngx_connection_s ngx_connection_t;
 typedef struct ngx_log_s ngx_log_t;
 typedef struct ngx_pool_s ngx_pool_t;
+typedef struct ngx_http_variable_value_s ngx_http_variable_value_t;
 typedef ngx_uint_t ngx_atomic_uint_t;
 typedef struct ngx_time_s ngx_time_t;
 
@@ -523,7 +524,15 @@ struct ngx_connection_s {
     ngx_log_t       *log;
     struct sockaddr *sockaddr;
     ngx_str_t        addr_text;
-    ngx_str_t        realip;
+};
+
+struct ngx_http_variable_value_s {
+    unsigned         len:28;
+    unsigned         valid:1;
+    unsigned         no_cacheable:1;
+    unsigned         not_found:1;
+    unsigned         escape:1;
+    u_char           *data;
 };
 
 struct ngx_pool_s {
@@ -570,6 +579,45 @@ struct ngx_http_request_s {
     void             *loc_conf;
     void             *srv_conf;
 };
+
+static ngx_str_t g_realip_remote_addr;
+
+ngx_uint_t
+ngx_hash_key_lc(u_char *data, size_t len)
+{
+    UNUSED(data);
+    UNUSED(len);
+    return 0;
+}
+
+ngx_http_variable_value_t *
+ngx_http_get_variable(ngx_http_request_t *r, ngx_str_t *name,
+    ngx_uint_t key)
+{
+    static ngx_http_variable_value_t not_found = {
+        0, 0, 0, 1, 0, NULL
+    };
+    static ngx_http_variable_value_t realip_remote_addr;
+
+    UNUSED(r);
+    UNUSED(key);
+
+    if (name == NULL
+        || name->len != sizeof("realip_remote_addr") - 1
+        || memcmp(name->data, "realip_remote_addr", name->len) != 0
+        || g_realip_remote_addr.len == 0)
+    {
+        return &not_found;
+    }
+
+    realip_remote_addr.len = g_realip_remote_addr.len;
+    realip_remote_addr.valid = 1;
+    realip_remote_addr.no_cacheable = 0;
+    realip_remote_addr.not_found = 0;
+    realip_remote_addr.escape = 0;
+    realip_remote_addr.data = g_realip_remote_addr.data;
+    return &realip_remote_addr;
+}
 
 #ifndef ngx_memzero
 #define ngx_memzero(buf, n) memset((buf), 0, (n))
@@ -1159,6 +1207,8 @@ reset_base_url_stub(void)
     g_stub_decide_rc = DECIDE_BASE_URL_OK;
     g_stub_decide_reason = 0;
     g_stub_decide_source = 0;
+    g_realip_remote_addr.data = NULL;
+    g_realip_remote_addr.len = 0;
 }
 
 /*
@@ -1424,9 +1474,9 @@ test_base_url_unix_socket_flag(void)
 }
 
 /*
- * Test: when the realip module preserved the original transport peer in
- * connection->realip, the wrapper marshals realip (not the rewritten
- * addr_text) as the trusted-proxy evaluation source.
+ * Test: when the realip module exposes the original transport peer through
+ * its public variable, the wrapper marshals it (not the rewritten addr_text)
+ * as the trusted-proxy evaluation source.
  *
  * Validates ADR-0016 trusted-proxies model: CIDR evaluation uses the
  * original transport peer preserved by ngx_http_realip_module rather than
@@ -1440,7 +1490,7 @@ test_base_url_prefers_realip_peer(void)
     ngx_http_markdown_main_conf_t main_conf;
     ngx_str_t                     base_url;
 
-    TEST_SUBSECTION("base_url wrapper prefers connection realip peer");
+    TEST_SUBSECTION("base_url wrapper prefers public realip peer");
 
     reset_base_url_stub();
     init_request(&r);
@@ -1448,9 +1498,10 @@ test_base_url_prefers_realip_peer(void)
     memset(&main_conf, 0, sizeof(main_conf));
 
     /* addr_text has been rewritten by realip to the XFF-derived client;
-     * realip preserves the original proxy peer that the CIDR must match. */
+     * the public variable preserves the original proxy peer that the CIDR
+     * must match. */
     set_str(&r.connection->addr_text, "203.0.113.9");
-    set_str(&r.connection->realip, "10.1.2.3");
+    set_str(&g_realip_remote_addr, "10.1.2.3");
     set_str(&r.uri, "/articles/page.html");
     r.loc_conf = &conf;
     r.main_conf = (void *) &main_conf;
@@ -1460,21 +1511,20 @@ test_base_url_prefers_realip_peer(void)
                 "construct_base_url should succeed via the FFI decision");
     TEST_ASSERT(g_captured_base_url_input.source_ip_len == 8
         && memcmp(g_captured_base_url_input.source_ip, "10.1.2.3", 8) == 0,
-        "source IP must be marshaled from connection realip when present");
+        "source IP must be marshaled from public realip variable when present");
     free(base_url.data);
 
-    /* Without realip, the wrapper falls back to addr_text. */
+    /* Without the public realip variable, the wrapper falls back to addr_text. */
     reset_base_url_stub();
-    set_str(&r.connection->realip, "");
     TEST_ASSERT(ngx_http_markdown_construct_base_url(&r, r.pool, &base_url)
                     == NGX_OK,
-                "construct_base_url should succeed without realip");
+                "construct_base_url should succeed without public realip variable");
     TEST_ASSERT(g_captured_base_url_input.source_ip_len == 11
         && memcmp(g_captured_base_url_input.source_ip, "203.0.113.9", 11) == 0,
-        "source IP must fall back to connection addr_text when realip is empty");
+        "source IP must fall back to connection addr_text when realip is absent");
     free(base_url.data);
 
-    TEST_PASS("realip peer takes precedence over rewritten addr_text");
+    TEST_PASS("public realip peer takes precedence over rewritten addr_text");
 }
 
 /*
