@@ -2,8 +2,9 @@
 # smoke-test-basic.sh — Basic smoke test for DEB/RPM module packages.
 #
 # Installs the nginx.org package, installs the module package, verifies the
-# .so file exists, adds a load_module directive, and runs nginx -t to confirm
-# ABI compatibility. On any failure, calls smoke-test-diagnostics.sh.
+# .so file exists, loads the module in a temporary config, serves a real
+# Markdown request, and verifies a negative control without load_module fails.
+# On any failure, calls smoke-test-diagnostics.sh.
 #
 # Usage:
 #   smoke-test-basic.sh PACKAGE_FILE NGINX_VERSION
@@ -28,6 +29,7 @@ set -euo pipefail
 ##############################################################################
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+NGINX_BIN=""
 
 usage() {
     sed -n '3,16p' "$0" | sed 's/^#[[:space:]]\{0,1\}//' >&2
@@ -102,7 +104,7 @@ nginx_repo_channel() {
 detect_nginx_modules_path() {
     local modules_path
 
-    modules_path="$(nginx -V 2>&1 \
+    modules_path="$("$NGINX_BIN" -V 2>&1 \
         | tr ' ' '\n' \
         | sed -n 's/^--modules-path=//p' \
         | head -n 1)"
@@ -113,6 +115,123 @@ detect_nginx_modules_path() {
     fi
 
     printf '/usr/lib/nginx/modules\n'
+    return 0
+}
+
+run_module_behavior_smoke() {
+    local module_path="$1"
+    local curl_bin=""
+    local smoke_root=""
+    local smoke_prefix=""
+    local smoke_conf=""
+    local negative_conf=""
+    local headers_file=""
+    local body_file=""
+    local negative_log=""
+    local nginx_pid=""
+    local response_ok=0
+    local content_type_ok=0
+    local vary_ok=0
+    local body_ok=0
+    local i=0
+
+    curl_bin="$(command -v curl 2>/dev/null || true)"
+    if [[ -z "$curl_bin" ]]; then
+        die "curl is required for the positive module request smoke test"
+    fi
+
+    smoke_root="$(mktemp -d "${TMPDIR:-/tmp}/markdown-smoke-root.XXXXXX")" \
+        || die "Failed to create module smoke document root"
+    smoke_prefix="$(mktemp -d "${TMPDIR:-/tmp}/markdown-smoke-prefix.XXXXXX")" \
+        || die "Failed to create module smoke NGINX prefix"
+    smoke_conf="${smoke_prefix}/nginx.conf"
+    negative_conf="${smoke_prefix}/negative.conf"
+    headers_file="${smoke_prefix}/response.headers"
+    body_file="${smoke_prefix}/response.body"
+    negative_log="${smoke_prefix}/negative.log"
+
+    cat > "$smoke_root/index.html" <<'HTML'
+<!doctype html>
+<html><body><h1>Package smoke fixture</h1><p>module request</p></body></html>
+HTML
+
+    cat > "$smoke_conf" <<CONF
+load_module "${module_path}";
+pid ${smoke_prefix}/nginx.pid;
+error_log ${smoke_prefix}/error.log notice;
+daemon off;
+worker_processes 1;
+events { worker_connections 64; }
+http {
+    default_type text/html;
+    markdown_filter on;
+    server {
+        listen 127.0.0.1:19999;
+        root ${smoke_root};
+        location / { index index.html; }
+    }
+}
+CONF
+
+    cat > "$negative_conf" <<CONF
+pid ${smoke_prefix}/negative.pid;
+error_log ${negative_log} notice;
+daemon off;
+worker_processes 1;
+events { worker_connections 64; }
+http {
+    default_type text/html;
+    markdown_filter on;
+    server { listen 127.0.0.1:19998; }
+}
+CONF
+
+    info "Starting module-enabled NGINX for a positive Markdown request..."
+    "$NGINX_BIN" -p "$smoke_prefix" -c "$smoke_conf" \
+        >"${smoke_prefix}/startup.log" 2>&1 &
+    nginx_pid=$!
+
+    for ((i = 0; i < 50; i++)); do
+        if "$curl_bin" -fsS -D "$headers_file" -o "$body_file" \
+            -H 'Accept: text/markdown' http://127.0.0.1:19999/; then
+            response_ok=1
+            break
+        fi
+        sleep 0.1
+    done
+
+    if [[ "$response_ok" -eq 1 ]]; then
+        if grep -Eqi '^Content-Type:[[:space:]]*text/markdown' "$headers_file"; then
+            content_type_ok=1
+        fi
+        if grep -Eqi '^Vary:[[:space:]]*Accept' "$headers_file"; then
+            vary_ok=1
+        fi
+        if grep -q 'Package smoke fixture' "$body_file" \
+            && grep -q '^# ' "$body_file"; then
+            body_ok=1
+        fi
+    fi
+
+    kill "$nginx_pid" 2>/dev/null || true
+    wait "$nginx_pid" 2>/dev/null || true
+
+    if [[ "$response_ok" -ne 1 ]]; then
+        die "Module-enabled NGINX did not serve a Markdown request"
+    fi
+    if [[ "$content_type_ok" -ne 1 || "$vary_ok" -ne 1 || "$body_ok" -ne 1 ]]; then
+        die "Positive module request did not produce the expected Markdown representation"
+    fi
+    info "Positive module request verified Content-Type, Vary, and Markdown body"
+
+    info "Running negative control without load_module..."
+    if "$NGINX_BIN" -p "$smoke_prefix" -c "$negative_conf" \
+        >"$negative_log" 2>&1; then
+        die "Negative module smoke control unexpectedly passed without load_module"
+    fi
+    info "Negative control rejected markdown_filter without the module"
+
+    rm -rf "$smoke_root" "$smoke_prefix"
     return 0
 }
 
@@ -224,6 +343,7 @@ case "$PKG_FORMAT" in
         info "Installing nginx=${NGINX_VERSION}* from nginx.org..."
         apt-get install -y "nginx=${NGINX_VERSION}"'*' >>"${INSTALL_LOG}" 2>&1 \
             || die "Failed to install nginx=${NGINX_VERSION}*"
+        NGINX_BIN="$(command -v nginx)" || die "Installed nginx executable not found"
 
         # --- DEB: Install module package ---
         info "Installing module package: ${PACKAGE_FILE}"
@@ -232,7 +352,7 @@ case "$PKG_FORMAT" in
 
         # --- DEB: Verify nginx -V ---
         info "Running nginx -V..."
-        nginx -V 2>&1 >&2 || die "nginx -V failed"
+        "$NGINX_BIN" -V 2>&1 >&2 || die "nginx -V failed"
 
         # --- DEB: Verify .so exists ---
         MODULE_PATH="$(detect_nginx_modules_path)/ngx_http_markdown_filter_module.so"
@@ -264,12 +384,13 @@ http {
     }
 }
 CONF
-        if ! nginx -t -c "${TMP_CONF}" 2>&1; then
+        if ! "$NGINX_BIN" -t -c "${TMP_CONF}" 2>&1; then
             rm -f "${TMP_CONF}"
             die "nginx -t with load_module failed — module did not load"
         fi
         rm -f "${TMP_CONF}"
         info "Module loads successfully (load_module + markdown_filter on verified)"
+        run_module_behavior_smoke "$MODULE_PATH"
         ;;
 
     rpm)
@@ -298,9 +419,10 @@ REPO
         else
             die "Neither dnf nor yum found"
         fi
+        NGINX_BIN="$(command -v nginx)" || die "Installed nginx executable not found"
 
         # Verify installed NGINX version matches the target
-        installed_version="$(nginx -v 2>&1 || true)"
+        installed_version="$("$NGINX_BIN" -v 2>&1 || true)"
         case "$installed_version" in
             *"nginx/${NGINX_VERSION}"*)
                 info "Verified installed NGINX version: ${installed_version}"
@@ -326,7 +448,7 @@ REPO
 
         # --- RPM: Verify nginx -V ---
         info "Running nginx -V..."
-        nginx -V 2>&1 >&2 || die "nginx -V failed"
+        "$NGINX_BIN" -V 2>&1 >&2 || die "nginx -V failed"
 
         # --- RPM: Verify .so exists ---
         MODULE_PATH="$(detect_nginx_modules_path)/ngx_http_markdown_filter_module.so"
@@ -354,9 +476,10 @@ REPO
 
         # --- RPM: Verify nginx -t (ABI compatibility) ---
         info "Running nginx -t to verify module loads correctly..."
-        if ! nginx -t 2>&1; then
+        if ! "$NGINX_BIN" -t 2>&1; then
             die "nginx -t failed — module ABI compatibility check FAILED"
         fi
+        run_module_behavior_smoke "$MODULE_PATH"
         ;;
 
     *)
@@ -371,7 +494,7 @@ esac
 info "All smoke tests PASSED for ${PKG_FORMAT} package"
 info "  Package: ${PACKAGE_FILE}"
 info "  NGINX version: ${NGINX_VERSION}"
-info "  Module loaded successfully (nginx -t passed)"
+info "  Module loaded and served a positive Markdown request"
 
 # Clean up install log on success
 rm -f "${INSTALL_LOG}" 2>/dev/null || true
