@@ -371,9 +371,8 @@ fn metric_value(base_url: &str, name: &str) -> Result<u64> {
         // appear in the sample's label set.  Relying on one combined label
         // string breaks if the renderer orders labels differently.
         .filter(|(labels, _)| {
-            label.map_or(true, |required| {
-                required.split(',').all(|part| labels.contains(part.trim()))
-            })
+            label
+                .is_none_or(|required| required.split(',').all(|part| labels.contains(part.trim())))
         })
         .filter_map(|(_, sample_value)| {
             if !sample_value.is_finite() || sample_value < 0.0 {
