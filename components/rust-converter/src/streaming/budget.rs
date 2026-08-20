@@ -16,7 +16,7 @@ use crate::error::ConversionError;
 /// | Field | Default | Rationale |
 /// |-------|---------|-----------|
 /// | `total` | 2 MiB | Covers bounded state for most documents |
-/// | `state_stack` | 64 KiB | ~1000 nesting levels at ~64 B each |
+/// | `state_stack` | 64 KiB | ~1000 fixed-size nesting levels; retained String payloads are charged separately |
 /// | `output_buffer` | 256 KiB | One large block-level element |
 /// | `charset_sniff` | 1024 B | Matches `detect_charset` scan range |
 /// | `lookahead` | 64 KiB | Sufficient for `<head>` metadata |
