@@ -180,10 +180,17 @@ time.
 
 Deep nesting stays bounded by the streaming pipeline's `state_stack` budget:
 
-- **Default**: 64 KiB (~1000 nesting levels at ~64 bytes per level)
+- **Default**: 64 KiB (roughly 1000 fixed-size nesting levels at ~64 bytes
+  per level; retained String payloads reduce the remaining allowance)
 - **Effect**: Documents with extreme nesting depth exhaust the state stack
-  budget and trigger `BudgetExceeded`
+  budget and trigger `BudgetExceeded`; the retained heap bytes of link hrefs,
+  image src/alt text, and code-language identifiers count against the same
+  budget, so deeply nested links with large hrefs are also bounded
 - **Enforcement**: `MemoryBudget::check_state_stack()` on every push
+- **Accounting**: the checker charges each stack slot at 64 bytes plus
+  `StructuralContext::retained_heap_bytes()` for its variable-sized String
+  payloads; `stack_bytes_estimate()` uses the same per-slot accounting for
+  total working-set enforcement
 
 For the full-buffer path, html5ever's tree builder handles deep nesting
 according to the HTML5 spec (which defines a maximum nesting depth of 512
