@@ -1065,6 +1065,26 @@ test_clear_trailers_empty_list(void)
     TEST_PASS("clear_trailers handles empty list");
 }
 
+static void
+test_clear_trailers_null_elts_with_entries(void)
+{
+    ngx_http_request_t r = new_request();
+
+    TEST_SUBSECTION("clear_trailers handles a malformed list part");
+
+    free(r.headers_out.trailers.part.elts);
+    r.headers_out.trailers.part.elts = NULL;
+    r.headers_out.trailers.part.nelts = 1;
+
+    ngx_http_markdown_clear_trailers(&r);
+
+    TEST_ASSERT(r.headers_out.trailers.part.nelts == 1,
+                "malformed trailer part remains untouched after guard");
+
+    free_request(&r);
+    TEST_PASS("clear_trailers guards NULL elts with entries");
+}
+
 int
 main(void)
 {
@@ -1089,6 +1109,7 @@ main(void)
     test_head_representation_headers_null();
     test_clear_trailers_suppresses_all_entries();
     test_clear_trailers_empty_list();
+    test_clear_trailers_null_elts_with_entries();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

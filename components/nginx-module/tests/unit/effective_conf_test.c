@@ -756,7 +756,7 @@ test_bind_request_snapshot_preserves_captured_snapshot(void)
         &eff_b_ignore, &snap_b, &conf);
 
     ngx_http_markdown_bind_request_snapshot(
-        r.pool, conn.log, &conf, &snap_a, &early_eff_a,
+        &r, &conf, &snap_a, &early_eff_a,
         &tctx.effective_conf_storage,
         &tctx.dynconf_snapshot, &tctx.effective_conf);
 
@@ -854,7 +854,7 @@ test_dynconf_snapshot_not_consumed_when_dynconf_disabled(void)
 
     /* Bind: with dynconf_enabled=0, dynconf_snapshot must NOT be allocated */
     ngx_http_markdown_bind_request_snapshot(
-        r.pool, conn.log, &conf, &global_snap, &early_eff,
+        &r, &conf, &global_snap, &early_eff,
         &tctx.effective_conf_storage,
         &tctx.dynconf_snapshot, &tctx.effective_conf);
 

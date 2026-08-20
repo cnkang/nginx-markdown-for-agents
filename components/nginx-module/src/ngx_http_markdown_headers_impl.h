@@ -119,6 +119,9 @@ ngx_http_markdown_find_header_in_part(ngx_list_part_t *part,
         ngx_uint_t i;
 
         headers = part->elts;
+        if (part->nelts != 0 && headers == NULL) {
+            return NULL;
+        }
         i = 0;
         while (i < part->nelts) {
             if (headers[i].hash == 0) {
@@ -194,6 +197,9 @@ ngx_http_markdown_invalidate_headers_in_part(const ngx_http_request_t *r,
         ngx_uint_t i;
 
         headers = part->elts;
+        if (part->nelts != 0 && headers == NULL) {
+            return;
+        }
         i = 0;
         while (i < part->nelts) {
             if (headers[i].hash == 0) {
@@ -277,6 +283,9 @@ ngx_http_markdown_clear_trailers(ngx_http_request_t *r)
 
     while (part != NULL) {
         elts = part->elts;
+        if (part->nelts != 0 && elts == NULL) {
+            return;
+        }
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
             elts[i].hash = 0;
         }
