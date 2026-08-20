@@ -1141,10 +1141,6 @@ ngx_http_markdown_streaming_decomp_inflate_step(
         decomp->at_gzip_member_boundary = 0;
     }
 
-    if (decomp->state.zlib.avail_in == 0) {
-        return 1;
-    }
-
     if (decomp->state.zlib.avail_out == 0) {
         ngx_int_t  grow_rc;
 
@@ -1155,6 +1151,10 @@ ngx_http_markdown_streaming_decomp_inflate_step(
             return (grow_rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED)
                 ? (int) grow_rc : -1;
         }
+    }
+
+    if (decomp->state.zlib.avail_in == 0) {
+        return 1;
     }
 
     return 0;

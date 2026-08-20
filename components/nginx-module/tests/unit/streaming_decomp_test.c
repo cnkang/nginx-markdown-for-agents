@@ -3099,6 +3099,312 @@ compress_payload(const u_char *in, size_t in_len,
         in, in_len, window_bits, out, out_len);
 }
 
+
+/*
+ * test_sync_flush_bursts - Verify that a compressed stream remains complete
+ * when its producer emits one Z_SYNC_FLUSH burst per input chunk.
+ *
+ * This mirrors the chunking used by the non-buffered upstream benchmark.  A
+ * burst can consume all compressed input while the inflater still has output
+ * pending in a full workspace, so the decoder must grow before treating the
+ * input call as complete.
+ */
+static void
+test_sync_flush_bursts(void)
+{
+    const size_t                       source_len = 1024 * 1024;
+    const size_t                       source_chunk = 16 * 1024;
+    static const int                   window_bits[2] = {
+        MAX_WBITS + 16, MAX_WBITS
+    };
+    static const ngx_http_markdown_compression_type_e  types[2] = {
+        NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
+        NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
+    };
+    test_pool_t                          tp;
+    u_char                              *source;
+    u_char                              *actual;
+    size_t                               emitted;
+
+    TEST_SUBSECTION("compressed sync-flush bursts remain complete");
+
+    source = malloc(source_len);
+    actual = malloc(source_len);
+    TEST_ASSERT(source != NULL && actual != NULL,
+        "sync-flush regression buffers should allocate");
+
+    for (size_t type_index = 0; type_index < ARRAY_SIZE(types);
+         type_index++)
+    {
+        z_stream                            stream;
+        ngx_http_markdown_streaming_decomp_t *decomp;
+        size_t                              offset;
+
+        for (size_t i = 0; i < source_len; i++) {
+            source[i] = (u_char) ('A' + (i % 26));
+        }
+
+        memset(&stream, 0, sizeof(stream));
+        TEST_ASSERT(
+            deflateInit2(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED,
+                         window_bits[type_index], 8,
+                         Z_DEFAULT_STRATEGY) == Z_OK,
+            "sync-flush compressor should initialize");
+
+        test_pool_reset(&tp);
+        decomp = ngx_http_markdown_streaming_decomp_create(
+            &tp.pool, types[type_index], 0);
+        TEST_ASSERT(decomp != NULL,
+            "sync-flush decompressor should be created");
+        emitted = 0;
+
+        for (offset = 0; offset < source_len; offset += source_chunk) {
+            u_char  compressed[32768];
+            size_t  chunk_len;
+            size_t  compressed_len;
+            int     zrc;
+
+            chunk_len = source_len - offset;
+            if (chunk_len > source_chunk) {
+                chunk_len = source_chunk;
+            }
+
+            stream.next_in = source + offset;
+            stream.avail_in = (uInt) chunk_len;
+            stream.next_out = compressed;
+            stream.avail_out = sizeof(compressed);
+            zrc = deflate(&stream, Z_SYNC_FLUSH);
+            TEST_ASSERT(zrc == Z_OK && stream.avail_in == 0,
+                "sync-flush compressor should consume each source burst");
+            TEST_ASSERT(stream.avail_out > 0,
+                "sync-flush burst buffer should not fill");
+            compressed_len = sizeof(compressed) - stream.avail_out;
+
+            {
+                u_char  *out;
+                size_t  out_len;
+                ngx_int_t  rc;
+
+                out = NULL;
+                out_len = 0;
+                rc = ngx_http_markdown_streaming_decomp_feed(
+                    decomp, compressed, compressed_len,
+                    &out, &out_len, &tp.pool, &test_log);
+                TEST_ASSERT(rc == NGX_OK,
+                    "sync-flush burst should decompress successfully");
+                TEST_ASSERT(emitted + out_len <= source_len,
+                    "sync-flush output should stay within source size");
+                if (out_len > 0) {
+                    memcpy(actual + emitted, out, out_len);
+                    emitted += out_len;
+                }
+            }
+        }
+
+        {
+            u_char  compressed[1024];
+            size_t  compressed_len;
+            int     zrc;
+
+            stream.next_in = Z_NULL;
+            stream.avail_in = 0;
+            stream.next_out = compressed;
+            stream.avail_out = sizeof(compressed);
+            zrc = deflate(&stream, Z_FINISH);
+            TEST_ASSERT(zrc == Z_STREAM_END,
+                "sync-flush compressor should finish");
+            TEST_ASSERT(stream.avail_out > 0,
+                "sync-flush final buffer should not fill");
+            compressed_len = sizeof(compressed) - stream.avail_out;
+
+            {
+                u_char  *out;
+                size_t  out_len;
+                ngx_int_t  rc;
+
+                out = NULL;
+                out_len = 0;
+                rc = ngx_http_markdown_streaming_decomp_feed(
+                    decomp, compressed, compressed_len,
+                    &out, &out_len, &tp.pool, &test_log);
+                TEST_ASSERT(rc == NGX_OK,
+                    "sync-flush final burst should decompress");
+                TEST_ASSERT(emitted + out_len <= source_len,
+                    "final burst output should stay within source size");
+                if (out_len > 0) {
+                    memcpy(actual + emitted, out, out_len);
+                    emitted += out_len;
+                }
+            }
+        }
+
+        TEST_ASSERT(emitted == source_len,
+            "sync-flush bursts should emit the complete source");
+        TEST_ASSERT(MEM_EQ(actual, source, source_len),
+            "sync-flush bursts should preserve source bytes");
+
+        deflateEnd(&stream);
+        ngx_http_markdown_streaming_decomp_cleanup(decomp);
+        free(decomp);
+    }
+
+    free(actual);
+    free(source);
+    TEST_PASS("compressed sync-flush bursts remain complete");
+}
+
+#ifdef NGX_HTTP_BROTLI
+/*
+ * test_brotli_flush_bursts - Verify Brotli input produced by repeated
+ * process/flush operations, matching the non-buffered upstream benchmark.
+ *
+ * A one-shot Brotli encoder test does not exercise the decoder's handling of
+ * a stream whose flush boundaries are delivered as separate HTTP chunks.
+ */
+static void
+test_brotli_flush_bursts(void)
+{
+    const size_t                       source_len = 1024 * 1024;
+    const size_t                       source_chunk = 16 * 1024;
+    test_pool_t                          tp;
+    u_char                              *source;
+    u_char                              *actual;
+    size_t                               emitted;
+    BrotliEncoderState                  *encoder;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+
+    TEST_SUBSECTION("brotli process/flush bursts remain complete");
+
+    source = malloc(source_len);
+    actual = malloc(source_len);
+    TEST_ASSERT(source != NULL && actual != NULL,
+        "brotli flush regression buffers should allocate");
+
+    for (size_t i = 0; i < source_len; i++) {
+        source[i] = (u_char) ('A' + (i % 26));
+    }
+
+    encoder = BrotliEncoderCreateInstance(NULL, NULL, NULL);
+    TEST_ASSERT(encoder != NULL,
+        "brotli flush regression encoder should be created");
+
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, 0);
+    TEST_ASSERT(decomp != NULL,
+        "brotli flush regression decompressor should be created");
+    emitted = 0;
+
+    for (size_t offset = 0; offset < source_len;
+         offset += source_chunk)
+    {
+        u_char              compressed[65536];
+        const uint8_t      *next_in;
+        uint8_t            *next_out;
+        size_t               available_in;
+        size_t               available_out;
+        size_t               chunk_len;
+        size_t               compressed_len;
+        size_t               total_out;
+        u_char              *out;
+        size_t               out_len;
+        ngx_int_t            rc;
+
+        chunk_len = source_len - offset;
+        if (chunk_len > source_chunk) {
+            chunk_len = source_chunk;
+        }
+        next_in = source + offset;
+        available_in = chunk_len;
+        next_out = compressed;
+        available_out = sizeof(compressed);
+        total_out = 0;
+        TEST_ASSERT(BrotliEncoderCompressStream(
+                        encoder, BROTLI_OPERATION_FLUSH,
+                        &available_in, &next_in,
+                        &available_out, &next_out, &total_out)
+                    == BROTLI_TRUE,
+            "brotli flush encoder should accept each source burst");
+        TEST_ASSERT(available_in == 0 && !BrotliEncoderHasMoreOutput(encoder),
+            "brotli flush encoder should drain each burst");
+        compressed_len = sizeof(compressed) - available_out;
+
+        out = NULL;
+        out_len = 0;
+        rc = ngx_http_markdown_streaming_decomp_feed(
+            decomp, compressed, compressed_len,
+            &out, &out_len, &tp.pool, &test_log);
+        TEST_ASSERT(rc == NGX_OK,
+            "brotli flush burst should decompress successfully");
+        TEST_ASSERT(emitted + out_len <= source_len,
+            "brotli flush output should stay within source size");
+        if (out_len > 0) {
+            memcpy(actual + emitted, out, out_len);
+            emitted += out_len;
+        }
+        test_pool_free_tracked_allocations();
+    }
+
+    {
+        u_char          compressed[65536];
+        const uint8_t  *next_in;
+        uint8_t        *next_out;
+        size_t           available_in;
+        size_t           available_out;
+        size_t           compressed_len;
+        size_t           total_out;
+        u_char          *out;
+        size_t           out_len;
+        ngx_int_t        rc;
+
+        next_in = NULL;
+        available_in = 0;
+        next_out = compressed;
+        available_out = sizeof(compressed);
+        total_out = 0;
+        TEST_ASSERT(BrotliEncoderCompressStream(
+                        encoder, BROTLI_OPERATION_FINISH,
+                        &available_in, &next_in,
+                        &available_out, &next_out, &total_out)
+                    == BROTLI_TRUE,
+            "brotli finish encoder should succeed");
+        TEST_ASSERT(BrotliEncoderIsFinished(encoder),
+            "brotli finish encoder should reach finished state");
+        compressed_len = sizeof(compressed) - available_out;
+
+        out = NULL;
+        out_len = 0;
+        rc = ngx_http_markdown_streaming_decomp_feed(
+            decomp, compressed, compressed_len,
+            &out, &out_len, &tp.pool, &test_log);
+        TEST_ASSERT(rc == NGX_OK,
+            "brotli final flush burst should decompress");
+        TEST_ASSERT(emitted + out_len <= source_len,
+            "brotli final output should stay within source size");
+        if (out_len > 0) {
+            memcpy(actual + emitted, out, out_len);
+            emitted += out_len;
+        }
+    }
+
+    TEST_ASSERT(emitted == source_len,
+        "brotli process/flush bursts should emit the complete source");
+    TEST_ASSERT(MEM_EQ(actual, source, source_len),
+        "brotli process/flush bursts should preserve source bytes");
+
+    BrotliEncoderDestroyInstance(encoder);
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+    free(actual);
+    free(source);
+    TEST_ASSERT(g_free_on_palloc_violation == 0,
+        "brotli flush test must not free pool memory");
+    TEST_ASSERT(g_free_on_static_pool_violation == 0,
+        "brotli flush test must not free static pool memory");
+    TEST_PASS("brotli process/flush bursts remain complete");
+}
+#endif
+
 /*
  * Join two compressed byte ranges into one test-owned allocation.
  * Returns NULL when the inputs are invalid, the combined size overflows,
@@ -5415,7 +5721,9 @@ main(void)
     test_create_and_cleanup();
     test_create_failure_paths_and_cleanup_default();
     test_roundtrip_and_empty_feed();
+    test_sync_flush_bursts();
 #ifdef NGX_HTTP_BROTLI
+    test_brotli_flush_bursts();
     test_truncated_brotli_finish_errors();
     test_brotli_error_classification();
     test_brotli_exact_budget_probe();
