@@ -46,6 +46,9 @@ GATE_ARGS=(--mode "$GATE_MODE")
 if [[ "$ALLOW_SKIP_MODULE" == "1" ]]; then
   GATE_ARGS+=(--allow-skip-module)
 fi
+if [[ -n "${EVIDENCE_GATE_BENCHMARK_REPORT:-}" ]]; then
+  GATE_ARGS+=(--benchmark-report "$EVIDENCE_GATE_BENCHMARK_REPORT")
+fi
 
 set +e
 REQUIRE_BASELINE_HEAD="${EVIDENCE_GATE_REQUIRE_BASELINE_HEAD:-0}"

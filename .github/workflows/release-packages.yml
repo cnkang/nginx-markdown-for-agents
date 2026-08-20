@@ -1105,12 +1105,21 @@ jobs:
           python3 tools/perf/validate_module_probe_artifacts.py \
             --probe-dir perf/baselines/module-baseline-092-raw-probes \
             --baseline perf/baselines/module-baseline-092.json
+          # Measure the 0.9.2 candidate immediately after finalizing its
+          # baseline.  The later 092 blocking gate revalidates this exact
+          # report after the independent 091 gate, avoiding a second
+          # candidate measurement after an unrelated long-running stage.
+          tools/perf/run_module_benchmark.sh \
+            --output perf/reports/module-benchmark-092.json
+          python3 tools/perf/validate_module_probe_artifacts.py \
+            --probe-dir perf/reports/module-benchmark-092-probes
           # Keep the tag contract additive with the local 0.9.2 gate:
           # historical 0.9.1 evidence must pass before candidate 0.9.2
           # evidence.  NGINX_BIN is module-enabled and the helper refuses
           # to skip module evidence when it is present.
           make release-perf-evidence-blocking BASELINE_VERSION=091
-          make release-perf-evidence-blocking BASELINE_VERSION=092
+          EVIDENCE_GATE_BENCHMARK_REPORT=perf/reports/module-benchmark-092.json \
+            make release-perf-evidence-blocking BASELINE_VERSION=092
           # Short-soak qualification (Makefile stage [12/13]) against the
           # module-enabled EL9 nginx binary.
           python3 tools/release/gates/validate_soak_qualification.py --mode real --git-head
