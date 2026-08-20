@@ -43,14 +43,17 @@ may adjust latency and throughput only. Path, fallback, output, memory,
 
 Retain the raw workflow artifact and record its run, source Git commit,
 adjustment rule, person or reason, and adjustment date in `baseline_policy`.
-The checked-in 0.9.1 and 0.9.2 snapshots are verbatim eight-scenario runs
-from commit `712c5300228373677c367e6c0d83ac9d729ff63b`, measured by canonical
-workflow run `32394531042/attempts/1` in the NGINX 1.30.4 environment. Their
-raw artifacts have SHA-256 values
-`9c93a274f90cecb986167b24fb0f23e66a747c9f1c677cf4704424463c88f2bd` (0.9.1)
-and `52ed157609da6fc6ecd9e3b2b64a3f1e524c2227c27b44ea62e0c4f3237e63b2`
-(0.9.2). The validator requires each source commit, run attempt, timestamp,
-retained raw artifact, and digest to remain mutually consistent.
+The checked-in 0.9.1 snapshot is a verbatim eight-scenario run from commit
+`0847c287c1b744a3f80b7b7fe6ccf3e897223377`, measured by canonical workflow
+run `32398065263/attempts/1`. Its raw artifact has SHA-256
+`006bb70b6029a639068c50b532d1c8119c8e54b96775ff8c73e62223ba8cadc4`.
+The checked-in 0.9.2 snapshot is a verbatim run from commit
+`712c5300228373677c367e6c0d83ac9d729ff63b`, measured by canonical workflow
+run `32394531042/attempts/1`; its raw artifact has SHA-256
+`52ed157609da6fc6ecd9e3b2b64a3f1e524c2227c27b44ea62e0c4f3237e63b2`.
+Both runs use the NGINX 1.30.4 environment. The validator requires each
+source commit, run attempt, timestamp, retained raw artifact, and digest to
+remain mutually consistent.
 
 The 0.9.2 release path regenerates the checked-out 0.9.2 snapshot in the
 release container at the candidate SHA before running the blocking gate. This
