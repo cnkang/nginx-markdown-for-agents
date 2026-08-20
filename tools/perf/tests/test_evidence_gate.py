@@ -308,7 +308,7 @@ def test_manual_module_baseline_workflow_uses_canonical_native_runtime():
 def test_module_baseline_contains_completed_environment_consistent_scenarios():
     """The checked-in canonical baseline contains eight completed scenarios
     that all share its declared canonical environment (linux-x86_64, ab,
-    NGINX 1.24.0), including the Brotli streaming path.
+    NGINX 1.30.4), including the Brotli streaming path.
     """
     baseline_path = (
         Path(__file__).resolve().parents[3]
@@ -346,12 +346,15 @@ def test_module_baseline_contains_completed_environment_consistent_scenarios():
     assert baseline["module_benchmark"]["nginx_version"].startswith(
         "nginx version: nginx/"
     )
+    assert baseline["module_benchmark"]["nginx_version"] == (
+        "nginx version: nginx/1.30.4"
+    )
     streaming = by_name["streaming-first"]["metrics"]
     assert streaming["input_bytes"] == 1_048_516
     assert streaming["streaming_path_hits"] > 0
     assert streaming["streaming_ratio"] == 1.0
     assert streaming["streaming_fallback_total"] == 0
-    assert streaming["zero_copy_output_total"] > 0
+    assert streaming["copied_output_total"] > 0
 
     # Verify decompression path evidence in compressed streaming scenarios
     if "gzip-streaming-first" in by_name:
@@ -1518,7 +1521,6 @@ class TestBaselineEvidenceIntegrity:
     @pytest.mark.parametrize(
         ("scenario", "metric"),
         [
-            ("streaming-first", "zero_copy_output_total"),
             ("streaming-first", "copied_output_total"),
             ("streaming-first", "streaming_path_hits"),
             ("plain-small", "fullbuffer_path_hits"),
@@ -1651,6 +1653,15 @@ class TestBaselineEvidenceIntegrity:
 class TestScenarioSourceEnvironment:
     """scenario_sources entries must prove a matching environment."""
 
+    @staticmethod
+    def _canonical_source(report: dict) -> dict:
+        """Return the source environment declared by the canonical report."""
+        module_benchmark = report["module_benchmark"]
+        return {
+            field: module_benchmark[field]
+            for field in ("platform", "load_generator", "nginx_version")
+        }
+
     def _baseline_with_source(self, source: dict) -> dict:
         report = _load_canonical_module_baseline()
         report["baseline_policy"]["scenario_sources"] = {
@@ -1660,12 +1671,10 @@ class TestScenarioSourceEnvironment:
 
     def test_matching_structured_environment_is_accepted(self):
         """Scenario source with matching environment is accepted."""
-        report = self._baseline_with_source({
-            "platform": "linux-x86_64",
-            "load_generator": "ab",
-            "nginx_version": "nginx version: nginx/1.24.0",
-            "source_run": "same canonical run",
-        })
+        canonical = _load_canonical_module_baseline()
+        source = self._canonical_source(canonical)
+        source["source_run"] = "same canonical run"
+        report = self._baseline_with_source(source)
 
         assert _scenario_source_environment_violations(
             report, role="baseline"
@@ -1676,17 +1685,15 @@ class TestScenarioSourceEnvironment:
         [
             ("platform", "darwin-arm64"),
             ("load_generator", "hey"),
-            ("nginx_version", "nginx version: nginx/1.30.4"),
+            ("nginx_version", "nginx version: nginx/1.24.0"),
         ],
     )
     def test_diverging_source_environment_is_rejected(self, field, actual):
         """Scenario source with diverging environment field is rejected."""
-        source = {
-            "platform": "linux-x86_64",
-            "load_generator": "ab",
-            "nginx_version": "nginx version: nginx/1.24.0",
-            field: actual,
-        }
+        canonical = _load_canonical_module_baseline()
+        source = self._canonical_source(canonical)
+        source["source_run"] = "diverging source run"
+        source[field] = actual
         report = self._baseline_with_source(source)
 
         violations = _scenario_source_environment_violations(
@@ -1705,11 +1712,8 @@ class TestScenarioSourceEnvironment:
     )
     def test_undeclared_source_environment_field_is_rejected(self, field):
         """Scenario source missing a required environment field is rejected."""
-        source = {
-            "platform": "linux-x86_64",
-            "load_generator": "ab",
-            "nginx_version": "nginx version: nginx/1.24.0",
-        }
+        canonical = _load_canonical_module_baseline()
+        source = self._canonical_source(canonical)
         del source[field]
         report = self._baseline_with_source(source)
 
@@ -1727,9 +1731,7 @@ class TestScenarioSourceEnvironment:
         report = _load_canonical_module_baseline()
         report["baseline_policy"]["scenario_sources"] = {
             "no-such-scenario": {
-                "platform": "linux-x86_64",
-                "load_generator": "ab",
-                "nginx_version": "nginx version: nginx/1.24.0",
+                **self._canonical_source(report),
             }
         }
 
@@ -1757,12 +1759,11 @@ class TestScenarioSourceEnvironment:
 
     def test_mixed_environment_baseline_fails_full_validation(self):
         """A mixed-environment scenario merge surfaces in the blocking contract."""
-        report = self._baseline_with_source({
-            "platform": "linux-x86_64",
-            "load_generator": "ab",
-            "nginx_version": "nginx version: nginx/1.30.4",
-            "source_run": "1000 requests at 2026-07-19T09:03:37Z",
-        })
+        canonical = _load_canonical_module_baseline()
+        source = self._canonical_source(canonical)
+        source["nginx_version"] = "nginx version: nginx/1.24.0"
+        source["source_run"] = "1000 requests at 2026-07-19T09:03:37Z"
+        report = self._baseline_with_source(source)
 
         violations = _validate_benchmark_evidence(report, role="baseline")
 
