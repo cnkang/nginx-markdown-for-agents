@@ -190,10 +190,12 @@ def test_release_gate_generates_candidate_bound_092_baseline() -> None:
         '--source-git-commit "${CANDIDATE_SHA}"',
         "--source-run \"${CANDIDATE_RUN}\"",
         "--baseline perf/baselines/module-baseline-092.json",
-        "--output perf/reports/module-benchmark-092.json",
-        "EVIDENCE_GATE_BENCHMARK_REPORT=perf/reports/module-benchmark-092.json",
     ):
         assert snippet in workflow
+    assert (
+        "EVIDENCE_GATE_BENCHMARK_REPORT="
+        "perf/baselines/module-baseline-092-raw.json"
+    ) in workflow
 
 
 # ---------------------------------------------------------------------------
@@ -305,14 +307,22 @@ def test_nightly_perf_uploads_canonical_only_after_canonical_gates() -> None:
     assert release_gates < upload
 
 
-def test_nightly_reuses_the_adjacent_092_benchmark_report() -> None:
-    """The canonical 092 gate must revalidate its adjacent measurement."""
+def test_nightly_reuses_the_candidate_baseline_measurement() -> None:
+    """The canonical 092 gate must reuse its validated candidate measurement."""
     block = _module_baseline_job(_nightly_perf_text())
     evidence_gate = block.index("make perf-evidence-check")
     release_gates = block.index("make release-gates-check-092-canonical")
-    report = "CANDIDATE_BENCHMARK_REPORT=perf/reports/module-benchmark-092.json"
+    report = (
+        "CANDIDATE_BENCHMARK_REPORT="
+        "perf/baselines/module-baseline-092-raw.json"
+    )
+    evidence_report = (
+        "EVIDENCE_GATE_BENCHMARK_REPORT="
+        "perf/baselines/module-baseline-092-raw.json"
+    )
 
     assert report in block
+    assert evidence_report in block
     assert evidence_gate < release_gates
 
 

@@ -1053,11 +1053,11 @@ release-gates-check-091: release-gates-check-090
 #   RELEASE_GATE_ALLOW_SKIP_MODULE=1     - Allow proceeding without module
 #                                           benchmarks
 #   CANDIDATE_BENCHMARK_REPORT            - Optional repository-relative 092
-#                                           report measured immediately after
-#                                           the candidate baseline.  It is used
+#                                           report retained from the candidate
+#                                           baseline measurement.  It is used
 #                                           only by the 092 stage; the 091
 #                                           prerequisite always measures its
-#                                           own report.
+#                                           own independent report.
 #   RELEASE_GATE_ALLOW_SKIP_FUZZ=1       - (inherited) skip fuzz smoke
 #   RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 - (inherited) skip native E2E
 #   RELEASE_GATE_ALLOW_SKIP_COVERAGE=1   - (inherited) skip coverage
