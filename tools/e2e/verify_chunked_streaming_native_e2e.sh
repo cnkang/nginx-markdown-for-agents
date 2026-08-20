@@ -762,6 +762,10 @@ http {
         # upstream chunk-size setting. Keep the normal conversion routes at
         # the full smoke budget; the bounded 256 KiB route below is dedicated
         # to fail-open coverage when that budget is intentionally exhausted.
+        # The compressed fixtures are intentionally highly repetitive and
+        # exceed the production default ratio of 100.  Use an explicit test
+        # budget so these cases exercise conversion and backpressure rather
+        # than the separate decompression-ratio rejection path.
         location /streaming/ {
             markdown_filter on;
             markdown_accept wildcard;
@@ -769,7 +773,8 @@ http {
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}
                 parser_memory=${MARKDOWN_MAX_SIZE} conversion_timeout=120s
                 parser_timeout=120s
-                streaming_buffer=${MARKDOWN_MAX_SIZE};
+                streaming_buffer=${MARKDOWN_MAX_SIZE}
+                decompression_ratio=1000;
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -786,7 +791,8 @@ http {
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}
                 parser_memory=${MARKDOWN_MAX_SIZE} conversion_timeout=120s
                 parser_timeout=120s
-                streaming_buffer=${MARKDOWN_MAX_SIZE};
+                streaming_buffer=${MARKDOWN_MAX_SIZE}
+                decompression_ratio=1000;
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -805,7 +811,7 @@ http {
             markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}
                 parser_memory=${MARKDOWN_MAX_SIZE} conversion_timeout=120s
                 parser_timeout=120s
-                streaming_buffer=256k;
+                streaming_buffer=256k decompression_ratio=1000;
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
