@@ -45,9 +45,9 @@ failure discards the original HTML and returns the configured error status
 (`429` for resource-limit/overload failures or `503` for system failures,
 per `markdown_error_policy error_status`). The module emits the
 corresponding reason code and metrics exactly as on the fail-closed path:
-`failed_closed` is logged with the error-category reason, and the failure
-counters (`conversions_failed`, `failures_*`) are incremented. The original
-upstream response is never delivered and no replay is attempted.
+the module logs `failed_closed` with the error-category reason and increments
+the failure counters (`conversions_failed`, `failures_*`). The module never
+delivers or replays the original upstream response.
 
 ## Consequences
 
