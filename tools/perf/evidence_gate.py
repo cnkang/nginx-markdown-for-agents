@@ -38,6 +38,7 @@ import hashlib
 import json
 import math
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -81,11 +82,90 @@ def _stderr(msg: str) -> None:
     print(msg, file=sys.stderr)
 
 
-def _get_git_commit() -> str:
-    """Return the current short git commit hash, or 'unknown' if unavailable."""
+# Approved system directories in which a PATH-discovered helper executable may
+# legitimately live.  A helper discovered outside these roots is rejected so
+# release evidence can never be produced by a PATH-shadowable executable.
+_TRUSTED_TOOL_ROOTS = (
+    "/usr/sbin",
+    "/usr/bin",
+    "/sbin",
+    "/bin",
+    "/usr/local/sbin",
+    "/usr/local/bin",
+    "/usr/local/opt/nginx/sbin",
+    "/opt/homebrew/bin",
+    "/opt/homebrew/sbin",
+    "/opt/homebrew/opt/nginx/sbin",
+    "/opt/homebrew/Cellar",
+    "/usr/local/Cellar",
+    "/usr/lib/nginx",
+)
+
+
+def _canonicalize_path(path: str) -> str:
+    """Return the symlink-resolved canonical absolute path of a candidate."""
+    try:
+        return os.path.realpath(path)
+    except OSError:
+        return path
+
+
+def _is_trusted_tool_path(path: str) -> bool:
+    """Return True when the candidate lives directly under a trusted root.
+
+    The literal candidate location is checked (not the canonical target) so a
+    user-writable symlink pointing into a trusted root stays rejected.
+    """
+    return any(
+        path == root or path.startswith(root.rstrip("/") + "/")
+        for root in _TRUSTED_TOOL_ROOTS
+    )
+
+
+def _resolve_tool(name: str) -> str | None:
+    """Resolve a command name to an approved absolute executable path.
+
+    The candidate must be found on PATH, canonicalize to a regular executable
+    whose literal location is under a trusted system executable directory, and
+    when running as root must be owned by root and not writable by group or
+    other users.  Returns None when the tool is missing or untrusted.
+    """
+    candidate = shutil.which(name)
+    if not candidate:
+        return None
+    resolved = _canonicalize_path(candidate)
+    if not resolved or not os.path.isfile(resolved) or not os.access(resolved, os.X_OK):
+        return None
+    if not _is_trusted_tool_path(candidate) or not _is_trusted_tool_path(resolved):
+        return None
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        try:
+            stat_result = os.stat(resolved)
+        except OSError:
+            return None
+        if stat_result.st_uid != 0:
+            return None
+        if stat_result.st_mode & 0o022:
+            return None
+    return resolved
+
+
+def _git_bin() -> str | None:
+    """Return the resolved absolute git executable path, or None when untrusted."""
+    resolved = _resolve_tool("git")
+    if not resolved:
+        _stderr(
+            "warning: git is missing or not from a trusted location; "
+            "evidence will record git_commit as 'unknown'"
+        )
+    return resolved
+
+
+def _git_rev_parse(resolved_git: str) -> str:
+    """Return the current short git commit hash via the resolved git binary."""
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
+            [resolved_git, "rev-parse", "--short", "HEAD"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -95,6 +175,30 @@ def _get_git_commit() -> str:
         return result.stdout.strip() if result.returncode == 0 else "unknown"
     except (OSError, subprocess.SubprocessError):
         return "unknown"
+
+
+def _git_describe(resolved_git: str) -> str:
+    """Return the exact tag at HEAD via the resolved git binary, or ''."""
+    with contextlib.suppress(Exception):
+        result = subprocess.run(
+            [resolved_git, "describe", "--tags", "--exact-match", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            cwd=str(REPO_ROOT),
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    return ""
+
+
+def _get_git_commit() -> str:
+    """Return the current short git commit hash, or 'unknown' if unavailable."""
+    resolved_git = _git_bin()
+    if not resolved_git:
+        return "unknown"
+    return _git_rev_parse(resolved_git)
 
 
 def _nginx_bin_available() -> bool:
@@ -114,16 +218,11 @@ def _is_rc_tag() -> bool:
             return True
 
     with contextlib.suppress(Exception):
-        result = subprocess.run(
-            ["git", "describe", "--tags", "--exact-match", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-            cwd=str(REPO_ROOT),
-        )
-        if result.returncode == 0 and _RC_RE.search(result.stdout.strip()):
-            return True
+        resolved_git = _git_bin()
+        if resolved_git:
+            tag = _git_describe(resolved_git)
+            if tag and _RC_RE.search(tag):
+                return True
     return False
 
 
@@ -140,17 +239,10 @@ def _is_release_tag() -> bool:
             return True
 
     with contextlib.suppress(Exception):
-        result = subprocess.run(
-            ["git", "describe", "--tags", "--exact-match", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-            cwd=str(REPO_ROOT),
-        )
-        if result.returncode == 0:
-            tag = result.stdout.strip()
-            if _RELEASE_TAG_RE.search(tag) or _RC_RE.search(tag):
+        resolved_git = _git_bin()
+        if resolved_git:
+            tag = _git_describe(resolved_git)
+            if tag and (_RELEASE_TAG_RE.search(tag) or _RC_RE.search(tag)):
                 return True
     return False
 
@@ -173,8 +265,12 @@ def _run_module_benchmark(output_path: Path) -> tuple[int, str]:
     if not script.exists():
         return 1, f"Benchmark script not found: {script}"
 
+    resolved_bash = _resolve_tool("bash")
+    if not resolved_bash:
+        return 1, "Benchmark requires a trusted bash executable"
+
     result = subprocess.run(
-        [str(script), "--output", str(output_path)],
+        [resolved_bash, str(script), "--output", str(output_path)],
         capture_output=True,
         text=True,
         timeout=600,
@@ -398,6 +494,10 @@ def _build_evidence_pack(  # pylint: disable=too-many-arguments,too-many-positio
         "type": "perf-evidence-{}".format(_module_baseline_version()),
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "git_commit": _get_git_commit(),
+        "toolchain": {
+            "git": _git_bin(),
+            "bash": _resolve_tool("bash"),
+        },
         "verdict": verdict,
         "skipped": skipped,
         "skip_reason": skip_reason,

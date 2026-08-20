@@ -990,11 +990,13 @@ release-perf-evidence-blocking:
 	@echo "  Performance evidence gate (blocking mode, baseline $(BASELINE_VERSION))"
 	@if [ -n "$${NGINX_BIN:-}" ]; then \
 		MODULE_BASELINE_VERSION="$(BASELINE_VERSION)" \
-			python3 tools/perf/evidence_gate.py --mode blocking || exit 1; \
+			EVIDENCE_GATE_MODE=blocking EVIDENCE_GATE_ALLOW_SKIP_MODULE=0 \
+				tools/perf/run_evidence_gate.sh || exit 1; \
 	else \
 		if [ "$${RELEASE_GATE_ALLOW_SKIP_MODULE:-0}" = "1" ]; then \
 			MODULE_BASELINE_VERSION="$(BASELINE_VERSION)" \
-				python3 tools/perf/evidence_gate.py --mode blocking --allow-skip-module || exit 1; \
+			EVIDENCE_GATE_MODE=blocking EVIDENCE_GATE_ALLOW_SKIP_MODULE=1 \
+					tools/perf/run_evidence_gate.sh || exit 1; \
 		else \
 			echo "FAIL: Module-level benchmarks require NGINX_BIN." >&2; \
 			echo "  Set NGINX_BIN=/path/to/nginx or RELEASE_GATE_ALLOW_SKIP_MODULE=1 to skip." >&2; \
