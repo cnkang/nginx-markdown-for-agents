@@ -779,7 +779,8 @@ run_response_probe() {
 
   "$RESOLVED_PYTHON3" - "$REPO_ROOT" "$http_status" "$headers_file" "$body_file" \
     "$CORPUS_DIR/$fixture" "$expected_heading" "$expected_tail" \
-    "$compression" "$curl_exit" <<'PROBE_PYEOF' > "$result_file"
+    "$compression" "$curl_exit" "$NGINX_WORKDIR/logs/error.log" \
+    <<'PROBE_PYEOF' > "$result_file"
 import json
 import sys
 from pathlib import Path
@@ -799,6 +800,7 @@ expected_heading = sys.argv[6]
 expected_tail = sys.argv[7]
 compressed = sys.argv[8] != "none"
 curl_exit = int(sys.argv[9])
+error_log_path = Path(sys.argv[10])
 
 header_parse_error = ""
 headers = {}
@@ -833,6 +835,10 @@ if header_parse_error:
 if curl_exit:
     result["verdict"] = "fail"
     result["failure_reason"] = f"curl_exit: {curl_exit}"
+if result.get("verdict") == "fail" and error_log_path.exists():
+    error_log_artifact = error_log_path.parent / f"{headers_path.stem}.error.log"
+    error_log_artifact.write_bytes(error_log_path.read_bytes())
+    result["error_log_artifact"] = error_log_artifact.name
 print(json.dumps(result))
 PROBE_PYEOF
 
