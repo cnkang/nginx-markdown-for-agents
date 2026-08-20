@@ -33,14 +33,18 @@ def _trusted_roots() -> tuple[Path, ...]:
 
 
 def _is_under(path: Path, roots: tuple[Path, ...]) -> bool:
-    """Return whether a resolved path is below one of the trusted roots.
+    """Return whether an (unresolved) path is below one of the trusted roots.
 
-    Containment compares the RESOLVED candidate path against the resolved
-    trusted roots so symlinked or ``..``-containing candidates cannot escape
-    the allowlist.
+    Containment compares the candidate path against the resolved trusted
+    roots WITHOUT resolving the candidate itself.  Resolving the candidate
+    here would make a user-writable symlink that points into a trusted root
+    (for example `~/bin/foo -> /usr/bin/foo`) pass as trusted: the caller
+    checks the discovered PATH entry with this helper and validates the
+    resolved target separately via ``resolved_is_trusted``, so a symlink
+    whose literal location is outside the trusted roots stays rejected even
+    when its target is trusted.
     """
-    resolved = path.resolve()
-    return any(resolved == root or root in resolved.parents for root in roots)
+    return any(path == root or root in path.parents for root in roots)
 
 
 def _channel_from_toolchain_file(
