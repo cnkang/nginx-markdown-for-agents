@@ -76,6 +76,7 @@ struct ngx_connection_s {
 };
 
 struct ngx_http_request_s {
+    ngx_pool_t       *pool;
     ngx_connection_t *connection;
 };
 

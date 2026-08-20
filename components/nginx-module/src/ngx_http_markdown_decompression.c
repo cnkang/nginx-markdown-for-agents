@@ -51,8 +51,7 @@ ngx_http_markdown_full_brotli_reserve(
 
     current = *counter;
     for ( ;; ) {
-        if (current > (ngx_atomic_uint_t) limit
-            || size > limit - (size_t) current)
+        if (current > limit || size > limit - current)
         {
             return NGX_ERROR;
         }
@@ -1237,12 +1236,8 @@ ngx_http_markdown_full_brotli_prepare_alloc_ctx(
     }
 
     alloc_ctx->counter = &main_conf->brotli_workspace_bytes;
-    alloc_ctx->limit = (size_t) main_conf->brotli_workspace_limit;
-    if (alloc_ctx->limit == 0
-        || alloc_ctx->limit > NGX_HTTP_MARKDOWN_BROTLI_WORKSPACE_LIMIT)
-    {
-        alloc_ctx->limit = NGX_HTTP_MARKDOWN_BROTLI_WORKSPACE_LIMIT;
-    }
+    alloc_ctx->limit = ngx_http_markdown_brotli_workspace_limit(
+        main_conf->brotli_workspace_limit);
     alloc_ctx->log = r->connection->log;
 
     return NGX_OK;

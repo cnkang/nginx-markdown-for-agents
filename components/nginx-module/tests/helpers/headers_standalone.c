@@ -216,6 +216,11 @@ ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
             while (part != NULL) {
                 ngx_table_elt_t *headers = (ngx_table_elt_t *) part->elts;
 
+                if (part->nelts != 0 && headers == NULL) {
+                    markdown_header_plan_free(plan);
+                    return NGX_ERROR;
+                }
+
                 for (ngx_uint_t j = 0; j < part->nelts; j++) {
                     if (headers[j].hash == 0 || headers[j].key.data == NULL) {
                         continue;

@@ -57,6 +57,20 @@ typedef struct ngx_http_markdown_loc_validation_summary_s {
 #define NGX_HTTP_MARKDOWN_BROTLI_WORKSPACE_LIMIT (32 * 1024 * 1024)
 #endif
 
+#ifdef NGX_HTTP_BROTLI
+static ngx_inline size_t
+ngx_http_markdown_brotli_workspace_limit(ngx_atomic_uint_t configured_limit)
+{
+    if (configured_limit == 0
+        || configured_limit > NGX_HTTP_MARKDOWN_BROTLI_WORKSPACE_LIMIT)
+    {
+        return NGX_HTTP_MARKDOWN_BROTLI_WORKSPACE_LIMIT;
+    }
+
+    return configured_limit;
+}
+#endif
+
 /* C-side reload classification for file-system failures. */
 #define NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO 254
 
@@ -983,8 +997,13 @@ typedef struct {
     ngx_flag_t                   buffer_initialized;
     ngx_flag_t                   eligible;     /* Eligible for conversion */
     ngx_flag_t                   headers_forwarded; /* Whether downstream headers were sent */
-    ngx_http_markdown_last_modified_state_t
-                                last_modified;
+
+    /* Request-lifetime fields with matching release/representation scope. */
+    struct {
+        ngx_http_markdown_last_modified_state_t
+                                    last_modified;
+        ngx_http_markdown_inflight_cleanup_t *inflight_cleanup;
+    } lifecycle;
 
     /*
      * Conversion tracking state.
@@ -1343,21 +1362,6 @@ typedef struct {
         } completion;
     } streaming;
 
-    /* Per-request inflight release data (subrequest lifecycle, subrequest).
-     *
-     * Set by ngx_http_markdown_check_inflight after a successful
-     * increment.  Conversion terminal paths call
-     * ngx_http_markdown_inflight_release() to decrement the worker
-     * counter as soon as the conversion result is delivered, instead of
-     * waiting for r->pool destruction.  Subrequests share the parent
-     * request's pool, so pool-cleanup alone would hold the slot until
-     * the whole main request finishes (delayed release).  The release
-     * is idempotent: the pool cleanup handler still runs at pool
-     * destruction and observes the decremented flag.
-     *
-     * NULL until check_inflight succeeds; NULL on requests that never
-     * incremented (ineligible, overloaded, bypassed). */
-    ngx_http_markdown_inflight_cleanup_t *inflight_cleanup;
 } ngx_http_markdown_ctx_t;
 
 /*

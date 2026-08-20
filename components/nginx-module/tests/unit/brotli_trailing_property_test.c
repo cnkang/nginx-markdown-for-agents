@@ -641,12 +641,12 @@ test_brotli_workspace_budget(void)
     memset(&second, 0, sizeof(second));
     shared_bytes = 0;
 
-    first.brotli_workspace_bytes_shared = &shared_bytes;
-    first.brotli_workspace_limit = 40;
-    first.brotli_log = &test_log;
-    second.brotli_workspace_bytes_shared = &shared_bytes;
-    second.brotli_workspace_limit = 40;
-    second.brotli_log = &test_log;
+    first.brotli.workspace_bytes_shared = &shared_bytes;
+    first.brotli.workspace_limit = 40;
+    first.brotli.log = &test_log;
+    second.brotli.workspace_bytes_shared = &shared_bytes;
+    second.brotli.workspace_limit = 40;
+    second.brotli.log = &test_log;
 
     /* Workspace accounting covers the whole allocation (header + payload):
      * 12-byte payload -> 28 bytes

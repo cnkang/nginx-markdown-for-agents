@@ -120,7 +120,7 @@ ngx_http_markdown_inflight_cleanup_handler(void *data)
  *   - counter.current is incremented
  *   - high_watermark is updated if new peak
  *   - cleanup handler registered on r->pool
- *   - ctx->inflight_cleanup points at the cleanup data, enabling
+ *   - ctx->lifecycle.inflight_cleanup points at the cleanup data, enabling
  *     active release at conversion terminal (subrequest subrequest
  *     lifecycle)
  *
@@ -128,7 +128,7 @@ ngx_http_markdown_inflight_cleanup_handler(void *data)
  *   - counter.overload_total is incremented
  *   - counter.current is NOT incremented
  *   - no cleanup handler registered
- *   - ctx->inflight_cleanup stays NULL
+ *   - ctx->lifecycle.inflight_cleanup stays NULL
  *
  * Parameters:
  *   r    - NGINX request (for pool and logging)
@@ -198,7 +198,7 @@ ngx_http_markdown_inflight_try_increment(ngx_http_request_t *r,
     /* subrequest: hand the cleanup data to the request context so conversion
      * terminal paths can actively release the slot (subrequests share
      * the parent pool and must not hold the slot until pool destroy). */
-    ctx->inflight_cleanup = cd;
+    ctx->lifecycle.inflight_cleanup = cd;
 
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "markdown: inflight increment "
@@ -232,13 +232,13 @@ ngx_http_markdown_inflight_release(ngx_http_markdown_ctx_t *ctx)
 {
     ngx_http_markdown_inflight_cleanup_t  *cd;
 
-    cd = ctx->inflight_cleanup;
+    cd = ctx->lifecycle.inflight_cleanup;
     if (cd == NULL) {
         return;
     }
 
     ngx_http_markdown_inflight_cleanup_handler(cd);
-    ctx->inflight_cleanup = NULL;
+    ctx->lifecycle.inflight_cleanup = NULL;
 }
 
 /*

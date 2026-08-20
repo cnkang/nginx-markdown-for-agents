@@ -570,8 +570,7 @@ ngx_http_markdown_build_effective_conf(
  */
 static void
 ngx_http_markdown_bind_request_snapshot(
-    ngx_pool_t *pool,
-    ngx_log_t *log,
+    ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_dynconf_snapshot_t *snap_copy,
     const ngx_http_markdown_effective_conf_t *early_eff,
@@ -579,11 +578,16 @@ ngx_http_markdown_bind_request_snapshot(
     ngx_http_markdown_dynconf_snapshot_t **snapshot_slot,
     ngx_http_markdown_effective_conf_t **effective_slot)
 {
-    if (pool == NULL || conf == NULL || snapshot_slot == NULL
+    ngx_log_t  *log;
+
+    if (r == NULL || r->pool == NULL || r->connection == NULL
+        || conf == NULL || snapshot_slot == NULL
         || effective_slot == NULL || eff_storage == NULL)
     {
         return;
     }
+
+    log = r->connection->log;
 
     if (conf->advanced.dynconf_enabled) {
         if (snap_copy == NULL) {
@@ -593,7 +597,7 @@ ngx_http_markdown_bind_request_snapshot(
                           "request will use live conf values");
         } else {
             *snapshot_slot = ngx_pcalloc(
-                pool, sizeof(ngx_http_markdown_dynconf_snapshot_t));
+                r->pool, sizeof(ngx_http_markdown_dynconf_snapshot_t));
             if (*snapshot_slot != NULL) {
                 **snapshot_slot = *snap_copy;
             } else {
@@ -1222,7 +1226,8 @@ ngx_http_markdown_dynconf_apply_streaming_buffer(
         return NGX_ERROR;
     }
 
-    candidate->streaming_budget = (size_t) result->streaming_buffer;
+    candidate->streaming_budget =
+        (size_t) result->streaming_buffer; /* CWE-190:guarded */
 #else
     (void) snapshot;
     (void) candidate;
@@ -3017,7 +3022,7 @@ ngx_http_markdown_dynconf_read_file(
         return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
     }
 
-    *file_size = (size_t) file_info.st_size;
+    *file_size = (size_t) file_info.st_size; /* CWE-190:guarded */
     *data = ngx_alloc(*file_size == 0 ? 1 : *file_size, log);
     if (*data == NULL) {
         ngx_close_file(fd);
