@@ -41,6 +41,27 @@ SCENARIOS: tuple[str, ...] = (
     "brotli-streaming-first",
 )
 
+# The shell harness keeps its internal configuration selector for choosing an
+# NGINX config, but benchmark evidence must not publish the removed
+# ``profile`` vocabulary as if it were a user-facing directive.  Keep this
+# mapping at the report boundary so old internal names cannot leak into a
+# checked-in baseline.
+_SCENARIO_CONFIG_BY_PROFILE = {
+    "balanced": "explicit-defaults",
+    "streaming_first": "explicit-streaming",
+    "strict_cache": "explicit-strict-cache",
+}
+
+
+def _scenario_config_for_report(profile: str) -> str:
+    """Translate an internal harness mode to the frozen report vocabulary."""
+    try:
+        return _SCENARIO_CONFIG_BY_PROFILE[profile]
+    except KeyError as exc:
+        raise ValueError(
+            f"unsupported internal benchmark configuration: {profile!r}"
+        ) from exc
+
 
 def _normalize_header_name(name: str) -> str:
     normalized = name.strip().lower()
@@ -751,7 +772,7 @@ def build_scenario_result(data: ScenarioResultInput) -> dict:
 
     result = {
         "name": data.name,
-        "profile": data.profile,
+        "scenario_config": _scenario_config_for_report(data.profile),
         "compression": data.compression,
         "transfer_encoding": data.transfer_encoding,
         "concurrency": data.concurrency,
