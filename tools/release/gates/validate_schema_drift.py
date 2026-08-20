@@ -469,7 +469,7 @@ def _run_gate(index, total, label, gate_fn):
     print(f"[{index}/{total}] {label}...")
     try:
         errors = gate_fn()
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, TypeError, AttributeError) as exc:
         errors = [f"gate raised a structured input error: {exc}"]
     if errors:
         for error in errors:

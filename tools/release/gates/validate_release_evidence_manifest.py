@@ -193,13 +193,25 @@ def _check_required_entry_fields(entry: dict, index: int, reasons: list) -> None
 
 
 def _check_entry_identity(entry: dict, seen_ids: set, reasons: list) -> None:
-    """Record duplicate evidence entry identifiers."""
+    """Record duplicate evidence entry identifiers.
+
+    A non-null entry_id must be a string: an invalid type (int, list, ...)
+    is recorded as malformed and skipped, matching
+    validate_release_candidate_evidence.py, while duplicate detection
+    still applies to valid string identifiers.
+    """
     entry_id = entry.get("id")
-    if entry_id is not None:
-        if entry_id in seen_ids:
-            reasons.append(
-                f"malformed: duplicate entry id {entry_id!r}")
-        seen_ids.add(entry_id)
+    if entry_id is None:
+        return
+    if not isinstance(entry_id, str):
+        reasons.append(
+            f"malformed: entry id has non-string type "
+            f"{type(entry_id).__name__}")
+        return
+    if entry_id in seen_ids:
+        reasons.append(
+            f"malformed: duplicate entry id {entry_id!r}")
+    seen_ids.add(entry_id)
 
 
 def _check_entry_status(entry: dict, index: int, reasons: list) -> None:

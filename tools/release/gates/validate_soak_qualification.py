@@ -149,7 +149,9 @@ def load_manifest(manifest_path: str) -> dict:
     missing = required - set(manifest)
     if missing:
         raise SystemExit(f"ERROR: soak manifest missing fields: {sorted(missing)}")
-    if not CANDIDATE_SHA_RE.match(manifest["candidate_sha"]):
+    if not isinstance(manifest["candidate_sha"], str) or not CANDIDATE_SHA_RE.match(
+        manifest["candidate_sha"]
+    ):
         raise SystemExit("ERROR: soak manifest candidate_sha must be 40 hex")
     if (
         isinstance(manifest["duration_minutes"], bool)
@@ -297,10 +299,14 @@ def validate_against_manifest(record: dict, manifest: dict) -> None:
             f"{record['candidate_sha']} != {manifest['candidate_sha']}"
         )
     floor = manifest["duration_minutes"] * 60 * 0.95
-    if record["duration_seconds"] < floor:
+    if (
+        isinstance(record["duration_seconds"], bool)
+        or not isinstance(record["duration_seconds"], (int, float))
+        or record["duration_seconds"] < floor
+    ):
         raise SystemExit(
             "ERROR: below-threshold: soak duration "
-            f"{record['duration_seconds']}s < {floor:.0f}s floor"
+            f"{record['duration_seconds']!r}s < {floor:.0f}s floor"
         )
     _validate_scalar(record, "concurrency", manifest["concurrency"])
 
