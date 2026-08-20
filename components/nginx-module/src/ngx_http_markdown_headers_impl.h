@@ -1198,6 +1198,9 @@ ngx_http_markdown_head_representation_headers(ngx_http_request_t *r)
         hdr_token_count, sizeof(hdr_token_count) - 1, 0, NULL);
     ngx_http_markdown_invalidate_headers(r,
         hdr_trailer, sizeof(hdr_trailer) - 1, 0, NULL);
+    /* HEAD has no converted body, so it must not forward upstream trailer
+     * entries either.  HTTP/2/3 can emit them without a Trailer declaration. */
+    ngx_http_markdown_clear_trailers(r);
 
     /* Content-Type: point at the Markdown media type a GET conversion
      * would select, using the shared writable array so all paths
