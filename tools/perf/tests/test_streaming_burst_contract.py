@@ -29,11 +29,13 @@ def test_native_e2e_reserves_full_budget_for_conversion_routes():
 
     for location in ("/streaming/", "/streaming-zero-copy/"):
         block = _location_block(source, location)
-        assert "streaming_buffer=${MARKDOWN_MAX_SIZE};" in block
-        assert "streaming_buffer=256k;" not in block
+        assert "streaming_buffer=${MARKDOWN_MAX_SIZE}" in block
+        assert "decompression_ratio=1000;" in block
+        assert "streaming_buffer=256k" not in block
 
     bounded_block = _location_block(source, "/streaming-256k/")
-    assert "streaming_buffer=256k;" in bounded_block
+    assert "streaming_buffer=256k" in bounded_block
+    assert "decompression_ratio=1000;" in bounded_block
 
 
 def test_native_e2e_covers_256k_continuous_compression_bursts():
