@@ -34,20 +34,11 @@ from lib.path_validation import validate_read_path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DIR = REPO_ROOT / "components/nginx-module/src"
 
-# A function definition line, e.g.:
-#   ngx_int_t ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
-# or with the return type on its own line:
-#   ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
-# Capture the signature prefix and extract its final identifier separately.
-# Keeping the expression to two flat character classes avoids the nested
-# quantifiers that make a type-prefix expression difficult to audit and cause
-# SonarCloud's regex-complexity rule to reject it.
-FUNC_DEF_RE = re.compile(
-    r"^[ \t]*([^()\n]+)\([^()\n]*\)[ \t]*$",
-    re.MULTILINE,
-)
+# Function signatures are located by deterministic line scanning below.  A
+# regex is intentionally not used for the whole signature: balanced-looking
+# parenthesis character classes still invite super-linear backtracking as the
+# C source grows.
 FUNC_NAME_RE = re.compile(r"[A-Za-z_]\w*$")
-# Function may span lines: collect braces by scanning from a def line.
 
 # Access-control call signals.
 ACCESS_CALL_RE = re.compile(
@@ -105,23 +96,39 @@ def _matching_brace(text: str, open_idx: int) -> int:
     return -1
 
 
+def _iter_signature_candidates(text: str):
+    """Yield (function name, signature end offset) for candidate lines."""
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        logical_line = line.rstrip("\r\n")
+        open_idx = logical_line.find("(")
+        close_idx = logical_line.rfind(")")
+        if open_idx == -1 or close_idx <= open_idx:
+            offset += len(line)
+            continue
+        if logical_line[close_idx + 1 :].strip():
+            offset += len(line)
+            continue
+
+        name_match = FUNC_NAME_RE.search(logical_line[:open_idx].rstrip())
+        if name_match is not None:
+            yield name_match.group(0), offset + len(logical_line)
+        offset += len(line)
+
+
 def _iter_functions(text: str):
     """Yield (name, body) for each function with a braced body."""
     # Compute the blanked copy once: every function match reuses the same
     # comment/literal-aware text, avoiding O(functions × text) rescans.
     blanked = _blank_literals_and_comments(text)
-    for m in FUNC_DEF_RE.finditer(text):
-        name_match = FUNC_NAME_RE.search(m.group(1).rstrip())
-        if name_match is None:
-            continue
-        name = name_match.group(0)
+    for name, signature_end in _iter_signature_candidates(text):
         # Locate the opening body brace in comment- and literal-aware
         # text: a '{' inside a doc comment or string literal between the
         # signature and the real body must not be mistaken for the body
         # opener.  The blanked copy keeps every character position, so
         # the found offset maps back to the original text and the brace
         # balance / body extraction use the original content.
-        open_idx = blanked.find("{", m.end())
+        open_idx = blanked.find("{", signature_end)
         if open_idx == -1:
             continue
         close_idx = _matching_brace(text, open_idx)

@@ -30,20 +30,6 @@ fn shared_client() -> &'static reqwest::blocking::Client {
     })
 }
 
-/// Send a GET request and return the response.
-///
-/// # Arguments
-///
-/// * `url` - Fully qualified URL.
-///
-/// # Returns
-///
-/// An `HttpResponse` on success.
-pub fn get(url: &str) -> Result<HttpResponse> {
-    let resp = shared_client().get(url).send()?;
-    to_http_response(resp)
-}
-
 /// Send a HEAD request and return the response.
 ///
 /// # Arguments

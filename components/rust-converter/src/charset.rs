@@ -198,27 +198,14 @@ enum MetaScanStep {
     Found(String),
 }
 
-/// Process one position in the HTML prefix: skip comments and non-meta tags,
-/// and extract a charset from a `<meta>` element if present.
-fn scan_one_meta(html: &[u8], pos: usize) -> MetaScanStep {
-    // Skip HTML comments so a commented-out meta tag is not treated as
-    // a real declaration.
-    if html[pos..].starts_with(b"<!--") {
-        return match find_subslice(&html[pos + 4..], b"-->") {
-            Some(end) => MetaScanStep::Continue(pos + 4 + end + 3),
-            None => MetaScanStep::Stop,
-        };
+fn scan_meta_comment(html: &[u8], pos: usize) -> MetaScanStep {
+    match find_subslice(&html[pos + 4..], b"-->") {
+        Some(end) => MetaScanStep::Continue(pos + 4 + end + 3),
+        None => MetaScanStep::Stop,
     }
+}
 
-    // Find the next '<'.
-    let Some(lt) = find_byte(&html[pos..], b'<') else {
-        return MetaScanStep::Stop;
-    };
-    let pos = pos + lt;
-
-    // Must be a tag start (not `</` or `<!`).  Skip the whole
-    // declaration/comment to its closing '>' so inner '<' characters
-    // (e.g. a commented-out <meta>) cannot be misread as tag starts.
+fn scan_meta_tag(html: &[u8], pos: usize) -> MetaScanStep {
     if pos + 1 >= html.len() {
         return MetaScanStep::Stop;
     }
@@ -226,7 +213,6 @@ fn scan_one_meta(html: &[u8], pos: usize) -> MetaScanStep {
         return MetaScanStep::Continue(next);
     }
 
-    // Parse the tag name.
     let mut tag_end = pos + 1;
     while tag_end < html.len() && is_html_name_byte(html[tag_end]) {
         tag_end += 1;
@@ -250,6 +236,21 @@ fn scan_one_meta(html: &[u8], pos: usize) -> MetaScanStep {
         return MetaScanStep::Found(charset);
     }
     MetaScanStep::Continue(next_pos)
+}
+
+/// Process one position in the HTML prefix: skip comments and non-meta tags,
+/// and extract a charset from a `<meta>` element if present.
+fn scan_one_meta(html: &[u8], pos: usize) -> MetaScanStep {
+    // Skip HTML comments so a commented-out meta tag is not treated as
+    // a real declaration.
+    if html[pos..].starts_with(b"<!--") {
+        return scan_meta_comment(html, pos);
+    }
+
+    let Some(lt) = find_byte(&html[pos..], b'<') else {
+        return MetaScanStep::Stop;
+    };
+    scan_meta_tag(html, pos + lt)
 }
 
 /// Skip a closing tag (`</...>`) or declaration (`<!...>`), including
