@@ -479,7 +479,7 @@ fi
 def test_module_benchmark_records_actual_fixture_bytes():
     """Every scenario must report the actual fixture size for memory slope."""
     source = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
-    assert 'fixture_bytes="$(wc -c < "$CORPUS_DIR/$SC_FIXTURE")"' in source
+    assert 'fixture_bytes="$("$RESOLVED_WC" -c < "$CORPUS_DIR/$SC_FIXTURE")"' in source
     assert "input_bytes=int(sys.argv[12])" in source
 
 
@@ -517,8 +517,8 @@ def test_module_benchmark_materializes_output_derived_probe_directory():
     source = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
 
     assert 'PROBE_OUTPUT_DIR="${OUTPUT_PATH%.json}-probes"' in source
-    assert 'mkdir -p "$PROBE_OUTPUT_DIR"' in source
-    assert 'cp -R "$PROBE_DIR/." "$PROBE_OUTPUT_DIR/"' in source
+    assert '"$RESOLVED_MKDIR" -p "$PROBE_OUTPUT_DIR"' in source
+    assert '"$RESOLVED_CP" -R "$PROBE_DIR/." "$PROBE_OUTPUT_DIR/"' in source
 
 
 def test_module_benchmark_materializes_all_eight_scenario_probe_triplets():
@@ -553,8 +553,8 @@ def test_module_benchmark_cleanup_removes_temp_only_after_probe_materialization(
     cleanup_end = source.index("\n}\n", cleanup_start) + 3
     cleanup = source[cleanup_start:cleanup_end]
 
-    assert 'cp -R "$PROBE_DIR/." "$PROBE_OUTPUT_DIR/"' in source
-    assert 'rm -rf "$NGINX_WORKDIR"' in cleanup
+    assert '"$RESOLVED_CP" -R "$PROBE_DIR/." "$PROBE_OUTPUT_DIR/"' in source
+    assert '"$RESOLVED_RM" -rf "$NGINX_WORKDIR"' in cleanup
     assert "PROBE_OUTPUT_DIR" not in cleanup
 
 
@@ -1497,11 +1497,13 @@ class TestNginxConfigGeneration:
         script_content = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
 
         assert "required_commands=(" in script_content
-        assert 'command -v "$required_command"' in script_content
+        assert 'command -v "$name"' in script_content
+        assert "resolve_tool" in script_content
+        assert "RESOLVED_PS" in script_content
         assert "RSS_SUPPORTED=1" in script_content
         assert "RSS_SUPPORTED=0" in script_content
         assert "memory evidence will fail closed" in script_content
-        assert 'ps -o rss= -p "$$"' in script_content
+        assert '"$RESOLVED_PS" -o rss= -p "$$"' in script_content
 
     def test_preflight_requires_pinned_python_brotli(self):
         """The blocking chunked Brotli scenario must fail before serving requests."""
