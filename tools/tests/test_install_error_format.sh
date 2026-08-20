@@ -227,7 +227,7 @@ exit 0
 EOF
   chmod +x "$shim_dir/nginx"
 
-  SKIP_ROOT_CHECK=1 PATH="$restricted_path" \
+  SKIP_ROOT_CHECK=1 NGINX_BIN="$shim_dir/nginx" PATH="$restricted_path" \
     bash "$INSTALL_SCRIPT" "$@" >"$stdout_file" 2>"$stderr_file" || true
 
   _LAST_STDOUT="$(cat "$stdout_file")"

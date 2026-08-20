@@ -110,7 +110,7 @@ AUTO_DISABLE_STALE_MODULE=1 curl -sSL https://raw.githubusercontent.com/cnkang/n
 ```
 
 The script requires `sudo` (root privileges) to write the module binary and modify NGINX configuration files.
-By default, the installer enforces SHA-256 integrity checks and refuses artifacts without an available SHA-256 digest.
+By default, the installer requires a release-signed `SHA256SUMS` manifest and refuses artifacts whose signature, key, manifest entry, or digest verification is unavailable.
 
 ### Auto-Wiring Behavior
 
@@ -128,11 +128,30 @@ The install script performs the following automatically:
 
 ### Integrity Guardrails (Install Script)
 
-- Default behavior: installation fails if no SHA-256 digest is available for the selected artifact.
-- `DOWNLOAD_URL_OVERRIDE` always requires `DOWNLOAD_SHA256`.
+- Default behavior: installation fails when the selected artifact cannot pass
+  authentication against the release's signed `SHA256SUMS` manifest. The
+  installer downloads `SHA256SUMS` and `SHA256SUMS.asc` from the same release,
+  verifies the detached signature with the pinned release signing key, binds the
+  artifact hash to its exact entry in the verified manifest, and cross-checks
+  the manifest digest against the release API digest when one is present. If the
+  signature, key, manifest, or fingerprint trust material is missing, the
+  installer fails closed and does not install the artifact.
+- `TRUSTED_FINGERPRINT` pins the release signing key. The default is the
+  fingerprint of the signing subkey of the checked-in release key
+  (`packaging/nginx-markdown-for-agents-release.asc`). Operators must override
+  it with an independently authenticated fingerprint before trusting a
+  different key.
+- `DOWNLOAD_URL_OVERRIDE` (operator-supplied URL) always requires `DOWNLOAD_SHA256`.
+  The operator-supplied digest is the independent trust anchor for that path.
+  The installer performs no manifest download or GPG verification.
 - The installer has no checksumless bypass. If an independently authenticated
   digest is unavailable, withhold the binary installation and use the manual
   source-build path instead.
+- `NGINX_BIN` optionally overrides PATH discovery with an operator-chosen
+  absolute path to the nginx executable. Without it, a PATH-discovered nginx
+  must live in a trusted system executable directory. When running as root the
+  resolved binary must also have root ownership and must not be writable by
+  group or other users.
 
 After the script completes, reload NGINX:
 
@@ -1271,7 +1290,7 @@ ERROR: SHA-256 checksum verification failed
 or:
 
 ```text
-Release asset does not provide a SHA256 digest; refusing to install without an available SHA-256 digest.
+The release does not provide a usable signed `SHA256SUMS` manifest/signature, or the downloaded artifact does not match the signed manifest.
 ```
 
 **Root Cause:**
