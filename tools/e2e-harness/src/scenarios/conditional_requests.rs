@@ -194,6 +194,24 @@ fn append_if_modified_since_cases(
     }
 }
 
+fn append_absent_header_case(
+    headers: &reqwest::header::HeaderMap,
+    assertions: &mut Vec<AssertionResult>,
+    header_name: &str,
+    assertion_name: &str,
+    expected: &str,
+) {
+    let value = common::header_value(headers, header_name);
+    let passed = value.is_empty();
+    assertions.push(AssertionResult {
+        name: assertion_name.to_string(),
+        passed,
+        expected: expected.to_string(),
+        actual: if passed { "absent".to_string() } else { value },
+        message: None,
+    });
+}
+
 fn append_head_case(
     url: &str,
     headers: &HashMap<String, String>,
@@ -231,57 +249,34 @@ fn append_head_case(
             message: None,
         });
 
-        let etag = common::header_value(&response.headers, "etag");
-        assertions.push(AssertionResult {
-            name: "case10_head_no_etag".to_string(),
-            passed: etag.is_empty(),
-            expected: "no ETag (body-derived, not fabricatable)".to_string(),
-            actual: if etag.is_empty() {
-                "absent".to_string()
-            } else {
-                etag
-            },
-            message: None,
-        });
-
-        let content_length = common::header_value(&response.headers, "content-length");
-        assertions.push(AssertionResult {
-            name: "case10_head_no_content_length".to_string(),
-            passed: content_length.is_empty(),
-            expected: "no Content-Length (body-derived, not fabricatable)".to_string(),
-            actual: if content_length.is_empty() {
-                "absent".to_string()
-            } else {
-                content_length
-            },
-            message: None,
-        });
-
-        let content_encoding = common::header_value(&response.headers, "content-encoding");
-        assertions.push(AssertionResult {
-            name: "case10_head_no_content_encoding".to_string(),
-            passed: content_encoding.is_empty(),
-            expected: "no Content-Encoding (HTML body encoding)".to_string(),
-            actual: if content_encoding.is_empty() {
-                "absent".to_string()
-            } else {
-                content_encoding
-            },
-            message: None,
-        });
-
-        let last_modified = common::header_value(&response.headers, "last-modified");
-        assertions.push(AssertionResult {
-            name: "case10_head_no_last_modified".to_string(),
-            passed: last_modified.is_empty(),
-            expected: "no Last-Modified (HTML mtime)".to_string(),
-            actual: if last_modified.is_empty() {
-                "absent".to_string()
-            } else {
-                last_modified
-            },
-            message: None,
-        });
+        append_absent_header_case(
+            &response.headers,
+            assertions,
+            "etag",
+            "case10_head_no_etag",
+            "no ETag (body-derived, not fabricatable)",
+        );
+        append_absent_header_case(
+            &response.headers,
+            assertions,
+            "content-length",
+            "case10_head_no_content_length",
+            "no Content-Length (body-derived, not fabricatable)",
+        );
+        append_absent_header_case(
+            &response.headers,
+            assertions,
+            "content-encoding",
+            "case10_head_no_content_encoding",
+            "no Content-Encoding (HTML body encoding)",
+        );
+        append_absent_header_case(
+            &response.headers,
+            assertions,
+            "last-modified",
+            "case10_head_no_last_modified",
+            "no Last-Modified (HTML mtime)",
+        );
     }
 }
 

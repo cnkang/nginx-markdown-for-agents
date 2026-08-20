@@ -62,21 +62,20 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         "conversion_request",
     )
     .is_some()
-    {
-        if let Some(after_conversion) = common::try_get_with_headers(
+        && let Some(after_conversion) = common::try_get_with_headers(
             &metrics_url,
             &prometheus_headers,
             &mut assertions,
             "metrics_after_conversion",
-        ) {
-            assert_prometheus_response("after_conversion", &after_conversion, &mut assertions);
-            assertions.push(assert_prometheus_sample(
-                "conversion_requests_nonzero",
-                "nginx_markdown_requests_total",
-                "outcome=\"converted\"",
-                &after_conversion.body,
-            ));
-        }
+        )
+    {
+        assert_prometheus_response("after_conversion", &after_conversion, &mut assertions);
+        assertions.push(assert_prometheus_sample(
+            "conversion_requests_nonzero",
+            "nginx_markdown_requests_total",
+            "outcome=\"converted\"",
+            &after_conversion.body,
+        ));
     }
 
     Ok(common::finalize_report(SCENARIO, start, assertions))
