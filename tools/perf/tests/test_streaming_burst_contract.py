@@ -61,4 +61,4 @@ def test_module_benchmark_declares_compression_ratio_budget():
     limits_block = source[start:end]
 
     assert "streaming_buffer=16m" in limits_block
-    assert "decompression_ratio=1000" in limits_block
+    assert "decompression_ratio=2000" in limits_block
