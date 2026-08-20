@@ -1343,8 +1343,7 @@ pub unsafe extern "C" fn markdown_chain_decode_result_init(result: *mut FFIChain
 /// removed. The cumulative output budget (`max_output` = configured
 /// `decompressed_size`) applies across every non-identity intermediate
 /// output; the per-layer expansion ratio (`ratio` = configured
-/// `decompression_ratio`) activates only above the fixed 256-byte
-/// internal threshold.
+/// `decompression_ratio`) applies to every non-empty compressed layer.
 ///
 /// An identity-only chain (`layer_count == 0`) is a successful no-op:
 /// the output is a copy of the input (decode(identity, input) == input),
@@ -2724,7 +2723,7 @@ mod tests {
                 layers.as_ptr(),
                 2,
                 100_000,
-                100,
+                10_000,
                 &mut result,
             )
         };

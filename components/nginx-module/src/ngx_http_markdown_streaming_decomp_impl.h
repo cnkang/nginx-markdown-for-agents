@@ -85,6 +85,8 @@ typedef enum {
 typedef struct ngx_http_markdown_streaming_decomp_s {
     ngx_http_markdown_compression_type_e  type;
     size_t                                max_decompressed_size;
+    size_t                                decompression_ratio;
+    size_t                                total_compressed;
     size_t                                total_decompressed;
 
     union {
@@ -101,8 +103,8 @@ typedef struct ngx_http_markdown_streaming_decomp_s {
     u_char                               *brotli_next_out;
     size_t                                brotli_avail_out;
     /* Decoder-owned allocations are bounded across requests in a worker. */
-    ngx_atomic_t                     brotli_workspace_bytes;
-    ngx_atomic_t                    *brotli_workspace_bytes_shared;
+    ngx_atomic_uint_t                brotli_workspace_bytes;
+    ngx_atomic_uint_t               *brotli_workspace_bytes_shared;
     size_t                                brotli_workspace_limit;
     ngx_log_t                            *brotli_log;
 #endif
@@ -164,12 +166,12 @@ typedef struct ngx_http_markdown_streaming_decomp_s {
 
 #ifdef NGX_HTTP_BROTLI
 typedef struct {
-    ngx_atomic_t  *counter;
+    ngx_atomic_uint_t  *counter;
     size_t              size;
 } ngx_http_markdown_brotli_allocation_t;
 
 
-static ngx_atomic_t *
+static ngx_atomic_uint_t *
 ngx_http_markdown_brotli_workspace_counter(
     ngx_http_markdown_streaming_decomp_t *decomp)
 {
@@ -181,10 +183,10 @@ ngx_http_markdown_brotli_workspace_counter(
 
 static ngx_int_t
 ngx_http_markdown_brotli_reserve(
-    ngx_atomic_t *counter, size_t limit, size_t size)
+    ngx_atomic_uint_t *counter, size_t limit, size_t size)
 {
-    ngx_atomic_t  current;
-    ngx_atomic_t  next;
+    ngx_atomic_uint_t  current;
+    ngx_atomic_uint_t  next;
 
     if (counter == NULL || size == 0 || size > limit) {
         return NGX_ERROR;
@@ -192,13 +194,13 @@ ngx_http_markdown_brotli_reserve(
 
     current = *counter;
     for ( ;; ) {
-        if (current > (ngx_atomic_t) limit
+        if (current > (ngx_atomic_uint_t) limit
             || size > limit - (size_t) current)
         {
             return NGX_ERROR;
         }
 
-        next = current + (ngx_atomic_t) size;
+        next = current + (ngx_atomic_uint_t) size;
         if (ngx_atomic_cmp_set(counter, current, next)) {
             return NGX_OK;
         }
@@ -212,7 +214,7 @@ ngx_http_markdown_brotli_alloc(void *opaque, size_t size)
 {
     ngx_http_markdown_streaming_decomp_t *decomp;
     ngx_http_markdown_brotli_allocation_t *allocation;
-    ngx_atomic_t                    *counter;
+    ngx_atomic_uint_t               *counter;
     size_t                                total;
 
     decomp = opaque;
@@ -259,7 +261,7 @@ static void
 ngx_http_markdown_brotli_free(void *opaque, void *address)
 {
     ngx_http_markdown_brotli_allocation_t *allocation;
-    ngx_atomic_t                    *counter;
+    ngx_atomic_uint_t               *counter;
     size_t                                size;
 
     (void) opaque;
@@ -521,6 +523,7 @@ ngx_http_markdown_streaming_decomp_create_with_origin(
     ngx_pool_t *pool,
     ngx_http_markdown_compression_type_e type,
     size_t max_decompressed_size,
+    size_t decompression_ratio,
     ngx_atomic_uint_t *brotli_workspace_bytes,
     size_t brotli_workspace_limit,
     ngx_log_t *log,
@@ -548,6 +551,8 @@ ngx_http_markdown_streaming_decomp_create_with_origin(
 
     decomp->type = type;
     decomp->max_decompressed_size = max_decompressed_size;
+    decomp->decompression_ratio = decompression_ratio;
+    decomp->total_compressed = 0;
     decomp->total_decompressed = 0;
     decomp->initialized = 0;
     decomp->finished = 0;
@@ -677,7 +682,7 @@ ngx_http_markdown_streaming_decomp_create(
 #endif
 
     return ngx_http_markdown_streaming_decomp_create_with_origin(
-        pool, type, max_decompressed_size, NULL,
+        pool, type, max_decompressed_size, 0, NULL,
         NGX_HTTP_MARKDOWN_BROTLI_WORKSPACE_LIMIT, default_log, NULL);
 }
 
@@ -711,6 +716,35 @@ ngx_http_markdown_streaming_decomp_check_limit(
         }
     }
     return 0;
+}
+
+
+/*
+ * Account for the raw compressed bytes accepted by one feed call.  This is
+ * deliberately done before format sniffing or decoding so partial deflate
+ * headers, zero-output chunks, and concatenated gzip members all contribute
+ * to the response-wide ratio denominator.
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_decomp_record_input(
+    ngx_http_markdown_streaming_decomp_t *decomp,
+    size_t input_len,
+    ngx_log_t *log)
+{
+    if (decomp->total_compressed
+        > NGX_MAX_SIZE_T_VALUE - input_len)
+    {
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+            "markdown: compressed input accounting overflow, "
+            "total=%uz input=%uz",
+            decomp->total_compressed, input_len);
+        decomp->failure_origin =
+            NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
+        return NGX_ERROR;
+    }
+
+    decomp->total_compressed += input_len;
+    return NGX_OK;
 }
 
 
@@ -2056,9 +2090,19 @@ ngx_http_markdown_streaming_decomp_feed(
         return rc;
     }
 
-    /* Empty input is a no-op */
-    if (in_data == NULL || in_len == 0) {
+    /* Empty input is a no-op. A non-empty NULL input is an internal error. */
+    if (in_len == 0) {
         return NGX_OK;
+    }
+    if (in_data == NULL) {
+        decomp->failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
+        return NGX_ERROR;
+    }
+
+    rc = ngx_http_markdown_streaming_decomp_record_input(
+        decomp, in_len, log);
+    if (rc != NGX_OK) {
+        return rc;
     }
 
     if (decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
@@ -2135,11 +2179,11 @@ ngx_http_markdown_streaming_decomp_feed(
 
 
 /*
- * Validate decompressed size against overflow and budget limits after
- * a decode pass. On success, updates decomp->total_decompressed and
- * returns NGX_OK. On failure, returns the appropriate error code
- * (NGX_ERROR or NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) without
- * freeing the buffer.
+ * Validate decompressed size and the response-wide expansion ratio after a
+ * decode pass. On success, updates decomp->total_decompressed and returns
+ * NGX_OK. On failure, returns the appropriate error code (NGX_ERROR,
+ * NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED, or
+ * NGX_HTTP_MARKDOWN_DECOMP_RATIO_EXCEEDED) without freeing the buffer.
  *
  * Ownership note: when called from ngx_http_markdown_streaming_decomp_feed,
  * the decode loop has already called finalize_buf() which transferred
@@ -2155,6 +2199,7 @@ ngx_http_markdown_streaming_decomp_apply_limits(
     ngx_log_t *log)
 {
     size_t  projected;
+    size_t  ratio_limit;
 
     (void) buf_ptr;
 
@@ -2179,6 +2224,27 @@ ngx_http_markdown_streaming_decomp_apply_limits(
             projected,
             decomp->max_decompressed_size);
         return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+    }
+
+    /* Apply the configured expansion ratio to the complete response, not to
+     * an individual input chunk. A multiplication overflow means the ratio
+     * limit is above SIZE_MAX and therefore cannot be exceeded by a size_t
+     * output; it must not wrap into a smaller limit. */
+    if (decomp->decompression_ratio > 0
+        && decomp->total_compressed > 0
+        && decomp->decompression_ratio
+            <= NGX_MAX_SIZE_T_VALUE / decomp->total_compressed)
+    {
+        ratio_limit = decomp->total_compressed
+                      * decomp->decompression_ratio;
+        if (projected > ratio_limit) {
+            ngx_log_error(NGX_LOG_WARN, log, 0,
+                "markdown: decompressed size %uz exceeds "
+                "ratio limit %uz (compressed=%uz ratio=%uz)",
+                projected, ratio_limit, decomp->total_compressed,
+                decomp->decompression_ratio);
+            return NGX_HTTP_MARKDOWN_DECOMP_RATIO_EXCEEDED;
+        }
     }
 
     decomp->total_decompressed = projected;
