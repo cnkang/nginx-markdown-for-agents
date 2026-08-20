@@ -563,10 +563,10 @@ ngx_http_markdown_build_effective_conf(
  *
  * The effective view is copied by value into `eff_storage` (owned by the
  * caller, typically the request context).  There is no pool allocation for
- * the effective view: a request whose allocation failed must still bind
- * the header-time view, otherwise the body phase would fall back to
- * static live-conf values and observe a different configuration than the
- * header phase (bind-once violation).
+ * the effective view.  If the optional request-pool snapshot allocation
+ * fails, the captured header-time effective view still binds; only the
+ * snapshot pointer is unavailable.  This keeps later phases on the same
+ * configuration view (bind-once invariant).
  */
 static void
 ngx_http_markdown_bind_request_snapshot(
@@ -603,7 +603,8 @@ ngx_http_markdown_bind_request_snapshot(
             } else {
                 ngx_log_error(NGX_LOG_WARN, log, 0,
                               "markdown: failed to allocate dynconf snapshot "
-                              "from request pool; request will use live conf values");
+                              "from request pool; retaining the captured "
+                              "header-time effective view");
             }
         }
     }
