@@ -15,6 +15,13 @@ input sizes. The evidence gate reports `MISSING_EVIDENCE` rather than a
 regression verdict when these fields differ. Report-only mode retains exit zero
 for visibility. Blocking release mode fails until comparable evidence exists.
 
+The blocking 0.9.2 release gate also binds both
+`module_benchmark.git_commit` and
+`baseline_policy.source_git_commit` to the current full 40-character
+`git HEAD`. A stale baseline is release evidence failure, not a candidate
+for silent reuse or metadata-only normalization; run the module-enabled
+canonical benchmark again at the frozen candidate commit.
+
 ## Evidence Truth and Conservative Normalization
 
 Module baselines contain two different classes of data:

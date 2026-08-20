@@ -164,6 +164,7 @@ def test_missing_diagnostics_counters_fail_closed_in_scenario_metrics():
             load_exit_code=0,
         )
     )
+    assert result["scenario_config"] == "explicit-streaming"
     assert result["metrics"]["fallback_rate"] is None
     assert "precommit_failopen_total" not in result["metrics"]
     assert result["metrics"]["throughput_mbytes_per_sec"] == pytest.approx(0.0001)
@@ -793,13 +794,13 @@ def _build_valid_mock_report():
         "module_benchmark": {
             "version": "1.0.0",
             "timestamp": "2026-07-01T12:00:00Z",
-            "git_commit": "abc1234",
+            "git_commit": "0123456789abcdef0123456789abcdef01234567",
             "platform": "darwin-arm64",
             "load_generator": "hey",
             "scenarios": [
                 {
                     "name": "plain-small",
-                    "profile": "balanced",
+                    "scenario_config": "explicit-defaults",
                     "compression": "none",
                     "transfer_encoding": "identity",
                     "concurrency": 10,
@@ -821,7 +822,7 @@ def _build_valid_mock_report():
                 },
                 {
                     "name": "chunked-medium",
-                    "profile": "balanced",
+                    "scenario_config": "explicit-defaults",
                     "compression": "none",
                     "transfer_encoding": "chunked",
                     "concurrency": 10,
@@ -843,7 +844,7 @@ def _build_valid_mock_report():
                 },
                 {
                     "name": "gzip-large",
-                    "profile": "balanced",
+                    "scenario_config": "explicit-defaults",
                     "compression": "gzip",
                     "transfer_encoding": "identity",
                     "concurrency": 10,
@@ -865,7 +866,7 @@ def _build_valid_mock_report():
                 },
                 {
                     "name": "large-body",
-                    "profile": "balanced",
+                    "scenario_config": "explicit-defaults",
                     "compression": "none",
                     "transfer_encoding": "identity",
                     "concurrency": 5,
@@ -887,7 +888,7 @@ def _build_valid_mock_report():
                 },
                 {
                     "name": "streaming-first",
-                    "profile": "streaming_first",
+                    "scenario_config": "explicit-streaming",
                     "compression": "none",
                     "transfer_encoding": "chunked",
                     "concurrency": 20,
@@ -1213,10 +1214,13 @@ class TestReportSchemaConformance:
         report = _build_valid_mock_report()
         assert report["module_benchmark"]["load_generator"] in valid_generators
 
-    def test_profile_enum_values(self):
-        """profile field enum covers all valid profiles."""
+    def test_scenario_config_enum_values(self):
+        """scenario_config carries benchmark-only configuration identity."""
         self._assert_schema_enum_values(
-            "profile", "balanced", "streaming_first", "strict_cache"
+            "scenario_config",
+            "explicit-defaults",
+            "explicit-streaming",
+            "explicit-strict-cache",
         )
 
     def test_compression_enum_values(self):
