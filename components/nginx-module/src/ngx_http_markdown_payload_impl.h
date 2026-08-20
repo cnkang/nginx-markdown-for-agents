@@ -787,9 +787,10 @@ ngx_http_markdown_handle_decompression_conversion_error(
 /*
  * Linearize a buffer chain into a single contiguous allocation.
  *
- * Validates each buffer's pos/last pointers (non-NULL, well-ordered via
- * uintptr_t comparison) and accumulates total size with overflow checking.
- * On success, allocates a pool buffer and copies all chain data into it.
+ * Validates each buffer's pos/last pointers (or an explicit empty buffer
+ * with both pointers NULL), keeps pointer ordering checks in integer space,
+ * and accumulates total size with overflow checking. On success, allocates a
+ * pool buffer and copies all chain data into it unless the chain is empty.
  *
  * Parameters:
  *   r        - NGINX request (pool allocation and logging)
@@ -798,10 +799,9 @@ ngx_http_markdown_handle_decompression_conversion_error(
  *   out_size - output: total byte count
  *
  * Returns:
- *   NGX_OK                                  - success
+ *   NGX_OK                                  - success, including empty input
  *   NGX_ERROR                               - invalid pointers or alloc failure
  *   NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED - size overflow
- *   NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT - empty input
  */
 #ifndef NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS
 static ngx_int_t
@@ -820,7 +820,7 @@ ngx_http_markdown_linearize_chain(ngx_http_request_t *r,
             continue;
         }
 
-        if (src->buf->pos == NULL || src->buf->last == NULL) {
+        if ((src->buf->pos == NULL) != (src->buf->last == NULL)) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                          "markdown: linearize chain "
                          "invalid buffer pointers, "
@@ -847,10 +847,9 @@ ngx_http_markdown_linearize_chain(ngx_http_request_t *r,
     }
 
     if (total == 0) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown: linearize chain "
-                     "called with empty input");
-        return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
+        *out_buf = NULL;
+        *out_size = 0;
+        return NGX_OK;
     }
 
     buf = ngx_palloc(r->pool, total);
@@ -907,20 +906,17 @@ ngx_http_markdown_decompression_input(
 {
     if (compressed_chain->next == NULL
         && compressed_chain->buf != NULL
-        && compressed_chain->buf->pos != NULL
-        && compressed_chain->buf->last != NULL
-        && (uintptr_t) compressed_chain->buf->last
-           >= (uintptr_t) compressed_chain->buf->pos)
+        && ((compressed_chain->buf->pos == NULL
+             && compressed_chain->buf->last == NULL)
+            || (compressed_chain->buf->pos != NULL
+                && compressed_chain->buf->last != NULL
+                && (uintptr_t) compressed_chain->buf->last
+                   >= (uintptr_t) compressed_chain->buf->pos)))
     {
         *input_buf = compressed_chain->buf->pos;
-        *input_size = compressed_chain->buf->last
-                      - compressed_chain->buf->pos;
-        if (*input_size == 0) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                "markdown: contiguous chain has zero-length buffer");
-            return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
-        }
-
+        *input_size = (compressed_chain->buf->pos == NULL)
+            ? 0
+            : compressed_chain->buf->last - compressed_chain->buf->pos;
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
             "markdown: skipping linearize copy, buffer contiguous, "
             "size=%uz", *input_size);
