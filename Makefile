@@ -70,7 +70,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         security-static security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny \
         supply-chain supply-chain-trivy supply-chain-sbom \
         complexity-check \
-	docs-check docs-style-check docs-style-check-strict docs-style-check-regression docs-style-check-baseline license-check release-notes release-gates-check release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x         release-gates-check-090 release-gates-check-091 release-gates-check-092 release-gates-check-all release-gates-check-legacy release-gates-check-strict \
+	docs-check docs-style-check docs-style-check-strict docs-style-check-regression docs-style-check-baseline license-check release-notes release-gates-check release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x         release-gates-check-090 release-gates-check-091 release-gates-check-092-canonical release-gates-check-092 release-gates-check-all release-gates-check-legacy release-gates-check-strict \
         release-matrix-check \
         release-candidate-evidence-check artifact-registry-check release-evidence-manifest-check \
         test-rust-fuzz-qualification test-e2e-rust-soak \
@@ -1039,7 +1039,12 @@ release-gates-check-091: release-gates-check-090
 	fi
 	@echo "=== 0.9.1 Release Gates: PASS ==="
 
-# release-gates-check-092: Blocking 0.9.2 release gate.
+# release-gates-check-092-canonical: Blocking 0.9.2 performance/contract gate.
+# This is the subset that a native canonical performance job can establish.
+# Package artifact registry, candidate-bound final evidence, fuzz qualification,
+# and soak qualification remain in release-gates-check-092 and the canonical
+# release-packages.yml workflow, where their required inputs are available.
+#
 # Additive on 091: adds public-surface/dynconf contract drift, version
 # consistency, reason-code registry completeness, and streaming lifecycle tests.
 #
@@ -1052,24 +1057,24 @@ release-gates-check-091: release-gates-check-090
 #   RELEASE_GATE_ALLOW_SKIP_COVERAGE=1   - (inherited) skip coverage
 #
 # Classification: BLOCKING
-release-gates-check-092: release-gates-check-091
-	@echo "=== 0.9.2 Release Gates (blocking) ==="
-	@echo "  [1/13] 0.9.2 performance evidence gate (blocking mode, baseline 092)"
+release-gates-check-092-canonical: release-gates-check-091
+	@echo "=== 0.9.2 Canonical Performance/Contract Gates (blocking) ==="
+	@echo "  [1/7] 0.9.2 performance evidence gate (blocking mode, baseline 092)"
 	$(MAKE) release-perf-evidence-blocking BASELINE_VERSION=092
-	@echo "  [2/13] Public surface and dynconf schema drift checks"
+	@echo "  [2/7] Public surface and dynconf schema drift checks"
 	$(MAKE) public-surface-drift-check
 	$(MAKE) schema-drift-check SCHEMA_RELEASE_VERSION=0.9.2
-	@echo "  [3/13] Version consistency (0.9.2)"
+	@echo "  [3/7] Version consistency (0.9.2)"
 	bash tools/harness/detect_version_consistency.sh
-	@echo "  [4/13] Reason code registry completeness"
+	@echo "  [4/7] Reason code registry completeness"
 	$(MAKE) reason-codegen-check
 	python3 tools/release/gates/validate_official_feature_manifest.py
 	$(MAKE) reason-codegen-generate
 	$(MAKE) reason-codegen-check
 	PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
-	@echo "  [5/13] Streaming lifecycle unit test"
+	@echo "  [5/7] Streaming lifecycle unit test"
 	$(MAKE) -C $(NGINX_TEST_DIR) unit-streaming_impl
-	@echo "  [6/13] Official build feature manifest"
+	@echo "  [6/7] Official build feature manifest"
 	$(MAKE) official-feature-manifest-generate
 	python3 tools/release/gates/validate_official_feature_manifest.py
 	git diff --exit-code -- \
@@ -1077,8 +1082,17 @@ release-gates-check-092: release-gates-check-091
 		artifacts/release/0.9.2/reason-registry-report.json \
 		artifacts/release/0.9.2/generated-reason-artifacts.json \
 		artifacts/release/0.9.2/official-build-feature-manifest.json
-	@echo "  [7/13] Canonical release matrix"
+	@echo "  [7/7] Canonical release matrix"
 	PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
+	@echo "=== 0.9.2 Canonical Performance/Contract Gates: PASS ==="
+
+# release-gates-check-092: Complete blocking 0.9.2 release gate.
+# The canonical performance/contract subset above is followed by the
+# candidate-bound artifact, evidence, fuzz, soak, docs, and property gates.
+# Those stages must remain here so a package release cannot pass on a
+# performance-only workflow's partial evidence.
+release-gates-check-092: release-gates-check-092-canonical
+	@echo "=== 0.9.2 Release Gates (blocking) ==="
 	@echo "  [8/13] Release candidate evidence bound to HEAD"
 	$(MAKE) release-candidate-evidence-check
 	@echo "  [9/13] Artifact registry evidence"
@@ -1404,7 +1418,8 @@ help:
 	@echo "  release-gates-check-08x  - Alias for release-gates-check-080 (0.8.x patch-line canonical entry)"
 	@echo "  release-gates-check-090  - Validate 0.9.0 release gates (additive on 0.8.0; production examples, gate validator)"
 	@echo "  release-gates-check-091  - Validate 0.9.1 release gates (blocking; module benchmark evidence gate)"
-	@echo "  release-gates-check-092  - Validate 0.9.2 release gates (blocking; 091 + 092 evidence + contract checks)"
+	@echo "  release-gates-check-092-canonical - Validate 0.9.2 canonical performance/contract gates"
+	@echo "  release-gates-check-092  - Validate complete 0.9.2 release gates (blocking; candidate evidence + artifacts + fuzz + soak)"
 	@echo "  release-matrix-check      - Validate canonical release matrix against the checked-in schema and ABI/feature bindings"
 	@echo "  release-candidate-evidence-check - Validate frozen release candidate SHA manifest (FIXTURE=... for regression fixtures)"
 	@echo "  artifact-registry-check   - Validate candidate-bound release artifact index (FIXTURE=... for regression fixtures)"

@@ -61,11 +61,11 @@ def _workflow_publish_body() -> str:
 
 def _makefile_092_target() -> str:
     text = MAKEFILE.read_text(encoding="utf-8")
-    start = text.find("release-gates-check-092: release-gates-check-091")
+    start = text.find("release-gates-check-092: release-gates-check-092-canonical")
     if start == -1:
         raise AssertionError(
             f"{MAKEFILE.name}: missing 'release-gates-check-092: "
-            "release-gates-check-091' target line"
+            "release-gates-check-092-canonical' target line"
         )
     end = text.find("\nrelease-matrix-check:", start)
     if end == -1:
