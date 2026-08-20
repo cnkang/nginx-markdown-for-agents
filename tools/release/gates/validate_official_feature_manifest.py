@@ -23,11 +23,28 @@ import tomllib
 from argparse import ArgumentParser
 from collections.abc import Iterator
 
+try:
+    from tools.release.matrix.normalize_matrix import RELEASE_VERSION
+except ImportError:
+    import importlib.util as _importlib_util
+
+    _norm_path = pathlib.Path(__file__).resolve().parents[1] / "matrix" / "normalize_matrix.py"
+    _norm_spec = _importlib_util.spec_from_file_location(
+        "normalize_matrix_standalone", str(_norm_path)
+    )
+    RELEASE_VERSION = "0.9.2"
+    if _norm_spec is not None and _norm_spec.loader is not None:
+        _norm_mod = _importlib_util.module_from_spec(_norm_spec)
+        _norm_spec.loader.exec_module(_norm_mod)
+        RELEASE_VERSION = getattr(_norm_mod, "RELEASE_VERSION", "0.9.2")
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
-MANIFEST_PATH = (
-    REPO_ROOT / "artifacts" / "release" / "0.9.2" / "official-build-feature-manifest.json"
-)
-CARGO_TOML_PATH = REPO_ROOT / "components" / "rust-converter" / "Cargo.toml"
+
+def _manifest_path() -> pathlib.Path:
+    return REPO_ROOT / "artifacts" / "release" / RELEASE_VERSION / "official-build-feature-manifest.json"
+
+def _cargo_toml_path() -> pathlib.Path:
+    return REPO_ROOT / "components" / "rust-converter" / "Cargo.toml"
 
 EXPECTED = {"incremental": True, "streaming": True, "prune_noise_regions": True}
 FORBIDDEN_FEATURE_NAMES = {"pruning", "brotli"}
@@ -186,11 +203,12 @@ def _check_feature_consumers(value: object, failures: list) -> None:
 
 def load_cargo_toml(failures: list) -> str:
     """Load Cargo.toml or record a failure."""
-    if not CARGO_TOML_PATH.is_file():
-        failures.append(f"Cargo.toml missing: {CARGO_TOML_PATH}")
+    cargo_path = _cargo_toml_path()
+    if not cargo_path.is_file():
+        failures.append(f"Cargo.toml missing: {cargo_path}")
         return ""
     try:
-        return CARGO_TOML_PATH.read_text(encoding="utf-8")
+        return cargo_path.read_text(encoding="utf-8")
     except OSError as exc:
         failures.append(f"Cargo.toml unreadable: {exc}")
         return ""
@@ -206,15 +224,15 @@ def write_manifest() -> int:
         return 1
 
     try:
-        MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
-        MANIFEST_PATH.write_text(
+        _manifest_path().parent.mkdir(parents=True, exist_ok=True)
+        _manifest_path().write_text(
             json.dumps(EXPECTED, sort_keys=True) + "\n", encoding="utf-8"
         )
     except OSError as exc:
         print(f"ERROR: feature manifest could not be written: {exc}", file=sys.stderr)
         return 1
 
-    print(f"Generated official build feature manifest: {MANIFEST_PATH}")
+    print(f"Generated official build feature manifest: {_manifest_path()}")
     return 0
 
 
@@ -232,12 +250,12 @@ def main(argv=None) -> int:
 
     failures = []
 
-    if not MANIFEST_PATH.is_file():
-        print(f"ERROR: feature manifest missing: {MANIFEST_PATH}", file=sys.stderr)
+    if not _manifest_path().is_file():
+        print(f"ERROR: feature manifest missing: {_manifest_path()}", file=sys.stderr)
         return 1
 
     try:
-        manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+        manifest = json.loads(_manifest_path().read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
         print(f"ERROR: feature manifest unreadable: {exc}", file=sys.stderr)
         return 1
