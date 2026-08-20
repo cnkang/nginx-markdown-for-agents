@@ -831,7 +831,7 @@ mod tests {
          * classifications must stay distinct). */
         let original = vec![0u8; 200_000];
         let compressed = gzip_compress(&original);
-        assert!(compressed.len() > 0);
+        assert!(!compressed.is_empty());
         let limits = DecodeLimits {
             max_output: 100_000,
             ratio: 10_000,
