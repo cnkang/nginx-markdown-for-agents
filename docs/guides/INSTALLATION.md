@@ -41,32 +41,9 @@ privileged execution, then verifies both Markdown and HTML responses:
 
 ```bash
 # Step 1: Download and authenticate the versioned release installer
-RELEASE_TAG=v0.9.2
-RELEASE_BASE="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"
-INSTALLER="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"
-curl -fsSLo "${INSTALLER}" "${RELEASE_BASE}/${INSTALLER}"
-curl -fsSLo SHA256SUMS "${RELEASE_BASE}/SHA256SUMS"
-curl -fsSLo SHA256SUMS.asc "${RELEASE_BASE}/SHA256SUMS.asc"
-curl -fsSLo nginx-markdown-for-agents-release.asc \
-  "${RELEASE_BASE}/nginx-markdown-for-agents-release.asc"
-TRUSTED_FINGERPRINT=15C792438EAA762B421E60D21E8D41E7D19A8A75
-GNUPGHOME="$(mktemp -d)"
-trap 'rm -rf "$GNUPGHOME"' EXIT
-gpg --batch --homedir "$GNUPGHOME" --import nginx-markdown-for-agents-release.asc
-VALIDSIG="$(gpg --batch --homedir "$GNUPGHOME" --status-fd=1 \
-  --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
-  | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
-[[ "$VALIDSIG" == "$TRUSTED_FINGERPRINT" ]] || exit 1
-grep -E "  ${INSTALLER}$" SHA256SUMS | sha256sum -c -
-sudo env VERSION="${RELEASE_TAG}" bash "${INSTALLER}"
-
-# Step 2: Reload NGINX
-sudo nginx -t && sudo nginx -s reload
-
-# Step 3: Verify — request the default welcome page as Markdown
+RELEASE_TAG=v0.9.2; RELEASE_BASE="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"; INSTALLER="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"; curl -fsSLo "${INSTALLER}" "${RELEASE_BASE}/${INSTALLER}" -o SHA256SUMS "${RELEASE_BASE}/SHA256SUMS" -o SHA256SUMS.asc "${RELEASE_BASE}/SHA256SUMS.asc" -o nginx-markdown-for-agents-release.asc "${RELEASE_BASE}/nginx-markdown-for-agents-release.asc"
+TRUSTED_FINGERPRINT=15C792438EAA762B421E60D21E8D41E7D19A8A75; GNUPGHOME="$(mktemp -d)"; trap 'rm -rf "$GNUPGHOME"' EXIT; gpg --batch --homedir "$GNUPGHOME" --import nginx-markdown-for-agents-release.asc; VALIDSIG="$(gpg --batch --homedir "$GNUPGHOME" --status-fd=1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"; [[ "$VALIDSIG" == "$TRUSTED_FINGERPRINT" ]] || exit 1; grep -E "  ${INSTALLER}$" SHA256SUMS | sha256sum -c - && sudo env VERSION="${RELEASE_TAG}" bash "${INSTALLER}" && sudo nginx -t && sudo nginx -s reload
 curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/
-
-# Step 4: Confirm HTML passthrough is preserved
 curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/
 ```
 
