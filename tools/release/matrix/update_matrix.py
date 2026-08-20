@@ -43,6 +43,7 @@ try:
         normalize_compatibility_entries,
         normalize_compatibility_entry,
         normalize_entry_aliases,
+        RELEASE_VERSION,
     )
 except ImportError:
     from normalize_matrix import (
@@ -51,6 +52,7 @@ except ImportError:
         normalize_compatibility_entries,
         normalize_compatibility_entry,
         normalize_entry_aliases,
+        RELEASE_VERSION,
     )
 
 # ---------------------------------------------------------------------------
@@ -60,7 +62,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent.parent
 MATRIX_PATH = REPO_ROOT / "tools" / "release-matrix.json"
 FEATURE_MANIFEST_PATH = (
-    REPO_ROOT / "artifacts" / "release" / "0.9.2"
+    REPO_ROOT / "artifacts" / "release" / RELEASE_VERSION
     / "official-build-feature-manifest.json"
 )
 ABI_HEADER_PATH = (

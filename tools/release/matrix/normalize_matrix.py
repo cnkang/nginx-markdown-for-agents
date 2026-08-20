@@ -28,6 +28,10 @@ import pathlib
 import sys
 from typing import Any, Dict, List
 
+# Single source of truth for the release artifact version directory.
+# Update this when the release line changes (e.g. 0.9.2 -> 0.9.3).
+RELEASE_VERSION = "0.9.2"
+
 # Repository path-validation helper (AGENTS.md Rule 33): CLI-derived paths
 # must be validated before use.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3] / "tools"))

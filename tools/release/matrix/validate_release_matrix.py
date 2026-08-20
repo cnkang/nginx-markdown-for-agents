@@ -33,6 +33,21 @@ import re
 import subprocess
 import sys
 
+try:
+    from .normalize_matrix import RELEASE_VERSION
+except ImportError:
+    import importlib.util as _importlib_util
+
+    _norm_path = pathlib.Path(__file__).resolve().parent / "normalize_matrix.py"
+    _norm_spec = _importlib_util.spec_from_file_location(
+        "normalize_matrix_standalone", str(_norm_path)
+    )
+    RELEASE_VERSION = "0.9.2"
+    if _norm_spec is not None and _norm_spec.loader is not None:
+        _norm_mod = _importlib_util.module_from_spec(_norm_spec)
+        _norm_spec.loader.exec_module(_norm_mod)
+        RELEASE_VERSION = getattr(_norm_mod, "RELEASE_VERSION", "0.9.2")
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 MATRIX_PATH = REPO_ROOT / "docs" / "releases" / "release-matrix.json"
 SCHEMA_PATH = REPO_ROOT / "schemas" / "release-matrix.schema.json"
@@ -40,7 +55,7 @@ NORMALIZE_PATH = (
     REPO_ROOT / "tools" / "release" / "matrix" / "normalize_matrix.py"
 )
 FEATURE_MANIFEST_PATH = (
-    REPO_ROOT / "artifacts" / "release" / "0.9.2"
+    REPO_ROOT / "artifacts" / "release" / RELEASE_VERSION
     / "official-build-feature-manifest.json"
 )
 ABI_HEADER_PATH = (
