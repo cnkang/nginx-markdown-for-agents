@@ -610,12 +610,13 @@ http {
             proxy_set_header Host \$host;
 
             markdown_filter on;
-            # The 1 MiB Brotli fixture can expand from one very small wire
-            # chunk. Keep both conversion and pre-commit replay buffers large
-            # enough for that valid first batch while retaining hard caps.
+            # The compressed fixtures are intentionally highly repetitive and
+            # exceed the production default expansion ratio of 100. Keep the
+            # benchmark's ratio budget explicit so these scenarios exercise
+            # conversion and backpressure rather than ratio rejection.
             markdown_limits conversion_memory=64m parser_memory=64m
                 conversion_timeout=2s parser_timeout=2s streaming_buffer=16m
-                max_inflight=64;
+                decompression_ratio=1000 max_inflight=64;
             $profile_directives
         }
 
