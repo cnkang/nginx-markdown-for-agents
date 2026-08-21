@@ -30,14 +30,15 @@ Establish a single machine-readable release matrix per RFC 0008 section 4:
    validators MUST consume `tools/release-matrix.json` as the authoritative
    source for support, platform, artifact, and version declarations.
 3. The ABI-bound release gate may consume the generated contract projection
-   at `docs/releases/release-matrix.json`. That projection MUST be generated
-   by `python3 tools/release/matrix/generate_release_contract_matrix.py --write`,
-   MUST record the canonical-content digest of `tools/release-matrix.json`,
-   and MUST pass the corresponding `--check` freshness gate. It is not a
-   second manually maintained source of truth.
-4. Human-readable documentation MAY be generated from the policy matrix, but
-   neither documentation nor the release-contract projection MUST be edited
-   manually in parallel.
+   at `docs/releases/release-matrix.json`. The release-contract generation
+   command (`python3 tools/release/matrix/generate_release_contract_matrix.py
+   --write`) MUST generate that projection and record the canonical-content
+   digest of `tools/release-matrix.json`. The corresponding `--check`
+   freshness gate MUST pass. The projection is not a second manually
+   maintained source of truth.
+4. The policy matrix MAY generate human-readable documentation, but human
+   operators MUST NOT manually edit documentation and the release-contract
+   projection in parallel.
 
 The matrix covers at minimum:
 - Target NGINX version range (floor and ceiling)
