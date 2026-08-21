@@ -233,7 +233,7 @@ jobs:
           python-version: '3.14.6'
 
       - name: Install documentation dependencies
-        run: python3 -m pip install PyYAML==6.0.2
+        run: python3 -m pip install 'jsonschema[format]==4.23.0' PyYAML==6.0.2
 
       - name: Validate docs
         env:
