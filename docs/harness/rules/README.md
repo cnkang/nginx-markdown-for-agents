@@ -24,14 +24,14 @@ related rules by domain with YAML frontmatter for path-scoped loading.
 | 21 | Warning Triage | [warnings-triage.md](warnings-triage.md) | warning classification, repro |
 | 24, 42, 65 | C Safety | [c-safety.md](c-safety.md) | C99, narrowing casts, const, volatile/atomic, forward decl ordering, whole-struct initialization |
 | 26 | Naming & Docs | [naming-docs.md](naming-docs.md) | names, comments, doc comments |
-| 28, 29, 30, 31, 39, 40, 50 | NGINX Idioms | [nginx-idioms.md](nginx-idioms.md) | list iteration, flag clearing, NUL-term, OWS separator |
+| 28, 29, 30, 31, 39, 40, 50, 69 | NGINX Idioms | [nginx-idioms.md](nginx-idioms.md) | list iteration, flag clearing, NUL-term, OWS separator, representation-change metadata completeness |
 | 34, 35, 45 | Dynconf & Snapshot | [dynconf-snapshot.md](dynconf-snapshot.md) | effective_conf, reload retry, NULL-safe access |
 | 36 | Harness Routing | [harness-routing.md](harness-routing.md) | routing-manifest coverage |
 | 37, 60 | E2E Runner | [e2e-runner.md](e2e-runner.md) | Rust-first E2E, parity, streaming config directive consistency |
 | 48 | Security Static Analysis & Supply Chain | [security-static-analysis.md](security-static-analysis.md) | actionlint, shellcheck, gitleaks, Semgrep, cargo-deny, Trivy/SBOM/Scorecard |
 | 55 | Version Consistency | [version-consistency.md](version-consistency.md) | source/chart/docs version sync, Rust baseline |
-| 56, 57, 58, 59 | Build Safety | [build-safety.md](build-safety.md) | orphan comment closers, #ifdef guard visibility, workflow input injection, hardcoded HTTP status |
-| 61, 62 | Release Integrity | [release-integrity.md](release-integrity.md) | layered performance evidence provenance and matrix key normalization invariants |
+| 56, 57, 58, 59, 70 | Build Safety | [build-safety.md](build-safety.md) | orphan comment closers, #ifdef guard visibility, workflow input injection, hardcoded HTTP status, scratch-file hygiene |
+| 61, 62 | Release Integrity | [release-integrity.md](release-integrity.md) | layered performance evidence provenance, evidence binding lifecycle, and matrix key normalization invariants |
 | FUZZ-001..007 | Fuzz Infrastructure | [fuzz-infrastructure.md](fuzz-infrastructure.md) | fuzz targets, CI fuzzing, corpus management |
 
 ## Usage
