@@ -1607,8 +1607,19 @@ ngx_http_markdown_forward_headers(ngx_http_request_t *r, ngx_http_markdown_ctx_t
             ctx->lifecycle.last_modified.source_last_modified_time;
     }
 
-    rc = ngx_http_markdown_next_header_filter_with_auth(
-        r, ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module));
+    /*
+     * A streaming fail-open response is the original upstream
+     * representation.  Do not apply the authenticated-content rewrite to
+     * its Cache-Control header: the fail-open path must preserve the
+     * upstream header set before downstream filters run.
+     */
+    if (ctx->streaming.completion.failopen_active) {
+        rc = ngx_http_next_header_filter(r);
+    } else {
+        rc = ngx_http_markdown_next_header_filter_with_auth(
+            r, ngx_http_get_module_loc_conf(r,
+                ngx_http_markdown_filter_module));
+    }
     /*
      * Canonical NGINX model: header-chain NGX_AGAIN means the write filter
      * queued the header block — the headers are ACCEPTED and the header
