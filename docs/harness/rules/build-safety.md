@@ -1,6 +1,6 @@
 ---
 domain: build-safety
-rules: [56, 57, 58, 59]
+rules: [56, 57, 58, 59, 70]
 paths:
   - "components/nginx-module/src/**"
   - "components/rust-converter/src/**"
@@ -119,3 +119,30 @@ code (429/503). The fix returned `conf->error_status` in all reject paths.
 - Advisory mode by default, `--strict` for blocking
 
 **Verification**: `bash tools/harness/detect_hardcoded_http_status.sh`
+
+---
+
+### 70. Scratch and temporary file hygiene
+Historical issues: `0e32598a` (five CodeRabbit-digest helper scripts
+swept into a functional commit), `8df10b9c` (`pr_body.md` draft tracked
+at repository root).  All six remained tracked at HEAD for days, yet no gate
+detected them.
+
+Required:
+- One-off analysis scripts, PR drafts, and notes files must not enter
+  functional commits.  Repository-root-level `*.py`/`*.sh` files are
+  forbidden unless they are a documented external contract (the only
+  current exception is `build.sh`, the ClusterFuzzLite/OSS-Fuzz
+  entrypoint).
+- Never commit editor and system junk (`*.bak`, `*.orig`, `*.rej`, `*~`,
+  `.swp`, `.DS_Store`, `Thumbs.db`).
+- Test sources legitimately named `parse_*_test.*` / `test_*` are exempt.
+  The scratch-prefix rule applies only to non-test script/doc files.
+- Intentional exceptions require an allowlist entry with a written
+  justification in the detector.
+
+Verification:
+- `python3 tools/harness/detect_scratch_files.py` — full tracked-tree
+  audit; blocking harness gate.
+- `python3 tools/harness/detect_scratch_files.py --staged` — pre-commit
+  mode wired into `.pre-commit-config.yaml`.
