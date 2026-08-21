@@ -67,6 +67,36 @@ repos:
         entry: tools/harness/detect_decompression_budget.sh
         language: script
         files: ^components/nginx-module/src/.*decomp.*\.c$
+
+  # Write-time hygiene gates (2026-08-21 remediation, Rules 61/63/70/13)
+  - repo: local
+    hooks:
+      - id: detect-scratch-files
+        name: scratch/temporary file hygiene (Rule 70)
+        entry: python3 tools/harness/detect_scratch_files.py --staged
+        language: system
+        pass_filenames: false
+      
+      - id: baseline-hand-edit
+        name: performance baseline binding lifecycle (Rule 61)
+        entry: python3 tools/harness/detect_baseline_hand_edit.py --changed
+        language: system
+        pass_filenames: true
+        files: ^perf/baselines/.*\.json$
+      
+      - id: workflow-env-liveness
+        name: workflow env-var liveness (Rule 13)
+        entry: python3 tools/harness/detect_workflow_env_liveness.py
+        language: system
+        pass_filenames: false
+        files: ^\.github/workflows/.*\.ya?ml$
+      
+      - id: docs-style-changed
+        name: docs writing style, changed files (Rule 63)
+        entry: python3 tools/docs/check_writing_style.py --changed --base HEAD
+        language: system
+        pass_filenames: false
+        files: \.md$
   
   # Rust FFI safety
   - repo: local

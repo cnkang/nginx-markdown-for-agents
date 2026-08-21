@@ -136,7 +136,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 58 | build-safety | Workflow input injection: GitHub Actions inputs must be routed through env vars before use in shell run blocks; direct ${{ inputs.* }} interpolation in run blocks is command injection; detect_workflow_input_injection.sh gates at write time |
 | 59 | build-safety | Hardcoded HTTP status in reject paths: reject/error paths must return conf->error_status instead of hardcoded NGX_HTTP_BAD_GATEWAY; detect_hardcoded_http_status.sh provides advisory detection |
 | 60 | e2e-runner | E2E config directive consistency: locations with `markdown_cache_validation full` must have explicit `markdown_streaming` (no implicit auto + blocking directive unless intentionally testing runtime-block); detect_e2e_streaming_config.py advisory gate (block-aware, fail-closed, deterministic location scanner) |
-| 61 | release-integrity | Performance evidence provenance invariant: baseline_policy carries policy provenance; module_benchmark carries environment/identity; scenarios carry evidence; optional scenario_sources receive environment checks; fail closed on missing fields or mixed environments |
+| 61 | release-integrity | Performance evidence provenance invariant: baseline_policy carries policy provenance; module_benchmark carries environment/identity; scenarios carry evidence; optional scenario_sources receive environment checks; fail closed on missing fields or mixed environments; evidence binding lifecycle — baselines are finalizer output, never hand-edited, and finalized JSON moves only with its raw inputs (`python3 tools/harness/detect_baseline_hand_edit.py`, `--changed` mode wired into pre-commit) |
 | 62 | release-integrity | Release matrix key normalization invariant: all matrix consumers (loader, validation, sort, diff) must resolve aliased keys through one normalization entry point with one canonical key set, so `nginx`/`nginx_version` and `os`/`os_type`/`libc` never disagree |
 | 63 | docs-tooling | Non-native-reader writing style (STE-inspired): changed files zero new warnings (`make docs-style-check-regression` through routine `make docs-check`); repository warning budget must not grow (`make docs-style-check-baseline`, owned by full harness/release validation); preserve meaning when rewriting passive voice (keep subject/object direction and explicit agent, never drop must/never/only qualifiers) |
 | 64 | streaming-backpressure | NGX_AGAIN call-site audit: every call to a known NGX_AGAIN-returning API must branch NGX_AGAIN explicitly and never fold it into the NGX_ERROR path or an immediate return; new APIs that may return NGX_AGAIN must register in the detector's known-API list; `bash tools/harness/detect_ngx_again_call_sites.sh` — blocking harness-tooling CI check via `make harness-security-checks` for selected `harness_tooling` paths, and a local full-gate check |
@@ -144,6 +144,8 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 66 | ci-gating | Local GCC parity gate: C test/module changes must pass the unit suite under real GCC before push (`make test-c-unit-gcc`, Ubuntu GCC in Docker); local `gcc` on macOS is an Apple clang alias that masks GCC -Werror hard errors and GCC -O0 uninitialized-stack crashes |
 | 67 | observability-metrics | v1 terminal-outcome conservation in the metrics renderer: conversion-failure space partitions without double counting (`conversions_failed = failed_open + failed_closed + aborted`); `failed_open` reads `results.failopen_count`; derived `failed_closed` deducts `failopen_count` and (streaming build) `terminal_aborted_total`; `aborted` reads `terminal_aborted_total`, never the per-path counter `streaming_failure_postcommit_abort`; every classified outcome deducted before the saturating floor; `aborted = 0` only in the non-streaming build; `PYTHONPATH=. python3 tools/harness/detect_metrics_event_conservation.py` — blocking harness-tooling CI check via `make harness-security-checks` for selected `harness_tooling` paths, and a local full-gate check |
 | 68 | security-cwe | Access control before method handling in HTTP handlers: handlers that reject unsupported methods (405 `NGX_HTTP_NOT_ALLOWED` or `*_method_not_allowed()` helper) must evaluate access control **before** the method-rejection branch; a denied request must not receive 405, an `Allow` header, or any handler-behavior signal; the access check must appear earlier in source order than any `NGX_HTTP_NOT_ALLOWED` assignment; handlers without a 405 path are exempt; `python3 tools/harness/detect_access_before_method.py` — advisory local gate (`--strict` promotes findings to violations; blocking harness-tooling CI check via `make harness-security-checks` for selected `harness_tooling` paths) |
+| 69 | nginx-idioms | Representation-change metadata-surface completeness: every representation-change path (fullcov commit, stream commit, 304, HEAD representation) must clear ALL upstream metadata surfaces in the same function — Trailer declaration implies `ngx_http_markdown_clear_trailers()`; mirror pairs (`last_modified_time`/`last_modified`, `content_type_lowcase`/`content_type_hash`) strip together or explicitly invalidate; reuse shared helpers; `python3 tools/harness/detect_representation_metadata_clearing.py` — blocking harness gate |
+| 70 | build-safety | Scratch/temporary file hygiene: one-off analysis scripts, PR drafts, editor/system junk must never enter commits; root-level `*.py`/`*.sh` forbidden except documented external contracts (`build.sh` ClusterFuzzLite entrypoint); test sources named `parse_*_test.*`/`test_*` exempt; `python3 tools/harness/detect_scratch_files.py` — blocking harness gate, `--staged` mode wired into `.pre-commit-config.yaml` |
 | FUZZ-001..007 | fuzz-infrastructure | Fuzz target determinism, corpus/repo tracking, ClusterFuzzLite workflows, guided fuzz smoke, batch/prune pairing, and gitignore hygiene (see fuzz-infrastructure.md) |
 
 ## Required Agent Workflow
@@ -269,6 +271,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Header lookup/iteration filters hash==0 (invalidated) entries [40]
 - Content-Type OWS separator accepts HTAB; trailing OWS excluded before parameter comparison [50]
 - Hardcoded HTTP status in reject paths: return conf->error_status instead of NGX_HTTP_BAD_GATEWAY; `bash tools/harness/detect_hardcoded_http_status.sh` — advisory [59]
+- Representation-change metadata completeness: Trailer declaration invalidation implies `ngx_http_markdown_clear_trailers()` in the same function; mirror pairs (`last_modified_time`/`last_modified`, `content_type_lowcase`/`content_type_hash`) strip together or explicitly invalidate via `ngx_http_markdown_invalidate_headers`; reuse shared helpers on every representation path (fullcov, stream commit, 304, HEAD); `python3 tools/harness/detect_representation_metadata_clearing.py` — blocking harness gate [69]
 
 **HTML Sanitizer & Output Safety** (C, R, D)
 - Void elements self-closing; skip-mode name-aware [5]
@@ -279,6 +282,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 
 **Testing & Coverage** (C, T, R)
 - Every bug fix has regression test; cross-boundary + malformed cases [14]
+- Harness detector fixes ship adversarial fixtures reproducing the defect shape plus a clean-fixture false-positive guard; detector scans stay runtime-bounded [14]
 - No dead stores; loop vars in for; every var consumed by assertion [16]
 - Side-effect tests drive outcome through production branching, not manual mutation [14]
 - Rust: no unused helpers; #[cfg(feature)] import safety; doctests by visibility [22]
@@ -289,9 +293,11 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Use `[[` for all conditional tests (not `[`); case has default `*)`; messages to stderr; explicit return; usage matches flags [18]
 - macOS bash 3.2 compatible; no GNU-only flags; empty array expansion safe under set -u [11]
 - Merge nested `if` without `else` into compound `&&` conditions [18]
+- Never read `$?` inside a negated conditional body (`if ! cmd; then rc=$?` reads the negated status); capture with `cmd || rc=$?`; `bash tools/harness/detect_shell_hygiene.sh` pattern (f) — blocking harness gate [11,18]
 - No unsanitized path interpolation [12]
 
 **CI/Workflows** (CI)
+- Workflow env-var liveness: every run block must define each `$VAR` it references in step/job/workflow env, an earlier `GITHUB_ENV` export, or the run block itself. Step-local `env:` is invisible to later steps. Empty matrix collections fail the prepare step. `PYTHONPATH=. python3 tools/harness/detect_workflow_env_liveness.py` — blocking harness gate and pre-commit hook [13]
 - GitHub Actions pinned to immutable SHA, download checksums verified [13]
 - Artifact-producing builder images use reviewed multi-architecture manifest
   digests, not mutable tags, external source/tool bytes are checksum-verified
@@ -456,6 +462,16 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   PR-blocking or report-oriented visibility [48]
 - THIRD-PARTY-NOTICES must stay in sync with resolved dependency versions;
   add/remove/update entries in same changeset as Cargo.lock changes [49]
+- Docs style at write time: run the changed-file writing-style gate before
+  committing docs (`python3 tools/docs/check_writing_style.py --changed`,
+  wired as `docs-style-changed` pre-commit hook); do not defer to review [63]
+
+**Repository Hygiene** (all surfaces)
+- No scratch/temporary files in commits: one-off analysis scripts, PR
+  drafts, editor/system junk are forbidden; root-level `*.py`/`*.sh`
+  forbidden except documented external contracts (`build.sh`);
+  `python3 tools/harness/detect_scratch_files.py` (blocking harness gate),
+  `--staged` mode in `.pre-commit-config.yaml` [70]
 
 **If the change would violate any item, redesign it before writing.** Do not write code that breaks an item.
 
@@ -608,6 +624,7 @@ remediation:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-21 | Kang | Recent-Git remediation closeout (2026-08-14..21 window, 266 commits): added Rule 69 representation-change metadata-surface completeness (nginx-idioms) with blocking detector detect_representation_metadata_clearing.py + 11 fixture tests, fixed two unpaired content_type mirror clears in diagnostics.c; extended Rule 61 with the evidence binding lifecycle (baselines are finalizer output, never hand-edited) with detect_baseline_hand_edit.py full-audit + --changed modes + 11 tests; added Rule 70 scratch/temporary file hygiene (build-safety) with detect_scratch_files.py (tracked + --staged) + 8 tests and removed six accidentally tracked scratch files; strengthened Rule 13 with workflow env-var liveness detector detect_workflow_env_liveness.py + 11 tests (MATRIX_ARCH-class step-local env bugs); strengthened Rules 11/18 with the $?-inside-negated-conditional trap as detect_shell_hygiene.sh pattern (f) + fixture test; strengthened Rule 14 with the detector adversarial-fixture meta-rule; Rule 63 write-time enforcement via docs-style-changed pre-commit hook; P2 lizard/SonarCloud complexity mapping documented in complexity.md; all new gates wired into `make harness-security-checks`/`make test-harness` and `.pre-commit-config.yaml`; index rows + checklist sync throughout |
 | 0.9.2 | 2026-08-15 | Kang | Added Rule 67: v1 terminal-outcome conservation in the metrics renderer (observability-metrics) — conversion-failure partition without double counting, failed_open/failed_closed/aborted source correctness; blocking detector detect_metrics_event_conservation.py wired into `make harness-security-checks`; index row + checklist sync; README mapping and rule doc updated |
 | 0.9.2 | 2026-08-15 | Kang | Added Rules 64–66 with index rows and checklist sync: Rule 64 NGX_AGAIN call-site audit (streaming-backpressure) with blocking detector detect_ngx_again_call_sites.sh; Rule 65 whole-struct initialization for stack config-holder types (c-safety) with advisory detector detect_uninitialized_stack_struct.sh; Rule 66 local GCC parity gate for C test/module changes (ci-gating, make test-c-unit-gcc) |
 | 0.9.2 | 2026-08-09 | Codex | Rule 63 ownership clarified: routine `make docs-check` runs the changed-file regression gate; the repository-wide baseline runs through full harness/release validation (`make docs-style-check-baseline`), with the rule and docs-tooling guidance aligned to those owners |

@@ -455,6 +455,10 @@ harness-security-checks:
 	PYTHONPATH=. python3 tools/harness/detect_access_before_method.py --strict
 	PYTHONPATH=. python3 tools/harness/detect_elts_null_guard.py
 	PYTHONPATH=. python3 tools/harness/detect_doc_sync.py
+	python3 tools/harness/detect_representation_metadata_clearing.py
+	python3 tools/harness/detect_baseline_hand_edit.py
+	python3 tools/harness/detect_scratch_files.py
+	PYTHONPATH=. python3 tools/harness/detect_workflow_env_liveness.py
 
 release-supply-chain-check:
 	@echo "=== Release Supply-Chain Contracts ==="
@@ -496,6 +500,7 @@ test-harness:
 	bash tools/harness/tests/test_detect_live_conf_reads.sh
 	bash tools/harness/tests/test_detect_ngx_again_call_sites.sh
 	bash tools/harness/tests/test_detect_uninitialized_stack_struct.sh
+	bash tools/harness/tests/test_detect_shell_hygiene.sh
 	python3 -m pytest tools/harness/tests/ -q --tb=short -k "not check_harness_sync"
 
 license-check:
