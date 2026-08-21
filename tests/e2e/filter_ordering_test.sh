@@ -14,6 +14,8 @@
 #     X-Upstream-Content-Encoding (override with UPSTREAM_ENCODING_HEADER)
 #   - the proxy-cache fixture exposes MISS/HIT as X-Cache-Status (override
 #     with CACHE_STATUS_HEADER)
+#   - REQUIRE_FILTER_ORDERING_ALL=1 to turn every required-scenario SKIP into
+#     a failure (used by canonical/release qualification)
 #
 # Test Scenarios:
 #   1. markdown + gzip: client requests gzip, gets gzip-compressed Markdown
@@ -50,6 +52,7 @@ CACHE_STATUS_HEADER="${CACHE_STATUS_HEADER-X-Cache-Status}"
 PASS_COUNT=0
 FAIL_COUNT=0
 SKIP_COUNT=0
+REQUIRE_FILTER_ORDERING_ALL="${REQUIRE_FILTER_ORDERING_ALL:-0}"
 
 pass() {
     local msg="$1"
@@ -65,6 +68,10 @@ fail() {
 
 skip() {
     local msg="$1"
+    if [[ "$REQUIRE_FILTER_ORDERING_ALL" == "1" ]]; then
+        fail "Required filter-ordering assertion skipped: $msg"
+        return
+    fi
     SKIP_COUNT=$((SKIP_COUNT + 1))
     echo "SKIP: $msg" >&2
 }

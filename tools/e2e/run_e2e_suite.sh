@@ -73,6 +73,9 @@ Environment variables:
   TEST_PATH       Required fixture path for filter_ordering.
   GUNZIP_TEST_PATH
                   Required upstream-gzip fixture path for filter_ordering.
+  REQUIRE_FILTER_ORDERING_ALL
+                  The canonical suite enables strict filter-ordering evidence
+                  automatically when NGINX_URL is configured.
 EOF
   return 0
 }
@@ -239,6 +242,7 @@ if [[ -n "${NGINX_URL:-}" ]]; then
   fi
   env NGINX_BIN="${SUITE_NGINX_BIN}" NGINX_URL="${NGINX_URL}" \
     TEST_PATH="${TEST_PATH}" GUNZIP_TEST_PATH="${GUNZIP_TEST_PATH}" \
+    REQUIRE_FILTER_ORDERING_ALL=1 \
     bash "${FILTER_ORDERING_SCRIPT}"
   # Final qualification requires the subrequest_in_memory path
   # (decision D6): REQUIRE_AUTH_SUBREQUEST turns the optional scenario 5
