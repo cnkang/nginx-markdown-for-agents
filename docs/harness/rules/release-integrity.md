@@ -78,6 +78,37 @@ own objects. Do not copy provenance into every scenario record:
    `nginx_version` consistent with the top-level `module_benchmark` fields.
    Mixed-environment baselines are split or rejected.
 
+**Evidence binding lifecycle (2026-08-21 extension).** The 0.9.2
+pre-freeze window produced ~15 commits churning candidate-bound evidence
+(`36a9ad45`, `0847c287`, `f68109ac`, `2f8fc276`, `3bd22d47`, `f49920c6`,
+`19340b31`, `d7012e42` reverted two minutes later by `cf6aea8e`) plus one
+direct edit of a derived field (`8c899644`).  Provenance fields alone did
+not prevent the churn because the *workflow* did not manage the lifecycle:
+
+7. **Baselines are finalizer output, never hand-edited data.**
+   `tools/perf/finalize_module_baseline.py` must produce every change to a
+   finalized `perf/baselines/module-baseline-*.json` from retained raw inputs.
+   Hand-editing a finalized baseline — including derived fields such as
+   `fallback_rate` — is forbidden; regenerate instead.
+8. **Raw inputs move with the finalized pack.**  A change set that touches
+   a finalized baseline must touch its retained inputs
+   (`*-raw.json` and/or `*-raw-probes/`) in the same commit.  A finalized
+   JSON that moves alone is the signature of a hand edit.
+9. **Archival imports keep their schema.**  `type: verbatim_import` packs
+   are immutable audit records: they require a full 40-hex
+   `source_git_commit` and an existing retained artifact, but their
+   remaining provenance fields stay as imported rather than being
+   retro-fitted to the finalizer schema.
+
+Verification:
+- `python3 tools/harness/detect_baseline_hand_edit.py` — full audit over
+  `perf/baselines/`: provenance field presence, commit identity binding,
+  SHA format/history existence, artifact digest recomputation, timestamp
+  format. Blocking harness gate.
+- `python3 tools/harness/detect_baseline_hand_edit.py --changed <paths>`
+  — changed-file mode for pre-commit use: flags finalized baselines that
+  changed without their raw inputs.
+
 **Verification:**
 - `RELEASE_GATE_ALLOW_SKIP_MODULE=1 make release-gates-check-092` — blocking
   gate (requires `NGINX_BIN` or `RELEASE_GATE_ALLOW_SKIP_MODULE=1`), validates
