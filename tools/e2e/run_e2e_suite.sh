@@ -70,6 +70,9 @@ Environment variables:
                   E2E qualification FAILS when unset; set
                   RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 to skip these two
                   scripts (non-release local runs only).
+  TEST_PATH       Required fixture path for filter_ordering.
+  GUNZIP_TEST_PATH
+                  Required upstream-gzip fixture path for filter_ordering.
 EOF
   return 0
 }
@@ -230,7 +233,13 @@ env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${ERROR_POLICY_VALUES_SCRIPT}"
 if [[ -n "${NGINX_URL:-}" ]]; then
   require_suite_script "${FILTER_ORDERING_SCRIPT}" "filter_ordering"
   require_suite_script "${SUBREQUEST_SSI_SCRIPT}" "subrequest_ssi"
-  env NGINX_BIN="${SUITE_NGINX_BIN}" bash "${FILTER_ORDERING_SCRIPT}"
+  if [[ -z "${TEST_PATH:-}" ]] || [[ -z "${GUNZIP_TEST_PATH:-}" ]]; then
+    echo "FAIL: TEST_PATH and GUNZIP_TEST_PATH are required for filter_ordering qualification." >&2
+    exit 1
+  fi
+  env NGINX_BIN="${SUITE_NGINX_BIN}" NGINX_URL="${NGINX_URL}" \
+    TEST_PATH="${TEST_PATH}" GUNZIP_TEST_PATH="${GUNZIP_TEST_PATH}" \
+    bash "${FILTER_ORDERING_SCRIPT}"
   # Final qualification requires the subrequest_in_memory path
   # (decision D6): REQUIRE_AUTH_SUBREQUEST turns the optional scenario 5
   # into a hard requirement so an incomplete fixture cannot pass.
