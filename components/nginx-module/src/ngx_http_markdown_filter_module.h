@@ -1956,7 +1956,7 @@ ngx_int_t ngx_http_markdown_modify_cache_control_for_auth(
  * harnesses; keeping the policy here prevents full-buffer, streaming,
  * conditional, HEAD, and pass-through paths from drifting apart.
  */
-static ngx_int_t
+static ngx_inline ngx_int_t
 ngx_http_markdown_apply_auth_cache_control(
     ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf)
 {
