@@ -11,12 +11,12 @@
  * Task: 18.1 Implement If-None-Match handling with configurable behavior
  */
 
-#include "ngx_http_markdown_filter_module.h"
-#include "markdown_converter.h"
-
 #ifndef NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
 #define NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL 1
 #endif
+
+#include "ngx_http_markdown_filter_module.h"
+#include "markdown_converter.h"
 
 
 #define NGX_HTTP_MARKDOWN_HTTP_DATE_LEN \
@@ -854,7 +854,6 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
     /*
      * Conditional responses take a separate path from the normal header
      * plan.  Apply the same authenticated-response cache policy before any
@@ -862,18 +861,13 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
      * cache directive from the source response.
      */
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
-    if (conf != NULL && ngx_http_markdown_is_authenticated(r, conf)) {
-        rc = ngx_http_markdown_modify_cache_control_for_auth(r);
-        if (rc != NGX_OK) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                          "markdown: 304 auth Cache-Control update failed");
-            ngx_http_markdown_304_snapshot_restore(r, &snapshot);
-            return NGX_ERROR;
-        }
+    rc = ngx_http_markdown_apply_auth_cache_control(r, conf);
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown: 304 auth Cache-Control update failed");
+        ngx_http_markdown_304_snapshot_restore(r, &snapshot);
+        return NGX_ERROR;
     }
-#else
-    (void) conf;
-#endif
 
     r->headers_out.status = NGX_HTTP_NOT_MODIFIED;
     r->headers_out.status_line.len = 0;

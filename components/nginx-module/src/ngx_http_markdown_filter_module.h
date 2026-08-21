@@ -12,6 +12,11 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
+#ifndef NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
+/* Standalone header harnesses do not link the auth implementation. */
+#define NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL 0
+#endif
+
 /*
  * Public module version reported in diagnostics/metrics.  This is the
  * single definition; release tooling may override it via -D at build
@@ -1940,6 +1945,38 @@ ngx_int_t ngx_http_markdown_is_authenticated(const ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf);
 ngx_int_t ngx_http_markdown_modify_cache_control_for_auth(
     ngx_http_request_t *r);
+
+#ifndef NGX_HTTP_MARKDOWN_AUTH_CACHE_CONTROL_HELPER_DEFINED
+#define NGX_HTTP_MARKDOWN_AUTH_CACHE_CONTROL_HELPER_DEFINED 1
+
+/*
+ * Apply the authenticated-response cache policy at the final header
+ * emission boundary.  This helper is static because the implementation
+ * header is included by several independent translation units and unit
+ * harnesses; keeping the policy here prevents full-buffer, streaming,
+ * conditional, HEAD, and pass-through paths from drifting apart.
+ */
+static ngx_int_t
+ngx_http_markdown_apply_auth_cache_control(
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf)
+{
+#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
+    if (r == NULL) {
+        return NGX_ERROR;
+    }
+
+    if (conf != NULL && ngx_http_markdown_is_authenticated(r, conf)) {
+        return ngx_http_markdown_modify_cache_control_for_auth(r);
+    }
+#else
+    (void) r;
+    (void) conf;
+#endif
+
+    return NGX_OK;
+}
+
+#endif /* NGX_HTTP_MARKDOWN_AUTH_CACHE_CONTROL_HELPER_DEFINED */
 
 /*
  * Shared conversion-option helpers

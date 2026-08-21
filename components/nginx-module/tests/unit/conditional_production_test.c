@@ -2,6 +2,9 @@
 #include <strings.h>
 
 #define MARKDOWN_STREAMING_ENABLED 1
+#ifndef NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
+#define NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL 1
+#endif
 
 #include "../../src/ngx_http_markdown_filter_module.h"
 #include "markdown_converter.h"
