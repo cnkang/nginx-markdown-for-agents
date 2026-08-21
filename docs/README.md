@@ -101,7 +101,7 @@ Per-version release notes and release checklists (one file per release line).
   (the sole manually maintained support and artifact policy source)
 - generated release-contract projection:
   [release-matrix.json](releases/release-matrix.json)
-  (ABI/feature-bound schema 1 projection; generated from the policy source and
+  (ABI/feature-bound schema 1 projection generated from the policy source and
   checked for freshness by the release gate)
 
 ### `development/`
