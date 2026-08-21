@@ -118,7 +118,8 @@ def test_os_release_sourcing_passes():
         "echo \"${CODENAME} ${DISTRO_ID}\"\n"
     )
     defined = module.extract_shell_definitions(run)
-    assert "VERSION_CODENAME" in defined and "ID" in defined
+    assert "VERSION_CODENAME" in defined
+    assert "ID" in defined
 
 
 def test_while_read_loop_variable_passes():

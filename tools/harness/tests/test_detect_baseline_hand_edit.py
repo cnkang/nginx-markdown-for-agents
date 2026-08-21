@@ -148,9 +148,9 @@ def test_changed_mode_ignores_unrelated_paths():
     assert findings == []
 
 
-def test_symlink_escaping_repo_root_rejected(tmp_path):
+def test_symlink_escaping_repo_root_rejected(tmp_path, monkeypatch):
     import os
-    module.REPO_ROOT = tmp_path
+    monkeypatch.setattr(module, "REPO_ROOT", tmp_path)
     # Target lives OUTSIDE the fake repository root.
     outside = tmp_path.parent / "h-baseline-escape-target.json"
     outside.write_text("{\"leaked\": true}", encoding="utf-8")

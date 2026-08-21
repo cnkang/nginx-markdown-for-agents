@@ -49,7 +49,7 @@ OS_RELEASE_VARS = {
 
 def _merge_continuations(run_text):
     """Join backslash-continued lines so multi-line exports stay intact."""
-    return re.sub(r"\\\n", " ", run_text)
+    return run_text.replace("\\\n", " ")
 
 
 def _mask_single_quoted(run_text):
@@ -109,7 +109,7 @@ def extract_shell_definitions(run_text):
         if match:
             defined.add(match.group(1))
             continue
-        match = re.match(r"^(?:read\s+(?:-[a-zA-Z]+\s+)*)([A-Za-z_]\w*)",
+        match = re.match(r"^read\s+(?:-[a-zA-Z]+\s+)*([A-Za-z_]\w*)",
                          stripped)
         if match:
             defined.add(match.group(1))
@@ -132,7 +132,10 @@ def extract_github_env_exports(run_text):
     if "GITHUB_ENV" not in text:
         return exported
     for line in text.splitlines():
-        match = re.match(r"\s*\{?\s*echo\s+\"?([A-Za-z_]\w*)=", line)
+        stripped = line.lstrip()
+        if stripped.startswith("{"):
+            stripped = stripped[1:].lstrip()
+        match = re.match(r"echo\s+\"?([A-Za-z_]\w*)=", stripped)
         if match:
             exported.add(match.group(1))
             continue
