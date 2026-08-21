@@ -30,13 +30,19 @@ jobs:
       - name: Run matrix updater
         run: python3 tools/release/matrix/update_matrix.py
 
+      - name: Generate release-contract matrix projection
+        run: python3 tools/release/matrix/generate_release_contract_matrix.py --write
+
       - name: Render release matrix docs
         run: python3 tools/render_release_matrix_docs.py --write
 
       - name: Check for changes
         id: changes
         run: |
-          if [ -f tools/matrix-diff.json ]; then
+          if [[ -f tools/matrix-diff.json ]] || ! git diff --quiet -- \
+            tools/release-matrix.json \
+            docs/releases/release-matrix.json \
+            docs/guides/INSTALLATION.md; then
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
@@ -45,6 +51,8 @@ jobs:
       - name: Run validation scripts
         if: steps.changes.outputs.has_changes == 'true'
         run: |
+          python3 tools/release/matrix/generate_release_contract_matrix.py --check
+          PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
           python3 tools/release/matrix/validate_doc_matrix_sync.py
           python3 tools/release/matrix/validate_matrix_install_consistency.py
           python3 tools/release/matrix/validate_workflow_matrix_consumers.py

@@ -97,9 +97,12 @@ Index: [project/README.md](project/README.md)
 Per-version release notes and release checklists (one file per release line).
 
 - 0.9.2 release notes and pre-freeze checklist
-- canonical release matrix: [release-matrix.json](releases/release-matrix.json)
-- package/artifact support matrix: [`tools/release-matrix.json`](../tools/release-matrix.json)
-  (schema 1.0. This is separate from the release-contract matrix above)
+- policy matrix source: [`tools/release-matrix.json`](../tools/release-matrix.json)
+  (the sole manually maintained support and artifact policy source)
+- generated release-contract projection:
+  [release-matrix.json](releases/release-matrix.json)
+  (ABI/feature-bound schema 1 projection; generated from the policy source and
+  checked for freshness by the release gate)
 
 ### `development/`
 

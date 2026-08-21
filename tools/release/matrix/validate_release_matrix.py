@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Canonical release-matrix validation gate.
+"""Release-contract matrix projection validation gate.
 
-Validates that the sole repository-owned release matrix
+Validates that the generated release-contract projection
 (`docs/releases/release-matrix.json`, schema version 1) is:
 
 1. Schema-conformant against the immutable
@@ -15,6 +15,8 @@ Validates that the sole repository-owned release matrix
    to the official build feature manifest digest
    (`artifacts/release/0.9.2/official-build-feature-manifest.json`) for
    every entry.
+4. Generated from the sole manually maintained policy matrix
+   (`tools/release-matrix.json`) without projection drift.
 
 Failure semantics are fail-closed: any schema violation, alias usage,
 digest/ABI mismatch, or unreadable input is an ERROR and exits 1.
@@ -48,8 +50,14 @@ except ImportError:
         _norm_spec.loader.exec_module(_norm_mod)
         RELEASE_VERSION = getattr(_norm_mod, "RELEASE_VERSION", "0.9.2")
 
+try:
+    from .generate_release_contract_matrix import build_projection
+except ImportError:
+    from generate_release_contract_matrix import build_projection
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 MATRIX_PATH = REPO_ROOT / "docs" / "releases" / "release-matrix.json"
+SOURCE_MATRIX_PATH = REPO_ROOT / "tools" / "release-matrix.json"
 SCHEMA_PATH = REPO_ROOT / "schemas" / "release-matrix.schema.json"
 NORMALIZE_PATH = (
     REPO_ROOT / "tools" / "release" / "matrix" / "normalize_matrix.py"
@@ -225,6 +233,23 @@ def check_bindings(normalized: dict) -> None:
         raise SystemExit("ERROR: matrix binding drift:\n  " + "\n  ".join(errors))
 
 
+def check_source_projection(matrix: dict) -> None:
+    """Reject a release-contract document that is not generated from policy."""
+    source = _load_json(SOURCE_MATRIX_PATH, "policy release matrix")
+    try:
+        expected = build_projection(source)
+    except (TypeError, ValueError) as exc:
+        raise SystemExit(
+            f"ERROR: policy matrix cannot produce a release-contract projection: {exc}"
+        ) from exc
+    if matrix != expected:
+        raise SystemExit(
+            "ERROR: release-contract projection drifted from "
+            "tools/release-matrix.json; run "
+            "tools/release/matrix/generate_release_contract_matrix.py --write"
+        )
+
+
 def main() -> int:
     if not MATRIX_PATH.is_file():
         print(f"ERROR: matrix missing: {MATRIX_PATH}", file=sys.stderr)
@@ -240,6 +265,7 @@ def main() -> int:
             "remove legacy aliases and dropped metadata"
         )
     check_bindings(normalized)
+    check_source_projection(matrix)
 
     digest = "sha256:" + hashlib.sha256(MATRIX_PATH.read_bytes()).hexdigest()
     print(f"release-matrix digest: {digest}")
@@ -247,8 +273,8 @@ def main() -> int:
     print(f"feature-manifest digest binding: {feature_manifest_digest()}")
     print(f"abi_version binding: {frozen_abi_version()}")
     print(
-        "PASS: docs/releases/release-matrix.json is canonical, "
-        "schema-conformant, and ABI/feature-bound"
+        "PASS: docs/releases/release-matrix.json is a current, "
+        "schema-conformant, ABI/feature-bound release-contract projection"
     )
     return 0
 

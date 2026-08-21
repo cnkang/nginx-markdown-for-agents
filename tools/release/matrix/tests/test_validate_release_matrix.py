@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from tools.release.matrix import generate_release_contract_matrix as projection
 from tools.release.matrix import validate_release_matrix as validator
 
 
@@ -16,9 +17,13 @@ def fake_matrix_root(tmp_path: Path) -> Path:
     root = tmp_path
     (root / "docs/releases").mkdir(parents=True)
     (root / "schemas").mkdir(parents=True)
+    (root / "tools").mkdir(parents=True)
     (root / "tools/release/matrix").mkdir(parents=True)
     (root / "artifacts/release/0.9.2").mkdir(parents=True)
     (root / "components/rust-converter/include").mkdir(parents=True)
+    (root / "tools/release-matrix.json").write_text(
+        json.dumps(source_matrix()), encoding="utf-8"
+    )
     (root / "schemas/release-matrix.schema.json").write_text(
         json.dumps(
             {
@@ -27,6 +32,7 @@ def fake_matrix_root(tmp_path: Path) -> Path:
                 "properties": {
                     "schema_version": {"const": 1},
                     "entries": {"type": "array", "items": {"type": "object"}},
+                    "generated_from": {"type": "object"},
                 },
                 "additionalProperties": False,
             }
@@ -54,6 +60,28 @@ def canonical_entry() -> dict:
         "artifact_type": "deb",
         "feature_manifest_digest": digest,
         "abi_version": 2,
+    }
+
+
+def source_matrix() -> dict:
+    return {
+        "schema_version": "1.0",
+        "entries": [
+            {
+                "nginx_version": "1.26.3",
+                "nginx_channel": "stable",
+                "os": "debian12",
+                "libc": "glibc",
+                "arch": "amd64",
+                "artifact_type": "deb-package",
+                "test_level": "smoke-test",
+                "support_tier": "supported",
+                "release_blocking": True,
+                "owner_workflow": ".github/workflows/release-packages.yml",
+                "feature_manifest_digest": expected_digest(),
+                "abi_version": 2,
+            }
+        ],
     }
 
 
@@ -85,6 +113,7 @@ def patch_validator_paths(
         "SCHEMA_PATH",
         "FEATURE_MANIFEST_PATH",
         "ABI_HEADER_PATH",
+        "SOURCE_MATRIX_PATH",
     ):
         monkeypatch.setattr(
             validator,
@@ -101,10 +130,7 @@ def patch_validator_paths(
 
 def test_valid_matrix_passes(fake_matrix_root: Path) -> None:
     """A canonical, bound matrix must pass all checks."""
-    write_matrix(
-        fake_matrix_root,
-        {"schema_version": 1, "entries": [{**canonical_entry(), "feature_manifest_digest": expected_digest()}]},
-    )
+    write_matrix(fake_matrix_root, projection.build_projection(source_matrix()))
     assert validator.main() == 0
 
 
@@ -171,3 +197,12 @@ def test_feature_manifest_digest_convention() -> None:
     digest = validator.feature_manifest_digest()
     assert digest.startswith("sha256:")
     assert len(digest) == 7 + 64
+
+
+def test_stale_source_projection_fails(fake_matrix_root: Path) -> None:
+    """A projection with stale source metadata must fail closed."""
+    document = projection.build_projection(source_matrix())
+    document["generated_from"]["sha256"] = "sha256:" + "0" * 64
+    write_matrix(fake_matrix_root, document)
+    with pytest.raises(SystemExit, match="projection drifted"):
+        validator.main()

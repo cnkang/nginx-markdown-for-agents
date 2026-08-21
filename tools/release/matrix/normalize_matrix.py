@@ -91,6 +91,7 @@ COMPATIBILITY_TOP_LEVEL_KEYS = frozenset(
         "updated_at",
         "support_tiers",
         "tier_mapping",
+        "generated_from",
     }
 )
 
@@ -142,6 +143,7 @@ def normalize_document(doc: Dict[str, Any]) -> Dict[str, Any]:
             "updated_at",
             "support_tiers",
             "tier_mapping",
+            "generated_from",
         }
     )
     if unknown:
@@ -169,7 +171,12 @@ def normalize_document(doc: Dict[str, Any]) -> Dict[str, Any]:
         "schema_version": doc.get("schema_version", 1),
         "entries": entries,
     }
-    for metadata_key in ("updated_at", "support_tiers", "tier_mapping"):
+    for metadata_key in (
+        "updated_at",
+        "support_tiers",
+        "tier_mapping",
+        "generated_from",
+    ):
         if metadata_key in doc:
             normalized[metadata_key] = doc[metadata_key]
     return normalized
@@ -332,7 +339,12 @@ def normalize_compatibility_document(doc: Dict[str, Any]) -> Dict[str, Any]:
         "schema_version": doc.get("schema_version", 1),
         "entries": normalize_compatibility_entries(raw_entries),
     }
-    for metadata_key in ("updated_at", "support_tiers", "tier_mapping"):
+    for metadata_key in (
+        "updated_at",
+        "support_tiers",
+        "tier_mapping",
+        "generated_from",
+    ):
         if metadata_key in doc:
             normalized[metadata_key] = doc[metadata_key]
     return normalized
