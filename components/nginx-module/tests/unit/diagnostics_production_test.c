@@ -121,6 +121,7 @@ typedef struct {
     size_t      content_type_len;
     ngx_str_t   content_type;
     u_char     *content_type_lowcase;
+    ngx_uint_t  content_type_hash;
     off_t       content_length_n;
     ngx_list_t  headers;
 } ngx_http_headers_out_t;
