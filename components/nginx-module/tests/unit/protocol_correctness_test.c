@@ -140,12 +140,21 @@ typedef struct MarkdownResult {
 
 /* ── Mock implementations for headers_impl.h ──────────────────── */
 
+static int g_pnalloc_call_count;
+static int g_fail_pnalloc_call;
+
 void *
 ngx_pnalloc(ngx_pool_t *pool, size_t size)
 {
     pool_alloc_t *node;
     void *ptr;
     if (pool == NULL) {
+        return NULL;
+    }
+    g_pnalloc_call_count++;
+    if (g_fail_pnalloc_call > 0
+        && g_pnalloc_call_count == g_fail_pnalloc_call)
+    {
         return NULL;
     }
     ptr = malloc(size);
@@ -1116,6 +1125,54 @@ test_head_response_parity(void)
     TEST_PASS("HEAD response header parity with GET verified");
 }
 
+static void
+test_head_vary_failure_rolls_back_headers(void)
+{
+    ngx_http_request_t  r = new_request();
+    ngx_table_elt_t    *etag;
+    ngx_table_elt_t    *vary;
+    ngx_int_t           rc;
+    static u_char       original_content_type[] = "text/html";
+
+    TEST_SUBSECTION("HEAD Vary allocation failure rolls back headers");
+
+    etag = push_header(&r, "ETag", "\"html-etag\"");
+    vary = push_header(&r, "Vary", "User-Agent");
+    r.headers_out.content_type.data = original_content_type;
+    r.headers_out.content_type.len = sizeof(original_content_type) - 1;
+    r.headers_out.content_type_len = sizeof(original_content_type) - 1;
+    r.headers_out.content_length_n = 2048;
+    r.headers_out.etag = etag;
+    r.allow_ranges = 1;
+
+    /* Snapshot allocation succeeds; Vary append allocation fails. */
+    g_pnalloc_call_count = 0;
+    g_fail_pnalloc_call = 2;
+    rc = ngx_http_markdown_head_representation_headers(&r);
+    g_fail_pnalloc_call = 0;
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "HEAD header rewrite reports Vary allocation failure");
+    TEST_ASSERT(r.headers_out.content_type.data == original_content_type,
+                "HEAD failure restores Content-Type storage");
+    TEST_ASSERT(r.headers_out.content_type.len
+                    == sizeof(original_content_type) - 1,
+                "HEAD failure restores Content-Type length");
+    TEST_ASSERT(r.headers_out.content_length_n == 2048,
+                "HEAD failure restores Content-Length");
+    TEST_ASSERT(r.headers_out.etag == etag && etag->hash != 0,
+                "HEAD failure restores ETag header state");
+    TEST_ASSERT(vary->value.len == sizeof("User-Agent") - 1
+                    && memcmp(vary->value.data, "User-Agent",
+                              sizeof("User-Agent") - 1) == 0,
+                "HEAD failure restores Vary value");
+    TEST_ASSERT(r.allow_ranges == 1,
+                "HEAD failure restores range support");
+
+    free_request(&r);
+    TEST_PASS("HEAD Vary failure rollback verified");
+}
+
 /* ══════════════════════════════════════════════════════════════════
  * Content-Type and Content-Length consistency
  * ══════════════════════════════════════════════════════════════════ */
@@ -1628,6 +1685,7 @@ main(void)
     /* HEAD request handling */
     test_head_routes_to_fullbuffer();
     test_head_response_parity();
+    test_head_vary_failure_rolls_back_headers();
 
     /* Content-Type and Content-Length consistency */
     test_content_type_and_length();

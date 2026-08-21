@@ -1205,8 +1205,16 @@ ngx_http_markdown_head_representation_headers(ngx_http_request_t *r)
     static u_char  hdr_trailer[] = "Trailer";
     static u_char  hdr_content_length[] = "Content-Length";
     static u_char  hdr_etag[] = "ETag";
+    ngx_http_markdown_header_snapshot_t  snapshot;
+    ngx_int_t                             rc;
 
     if (r == NULL) {
+        return NGX_ERROR;
+    }
+
+    if (ngx_http_markdown_header_snapshot_prepare(r, &snapshot) != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown: HEAD header snapshot prepare failed");
         return NGX_ERROR;
     }
 
@@ -1275,7 +1283,13 @@ ngx_http_markdown_head_representation_headers(ngx_http_request_t *r)
         sizeof(ngx_http_markdown_hdr_accept_ranges) - 1, 0, NULL);
 
     /* Vary: Accept — the representation varies by Accept negotiation. */
-    return ngx_http_markdown_add_vary_accept(r);
+    rc = ngx_http_markdown_add_vary_accept(r);
+    if (rc != NGX_OK) {
+        ngx_http_markdown_header_snapshot_restore(r, &snapshot);
+        return rc;
+    }
+
+    return NGX_OK;
 }
 
 #endif /* NGX_HTTP_MARKDOWN_HEADERS_IMPL_H */
