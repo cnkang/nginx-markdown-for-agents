@@ -475,6 +475,7 @@ ngx_http_markdown_diagnostics_method_not_allowed(ngx_http_request_t *r)
     r->headers_out.content_type_len = sizeof("text/plain") - 1;
     ngx_str_set(&r->headers_out.content_type, "text/plain");
     r->headers_out.content_type_lowcase = NULL;
+    r->headers_out.content_type_hash = 0;
     r->headers_out.content_length_n = b->last - b->pos;
 
     rc = ngx_http_send_header(r);
@@ -542,6 +543,7 @@ ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
     r->headers_out.content_type_len = sizeof("application/json") - 1;
     ngx_str_set(&r->headers_out.content_type, "application/json");
     r->headers_out.content_type_lowcase = NULL;
+    r->headers_out.content_type_hash = 0;
     r->headers_out.content_length_n = b->last - b->pos;
 
     /* HEAD request: send headers only */
