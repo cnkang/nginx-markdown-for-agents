@@ -25,27 +25,32 @@
 
 /*
  * Keep the standalone header harness and production translation units on
- * the same final-header authentication policy.  Production includes this
+ * the same final-header authentication decision.  Production includes this
  * file after filter_module.h, which supplies the identical helper first;
  * the guard prevents a duplicate static definition there.  Standalone
  * harnesses compile with the auth policy disabled and therefore need no
  * auth-function declarations.
  */
 static ngx_int_t
-ngx_http_markdown_apply_auth_cache_control(
-    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf)
+ngx_http_markdown_auth_cache_control_required(
+    const ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
+    ngx_flag_t *required)
 {
+    if (required == NULL) {
+        return NGX_ERROR;
+    }
+
 #if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
     if (r == NULL) {
         return NGX_ERROR;
     }
 
-    if (conf != NULL && ngx_http_markdown_is_authenticated(r, conf)) {
-        return ngx_http_markdown_modify_cache_control_for_auth(r);
-    }
+    *required = (conf != NULL
+                 && ngx_http_markdown_is_authenticated(r, conf));
 #else
     (void) r;
     (void) conf;
+    *required = 0;
 #endif
 
     return NGX_OK;
@@ -1071,9 +1076,12 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
                                  const ngx_http_markdown_conf_t *conf)
 {
     ngx_int_t                              rc;
+    ngx_flag_t                             auth_cache_control_required;
     struct FFIHeaderPlan                   plan;
     ngx_http_markdown_fullcov_prepared_t   prep;
     ngx_http_markdown_header_snapshot_t    snapshot;
+
+    auth_cache_control_required = 0;
 
     if (r == NULL || result == NULL || conf == NULL) {
         return NGX_ERROR;
@@ -1145,7 +1153,13 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
     }
 
     /* P5: Cache-Control auth modification */
-    rc = ngx_http_markdown_apply_auth_cache_control(r, conf);
+    rc = ngx_http_markdown_auth_cache_control_required(
+        r, conf, &auth_cache_control_required);
+#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
+    if (rc == NGX_OK && auth_cache_control_required) {
+        rc = ngx_http_markdown_modify_cache_control_for_auth(r);
+    }
+#endif
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: header_plan_apply_error: "

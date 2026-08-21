@@ -1950,27 +1950,32 @@ ngx_int_t ngx_http_markdown_modify_cache_control_for_auth(
 #define NGX_HTTP_MARKDOWN_AUTH_CACHE_CONTROL_HELPER_DEFINED 1
 
 /*
- * Apply the authenticated-response cache policy at the final header
- * emission boundary.  This helper is static because the implementation
- * header is included by several independent translation units and unit
- * harnesses; keeping the policy here prevents full-buffer, streaming,
- * conditional, HEAD, and pass-through paths from drifting apart.
+ * Determine whether the authenticated-response cache policy is required at
+ * the final header emission boundary.  The check is const-correct; callers
+ * perform the separate mutable header update only after this succeeds.
+ * Keeping the decision here prevents full-buffer, streaming, conditional,
+ * HEAD, and pass-through paths from drifting apart.
  */
 static ngx_inline ngx_int_t
-ngx_http_markdown_apply_auth_cache_control(
-    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf)
+ngx_http_markdown_auth_cache_control_required(
+    const ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
+    ngx_flag_t *required)
 {
+    if (required == NULL) {
+        return NGX_ERROR;
+    }
+
 #if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
     if (r == NULL) {
         return NGX_ERROR;
     }
 
-    if (conf != NULL && ngx_http_markdown_is_authenticated(r, conf)) {
-        return ngx_http_markdown_modify_cache_control_for_auth(r);
-    }
+    *required = (conf != NULL
+                 && ngx_http_markdown_is_authenticated(r, conf));
 #else
     (void) r;
     (void) conf;
+    *required = 0;
 #endif
 
     return NGX_OK;

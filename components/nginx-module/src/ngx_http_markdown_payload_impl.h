@@ -13,6 +13,9 @@
  * evolve without expanding the header/body filter flow itself.
  */
 
+static ngx_int_t ngx_http_markdown_next_header_filter_with_auth(
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf);
+
 static ngx_int_t ngx_http_markdown_forward_headers(ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx);
 static ngx_int_t ngx_http_markdown_send_buffered_original_response(

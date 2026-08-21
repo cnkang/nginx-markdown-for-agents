@@ -17,6 +17,7 @@ sys.path.insert(
 from validate_workflow_matrix_consumers import (  # noqa: E402  # pylint: disable=import-error
     NGINX_VERSION_RE,
     _is_excluded_line,
+    _publish_job_needs,
     _uses_dynamic_resolution,
     extract_hardcoded_versions,
     load_matrix_versions,
@@ -335,6 +336,24 @@ class TestValidateReleaseBlockingPublishDag:
             errors = validate_release_blocking_publish_dag(matrix_file)
 
         assert errors == []
+
+    def test_publish_needs_does_not_cross_job_boundary(self) -> None:
+        content = (
+            "  publish:\n"
+            "    runs-on: ubuntu-latest\n"
+            "  other:\n"
+            "    needs: [official-docker-release-gate]\n"
+        )
+
+        assert _publish_job_needs(content) == set()
+
+    def test_publish_needs_returns_inline_dependencies(self) -> None:
+        content = "  publish:\n    needs: [release-gate, official-docker-release-gate]\n"
+
+        assert _publish_job_needs(content) == {
+            "release-gate",
+            "official-docker-release-gate",
+        }
 
     def _make_fixture(
         self, tmp_path: Path, release_workflow_body: str

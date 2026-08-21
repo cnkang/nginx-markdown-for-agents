@@ -13,9 +13,6 @@
  * evolve separately from payload buffering, decompression, and output shaping.
  */
 
-static ngx_int_t ngx_http_markdown_next_header_filter_with_auth(
-    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf);
-
 #include "ngx_http_markdown_payload_impl.h"
 #include "ngx_http_markdown_conversion_impl.h"
 #include "ngx_http_markdown_exports.h"
@@ -140,11 +137,21 @@ static ngx_int_t
 ngx_http_markdown_next_header_filter_with_auth(
     ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf)
 {
-    ngx_int_t  rc;
+    ngx_flag_t  auth_cache_control_required;
+    ngx_int_t   rc;
 
-    rc = ngx_http_markdown_apply_auth_cache_control(r, conf);
+    auth_cache_control_required = 0;
+    rc = ngx_http_markdown_auth_cache_control_required(
+        r, conf, &auth_cache_control_required);
     if (rc != NGX_OK) {
         return rc;
+    }
+
+    if (auth_cache_control_required) {
+        rc = ngx_http_markdown_modify_cache_control_for_auth(r);
+        if (rc != NGX_OK) {
+            return rc;
+        }
     }
 
     return ngx_http_next_header_filter(r);
