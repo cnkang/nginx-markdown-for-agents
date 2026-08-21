@@ -98,6 +98,7 @@ TAR_BIN=""
 TR_BIN=""
 UNAME_BIN=""
 XARGS_BIN=""
+READLINK_BIN=""
 GPG_BIN=""
 JQ_BIN=""
 FILE_BIN=""
@@ -338,6 +339,16 @@ readonly TRUSTED_NGINX_ROOTS=(
   /usr/share/nginx/sbin
   /usr/lib/nginx
 )
+readonly TRUSTED_NGINX_DESTINATION_ROOTS=(
+  /etc/nginx
+  /usr/lib/nginx
+  /usr/share/nginx
+  /usr/local/nginx
+  /usr/local/opt/nginx
+  /opt/nginx
+  /opt/homebrew/opt/nginx
+  /opt/homebrew/Cellar/nginx
+)
 
 # canonicalize_path resolves symlinks and prints the canonical absolute path.
 #
@@ -357,24 +368,39 @@ canonicalize_path() {
   local i=0
   local basename_bin="${BASENAME_BIN:-/usr/bin/basename}"
   local dirname_bin="${DIRNAME_BIN:-/usr/bin/dirname}"
+  local readlink_bin="${READLINK_BIN:-}"
 
-  if [[ -z "$path" ]]; then
+  if [[ -z "$path" ]] || [[ -z "$readlink_bin" ]]; then
     return 1
   fi
   if [[ "$path" != /* ]]; then
     path="$(pwd)/$path"
   fi
 
-  dir="$(cd "$("$dirname_bin" "$path")" 2>/dev/null && pwd -P)" || dir="$("$dirname_bin" "$path")"
-  file="$("$basename_bin" "$path")"
+  if ! dir="$(cd "$("$dirname_bin" "$path")" 2>/dev/null && pwd -P)"; then
+    return 1
+  fi
+  if ! file="$("$basename_bin" "$path")"; then
+    return 1
+  fi
 
-  while [[ -L "$dir/$file" ]] && [[ $i -lt 40 ]]; do
-    target="$(/usr/bin/readlink "$dir/$file" 2>/dev/null)" || break
+  while [[ -L "$dir/$file" ]]; do
+    if [[ $i -ge 40 ]]; then
+      return 1
+    fi
+    if ! target="$("$readlink_bin" "$dir/$file" 2>/dev/null)"; then
+      return 1
+    fi
+    [[ -n "$target" ]] || return 1
     if [[ "$target" != /* ]]; then
       target="$dir/$target"
     fi
-    dir="$(cd "$("$dirname_bin" "$target")" 2>/dev/null && pwd -P)" || dir="$("$dirname_bin" "$target")"
-    file="$("$basename_bin" "$target")"
+    if ! dir="$(cd "$("$dirname_bin" "$target")" 2>/dev/null && pwd -P)"; then
+      return 1
+    fi
+    if ! file="$("$basename_bin" "$target")"; then
+      return 1
+    fi
     i=$((i + 1))
   done
 
@@ -507,6 +533,142 @@ is_secure_root_path() {
     [[ -e "$current" ]] || return 1
     is_secure_root_file "$current" || return 1
   done
+  return 0
+}
+
+# bootstrap_readlink selects a fixed system readlink before canonicalize_path
+# is used.  It intentionally does not consult PATH: canonicalization is part
+# of the trust boundary for every later executable and destination check.
+bootstrap_readlink() {
+  local candidate=""
+  local -a candidates=(
+    /usr/bin/readlink
+    /bin/readlink
+    /usr/local/bin/readlink
+    /opt/homebrew/bin/readlink
+  )
+
+  for candidate in "${candidates[@]}"; do
+    if [[ ! -f "$candidate" ]] || [[ ! -x "$candidate" ]]; then
+      continue
+    fi
+    is_trusted_command_path "$candidate" || continue
+    if [[ "$EUID" -eq 0 ]] && ! is_secure_root_path "$candidate"; then
+      continue
+    fi
+    READLINK_BIN="$candidate"
+    return 0
+  done
+
+  return 1
+}
+
+# path_has_symlink_component returns 0 when any component of an absolute path
+# is a symlink.  Privileged destinations reject symlink traversal entirely so
+# an attacker cannot redirect a checked directory after validation.
+path_has_symlink_component() {
+  local path="$1"
+  local current="/"
+  local remainder=""
+  local component=""
+
+  [[ "$path" = /* ]] || return 1
+  remainder="${path#/}"
+  while [[ -n "$remainder" ]]; do
+    component="${remainder%%/*}"
+    if [[ "$remainder" == */* ]]; then
+      remainder="${remainder#*/}"
+    else
+      remainder=""
+    fi
+    [[ -n "$component" ]] || continue
+    [[ "$component" != "." ]] || continue
+    [[ "$component" != ".." ]] || return 0
+    current="${current%/}/${component}"
+    [[ -L "$current" ]] && return 0
+  done
+
+  return 1
+}
+
+# is_trusted_nginx_destination_path limits installer writes to conventional
+# NGINX roots or the exact prefix reported by the validated nginx binary.
+is_trusted_nginx_destination_path() {
+  local path="$1"
+  local root=""
+
+  [[ "$path" = /* ]] || return 1
+  for root in "${TRUSTED_NGINX_DESTINATION_ROOTS[@]}"; do
+    case "$path" in
+      "$root"|"$root"/*)
+        return 0
+        ;;
+      *)
+        ;;
+    esac
+  done
+  if [[ -n "${NGINX_PREFIX:-}" ]]; then
+    case "$path" in
+      "$NGINX_PREFIX"|"$NGINX_PREFIX"/*)
+        return 0
+        ;;
+      *)
+        ;;
+    esac
+  fi
+  return 1
+}
+
+# validate_privileged_destination validates an existing or not-yet-created
+# path before any installer write.  For a new path, the nearest existing
+# ancestor is checked; all existing components must be root-owned and not
+# group/other writable, and no path component may be a symlink.
+validate_privileged_destination() {
+  local path="$1"
+  local label="$2"
+  local existing=""
+  local parent=""
+  local canonical=""
+
+  if [[ "$path" != /* ]] || ! is_trusted_nginx_destination_path "$path"; then
+    die_with_error "$CATEGORY_CONFIG" \
+      "Refusing to write ${label}: destination is outside trusted NGINX roots: ${path}" \
+      "Use an NGINX build whose prefix and paths resolve under a root-owned NGINX installation." \
+      "Do not override nginx metadata with a writable or relative destination."
+  fi
+  if path_has_symlink_component "$path"; then
+    die_with_error "$CATEGORY_CONFIG" \
+      "Refusing to write ${label}: destination contains a symlink: ${path}" \
+      "Use a canonical NGINX prefix, modules path, and configuration path without symlink components."
+  fi
+
+  existing="$path"
+  while [[ ! -e "$existing" ]]; do
+    parent="$("$DIRNAME_BIN" "$existing")" || return 1
+    [[ "$parent" != "$existing" ]] || return 1
+    existing="$parent"
+  done
+  [[ -d "$existing" ]] || die_with_error "$CATEGORY_CONFIG" \
+    "Refusing to write ${label}: existing parent is not a directory: ${existing}" \
+    "$MSG_CHECK_PERMS_DISK"
+  is_secure_root_path "$existing" || die_with_error "$CATEGORY_CONFIG" \
+    "Refusing to write ${label}: parent is not root-owned and non-writable by group/other: ${existing}" \
+    "$MSG_CHECK_PERMS_DISK"
+  canonical="$(canonicalize_path "$existing")" || die_with_error "$CATEGORY_CONFIG" \
+    "Refusing to write ${label}: destination canonicalization failed: ${existing}" \
+    "Use a complete, accessible NGINX installation path."
+  is_secure_root_path "$canonical" || die_with_error "$CATEGORY_CONFIG" \
+    "Refusing to write ${label}: canonical parent is not secure: ${canonical}" \
+    "$MSG_CHECK_PERMS_DISK"
+
+  if [[ -e "$path" ]]; then
+    [[ -f "$path" || -d "$path" ]] || die_with_error "$CATEGORY_CONFIG" \
+      "Refusing to write ${label}: destination is not a regular file or directory: ${path}" \
+      "$MSG_CHECK_PERMS_DISK"
+    is_secure_root_file "$path" || die_with_error "$CATEGORY_CONFIG" \
+      "Refusing to write ${label}: existing destination is not root-owned and non-writable by group/other: ${path}" \
+      "$MSG_CHECK_PERMS_DISK"
+  fi
   return 0
 }
 
@@ -1217,6 +1379,11 @@ resolve_include_dir() {
 backup_file_once() {
   local file="$1"
   local backup_file="${file}.bak.nginx-markdown-for-agents"
+  validate_privileged_destination "$file" "configuration backup source"
+  if [[ -e "$backup_file" ]] && ! validate_privileged_destination \
+      "$backup_file" "configuration backup"; then
+    return 1
+  fi
   if [[ ! -f "$backup_file" ]] && ! "$CP_BIN" "$file" "$backup_file"; then
     die_with_error "$CATEGORY_FILESYSTEM" \
       "Failed to create backup file: ${backup_file}" \
@@ -1333,6 +1500,12 @@ if [[ "${SKIP_ROOT_CHECK:-0}" != "1" ]] && [[ "$EUID" -ne 0 ]]; then
     "Or set SKIP_ROOT_CHECK=1 if running inside a container."
 fi
 
+if ! bootstrap_readlink; then
+  die_with_error "$CATEGORY_CONFIG" \
+    "Required executable is missing or untrusted: readlink" \
+    "Install readlink in a root-owned system executable directory." \
+    "Do not run the installer with a PATH entry pointing to a writable directory."
+fi
 cache_trusted_executables
 export PATH="$TRUSTED_COMMAND_PATH"
 
@@ -1359,6 +1532,13 @@ NGINX_CONF_PATH="$(resolve_path_with_prefix "$NGINX_CONF_PATH_RAW" "$NGINX_PREFI
 if [[ -z "$NGINX_CONF_PATH" ]]; then
   NGINX_CONF_PATH="/etc/nginx/nginx.conf"
 fi
+if [[ -n "$NGINX_PREFIX" ]]; then
+  validate_privileged_destination "$NGINX_PREFIX" "NGINX prefix"
+fi
+if [[ -n "$NGINX_MODULES_PATH" ]]; then
+  validate_privileged_destination "$NGINX_MODULES_PATH" "NGINX modules path"
+fi
+validate_privileged_destination "$NGINX_CONF_PATH" "NGINX configuration"
 NGINX_CONF_DIR="$("$DIRNAME_BIN" "$NGINX_CONF_PATH")"
 
 echo "[+] NGINX conf path: $NGINX_CONF_PATH"
@@ -1662,6 +1842,7 @@ elif [[ -d "/usr/local/nginx/modules" ]]; then
 else
   MODULES_DIR="/etc/nginx/modules"
 fi
+validate_privileged_destination "$MODULES_DIR" "NGINX modules directory"
 if ! "$MKDIR_BIN" -p "$MODULES_DIR"; then
   die_with_error "$CATEGORY_FILESYSTEM" \
     "Failed to create modules directory: ${MODULES_DIR}" \
@@ -1681,9 +1862,6 @@ if ! "$CHMOD_BIN" 644 "$MODULES_DIR/$MODULE_SO"; then
 fi
 
 MODULE_LOAD_PATH="${MODULES_DIR%/}/${MODULE_SO}"
-if [[ -n "$NGINX_MODULES_PATH_RAW" ]]; then
-  MODULE_LOAD_PATH="${NGINX_MODULES_PATH_RAW%/}/${MODULE_SO}"
-fi
 
 MODULE_CONF_SNIPPET=""
 MARKDOWN_CONF_SNIPPET=""
@@ -1707,12 +1885,16 @@ if [[ -f "$NGINX_CONF_PATH" ]]; then
 
   if [[ "$MODULE_ALREADY_CONFIGURED" -eq 0 ]]; then
     MODULE_INCLUDE_DIR="$(resolve_include_dir "$MODULE_INCLUDE_PATTERN" "$NGINX_CONF_DIR")"
+    validate_privileged_destination "$MODULE_INCLUDE_DIR" \
+      "module include directory"
     if ! "$MKDIR_BIN" -p "$MODULE_INCLUDE_DIR"; then
       die_with_error "$CATEGORY_FILESYSTEM" \
         "Failed to create module include directory: ${MODULE_INCLUDE_DIR}" \
         "$MSG_CHECK_PERMS_DISK"
     fi
     MODULE_CONF_SNIPPET="${MODULE_INCLUDE_DIR%/}/50-ngx-http-markdown-filter-module.conf"
+    validate_privileged_destination "$MODULE_CONF_SNIPPET" \
+      "module loader snippet"
     if ! "$CAT_BIN" > "$MODULE_CONF_SNIPPET" <<EOF
 # Generated by nginx-markdown-for-agents install.sh
 load_module ${MODULE_LOAD_PATH};
@@ -1741,12 +1923,16 @@ EOF
     HTTP_INCLUDE_PATTERN="$("$GREP_BIN" -E '^[[:space:]]*include[[:space:]]+[^;]*conf\.d/[^;]*\.conf[[:space:]]*;' "$NGINX_CONF_PATH" | "$SED_BIN" -E 's/^[[:space:]]*include[[:space:]]+([^;]+);/\1/' | "$HEAD_BIN" -n1 || true)"
     if [[ -n "$HTTP_INCLUDE_PATTERN" ]]; then
       HTTP_INCLUDE_DIR="$(resolve_include_dir "$HTTP_INCLUDE_PATTERN" "$NGINX_CONF_DIR")"
+      validate_privileged_destination "$HTTP_INCLUDE_DIR" \
+        "markdown include directory"
       if ! "$MKDIR_BIN" -p "$HTTP_INCLUDE_DIR"; then
         die_with_error "$CATEGORY_FILESYSTEM" \
           "Failed to create markdown include directory: ${HTTP_INCLUDE_DIR}" \
           "$MSG_CHECK_PERMS_DISK"
       fi
       MARKDOWN_CONF_SNIPPET="${HTTP_INCLUDE_DIR%/}/90-markdown-filter-enable.conf"
+      validate_privileged_destination "$MARKDOWN_CONF_SNIPPET" \
+        "markdown enable snippet"
       if ! "$CAT_BIN" > "$MARKDOWN_CONF_SNIPPET" <<'EOF'
 # Generated by nginx-markdown-for-agents install.sh
 markdown_filter on;
