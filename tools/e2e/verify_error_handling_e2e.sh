@@ -125,7 +125,7 @@ VALID_HTML = b"""<html><head><title>Valid</title></head>
 """
 
 LARGE_HTML = b"""<html><head><title>Large</title></head>
-<body><h1>Large Page</h1>""" + (b"<p>Oversize content.</p>" * 120) + b"""</body></html>
+<body><h1>Large Page</h1>""" + (b"<p>Oversize content.</p>" * 4000) + b"""</body></html>
 """
 
 MALFORMED_HTML = b"""<html><head><title>Bad
@@ -167,8 +167,10 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(VALID_HTML)
             return
         if path == "/large":
-            if len(LARGE_HTML) <= 1024:
-                raise RuntimeError(f"LARGE_HTML must exceed 1024 bytes, got {len(LARGE_HTML)}")
+            if len(LARGE_HTML) <= 65536:
+                raise RuntimeError(
+                    f"LARGE_HTML must exceed 64KiB, got {len(LARGE_HTML)}"
+                )
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=UTF-8")
             self.send_header("Content-Length", str(len(LARGE_HTML)))
@@ -316,7 +318,7 @@ http {
         location /md-small/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_limits conversion_memory=64k parser_memory=64k streaming_buffer=512k conversion_timeout=120s;
+            markdown_limits conversion_memory=64k parser_memory=64k streaming_buffer=64k conversion_timeout=120s;
             markdown_error_policy pass;
 
             proxy_http_version 1.1;
