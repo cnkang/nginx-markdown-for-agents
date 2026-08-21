@@ -1,6 +1,6 @@
 ---
 domain: nginx-idioms
-rules: [28, 29, 30, 31, 39, 40, 50]
+rules: [28, 29, 30, 31, 39, 40, 50, 69]
 paths:
   - "components/nginx-module/src/**"
 ---
@@ -261,10 +261,10 @@ Required:
 - When parsing `Content-Type` headers for streaming eligibility checks,
   accept both space (`SP`, 0x20) and horizontal tab (`HTAB`, 0x09) as
   optional whitespace (OWS) separators per RFC 7230.  Some clients send
-  `text/markdown;\tcharset=utf-8` with a tab after the semicolon, rejecting
-  HTAB causes false-negative eligibility decisions.
-- Exclude trailing OWS after the parameter value.  A Content-Type like
-  `text/markdown; charset=utf-8` (trailing space) must not fail the
+  `text/markdown` followed by HTAB and `charset=utf-8` after the media-type
+  separator, rejecting HTAB causes false-negative eligibility decisions.
+- Exclude trailing OWS after the parameter value.  A Content-Type with
+  `text/markdown` followed by a space and `charset=utf-8` must not fail the
   charset check — strip trailing OWS before comparing the parameter
   value.
 - When adding or modifying a Content-Type parser, test with both SP and
@@ -275,3 +275,49 @@ Verification:
   — for each parser, verify it handles HTAB as OWS.
 - `make test-nginx-unit` — eligibility tests cover HTAB separator and
   trailing OWS exclusion.
+
+---
+
+### 69. Representation-change metadata-surface completeness
+Historical issues: `aac2f341`, `ccc320c7`, `8b3633c1`, `de6cec38`,
+`516df672`, `0db8042e`, `a47a3e40`, `1fa75117` (2026-08-19/20 cluster).
+
+Principle: when a response's representation changes (HTML to Markdown
+conversion commit, streaming commit metadata removal, 304 Decision G,
+HEAD representation rewrite), the implementation must clear or suppress
+EVERY upstream metadata surface in the same function.  NGINX emission predicates
+read paired state, so clearing one mirror while leaving its twin stale
+either resurrects source-HTML metadata or leaks it through another
+emission path.  The 2026-08 cluster fixed these surfaces one at a time
+across four paths. This rule collapses them into one contract.
+
+Required:
+- **Trailer suppression**: invalidating the `Trailer` declaration header
+  is not sufficient.  HTTP/2 and HTTP/3 emit `headers_out.trailers`
+  entries without any declaration, so every representation-change path
+  must call the shared `ngx_http_markdown_clear_trailers()` helper in
+  the same function that invalidates the declaration.
+- **Mirror-pair completeness**: NGINX core emits `Last-Modified` from
+  paired state (`last_modified_time` scalar mirror plus typed pointer)
+  and matches Content-Type through the `content_type_lowcase` /
+  `content_type_hash` cache.  A function that strips one half of a pair
+  (`last_modified_time = -1`, `content_type_lowcase = NULL`) must strip
+  the other half in the same function, or explicitly invalidate the
+  corresponding header-list entry via `ngx_http_markdown_invalidate_headers`,
+  or delegate to `ngx_http_markdown_send_304()` which performs the full
+  strip.
+- **Single shared helpers**: new representation paths must reuse
+  `ngx_http_markdown_clear_trailers()`, `ngx_http_markdown_invalidate_headers()`,
+  and `ngx_http_markdown_head_representation_headers()` rather than
+  re-implementing per-header suppression inline.
+- Fresh module-generated responses (diagnostics, 405 builders) follow the
+  same pairing convention: set `content_type_lowcase = NULL` together with
+  `content_type_hash = 0`.
+
+Verification:
+- `python3 tools/harness/detect_representation_metadata_clearing.py`
+  — blocking harness gate. It flags Trailer-declaration invalidation without
+  list clearing and unpaired mirror strips.
+- `make test-nginx-unit` — protocol correctness tests assert no digest,
+  trailer, Last-Modified, or stale Content-Type leakage on all four
+  representation-change paths.
