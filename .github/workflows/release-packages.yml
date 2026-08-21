@@ -871,9 +871,9 @@ jobs:
             exit 1
           fi
 
-          containment_status="$(gh api "repos/${REPOSITORY}/compare/${TAG_SHA}...${DEFAULT_BRANCH}" --jq '.status')"
-          if [[ "${containment_status}" != "ahead" && "${containment_status}" != "identical" ]]; then
-            echo "ERROR: Tag SHA ${TAG_SHA} is not contained in ${DEFAULT_BRANCH}." >&2
+          approved_sha="$(gh api "repos/${REPOSITORY}/commits/${DEFAULT_BRANCH}" --jq '.sha')"
+          if [[ -z "${approved_sha}" ]] || [[ "${TAG_SHA}" != "${approved_sha}" ]]; then
+            echo "ERROR: Tag SHA ${TAG_SHA} is not the exact approved ${DEFAULT_BRANCH} tip (${approved_sha:-missing})." >&2
             exit 1
           fi
 
@@ -1126,6 +1126,20 @@ jobs:
           python3 tools/release/gates/validate_release_evidence_manifest.py --mode real
         shell: bash
 
+  # The official Docker matrix is release-blocking for Docker artifacts in
+  # tools/release-matrix.json. Call the reusable workflow with this exact
+  # candidate SHA so publish cannot proceed on an independently triggered,
+  # stale, or merely related Docker validation run.
+  official-docker-release-gate:
+    name: Official NGINX Docker Release Gate
+    needs: [release-gate]
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/official-nginx-docker.yml
+    with:
+      module_repo: ${{ github.server_url }}/${{ github.repository }}.git
+      module_ref: ${{ github.ref_name }}
+      module_sha: ${{ github.sha }}
+
   # ─────────────────────────────────────────────────────────────────────────────
   # Integrity Checksums Job: SHA256SUMS generation (no protected environment)
   # Generates checksums for all package artifacts. Does not require signing
@@ -1133,10 +1147,11 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   integrity-checksums:
     name: Integrity - SHA256SUMS
-    needs: [smoke-test, integrity-signing]
+    needs: [smoke-test, integrity-signing, official-docker-release-gate]
     if: >-
       always()
       && needs.smoke-test.result == 'success'
+      && needs.official-docker-release-gate.result == 'success'
       && (needs.integrity-signing.result == 'success'
           || (needs.integrity-signing.result == 'skipped'
               && github.ref_type != 'tag'))
@@ -1308,7 +1323,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   integrity-signing:
     name: Integrity - GPG Sign
-    needs: [smoke-test, release-gate, musl-build]
+    needs: [smoke-test, release-gate, musl-build, official-docker-release-gate]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     permissions:
@@ -1419,7 +1434,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   integrity-signature:
     name: Integrity - Sign SHA256SUMS
-    needs: [integrity-checksums, release-gate]
+    needs: [integrity-checksums, release-gate, official-docker-release-gate]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     permissions:
@@ -1485,13 +1500,14 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   publish:
     name: Publish
-    needs: [release-gate, integrity-checksums, integrity-signature]
+    needs: [release-gate, integrity-checksums, integrity-signature, official-docker-release-gate]
     # Tag releases: signing always runs, so signing must succeed for publish.
     # workflow_dispatch: signing is skipped, publish proceeds without it.
     if: >-
       always()
       && needs.integrity-checksums.result == 'success'
       && needs.release-gate.result == 'success'
+      && needs.official-docker-release-gate.result == 'success'
       && (needs.integrity-signature.result == 'success'
           || (needs.integrity-signature.result == 'skipped'
               && github.ref_type != 'tag'))

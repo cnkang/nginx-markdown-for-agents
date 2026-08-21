@@ -50,6 +50,9 @@ LEGACY_WORKFLOWS = {
     "release-rpm.yml",
 }
 
+RELEASE_PACKAGES_WORKFLOW = "release-packages.yml"
+OFFICIAL_DOCKER_WORKFLOW = ".github/workflows/official-nginx-docker.yml"
+
 # Candidate semantic versions are classified as NGINX versions only when the
 # same workflow line explicitly associates them with NGINX. This avoids numeric
 # range guesses that eventually misclassify Rust, Python, or tool releases.
@@ -284,6 +287,71 @@ def validate_owner_workflow_refs(matrix_path: Path) -> list[str]:
     return errors
 
 
+def validate_release_blocking_publish_dag(matrix_path: Path) -> list[str]:
+    """Ensure release-blocking Docker artifacts gate canonical publication."""
+    errors: list[str] = []
+
+    validated = validate_read_path(
+        matrix_path, purpose="release-blocking publish DAG check"
+    )
+    with open(validated, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    entries = data.get("entries", []) or (
+        data.get("matrix", []) + data.get("additional_artifacts", [])
+    )
+    docker_owners = {
+        entry.get("owner_workflow", "")
+        for entry in entries
+        if entry.get("artifact_type") == "docker-image"
+        and entry.get("release_blocking") is True
+    }
+    docker_owners.discard("")
+    if not docker_owners:
+        return errors
+
+    canonical_path = WORKFLOWS_DIR / RELEASE_PACKAGES_WORKFLOW
+    if not canonical_path.exists():
+        return [
+            "Release-blocking Docker entries exist but the canonical "
+            f"workflow is missing: {canonical_path}"
+        ]
+    canonical_content = canonical_path.read_text(encoding="utf-8")
+    publish_match = re.search(
+        r"(?ms)^  publish:\s*\n.*?^    needs:\s*\[([^\]]+)\]",
+        canonical_content,
+    )
+
+    if "official-docker-release-gate:" not in canonical_content:
+        errors.append(
+            "release-packages.yml does not define "
+            "official-docker-release-gate for release-blocking Docker artifacts"
+        )
+    if "./" + OFFICIAL_DOCKER_WORKFLOW not in canonical_content:
+        errors.append(
+            "release-packages.yml does not call the official Docker workflow "
+            "as a reusable release gate"
+        )
+    if publish_match is None or "official-docker-release-gate" not in publish_match.group(1):
+        errors.append(
+            "release-packages.yml publish job does not depend on "
+            "official-docker-release-gate"
+        )
+
+    for owner in sorted(docker_owners):
+        owner_path = REPO_ROOT / owner
+        if not owner_path.exists():
+            continue
+        owner_content = owner_path.read_text(encoding="utf-8")
+        if not re.search(r"(?m)^  workflow_call:\s*$", owner_content):
+            errors.append(
+                f"{owner} must expose workflow_call before it can be a "
+                "release-blocking reusable Docker gate"
+            )
+
+    return errors
+
+
 def main() -> int:
     """Run workflow matrix consumer validation.
 
@@ -329,6 +397,10 @@ def main() -> int:
     # 4. owner_workflow references in matrix point to real files
     owner_errors = validate_owner_workflow_refs(MATRIX_PATH)
     all_errors.extend(owner_errors)
+
+    # 5. release-blocking Docker artifacts must be in the publish DAG
+    docker_dag_errors = validate_release_blocking_publish_dag(MATRIX_PATH)
+    all_errors.extend(docker_dag_errors)
 
     # Report results
     if all_warnings:
