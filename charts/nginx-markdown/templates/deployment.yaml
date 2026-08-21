@@ -74,7 +74,17 @@ spec:
         - name: metrics-sidecar
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          image: "{{ .Values.metrics.sidecar.image.repository }}:{{ .Values.metrics.sidecar.image.tag }}"
+          {{- $sidecarImageRepo := required "metrics.sidecar.image.repository must be set when the metrics sidecar is enabled" .Values.metrics.sidecar.image.repository }}
+          {{- $sidecarImageDigest := .Values.metrics.sidecar.image.digest | default "" }}
+          {{- $sidecarImageTag := .Values.metrics.sidecar.image.tag | default "" }}
+          {{- if and (eq $sidecarImageDigest "") (eq $sidecarImageTag "") }}
+          {{- fail "metrics.sidecar.image.digest or metrics.sidecar.image.tag must be set when the metrics sidecar is enabled" }}
+          {{- end }}
+          {{- if $sidecarImageDigest }}
+          image: "{{ $sidecarImageRepo }}@{{ $sidecarImageDigest }}"
+          {{- else }}
+          image: "{{ $sidecarImageRepo }}:{{ $sidecarImageTag }}"
+          {{- end }}
           imagePullPolicy: {{ .Values.metrics.sidecar.image.pullPolicy }}
           volumeMounts:
             - name: metrics-sidecar-config

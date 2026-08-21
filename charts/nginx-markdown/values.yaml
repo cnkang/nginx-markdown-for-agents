@@ -147,8 +147,11 @@ metrics:
   sidecar:
     enabled: false
     image:
-      repository: nginx
-      tag: "1.27-alpine"
+      # No mutable image default. Set digest (preferred) or an explicit tag
+      # when the sidecar is enabled.
+      repository: ""
+      tag: ""
+      digest: ""
       pullPolicy: IfNotPresent
     port: 9113
     resources: {}

@@ -78,7 +78,34 @@
           "type": "object",
           "properties": {
             "enabled": { "type": "boolean" },
-            "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+            "image": {
+              "type": "object",
+              "properties": {
+                "repository": {
+                  "type": "string",
+                  "description": "Image repository; required by the Deployment when the sidecar is enabled."
+                },
+                "tag": { "type": "string" },
+                "digest": {
+                  "type": "string",
+                  "pattern": "^$|^sha256:[0-9a-fA-F]{64}$",
+                  "description": "Immutable image digest; preferred over tag when the sidecar is enabled."
+                },
+                "pullPolicy": {
+                  "type": "string",
+                  "enum": ["Always", "IfNotPresent", "Never"]
+                }
+              }
+            },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "resources": {
+              "type": "object",
+              "description": "Kubernetes container resource requests and limits.",
+              "properties": {
+                "limits": { "type": "object" },
+                "requests": { "type": "object" }
+              }
+            }
           }
         }
       }
