@@ -602,6 +602,9 @@ def test_tag_workflow_uses_092_blocking_evidence() -> None:
 
     publish_start = workflow.index("  publish:")
     publish_block = workflow[publish_start:]
-    assert "needs: [release-gate, integrity-checksums, integrity-signature]" in publish_block
+    assert (
+        "needs: [release-gate, integrity-checksums, integrity-signature, "
+        "official-docker-release-gate]"
+    ) in publish_block
     assert "github.ref_type != 'tag'" in publish_block
     assert "needs.release-gate.result == 'success'" in publish_block
