@@ -22,7 +22,9 @@ failures=0
 # The detector exits non-zero when it finds violations, so capture output
 # before inspecting it (pipefail would invert the pipeline status).
 run_detector() {
-    bash "${SCRIPT_DIR}/../detect_shell_hygiene.sh" "$1" 2>&1 || true
+    local fixture="$1"
+    bash "${SCRIPT_DIR}/../detect_shell_hygiene.sh" "${fixture}" 2>&1 \
+        || true
     return 0
 }
 

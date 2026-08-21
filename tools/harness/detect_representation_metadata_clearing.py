@@ -47,7 +47,17 @@ DEFAULT_DIR = "components/nginx-module/src"
 ALLOWLIST = [
 ]
 
-FUNC_DEF_RE = re.compile(r"^[^()]*?([a-zA-Z_]\w*)\s*\([^;{}]*\)\s*$")
+FUNC_DEF_RE = re.compile(r"^[^();{}]*\([^;{}]*\)[ \t]*$")
+FUNC_NAME_RE = re.compile(r"([a-zA-Z_]\w*)$")
+
+
+def _function_def_name(line):
+    """Return the identifier preceding the parameter list, or None."""
+    paren = line.find("(")
+    if paren <= 0:
+        return None
+    match = FUNC_NAME_RE.search(line[:paren].rstrip())
+    return match.group(1) if match else None
 
 TRAILER_MARKER_RE = re.compile(r"hdr_trailer\b|[\"']Trailer[\"']")
 CLEAR_TRAILERS_RE = re.compile(r"ngx_http_markdown_clear_trailers\s*\(")
@@ -124,15 +134,15 @@ def _collect_function_body(lines, start_index):
     """Return the function body lines and the last consumed line index."""
     depth = 0
     body_lines = []
-    end_index = start_index
-    for end_index in range(start_index + 1, len(lines)):
-        line = lines[end_index]
+    for end_index, line in enumerate(
+        lines[start_index + 1:], start=start_index + 1
+    ):
         body_lines.append(line)
         depth += line.count("{") - line.count("}")
-        if _function_body_is_complete(
-            depth, end_index, start_index, line
-        ):
+        if _function_body_is_complete(depth, end_index, start_index, line):
             break
+    else:
+        return start_index, body_lines
     return end_index, body_lines
 
 
@@ -141,17 +151,16 @@ def extract_functions_from_source(source):
     lines = source.splitlines()
     i = 0
     while i < len(lines):
-        match = FUNC_DEF_RE.match(lines[i].rstrip())
-        if not match or i + 1 >= len(lines):
+        if not FUNC_DEF_RE.match(lines[i].rstrip()) or i + 1 >= len(lines):
             i += 1
             continue
-        if lines[i + 1].strip() != "{":
+        name = _function_def_name(lines[i].rstrip())
+        if not name or lines[i + 1].strip() != "{":
             i += 1
             continue
         end_index, body_lines = _collect_function_body(lines, i)
         raw = "\n".join(body_lines)
-        yield match.group(1), i + 1, re.sub(r"\s+", " ",
-                                            strip_comments(raw))
+        yield name, i + 1, re.sub(r"\s+", " ", strip_comments(raw))
         i = end_index + 1
 
 
