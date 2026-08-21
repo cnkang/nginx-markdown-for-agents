@@ -9,6 +9,7 @@
 #   - gzip, gunzip, brotli, proxy_cache modules available
 #   - curl available
 #   - NGINX_URL environment variable set (default: http://localhost:8080)
+#   - TEST_PATH and GUNZIP_TEST_PATH point to the qualified fixture locations
 #   - the gunzip fixture exposes the upstream encoding as
 #     X-Upstream-Content-Encoding (override with UPSTREAM_ENCODING_HEADER)
 #   - the proxy-cache fixture exposes MISS/HIT as X-Cache-Status (override
@@ -22,7 +23,9 @@
 #   5. markdown + no compression: plain Markdown to client
 #
 # Usage:
-#   NGINX_URL=http://localhost:8080 ./filter_ordering_test.sh
+#   NGINX_URL=http://localhost:8080 \
+#   TEST_PATH=/markdown GUNZIP_TEST_PATH=/gunzip-markdown \
+#   ./filter_ordering_test.sh
 #
 # Exit codes:
 #   0 — all checks passed
@@ -33,16 +36,14 @@ set -e
 
 NGINX_URL="${NGINX_URL:-http://localhost:8080}"
 TEST_PATH_CONFIGURED=0
-if [[ "${TEST_PATH+x}" == "x" ]]; then
+TEST_PATH="${TEST_PATH:-}"
+if [[ -n "$TEST_PATH" ]]; then
     TEST_PATH_CONFIGURED=1
-else
-    TEST_PATH="/"
 fi
 GUNZIP_TEST_PATH_CONFIGURED=0
-if [[ "${GUNZIP_TEST_PATH+x}" == "x" ]]; then
+GUNZIP_TEST_PATH="${GUNZIP_TEST_PATH:-}"
+if [[ -n "$GUNZIP_TEST_PATH" ]]; then
     GUNZIP_TEST_PATH_CONFIGURED=1
-else
-    GUNZIP_TEST_PATH="/"
 fi
 UPSTREAM_ENCODING_HEADER="${UPSTREAM_ENCODING_HEADER-X-Upstream-Content-Encoding}"
 CACHE_STATUS_HEADER="${CACHE_STATUS_HEADER-X-Cache-Status}"
@@ -309,39 +310,25 @@ test_markdown_no_compression() {
 # ─────────────────────────────────────────────────────────────────────────────
 
 main() {
+    if [[ "${TEST_PATH_CONFIGURED}" -ne 1 ]] \
+        || [[ "${GUNZIP_TEST_PATH_CONFIGURED}" -ne 1 ]]; then
+        echo "Error: TEST_PATH and GUNZIP_TEST_PATH are required for filter-ordering qualification" >&2
+        exit 2
+    fi
+
     check_prerequisites
 
     echo "Running filter ordering E2E tests against ${NGINX_URL}" >&2
     echo >&2
 
-    if [[ "${TEST_PATH_CONFIGURED}" -eq 1 ]]; then
-        test_markdown_gzip
-    else
-        skip "Test 1 skipped: TEST_PATH was not configured"
-    fi
-    if [[ "${GUNZIP_TEST_PATH_CONFIGURED}" -eq 1 ]]; then
-        test_markdown_gunzip
-    else
-        skip "Test 2 skipped: GUNZIP_TEST_PATH was not configured"
-    fi
-    if [[ "${TEST_PATH_CONFIGURED}" -eq 1 ]]; then
-        test_markdown_brotli
-    else
-        skip "Test 3 skipped: TEST_PATH was not configured"
-    fi
-    if [[ "${TEST_PATH_CONFIGURED}" -eq 1 ]]; then
-        test_markdown_proxy_cache
-    else
-        skip "Test 4 skipped: TEST_PATH was not configured"
-    fi
-    if [[ "${TEST_PATH_CONFIGURED}" -eq 1 ]]; then
-        test_markdown_no_compression
-    else
-        skip "Test 5 skipped: TEST_PATH was not configured"
-    fi
+    test_markdown_gzip
+    test_markdown_gunzip
+    test_markdown_brotli
+    test_markdown_proxy_cache
+    test_markdown_no_compression
     echo "Results: ${PASS_COUNT} passed, ${FAIL_COUNT} failed, ${SKIP_COUNT} skipped" >&2
 
-    if [[ ${FAIL_COUNT} -gt 0 ]]; then
+    if [[ ${FAIL_COUNT} -gt 0 ]] || [[ ${PASS_COUNT} -eq 0 ]]; then
         exit 1
     fi
     exit 0
