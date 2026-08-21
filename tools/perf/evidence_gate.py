@@ -2670,6 +2670,115 @@ def _check_environment_compatibility(
     return violations
 
 
+def _resolve_baseline_head_binding(
+    report: dict | None,
+    args: argparse.Namespace,
+    blocking: bool,
+    baseline_report: dict,
+) -> tuple[dict, bool, int | None] | None:
+    """Return a terminal result when the baseline is not HEAD-bound."""
+    if not _baseline_head_binding_required():
+        return None
+
+    if head_violations := _baseline_head_violations(baseline_report):
+        return {}, False, _report_integrity_failure(
+            report,
+            args,
+            head_violations,
+            "FAIL: Checked-in baseline is not bound to the current HEAD:",
+            "  Regenerate the 0.9.2 module baseline from a real module-enabled "
+            "benchmark at this exact commit before release qualification.",
+            exit_code=1 if blocking else 0,
+        )
+
+    return None
+
+
+def _resolve_ineligible_baseline(
+    report: dict | None,
+    args: argparse.Namespace,
+    blocking: bool,
+    baseline_report: dict,
+) -> tuple[dict, bool, int | None] | None:
+    """Handle a baseline excluded from percentage comparisons."""
+    policy = baseline_report.get("baseline_policy")
+    if not isinstance(policy, dict) or policy.get("release_gate_eligible") is not False:
+        return None
+
+    reason = policy.get(
+        "release_gate_exclusion_reason",
+        "no exclusion reason recorded",
+    )
+    if blocking and _is_release_tag():
+        _stderr(
+            "ERROR: checked-in module baseline is ineligible for "
+            f"release-gate comparison: {reason}"
+        )
+        # Match _resolve_missing_baseline: build and emit the evidence pack
+        # and summary before failing so the failure is documented in the
+        # output artifact, not only on stderr.
+        evidence_pack = _build_evidence_pack(
+            report=report,
+            verdict="MISSING_EVIDENCE",
+            breaches=[{
+                "metric": "baseline",
+                "reason": f"release-tag baseline ineligible for comparison: {reason}",
+            }],
+            results=[],
+        )
+        _print_evidence_summary(evidence_pack)
+        _write_output(evidence_pack, args.output)
+        return {}, False, EXIT_FAILURE
+
+    _stderr(
+        "INFO: Checked-in module baseline is excluded from release-gate "
+        f"comparisons: {reason}"
+    )
+    return {}, False, None
+
+
+def _resolve_environment_mismatch(
+    report: dict | None,
+    args: argparse.Namespace,
+    blocking: bool,
+    baseline_report: dict,
+) -> tuple[dict, bool, int | None] | None:
+    """Return a terminal result when benchmark environments differ."""
+    if not (env_violations := _check_environment_compatibility(
+        report or {}, baseline_report
+    )):
+        return None
+
+    env_violation_strs = [
+        (f"env.{field}", detail)
+        for field, detail in env_violations
+    ]
+    env_violation_strs.append(
+        (
+            "baseline.percentage_thresholds",
+            "cannot evaluate percentage thresholds across incompatible "
+            "benchmark environments",
+        )
+    )
+    heading = (
+        "FAIL: Current and baseline benchmark environments are incompatible:"
+        if blocking else
+        "MISSING_EVIDENCE: Current and baseline benchmark environments "
+        "are incompatible:"
+    )
+    return {}, False, _report_integrity_failure(
+        report,
+        args,
+        env_violation_strs,
+        heading,
+        "  Percentage thresholds cannot be evaluated across incompatible "
+        "environments.\n"
+        "  Regenerate the baseline on the same platform, load generator, "
+        "and NGINX version as the current run.",
+        exit_code=1 if blocking else 0,
+    )
+
+
 def _resolve_baseline(
     report: dict | None, args: argparse.Namespace, blocking: bool,
 ) -> tuple[dict, bool, int | None]:
@@ -2696,52 +2805,17 @@ def _resolve_baseline(
 
     baseline_report = json.loads(baseline_path.read_text(encoding="utf-8"))
 
-    if _baseline_head_binding_required():
-        if head_violations := _baseline_head_violations(baseline_report):
-            return {}, False, _report_integrity_failure(
-                report,
-                args,
-                head_violations,
-                "FAIL: Checked-in baseline is not bound to the current HEAD:",
-                "  Regenerate the 0.9.2 module baseline from a real module-enabled "
-                "benchmark at this exact commit before release qualification.",
-                exit_code=1 if blocking else 0,
-            )
+    head_result = _resolve_baseline_head_binding(
+        report, args, blocking, baseline_report
+    )
+    if head_result is not None:
+        return head_result
 
-    # Evaluate release_gate_eligible FIRST: an ineligible baseline is
-    # excluded from release-gate comparison regardless of evidence
-    # integrity, so skip the integrity validation entirely for it.
-    policy = baseline_report.get("baseline_policy")
-    if isinstance(policy, dict) and policy.get("release_gate_eligible") is False:
-        reason = policy.get(
-            "release_gate_exclusion_reason",
-            "no exclusion reason recorded",
-        )
-        if blocking and _is_release_tag():
-            _stderr(
-                "ERROR: checked-in module baseline is ineligible for "
-                f"release-gate comparison: {reason}"
-            )
-            # Match _resolve_missing_baseline: build and emit the evidence
-            # pack and summary before failing so the failure is documented
-            # in the output artifact, not only on stderr.
-            evidence_pack = _build_evidence_pack(
-                report=report,
-                verdict="MISSING_EVIDENCE",
-                breaches=[{
-                    "metric": "baseline",
-                    "reason": f"release-tag baseline ineligible for comparison: {reason}",
-                }],
-                results=[],
-            )
-            _print_evidence_summary(evidence_pack)
-            _write_output(evidence_pack, args.output)
-            return {}, False, EXIT_FAILURE
-        _stderr(
-            "INFO: Checked-in module baseline is excluded from release-gate "
-            f"comparisons: {reason}"
-        )
-        return {}, False, None
+    ineligible_result = _resolve_ineligible_baseline(
+        report, args, blocking, baseline_report
+    )
+    if ineligible_result is not None:
+        return ineligible_result
 
     integrity_rc = _validate_baseline_evidence(
         report, args, baseline_report, blocking
@@ -2749,38 +2823,11 @@ def _resolve_baseline(
     if integrity_rc is not None:
         return {}, False, integrity_rc
 
-    if env_violations := _check_environment_compatibility(
-        report or {},
-        baseline_report,
-    ):
-        env_violation_strs = [
-            (f"env.{field}", detail)
-            for field, detail in env_violations
-        ]
-        env_violation_strs.append(
-            (
-                "baseline.percentage_thresholds",
-                "cannot evaluate percentage thresholds across incompatible "
-                "benchmark environments",
-            )
-        )
-        heading = (
-            "FAIL: Current and baseline benchmark environments are incompatible:"
-            if blocking else
-            "MISSING_EVIDENCE: Current and baseline benchmark environments "
-            "are incompatible:"
-        )
-        return {}, False, _report_integrity_failure(
-            report,
-            args,
-            env_violation_strs,
-            heading,
-            "  Percentage thresholds cannot be evaluated across incompatible "
-            "environments.\n"
-            "  Regenerate the baseline on the same platform, load generator, "
-            "and NGINX version as the current run.",
-            exit_code=1 if blocking else 0,
-        )
+    environment_result = _resolve_environment_mismatch(
+        report, args, blocking, baseline_report
+    )
+    if environment_result is not None:
+        return environment_result
 
     return _extract_evidence_metrics(baseline_report), True, None
 
