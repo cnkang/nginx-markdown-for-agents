@@ -1,5 +1,9 @@
 {
   "schema_version": 1,
+  "generated_from": {
+    "path": "tools/release-matrix.json",
+    "sha256": "sha256:3cafb674ef6d78b1a311e6ea5122b1719217e545c0ad40df196c6baa44eb75bd"
+  },
   "entries": [
     {
       "nginx_version": "1.24.0",

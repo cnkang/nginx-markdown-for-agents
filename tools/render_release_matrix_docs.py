@@ -21,7 +21,10 @@ Exit codes:
     1  Check mismatch or runtime error
     2  Schema validation error
 
-The authoritative matrix source is tools/release-matrix.json.
+The authoritative policy matrix source is tools/release-matrix.json.
+The release-contract projection at docs/releases/release-matrix.json is
+generated separately by generate_release_contract_matrix.py and is not a
+manually maintained input to this renderer.
 Schema: tools/release-matrix.schema.json.
 
 Part of release matrix source of truth.

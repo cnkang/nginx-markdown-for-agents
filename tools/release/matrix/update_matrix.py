@@ -6,7 +6,9 @@ Scrapes the nginx.org download page, computes the desired matrix state
 ``tools/release-matrix.json`` and the Platform Compatibility Matrix table
 in ``docs/guides/INSTALLATION.md``.  A machine-readable diff summary is
 written to ``matrix-diff.json`` when changes are detected, for consumption
-by the GitHub Actions workflow.
+by the GitHub Actions workflow.  The workflow then regenerates the
+ABI-bound release-contract projection at
+``docs/releases/release-matrix.json`` from the policy matrix.
 
 Exit codes:
     0 — Success (no changes needed, or changes written successfully)

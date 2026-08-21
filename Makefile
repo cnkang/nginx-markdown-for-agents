@@ -302,6 +302,7 @@ docs-check-base:
 	python3 tools/docs/check_packaging_docs.py
 	python3 tools/docs/check_packaging_consistency.py
 	python3 tools/docs/validate_packaging_matrix.py
+	python3 tools/release/matrix/generate_release_contract_matrix.py --check
 	python3 tools/render_release_matrix_docs.py --check
 	python3 tools/release/matrix/validate_workflow_matrix_consumers.py
 	python3 tools/release/gates/validate_release_matrix_schema.py
@@ -1119,22 +1120,22 @@ release-gates-check-092: release-gates-check-092-canonical
 	$(MAKE) test-property
 	@echo "=== 0.9.2 Release Gates: PASS ==="
 
-# release-matrix-check: Canonical release-matrix gate.
-# Validates docs/releases/release-matrix.json against the immutable
-# schemas/release-matrix.schema.json, requires a fully canonical document
-# (no legacy aliases, no legacy top-level matrix, no dropped metadata
-# keys), and binds every entry to the frozen ABI version and the official
-# feature-manifest digest. Fail-closed on any drift.
+# release-matrix-check: Release matrix source/projection gate.
+# Checks that docs/releases/release-matrix.json is the deterministic
+# release-contract projection of tools/release-matrix.json, then validates
+# its immutable schema, ABI binding, and feature-manifest binding. Fail-closed
+# on any source or projection drift.
 # Classification: BLOCKING
 release-matrix-check:
-	@echo "=== Canonical Release Matrix Check ==="
+	@echo "=== Release Matrix Source/Projection Check ==="
+	python3 tools/release/matrix/generate_release_contract_matrix.py --check
 	python3 tools/release/gates/validate_official_feature_manifest.py
 	$(MAKE) official-feature-manifest-generate
 	python3 tools/release/gates/validate_official_feature_manifest.py
 	git diff --exit-code -- artifacts/release/0.9.2/official-build-feature-manifest.json
 	PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
 	PYTHONPATH=. python3 -m pytest tools/release/matrix/tests/test_validate_release_matrix.py -q --tb=short
-	@echo "  Canonical Release Matrix Check: PASSED"
+	@echo "  Release Matrix Source/Projection Check: PASSED"
 
 # release-candidate-evidence-check: Pre-freeze release candidate evidence gate.
 # Validates release-candidate evidence against the v1 schema.

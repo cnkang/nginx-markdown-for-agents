@@ -10,6 +10,23 @@
       "const": 1,
       "description": "Canonical schema version. Integer 1; legacy string versions like \"1.0\" are rejected."
     },
+    "generated_from": {
+      "type": "object",
+      "description": "Deterministic source binding for the generated release-contract projection.",
+      "required": ["path", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "const": "tools/release-matrix.json",
+          "description": "The sole manually maintained policy matrix source."
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "SHA-256 of the canonical JSON content of the source matrix."
+        }
+      }
+    },
     "entries": {
       "type": "array",
       "description": "Canonical release matrix rows.",
