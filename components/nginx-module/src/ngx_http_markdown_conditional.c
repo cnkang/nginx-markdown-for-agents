@@ -651,7 +651,7 @@ typedef struct {
     ngx_table_elt_t                         *last_modified;
     off_t                                   content_length_n;
     time_t                                  last_modified_time;
-    ngx_flag_t                              allow_ranges;
+    unsigned                                allow_ranges;
     ngx_http_markdown_304_list_snapshot_t  headers_snapshot;
     ngx_http_markdown_304_list_snapshot_t  trailers_snapshot;
 } ngx_http_markdown_304_snapshot_t;
