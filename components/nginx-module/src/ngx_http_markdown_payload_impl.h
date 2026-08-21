@@ -1604,7 +1604,8 @@ ngx_http_markdown_forward_headers(ngx_http_request_t *r, ngx_http_markdown_ctx_t
             ctx->lifecycle.last_modified.source_last_modified_time;
     }
 
-    rc = ngx_http_next_header_filter(r);
+    rc = ngx_http_markdown_next_header_filter_with_auth(
+        r, ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module));
     /*
      * Canonical NGINX model: header-chain NGX_AGAIN means the write filter
      * queued the header block — the headers are ACCEPTED and the header

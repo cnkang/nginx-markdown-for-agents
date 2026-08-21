@@ -30,6 +30,9 @@
  *   header send, no partial Markdown response may be committed.
  */
 
+#ifndef NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
+#define NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL 1
+#endif
 #include "ngx_http_markdown_stream_commit.h"
 
 
@@ -558,25 +561,7 @@ ngx_http_markdown_stream_commit_apply_auth_cache_control(
     ngx_http_request_t *r, /* NOSONAR: r passed to non-const modify_cache_control_for_auth */
     const ngx_http_markdown_conf_t *conf)
 {
-#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
-    ngx_int_t  rc;
-
-    if (conf == NULL) {
-        return NGX_OK;
-    }
-
-    if (ngx_http_markdown_is_authenticated(r, conf)) {
-        rc = ngx_http_markdown_modify_cache_control_for_auth(r);
-        if (rc != NGX_OK) {
-            return rc;
-        }
-    }
-#else
-    (void) r;
-    (void) conf;
-#endif
-
-    return NGX_OK;
+    return ngx_http_markdown_apply_auth_cache_control(r, conf);
 }
 
 

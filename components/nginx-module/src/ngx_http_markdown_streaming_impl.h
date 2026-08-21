@@ -20,6 +20,29 @@
 #include "ngx_http_markdown_stream_postcommit.h"
 #include "ngx_http_markdown_stream_commit.h"
 
+#ifndef NGX_HTTP_MARKDOWN_NEXT_HEADER_FILTER_WITH_AUTH_DEFINED
+#define NGX_HTTP_MARKDOWN_NEXT_HEADER_FILTER_WITH_AUTH_DEFINED 1
+
+/*
+ * Standalone streaming harnesses include this implementation without the
+ * request orchestrator.  Keep their header emission on the same auth policy
+ * while avoiding a second definition in the production translation unit.
+ */
+static ngx_int_t
+ngx_http_markdown_next_header_filter_with_auth(
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf)
+{
+    ngx_int_t  rc;
+
+    rc = ngx_http_markdown_apply_auth_cache_control(r, conf);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
+    return ngx_http_next_header_filter(r);
+}
+
+#endif /* NGX_HTTP_MARKDOWN_NEXT_HEADER_FILTER_WITH_AUTH_DEFINED */
 
 typedef struct {
     ngx_flag_t  main_terminal;
@@ -2471,7 +2494,7 @@ ngx_http_markdown_streaming_commit(
             r, ctx, conf, ERROR_STREAMING_FALLBACK);
     }
 
-    rc = ngx_http_next_header_filter(r);
+    rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
     if (rc == NGX_AGAIN) {
         /*
          * Canonical NGINX model: header-chain NGX_AGAIN means the write

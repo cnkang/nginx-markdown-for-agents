@@ -20,6 +20,39 @@
 
 #include "ngx_http_markdown_exports.h"
 
+#ifndef NGX_HTTP_MARKDOWN_AUTH_CACHE_CONTROL_HELPER_DEFINED
+#define NGX_HTTP_MARKDOWN_AUTH_CACHE_CONTROL_HELPER_DEFINED 1
+
+/*
+ * Keep the standalone header harness and production translation units on
+ * the same final-header authentication policy.  Production includes this
+ * file after filter_module.h, which supplies the identical helper first;
+ * the guard prevents a duplicate static definition there.  Standalone
+ * harnesses compile with the auth policy disabled and therefore need no
+ * auth-function declarations.
+ */
+static ngx_int_t
+ngx_http_markdown_apply_auth_cache_control(
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf)
+{
+#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
+    if (r == NULL) {
+        return NGX_ERROR;
+    }
+
+    if (conf != NULL && ngx_http_markdown_is_authenticated(r, conf)) {
+        return ngx_http_markdown_modify_cache_control_for_auth(r);
+    }
+#else
+    (void) r;
+    (void) conf;
+#endif
+
+    return NGX_OK;
+}
+
+#endif /* NGX_HTTP_MARKDOWN_AUTH_CACHE_CONTROL_HELPER_DEFINED */
+
 /*
  * Include the header plan header for the atomic apply function.
  * In standalone test mode, the test harness provides its own stub.
@@ -1112,18 +1145,14 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
     }
 
     /* P5: Cache-Control auth modification */
-#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
-    if (ngx_http_markdown_is_authenticated(r, conf)) {
-        rc = ngx_http_markdown_modify_cache_control_for_auth(r);
-        if (rc != NGX_OK) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                "markdown: header_plan_apply_error: "
-                "Cache-Control auth modification failed");
-            ngx_http_markdown_header_snapshot_restore(r, &snapshot);
-            return NGX_ERROR;
-        }
+    rc = ngx_http_markdown_apply_auth_cache_control(r, conf);
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "markdown: header_plan_apply_error: "
+            "Cache-Control auth modification failed");
+        ngx_http_markdown_header_snapshot_restore(r, &snapshot);
+        return NGX_ERROR;
     }
-#endif
 
     /* ================================================================
      * COMMIT PHASE: pointer/scalar assignment only, zero allocations,

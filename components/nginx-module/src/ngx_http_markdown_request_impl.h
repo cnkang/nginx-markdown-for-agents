@@ -13,6 +13,9 @@
  * evolve separately from payload buffering, decompression, and output shaping.
  */
 
+static ngx_int_t ngx_http_markdown_next_header_filter_with_auth(
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf);
+
 #include "ngx_http_markdown_payload_impl.h"
 #include "ngx_http_markdown_conversion_impl.h"
 #include "ngx_http_markdown_exports.h"
@@ -132,6 +135,23 @@ ngx_http_markdown_settle_buffered_failopen_delivery(
 }
 static ngx_http_output_header_filter_pt ngx_http_next_header_filter;
 static ngx_http_output_body_filter_pt ngx_http_next_body_filter;
+
+static ngx_int_t
+ngx_http_markdown_next_header_filter_with_auth(
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf)
+{
+    ngx_int_t  rc;
+
+    rc = ngx_http_markdown_apply_auth_cache_control(r, conf);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
+    return ngx_http_next_header_filter(r);
+}
+
+#define NGX_HTTP_MARKDOWN_NEXT_HEADER_FILTER_WITH_AUTH_DEFINED 1
+
 const ngx_str_t *ngx_http_markdown_reason_failed_closed(void);
 const ngx_str_t *ngx_http_markdown_reason_failed_open(void);
 const ngx_str_t *ngx_http_markdown_reason_from_error_category(
@@ -271,7 +291,7 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
         ngx_http_markdown_reason_failed_open(),
         ngx_http_markdown_reason_from_error_category(
             NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
-    rc = ngx_http_next_header_filter(r);
+    rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
     /* No request context exists on this allocation-failure path, so an
      * NGX_AGAIN return cannot be settled on a later body-filter resume.
      * Keep delivery accounting conservative: only definitive downstream
@@ -340,7 +360,7 @@ ngx_http_markdown_handle_encoding_collection_failure(
         ngx_http_markdown_reason_failed_open(),
         ngx_http_markdown_reason_from_error_category(
             NGX_HTTP_MARKDOWN_ERROR_SYSTEM, r->connection->log));
-    rc = ngx_http_next_header_filter(r);
+    rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
     /*
      * Canonical NGINX model: header-chain NGX_AGAIN means the write filter
      * queued the header block — the headers are accepted.  Publish the
@@ -580,7 +600,7 @@ ngx_http_markdown_header_precheck(ngx_http_request_t *r,
                 r->connection->log));
         ngx_http_markdown_log_header_terminal_decision(
             r, conf, early_eff, "disabled");
-        *rc = ngx_http_next_header_filter(r);
+        *rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
         return 1;
     }
 
@@ -601,7 +621,7 @@ ngx_http_markdown_header_precheck(ngx_http_request_t *r,
                 eligibility, r->connection->log));
         ngx_http_markdown_log_header_terminal_decision(
             r, conf, early_eff, "not_eligible");
-        *rc = ngx_http_next_header_filter(r);
+        *rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
         return 1;
     }
 
@@ -617,7 +637,7 @@ ngx_http_markdown_header_precheck(ngx_http_request_t *r,
                 r->connection->log));
         ngx_http_markdown_log_header_terminal_decision(
             r, conf, early_eff, "not_eligible");
-        *rc = ngx_http_next_header_filter(r);
+        *rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
         return 1;
     }
 
@@ -631,7 +651,7 @@ ngx_http_markdown_header_precheck(ngx_http_request_t *r,
             ngx_http_markdown_reason_bypass_no_transform());
         ngx_http_markdown_log_header_terminal_decision(
             r, conf, early_eff, "bypass_no_transform");
-        *rc = ngx_http_next_header_filter(r);
+        *rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
         return 1;
     }
 
@@ -640,7 +660,7 @@ ngx_http_markdown_header_precheck(ngx_http_request_t *r,
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
         ngx_http_markdown_log_accept_skip(r, conf, early_eff,
             accept_reason);
-        *rc = ngx_http_next_header_filter(r);
+        *rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
         return 1;
     }
 
@@ -704,7 +724,7 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
         ngx_http_markdown_log_decision(
             r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_overload());
-        rc = ngx_http_next_header_filter(r);
+        rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
         /*
          * Canonical NGINX model: header-chain NGX_AGAIN means the write
          * filter queued the header block — the headers are accepted.
@@ -745,7 +765,7 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
         ngx_http_markdown_log_decision(
             r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_failed_open());
-        rc = ngx_http_next_header_filter(r);
+        rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
         /*
          * Canonical NGINX model: header-chain NGX_AGAIN means the write
          * filter queued the header block — the headers are accepted.
@@ -951,7 +971,7 @@ ngx_http_markdown_handle_encoding_header_invalid(
     ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                   "markdown: malformed Content-Encoding "
                   "chain, returning original encoded content");
-    rc = ngx_http_next_header_filter(r);
+    rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
     /*
      * Canonical NGINX model: header-chain NGX_AGAIN means the write
      * filter queued the header block — the headers are accepted.
@@ -1059,7 +1079,7 @@ encoding_policy:
         NGX_HTTP_MARKDOWN_METRIC_INC(skips.compression_passthrough);
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_streaming_skip_compressed());
-        *rc = ngx_http_next_header_filter(r);
+        *rc = ngx_http_markdown_next_header_filter_with_auth(r, conf);
         /*
          * Canonical NGINX model: header-chain NGX_AGAIN means the write
          * filter queued the header block — the headers are accepted.
@@ -1227,7 +1247,8 @@ ngx_http_markdown_header_filter_handle_reentry(ngx_http_request_t *r)
     if (ctx->headers_forwarded) {
         return NGX_OK;
     }
-    return ngx_http_next_header_filter(r);
+    return ngx_http_markdown_next_header_filter_with_auth(
+        r, ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module));
 }
 
 
@@ -1264,7 +1285,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
     if (conf == NULL) {
         /* Module not configured, pass through */
-        return ngx_http_next_header_filter(r);
+        return ngx_http_markdown_next_header_filter_with_auth(r, NULL);
     }
 
     /* Header-filter re-entry must reuse the request context created by the
