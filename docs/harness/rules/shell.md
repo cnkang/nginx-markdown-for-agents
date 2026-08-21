@@ -79,6 +79,13 @@ Required:
 - For HTTP HEAD validation in curl-based harness scripts, use `curl --head`
   (or `-I`) instead of `-X HEAD`, and create any expected empty body artifact
   explicitly when downstream checks read a body file.
+- **Never read `$?` inside a negated conditional body** (2026-08-21,
+  `6fcf1bb9`).  Inside `if ! run_case; then rc=$?`, bash's `$?` reflects
+  the NEGATED status (always 0 when the command failed), so the branch
+  can never observe the original exit code and failure-classification
+  branches become dead.  Capture the status before branching with
+  `run_case || rc=$?` (safe under `set -e`), then test `${rc}`.  The same
+  applies to `while !`/`until !` bodies.
 
 
 ### Rule 41 — Shell harness detectors must use POSIX ERE

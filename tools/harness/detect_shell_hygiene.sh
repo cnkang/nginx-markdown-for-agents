@@ -30,6 +30,11 @@
 #       to --head across all HTTP servers.  Per AGENTS.md Rule 18,
 #       prefer --head (-I) for HTTP HEAD validation.
 #
+#   (f) $? read inside a negated conditional body (Rule 11 / 6fcf1bb9)
+#       Inside `if ! cmd; then rc=$?`, bash's $? reflects the NEGATED
+#       status (always 0 when cmd failed), so the branch never observes
+#       the original exit code.  Capture with `cmd || rc=$?` instead.
+#
 # Rationale: 8+ fix commits in the review window addressed these three
 # patterns (0a43c15, 6fb0b1a, 698a2cb, 486a97a, f723235, e0f3948,
 # 495aa0e, a9ea852).  No prior automated detection existed.
@@ -116,6 +121,12 @@ readonly WARNING_ALLOWLIST=(
 # Format: "relative/path"
 # (Legacy array kept for backward compat with scanning loop)
 readonly RETURN_EXEMPT_FILES=(
+)
+
+# Files exempt from pattern (f) ($? inside negated conditionals):
+# fixture tests intentionally embed the defect shapes they assert on.
+readonly NEGATION_EXEMPT_FILES=(
+    "tools/harness/tests/test_detect_shell_hygiene.sh"
 )
 
 echo "=== Shell Hygiene Detection (S7682 / S7688 / S131 / S1066 / Rule 18) ===" >&2
@@ -390,6 +401,90 @@ while IFS= read -r match; do
 done < <(grep -rnE 'curl[[:space:]].*-X[[:space:]]+HEAD' "$SCAN_DIR" --include='*.sh' 2>/dev/null || true)
 
 if [[ "$curl_head_hits" -eq 0 ]]; then
+    echo "$MSG_NONE_FOUND" >&2
+fi
+echo "" >&2
+
+# ── Pattern (f): $? read inside a negated conditional body ──
+#
+# Inside `if ! cmd; then ... $? ...; fi`, bash's $? reflects the negated
+# status, so the original exit code is unobservable.  Per AGENTS.md
+# Rules 11/18 and fix 6fcf1bb9, capture with `cmd || rc=$?` instead.
+echo "--- Pattern (f): \$? inside negated conditional body ---"
+
+negation_hits=0
+while IFS= read -r script_file; do
+    # Fixture tests intentionally embed defect shapes; exempt them.
+    skip_negation=0
+    for exempt in ${NEGATION_EXEMPT_FILES[@]+"${NEGATION_EXEMPT_FILES[@]}"}; do
+        if [[ "$script_file" == *"$exempt"* ]]; then
+            skip_negation=1
+            break
+        fi
+    done
+    if [[ "$skip_negation" -eq 1 ]]; then
+        continue
+    fi
+    # Single-line form first: `if ! cmd; then rc=$?; fi`
+    while IFS=: read -r hit_line hit_content; do
+        [[ -z "$hit_line" ]] && continue
+        # Skip the prescribed capture idiom `|| rc=$?`.
+        if [[ "$hit_content" =~ \|\|[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=[\"]?\$\? ]]; then
+            continue
+        fi
+        echo "  ERROR   ${script_file}:${hit_line} — \$? inside a negated conditional reads the negated status; capture with 'cmd || rc=\$?': ${hit_content}" >&2
+        errors=$((errors + 1))
+        negation_hits=$((negation_hits + 1))
+    done < <(grep -nE '^[[:space:]]*(if|elif|while|until)[[:space:]]+!.*\$\?' "$script_file" 2>/dev/null || true)
+
+    # Multi-line form: track open negated conditions across lines.
+    while IFS=: read -r hit_line hit_content; do
+        [[ -z "$hit_line" ]] && continue
+        echo "  ERROR   ${script_file}:${hit_line} — \$? inside a negated conditional body reads the negated status; capture with 'cmd || rc=\$?': ${hit_content}" >&2
+        errors=$((errors + 1))
+        negation_hits=$((negation_hits + 1))
+    done < <(awk '
+        BEGIN { ifdepth = 0; pending = 0 }
+        {
+            line = $0
+            trimmed = line
+            sub(/^[[:space:]]+/, "", trimmed)
+
+            is_comment = (trimmed ~ /^#/)
+            is_fi      = (trimmed ~ /^fi([[:space:];)]|$)/)
+            is_else    = (trimmed ~ /^else([[:space:];)]|$)/)
+            is_elif    = (trimmed ~ /^elif([[:space:]]|$)/)
+            is_done    = (trimmed ~ /^done([[:space:];)]|$)/)
+            is_esac    = (trimmed ~ /^esac([[:space:];)]|$)/)
+            is_open    = (trimmed ~ /^(if|while|until|for|case)([[:space:];]|$)/)
+            is_negopen = (trimmed ~ /^(if|while|until)[[:space:]]+!/)
+            is_elifneg = (trimmed ~ /^elif[[:space:]]+!/)
+
+            if ((pending > 0) && (!is_comment) && (line ~ /\$\?/) \
+                && !(is_negopen || is_elifneg) \
+                && (line !~ /\|\|[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*\$\?/)) {
+                print NR ":" line
+            }
+
+            if (is_fi || is_done || is_esac || is_else || is_elif) {
+                if (pending > 0 && openlevel[pending] == ifdepth) {
+                    pending--
+                }
+            }
+            if (is_fi || is_done || is_esac) {
+                if (ifdepth > 0) ifdepth--
+            } else if (is_open && !(is_negopen || is_elifneg)) {
+                ifdepth++
+            }
+            if (is_negopen || is_elifneg) {
+                pending++
+                openlevel[pending] = ifdepth
+            }
+        }
+    ' "$script_file" 2>/dev/null || true)
+done < <(find "$SCAN_DIR" -name '*.sh' -type f 2>/dev/null | sort)
+
+if [[ "$negation_hits" -eq 0 ]]; then
     echo "$MSG_NONE_FOUND" >&2
 fi
 echo "" >&2
