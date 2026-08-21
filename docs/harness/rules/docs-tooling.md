@@ -105,6 +105,13 @@ Required:
   `make docs-style-check-regression` for changed files. The advisory scan is
   `make docs-style-check`. The repository-wide budget runs through full
   harness or release validation with `make docs-style-check-baseline`.
+- **Write-time enforcement (2026-08-21)**: the 0.9.2 window needed two
+  post-hoc cleanup commits (`3ffc2c0b`, `6b61e3f8`) because regressions
+  surfaced at review time, not write time. A pre-commit hook
+  (`docs-style-changed` in `.pre-commit-config.yaml`) now runs the
+  changed-file gate before commit; enable hooks with `pre-commit install`.
+  The hook is advisory-fast and does not replace the blocking
+  `make docs-check`.
 - The scan excludes code blocks, fenced blocks, tables, headings, inline
   code, links, and HTML comments. Rule documents, release-gate
   templates, and MUST-specification clauses may retain rule-format long

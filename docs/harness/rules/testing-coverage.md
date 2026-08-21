@@ -14,6 +14,18 @@ Historical issues: `48edb7c`, `0a08d08`, `3a9f3cd`, `dcbf923`, `2a23415`, `25343
 
 Required:
 - Every bug fix must ship with at least one targeted regression test.
+- **Harness detector fixes ship adversarial fixtures (2026-08-21)**: the
+  0.9.2 window needed ~10 commits fixing the detectors themselves
+  (`076bfdc1` reusable-workflow boundary state, `658cb4d3` future
+  annotations, `9fd3deba` regex complexity, `eaadc7fb`, `493732fe`),
+  proving detector bugs recur at boundary shapes.  A fix to any
+  `tools/harness/detect_*` script must add a test fixture that reproduces
+  the exact defect shape (the fixture fails before the fix and passes
+  after it), plus a clean-fixture case proving the detector does not
+  false-positive on the prescribed idiom.  Detector scans over the full
+  repository must stay runtime-bounded; if a detector needs optimization,
+  preserve its detection semantics and note the budget in the rule that
+  owns it.
 - For streaming/parser/sanitizer fixes, include cross-boundary and malformed-input cases.
 - For streaming text-path fixes, include non-ASCII multibyte split cases (UTF-8 boundary tests).
 - Streaming chunk-split fuzz targets must exercise multi-boundary patterns (for
