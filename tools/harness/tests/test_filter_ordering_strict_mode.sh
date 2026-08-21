@@ -2,7 +2,7 @@
 
 set -e
 
-WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 FILTER_ORDERING_SCRIPT="${WORKSPACE_ROOT}/tests/e2e/filter_ordering_test.sh"
 TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/filter-ordering-strict.XXXXXX")"
 FAKE_CURL_DIR="${TEST_ROOT}/bin"
