@@ -1009,7 +1009,8 @@ http {
 
         # 10.12: Fail-open preserves Cache-Control and ETag (authenticated)
         # Uses auth_policy allow so the request enters conversion/streaming,
-        # then streaming_buffer=1k triggers pre-commit failure -> fail-open.
+        # then streaming_buffer=64k triggers pre-commit failure for the
+        # 12MB fixture -> fail-open.
         # With auth_policy allow + auth_cookies "session*" + Cookie header,
         # the normal (non-fail-open) path would rewrite Cache-Control to
         # private.  Fail-open must bypass that rewrite.
