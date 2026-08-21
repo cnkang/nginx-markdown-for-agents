@@ -17,6 +17,7 @@ sys.path.insert(
 from validate_workflow_matrix_consumers import (  # noqa: E402  # pylint: disable=import-error
     NGINX_VERSION_RE,
     _is_excluded_line,
+    _has_top_level_workflow_call,
     _publish_job_needs,
     _uses_dynamic_resolution,
     extract_hardcoded_versions,
@@ -354,6 +355,10 @@ class TestValidateReleaseBlockingPublishDag:
             "release-gate",
             "official-docker-release-gate",
         }
+
+    def test_workflow_call_requires_two_space_job_indent(self) -> None:
+        assert _has_top_level_workflow_call("  workflow_call:\n")
+        assert not _has_top_level_workflow_call("    workflow_call:\n")
 
     def _make_fixture(
         self, tmp_path: Path, release_workflow_body: str

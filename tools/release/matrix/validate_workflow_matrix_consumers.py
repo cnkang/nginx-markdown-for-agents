@@ -340,7 +340,7 @@ def validate_release_blocking_publish_dag(matrix_path: Path) -> list[str]:
         if not owner_path.exists():
             continue
         owner_content = owner_path.read_text(encoding="utf-8")
-        if not re.search(r"(?m)^  workflow_call:\s*$", owner_content):
+        if not _has_top_level_workflow_call(owner_content):
             errors.append(
                 f"{owner} must expose workflow_call before it can be a "
                 "release-blocking reusable Docker gate"
@@ -410,6 +410,15 @@ def _parse_inline_needs(value: str) -> set[str]:
         for entry in value[1:-1].split(",")
         if entry.strip()
     }
+
+
+def _has_top_level_workflow_call(content: str) -> bool:
+    """Return whether a reusable workflow declares its call entry point."""
+    return any(
+        len(line) - len(line.lstrip(" ")) == 2
+        and line.strip() == "workflow_call:"
+        for line in content.splitlines()
+    )
 
 
 def main() -> int:
