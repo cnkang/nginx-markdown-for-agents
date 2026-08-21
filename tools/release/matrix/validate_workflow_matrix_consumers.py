@@ -317,10 +317,7 @@ def validate_release_blocking_publish_dag(matrix_path: Path) -> list[str]:
             f"workflow is missing: {canonical_path}"
         ]
     canonical_content = canonical_path.read_text(encoding="utf-8")
-    publish_match = re.search(
-        r"(?ms)^  publish:\s*\n.*?^    needs:\s*\[([^\]]+)\]",
-        canonical_content,
-    )
+    publish_needs = _publish_job_needs(canonical_content)
 
     if "official-docker-release-gate:" not in canonical_content:
         errors.append(
@@ -332,7 +329,7 @@ def validate_release_blocking_publish_dag(matrix_path: Path) -> list[str]:
             "release-packages.yml does not call the official Docker workflow "
             "as a reusable release gate"
         )
-    if publish_match is None or "official-docker-release-gate" not in publish_match.group(1):
+    if "official-docker-release-gate" not in publish_needs:
         errors.append(
             "release-packages.yml publish job does not depend on "
             "official-docker-release-gate"
@@ -350,6 +347,69 @@ def validate_release_blocking_publish_dag(matrix_path: Path) -> list[str]:
             )
 
     return errors
+
+
+def _publish_job_needs(content: str) -> set[str]:
+    """Return inline ``needs`` entries declared by the ``publish`` job.
+
+    The workflow validator only needs the publish job's dependency names.
+    Walking the small YAML structure directly keeps the check bounded and
+    avoids a backtracking expression over the complete workflow document.
+    """
+    publish_indent = 2
+    in_publish = False
+
+    for line in content.splitlines():
+        parts = _publish_line_parts(line)
+        if parts is None:
+            continue
+        indent, stripped = parts
+
+        if not in_publish:
+            in_publish = _is_publish_job(indent, stripped, publish_indent)
+            continue
+        if indent <= publish_indent:
+            return set()
+        if indent != publish_indent + 2:
+            continue
+
+        needs_value = _needs_value(stripped)
+        if needs_value is not None:
+            return _parse_inline_needs(needs_value)
+
+    return set()
+
+
+def _publish_line_parts(line: str) -> tuple[int, str] | None:
+    """Return indentation and content for a meaningful workflow line."""
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return None
+    return len(line) - len(line.lstrip(" ")), stripped
+
+
+def _is_publish_job(indent: int, stripped: str, publish_indent: int) -> bool:
+    """Return whether a line starts the top-level ``publish`` job."""
+    return indent == publish_indent and stripped == "publish:"
+
+
+def _needs_value(stripped: str) -> str | None:
+    """Return the inline value for a job-level ``needs`` key."""
+    key, separator, value = stripped.partition(":")
+    if key != "needs" or not separator:
+        return None
+    return value.strip()
+
+
+def _parse_inline_needs(value: str) -> set[str]:
+    """Parse the bounded inline dependency list used by the release workflow."""
+    if not (value.startswith("[") and value.endswith("]")):
+        return set()
+    return {
+        entry.strip()
+        for entry in value[1:-1].split(",")
+        if entry.strip()
+    }
 
 
 def main() -> int:

@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -205,19 +206,26 @@ def _write_projection(projection: dict[str, Any]) -> None:
     output = validate_write_path_within_root(
         PROJECTION_PATH, REPO_ROOT, purpose="release matrix projection"
     )
-    temporary = validate_write_path_within_root(
-        output.with_suffix(output.suffix + ".tmp"),
-        REPO_ROOT,
-        purpose="release matrix projection temporary file",
+    output_directory = validate_write_path_within_root(
+        output.parent, REPO_ROOT, purpose="release matrix projection directory"
     )
+    temporary_path: Path | None = None
     try:
-        temporary.write_text(
-            json.dumps(projection, indent=2) + "\n", encoding="utf-8"
-        )
-        os.replace(temporary, output)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=output_directory,
+            prefix=".release-matrix-",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            temporary.write(json.dumps(projection, indent=2) + "\n")
+        os.replace(temporary_path, output)
     except (OSError, ValueError):
-        with contextlib.suppress(OSError, ValueError):
-            temporary.unlink(missing_ok=True)
+        if temporary_path is not None:
+            with contextlib.suppress(OSError, ValueError):
+                temporary_path.unlink(missing_ok=True)
         raise
 
 

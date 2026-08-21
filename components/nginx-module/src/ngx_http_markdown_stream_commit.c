@@ -289,10 +289,6 @@ ngx_http_markdown_stream_commit_remove_etag(
     ngx_http_request_t *r);
 
 static ngx_int_t
-ngx_http_markdown_stream_commit_apply_auth_cache_control(
-    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf);
-
-static ngx_int_t
 ngx_http_markdown_stream_commit_remove_representation_metadata(
     ngx_http_request_t *r);
 
@@ -322,7 +318,10 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
                                          const ngx_http_markdown_conf_t *conf)
 {
     ngx_int_t                        rc;
+    ngx_flag_t                       auth_cache_control_required;
     ngx_http_markdown_commit_snap_t  snap;
+
+    auth_cache_control_required = 0;
 
     if (r == NULL || ctx == NULL) {
         return NGX_ERROR;
@@ -380,8 +379,11 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    rc = ngx_http_markdown_stream_commit_apply_auth_cache_control(
-        r, conf);
+    rc = ngx_http_markdown_auth_cache_control_required(
+        r, conf, &auth_cache_control_required);
+    if (rc == NGX_OK && auth_cache_control_required) {
+        rc = ngx_http_markdown_modify_cache_control_for_auth(r);
+    }
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown: stream commit: "
@@ -538,30 +540,6 @@ ngx_http_markdown_stream_commit_remove_etag(
     ngx_http_request_t *r)
 {
     return ngx_http_markdown_set_etag(r, NULL, 0);
-}
-
-
-/**
- * Applies Cache-Control protection for authenticated requests.
- *
- * When the NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL compile-time gate
- * is enabled and the request is authenticated (as determined by the active
- * auth_policy via ngx_http_markdown_is_authenticated), this upgrades the
- * response Cache-Control to at least "private": a "public" directive is
- * rewritten to "private", and a missing/private-less header gets "private"
- * appended. "no-store" is preserved and never downgraded. This mirrors
- * the full-buffer path so streaming and buffered responses behave identically.
- *
- * @param r HTTP request.
- * @param conf Module location configuration (used for auth_policy check).
- * @return NGX_OK on success or when not applicable; NGX_ERROR on modification failure.
- */
-static ngx_int_t
-ngx_http_markdown_stream_commit_apply_auth_cache_control(
-    ngx_http_request_t *r, /* NOSONAR: r passed to non-const modify_cache_control_for_auth */
-    const ngx_http_markdown_conf_t *conf)
-{
-    return ngx_http_markdown_apply_auth_cache_control(r, conf);
 }
 
 

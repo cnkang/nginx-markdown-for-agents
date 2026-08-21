@@ -722,7 +722,6 @@ static void
 ngx_http_markdown_304_restore_list(ngx_list_t *list,
     const ngx_http_markdown_304_list_snapshot_t *snapshot)
 {
-    ngx_list_part_t  *part;
     ngx_table_elt_t  *entries;
     ngx_uint_t        restored;
 
@@ -741,7 +740,7 @@ ngx_http_markdown_304_restore_list(ngx_list_t *list,
     }
 
     restored = 0;
-    for (part = &list->part;
+    for (ngx_list_part_t *part = &list->part;
          part != NULL && restored < snapshot->entry_count;
          part = part->next)
     {
@@ -841,8 +840,11 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
 {
     ngx_table_elt_t                    *h;
     ngx_int_t                           rc;
+    ngx_flag_t                          auth_cache_control_required;
     const ngx_http_markdown_conf_t     *conf = NULL;
     ngx_http_markdown_304_snapshot_t    snapshot;
+
+    auth_cache_control_required = 0;
 
     if (r == NULL) {
         return NGX_ERROR;
@@ -861,7 +863,11 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
      * cache directive from the source response.
      */
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
-    rc = ngx_http_markdown_apply_auth_cache_control(r, conf);
+    rc = ngx_http_markdown_auth_cache_control_required(
+        r, conf, &auth_cache_control_required);
+    if (rc == NGX_OK && auth_cache_control_required) {
+        rc = ngx_http_markdown_modify_cache_control_for_auth(r);
+    }
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown: 304 auth Cache-Control update failed");
