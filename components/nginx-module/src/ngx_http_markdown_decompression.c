@@ -34,7 +34,7 @@ typedef struct {
 
 typedef struct {
     ngx_atomic_uint_t  *counter;
-    size_t              size;
+    size_t              reserved_size;
 } ngx_http_markdown_full_brotli_allocation_t;
 
 
@@ -70,6 +70,7 @@ ngx_http_markdown_full_brotli_alloc(void *opaque, size_t size)
 {
     ngx_http_markdown_full_brotli_alloc_ctx_t  *ctx;
     ngx_http_markdown_full_brotli_allocation_t  *allocation;
+    size_t                                       total;
 
     ctx = opaque;
     if (ctx == NULL || ctx->log == NULL || size == 0
@@ -79,15 +80,19 @@ ngx_http_markdown_full_brotli_alloc(void *opaque, size_t size)
         return NULL;
     }
 
+    if (size > (size_t) -1
+        - sizeof(ngx_http_markdown_full_brotli_allocation_t))
+    {
+        return NULL;
+    }
+    total = sizeof(ngx_http_markdown_full_brotli_allocation_t) + size;
     if (ngx_http_markdown_full_brotli_reserve(
-            ctx->counter, ctx->limit, size) != NGX_OK)
+            ctx->counter, ctx->limit, total) != NGX_OK)
     {
         return NULL;
     }
 
-    allocation = ngx_alloc(
-        sizeof(ngx_http_markdown_full_brotli_allocation_t) + size,
-        ctx->log);
+    allocation = ngx_alloc(total, ctx->log);
     if (allocation == NULL) {
         /*
          * Roll back the reserved budget.  NGINX workers are single-threaded
@@ -95,14 +100,14 @@ ngx_http_markdown_full_brotli_alloc(void *opaque, size_t size)
          * real contention here — the CAS/atomic discipline is retained for
          * Rule 42 volatile/atomic consistency and metrics-snapshot safety,
          * not for cross-thread synchronization.
-         */
+        */
         (void) ngx_atomic_fetch_add(
-            ctx->counter, -((ngx_atomic_int_t) size));
+            ctx->counter, -((ngx_atomic_int_t) total));
         return NULL;
     }
 
     allocation->counter = ctx->counter;
-    allocation->size = size;
+    allocation->reserved_size = total;
     return allocation + 1;
 }
 
@@ -112,7 +117,7 @@ ngx_http_markdown_full_brotli_free(void *opaque, void *address)
 {
     ngx_http_markdown_full_brotli_allocation_t  *allocation;
     ngx_atomic_uint_t                           *counter;
-    size_t                                       size;
+    size_t                                       reserved_size;
 
     (void) opaque;
     if (address == NULL) {
@@ -122,10 +127,10 @@ ngx_http_markdown_full_brotli_free(void *opaque, void *address)
     allocation =
         ((ngx_http_markdown_full_brotli_allocation_t *) address) - 1;
     counter = allocation->counter;
-    size = allocation->size;
+    reserved_size = allocation->reserved_size;
     ngx_free(allocation);
     (void) ngx_atomic_fetch_add(
-        counter, -((ngx_atomic_int_t) size));
+        counter, -((ngx_atomic_int_t) reserved_size));
 }
 #endif
 
