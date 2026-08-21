@@ -125,6 +125,36 @@ def test_non_streaming_verifier_changes_trigger_runtime_regressions() -> None:
     assert "tools/ci/verify_non_streaming_nginx_module.sh" in filters["e2e"]
 
 
+def test_release_packages_tag_gate_requires_exact_main_tip() -> None:
+    """Release tags must equal the protected branch candidate, not merely
+    be an ancestor somewhere in that branch's history."""
+    workflow_text = _workflow_text("release-packages.yml")
+
+    assert (
+        "gh api \"repos/${REPOSITORY}/commits/${DEFAULT_BRANCH}\" "
+        "--jq '.sha'"
+    ) in workflow_text
+    assert '[[ "${TAG_SHA}" != "${approved_sha}" ]]' in workflow_text
+    assert 'compare/${TAG_SHA}...${DEFAULT_BRANCH}' not in workflow_text
+
+
+def test_release_packages_publish_waits_for_official_docker_gate() -> None:
+    """Release-blocking Docker validation must be in the canonical DAG."""
+    workflow = _workflow_data("release-packages.yml")
+    publish_needs = workflow["jobs"]["publish"]["needs"]
+
+    assert "official-docker-release-gate" in publish_needs
+    assert "official-docker-release-gate" in workflow["jobs"]
+    assert (
+        "./.github/workflows/official-nginx-docker.yml"
+        in _workflow_text("release-packages.yml")
+    )
+
+    official = _workflow_data("official-nginx-docker.yml")
+    assert "workflow_call" in official["on"]
+    assert "CALLER_MODULE_SHA" in _workflow_text("official-nginx-docker.yml")
+
+
 def test_macos_smoke_retries_once_and_blocks_a_second_failure() -> None:
     """Darwin transport retries must not make repeated E2E failures advisory."""
     workflow = _workflow_data("macos-smoke.yml")

@@ -2,6 +2,23 @@ name: Official NGINX Docker Validation
 
 on:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      module_repo:
+        description: Repository URL for the exact release candidate source.
+        required: false
+        type: string
+        default: ""
+      module_ref:
+        description: Ref used only to resolve the candidate source checkout.
+        required: false
+        type: string
+        default: ""
+      module_sha:
+        description: Immutable candidate SHA consumed by the Docker build.
+        required: false
+        type: string
+        default: ""
   # Tag releases: docker-image matrix entries are release_blocking=true, so
   # the validation must run on the tag SHA before publication (F-03 fix).
   push:
@@ -98,8 +115,21 @@ jobs:
           DEFAULT_REPO: ${{ github.server_url }}/${{ github.repository }}.git
           DEFAULT_REF: ${{ github.ref_name }}
           DEFAULT_SHA: ${{ github.sha }}
+          CALLER_MODULE_REPO: ${{ inputs.module_repo || '' }}
+          CALLER_MODULE_REF: ${{ inputs.module_ref || '' }}
+          CALLER_MODULE_SHA: ${{ inputs.module_sha || '' }}
         run: |
-          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+          if [[ -n "${CALLER_MODULE_SHA}" ]]; then
+            if [[ -z "${CALLER_MODULE_REPO}" || -z "${CALLER_MODULE_REF}" ]]; then
+              echo "ERROR: workflow_call must provide module_repo, module_ref, and module_sha together." >&2
+              exit 1
+            fi
+            {
+              printf 'repo=%s\n' "${CALLER_MODULE_REPO}"
+              printf 'ref=%s\n' "${CALLER_MODULE_REF}"
+              printf 'sha=%s\n' "${CALLER_MODULE_SHA}"
+            } >> "$GITHUB_OUTPUT"
+          elif [[ "${EVENT_NAME}" == "pull_request" ]]; then
             {
               printf 'repo=%s\n' "${PR_REPO}"
               printf 'ref=%s\n' "${PR_REF}"
