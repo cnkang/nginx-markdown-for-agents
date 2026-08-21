@@ -101,3 +101,18 @@ Verification:
 - `make complexity-check`
 - `PYTHONPATH=. python3 tools/harness/detect_python_complexity.py`
 - `python3 -m pytest tools/harness/tests/test_detect_python_complexity.py -q --tb=short`
+
+**lizard/SonarCloud threshold mapping (2026-08-21):** the local gate
+(lizard CCN, `make complexity-check`) and SonarCloud use different
+metrics.  Lizard counts cyclomatic complexity per function.  SonarCloud
+additionally reports cognitive complexity and code smells with its own
+per-language thresholds.  The 0.9.2 pre-freeze window remediated several
+SonarCloud complexity findings (`e3cbf06b`, `c8c93300`, `8fbf2e7e`,
+`0e32598a`) that the local gate had passed, because nested control flow
+raises cognitive complexity faster than cyclomatic complexity.  The team
+accepts this divergence: SonarCloud cognitive complexity is not locally
+reproducible, and forcing numeric parity would either duplicate Sonar or
+weaken the local gate.  Practical contract: keep local gates clean at
+write time.  Treat SonarCloud complexity findings that arrive later as
+triage items under Rule 21 (fix by extracting helpers, not by
+suppression), and fold any recurring shape back into this rule.
