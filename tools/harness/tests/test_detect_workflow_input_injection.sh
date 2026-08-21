@@ -339,6 +339,31 @@ else
 fi
 rm -f "${wf_dir}/dot-benign.yml"
 
+# Test 12: Reusable-workflow `with:` values are not shell source and must not
+# inherit the run block state from the preceding step/job.
+cat >"${wf_dir}/reusable-with.yml" <<'Y'
+name: reusable-with
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare
+        run: echo "ready"
+  reusable:
+    uses: ./.github/workflows/official.yml
+    with:
+      module_ref: ${{ github.ref_name }}
+Y
+${DETECTOR} "${wf_dir}" >"${output_file}" 2>&1
+exit_code=$?
+if [[ ${exit_code} -eq 0 ]]; then
+    pass "reusable-workflow with values are not treated as shell source"
+else
+    fail "reusable-workflow with values are not treated as shell source" "expected exit 0, got ${exit_code}"
+    cat "${output_file}" >&2
+fi
+rm -f "${wf_dir}/reusable-with.yml"
+
 printf '\n%d passed, %d failed\n' "${PASS_COUNT}" "${FAIL_COUNT}"
 if [[ ${FAIL_COUNT} -gt 0 ]]; then
     exit 1

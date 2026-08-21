@@ -114,6 +114,17 @@ while IFS= read -r -d '' file; do
             continue
         fi
 
+        # A reusable-workflow job uses a plain `uses:` key (without the
+        # step-list dash).  It ends any preceding step run block; its `with:`
+        # values are workflow wiring, not shell source.  Without this boundary
+        # the scanner can carry a prior step's run state into the next job and
+        # report safe module_ref/module_sha wiring as shell interpolation.
+        if [[ "$line" =~ ^[[:space:]]*uses:[[:space:]]+ ]]; then
+            in_run_block=0
+            in_env_block=0
+            continue
+        fi
+
         # Check for input interpolation inside run blocks
         if [[ $in_run_block -eq 1 || $inline_run_command -eq 1 ]]; then
             # Flag ${{ inputs.* }} inside run blocks
