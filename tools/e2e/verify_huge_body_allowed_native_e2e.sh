@@ -5,7 +5,8 @@ set -euo pipefail
 # conversion_memory allows them.
 # Covers:
 #  - 100MB valid HTML conversion path (best-effort success path)
-#  - 1GB allowed-size path with deterministic conversion failure + fail-open replay
+#  - 1GB allowed-size GET path with deterministic conversion failure +
+#    fail-open replay
 #
 # Why the 1GB file is intentionally invalid UTF-8:
 # - It still forces full buffering (max_size allows it)
@@ -17,7 +18,7 @@ NGINX_VERSION="${NGINX_VERSION:-1.28.2}"
 PORT="${PORT:-18093}"
 KEEP_ARTIFACTS=0
 RUN_1G_GET="${RUN_1G_GET:-1}"
-MARKDOWN_MAX_SIZE="${MARKDOWN_MAX_SIZE:-2g}"
+MARKDOWN_MAX_SIZE="${MARKDOWN_MAX_SIZE:-1g}"
 MARKDOWN_PARSER_MEMORY="${MARKDOWN_PARSER_MEMORY:-1024m}"
 ACCEPT_MARKDOWN_HEADER='Accept: text/markdown'
 NGINX_BIN="${NGINX_BIN:-}"
@@ -44,8 +45,10 @@ markdown_limits conversion_memory allows them (native-only on Apple Silicon).
 
 Checks:
   1) 100MB valid HTML converts successfully to Markdown (GET, HEAD)
-  2) 1GB HTML is allowed by size and reaches conversion; conversion fails fast due
-     to invalid UTF-8, then fail-open returns the full original body (GET, HEAD)
+  2) 1GB HTML GET is allowed by size and reaches conversion; conversion fails
+     fast due to invalid UTF-8, then fail-open returns the full original body.
+     HEAD validates the planned Markdown representation only because HEAD does
+     not execute GET body conversion.
 
 Notes:
   - This script auto-reexecs under native arm64 on Apple Silicon if launched under Rosetta.
@@ -264,29 +267,6 @@ check_get_markdown() {
   return 0
 }
 
-check_head_failopen_passthrough() {
-  local name="$1" expected_bytes="$2"
-  local hdr="${RAW_DIR}/${name}.head.hdr"
-  local code
-
-  code="$(curl -sS -I -D "${hdr}" -o /dev/null -H "${ACCEPT_MARKDOWN_HEADER}" \
-    --max-time 180 "http://127.0.0.1:${PORT}/allow/${name}.html" -w '%{http_code}')"
-  [[ "${code}" == "200" ]] || { echo "${name}: expected HEAD 200, got ${code}" >&2; exit 1; }
-
-  grep -qi '^Content-Type: text/html' "${hdr}" || {
-    echo "${name}: expected pass-through Content-Type text/html on HEAD" >&2
-    exit 1
-  }
-
-  local cl
-  cl="$(awk 'BEGIN{IGNORECASE=1} /^Content-Length:/ {gsub(/\r/, ""); print $2; exit}' "${hdr}")"
-  [[ "${cl}" == "${expected_bytes}" ]] || {
-    echo "${name}: Content-Length mismatch (expected ${expected_bytes}, got ${cl:-missing})" >&2
-    exit 1
-  }
-  return 0
-}
-
 check_get_failopen_passthrough() {
   local name="$1" expected_bytes="$2" timeout_s="$3"
   local hdr="${RAW_DIR}/${name}.get.hdr"
@@ -318,7 +298,7 @@ check_head_markdown "convert-100m"
 check_get_markdown "convert-100m" 600
 
 echo "==> 1GB fail-open replay validation (max_size allowed)"
-check_head_failopen_passthrough "failopen-1g-invalid" "1073741824"
+check_head_markdown "failopen-1g-invalid"
 if [[ "${RUN_1G_GET}" == "1" ]]; then
   check_get_failopen_passthrough "failopen-1g-invalid" "1073741824" 300
 else
@@ -326,10 +306,14 @@ else
 fi
 
 echo "==> Log sanity checks"
-grep -q 'conversion failed' "${RUNTIME}/logs/error.log" || {
-  echo "Expected conversion failure log for failopen-1g-invalid not found" >&2
-  exit 1
-}
+if [[ "${RUN_1G_GET}" == "1" ]]; then
+  grep -q 'conversion failed' "${RUNTIME}/logs/error.log" || {
+    echo "Expected conversion failure log for failopen-1g-invalid not found" >&2
+    exit 1
+  }
+else
+  echo "==> Skipping 1GB conversion log check (--skip-1g-get)"
+fi
 if grep -q 'response size exceeds limit' "${RUNTIME}/logs/error.log"; then
   echo "Unexpected size-limit bypass log found in allowed-size scenario" >&2
   exit 1
