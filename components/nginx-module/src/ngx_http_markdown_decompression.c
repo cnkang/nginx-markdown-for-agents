@@ -147,8 +147,8 @@ static ngx_int_t ngx_http_markdown_measure_content_encoding(
     ngx_uint_t *match_count, size_t *total_len);
 static ngx_int_t ngx_http_markdown_add_content_encoding_length(
     size_t value_len, ngx_uint_t match_count, size_t *total_len);
-static size_t ngx_http_markdown_copy_content_encoding(
-    ngx_http_request_t *r, u_char *data);
+static ngx_int_t ngx_http_markdown_copy_content_encoding(
+    ngx_http_request_t *r, u_char *data, size_t *written_out);
 
 
 static ngx_flag_t
@@ -232,25 +232,27 @@ ngx_http_markdown_measure_content_encoding(
 }
 
 
-static size_t
-ngx_http_markdown_copy_content_encoding(ngx_http_request_t *r, u_char *data)
+static ngx_int_t
+ngx_http_markdown_copy_content_encoding(ngx_http_request_t *r, u_char *data,
+                                        size_t *written_out)
 {
     ngx_flag_t        first;
     size_t             written;
 
-    if (r == NULL || data == NULL) {
-        return 0;
+    if (r == NULL || data == NULL || written_out == NULL) {
+        return NGX_ERROR;
     }
 
     first = 1;
     written = 0;
+    *written_out = 0;
     for (ngx_list_part_t *part = &r->headers_out.headers.part;
          part != NULL;
          part = part->next)
     {
         const ngx_table_elt_t *headers = part->elts;
         if (headers == NULL && part->nelts != 0) {
-            return written;
+            return NGX_ERROR;
         }
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
             if (headers[i].hash == 0) {
@@ -272,7 +274,8 @@ ngx_http_markdown_copy_content_encoding(ngx_http_request_t *r, u_char *data)
         }
     }
 
-    return written;
+    *written_out = written;
+    return NGX_OK;
 }
 
 /*
@@ -296,6 +299,7 @@ ngx_http_markdown_collect_content_encoding(ngx_http_request_t *r,
 {
     ngx_uint_t        match_count;
     size_t             total_len;
+    size_t             written;
     u_char            *data;
     const ngx_str_t  *single_value;
 
@@ -325,7 +329,9 @@ ngx_http_markdown_collect_content_encoding(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    if (ngx_http_markdown_copy_content_encoding(r, data) != total_len) {
+    if (ngx_http_markdown_copy_content_encoding(r, data, &written) != NGX_OK
+        || written != total_len)
+    {
         out->data = NULL;
         out->len = 0;
         return NGX_ERROR;

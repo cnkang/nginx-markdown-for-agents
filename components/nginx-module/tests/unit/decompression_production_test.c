@@ -633,6 +633,26 @@ test_collect_content_encoding_allocation_failure(void)
     TEST_PASS("Content-Encoding allocation failures are reported");
 }
 
+static void
+test_copy_content_encoding_reports_malformed_list(void)
+{
+    ngx_http_request_t  r;
+    u_char              output[32];
+    size_t              written;
+
+    init_request(&r);
+    r.headers_out.headers.part.elts = NULL;
+    r.headers_out.headers.part.nelts = 1;
+    written = (size_t) -1;
+
+    TEST_ASSERT(ngx_http_markdown_copy_content_encoding(
+                    &r, output, &written) == NGX_ERROR,
+                "malformed Content-Encoding list must return NGX_ERROR");
+    TEST_ASSERT(written == 0,
+                "malformed Content-Encoding list must report no bytes");
+    TEST_PASS("Content-Encoding copy reports malformed lists explicitly");
+}
+
 /*
  * Regression: Content-Encoding collection failure must mark the request
  * ineligible and record the error category BEFORE any error-policy
@@ -1866,6 +1886,7 @@ main(void)
     test_detect_compression_variants();
     test_collect_content_encoding_repeated_fields();
     test_collect_content_encoding_allocation_failure();
+    test_copy_content_encoding_reports_malformed_list();
     test_collection_failure_handler_dispatch();
     test_dispatch_non_decompressing_cases();
     test_gzip_success();

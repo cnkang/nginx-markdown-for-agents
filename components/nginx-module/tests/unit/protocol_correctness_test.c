@@ -521,13 +521,14 @@ free_request(ngx_http_request_t *r)
 }
 
 static ngx_table_elt_t *
-push_header(ngx_http_request_t *r, const char *key, const char *value)
+push_header_to_list(ngx_pool_t *pool, ngx_list_t *list,
+                    const char *key, const char *value)
 {
     size_t key_data_len = test_cstrnlen(key, 256);
     size_t val_data_len = test_cstrnlen(value, 512);
-    char *key_copy = (char *) ngx_pnalloc(r->pool, key_data_len + 1);
-    char *val_copy = (char *) ngx_pnalloc(r->pool, val_data_len + 1);
-    ngx_table_elt_t *h = ngx_list_push(&r->headers_out.headers);
+    char *key_copy = (char *) ngx_pnalloc(pool, key_data_len + 1);
+    char *val_copy = (char *) ngx_pnalloc(pool, val_data_len + 1);
+    ngx_table_elt_t *h = ngx_list_push(list);
     TEST_ASSERT(h != NULL, "header list push failed");
     TEST_ASSERT(key_copy != NULL, "alloc key failed");
     TEST_ASSERT(val_copy != NULL, "alloc value failed");
@@ -539,6 +540,12 @@ push_header(ngx_http_request_t *r, const char *key, const char *value)
     h->value.data = (u_char *) val_copy;
     h->value.len = val_data_len;
     return h;
+}
+
+static ngx_table_elt_t *
+push_header(ngx_http_request_t *r, const char *key, const char *value)
+{
+    return push_header_to_list(r->pool, &r->headers_out.headers, key, value);
 }
 
 static ngx_table_elt_t *
@@ -1131,6 +1138,7 @@ test_head_vary_failure_rolls_back_headers(void)
     ngx_http_request_t  r = new_request();
     ngx_table_elt_t    *etag;
     ngx_table_elt_t    *vary;
+    ngx_table_elt_t    *trailer;
     ngx_int_t           rc;
     static u_char       original_content_type[] = "text/html";
 
@@ -1138,6 +1146,8 @@ test_head_vary_failure_rolls_back_headers(void)
 
     etag = push_header(&r, "ETag", "\"html-etag\"");
     vary = push_header(&r, "Vary", "User-Agent");
+    trailer = push_header_to_list(r.pool, &r.headers_out.trailers,
+                                  "Digest", "sha-256=upstream");
     r.headers_out.content_type.data = original_content_type;
     r.headers_out.content_type.len = sizeof(original_content_type) - 1;
     r.headers_out.content_type_len = sizeof(original_content_type) - 1;
@@ -1168,6 +1178,11 @@ test_head_vary_failure_rolls_back_headers(void)
                 "HEAD failure restores Vary value");
     TEST_ASSERT(r.allow_ranges == 1,
                 "HEAD failure restores range support");
+    TEST_ASSERT(trailer->hash != 0
+                    && trailer->value.len == sizeof("sha-256=upstream") - 1
+                    && memcmp(trailer->value.data, "sha-256=upstream",
+                              sizeof("sha-256=upstream") - 1) == 0,
+                "HEAD failure restores actual trailer entry");
 
     free_request(&r);
     TEST_PASS("HEAD Vary failure rollback verified");
