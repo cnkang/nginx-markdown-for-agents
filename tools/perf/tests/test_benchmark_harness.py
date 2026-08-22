@@ -1477,6 +1477,17 @@ class TestPortCleanupOnSignals:
         env = os.environ.copy()
         env["NGINX_BIN"] = str(stub)
         env.pop("MODULE_SO", None)
+        # The harness resolves every helper against its trusted-root allowlist
+        # and fails closed when PATH resolves python3 (or another helper) to a
+        # user-writable location such as a conda Caskroom bin directory.  A
+        # developer shell can order such directories ahead of the system roots,
+        # which would make these lifecycle tests depend on ambient PATH luck.
+        # The behaviour under test here is trap-driven cleanup, not host PATH
+        # auditing, so pin the standard system directories ahead of the
+        # inherited PATH — the same resolution CI gets on its clean runners.
+        env["PATH"] = os.pathsep.join(
+            ["/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin", env.get("PATH", "")]
+        )
         return subprocess.Popen(
             [
                 BASH_BIN,
