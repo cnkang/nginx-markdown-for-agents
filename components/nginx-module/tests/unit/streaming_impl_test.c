@@ -2364,10 +2364,27 @@ test_abort_passthrough_and_reentry_helpers(void)
 
     ctx.headers_forwarded = 0;
     g_forward_headers_rc = NGX_AGAIN;
+    g_next_body_filter_rc = NGX_OK;
+    g_next_body_filter_calls = 0;
+    g_next_body_filter_last_in = NULL;
+    rc = ngx_http_markdown_streaming_passthrough(&r, &ctx, &in);
+    TEST_ASSERT(rc == NGX_OK,
+        "passthrough should submit the body chain after header backpressure");
+    TEST_ASSERT(g_next_body_filter_calls == 1 && g_next_body_filter_last_in == &in,
+        "passthrough must deliver the input chain, never drop it on header "
+        "backpressure (headers are queued by the write filter; the body is "
+        "submitted behind them)");
+
+    ctx.headers_forwarded = 0;
+    g_forward_headers_rc = NGX_AGAIN;
+    g_next_body_filter_rc = NGX_AGAIN;
     rc = ngx_http_markdown_streaming_passthrough(&r, &ctx, &in);
     TEST_ASSERT(rc == NGX_AGAIN,
-        "passthrough should preserve downstream header backpressure");
+        "passthrough should propagate body backpressure after queued headers");
+    TEST_ASSERT(g_next_body_filter_last_in == &in,
+        "body backpressure return must still carry the submitted chain");
     g_forward_headers_rc = NGX_OK;
+    g_next_body_filter_rc = NGX_OK;
 
     ctx.headers_forwarded = 1;
     g_next_body_filter_rc = NGX_DONE;
@@ -2889,11 +2906,23 @@ test_commit_feed_and_finalize_core_paths(void)
         && metrics.streaming.commit_total == 0,
         "header-filter errors must not publish commit state");
 
+    /* A definitive downstream failure latches headers_committed so the
+     * canonical header chain runs at most once per request.  Clear the
+     * latch here to open the next independent scenario (positive-rc
+     * propagation from a first, non-failed commit attempt). */
+    ctx.stream_sm.headers_committed = 0;
+
     g_next_header_filter_rc = 1;
     rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
     TEST_ASSERT(rc == 1,
         "commit should propagate positive next header filter rc");
     g_next_header_filter_rc = NGX_OK;
+
+    /* The positive-rc attempt routed through the definitive-failure
+     * branch (a bare positive rc is neither OK/DONE nor AGAIN), which
+     * latched headers_committed.  Clear it so the happy-path scenario
+     * below exercises a first, unpublish ed commit. */
+    ctx.stream_sm.headers_committed = 0;
 
     rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_OK, "commit should succeed on happy path");
@@ -7052,6 +7081,105 @@ test_abandon_pending_after_fatal_releases_pending_header_output(void)
 }
 
 /*
+ * Regression: a finalize output deferred behind a commit-time header
+ * NGX_AGAIN must keep the module-owned buffered bit set.
+ *
+ * Failure chain being guarded against:
+ *   finalize produces a non-empty Markdown tail
+ *   -> commit NGX_AGAIN (header block queued by the write filter)
+ *   -> finalize_pending_result retains the tail, sync_buffered() runs
+ *   -> WITHOUT the fix the buffered bit is cleared while the tail is
+ *      still owned, so NGINX is not obligated to re-enter the filter
+ *      and the deferred tail / terminal last_buf may never be sent.
+ *
+ * Drives the production functions: ngx_http_markdown_streaming_send_markdown
+ * (the finalize-send path that allocates the deferred result) and
+ * ngx_http_markdown_streaming_sync_buffered via its callers, then the NULL
+ * body-filter re-entry resume path that delivers the deferred chunk.
+ */
+static void
+test_finalize_pending_result_keeps_buffered_liveness(void)
+{
+    ngx_http_request_t       r;
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t               pool;
+    ngx_connection_t         conn;
+    ngx_log_t                log;
+    ngx_event_t              read_event;
+    ngx_http_markdown_metrics_t metrics;
+    struct MarkdownResult    result;
+    u_char                   tail[] = "final markdown tail";
+    ngx_int_t                final_send_rc;
+    ngx_int_t                rc;
+
+    memset(&r, 0, sizeof(r));
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&pool, 0, sizeof(pool));
+    memset(&conn, 0, sizeof(conn));
+    memset(&log, 0, sizeof(log));
+    memset(&read_event, 0, sizeof(read_event));
+
+    r.pool = &pool;
+    r.connection = &conn;
+    conn.log = &log;
+    r.main = &r;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+
+    /* Step 1-2: finalize produced a non-empty tail; the header chain
+     * returns NGX_AGAIN (write filter queued the header block). */
+    memset(&result, 0, sizeof(result));
+    result.markdown = tail;
+    result.markdown_len = sizeof(tail) - 1;
+
+    g_next_header_filter_rc = NGX_AGAIN;
+    final_send_rc = NGX_OK;
+
+    rc = ngx_http_markdown_streaming_finalize_send_markdown(
+        &r, &ctx, &conf, &result, &final_send_rc);
+
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "finalize-send must propagate the commit NGX_AGAIN");
+    /* Step 3: the deferred result is retained. */
+    TEST_ASSERT(ctx.streaming.completion.finalize_pending_result != NULL,
+        "header NGX_AGAIN during finalize must retain the deferred result");
+
+    /* Step 4: the buffered bit MUST stay set — this is the regression. */
+    TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
+        "deferred finalize output must keep NGX_HTTP_MARKDOWN_BUFFERED set "
+        "so NGINX re-enters the filter to deliver it");
+
+    /* Step 5-7: write-event NULL re-entry delivers the tail exactly once,
+     * then the terminal. */
+    g_next_header_filter_calls = 0;
+    g_next_body_filter_rc = NGX_OK;
+    g_next_body_filter_calls = 0;
+    rc = ngx_http_markdown_streaming_handle_null_input(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK || rc == NGX_DONE,
+        "null-input resume must deliver the deferred tail and terminal");
+    TEST_ASSERT(g_next_header_filter_calls == 0,
+        "header chain must not be re-invoked on write-event resume");
+    TEST_ASSERT(g_next_body_filter_calls >= 2,
+        "resume must deliver the deferred tail AND the terminal last_buf");
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 1,
+        "terminal last_buf must be confirmed delivered exactly once");
+    TEST_ASSERT(ctx.streaming.completion.finalize_pending_result == NULL,
+        "delivered deferred result must be consumed exactly once");
+
+    /* Step 8: buffered bit fully cleared once nothing is pending. */
+    TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0,
+        "buffered bit must clear after all deferred work drains");
+
+    TEST_PASS("finalize_pending_result keeps buffered liveness");
+}
+
+/*
  * Test entry point.  Runs all streaming_impl unit test functions in
  * sequence.  Prints a banner before and after the test run.  Returns 0
  * on success; individual test assertions abort via TEST_ASSERT on failure.
@@ -7108,6 +7236,7 @@ main(void)
     test_streaming_decomp_error_origin_classification();
     test_streaming_stage_handler_failure_category_routing();
     test_abandon_pending_after_fatal_releases_pending_header_output();
+    test_finalize_pending_result_keeps_buffered_liveness();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");
