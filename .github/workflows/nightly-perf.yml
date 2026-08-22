@@ -361,9 +361,15 @@ jobs:
 
       - name: Run canonical performance evidence check
         run: |
-          # The raw report is the candidate's authoritative measurement.  A
-          # second ApacheBench run here would compare two integer-millisecond
-          # p50 samples and can turn one timing bucket into a false regression.
+          # The raw report is the candidate's OWN measurement for this run:
+          # it was generated above from the exact checked-out candidate and
+          # finalized with BASELINE_GIT_COMMIT == $(git rev-parse HEAD), so
+          # its provenance binding is same-run verifiable.  It is NOT a
+          # substitute for the checked-in audit baseline, which stays bound
+          # to its own historical measurement commit (Rule 61); a future
+          # re-measurement regenerates both together.  A second ApacheBench
+          # run here would compare two integer-millisecond p50 samples and
+          # can turn one timing bucket into a false regression.
           MODULE_BASELINE_VERSION=092 \
           EVIDENCE_GATE_BENCHMARK_REPORT=perf/baselines/module-baseline-092-raw.json \
           NGINX_BIN="${NGINX_SRC}/objs/nginx" \
