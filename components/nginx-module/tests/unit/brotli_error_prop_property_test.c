@@ -803,6 +803,34 @@ test_property9_part_c_truncated_input_propagation(void)
         "truncated -> TRUNCATED_INPUT (never NGX_ERROR)");
 }
 
+static void
+test_brotli_error_classification_ranges(void)
+{
+    int  code;
+
+    TEST_SUBSECTION("Brotli error classification ranges");
+
+    for (code = -30; code <= -21; code++) {
+        TEST_ASSERT(
+            ngx_http_markdown_brotli_error_classify(code)
+                == NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION,
+            "allocation codes must remain allocation-classified");
+    }
+
+    for (code = -17; code <= -1; code++) {
+        TEST_ASSERT(
+            ngx_http_markdown_brotli_error_classify(code)
+                == NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT,
+            "format codes must remain format-classified");
+    }
+
+    TEST_ASSERT(
+        ngx_http_markdown_brotli_error_classify(-18)
+            == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
+        "internal codes must remain system-classified");
+    TEST_PASS("Brotli error classification ranges are stable");
+}
+
 /* ----------------------------------------------------------------
  * Main
  * ---------------------------------------------------------------- */
@@ -823,6 +851,8 @@ main(void)
 
     /* Part C: TRUNCATED_INPUT propagation */
     test_property9_part_c_truncated_input_propagation();
+
+    test_brotli_error_classification_ranges();
 
     printf("\n");
     TEST_PASS(

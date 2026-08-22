@@ -1307,17 +1307,45 @@ ngx_http_markdown_decomp_brotli_stream(
         }
 
         if (result == BROTLI_DECODER_RESULT_ERROR) {
-            BrotliDecoderErrorCode  error_code;
-            const char              *error_str;
+            BrotliDecoderErrorCode                  error_code;
+            ngx_http_markdown_brotli_error_class_e  error_class;
+            const char                             *error_str;
 
             error_code = BrotliDecoderGetErrorCode(decoder);
+            error_class = ngx_http_markdown_brotli_error_classify(
+                (int) error_code);
             error_str = BrotliDecoderErrorString(error_code);
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                          "markdown: brotli decompression failed, "
-                          "error: %s, category=conversion", error_str);
+
+            /*
+             * Keep buffered classification aligned with the streaming
+             * decoder.  Only documented invalid-input codes are format
+             * errors; allocation and internal decoder failures are system
+             * errors and must not be reported as corrupt input.
+             */
+            if (error_class == NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                              "markdown: brotli decompression failed, "
+                              "error: %s, category=conversion",
+                              error_str);
+                return ngx_http_markdown_decomp_brotli_fail(
+                    decoder, output->data,
+                    NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR);
+            }
+
+            if (error_class == NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                              "markdown: brotli decompression failed, "
+                              "error: %s, class=allocation, category=system",
+                              error_str);
+            } else {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                              "markdown: brotli decompression failed, "
+                              "error: %s, class=internal, category=system",
+                              error_str);
+            }
+
             return ngx_http_markdown_decomp_brotli_fail(
-                decoder, output->data,
-                NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR);
+                decoder, output->data, NGX_ERROR);
         }
 
         if (result == BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT) {

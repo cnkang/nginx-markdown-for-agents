@@ -1237,50 +1237,6 @@ ngx_http_markdown_streaming_decomp_inflate_loop(
  *   NGX_ERROR - allocation or internal failure (failure_origin set)
  */
 
-/*
- * Three-way error classification for BrotliDecoderErrorCode.
- *
- * The classification uses integer-range comparisons exclusively to
- * remain compatible with Brotli 1.0.9 (Ubuntu 22.04), which does not
- * expose all named enum constants present in newer releases.
- *
- * Frozen ranges (from the Brotli specification and brotli/decode.h):
- *   FORMAT:     codes -1 through -17
- *   ALLOCATION: codes -21 through -30
- *   INTERNAL:   codes -18 through -20, -31, and any unknown/out-of-range
- */
-typedef enum {
-    NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT = 0,
-    NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION,
-    NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL
-} ngx_http_markdown_brotli_error_class_e;
-
-static ngx_http_markdown_brotli_error_class_e
-ngx_http_markdown_brotli_classify_error(BrotliDecoderErrorCode code)
-{
-    int  c;
-
-    c = (int) code;
-
-    /* FORMAT: codes -1 through -17 */
-    if (c >= -17 && c <= -1) {
-        return NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT;
-    }
-
-    /* ALLOCATION: codes -21 through -30 */
-    if (c >= -30 && c <= -21) {
-        return NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION;
-    }
-
-    /*
-     * INTERNAL: codes -18 through -20 (COMPOUND_DICTIONARY,
-     * DICTIONARY_NOT_SET, INVALID_ARGUMENTS), -31 (UNREACHABLE),
-     * and any unknown/out-of-range value.
-     */
-    return NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL;
-}
-
-
 static int
 ngx_http_markdown_streaming_decomp_brotli_error(
     ngx_http_markdown_streaming_decomp_t *decomp,
@@ -1293,7 +1249,7 @@ ngx_http_markdown_streaming_decomp_brotli_error(
     const char                             *err_str;
 
     err_code = BrotliDecoderGetErrorCode(decomp->state.brotli);
-    err_class = ngx_http_markdown_brotli_classify_error(err_code);
+    err_class = ngx_http_markdown_brotli_error_classify((int) err_code);
     err_str = BrotliDecoderErrorString(err_code);
 
     ngx_log_error(NGX_LOG_ERR, log, 0,
@@ -1944,12 +1900,21 @@ ngx_http_markdown_streaming_decomp_workspace_size(
      * a stream at exact budget that hasn't finished needs one probe byte
      * to determine whether the decoder completes without further output
      * (success) or produces additional bytes (budget exceeded).
+     *
+     * Deflate (zlib raw/wrapped) has the same completion-detection need:
+     * when the workspace equals the remaining budget exactly, inflate can
+     * legitimately fill it to the last byte and report Z_STREAM_END.  The
+     * grow path's `>= remaining` guard would reject that valid stream as
+     * budget-exceeded before check_limit() (strict `>`) ever runs.  Give
+     * deflate the same +1 probe so an exact-budget response decompresses
+     * and only genuinely-over-budget output is rejected.
      */
     if ((decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
 #ifdef NGX_HTTP_BROTLI
          || (decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI
              && !decomp->finished)
 #endif
+         || decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
         )
         && *buf_size >= remaining && remaining < (size_t) -1)
     {

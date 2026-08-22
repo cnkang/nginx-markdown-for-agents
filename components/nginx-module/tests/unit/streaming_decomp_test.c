@@ -513,12 +513,11 @@ test_inflate(z_streamp strm, int flush)
             strm->avail_in = 1;
             return Z_OK;
         }
-        if (strm->avail_out > 128) {
-            strm->avail_out -= 128;
-        } else {
-            strm->avail_out = 0;
-        }
-        strm->avail_in = 0;
+        strm->avail_out = 0;
+        /* Keep input pending and report progress so the step function
+         * takes the avail_out==0 branch into grow_output_buf — the code
+         * path whose budget guard this case exercises. */
+        strm->avail_in = 1;
         return Z_OK;
 
     case TEST_INFLATE_MODE_FEED_EXPAND_THEN_DONE:
@@ -973,79 +972,79 @@ test_brotli_error_classification(void)
     TEST_SUBSECTION("brotli error classification: frozen three-way");
 
     /* FORMAT boundary: -1 (first FORMAT code) */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-1));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT,
         "code -1 should classify as FORMAT");
 
     /* FORMAT boundary: -17 (last FORMAT code) */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-17));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT,
         "code -17 should classify as FORMAT");
 
     /* FORMAT mid-range: -10 */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-10));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT,
         "code -10 should classify as FORMAT");
 
     /* ALLOCATION boundary: -21 (first ALLOCATION code) */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-21));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION,
         "code -21 should classify as ALLOCATION");
 
     /* ALLOCATION boundary: -30 (last ALLOCATION code) */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-30));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION,
         "code -30 should classify as ALLOCATION");
 
     /* ALLOCATION mid-range: -25 */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-25));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION,
         "code -25 should classify as ALLOCATION");
 
     /* INTERNAL: -18 (COMPOUND_DICTIONARY) */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-18));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
         "code -18 should classify as INTERNAL");
 
     /* INTERNAL: -19 (DICTIONARY_NOT_SET) */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-19));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
         "code -19 should classify as INTERNAL");
 
     /* INTERNAL: -20 (INVALID_ARGUMENTS) */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-20));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
         "code -20 should classify as INTERNAL");
 
     /* INTERNAL: -31 (UNREACHABLE) */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-31));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
         "code -31 should classify as INTERNAL");
 
     /* Unknown out-of-range: -99 classifies as INTERNAL (not FORMAT) */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-99));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
         "unknown code -99 should classify as INTERNAL");
 
     /* Unknown out-of-range: -32 classifies as INTERNAL */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-32));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
         "unknown code -32 should classify as INTERNAL");
 
     /* Unknown out-of-range: 0 (not negative) classifies as INTERNAL */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(0));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
         "code 0 should classify as INTERNAL");
@@ -3690,6 +3689,87 @@ test_roundtrip_and_empty_feed(void)
 }
 
 /*
+ * test_deflate_exact_budget_round_trip - Regression: a deflate response
+ * whose decompressed size lands EXACTLY on the configured budget must
+ * decompress successfully.  The workspace probe-byte reservation now
+ * covers deflate (like gzip/brotli), so the inflate loop can fill the
+ * final byte and observe Z_STREAM_END instead of tripping the grow
+ * path's `>= remaining` guard before check_limit()'s strict `>` runs.
+ */
+static void
+test_deflate_exact_budget_round_trip(void)
+{
+    const char  *text;
+    size_t       text_len;
+    u_char      *compressed;
+    size_t       compressed_len;
+    test_pool_t  tp;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+    u_char      *out;
+    size_t       out_len;
+    ngx_int_t    rc;
+
+    TEST_SUBSECTION("deflate exact-budget round trip");
+
+    /*
+     * The initial workspace is max(in_len * 4, 4096); the probe path only
+     * engages when the workspace equals the remaining budget, so the
+     * payload must exceed the 4096 minimum for the budget to be the
+     * binding constraint.  Build a >4096-byte body.
+     */
+    text = "Exact-budget deflate payload. ";
+    text_len = test_cstrnlen(text, 1024);
+    while (text_len < 5000) {
+        text_len += test_cstrnlen(text, 1024);
+    }
+
+    {
+        char  *body;
+
+        body = malloc(text_len + 1);
+        TEST_ASSERT(body != NULL, "body allocation should succeed");
+        for (size_t off = 0; off < text_len; off += test_cstrnlen(text, 1024)) {
+            size_t seg = test_cstrnlen(text, 1024);
+            if (off + seg > text_len) {
+                seg = text_len - off;
+            }
+            memcpy(body + off, text, seg);
+        }
+        body[text_len] = '\0';
+
+        rc = compress_payload((const u_char *) body, text_len,
+                              NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE,
+                              &compressed, &compressed_len);
+        TEST_ASSERT(rc == NGX_OK, "deflate compression should succeed");
+
+        test_pool_reset(&tp);
+        decomp = ngx_http_markdown_streaming_decomp_create(
+            &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE, text_len);
+        TEST_ASSERT(decomp != NULL,
+            "bounded deflate decompressor should exist");
+
+        out = NULL;
+        out_len = 0;
+        rc = ngx_http_markdown_streaming_decomp_feed(
+            decomp, compressed, compressed_len, &out, &out_len,
+            &tp.pool, &test_log);
+        TEST_ASSERT(rc == NGX_OK,
+            "a deflate stream landing exactly on the budget must succeed "
+            "(not BUDGET_EXCEEDED)");
+        TEST_ASSERT(out != NULL && out_len == text_len,
+            "exact-budget output length must match the source");
+        TEST_ASSERT(MEM_EQ(out, body, out_len),
+            "exact-budget output must round-trip byte-exactly");
+
+        free(body);
+        free(compressed);
+        free(decomp);
+        TEST_PASS("deflate exact-budget round trip verified");
+    }
+}
+
+
+/*
  * test_budget_and_invalid_type_branches - Verify budget-exceeded detection
  * and the invalid-type decline/error paths in feed and finish.
  *
@@ -4977,6 +5057,8 @@ test_feed_mocked_inflate_paths(void)
         "feed should classify mocked oversized output as budget exceeded");
     free(decomp);
 
+
+
     test_pool_reset(&tp);
     decomp = ngx_http_markdown_streaming_decomp_create(
         &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, 0);
@@ -5746,6 +5828,7 @@ main(void)
     test_truncated_deflate_formats_are_classified_at_finish();
     test_gzip_members_in_one_feed();
     test_gzip_empty_member_after_exact_budget();
+    test_deflate_exact_budget_round_trip();
     test_gzip_member_boundary_between_feeds();
     test_gzip_member_boundary_inside_feed();
     test_gzip_truncated_second_member();
