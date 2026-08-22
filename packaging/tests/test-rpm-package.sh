@@ -42,7 +42,7 @@ case "${1:-}" in
     --spec)
         MODE="spec"
         shift
-        if [ -z "${1:-}" ]; then
+        if [[ -z "${1:-}" ]]; then
             echo "Error: no spec file path provided" >&2
             usage
         fi
@@ -57,7 +57,7 @@ case "${1:-}" in
         ;;
 esac
 
-if [ ! -f "$TARGET_FILE" ]; then
+if [[ ! -f "$TARGET_FILE" ]]; then
     echo "Error: file not found: $TARGET_FILE" >&2
     exit 2
 fi
@@ -121,7 +121,7 @@ esac
 echo "" >&2
 echo "Results: $PASS_COUNT passed, $FAIL_COUNT failed" >&2
 
-if [ "$FAIL_COUNT" -gt 0 ]; then
+if [[ "$FAIL_COUNT" -gt 0 ]]; then
     echo "FAIL" >&2
     exit 1
 fi

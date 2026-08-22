@@ -48,15 +48,15 @@ main() {
     # this module's configuration file.  A symlink to any other target is
     # operator-owned and left untouched; a regular file is operator-owned
     # configuration and never deleted.
-    if [ -L "${SYMLINK_PATH}" ]; then
+    if [[ -L "${SYMLINK_PATH}" ]]; then
         TARGET="$(readlink "${SYMLINK_PATH}" 2>/dev/null || true)"
-        if [ "${TARGET}" = "${MODULES_AVAILABLE_CONF}" ]; then
+        if [[ "${TARGET}" = "${MODULES_AVAILABLE_CONF}" ]]; then
             info "Removing module symlink: ${SYMLINK_PATH} -> ${TARGET}"
             rm -f "${SYMLINK_PATH}"
         else
             info "Not removing ${SYMLINK_PATH}: symlink target ${TARGET} is not this module's config (${MODULES_AVAILABLE_CONF})"
         fi
-    elif [ -e "${SYMLINK_PATH}" ]; then
+    elif [[ -e "${SYMLINK_PATH}" ]]; then
         info "Not removing ${SYMLINK_PATH}: regular file is operator-owned configuration"
     else
         info "No module symlink found at ${SYMLINK_PATH} (nothing to clean)"

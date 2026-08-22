@@ -71,7 +71,7 @@ usage() {
 
 # --- Parse arguments ---
 
-while [ $# -gt 0 ]; do
+while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help)
             usage
@@ -111,8 +111,8 @@ YUM_REPO_URL="${YUM_REPO_URL:-}"
 
 echo "Step 1: DEB package signature verification..." >&2
 
-if [ -n "$DEB_FILE" ]; then
-    if [ ! -f "$DEB_FILE" ]; then
+if [[ -n "$DEB_FILE" ]]; then
+    if [[ ! -f "$DEB_FILE" ]]; then
         fail "DEB file not found: $DEB_FILE"
     elif ! command -v dpkg-sig >/dev/null 2>&1; then
         echo "  SKIP: dpkg-sig not available on this system" >&2
@@ -136,8 +136,8 @@ fi
 
 echo "Step 2: RPM package signature verification..." >&2
 
-if [ -n "$RPM_FILE" ]; then
-    if [ ! -f "$RPM_FILE" ]; then
+if [[ -n "$RPM_FILE" ]]; then
+    if [[ ! -f "$RPM_FILE" ]]; then
         fail "RPM file not found: $RPM_FILE"
     elif ! command -v rpm >/dev/null 2>&1; then
         echo "  SKIP: rpm not available on this system" >&2
@@ -161,14 +161,14 @@ fi
 
 echo "Step 3: APT repository metadata signature..." >&2
 
-if [ -n "$APT_RELEASE_DIR" ]; then
+if [[ -n "$APT_RELEASE_DIR" ]]; then
     RELEASE_FILE="${APT_RELEASE_DIR}/Release"
     RELEASE_GPG="${APT_RELEASE_DIR}/Release.gpg"
     INRELEASE_FILE="${APT_RELEASE_DIR}/InRelease"
 
-    if [ ! -f "$RELEASE_FILE" ]; then
+    if [[ ! -f "$RELEASE_FILE" ]]; then
         fail "APT Release file not found: $RELEASE_FILE"
-    elif [ ! -f "$RELEASE_GPG" ]; then
+    elif [[ ! -f "$RELEASE_GPG" ]]; then
         fail "APT Release.gpg not found: $RELEASE_GPG"
     else
         VERIFY_APT=$(gpg --verify "$RELEASE_GPG" "$RELEASE_FILE" 2>&1) || true
@@ -182,7 +182,7 @@ if [ -n "$APT_RELEASE_DIR" ]; then
     fi
 
     # Also check InRelease if present
-    if [ -f "$INRELEASE_FILE" ]; then
+    if [[ -f "$INRELEASE_FILE" ]]; then
         VERIFY_IR=$(gpg --verify "$INRELEASE_FILE" 2>&1) || true
 
         if echo "$VERIFY_IR" | grep -qi "good signature"; then
@@ -200,13 +200,13 @@ fi
 
 echo "Step 4: YUM repository metadata signature..." >&2
 
-if [ -n "$YUM_REPODATA_DIR" ]; then
+if [[ -n "$YUM_REPODATA_DIR" ]]; then
     REPOMD_FILE="${YUM_REPODATA_DIR}/repomd.xml"
     REPOMD_ASC="${YUM_REPODATA_DIR}/repomd.xml.asc"
 
-    if [ ! -f "$REPOMD_FILE" ]; then
+    if [[ ! -f "$REPOMD_FILE" ]]; then
         fail "YUM repomd.xml not found: $REPOMD_FILE"
-    elif [ ! -f "$REPOMD_ASC" ]; then
+    elif [[ ! -f "$REPOMD_ASC" ]]; then
         fail "YUM repomd.xml.asc not found: $REPOMD_ASC"
     else
         VERIFY_YUM=$(gpg --verify "$REPOMD_ASC" "$REPOMD_FILE" 2>&1) || true
@@ -227,11 +227,11 @@ fi
 
 echo "Step 5: apt-get update test..." >&2
 
-if [ -n "$APT_REPO_URL" ]; then
+if [[ -n "$APT_REPO_URL" ]]; then
     if ! command -v apt-get >/dev/null 2>&1; then
         echo "  SKIP: apt-get not available" >&2
         pass "apt-get update skipped (tool not available)"
-    elif [ "$(id -u)" -ne 0 ]; then
+    elif [[ "$(id -u)" -ne 0 ]]; then
         echo "  SKIP: root required for apt-get update" >&2
         pass "apt-get update skipped (not root)"
     else
@@ -264,11 +264,11 @@ fi
 
 echo "Step 6: yum makecache test..." >&2
 
-if [ -n "$YUM_REPO_URL" ]; then
+if [[ -n "$YUM_REPO_URL" ]]; then
     if ! command -v yum >/dev/null 2>&1; then
         echo "  SKIP: yum not available" >&2
         pass "yum makecache skipped (tool not available)"
-    elif [ "$(id -u)" -ne 0 ]; then
+    elif [[ "$(id -u)" -ne 0 ]]; then
         echo "  SKIP: root required for yum makecache" >&2
         pass "yum makecache skipped (not root)"
     else
@@ -310,7 +310,7 @@ echo "" >&2
 echo "=== Repository Signature Test Results ===" >&2
 echo "Results: $PASS_COUNT passed, $FAIL_COUNT failed" >&2
 
-if [ "$FAIL_COUNT" -gt 0 ]; then
+if [[ "$FAIL_COUNT" -gt 0 ]]; then
     echo "FAIL" >&2
     exit 1
 fi
