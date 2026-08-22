@@ -302,6 +302,10 @@ impl IncrementalEmitter {
         self.inline_code_buffer.clear();
         self.inline_code_backtick_max = 0;
         self.inline_code_trailing_backticks = 0;
+        // The inline-code span was discarded with its buffer: leaving
+        // in_inline_code set would make a later finalize()/safe_finish
+        // call emit_inline_code() and emit an empty code span.
+        self.in_inline_code = false;
         self.link_text.clear();
         self.link_text_overflow = false;
     }
@@ -605,6 +609,16 @@ impl IncrementalEmitter {
     /// longest literal backtick run.
     fn emit_inline_code(&mut self) -> Result<(), ConversionError> {
         let content = std::mem::take(&mut self.inline_code_buffer);
+        if content.is_empty() {
+            // Nothing buffered (e.g. after discard_uncommitted_output):
+            // emit nothing rather than an empty code span.  Reset the
+            // span state either way so the emitter stays consistent.
+            self.in_inline_code = false;
+            self.inline_code_backtick_max = 0;
+            self.inline_code_trailing_backticks = 0;
+            return Ok(());
+        }
+        self.in_inline_code = false;
         let fence_len = self.inline_code_backtick_max.saturating_add(1);
         let fence = "`".repeat(fence_len.max(1));
 
