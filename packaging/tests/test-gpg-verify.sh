@@ -122,7 +122,7 @@ fi
 # Import key into temporary keyring
 KEYRING="${TMPDIR}/keyring.gpg"
 
-if [ -f "$KEY_FILE" ] && [ -s "$KEY_FILE" ]; then
+if [[ -f "$KEY_FILE" ]] && [ -s "$KEY_FILE" ]; then
     GPG_IMPORT=$(gpg --no-default-keyring --keyring "$KEYRING" \
         --import "$KEY_FILE" 2>&1) || true
 
@@ -134,7 +134,7 @@ if [ -f "$KEY_FILE" ] && [ -s "$KEY_FILE" ]; then
     fi
 
     # Verify fingerprint if expected value provided
-    if [ -n "$EXPECTED_FINGERPRINT" ]; then
+    if [[ -n "$EXPECTED_FINGERPRINT" ]]; then
         # Select a signing-capable subkey: field 12 must contain "s",
         # and field 2 must not mark the subkey revoked/expired/invalid/
         # disabled.  The fingerprint is the fpr record that follows the
@@ -147,7 +147,7 @@ if [ -f "$KEY_FILE" ] && [ -s "$KEY_FILE" ]; then
                     next
                 }
                 $1 == "fpr" && want { print $10; exit }')
-        if [ "$KEY_FP" = "$EXPECTED_FINGERPRINT" ]; then
+        if [[ "$KEY_FP" = "$EXPECTED_FINGERPRINT" ]]; then
             pass "key fingerprint matches expected value"
         else
             fail "key fingerprint mismatch (got: $KEY_FP)"
@@ -161,7 +161,7 @@ fi
 
 # --- Step 2: APT repository verification ---
 
-if [ "$MODE" = "apt" ] || [ "$MODE" = "both" ]; then
+if [[ "$MODE" = "apt" ]] || [ "$MODE" = "both" ]; then
     echo "" >&2
     echo "Step 2: APT repository signature verification..." >&2
 
@@ -215,7 +215,7 @@ fi
 
 # --- Step 3: YUM repository verification ---
 
-if [ "$MODE" = "yum" ] || [ "$MODE" = "both" ]; then
+if [[ "$MODE" = "yum" ]] || [ "$MODE" = "both" ]; then
     echo "" >&2
     echo "Step 3: YUM repository signature verification..." >&2
 
@@ -251,7 +251,7 @@ if [ "$MODE" = "yum" ] || [ "$MODE" = "both" ]; then
     # Verify RPM package signature if an .rpm file is available
     if command -v rpm >/dev/null 2>&1; then
         RPM_FILES=$(find "${TMPDIR}" -name "*.rpm" 2>/dev/null)
-        if [ -n "$RPM_FILES" ]; then
+        if [[ -n "$RPM_FILES" ]]; then
             for rpm_file in $RPM_FILES; do
                 RPM_SIG=$(rpm -K "$rpm_file" 2>&1) || true
                 if echo "$RPM_SIG" | grep -qi "pgp\|gpg.*OK"; then
@@ -274,7 +274,7 @@ echo "" >&2
 echo "=== GPG Verification Results ===" >&2
 echo "Results: $PASS_COUNT passed, $FAIL_COUNT failed" >&2
 
-if [ "$FAIL_COUNT" -gt 0 ]; then
+if [[ "$FAIL_COUNT" -gt 0 ]]; then
     echo "FAIL" >&2
     exit 1
 fi

@@ -35,6 +35,11 @@ info() {
     return 0
 }
 
+warn() {
+    printf '[nginx-module-markdown] WARNING: %s\n' "$1" >&2
+    return 0
+}
+
 ##############################################################################
 # Main
 ##############################################################################
@@ -43,15 +48,20 @@ ACTION="${1:-install}"
 
 case "$ACTION" in
     install|upgrade|1|2)
-        # Check if nginx is already installed
-        if ! command -v nginx >/dev/null 2>&1; then
+        # Resolve NGINX ONCE and reuse the same absolute identity for the
+        # existence check and the version probe.  A root-run maintainer
+        # script must not re-resolve a bare "nginx" from PATH after the
+        # discovery step: PATH is caller-controlled, so discovery and use
+        # could land on different executables (executable-trust invariant).
+        NGINX_BIN="$(command -v nginx 2>/dev/null || true)"
+        if [[ -z "${NGINX_BIN}" ]]; then
             info "NGINX not yet installed; package dependency will handle installation."
             exit 0
         fi
 
         # Extract installed NGINX version from nginx -v output
         # Format: "nginx version: nginx/1.26.3"
-        INSTALLED_NGINX_VERSION="$(nginx -v 2>&1 | sed -n 's|.*nginx/||p')"
+        INSTALLED_NGINX_VERSION="$("${NGINX_BIN}" -v 2>&1 | sed -n 's|.*nginx/||p')"
 
         if [[ -z "${INSTALLED_NGINX_VERSION}" ]]; then
             warn "Could not determine installed NGINX version from 'nginx -v'."

@@ -106,6 +106,7 @@ append_sorted_file() {
         index=$((index - 1))
     done
     ALL_FILES[index]="$value"
+    return 0
 }
 
 while IFS= read -r -d '' f; do

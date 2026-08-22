@@ -42,14 +42,15 @@ EOF
 }
 
 # run_preinstall — run the real preinstall script with target baked in.
-# preinstall.sh uses the %%NGINX_VERSION%% placeholder expanded by nFPM at
-# package build time; for the test we substitute it directly.
+# preinstall.sh reads the lifecycle action as $1; `bash -c` treats the word
+# after the script string as $0 (the process name), so pass a placeholder
+# name first and the action as the real first argument.
 run_preinstall() {
     local target="$1"
     local action="${2:-install}"
     local script
     script="$(sed "s|%%NGINX_VERSION%%|${target}|g" "${PREINSTALL}")"
-    PATH="${FAKE_BIN_DIR}:${PATH}" bash -c "${script}" "${action}" 2>/dev/null
+    PATH="${FAKE_BIN_DIR}:${PATH}" bash -c "${script}" preinstall.sh "${action}" 2>/dev/null
     return $?
 }
 
@@ -89,9 +90,11 @@ else
     pass "major diff rejected"
 fi
 
-# Scenario 5: nginx not installed → proceed (exit 0)
+# Scenario 5: nginx not installed → proceed (exit 0).
+# Restrict PATH to the fake dir only so an inherited system nginx on a
+# developer/CI machine cannot satisfy the check and mask this scenario.
 rm -f "${FAKE_BIN_DIR}/nginx"
-if run_preinstall "1.26.3"; then
+if PATH="${FAKE_BIN_DIR}:/usr/bin:/bin" run_preinstall "1.26.3"; then
     pass "nginx not installed → proceed (dependency will handle it)"
 else
     fail "missing nginx should proceed"
@@ -107,10 +110,41 @@ for action in install upgrade 1 2 abort-upgrade abort-remove abort-deconfigure; 
     fi
 done
 
+# Scenario 7: executable-trust — discovery and version probe must use the
+# SAME resolved identity.  Plant a fake nginx that reports a MATCHING version;
+# if the script re-resolved a bare `nginx` from a caller-influenced PATH for
+# the probe, a second shadowing binary could bypass or corrupt the check.
+# Here: single fake binary, matching version, must proceed; then a tampered
+# probe (fake binary stops printing the version line) must take the warn path
+# and still exit 0 — never command-not-found (127).
+fake_nginx "1.26.3"
+if run_preinstall "1.26.3"; then
+    pass "resolved-identity probe: matching fake binary proceeds"
+else
+    fail "matching fake binary should proceed via resolved identity"
+fi
+
+cat > "${FAKE_BIN_DIR}/nginx" <<'EOF'
+#!/bin/bash
+echo "nginx: corrupted -v output simulation" >&2
+exit 0
+EOF
+chmod +x "${FAKE_BIN_DIR}/nginx"
+if PATH="${FAKE_BIN_DIR}:/usr/bin:/bin" run_preinstall "1.26.3"; then
+    rc_probe=0
+else
+    rc_probe=$?
+fi
+if [[ "${rc_probe}" == "0" ]]; then
+    pass "unparseable 'nginx -v' output takes the warn path with exit 0 (no command-not-found)"
+else
+    fail "unparseable 'nginx -v' output should warn and exit 0, got rc=${rc_probe}"
+fi
+
 echo "" >&2
 echo "Results: ${PASS_COUNT} passed, ${FAIL_COUNT} failed" >&2
 
-if [ "${FAIL_COUNT}" -gt 0 ]; then
+if [[ "${FAIL_COUNT}" -gt 0 ]]; then
     echo "FAIL" >&2
     exit 1
 fi
