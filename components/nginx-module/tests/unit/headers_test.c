@@ -1013,6 +1013,63 @@ test_head_representation_headers_null(void)
     TEST_PASS("NULL request validation works");
 }
 
+/*
+ * Adversarial duplicate-header regression: upstream may carry
+ * Content-Type / Content-Encoding / Last-Modified both as dedicated
+ * fields and as multiple header-list entries (including charset
+ * variants and multi-part lists).  After the HEAD representation
+ * rewrite there must be exactly one effective Content-Type (the
+ * Markdown media type), zero Content-Encoding entries, and zero
+ * Last-Modified entries — with the typed pointer and time mirror
+ * cleared together.
+ */
+static void
+test_head_representation_headers_duplicate_entries(void)
+{
+    ngx_http_request_t r = new_request();
+
+    TEST_SUBSECTION("HEAD representation headers purge duplicates");
+
+    push_header(&r, "Content-Type", "text/html");
+    push_header(&r, "Content-Type", "text/html; charset=iso-8859-1");
+    push_header(&r, "Content-Encoding", "gzip");
+    push_header(&r, "Content-Encoding", "br");
+    push_header(&r, "Last-Modified", "Wed, 01 Jan 2025 00:00:00 GMT");
+    push_header(&r, "Last-Modified", "Wed, 01 Jan 2025 01:00:00 GMT");
+    r.headers_out.content_type.data = (u_char *) "text/html";
+    r.headers_out.content_type.len = sizeof("text/html") - 1;
+    r.headers_out.content_type_len = sizeof("text/html") - 1;
+    r.headers_out.content_encoding = NULL;
+    r.headers_out.last_modified_time = 1234567890;
+    r.headers_out.last_modified =
+        push_header(&r, "Last-Modified", "Wed, 01 Jan 2025 02:00:00 GMT");
+
+    TEST_ASSERT(ngx_http_markdown_head_representation_headers(&r) == NGX_OK,
+                "HEAD representation rewrite should succeed");
+
+    TEST_ASSERT(count_active_headers(&r, "Content-Type") == 0,
+                "all stale Content-Type list entries must be invalidated "
+                "(a survivor would emit a second Content-Type)");
+    TEST_ASSERT(count_active_headers(&r, "Content-Encoding") == 0,
+                "all stale Content-Encoding list entries must be invalidated");
+    TEST_ASSERT(count_active_headers(&r, "Last-Modified") == 0,
+                "duplicate Last-Modified entries must all be invalidated "
+                "(stop_after_first would leave later entries alive)");
+    TEST_ASSERT(STR_EQ((char *) r.headers_out.content_type.data,
+                        "text/markdown; charset=utf-8"),
+                "dedicated Content-Type must be the Markdown media type");
+    TEST_ASSERT(r.headers_out.content_encoding == NULL,
+                "dedicated Content-Encoding pointer must be cleared");
+    TEST_ASSERT(r.headers_out.last_modified_time == (time_t) -1,
+                "Last-Modified time mirror must be reset");
+    TEST_ASSERT(r.headers_out.last_modified == NULL,
+                "Last-Modified typed pointer must be cleared together with "
+                "the time mirror");
+
+    free_request(&r);
+    TEST_PASS("HEAD duplicate representation headers purged");
+}
+
 /* ══════════════════════════════════════════════════════════════════
  * Response trailers clearing
  * ══════════════════════════════════════════════════════════════════ */
@@ -1115,6 +1172,7 @@ main(void)
     test_update_headers_multipart_failure_restores_chain();
     test_head_representation_headers_strips_html_metadata();
     test_head_representation_headers_null();
+    test_head_representation_headers_duplicate_entries();
     test_clear_trailers_suppresses_all_entries();
     test_clear_trailers_empty_list();
     test_clear_trailers_null_elts_with_entries();

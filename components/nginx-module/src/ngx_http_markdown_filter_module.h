@@ -1922,8 +1922,9 @@ ngx_int_t ngx_http_markdown_update_headers(ngx_http_request_t *r,
 ngx_int_t ngx_http_markdown_head_representation_headers(ngx_http_request_t *r);
 void ngx_http_markdown_clear_trailers(ngx_http_request_t *r);
 
-/* Remove Content-Encoding header (called after decompression) */
-void ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r);
+/* Remove Content-Encoding header: clears the dedicated pointer and
+ * invalidates ALL list entries. Returns NGX_OK (infallible). */
+ngx_int_t ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r);
 
 /* Shared header helpers used by both full-buffer and streaming paths */
 #define NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL  "text/markdown; charset=utf-8"
@@ -1933,6 +1934,17 @@ extern u_char ngx_http_markdown_content_type[];
 ngx_int_t ngx_http_markdown_add_vary_accept(ngx_http_request_t *r);
 ngx_int_t ngx_http_markdown_set_etag(ngx_http_request_t *r,
     const u_char *etag, size_t etag_len);
+
+/*
+ * Apply the Markdown representation Content-Type to a response:
+ * delete ALL stale Content-Type entries from the headers_out.headers
+ * list, then point the dedicated content_type field (and its
+ * charset/lowcase/hash mirrors) at the shared Markdown media type.
+ * Shared by every representation-change path (fullcov HeaderPlan
+ * commit phase, stream commit, 304, HEAD) so no path can leave a
+ * duplicate Content-Type list entry alive.  Infallible.
+ */
+void ngx_http_markdown_set_representation_content_type(ngx_http_request_t *r);
 
 /*
  * Authentication detection and cache control functions
