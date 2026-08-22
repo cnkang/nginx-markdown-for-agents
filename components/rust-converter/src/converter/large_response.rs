@@ -93,14 +93,10 @@ impl FusedNormalizer {
         let line = line.strip_suffix('\r').unwrap_or(line);
 
         let trimmed_start = line.trim_start();
-        // CommonMark: a fence must be indented at most 3 spaces.  A line
-        // indented 4+ spaces is an indented code block, not a fence.
-        let indent = line.len() - trimmed_start.len();
-        let fence_len = if indent > 3 {
-            0
-        } else {
-            trimmed_start.bytes().take_while(|&b| b == b'`').count()
-        };
+        // Shared fence measurement (column-aware, tab-safe): keep the
+        // large-document path byte-identical with the small-document
+        // normalize() path.
+        let fence_len = crate::converter::normalize::measure_fence_len(line);
         let is_opening_fence = self.active_fence_len.is_none() && fence_len >= 3;
         let is_closing_fence = self
             .active_fence_len
@@ -234,15 +230,8 @@ mod tests {
 
         for line in output.lines() {
             let trimmed_start = line.trim_start();
-            // CommonMark: a fence must be indented at most 3 spaces.  A
-            // line indented 4+ spaces is an indented code block, not a
-            // fence (matches FusedNormalizer::push_line).
-            let indent = line.len() - trimmed_start.len();
-            let fence_len = if indent > 3 {
-                0
-            } else {
-                trimmed_start.bytes().take_while(|&b| b == b'`').count()
-            };
+            // Shared fence measurement (column-aware, tab-safe).
+            let fence_len = crate::converter::normalize::measure_fence_len(line);
             let is_opening_fence = active_fence_len.is_none() && fence_len >= 3;
             let is_closing_fence = active_fence_len
                 .map(|len| fence_len >= len && trimmed_start[fence_len..].trim().is_empty())

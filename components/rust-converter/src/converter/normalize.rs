@@ -164,7 +164,7 @@ fn leading_indent_columns(line: &str) -> usize {
     columns
 }
 
-fn measure_fence_len(line: &str) -> usize {
+pub(crate) fn measure_fence_len(line: &str) -> usize {
     // CommonMark: a fence must be indented at most 3 spaces.  A line
     // indented 4+ columns is an indented code block, not a fence, so
     // count the backtick run only when the leading indentation is
