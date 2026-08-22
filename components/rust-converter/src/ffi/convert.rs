@@ -229,12 +229,17 @@ pub(crate) fn convert_inner(
 
     // Compute remaining time budget for DOM traversal. The ConversionContext
     // uses this as its cooperative checkpoint deadline so the full pipeline
-    // (parse + traversal) stays within the overall deadline.
-    let traversal_budget = if deadlines.overall.is_zero() {
-        Duration::ZERO
-    } else {
-        deadlines.overall.saturating_sub(conversion_start.elapsed())
-    };
+    // (parse + traversal) stays within the overall deadline.  An overall
+    // deadline that pre-parse work already exhausted is a genuine timeout:
+    // fail with Timeout instead of handing ConversionContext a ZERO budget,
+    // which it interprets as "no deadline" and would run unbounded.
+    // (ZERO from an explicitly unconfigured overall deadline never reaches
+    // here — check_deadline treats it as always-OK above.)
+    let elapsed_overall = conversion_start.elapsed();
+    if !deadlines.overall.is_zero() && elapsed_overall >= deadlines.overall {
+        return Err(ConversionError::Timeout);
+    }
+    let traversal_budget = deadlines.overall.saturating_sub(elapsed_overall);
 
     let mut ctx = ConversionContext::new(traversal_budget);
     ctx.set_input_size_hint(input_size);

@@ -252,7 +252,7 @@ impl StructuralStateMachine {
             }
             "code" => {
                 if self.current_context() == Some(&StructuralContext::CodeBlock(None)) {
-                    self.apply_code_language(attrs);
+                    self.apply_code_language(attrs)?;
                     return Ok(StateMachineAction::None);
                 }
                 StructuralContext::InlineCode
@@ -359,7 +359,7 @@ impl StructuralStateMachine {
         Ok(StateMachineAction::Enter(ctx))
     }
 
-    fn apply_code_language(&mut self, attrs: &[(String, String)]) {
+    fn apply_code_language(&mut self, attrs: &[(String, String)]) -> Result<(), ConversionError> {
         let lang = attrs.iter().find(|(k, _)| k == "class").and_then(|(_, v)| {
             v.split_whitespace()
                 .filter_map(|class| {
@@ -370,11 +370,23 @@ impl StructuralStateMachine {
                 .find(|language| Self::is_safe_code_fence_language(language))
                 .map(ToOwned::to_owned)
         });
-        if let Some(lang) = lang
-            && let Some(last) = self.stack.last_mut()
-        {
+        let Some(lang) = lang else {
+            return Ok(());
+        };
+        // Replacing CodeBlock(None) with CodeBlock(Some(lang)) grows the
+        // context's retained heap by the language string's capacity.
+        // Charge that delta against the state-stack budget instead of
+        // silently exceeding it.  Compute the budget check BEFORE taking
+        // the mutable borrow of the stack slot.
+        let delta = StructuralContext::CodeBlock(Some(lang.clone()))
+            .retained_heap_bytes()
+            .saturating_sub(StructuralContext::CodeBlock(None).retained_heap_bytes());
+        let current_stack_bytes = self.stack_bytes_estimate();
+        self.budget.check_state_stack(current_stack_bytes, delta)?;
+        if let Some(last) = self.stack.last_mut() {
             *last = StructuralContext::CodeBlock(Some(lang));
         }
+        Ok(())
     }
 
     /// Process an HTML end tag, pop the corresponding structural context if present, and update
