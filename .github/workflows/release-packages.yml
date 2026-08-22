@@ -197,11 +197,17 @@ jobs:
               # all supported artifacts are produced BEFORE the release is
               # published (the previous post-publication musl build could
               # never block a release).
+              # Canonical Rule 62 source keys only: nginx_version + the
+              # matrix's own 'arch' value.  The previous legacy aliases
+              # (nginx/os_type) rebuilt the retired contract shape here;
+              # os_type was dead downstream (musl is hardcoded for this
+              # job family).  'arch' passes through unchanged so the runner
+              # expression and build_release.sh (which accepts amd64/arm64)
+              # keep working without a second aliasing layer.
               musl_entries = [
                   {
-                      "nginx": e["nginx_version"],
-                      "os_type": e["libc"],
-                      "arch": {"amd64": "x86_64", "arm64": "aarch64"}.get(e["arch"], e["arch"]),
+                      "nginx_version": e["nginx_version"],
+                      "arch": e["arch"],
                   }
                   for e in data.get("entries", [])
                   if e.get("owner_workflow") == ".github/workflows/release-binaries.yml"
@@ -211,7 +217,7 @@ jobs:
               ]
               musl_entries.sort(
                   key=lambda e: (
-                      tuple(int(p) for p in e["nginx"].split(".")),
+                      tuple(int(p) for p in e["nginx_version"].split(".")),
                       e["arch"],
                   )
               )
@@ -511,10 +517,10 @@ jobs:
   # manual rebuilds of existing releases.
   # ─────────────────────────────────────────────────────────────────────────────
   musl-build:
-    name: Musl Build - NGINX ${{ matrix.nginx }} - ${{ matrix.arch }}
+    name: Musl Build - NGINX ${{ matrix.nginx_version }} - ${{ matrix.arch }}
     needs: prepare
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     permissions:
       contents: read
     strategy:
@@ -532,13 +538,14 @@ jobs:
 
       - name: Build musl module tarball
         run: |
-          ./tools/build_release.sh "${{ matrix.nginx }}" musl "${{ matrix.arch }}"
+          ./tools/build_release.sh "${{ matrix.nginx_version }}" musl \
+            "${{ matrix.arch }}"
 
       - name: Upload musl module tarball
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: pkg-musl-module-${{ matrix.nginx }}-${{ matrix.arch }}
-          path: dist/${{ matrix.nginx }}-musl-${{ matrix.arch }}/*.tar.gz
+          name: pkg-musl-module-${{ matrix.nginx_version }}-${{ matrix.arch }}
+          path: dist/${{ matrix.nginx_version }}-musl-${{ matrix.arch }}/*.tar.gz
           if-no-files-found: error
           retention-days: 5
 
@@ -739,16 +746,9 @@ jobs:
             exit 1
           fi
 
-          # Map arch for tarball naming (amd64→x86_64, arm64→aarch64).
-          # Use NFPM_ARCH (exported to GITHUB_ENV by the pkg-env step) —
-          # MATRIX_ARCH was only a step-local env var and is undefined here.
-          case "${NFPM_ARCH}" in
-            amd64) TARBALL_ARCH="x86_64" ;;
-            arm64) TARBALL_ARCH="aarch64" ;;
-            *) echo "ERROR: Unsupported architecture: ${NFPM_ARCH}" >&2; exit 1 ;;
-          esac
-
-          TARBALL_NAME="ngx_http_markdown_filter_module-${NGINX_VERSION}-glibc-${TARBALL_ARCH}.tar.gz"
+          # Reuse the RPM arch mapping already exported to GITHUB_ENV by the
+          # pkg-env step (amd64→x86_64, arm64→aarch64); do not re-derive it.
+          TARBALL_NAME="ngx_http_markdown_filter_module-${NGINX_VERSION}-glibc-${RPM_ARCH}.tar.gz"
           mkdir -p dist/tarball
           cp "${SO}" "dist/tarball/ngx_http_markdown_filter_module.so"
           tar -C dist/tarball -czf "dist/${TARBALL_NAME}" ngx_http_markdown_filter_module.so
@@ -849,13 +849,6 @@ jobs:
         with:
           python-version: '3.14.6'
 
-      - name: Generate candidate-bound release gate inputs
-        run: |
-          python3 tools/release/gates/generate_release_gate_manifests.py \
-            --phase inputs \
-            --candidate-sha "$(git rev-parse HEAD)"
-        shell: bash
-
       - name: Verify tag SHA is main CI-approved
         if: github.ref_type == 'tag'
         env:
@@ -906,6 +899,16 @@ jobs:
             --statuses-file "${statuses}" \
             --tag-sha "${TAG_SHA}" \
             --branch "${DEFAULT_BRANCH}"
+        shell: bash
+
+      # Candidate-bound gate inputs (gitignored working-tree state) are
+      # generated here — AFTER the tag-SHA governance check above, so no
+      # repository code from the checkout executes before governance.
+      - name: Generate candidate-bound release gate inputs
+        run: |
+          python3 tools/release/gates/generate_release_gate_manifests.py \
+            --phase inputs \
+            --candidate-sha "$(git rev-parse HEAD)"
         shell: bash
 
       - name: Install release gate dependencies

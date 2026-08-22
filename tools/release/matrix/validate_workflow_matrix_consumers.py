@@ -268,10 +268,19 @@ def validate_owner_workflow_refs(matrix_path: Path) -> list[str]:
     with open(validated, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    # Support both canonical 'entries' (release matrix canonical format) and legacy 'matrix' + 'additional_artifacts'
-    all_entries = data.get("entries", []) or (
-        data.get("matrix", []) + data.get("additional_artifacts", [])
-    )
+    # Rule 62: consumers must read ONLY the canonical 'entries' key.
+    # The legacy 'matrix'/'additional_artifacts' aliases are fail-closed in
+    # the normalizer; a validator accepting them would be more permissive
+    # than the contract it defends.  Missing/empty entries is an error here.
+    all_entries = data.get("entries")
+    if not isinstance(all_entries, list) or not all(
+        isinstance(entry, dict) for entry in all_entries
+    ):
+        errors.append(
+            "Matrix file must carry the canonical 'entries' list of objects "
+            "(legacy 'matrix'/'additional_artifacts' keys are not accepted)"
+        )
+        return errors
 
     for i, entry in enumerate(all_entries):
         wf = entry.get("owner_workflow", "")
@@ -297,9 +306,16 @@ def validate_release_blocking_publish_dag(matrix_path: Path) -> list[str]:
     with open(validated, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    entries = data.get("entries", []) or (
-        data.get("matrix", []) + data.get("additional_artifacts", [])
-    )
+    entries = data.get("entries")
+    if not isinstance(entries, list) or not all(
+        isinstance(entry, dict) for entry in entries
+    ):
+        errors.append(
+            "Matrix file must carry the canonical 'entries' list of objects "
+            "(legacy 'matrix'/'additional_artifacts' keys are not accepted)"
+        )
+        return errors
+
     docker_owners = {
         entry.get("owner_workflow", "")
         for entry in entries
