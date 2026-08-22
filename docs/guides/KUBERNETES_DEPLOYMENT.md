@@ -341,8 +341,9 @@ module functionality after Kubernetes deployment.
 3. **Accept negotiation** — Sends `Accept: text/html` and confirms the module
    does NOT convert (pass-through)
 4. **Metrics endpoint** — Verifies the module metrics path (default
-   `/_markdown_metrics`, matching `values.metrics.uri`; override with
-   `-m/--metrics`) returns HTTP 200 with Prometheus-format data
+   `/_markdown_metrics`, matching `values.metrics.uri`).  Override with
+   `-m/--metrics`.  The endpoint must return HTTP 200 with Prometheus-format
+   data.
 
 #### Usage
 
@@ -377,7 +378,7 @@ All options:
 | `-t, --timeout SECS` | `10` | Curl timeout in seconds |
 
 The port-forward targets the Pod's container port `8080` (the chart's
-NGINX `listen`; the Service maps `80 → 8080`), so direct Pod forwarding
+NGINX `listen`).  The Service maps `80 → 8080`, so direct Pod forwarding
 uses `8080`, not `80`.
 
 #### Expected Output
