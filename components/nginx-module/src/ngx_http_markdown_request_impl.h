@@ -1728,7 +1728,7 @@ ngx_http_markdown_body_filter_main(ngx_http_request_t *r, ngx_chain_t *in,
  *
  * Called for each chunk of the response body.
  * Buffers the response and performs conversion when complete.
- * 
+ *
  * Body filter hook
  * - Accumulates response chunks in buffer
  * - Detects when all chunks are buffered (last_buf flag)
@@ -1739,7 +1739,7 @@ ngx_http_markdown_body_filter_main(ngx_http_request_t *r, ngx_chain_t *in,
  *
  * Covers: body accumulation, conversion execution, header updates,
  * Markdown output, error strategy application
- * 
+ *
  * @param r   The request structure
  * @param in  The input chain containing response body chunks
  * @return    NGX_OK on success, NGX_ERROR on error
