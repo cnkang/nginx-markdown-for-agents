@@ -947,12 +947,26 @@ fn apply_resume_closing_output(
                 failure_updates: FailureUpdates::NONE,
             })
         }
-        NgxResult::Again => Ok(ApplyResult {
-            new_state: StreamingState::PendingClosingOutput,
-            next_frame: None,
-            side_effects: vec![],
-            failure_updates: FailureUpdates::NONE,
-        }),
+        NgxResult::Again => {
+            /* The pending chain must be the closing Markdown bytes;
+             * a mismatched kind means the chain was retained under the
+             * wrong pending state (same protocol-violation class the
+             * SEND_CLOSING_OUTPUT path validates). */
+            if outcome.pending_kind != Some(PendingKind::ClosingMarkdown) {
+                return Err(StateMachineError::InvariantViolation {
+                    message: format!(
+                        "resume closing output NGX_AGAIN with pending_kind={:?}",
+                        outcome.pending_kind
+                    ),
+                });
+            }
+            Ok(ApplyResult {
+                new_state: StreamingState::PendingClosingOutput,
+                next_frame: None,
+                side_effects: vec![],
+                failure_updates: FailureUpdates::NONE,
+            })
+        }
         NgxResult::Error => {
             /* Output loss → ABORTED */
             let record = FailureRecord {
@@ -1067,12 +1081,24 @@ fn apply_resume_terminal(
                 },
             })
         }
-        NgxResult::Again => Ok(ApplyResult {
-            new_state: StreamingState::PendingTerminal,
-            next_frame: None,
-            side_effects: vec![],
-            failure_updates: FailureUpdates::NONE,
-        }),
+        NgxResult::Again => {
+            /* The pending chain must be the terminal last_buf; validate
+             * pending_kind like every other NGX_AGAIN retention point. */
+            if outcome.pending_kind != Some(PendingKind::Terminal) {
+                return Err(StateMachineError::InvariantViolation {
+                    message: format!(
+                        "resume terminal NGX_AGAIN with pending_kind={:?}",
+                        outcome.pending_kind
+                    ),
+                });
+            }
+            Ok(ApplyResult {
+                new_state: StreamingState::PendingTerminal,
+                next_frame: None,
+                side_effects: vec![],
+                failure_updates: FailureUpdates::NONE,
+            })
+        }
         NgxResult::Error => {
             /* Definitive error → ABORTED, no retry */
             let record = FailureRecord {
