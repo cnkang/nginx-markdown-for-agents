@@ -252,6 +252,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Rule 61 validates baseline source SHAs against the repository
+          # history.  The active baseline SHAs are retained by immutable
+          # perf-baseline/* tags, so a shallow checkout cannot verify them.
+          fetch-depth: 0
+          fetch-tags: true
           persist-credentials: false
 
       - name: Set up Python
