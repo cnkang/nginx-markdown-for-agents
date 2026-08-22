@@ -384,15 +384,21 @@ unsafe fn write_success(result: *mut FFIDynconfResult, dynconf: &DynconfResult) 
     let active_bytes = dynconf.active_digest.as_bytes().to_vec().into_boxed_slice();
 
     // Phase 2: Commit -- transfer ownership and write all fields.
-    // Box::into_raw and pointer writes do not allocate and cannot panic.
+    // Pointer writes do not allocate and cannot panic.  Ownership is
+    // transferred through the single audited fat-pointer-safe helper
+    // (Rule 53): Box::into_raw on a Box<[u8]> would truncate the
+    // fat pointer and lose the empty-to-NULL guarantee.
     // SAFETY: result was validated non-NULL by the caller.
     let r = unsafe { &mut *result };
 
-    r.source_digest_len = source_bytes.len();
-    r.source_digest = Box::into_raw(source_bytes) as *const u8;
+    let (source_ptr, source_len) = crate::ffi::memory::leak_boxed_slice_to_raw(source_bytes);
+    let (active_ptr, active_len) = crate::ffi::memory::leak_boxed_slice_to_raw(active_bytes);
 
-    r.active_digest_len = active_bytes.len();
-    r.active_digest = Box::into_raw(active_bytes) as *const u8;
+    r.source_digest_len = source_len;
+    r.source_digest = source_ptr;
+
+    r.active_digest_len = active_len;
+    r.active_digest = active_ptr;
 
     // Write typed values
     r.filter = match dynconf.filter {
@@ -463,8 +469,9 @@ unsafe fn write_error_with_message(result: *mut FFIDynconfResult, code: u32, det
     let r = unsafe { &mut *result };
 
     r.error_code = code;
-    r.error_message_len = msg_bytes.len();
-    r.error_message = Box::into_raw(msg_bytes) as *const u8;
+    let (msg_ptr, msg_len) = crate::ffi::memory::leak_boxed_slice_to_raw(msg_bytes);
+    r.error_message_len = msg_len;
+    r.error_message = msg_ptr;
 
     // Clear success fields
     r.source_digest = ptr::null();
