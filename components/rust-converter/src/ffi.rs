@@ -71,7 +71,7 @@
 pub(crate) mod abi;
 mod convert;
 mod exports;
-mod memory;
+pub(crate) mod memory;
 mod options;
 
 #[cfg(feature = "streaming")]
