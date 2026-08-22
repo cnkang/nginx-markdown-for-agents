@@ -19,8 +19,8 @@ Modes:
   (default)      audit all git-tracked files
   --staged       audit only staged additions/copies/renames (pre-commit)
 
-Allowlist entries ("path:justification", substring path match) exempt
-intentional files; justification is mandatory.
+Allowlist entries ("path:justification", exact repository-relative path
+match) exempt intentional files; justification is mandatory.
 
 Usage:
     python3 tools/harness/detect_scratch_files.py [--staged]
@@ -53,7 +53,8 @@ JUNK_RE = re.compile(
 # Root-level one-off script extensions.
 ROOT_SCRIPT_RE = re.compile(r"\.(py|sh)$", re.IGNORECASE)
 
-# "path:justification" — substring path match, justification mandatory.
+# "path:justification" — exact repository-relative path match,
+# justification mandatory.
 ALLOWLIST = [
     "build.sh:ClusterFuzzLite/OSS-Fuzz requires build.sh at the repository "
     "root as its container entrypoint (fuzz-infrastructure rules)",
@@ -92,7 +93,10 @@ def is_allowlisted(path):
         parts = entry.split(":", 1)
         if len(parts) < 2 or len(parts[1].strip()) < 5:
             continue
-        if parts[0] and parts[0] in path:
+        # Anchor to the FULL repo-relative path, not a substring: a bare
+        # "build.sh" entry would otherwise exempt rebuild.sh / prebuild.sh
+        # or any nested script whose name contains the anchor.
+        if parts[0] and path == parts[0]:
             return True
     return False
 
