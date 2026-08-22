@@ -198,6 +198,40 @@ impl StreamingSanitizer {
         }
     }
 
+    /// Estimate the physical heap memory currently retained by the
+    /// sanitizer state.
+    ///
+    /// Counts capacity (allocated bytes), not logical length, for every
+    /// long-lived allocation: `skip_element` / `prune_element` names,
+    /// the strip / nesting / implied-closure stacks, and each stack
+    /// entry's own capacity.  These allocations are attacker-derived
+    /// (element names come from the input stream) and persist across
+    /// chunks while a skip/strip/prune region is open, so they must be
+    /// part of the parser working-set budget.
+    ///
+    /// Scalar counters (depths) are stack-resident and not counted.
+    pub fn resident_bytes(&self) -> usize {
+        let stack_entry_bytes = |stack: &Vec<String>| -> usize {
+            stack
+                .iter()
+                .map(|s| s.capacity())
+                .fold(0usize, usize::saturating_add)
+                .saturating_add(
+                    stack
+                        .capacity()
+                        .saturating_mul(std::mem::size_of::<String>()),
+                )
+        };
+
+        self.skip_element
+            .as_ref()
+            .map_or(0, |s| s.capacity())
+            .saturating_add(self.prune_element.as_ref().map_or(0, |s| s.capacity()))
+            .saturating_add(stack_entry_bytes(&self.strip_stack))
+            .saturating_add(stack_entry_bytes(&self.nesting_stack))
+            .saturating_add(stack_entry_bytes(&self.implied_closures))
+    }
+
     /// Creates a `StreamingSanitizer` with noise-region pruning enabled.
     ///
     /// Elements matching the prune config (nav, footer, aside, etc.) and
@@ -1758,5 +1792,60 @@ mod tests {
             SanitizeDecision::Pass(_)
         ));
         assert_eq!(san.nesting_depth(), 0);
+    }
+
+    // ── resident_bytes accounting (parser budget) ──────────────────
+
+    #[test]
+    fn test_resident_bytes_empty_state_is_zero() {
+        let san = StreamingSanitizer::new();
+        assert_eq!(san.resident_bytes(), 0, "empty sanitizer retains no heap");
+    }
+
+    #[test]
+    fn test_resident_bytes_grows_with_retained_state_and_never_shrinks_below_capacity() {
+        let mut san = StreamingSanitizer::new();
+
+        // Enter a skip region (script is a dangerous container element).
+        assert_eq!(
+            san.process_event(start_tag("script", vec![])),
+            SanitizeDecision::Skip
+        );
+        let after_skip = san.resident_bytes();
+        assert!(
+            after_skip > 0,
+            "retained skip_element name must be accounted, got {after_skip}"
+        );
+
+        // Exit the skip region, then open normal nested elements:
+        // nesting_stack entries must add to the retained estimate.
+        assert_eq!(san.process_event(end_tag("script")), SanitizeDecision::Skip);
+        assert!(matches!(
+            san.process_event(start_tag("div", vec![])),
+            SanitizeDecision::Pass(_)
+        ));
+        assert!(matches!(
+            san.process_event(start_tag("span", vec![])),
+            SanitizeDecision::Pass(_)
+        ));
+        let after_nesting = san.resident_bytes();
+        assert!(after_nesting > 0, "nesting stack entries must be accounted");
+
+        // Exit everything: allocations are released, accounting drops.
+        assert!(matches!(
+            san.process_event(end_tag("span")),
+            SanitizeDecision::Pass(_)
+        ));
+        assert!(matches!(
+            san.process_event(end_tag("div")),
+            SanitizeDecision::Pass(_)
+        ));
+        let after_exit = san.resident_bytes();
+        assert!(
+            after_exit < after_nesting,
+            "closing regions must release retained entries ({} < {})",
+            after_exit,
+            after_nesting
+        );
     }
 }

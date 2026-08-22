@@ -171,12 +171,11 @@ pub unsafe extern "C" fn markdown_incremental_new_with_code(
             IncrementalConverter::with_max_buffer_size(decoded.conversion, max_buffer_size)
         };
         converter.set_content_type(decoded.content_type.map(ToOwned::to_owned));
-        /* The IncrementalConverter exposes a single overall deadline that
-         * bounds parse + traversal together; use conversion_timeout, the
-         * documented overall pipeline limit, not parse_timeout (which is a
-         * parse-phase sub-limit the incremental path cannot express
-         * separately). */
         converter.set_timeout(decoded.timeout);
+        // The incremental path now expresses the parse-phase sub-limit:
+        // apply parse_timeout_ms around the buffered-parse step while
+        // conversion_timeout remains the overall pipeline deadline.
+        converter.set_parse_timeout(decoded.parse_timeout);
         Ok(Box::into_raw(Box::new(IncrementalConverterHandle {
             inner: converter,
             parser_memory_budget: decoded.parser_memory_budget,

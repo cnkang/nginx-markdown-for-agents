@@ -54,6 +54,9 @@ pub struct IncrementalConverter {
     max_buffer_size: usize,
     content_type: Option<String>,
     timeout: Duration,
+    /// Parse-phase sub-deadline (from `parse_timeout_ms`).  `Duration::ZERO`
+    /// means unconfigured: the overall `timeout` alone bounds the pipeline.
+    parse_timeout: Duration,
 }
 
 /// Default maximum buffer size for the incremental converter (64 MiB).
@@ -91,6 +94,7 @@ impl IncrementalConverter {
             max_buffer_size: INCREMENTAL_MAX_BUFFER_SIZE,
             content_type: None,
             timeout: Duration::ZERO,
+            parse_timeout: Duration::ZERO,
         }
     }
 
@@ -120,6 +124,7 @@ impl IncrementalConverter {
             max_buffer_size: effective,
             content_type: None,
             timeout: Duration::ZERO,
+            parse_timeout: Duration::ZERO,
         }
     }
 
@@ -144,6 +149,14 @@ impl IncrementalConverter {
     /// ```
     pub fn set_content_type(&mut self, content_type: Option<String>) {
         self.content_type = content_type;
+    }
+
+    /// Set the parse-phase sub-deadline applied around `parse_html_with_charset`.
+    ///
+    /// `Duration::ZERO` (default) leaves the phase unconfigured; the overall
+    /// conversion timeout alone then bounds the pipeline.
+    pub fn set_parse_timeout(&mut self, parse_timeout: Duration) {
+        self.parse_timeout = parse_timeout;
     }
 
     /// Configure the cooperative timeout used during conversion finalization.
@@ -228,7 +241,15 @@ impl IncrementalConverter {
         let mut ctx = ConversionContext::new(self.timeout);
         ctx.set_input_size_hint(self.buffer.len());
 
+        // The parse phase gets its own sub-deadline when configured, so a
+        // parse_timeout smaller than the overall timeout is actually
+        // enforced at the parse step instead of being absorbed into the
+        // single overall budget.
+        let parse_start = std::time::Instant::now();
         let dom = parse_html_with_charset(&self.buffer, ct_ref)?;
+        if !self.parse_timeout.is_zero() && parse_start.elapsed() > self.parse_timeout {
+            return Err(ConversionError::ParseTimeout);
+        }
         ctx.check_timeout()?;
 
         let converter = MarkdownConverter::with_options(self.options);

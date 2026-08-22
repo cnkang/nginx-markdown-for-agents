@@ -100,7 +100,19 @@ pub struct StreamingConverter {
     /// parser deadline bounds only the tokenizer phase, matching the
     /// full-buffer path where `parse_timeout` limits parsing while
     /// `conversion_timeout` bounds the whole pipeline.
+    ///
+    /// The deadline is evaluated against ACCUMULATED TOKENIZER WORK, not
+    /// total wall-clock time: each bounded html5ever slice's measured
+    /// duration is added to `parser_work_elapsed`, and the deadline fires
+    /// when that accumulation crosses the configured parse_timeout.  This
+    /// keeps an upstream that trickles chunks over a long period from
+    /// consuming the parser budget while it sits idle between feeds.
     parser_deadline: Option<Instant>,
+    /// Configured parser-phase allowance (the parse_timeout duration).
+    parser_work_allowance: Duration,
+    /// Accumulated html5ever tokenization work (measured per bounded
+    /// slice).  Compared against the parse_timeout duration.
+    parser_work_elapsed: Duration,
     /// Conversion statistics.
     stats: StreamingStats,
     /// Total bytes of Markdown emitted so far (for PostCommitError reporting).
@@ -244,6 +256,8 @@ impl StreamingConverter {
             commit_state: CommitState::PreCommit,
             deadline: None,
             parser_deadline: None,
+            parser_work_allowance: Duration::ZERO,
+            parser_work_elapsed: Duration::ZERO,
             stats: StreamingStats::default(),
             bytes_emitted: 0,
             metadata: PageMetadata::new(),
@@ -317,7 +331,20 @@ impl StreamingConverter {
     /// `Instant::now() + timeout` leaves the deadline unset (no limit),
     /// matching `set_timeout`.
     pub fn set_parser_timeout(&mut self, timeout: Duration) {
-        self.parser_deadline = Instant::now().checked_add(timeout);
+        // `Duration::ZERO` disables the parse-phase sub-deadline, matching
+        // `set_timeout`'s zero-means-unconfigured convention.  Storing a
+        // deadline with a zero allowance would make the first
+        // check_parser_timeout call report ParseTimeout for work that has
+        // not happened yet.
+        self.parser_deadline = if timeout.is_zero() {
+            None
+        } else {
+            Instant::now().checked_add(timeout)
+        };
+        self.parser_work_allowance = timeout;
+        // The deadline is interpreted against accumulated tokenizer work;
+        // a fresh configuration restarts the measurement window.
+        self.parser_work_elapsed = Duration::ZERO;
     }
 
     /// Set the flush threshold for the emitter.
@@ -588,7 +615,15 @@ impl StreamingConverter {
         // 3. Finish tokenizer (signal end-of-input)
         self.check_parser_timeout()?;
         self.update_peak_memory().map_err(|e| self.wrap_error(e))?;
+        // The EOF flush is tokenizer work too: a costly final parse must be
+        // charged against the parse budget and re-checked before its batch
+        // is processed, or finalize() could exceed parse_timeout silently.
+        let finish_start = Instant::now();
         let final_batch = self.tokenizer.finish().map_err(|e| self.wrap_error(e))?;
+        self.parser_work_elapsed = self
+            .parser_work_elapsed
+            .saturating_add(finish_start.elapsed());
+        self.check_parser_timeout()?;
 
         // 4. Process remaining tokens
         self.process_tokenizer_batch(final_batch)?;
@@ -711,13 +746,20 @@ impl StreamingConverter {
         let mut offset = 0usize;
         while offset < input.len() {
             // Charge the full conservative tokenizer envelope before the next
-            // bounded slice is handed to html5ever.
+            // bounded slice is handed to html5ever.  The parser deadline is
+            // evaluated against ACCUMULATED tokenizer work (measured below),
+            // not wall-clock since request start: upstream stalls between
+            // chunks must not consume the parse budget.
             self.check_parser_timeout()?;
             self.update_peak_memory().map_err(|e| self.wrap_error(e))?;
+            let slice_start = Instant::now();
             let step = self
                 .tokenizer
                 .feed_next(&input[offset..])
                 .map_err(|e| self.wrap_error(e))?;
+            self.parser_work_elapsed = self
+                .parser_work_elapsed
+                .saturating_add(slice_start.elapsed());
             if step.consumed == 0 && step.batch.is_none() {
                 return Err(self.wrap_error(ConversionError::InternalError(
                     "budgeted tokenizer made no progress".to_string(),
@@ -1068,17 +1110,20 @@ impl StreamingConverter {
     /// [`ConversionError::ParseTimeout`] with post-commit wrapping when
     /// headers are already committed.
     fn check_parser_timeout(&self) -> Result<(), ConversionError> {
-        if let Some(deadline) = self.parser_deadline
-            && Instant::now() >= deadline
-        {
-            if matches!(self.commit_state, CommitState::PostCommit) {
-                return Err(ConversionError::PostCommitError {
-                    reason: "parser timeout exceeded".to_string(),
-                    bytes_emitted: self.bytes_emitted,
-                    original_code: ConversionError::ParseTimeout.code(),
-                });
+        if self.parser_deadline.is_some() {
+            // Bound html5ever TOKENIZER WORK, not wall-clock time: the
+            // configured duration is the work allowance, measured as the
+            // accumulated duration of bounded tokenizer slices.
+            if self.parser_work_elapsed >= self.parser_work_allowance {
+                if matches!(self.commit_state, CommitState::PostCommit) {
+                    return Err(ConversionError::PostCommitError {
+                        reason: "parser timeout exceeded".to_string(),
+                        bytes_emitted: self.bytes_emitted,
+                        original_code: ConversionError::ParseTimeout.code(),
+                    });
+                }
+                return Err(ConversionError::ParseTimeout);
             }
-            return Err(ConversionError::ParseTimeout);
         }
         Ok(())
     }
@@ -1183,6 +1228,8 @@ impl StreamingConverter {
     /// - charset sniff buffer (in Pending state)
     /// - charset transcoded output (Cow::Owned during processing)
     /// - utf8_tail (incomplete UTF-8 bytes from previous chunk)
+    /// - sanitizer retained state (skip/prune element names, strip/
+    ///   nesting/implied-closure stacks — attacker-derived, by capacity)
     fn estimate_working_set(&self) -> usize {
         self.emitter
             .pending_bytes()
@@ -1195,6 +1242,7 @@ impl StreamingConverter {
             .saturating_add(self.charset_state.resident_bytes())
             .saturating_add(self.charset_transcoded_bytes)
             .saturating_add(self.utf8_tail.capacity())
+            .saturating_add(self.sanitizer.resident_bytes())
     }
 
     /// Extract metadata from events occurring in the `<head>` region.
@@ -2413,6 +2461,38 @@ mod tests {
         let mut conv = make_converter();
         let result = conv.feed_chunk(b"<p>ok</p>");
         assert!(result.is_ok(), "no parser deadline must not time out");
+    }
+
+    #[test]
+    fn test_set_parser_timeout_zero_disables_deadline() {
+        // set_parser_timeout(ZERO) follows the zero-means-unconfigured
+        // convention: the deadline must be cleared so the very next
+        // tokenizer slice does not report ParseTimeout for work that has
+        // not happened yet.
+        let mut conv = make_converter();
+        conv.set_parser_timeout(Duration::ZERO);
+        assert!(
+            conv.parser_deadline.is_none(),
+            "zero parser timeout must disable the deadline, got {:?}",
+            conv.parser_deadline
+        );
+        let result = conv.feed_chunk(b"<p>ok</p>");
+        assert!(
+            result.is_ok(),
+            "zero-configured parser timeout must not time out immediately"
+        );
+    }
+
+    #[test]
+    fn test_set_parser_timeout_nonzero_arms_deadline() {
+        // A non-zero configuration must arm the deadline (regression
+        // guard for the zero-disabling branch above).
+        let mut conv = make_converter();
+        conv.set_parser_timeout(Duration::from_secs(60));
+        assert!(conv.parser_deadline.is_some());
+        assert_eq!(conv.parser_work_allowance, Duration::from_secs(60));
+        let result = conv.feed_chunk(b"<p>ok</p>");
+        assert!(result.is_ok());
     }
 
     #[test]
