@@ -76,6 +76,30 @@ ngx_http_markdown_brotli_workspace_limit(ngx_atomic_uint_t configured_limit)
 }
 #endif
 
+/*
+ * Brotli decoder error classes shared by buffered and streaming paths.
+ * The numeric ranges are part of brotli/decode.h's public error contract.
+ */
+typedef enum {
+    NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT = 0,
+    NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION,
+    NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL
+} ngx_http_markdown_brotli_error_class_e;
+
+static ngx_inline ngx_http_markdown_brotli_error_class_e
+ngx_http_markdown_brotli_error_classify(int code)
+{
+    if (code >= -17 && code <= -1) {
+        return NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT;
+    }
+
+    if (code >= -30 && code <= -21) {
+        return NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION;
+    }
+
+    return NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL;
+}
+
 /* C-side reload classification for file-system failures. */
 #define NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO 254
 

@@ -1877,6 +1877,39 @@ test_brotli_not_compiled_in(void)
                 "brotli without compiled support should decline");
 }
 
+static void
+test_brotli_error_classification(void)
+{
+    int  code;
+
+    TEST_SUBSECTION("Brotli decoder error classification");
+
+    for (code = -30; code <= -21; code++) {
+        TEST_ASSERT(
+            ngx_http_markdown_brotli_error_classify(code)
+                == NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION,
+            "Brotli allocation range must use the system-error class");
+    }
+
+    for (code = -17; code <= -1; code++) {
+        TEST_ASSERT(
+            ngx_http_markdown_brotli_error_classify(code)
+                == NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT,
+            "Brotli input range must use the format-error class");
+    }
+
+    TEST_ASSERT(
+        ngx_http_markdown_brotli_error_classify(-20)
+            == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
+        "Brotli internal range must use the system-error class");
+    TEST_ASSERT(
+        ngx_http_markdown_brotli_error_classify(-31)
+            == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
+        "Brotli unknown range must use the system-error class");
+
+    TEST_PASS("Brotli decoder error classification is consistent");
+}
+
 int
 main(void)
 {
@@ -1911,6 +1944,7 @@ main(void)
     test_deflate_clean_still_succeeds();
     test_gzip_concatenated_not_regressed();
     test_brotli_not_compiled_in();
+    test_brotli_error_classification();
 
     TEST_PASS("decompression_production: all tests passed");
     return 0;

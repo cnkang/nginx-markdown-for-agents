@@ -46,7 +46,11 @@ echo ""
 # Updated 2026-08-19 (P2 batch): 374 — the dynconf bind-once fix removed
 # the effective-conf allocation-failure log site (by-value copy has no
 # allocation failure path).
-BASELINE_LOG_SITES=374
+# Updated 2026-08-22 (pre-freeze remediation): 379 — the brotli
+# error-classification split (resource vs format) adds category-specific
+# diagnostic sites, and the streaming/packaging fixes add failure-path
+# logs; each was reviewed as part of its fix.
+BASELINE_LOG_SITES=379
 
 echo "--- Property 1: Log call site count remains constant ---"
 CURRENT_LOG_SITES=$(grep -crn 'ngx_log_error\|ngx_log_debug' "$SRCDIR" | awk -F: '{s+=$2}END{print s}')
