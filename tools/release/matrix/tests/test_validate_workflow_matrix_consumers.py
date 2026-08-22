@@ -290,12 +290,42 @@ class TestValidateOwnerWorkflowRefs:
         assert len(errors) == 1
         assert "nonexistent.yml" in errors[0]
 
+    def test_rejects_legacy_matrix_shape(self, tmp_path: Path) -> None:
+        """Rule 62: legacy 'matrix'/'additional_artifacts' shapes are rejected."""
+        matrix_file = tmp_path / "tools" / "release-matrix.json"
+        matrix_file.parent.mkdir(parents=True)
+        legacy = {
+            "matrix": [
+                {
+                    "nginx": "1.26.3",
+                    "owner_workflow": ".github/workflows/release-packages.yml",
+                }
+            ],
+            "additional_artifacts": [],
+        }
+        matrix_file.write_text(json.dumps(legacy))
+        with patch("validate_workflow_matrix_consumers.REPO_ROOT", tmp_path):
+            errors = validate_owner_workflow_refs(matrix_file)
+        assert len(errors) == 1
+        assert "canonical 'entries'" in errors[0]
+
+    def test_rejects_non_object_entries(self, tmp_path: Path) -> None:
+        """A list of non-objects is a malformed canonical shape, not a crash."""
+        matrix_file = tmp_path / "tools" / "release-matrix.json"
+        matrix_file.parent.mkdir(parents=True)
+        matrix_file.write_text(json.dumps({"entries": [None]}))
+        with patch("validate_workflow_matrix_consumers.REPO_ROOT", tmp_path):
+            errors = validate_owner_workflow_refs(matrix_file)
+        assert len(errors) == 1
+        assert "canonical 'entries'" in errors[0]
+
     def _write_matrix_with_owner_workflow(
         self, owner_workflow: str, tmp_path: Path
     ) -> list[str]:
         matrix = {
-            "matrix": [{"nginx": "1.26.3", "owner_workflow": owner_workflow}],
-            "additional_artifacts": [],
+            "entries": [
+                {"nginx": "1.26.3", "owner_workflow": owner_workflow},
+            ],
         }
         matrix_file = tmp_path / "tools" / "release-matrix.json"
         matrix_file.parent.mkdir(parents=True)

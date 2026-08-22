@@ -1112,6 +1112,13 @@ release-gates-check-092-canonical: release-gates-check-091
 release-gates-check-092: release-gates-check-092-canonical
 	@echo "=== 0.9.2 Release Gates (blocking) ==="
 	@echo "  [8/13] Release candidate evidence bound to HEAD"
+	# The candidate-bound manifests are workflow outputs (generated from
+	# tracked policy/scope inputs at release time), not tracked working-tree
+	# state.  Generate the inputs phase locally so this gate can close from a
+	# clean checkout — mirroring the "Generate candidate-bound release gate
+	# inputs" step in release-packages.yml.  The output path is gitignored.
+	python3 tools/release/gates/generate_release_gate_manifests.py \
+		--phase inputs --candidate-sha "$$(git rev-parse HEAD)"
 	$(MAKE) release-candidate-evidence-check
 	@echo "  [9/13] Artifact registry evidence"
 	$(MAKE) artifact-registry-check
