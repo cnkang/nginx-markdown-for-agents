@@ -804,6 +804,46 @@ ngx_http_markdown_streaming_update_headers(
 
 
 /*
+ * Authoritative predicate: does the streaming path own deferred work
+ * that requires a future filter re-entry?
+ *
+ * Enumerates every pending continuation in one place so the buffered
+ * bit cannot drift out of sync with the completion state machine.
+ * When adding a new deferred-work field to the completion struct,
+ * add it here — do not patch sync_buffered() directly.
+ */
+static ngx_flag_t
+ngx_http_markdown_streaming_has_pending_work(
+    const ngx_http_markdown_ctx_t *ctx)
+{
+    if (ctx->streaming.pending_output != NULL
+        || ctx->streaming.pending_input.head != NULL
+        || ctx->streaming.pending_meta.pending_header_output != NULL
+        || ctx->streaming.completion.finalize_after_pending
+        || ctx->streaming.completion.finalize_pending_lastbuf
+        || ctx->streaming.completion.failopen_abort_after_pending)
+    {
+        return 1;
+    }
+
+    /*
+     * A finalize output deferred behind a commit-time header NGX_AGAIN:
+     * the header block is queued in the write filter (module holds no
+     * chain for it), so this pointer is the only module-owned evidence
+     * that the Markdown tail still needs delivery.  Omitting it let
+     * sync_buffered() clear the buffered bit while the deferred tail
+     * was still owned, so NGINX was no longer obligated to re-enter
+     * the filter and the tail/terminal could be lost.
+     */
+    if (ctx->streaming.completion.finalize_pending_result != NULL) {
+        return 1;
+    }
+
+    return 0;
+}
+
+
+/*
  * Synchronize r->buffered with the full streaming pending state.
  *
  * Sets NGX_HTTP_MARKDOWN_BUFFERED when any output, input, header commit,
@@ -816,13 +856,7 @@ ngx_http_markdown_streaming_sync_buffered(
     ngx_http_request_t *r,
     const ngx_http_markdown_ctx_t *ctx)
 {
-    if (ctx->streaming.pending_output != NULL
-        || ctx->streaming.pending_input.head != NULL
-        || ctx->streaming.pending_meta.pending_header_output != NULL
-        || ctx->streaming.completion.finalize_after_pending
-        || ctx->streaming.completion.finalize_pending_lastbuf
-        || ctx->streaming.completion.failopen_abort_after_pending)
-    {
+    if (ngx_http_markdown_streaming_has_pending_work(ctx)) {
         r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
     } else {
         r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
@@ -2528,11 +2562,13 @@ ngx_http_markdown_streaming_commit(
     }
     if (!ngx_http_markdown_streaming_delivery_ok(rc)) {
         /* Definitive downstream failure after the header transaction was
-         * applied: keep headers_committed so no later path can re-run
-         * the header mutations — the canonical header chain runs at most
-         * once per request. The request
-         * ends through the caller's error path; the commit is never
-         * retried. */
+         * applied: latch headers_committed BEFORE propagating the error
+         * so no later path can re-run the header mutations — the
+         * canonical header chain runs at most once per request, and a
+         * retry after a definitive failure would double-apply the
+         * transaction. The request still ends through the caller's
+         * error path; the commit is never retried. */
+        ctx->stream_sm.headers_committed = 1;
         return rc;
     }
 
@@ -3828,6 +3864,28 @@ ngx_http_markdown_streaming_init_handle(
             r, ctx, conf, ERROR_INTERNAL);
     }
 
+    /*
+     * Register the pool cleanup BEFORE the first fallible step below.
+     *
+     * The later fallible paths route to precommit_error(), which selects
+     * fail-open and delivers the current chain via send_failopen_chain();
+     * on downstream NGX_AGAIN that delivery stores the chain in
+     * pending_output.  If cleanup registration happened only after all
+     * fallible steps succeeded, a failure between them would leave
+     * pending_output set with no registered decrement, leaking the
+     * pending_output_requests gauge for this worker.  Registration is
+     * idempotent-safe here because it precedes any state the handler
+     * touches, and the handler itself is NULL-tolerant.
+     */
+    cln = ngx_pool_cleanup_add(r->pool, 0);
+    if (cln == NULL) {
+        return ngx_http_markdown_streaming_precommit_error(
+            r, ctx, conf, ERROR_MEMORY_LIMIT);
+    }
+    cln->handler =
+        ngx_http_markdown_streaming_cleanup;
+    cln->data = ctx;
+
     rc = ngx_http_markdown_prepare_conversion_options(
         r, conf, ctx->effective_conf, &options);
     if (rc != NGX_OK) {
@@ -3862,19 +3920,6 @@ ngx_http_markdown_streaming_init_handle(
      */
     ctx->streaming.ttfb.feed_start_ms = 0;
     ctx->streaming.completion.failure_recorded = 0;
-
-    /* Register cleanup handler */
-    cln = ngx_pool_cleanup_add(r->pool, 0);
-    if (cln == NULL) {
-        markdown_streaming_abort(
-            ctx->streaming.handle);
-        ctx->streaming.handle = NULL;
-        return ngx_http_markdown_streaming_precommit_error(
-            r, ctx, conf, ERROR_MEMORY_LIMIT);
-    }
-    cln->handler =
-        ngx_http_markdown_streaming_cleanup;
-    cln->data = ctx;
 
     rc = ngx_http_markdown_streaming_init_buffers(r, ctx, conf);
     if (rc != NGX_OK) {
@@ -4105,22 +4150,12 @@ ngx_http_markdown_streaming_failopen_passthrough(
         cloned = ngx_http_markdown_streaming_clone_chain_links(r, in);
         if (cloned == NULL && in != NULL) {
             /* Uniform error classification (Rule 38): replay-buffer
-             * allocation failure is a resource-limit failure, not a bare
-             * internal error. */
-            const ngx_http_markdown_conf_t  *conf;
-
-            conf = ngx_http_get_module_loc_conf(
-                r, ngx_http_markdown_filter_module);
-            if (conf == NULL) {
-                /* Location configuration unavailable: fail closed.
-                 * In practice the request path always has a loc conf
-                 * (allocated during configuration parsing); this guard
-                 * keeps the resource-limit error path from dereferencing
-                 * a NULL policy pointer. */
-                return NGX_ERROR;
-            }
-            return ngx_http_markdown_streaming_precommit_error(
-                r, ctx, conf, ERROR_MEMORY_LIMIT);
+             * allocation failure is a resource-limit failure.  This is
+             * the fail-open passthrough path — headers may already be
+             * forwarded and counters recorded, so re-entering
+             * precommit_error() here would duplicate metrics and logs;
+             * fail closed directly instead. */
+            return NGX_ERROR;
         }
         return ngx_http_markdown_streaming_send_failopen_chain(r, ctx, cloned);
     }
@@ -4284,14 +4319,16 @@ ngx_http_markdown_streaming_passthrough(
     if (!ctx->headers_forwarded) {
         rc = ngx_http_markdown_forward_headers(
             r, ctx);
-        if (rc == NGX_AGAIN) {
-            /* Header forwarding suspended (write event pending); resume
-             * via body-filter re-entry.  Do not fold into the error path. */
-            return NGX_AGAIN;
-        }
-        if (rc != NGX_OK) {
+        if (rc != NGX_OK && rc != NGX_AGAIN) {
             return rc;
         }
+        /* Header-chain NGX_AGAIN = headers queued by the write filter
+         * (NGINX core model).  Continue so the passthrough body chain
+         * is always submitted behind the queued header block; returning
+         * early here sends headers only under backpressure and drops
+         * the body chain (including any terminal last_buf marker).
+         * The body submission below propagates its own return code,
+         * including NGX_AGAIN when the write filter queues the body. */
     }
     return ngx_http_next_body_filter(r, in);
 }
@@ -5144,6 +5181,19 @@ ngx_http_markdown_streaming_handle_new_input_with_pending(
         }
 
         ngx_http_markdown_streaming_release_pending_header_output(ctx);
+        if (ctx->stream_sm.headers_committed
+            || ctx->streaming.commit_state
+               == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
+        {
+            /* The header block was already mutated and accepted (queued
+             * by the write filter) — this is a post-commit enqueue
+             * failure, so precommit_error() would re-enter pre-commit
+             * handling, duplicate counters/logs, or select fail-open
+             * against committed Markdown-contract headers.  Route
+             * through the post-commit error handler instead. */
+            return ngx_http_markdown_streaming_handle_postcommit_error(
+                r, ctx, conf, enqueue_error);
+        }
         rc = ngx_http_markdown_streaming_precommit_error(
             r, ctx, conf, enqueue_error);
         if (rc == NGX_DECLINED && !ctx->eligible) {
