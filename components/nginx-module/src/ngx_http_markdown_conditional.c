@@ -923,22 +923,12 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
     ngx_http_markdown_invalidate_response_header(
         r, (const u_char *) "Last-Modified", sizeof("Last-Modified") - 1);
 
-    /* The 304 describes the Markdown representation: point Content-Type
-     * at the Markdown media type instead of leaving the upstream
-     * text/html that describes the original body.  Use the shared
-     * writable array (not the string literal) so all conversion paths
-     * (fullcov, streaming, 304) reference the same storage. */
-    r->headers_out.content_type.data = ngx_http_markdown_content_type;
-    r->headers_out.content_type.len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
-    r->headers_out.content_type_len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
-    r->headers_out.charset.len = 0;
-    r->headers_out.charset.data = NULL;
-    /* Clear the lowercased/hash cache of the upstream media type: the
-     * header filter matches against content_type_lowcase/hash, so a
-     * stale text/html cache would let downstream matching (e.g. gzip
-     * or SSI) treat the Markdown response as HTML. */
-    r->headers_out.content_type_lowcase = NULL;
-    r->headers_out.content_type_hash = 0;
+    /* The 304 describes the Markdown representation: apply the
+     * Markdown Content-Type through the shared representation helper,
+     * which deletes stale header-list entries before pointing the
+     * dedicated field at the shared writable array (a surviving list
+     * entry would emit a second Content-Type). */
+    ngx_http_markdown_set_representation_content_type(r);
 
     if (result != NULL && result->etag != NULL && result->etag_len > 0) {
         rc = ngx_http_markdown_set_etag(r, result->etag, result->etag_len);

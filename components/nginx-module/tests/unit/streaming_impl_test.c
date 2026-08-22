@@ -1062,11 +1062,12 @@ ngx_http_markdown_add_vary_accept(ngx_http_request_t *r)
  * g_remove_content_encoding_calls so tests can verify invocation.
  * Ignores the request argument.
  */
-void
+ngx_int_t
 ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r)
 {
     UNUSED(r);
     g_remove_content_encoding_calls++;
+    return NGX_OK;
 }
 
 /*

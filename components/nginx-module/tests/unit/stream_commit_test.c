@@ -298,11 +298,12 @@ ngx_http_markdown_set_etag(ngx_http_request_t *r,
 /* Mock: ngx_http_markdown_remove_content_encoding */
 static int test_remove_content_encoding_called;
 
-void
+ngx_int_t
 ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r)
 {
     UNUSED(r);
     test_remove_content_encoding_called = 1;
+    return NGX_OK;
 }
 
 /* Mock: ngx_http_markdown_is_authenticated */
@@ -406,6 +407,45 @@ ngx_pnalloc(ngx_pool_t *pool, size_t size)
 
 /* Include the commit source after mocks */
 #include "../../src/ngx_http_markdown_stream_commit.c"
+
+/* Stub for ngx_http_markdown_set_representation_content_type: the
+ * production implementation lives in ngx_http_markdown_headers_impl.h
+ * (not included by this test's standalone harness).  Mirror the
+ * production semantics: invalidate all Content-Type list entries, then
+ * point the dedicated field at the shared Markdown media type and
+ * clear its charset/lowcase/hash mirrors. */
+void
+ngx_http_markdown_set_representation_content_type(ngx_http_request_t *r)
+{
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *headers;
+
+    for (part = &r->headers_out.headers.part; part != NULL;
+         part = part->next)
+    {
+        headers = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash != 0 && headers[i].key.len == 12
+                && strncasecmp((const char *) headers[i].key.data,
+                               "Content-Type", 12)
+                   == 0)
+            {
+                headers[i].hash = 0;
+            }
+        }
+    }
+
+    r->headers_out.content_type.data =
+        (u_char *) NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL;
+    r->headers_out.content_type.len =
+        sizeof(NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL) - 1;
+    r->headers_out.content_type_len =
+        sizeof(NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL) - 1;
+    r->headers_out.charset.len = 0;
+    r->headers_out.charset.data = NULL;
+    r->headers_out.content_type_lowcase = NULL;
+    r->headers_out.content_type_hash = 0;
+}
 
 /* Stub for ngx_http_markdown_clear_trailers: the production implementation
  * lives in ngx_http_markdown_headers_impl.h (not included by this test's

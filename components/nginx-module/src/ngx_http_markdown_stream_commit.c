@@ -490,12 +490,10 @@ static ngx_int_t
 ngx_http_markdown_stream_commit_set_content_type(
     ngx_http_request_t *r)
 {
-    r->headers_out.content_type.data = ngx_http_markdown_content_type;
-    r->headers_out.content_type.len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
-    r->headers_out.content_type_len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
-
-    r->headers_out.charset.len = 0;
-    r->headers_out.charset.data = NULL;
+    /* Shared representation helper: deletes stale Content-Type list
+     * entries first, then sets the dedicated field and its charset/
+     * lowcase/hash mirrors to the Markdown media type. */
+    ngx_http_markdown_set_representation_content_type(r);
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "markdown: stream commit: "

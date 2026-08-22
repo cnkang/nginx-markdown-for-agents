@@ -499,6 +499,43 @@ static ngx_http_markdown_conf_t *g_conditional_conf;
  * binary).  Mirror the production semantics: mark every trailer entry
  * hash=0 so output filters suppress the trailer block. */
 void
+ngx_http_markdown_set_representation_content_type(ngx_http_request_t *r)
+{
+    /* Test-local mirror of the production helper: invalidate all
+     * Content-Type list entries, then point the dedicated field at the
+     * shared Markdown media type and clear its mirrors.  Mirrors the
+     * semantics asserted by headers_test.c against the real helper. */
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *headers;
+
+    for (part = &r->headers_out.headers.part; part != NULL;
+         part = part->next)
+    {
+        headers = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash != 0 && headers[i].key.len == 12
+                && strncasecmp((const char *) headers[i].key.data,
+                               "Content-Type", 12)
+                   == 0)
+            {
+                headers[i].hash = 0;
+            }
+        }
+    }
+
+    r->headers_out.content_type.data =
+        (u_char *) NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL;
+    r->headers_out.content_type.len =
+        sizeof(NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL) - 1;
+    r->headers_out.content_type_len =
+        sizeof(NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL) - 1;
+    r->headers_out.charset.len = 0;
+    r->headers_out.charset.data = NULL;
+    r->headers_out.content_type_lowcase = NULL;
+    r->headers_out.content_type_hash = 0;
+}
+
+void
 ngx_http_markdown_clear_trailers(ngx_http_request_t *r)
 {
     ngx_list_part_t  *part;

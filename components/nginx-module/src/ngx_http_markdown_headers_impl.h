@@ -543,7 +543,7 @@ ngx_http_markdown_set_etag(ngx_http_request_t *r, const u_char *etag, size_t eta
  *
  * r - current HTTP request
  */
-void
+ngx_int_t
 ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r)
 {
     r->headers_out.content_encoding = NULL;
@@ -553,6 +553,53 @@ ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r)
                                          sizeof(ngx_http_markdown_hdr_content_encoding) - 1,
                                          0,
                                          "markdown: removed Content-Encoding header");
+    return NGX_OK;
+}
+
+/*
+ * Apply the Markdown representation Content-Type to a response.
+ *
+ * NGINX can carry Content-Type both as the dedicated
+ * r->headers_out.content_type field and as ordinary entries in the
+ * headers_out.headers list (e.g. when upstream or an earlier filter
+ * pushed one explicitly).  If a stale list entry survives a
+ * representation change, the response emits two Content-Type headers.
+ * Every representation-change path (fullcov HeaderPlan, stream commit,
+ * 304, HEAD) must therefore delete all list entries before pointing
+ * the dedicated field at the Markdown media type.
+ *
+ * Also clears the lowercased/hash cache of the upstream media type:
+ * the header filter matches against content_type_lowcase/hash, so a
+ * stale text/html cache would let downstream matching (e.g. gzip or
+ * SSI) treat the Markdown response as HTML.
+ *
+ * Infallible: list invalidation and pointer/scalar assignment only.
+ *
+ * r - current HTTP request
+ */
+void
+ngx_http_markdown_set_representation_content_type(ngx_http_request_t *r)
+{
+    static u_char  hdr_content_type[] = "Content-Type";
+
+    ngx_http_markdown_invalidate_headers(r,
+                                         hdr_content_type,
+                                         sizeof(hdr_content_type) - 1,
+                                         0,
+                                         "markdown: removed stale Content-Type header");
+
+    /* Point at the Markdown media type a GET conversion would select,
+     * using the shared writable array so all paths reference the same
+     * storage.  NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN is defined by
+     * ngx_http_markdown_filter_module.h, which every production TU
+     * includes before this header. */
+    r->headers_out.content_type.data = ngx_http_markdown_content_type;
+    r->headers_out.content_type.len = sizeof(NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL) - 1;
+    r->headers_out.content_type_len = sizeof(NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL) - 1;
+    r->headers_out.charset.len = 0;
+    r->headers_out.charset.data = NULL;
+    r->headers_out.content_type_lowcase = NULL;
+    r->headers_out.content_type_hash = 0;
 }
 
 /*
@@ -1249,22 +1296,13 @@ ngx_http_markdown_head_representation_headers(ngx_http_request_t *r)
         hdr_token_count, sizeof(hdr_token_count) - 1, 0, NULL);
     ngx_http_markdown_invalidate_headers(r,
         hdr_trailer, sizeof(hdr_trailer) - 1, 0, NULL);
-    /* Content-Type: point at the Markdown media type a GET conversion
-     * would select, using the shared writable array so all paths
-     * reference the same storage. */
-    r->headers_out.content_type.data = ngx_http_markdown_content_type;
-    r->headers_out.content_type.len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
-    r->headers_out.content_type_len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
-    r->headers_out.charset.len = 0;
-    r->headers_out.charset.data = NULL;
-    /* Clear the lowercased/hash cache of the upstream media type (same
-     * rationale as the fullcov/304 commit paths). */
-    r->headers_out.content_type_lowcase = NULL;
-    r->headers_out.content_type_hash = 0;
-
-    /* Content-Encoding: the Markdown representation is not the
-     * compressed HTML body; drop the upstream encoding. */
-    r->headers_out.content_encoding = NULL;
+    /* Content-Type / Content-Encoding: the Markdown representation
+     * replaces the upstream HTML one.  Apply both through the shared
+     * representation helpers so stale header-list entries are deleted
+     * together with the dedicated fields (a surviving list entry would
+     * emit a second Content-Type or a phantom Content-Encoding). */
+    ngx_http_markdown_set_representation_content_type(r);
+    ngx_http_markdown_remove_content_encoding(r);
 
     /* Content-Length / ETag: body-derived fields are unknowable for a
      * HEAD response (no body was converted); remove rather than
@@ -1278,11 +1316,17 @@ ngx_http_markdown_head_representation_headers(ngx_http_request_t *r)
         hdr_etag, sizeof(hdr_etag) - 1, 0, NULL);
 
     /* Last-Modified: the weak validator must not reference the source
-     * HTML mtime (Decision G applies to HEAD representation headers). */
+     * HTML mtime (Decision G applies to HEAD representation headers).
+     * Mirror completeness: reset the numeric mirror, the typed pointer
+     * (the header filter synthesizes Last-Modified whenever
+     * last_modified_time != -1 AND last_modified == NULL is false), and
+     * invalidate ALL duplicate list entries — the 304 and stream-commit
+     * paths already maintain this exact invariant. */
     r->headers_out.last_modified_time = (time_t) -1;
+    r->headers_out.last_modified = NULL;
     ngx_http_markdown_invalidate_headers(r,
         ngx_http_markdown_hdr_last_modified,
-        sizeof(ngx_http_markdown_hdr_last_modified) - 1, 1, NULL);
+        sizeof(ngx_http_markdown_hdr_last_modified) - 1, 0, NULL);
 
     /* Accept-Ranges: byte ranges apply to the HTML representation;
      * the Markdown representation does not support them. */
