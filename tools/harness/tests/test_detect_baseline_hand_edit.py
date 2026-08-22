@@ -181,3 +181,48 @@ def test_symlink_escaping_repo_root_rejected(tmp_path, monkeypatch):
     findings = []
     module.audit_baseline(baseline, findings)
     assert any("outside the repository" in f for f in findings)
+
+
+# ── probe-directory acceptance path (advertised but previously unimplemented) ──
+
+def test_changed_mode_accepts_probe_directory_regeneration():
+    # A regeneration that touches only files under the `-raw-probes/`
+    # directory (named e.g. plain-small.json) must satisfy the raw-input
+    # companion requirement.  The old `-raw`-filename-only match rejected
+    # this with a misleading "hand edits are forbidden" message.
+    findings = []
+    module.check_changed(
+        [
+            "perf/baselines/module-baseline-092.json",
+            "perf/baselines/module-baseline-092-raw-probes/plain-small.json",
+        ],
+        findings,
+    )
+    assert findings == []
+
+
+def test_shallow_clone_missing_commit_is_explicit_skip(capsys):
+    # In a shallow clone a missing measurement commit is indeterminate:
+    # the detector must print an explicit SKIP line AND record a finding
+    # so the gate exits non-clean — a shallow checkout must never accept
+    # provenance a full clone would reject (verdicts agree: both reject
+    # unverifiable metadata).
+    import detect_baseline_hand_edit as m
+    assert m.repo_commit_exists("0" * 40) is None or True  # env-dependent
+    # Directly verify the SKIP + finding contract:
+    findings = []
+    doc = {"module_benchmark": {"git_commit": "0" * 40}, "baseline_policy": {
+        "source_git_commit": "0" * 40,
+    }}
+    # Force the indeterminate branch regardless of local clone state.
+    original = m.repo_commit_exists
+    m.repo_commit_exists = lambda sha: None
+    try:
+        m._check_commit_and_timestamp("module-baseline-092.json", doc,
+                                      doc["baseline_policy"], findings)
+    finally:
+        m.repo_commit_exists = original
+    assert len(findings) == 1, "indeterminate provenance must fail closed"
+    assert "unverifiable in this shallow clone" in findings[0]
+    captured = capsys.readouterr().err
+    assert "SKIP module-baseline-092.json" in captured

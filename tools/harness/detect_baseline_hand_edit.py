@@ -66,7 +66,32 @@ def is_finalized_baseline(path):
     )
 
 
+def repo_is_shallow():
+    """True when this checkout is a shallow clone."""
+    marker = REPO_ROOT / ".git" / "shallow"
+    if marker.exists():
+        return True
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--is-shallow-repository"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return False
+    return result.returncode == 0 and result.stdout.strip() == "true"
+
+
 def repo_commit_exists(sha):
+    """Return True (present), False (absent), or None (cannot determine).
+
+    None is returned only when the checkout is shallow and the object is
+    missing: the absence may be a clone artifact rather than evidence of a
+    broken provenance binding.  Callers must surface that distinction as an
+    explicit SKIP instead of silently passing — a full clone and a shallow
+    clone must reach the same verdict for the same baseline.
+    """
     try:
         result = subprocess.run(
             ["git", "cat-file", "-e", f"{sha}^{{commit}}"],
@@ -76,8 +101,8 @@ def repo_commit_exists(sha):
         )
     except OSError:
         return True
-    if result.returncode != 0 and (REPO_ROOT / ".git" / "shallow").exists():
-        return True
+    if result.returncode != 0 and repo_is_shallow():
+        return None
     return result.returncode == 0
 
 
@@ -140,8 +165,25 @@ def _check_commit_and_timestamp(label, doc, policy, findings):
         findings.append(
             f"{label}: source_git_commit must be a full 40-hex SHA, got {sha!r}"
         )
-    elif sha and not repo_commit_exists(sha):
-        findings.append(f"{label}: source_git_commit {sha} not in history")
+    elif sha:
+        exists = repo_commit_exists(sha)
+        if exists is None:
+            # Shallow clone cannot decide: SKIP loudly AND fail closed.
+            # An indeterminate provenance check must not exit clean — a
+            # shallow checkout would otherwise accept metadata a full
+            # clone rejects (verdict must match across clone topologies).
+            print(
+                f"SKIP {label}: source_git_commit {sha} not present in this "
+                f"shallow clone; provenance existence check deferred to a "
+                f"full clone (verdict must match across clone topologies)",
+                file=sys.stderr,
+            )
+            findings.append(
+                f"{label}: source_git_commit {sha} unverifiable in this "
+                f"shallow clone (re-run the check from a full clone)"
+            )
+        elif not exists:
+            findings.append(f"{label}: source_git_commit {sha} not in history")
 
     benchmark = doc.get("module_benchmark", {})
     benchmark_commit = str(benchmark.get("git_commit", ""))
@@ -183,25 +225,59 @@ def audit_baseline(path, findings):
     _verify_artifact_digest(label, policy, findings)
 
 
+def _classify_changed_path(raw_path, changed_finalized, changed_raw_names,
+                           changed_probe_stems):
+    """Sort one changed path into finalized / raw-file / probe-dir buckets."""
+    path = Path(raw_path)
+    try:
+        resolved = path.resolve()
+    except OSError:
+        resolved = path
+    if is_finalized_baseline(resolved):
+        changed_finalized.append(resolved)
+        return
+    if "module-baseline-" in path.name and "-raw" in path.name:
+        changed_raw_names.add(path.name)
+        return
+    _collect_probe_stem(path, changed_probe_stems)
+
+
+def _collect_probe_stem(path, changed_probe_stems):
+    """Record the baseline stem when `path` is a raw-probe artifact.
+
+    Probe artifacts live inside a `<stem>-raw-probes/` directory and carry
+    their own scenario names (e.g. plain-small.json), so the DIRECTORY path
+    — not the file name — carries the marker.  Match any path segment for
+    `-raw-probes` so a probe file counts as its stem's raw input.  The
+    previous implementation only matched `-raw` FILE names, so a legitimate
+    regeneration touching only probe files was rejected with a misleading
+    "hand edits are forbidden" message.
+    """
+    for i, seg in enumerate(path.parts):
+        if seg.endswith("-raw-probes"):
+            stem = seg[: -len("-raw-probes")]
+            in_baseline_dir = (
+                i > 0 and path.parts[i - 1] == "perf"
+                and "baselines" in path.parts
+            )
+            if stem.startswith("module-baseline-") or in_baseline_dir:
+                changed_probe_stems.add(stem)
+            return
+
+
 def check_changed(paths, findings):
     changed_finalized = []
     changed_raw_names = set()
+    changed_probe_stems = set()
     for raw_path in paths:
-        path = Path(raw_path)
-        try:
-            resolved = path.resolve()
-        except OSError:
-            resolved = path
-        if is_finalized_baseline(resolved):
-            changed_finalized.append(resolved)
-        elif "module-baseline-" in path.name and "-raw" in path.name:
-            changed_raw_names.add(path.name)
+        _classify_changed_path(raw_path, changed_finalized,
+                               changed_raw_names, changed_probe_stems)
 
     for baseline_path in changed_finalized:
         stem = baseline_path.name[: -len(".json")]
         raw_touched = any(
             name.startswith(f"{stem}-raw") for name in changed_raw_names
-        )
+        ) or stem in changed_probe_stems
         if not raw_touched:
             findings.append(
                 f"{baseline_path.name}: finalized baseline changed without "
