@@ -201,10 +201,14 @@ ngx_http_markdown_metrics_v1_render_histogram(
         return NULL;
     }
 
+    /* _count must equal the +Inf bucket (Prometheus histogram
+     * contract): emit the same reconciled total used above, not the
+     * raw counter, so a count that lags the bucket increments cannot
+     * produce count < +Inf. */
     p = ngx_slprintf(p, end,
         "nginx_markdown_conversion_duration_seconds_count"
         "{engine=\"%s\"} %uA\n",
-        engine, histogram->count);
+        engine, total);
     if (p >= end) {
         return NULL;
     }
