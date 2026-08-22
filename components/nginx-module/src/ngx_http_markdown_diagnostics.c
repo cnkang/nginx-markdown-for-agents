@@ -449,9 +449,17 @@ ngx_http_markdown_diagnostics_method_not_allowed(ngx_http_request_t *r)
      * responses from content handlers, so we set it explicitly.
      *
      * The header and the response body are constructed transactionally:
-     * if the Allow header allocation fails, abort with 500 instead of
-     * emitting a 405 that violates the Allow contract.
+     * allocate the body buffer FIRST — a body-allocation failure aborts
+     * with 500 before any header mutation, while a header-allocation
+     * failure aborts before the 405 is sent.  (Allocating the Allow
+     * entry before the body could leave a live Allow header on a 500,
+     * contradicting the Allow contract this function exists to uphold.)
      */
+    b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
+    if (b == NULL) {
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+
     allow_hdr = ngx_list_push(&r->headers_out.headers);
     if (allow_hdr == NULL) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
@@ -459,11 +467,6 @@ ngx_http_markdown_diagnostics_method_not_allowed(ngx_http_request_t *r)
     allow_hdr->hash = 1;
     ngx_str_set(&allow_hdr->key, "Allow");
     ngx_str_set(&allow_hdr->value, "GET, HEAD");
-
-    b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
-    if (b == NULL) {
-        return NGX_HTTP_INTERNAL_SERVER_ERROR;
-    }
 
     b->pos = body;
     b->last = body + sizeof(body) - 1;
