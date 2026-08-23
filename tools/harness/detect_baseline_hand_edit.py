@@ -12,8 +12,10 @@ Full-audit mode (default over perf/baselines):
   1. every finalized baseline carries all six baseline_policy provenance
      fields (Rule 61 table), fail closed otherwise;
   2. module_benchmark.git_commit equals baseline_policy.source_git_commit;
-  3. source_git_commit is a full 40-hex SHA-1 present in repository
-     history (existence check skipped in shallow clones);
+  3. source_git_commit is a full 40-hex SHA-1 that is present in the
+     repository AND anchored by a ref, so a clean clone can still fetch
+     it (both checks report an explicit SKIP plus a finding when the
+     checkout itself cannot decide);
   4. recomputed SHA-256 of the retained raw artifact matches
      source_artifact_sha256;
   5. measurement_timestamp is ISO-8601 with explicit UTC offset.
@@ -55,6 +57,11 @@ UTC_TIMESTAMP_RE = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|\+00:00)$"
 )
 
+# Namespace of the durable measurement refs documented in
+# perf/baselines/README.md.  Disjoint from the release tag namespace
+# (v<MAJOR>.<MINOR>.<PATCH>), so release tooling never selects one.
+ANCHOR_TAG_NAMESPACE = "refs/tags/perf-baseline"
+
 
 def is_finalized_baseline(path):
     name = path.name
@@ -81,6 +88,88 @@ def repo_is_shallow():
     except OSError:
         return False
     return result.returncode == 0 and result.stdout.strip() == "true"
+
+
+def _git_stdout(*args):
+    """Stripped stdout of `git args...` in REPO_ROOT, or "" when it fails.
+
+    An unavailable git, a non-zero exit and genuinely empty output all
+    collapse to "".  Every caller reads only a NON-EMPTY answer as
+    evidence, so a failure can never be mistaken for a positive result.
+    """
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return ""
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
+def repo_commit_anchored(sha, stem):
+    """Return True (anchored), False (unanchored), or None (undecidable).
+
+    Presence is not provenance.  An object that no ref reaches survives
+    only until the server garbage-collects it, so a clean clone cannot be
+    relied on to obtain it — that is exactly how 0847c287/712c5300 fell
+    out of reachable history during the 2026-08-20/21 evidence churn while
+    remaining fetchable by explicit SHA.  Resolution order:
+
+      1. the canonical durable measurement tag for this baseline stem;
+      2. any ref whose history contains the object (covers archival packs
+         anchored by a release tag or by main);
+      3. shallow checkout, or a checkout carrying no tags at all — neither
+         can decide reachability, so the answer is indeterminate;
+      4. otherwise the object is present but unanchored.
+
+    Runtime bound (median of n=10 warm runs on the full clone restored for
+    this remediation: 68 refs, 3259 commits, 34176 in-pack objects; the
+    process-spawn floor measured via `git rev-parse --git-dir` is ~9.3 ms,
+    so the isolated git work is the excess over that floor):
+
+      step 1 fast path      9.6 / 9.7 ms hit, 8.8 ms miss   (~0.3 ms work)
+      step 2 fallback       16.3 / 15.1 / 10.6 ms           (1.3-7.0 ms)
+      step 2 worst case     16.5 / 16.0 / 15.0 ms, max 22.7 ms warm
+                            (all 68 refs evaluated, i.e. the unanchored
+                            FAIL verdict, measured without --count=1)
+      step 3 tags probe     9.4 ms
+
+    Step 1 is constant time and settles both baselines that own a
+    canonical tag; step 2 runs only for a baseline without one (currently
+    one: module-baseline-brotli-091, anchored by refs/heads/main and
+    refs/tags/v0.9.1).  That is four git invocations for the three
+    checked-in baselines — two fast-path hits, plus a fast-path miss and
+    one fallback for the archival pack — and the measured end-to-end cost
+    of the full audit rose from 84 ms to 128 ms (median of n=10 warm),
+    i.e. ~44 ms, dominated by process spawn rather than ref traversal.
+    Per SHA the bound stays ~18 ms warm even when every ref is evaluated.
+
+    `--count=1` returns whichever ref sorts first, and step 2 only proves
+    "reachable from SOME ref" (712c5300 is an ancestor of 0847c287, so it
+    answers module-baseline-091's tag).  The refname is therefore never
+    reported as the stem's own anchor.
+    """
+    canonical = _git_stdout(
+        "rev-parse", "--verify", "--quiet",
+        f"{ANCHOR_TAG_NAMESPACE}/{stem}^{{commit}}",
+    )
+    if canonical == sha:
+        return True
+    if _git_stdout("for-each-ref", "--contains", sha, "--count=1",
+                   "--format=%(refname)"):
+        return True
+    if repo_is_shallow():
+        return None
+    if not _git_stdout("for-each-ref", "refs/tags", "--count=1"):
+        # No tags at all: cannot tell "unanchored" from "the refs were
+        # never fetched", so do not claim either.
+        return None
+    return False
 
 
 def repo_commit_exists(sha):
@@ -147,6 +236,19 @@ def _baseline_label(path):
         return path.name
 
 
+def _baseline_stem(label):
+    """Baseline stem behind `label` — the file name without `.json`.
+
+    Derived from the label instead of taken as a parameter so the
+    signature of `_check_commit_and_timestamp` stays as callers already
+    use it, and so both label shapes (repo-relative path, bare file name)
+    yield the same stem.
+    """
+    name = Path(label).name
+    suffix = ".json"
+    return name[: -len(suffix)] if name.endswith(suffix) else name
+
+
 def _check_policy_fields(label, policy, findings):
     if policy.get("type") == "verbatim_import":
         return
@@ -157,6 +259,40 @@ def _check_policy_fields(label, policy, findings):
             findings.append(
                 f"{label}: baseline_policy.{field} missing/empty"
             )
+
+
+def _check_commit_anchor(label, sha, findings):
+    """Require a ref to anchor the measurement commit `sha`.
+
+    Runs for every finalized baseline, archival imports included: the
+    `verbatim_import` exemption in `_check_policy_fields` releases the
+    finalizer SCHEMA fields, never the existence of provenance, so the
+    same failure cannot resurface on an archival pack.
+    """
+    stem = _baseline_stem(label)
+    anchored = repo_commit_anchored(sha, stem)
+    if anchored is None:
+        # Same contract as the indeterminate presence branch below: SKIP
+        # loudly AND fail closed, so a shallow or tagless checkout never
+        # accepts an anchor a full clone would reject.
+        print(
+            f"SKIP {label}: source_git_commit {sha} anchor not decidable in "
+            f"this shallow or tagless clone; provenance anchor check "
+            f"deferred to a full clone with tags (verdict must match across "
+            f"clone topologies)",
+            file=sys.stderr,
+        )
+        findings.append(
+            f"{label}: source_git_commit {sha} anchor unverifiable in this "
+            f"shallow or tagless clone (re-run the check from a full clone "
+            f"with tags)"
+        )
+    elif not anchored:
+        findings.append(
+            f"{label}: source_git_commit {sha} exists but is not anchored "
+            f"by any ref; create the durable measurement tag "
+            f"perf-baseline/{stem} (see perf/baselines/README.md)"
+        )
 
 
 def _check_commit_and_timestamp(label, doc, policy, findings):
@@ -184,6 +320,8 @@ def _check_commit_and_timestamp(label, doc, policy, findings):
             )
         elif not exists:
             findings.append(f"{label}: source_git_commit {sha} not in history")
+        else:
+            _check_commit_anchor(label, sha, findings)
 
     benchmark = doc.get("module_benchmark", {})
     benchmark_commit = str(benchmark.get("git_commit", ""))

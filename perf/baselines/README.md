@@ -126,6 +126,100 @@ only to historical validator tests and audit comparisons. It is not the active
 release baseline. The active 0.9.2 baseline uses `verbatim_run` provenance and
 does not use `historical_audit_exception`.
 
+## Measurement Commit Durability
+
+Every finalized baseline records the commit its benchmark ran against, and
+that commit always predates the commit that records it. A Git commit cannot
+contain a baseline whose provenance hash is the hash of that same commit, so
+a checked-in baseline always points backwards in history. The binding stays
+verifiable only while some ref still reaches that older commit.
+
+A history rewrite breaks that reachability. During the 2026-08-20/21
+evidence churn, rebase and force-push moved the measurement commits behind
+`module-baseline-091.json` and `module-baseline-092.json` out of every
+branch and tag. The objects survived on the server and stayed fetchable by
+explicit SHA, but no ref reached them. A clean clone could not obtain them,
+so the provenance gate failed on every clone topology, not only on shallow
+checkouts.
+
+Running the benchmark again does not remove this failure mode. It only
+swaps in another anchor that happens to be reachable at that moment, and the
+next rewrite strips that anchor the same way. A durable measurement ref is
+the mechanism that removes the failure class.
+
+### Naming and lifecycle policy
+
+- **Namespace**: `refs/tags/perf-baseline/<baseline-stem>`, where
+  `<baseline-stem>` is the finalized baseline file name without `.json`.
+  This namespace stays disjoint from the release tag namespace
+  `v<MAJOR>.<MINOR>.<PATCH>`, so release tooling, formula resolution, and
+  the tag release gates never select a measurement ref.
+- **Tag object**: annotated, never lightweight. The tag message carries the
+  audit record.
+- **Immutability**: a pushed `perf-baseline/*` ref is immutable. Never move
+  it and never delete it. Correct a tag message only while the tag stays
+  local and unpushed.
+- **Creation trigger**: create a ref only when the finalizer produces a new
+  canonical baseline and no existing ref already anchors its measurement
+  commit. Never add a redundant ref for a commit that a branch or a release
+  tag already reaches.
+- **Message contents**: the message must record the baseline stem,
+  `source_run`, and `source_artifact_sha256`, so the ref audits itself
+  without opening the baseline file. The two live tags carry a superset of
+  that minimum. They add `baseline_file`, `source_git_commit`,
+  `source_artifact`, and an explicit statement that the ref turns immutable
+  once pushed.
+
+### Current anchors
+
+| Baseline stem | Measurement commit | Anchoring ref |
+|---------------|--------------------|---------------|
+| `module-baseline-091` | `0847c287c1b744a3f80b7b7fe6ccf3e897223377` | `refs/tags/perf-baseline/module-baseline-091` |
+| `module-baseline-092` | `712c5300228373677c367e6c0d83ac9d729ff63b` | `refs/tags/perf-baseline/module-baseline-092` |
+| `module-baseline-brotli-091` | `9734d12e4d1c4fb6e6e25852badf0ee614b170c8` | `refs/heads/main` and `refs/tags/v0.9.1` |
+
+`module-baseline-brotli-091` is the live example of the creation trigger.
+Its measurement commit already sits in `main` and in the `v0.9.1` release
+tag, so the policy forbids a dedicated `perf-baseline/*` ref for it. The
+anchoring requirement still holds for it: an archival `verbatim_import`
+pack receives no exemption.
+
+### How the anchor check resolves a commit
+
+`tools/harness/detect_baseline_hand_edit.py` decides anchoring in
+`repo_commit_anchored(sha, stem)` in this order:
+
+1. **Canonical fast path**: `refs/tags/perf-baseline/<stem>` resolves to
+   exactly `sha`. This runs in constant time and proves the per-baseline
+   binding.
+2. **Fallback**: `git for-each-ref --contains <sha>` finds a ref whose
+   history contains the object. This proves reachability from some ref, and
+   nothing more. It cannot prove the per-baseline binding, because
+   `712c5300...` is an ancestor of `0847c287...`, so a `--contains` query
+   for the 0.9.2 commit also matches the 0.9.1 tag. The detector therefore
+   never reports the matched refname as the anchor of that stem.
+3. **Indeterminate**: a shallow checkout, or a checkout that carries no
+   tags, cannot decide reachability. The detector prints an explicit SKIP
+   and still records a finding, so it fails closed instead of accepting an
+   anchor that a full clone would reject.
+4. **Unanchored**: the object exists but no ref reaches it. The finding
+   names the ref to create, `perf-baseline/<stem>`, and points back to this
+   section.
+
+### Continuous integration
+
+The `harness-tooling` job runs a `Prepare baseline measurement provenance`
+step ahead of `make harness-security-checks`. The step first fetches
+`+refs/tags/perf-baseline/*:refs/tags/perf-baseline/*`. It then proves each
+`source_git_commit` present with `git cat-file -e`, and exits 1 with the
+missing SHA plus the baselines that need it.
+
+Fetching the anchor tags first is what keeps the step sound. An object-only
+fetch by explicit SHA lands the commit as a second shallow root that no ref
+reaches, which satisfies presence but never anchoring. The step only makes
+objects queryable. The verdict stays with the detector, which re-checks
+presence, anchoring, and artifact digests on its own.
+
 ## Environment Consistency
 
 A single baseline file must never mix scenarios measured under different
@@ -359,6 +453,7 @@ The baseline system integrates with CI pipelines:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-22 | Kang | Added Measurement Commit Durability: durable measurement ref naming and lifecycle policy, current anchors, anchor resolution order, CI provenance preparation |
 | 0.9.2 | 2026-08-08 | Kang | Pointed active baseline references at module-baseline-092 |
 | 0.9.1 | 2026-07-28 | Codex | Documented strict raw-artifact provenance, exact historical-exception binding, and conservative normalization rules. |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |

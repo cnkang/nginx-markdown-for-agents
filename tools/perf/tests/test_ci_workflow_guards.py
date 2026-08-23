@@ -608,3 +608,129 @@ def test_tag_workflow_uses_092_blocking_evidence() -> None:
     ) in publish_block
     assert "github.ref_type != 'tag'" in publish_block
     assert "needs.release-gate.result == 'success'" in publish_block
+
+
+# ---------------------------------------------------------------------------
+# Baseline measurement provenance preparation (harness-tooling job)
+# ---------------------------------------------------------------------------
+
+
+def _harness_tooling_steps() -> list[dict[str, object]]:
+    """Return the ordered step list of the harness-tooling job."""
+    workflow = _ci_workflow_data()
+    jobs = workflow["jobs"]
+    assert isinstance(jobs, dict)
+    job = jobs["harness-tooling"]
+    assert isinstance(job, dict)
+    steps = job["steps"]
+    assert isinstance(steps, list)
+    return steps
+
+
+def _step_index(
+    steps: list[dict[str, object]],
+    field: str,
+    needle: str,
+    description: str,
+) -> int:
+    """Return the index of the first step whose `field` contains `needle`."""
+    for index, step in enumerate(steps):
+        if needle in str(step.get(field, "")).lower():
+            return index
+    raise AssertionError(
+        f"harness-tooling has no step {description}; "
+        f"steps: {[step.get('name') for step in steps]}"
+    )
+
+
+def test_harness_tooling_prepares_provenance_before_security_checks() -> None:
+    """Provenance preparation must precede the blocking provenance gate.
+
+    ``make harness-security-checks`` runs detect_baseline_hand_edit.py, which
+    needs the measurement commit object of every finalized baseline.  Without
+    a preparation step ahead of it the job asks a gate to verify history the
+    job never made available.
+    """
+    steps = _harness_tooling_steps()
+    gate_index = _step_index(
+        steps,
+        "run",
+        "make harness-security-checks",
+        "running make harness-security-checks",
+    )
+    prepare_index = _step_index(
+        steps,
+        "name",
+        "provenance",
+        "named for baseline measurement provenance preparation",
+    )
+    assert prepare_index < gate_index, (
+        f"provenance preparation (step {prepare_index}) must run before "
+        f"make harness-security-checks (step {gate_index})"
+    )
+
+
+def _harness_tooling_step(field: str, needle: str, description: str) -> dict[str, object]:
+    """Return the first harness-tooling step whose `field` contains `needle`."""
+    steps = _harness_tooling_steps()
+    step = steps[_step_index(steps, field, needle, description)]
+    assert isinstance(step, dict)
+    return step
+
+
+def test_harness_tooling_checkout_fetches_full_history() -> None:
+    """Rule 61 resolves measurement commits in this job, so it needs history.
+
+    A default checkout is shallow, where detect_baseline_hand_edit.py answers
+    "indeterminate" instead of deciding — which fails the gate closed rather
+    than passing it.  ``fetch-depth: 0`` plus tags is what makes every
+    measurement commit reachable through a normal fetch and lets the anchor
+    check take its constant-time fast path.
+
+    The comparison normalizes to text deliberately: this module loads ci.yml
+    with ``yaml.BaseLoader``, which keeps the value as the string ``'0'``,
+    while a plain ``safe_load`` would yield the integer ``0``.  Both spell full
+    history.  A depth of 1, or the key going missing, does not.
+    """
+    step = _harness_tooling_step(
+        "uses", "actions/checkout", "checking out the repository"
+    )
+    inputs = step.get("with")
+    assert isinstance(inputs, dict), step
+    assert str(inputs.get("fetch-depth")) == "0", inputs
+    assert str(inputs.get("fetch-tags")).lower() == "true", inputs
+
+
+def test_harness_tooling_provenance_step_proves_objects_are_present() -> None:
+    """Preparation must verify each measurement commit and fail when it cannot.
+
+    Fetching is best effort; the verdict belongs to ``git cat-file -e``.  A
+    ``|| true``, a ``continue-on-error``, or the loss of the non-zero exit
+    would each turn the step into a fetch attempt that reports nothing, and the
+    blocking gate behind it would then be asked to verify history the job never
+    made available.
+    """
+    step = _harness_tooling_step(
+        "name", "provenance", "named for measurement provenance preparation"
+    )
+    run = str(step.get("run", ""))
+    assert "git cat-file -e" in run, run
+    assert "exit 1" in run, run
+    assert "|| true" not in run, run
+    assert "continue-on-error" not in run, run
+    assert "continue-on-error" not in step, sorted(step)
+
+
+def test_harness_security_checks_step_stays_blocking() -> None:
+    """Requirement 3.8: the step running the provenance gate must block.
+
+    ``make harness-security-checks`` runs detect_baseline_hand_edit.py.  A
+    ``continue-on-error`` on this step, or a ``|| true`` inside it, would keep
+    the job green while the gate reports violations.
+    """
+    step = _harness_tooling_step(
+        "run", "make harness-security-checks", "running the harness security checks"
+    )
+    assert "continue-on-error" not in step, sorted(step)
+    run = str(step.get("run", ""))
+    assert "|| true" not in run, run
