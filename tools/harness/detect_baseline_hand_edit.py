@@ -62,13 +62,15 @@ UTC_TIMESTAMP_RE = re.compile(
 # (v<MAJOR>.<MINOR>.<PATCH>), so release tooling never selects one.
 ANCHOR_TAG_NAMESPACE = "refs/tags/perf-baseline"
 
+BASELINE_SUFFIX = ".json"
+
 
 def is_finalized_baseline(path):
     name = path.name
     return (
         path.is_file()
         and name.startswith("module-baseline-")
-        and name.endswith(".json")
+        and name.endswith(BASELINE_SUFFIX)
         and "-raw" not in name
     )
 
@@ -245,8 +247,11 @@ def _baseline_stem(label):
     yield the same stem.
     """
     name = Path(label).name
-    suffix = ".json"
-    return name[: -len(suffix)] if name.endswith(suffix) else name
+    return (
+        name[: -len(BASELINE_SUFFIX)]
+        if name.endswith(BASELINE_SUFFIX)
+        else name
+    )
 
 
 def _check_policy_fields(label, policy, findings):
@@ -412,7 +417,7 @@ def check_changed(paths, findings):
                                changed_raw_names, changed_probe_stems)
 
     for baseline_path in changed_finalized:
-        stem = baseline_path.name[: -len(".json")]
+        stem = baseline_path.name[: -len(BASELINE_SUFFIX)]
         raw_touched = any(
             name.startswith(f"{stem}-raw") for name in changed_raw_names
         ) or stem in changed_probe_stems

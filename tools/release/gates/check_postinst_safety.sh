@@ -287,7 +287,7 @@ check_trusted_path() {
     local file="$1"
 
     # Known external commands that resolve from PATH in maintainer scripts
-    local -a EXTERNAL_CMDS=(
+    local -a external_cmds=(
         "command -v"
         "cat"
         "readlink"
@@ -381,7 +381,7 @@ check_trusted_path() {
 
         # Check each known external command
         local cmd=""
-        for cmd in "${EXTERNAL_CMDS[@]}"; do
+        for cmd in "${external_cmds[@]}"; do
             # Build a pattern that matches the command as a word boundary
             # For "command -v", match literally
             # For single-word commands, match as standalone token
@@ -482,7 +482,6 @@ main() {
             ;;
     esac
 
-    local files_to_check=""
     local had_error=0
 
     if [[ $# -eq 0 ]]; then
