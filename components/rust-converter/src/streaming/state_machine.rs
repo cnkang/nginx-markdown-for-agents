@@ -695,7 +695,7 @@ impl StructuralStateMachine {
             .saturating_add(
                 self.stack
                     .iter()
-                    .map(|ctx| ctx.retained_heap_bytes())
+                    .map(StructuralContext::retained_heap_bytes)
                     .fold(0usize, usize::saturating_add),
             )
             .saturating_add(

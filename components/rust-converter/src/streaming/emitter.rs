@@ -403,7 +403,7 @@ impl IncrementalEmitter {
             .capacity()
             .saturating_add(self.code_block_buffer.capacity())
             .saturating_add(self.inline_code_buffer.capacity())
-            .saturating_add(self.code_fence_lang.as_ref().map_or(0, |s| s.capacity()))
+            .saturating_add(self.code_fence_lang.as_ref().map_or(0, String::capacity))
     }
 
     /// Total physical heap capacity retained by this emitter.
