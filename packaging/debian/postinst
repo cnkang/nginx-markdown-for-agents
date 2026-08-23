@@ -7,6 +7,10 @@
 
 set -e
 
+# Executable-trust: unconditional trusted PATH, no caller influence.
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
 case "$1" in
     configure)
         cat >&2 <<'EOF'
