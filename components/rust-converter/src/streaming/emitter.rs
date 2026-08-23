@@ -365,13 +365,35 @@ impl IncrementalEmitter {
     }
 
     /// Current size of the pending (not yet flushed) buffer in bytes.
+    ///
+    /// Logical length for flush timing; physical retained bytes are reported by resident_bytes().
     pub fn pending_bytes(&self) -> usize {
         self.buffer.len()
     }
 
     /// Current size of the flushed (ready to deliver) buffer in bytes.
+    ///
+    /// Logical length for flush timing; physical retained bytes are reported by resident_bytes().
     pub fn flushed_bytes(&self) -> usize {
         self.flushed.len()
+    }
+
+    /// Physical capacity retained by the pending buffer (for accounting tests).
+    #[cfg(test)]
+    pub(crate) fn buffer_capacity(&self) -> usize {
+        self.buffer.capacity()
+    }
+
+    /// Physical capacity retained by the flushed buffer (for accounting tests).
+    #[cfg(test)]
+    pub(crate) fn flushed_capacity(&self) -> usize {
+        self.flushed.capacity()
+    }
+
+    /// Capacity of the code fence language string, if any (for accounting tests).
+    #[cfg(test)]
+    pub(crate) fn code_fence_lang_capacity(&self) -> usize {
+        self.code_fence_lang.as_ref().map_or(0, |s| s.capacity())
     }
 
     /// Heap capacity retained by collectors that are separate from the
@@ -381,6 +403,23 @@ impl IncrementalEmitter {
             .capacity()
             .saturating_add(self.code_block_buffer.capacity())
             .saturating_add(self.inline_code_buffer.capacity())
+            .saturating_add(self.code_fence_lang.as_ref().map_or(0, |s| s.capacity()))
+    }
+
+    /// Total physical heap capacity retained by this emitter.
+    ///
+    /// Includes the pending output buffer, flushed output buffer, and all
+    /// collector strings (link_text, code_block_buffer, inline_code_buffer,
+    /// code_fence_lang). Reports capacity() not len() — this is the physical
+    /// retained-memory accounting entry point.
+    ///
+    /// For flush-timing logic, use pending_bytes()/flushed_bytes() which
+    /// report logical length.
+    pub(crate) fn resident_bytes(&self) -> usize {
+        self.buffer
+            .capacity()
+            .saturating_add(self.flushed.capacity())
+            .saturating_add(self.resident_collector_bytes())
     }
 
     /// Finalizes the emitter and returns the fully normalized output.
@@ -3478,5 +3517,214 @@ mod tests {
         );
         let s = String::from_utf8(result.final_markdown).unwrap();
         assert!(s.contains("Hi"), "got: {}", s);
+    }
+
+    // =========================================================================
+    // E-C2 (Finding C) bug condition exploration test — flushed buffer capacity
+    //
+    // This test PROVES that the emitter's resident_bytes() correctly reports
+    // physical retained heap by capacity. PASSES on fixed code.
+    // =========================================================================
+
+    /// E-C2: resident_bytes must account for physical capacity, not logical length.
+    ///
+    /// After writing content to the pending buffer and triggering flush_to_ready,
+    /// the flushed buffer has content. After take_flushed, both are reset.
+    /// resident_bytes() must always report the physical capacity of both buffers.
+    /// PASSES on fixed code because resident_bytes() uses capacity() not len().
+    #[test]
+    fn test_accounting_ec2_flushed_capacity_not_length() {
+        let budget = MemoryBudget::default();
+        let mut emitter = IncrementalEmitter::new(&budget);
+
+        // Write enough content to grow the pending buffer
+        let content = "x".repeat(4096);
+        emitter.write_str(&content).unwrap();
+
+        // Trigger a flush: moves pending → flushed
+        emitter.trigger_flush().unwrap();
+
+        // After flush, pending buffer was cleared (len=0, capacity retained)
+        // and flushed buffer has the content.
+        let flushed_cap = emitter.flushed_capacity();
+        let buf_cap = emitter.buffer_capacity();
+
+        assert!(
+            flushed_cap >= 4096,
+            "flushed capacity should be >= 4096 after flush, got {}",
+            flushed_cap
+        );
+
+        // The fix: resident_bytes() reports capacity of both buffers
+        let resident = emitter.resident_bytes();
+        assert!(
+            resident >= buf_cap.saturating_add(flushed_cap),
+            "resident_bytes() ({}) must be >= buffer_capacity ({}) + flushed_capacity ({}) = {}",
+            resident,
+            buf_cap,
+            flushed_cap,
+            buf_cap.saturating_add(flushed_cap)
+        );
+
+        // Now take the flushed content (simulating what feed_chunk does)
+        let _taken = emitter.take_flushed();
+
+        // After take_flushed, the flushed Vec was replaced with Vec::new()
+        // so flushed capacity is 0. But buffer capacity is still retained.
+        let buf_cap_after = emitter.buffer_capacity();
+        assert!(
+            buf_cap_after >= 4096,
+            "pending buffer should retain capacity >= 4096 after clear, got {}",
+            buf_cap_after
+        );
+
+        // Write a tiny amount to verify capacity is still accounted
+        emitter.write_str("y").unwrap();
+
+        // pending_bytes() intentionally returns len() for flush timing
+        assert_eq!(emitter.pending_bytes(), 1);
+
+        // But resident_bytes() must reflect physical capacity
+        let resident_after = emitter.resident_bytes();
+        assert!(
+            resident_after >= buf_cap_after,
+            "resident_bytes() ({}) must be >= buffer capacity ({}) even after take_flushed",
+            resident_after,
+            buf_cap_after
+        );
+    }
+
+    // =========================================================================
+    // Task 13.4 — accounting tests verifying FIXED resident_bytes() behavior
+    // =========================================================================
+
+    /// Test 1: resident_bytes reports capacity, not length.
+    ///
+    /// A buffer grown with capacity 4096 but containing only 1 byte must
+    /// report resident_bytes() >= 4096 (the physical retention), not 1.
+    #[test]
+    fn test_resident_bytes_capacity_not_length() {
+        let budget = MemoryBudget::default();
+        let mut emitter = IncrementalEmitter::new(&budget);
+
+        // Grow the pending buffer to at least 4096 capacity
+        let big_content = "x".repeat(4096);
+        emitter.write_str(&big_content).unwrap();
+
+        // Clear by triggering flush then take
+        emitter.trigger_flush().unwrap();
+        let _taken = emitter.take_flushed();
+
+        // Now buffer is cleared (len=0) but capacity retained
+        let buf_cap = emitter.buffer_capacity();
+        assert!(
+            buf_cap >= 4096,
+            "buffer should retain capacity >= 4096 after clear, got {}",
+            buf_cap
+        );
+
+        // Write just 1 character
+        emitter.write_str("x").unwrap();
+        assert_eq!(emitter.pending_bytes(), 1, "logical length is 1");
+
+        // resident_bytes must reflect physical capacity, not logical length
+        let resident = emitter.resident_bytes();
+        assert!(
+            resident >= 4096,
+            "resident_bytes() must be >= 4096 (physical capacity), got {} — \
+             this would be 1 if accounting used len() instead of capacity()",
+            resident
+        );
+    }
+
+    /// Test 3: resident_bytes after flush retains capacity.
+    ///
+    /// After flush/clear/take, the emitter's buffer capacity is still
+    /// retained and counted in resident_bytes().
+    #[test]
+    fn test_resident_bytes_after_flush_retains_capacity() {
+        let budget = MemoryBudget::default();
+        let mut emitter = IncrementalEmitter::new(&budget);
+
+        // Write content to grow buffers
+        let content = "y".repeat(8192);
+        emitter.write_str(&content).unwrap();
+        emitter.trigger_flush().unwrap();
+
+        // Before take: both buffers have capacity
+        let resident_before_take = emitter.resident_bytes();
+        let buf_cap = emitter.buffer_capacity();
+        let flushed_cap = emitter.flushed_capacity();
+        assert!(
+            resident_before_take >= buf_cap.saturating_add(flushed_cap),
+            "resident_bytes() ({}) must account for buffer ({}) + flushed ({}) capacities",
+            resident_before_take,
+            buf_cap,
+            flushed_cap
+        );
+
+        // After take_flushed: flushed capacity goes to 0 (mem::take),
+        // but buffer capacity remains
+        let _taken = emitter.take_flushed();
+        let buf_cap_after = emitter.buffer_capacity();
+        let flushed_cap_after = emitter.flushed_capacity();
+        assert_eq!(flushed_cap_after, 0, "take_flushed replaces with empty Vec");
+        assert!(
+            buf_cap_after >= 8192,
+            "buffer capacity retained after take, got {}",
+            buf_cap_after
+        );
+
+        let resident_after = emitter.resident_bytes();
+        assert!(
+            resident_after >= buf_cap_after,
+            "resident_bytes() ({}) must still include retained buffer capacity ({})",
+            resident_after,
+            buf_cap_after
+        );
+    }
+
+    /// Test 4: resident_bytes includes code_fence_lang capacity.
+    ///
+    /// When the emitter enters a code block with a language identifier,
+    /// the code_fence_lang String's capacity is part of resident_bytes().
+    #[test]
+    fn test_resident_bytes_includes_code_fence_lang() {
+        use crate::streaming::state_machine::StructuralContext;
+
+        let budget = MemoryBudget::default();
+        let mut emitter = IncrementalEmitter::new(&budget);
+        let mut sm = StructuralStateMachine::new(&budget);
+
+        // Enter a code block with language "rust"
+        let action =
+            StateMachineAction::Enter(StructuralContext::CodeBlock(Some("rust".to_owned())));
+        emitter.process_action(&action, &mut sm).unwrap();
+
+        // code_fence_lang should now hold "rust"
+        let lang_cap = emitter.code_fence_lang_capacity();
+        assert!(
+            lang_cap >= 4,
+            "code_fence_lang capacity should be >= 4 for 'rust', got {}",
+            lang_cap
+        );
+
+        // resident_bytes must include code_fence_lang contribution
+        let resident = emitter.resident_bytes();
+        assert!(
+            resident >= lang_cap,
+            "resident_bytes() ({}) must include code_fence_lang capacity ({})",
+            resident,
+            lang_cap
+        );
+
+        // Verify it is specifically in resident_collector_bytes
+        let collector = emitter.resident_collector_bytes();
+        assert!(
+            collector >= lang_cap,
+            "resident_collector_bytes() ({}) must include code_fence_lang capacity ({})",
+            collector,
+            lang_cap
+        );
     }
 }

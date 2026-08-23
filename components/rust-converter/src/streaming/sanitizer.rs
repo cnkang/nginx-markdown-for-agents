@@ -1848,4 +1848,67 @@ mod tests {
             after_nesting
         );
     }
+
+    // =========================================================================
+    // Task 13.4 — accounting test for deep nesting + skip/strip/prune
+    // =========================================================================
+
+    /// Test 7: resident_bytes grows with deeply nested skip/strip/nesting.
+    ///
+    /// Feed deeply nested HTML with skip (script), strip (form), and normal
+    /// nesting (div) elements. Verify resident_bytes() increases with each
+    /// additional layer, demonstrating all stacks contribute to accounting.
+    #[test]
+    fn test_resident_bytes_grows_with_deep_nesting() {
+        let mut san = StreamingSanitizer::new();
+
+        let baseline = san.resident_bytes();
+        assert_eq!(baseline, 0, "empty sanitizer has no retained heap");
+
+        // Push nested div elements to grow nesting_stack
+        for _ in 0..16 {
+            assert!(matches!(
+                san.process_event(start_tag("div", vec![])),
+                SanitizeDecision::Pass(_)
+            ));
+        }
+        let after_16_divs = san.resident_bytes();
+        assert!(
+            after_16_divs > baseline,
+            "16 nested divs must increase resident_bytes: {} > {}",
+            after_16_divs,
+            baseline
+        );
+
+        // Verify a specific numeric relationship: each div pushes a String
+        // "div" (len 3, capacity >= 3) onto nesting_stack. With 16 entries,
+        // the nesting stack alone should contribute at least 16 * 3 bytes
+        // of String payload capacity.
+        assert!(
+            after_16_divs >= 16 * 3,
+            "16 nested divs: resident_bytes ({}) must be >= 48 (16 * 3 bytes \
+             minimum per 'div' String capacity)",
+            after_16_divs
+        );
+
+        // Enter a form element (strip mode) inside the nesting
+        san.process_event(start_tag("form", vec![]));
+        let after_strip = san.resident_bytes();
+        assert!(
+            after_strip > after_16_divs,
+            "entering strip mode (form) must increase resident_bytes: {} > {}",
+            after_strip,
+            after_16_divs
+        );
+
+        // Enter a script element inside the form (skip mode, nested)
+        san.process_event(start_tag("script", vec![]));
+        let after_skip = san.resident_bytes();
+        assert!(
+            after_skip > after_strip,
+            "entering skip mode (script) must increase resident_bytes: {} > {}",
+            after_skip,
+            after_strip
+        );
+    }
 }

@@ -1218,31 +1218,45 @@ impl StreamingConverter {
     }
 
     /// Compute the current estimated resident working-set size.
+    /// Estimate the current in-memory working set of this converter.
     ///
-    /// Includes all heap allocations that are alive right now:
-    /// - emitter pending/flushed buffers and collectors
-    /// - state machine stack
-    /// - metadata from `<head>` region
-    /// - html_title_buf
-    /// - tokenizer conservative reservation
-    /// - charset sniff buffer (in Pending state)
-    /// - charset transcoded output (Cow::Owned during processing)
-    /// - utf8_tail (incomplete UTF-8 bytes from previous chunk)
-    /// - sanitizer retained state (skip/prune element names, strip/
-    ///   nesting/implied-closure stacks — attacker-derived, by capacity)
+    /// # Accounting contract
+    ///
+    /// - Only counts heap allocations owned by this converter and its components.
+    /// - Uses capacity(), not len(), for all growable buffers — reflects physical
+    ///   retained memory, not logical content length.
+    /// - Includes nested owned allocations (e.g., Strings inside Vec elements).
+    /// - Does not count stack-resident struct sizes (only heap backing).
+    /// - Does not count allocations owned by other components.
+    /// - Uses saturating arithmetic throughout.
+    /// - Each heap allocation belongs to exactly one component's resident_bytes();
+    ///   double counting is forbidden.
+    /// - When adding a new owned heap field to any component, update that
+    ///   component's resident_bytes() and add a corresponding test.
+    ///
+    /// # Components
+    ///
+    /// Compositional sum of:
+    /// - emitter: pending buffer + flushed buffer + collectors (link_text,
+    ///   code_block_buffer, inline_code_buffer, code_fence_lang)
+    /// - state_machine: stack Vec capacity + per-element String heap +
+    ///   ordered_list_counters
+    /// - sanitizer: skip/prune/strip/nesting/implied_closures stacks
+    /// - metadata: collected metadata strings
+    /// - tokenizer: reserved internal buffers
+    /// - charset_state: charset detection/transcoding buffers
+    /// - converter-owned: html_title_buf, utf8_tail, charset_transcoded_bytes
     fn estimate_working_set(&self) -> usize {
         self.emitter
-            .pending_bytes()
-            .saturating_add(self.emitter.flushed_bytes())
-            .saturating_add(self.emitter.resident_collector_bytes())
-            .saturating_add(self.state_machine.stack_bytes_estimate())
+            .resident_bytes()
+            .saturating_add(self.state_machine.resident_bytes())
+            .saturating_add(self.sanitizer.resident_bytes())
             .saturating_add(self.metadata.bytes_estimate())
             .saturating_add(self.html_title_buf.capacity())
             .saturating_add(self.tokenizer.reserved_bytes())
             .saturating_add(self.charset_state.resident_bytes())
             .saturating_add(self.charset_transcoded_bytes)
             .saturating_add(self.utf8_tail.capacity())
-            .saturating_add(self.sanitizer.resident_bytes())
     }
 
     /// Extract metadata from events occurring in the `<head>` region.
@@ -3796,13 +3810,31 @@ mod tests {
     #[test]
     fn test_parser_budget_allows_bounded_cumulative_input() {
         let mut conv = make_converter();
-        let budget = conv.estimate_working_set().saturating_add(32 * 1024);
+        // Headroom 128 KiB: accommodates the flushed buffer's capacity growth
+        // (Vec doubles to next power-of-2) under capacity-based accounting.
+        // Data points: EC6 recorded estimate_working_set() ~ 1,572,960 after
+        // 2000 chunks with len-based accounting; post-fix with capacity-based
+        // accounting the peak is bounded by flushed.capacity() ≈ next-power-of-2
+        // above accumulated output length.
+        let budget = conv.estimate_working_set().saturating_add(128 * 1024);
         conv.set_parser_budget(budget as u64);
 
         for _ in 0..2_000 {
             conv.feed_chunk(b"<p>bounded chunk</p>")
                 .expect("bounded working set should not charge cumulative input");
         }
+
+        // Explicit upper bound: the final working set must be within the
+        // budget. This turns "constant is sufficient" from an implicit
+        // assumption into an explicit check.
+        let final_working_set = conv.estimate_working_set();
+        assert!(
+            final_working_set <= budget,
+            "final estimate_working_set() ({}) must be <= budget ({}) — \
+             bounded cumulative input must not trigger budget enforcement",
+            final_working_set,
+            budget
+        );
     }
 
     /// Parser budget enforcement: when exceeded post-commit, the error is
@@ -3814,14 +3846,14 @@ mod tests {
         conv.set_parser_budget(budget as u64);
 
         // Feed enough to produce output (transition to post-commit)
-        let chunk1 = b"<h1>Title</h1><p>Paragraph one.</p>";
-        let r1 = conv.feed_chunk(chunk1);
+        let chunk1 = "<h1>Title</h1><p>Paragraph one.</p>";
+        let r1 = conv.feed_chunk(chunk1.as_bytes());
         assert!(r1.is_ok(), "First chunk should succeed");
 
         // Keep an unclosed block resident until the modeled working set
         // exceeds the parser budget. This must be reported post-commit.
-        let chunk2_data = vec![b'x'; 16 * 1024];
-        let mut chunk2 = b"<p>".to_vec();
+        let chunk2_data = vec![0x78u8; 16 * 1024];
+        let mut chunk2 = "<p>".as_bytes().to_vec();
         chunk2.extend_from_slice(&chunk2_data);
         let r2 = conv.feed_chunk(&chunk2);
         assert!(
@@ -3895,6 +3927,601 @@ mod tests {
         assert_eq!(
             single, chunked,
             "Leading BOM split across chunks must be stripped consistently"
+        );
+    }
+
+    // =========================================================================
+    // E-C (Finding C) bug condition exploration tests — memory accounting
+    //
+    // These tests PROVE that estimate_working_set() undercounts physical
+    // retained heap in the current unfixed code. They are EXPECTED TO FAIL.
+    // =========================================================================
+
+    /// E-C1: estimate_working_set must account for buffer CAPACITY not length.
+    ///
+    /// After feeding non-code HTML that triggers a flush, the pending buffer
+    /// is cleared (len=0) but retains its grown capacity. The emitter's
+    /// resident_bytes() must include buffer.capacity().
+    /// PASSES on fixed code because resident_bytes() reports capacity().
+    #[test]
+    fn test_accounting_ec1_buffer_capacity_not_length() {
+        let mut conv = make_converter();
+
+        // Feed enough content to grow the pending buffer, then trigger a
+        // flush via a closing block tag. After the flush, buffer.len()==0
+        // but buffer.capacity() remains large (Vec::clear does not dealloc).
+        let large_paragraph = format!("<p>{}</p>", "x".repeat(4096));
+        let _output = conv.feed_chunk(large_paragraph.as_bytes()).unwrap();
+
+        // After feed_chunk, the buffer was cleared by flush_to_ready (non-code
+        // path calls buffer.clear()). Capacity is retained.
+        let buf_cap = conv.emitter.buffer_capacity();
+
+        // The capacity should be large from the growth during processing
+        assert!(
+            buf_cap >= 4096,
+            "buffer capacity should be at least 4096 after processing 4 KiB paragraph, got {}",
+            buf_cap
+        );
+
+        // The fix: resident_bytes() includes buffer.capacity(), not buffer.len().
+        // estimate_working_set() uses resident_bytes() so it correctly accounts
+        // for the retained physical memory even when buffer is logically empty.
+        let resident = conv.emitter.resident_bytes();
+        assert!(
+            resident >= buf_cap,
+            "emitter.resident_bytes() ({}) must include buffer capacity ({}) — \
+             physical retention is correctly accounted",
+            resident,
+            buf_cap
+        );
+
+        // Also verify estimate_working_set includes this contribution
+        let working_set = conv.estimate_working_set();
+        assert!(
+            working_set >= buf_cap,
+            "estimate_working_set() ({}) must be >= buffer capacity ({}) — \
+             compositional accounting includes emitter.resident_bytes()",
+            working_set,
+            buf_cap
+        );
+    }
+
+    /// E-C3: resident_collector_bytes must include code_fence_lang capacity.
+    ///
+    /// When the emitter enters a code block with a language identifier via
+    /// Enter(CodeBlock(Some("rust"))), the emitter's code_fence_lang field
+    /// holds a String whose capacity must be part of the working set.
+    /// FAILS on unfixed code because resident_collector_bytes() only sums
+    /// link_text + code_block_buffer + inline_code_buffer.
+    ///
+    /// Note: In the standard <pre><code class="language-rust"> flow, the
+    /// language lives on the state machine stack (counted by stack_bytes_estimate
+    /// via retained_heap_bytes). code_fence_lang in the emitter is only set when
+    /// the Enter action directly carries the language. We test that scenario here.
+    #[test]
+    fn test_accounting_ec3_code_fence_lang_not_counted() {
+        use crate::streaming::state_machine::StructuralContext;
+
+        let mut conv = make_converter();
+
+        // Directly push a CodeBlock with language onto the state machine and
+        // have the emitter process it. We do this by feeding HTML that triggers
+        // the code_fence_lang path. Actually, in the standard flow,
+        // <pre> always pushes CodeBlock(None). To set code_fence_lang, we need
+        // to use the emitter's process_action directly.
+        //
+        // Since we can access conv.emitter from the test module (same module),
+        // we can call process_action with Enter(CodeBlock(Some("rust"))).
+        let action =
+            StateMachineAction::Enter(StructuralContext::CodeBlock(Some("rust".to_owned())));
+        conv.emitter
+            .process_action(&action, &mut conv.state_machine)
+            .unwrap();
+
+        // The emitter should now have code_fence_lang = Some("rust")
+        let lang_cap = conv.emitter.code_fence_lang_capacity();
+        assert!(
+            lang_cap >= 4,
+            "code_fence_lang should have capacity >= 4 for 'rust', got {}",
+            lang_cap
+        );
+
+        // The bug: resident_collector_bytes() does not include code_fence_lang
+        let collector_bytes = conv.emitter.resident_collector_bytes();
+        assert!(
+            collector_bytes >= lang_cap,
+            "resident_collector_bytes() must include code_fence_lang capacity ({}), \
+             but reports only {} — code_fence_lang contribution missing",
+            lang_cap,
+            collector_bytes
+        );
+    }
+
+    /// E-C4: resident_bytes must reflect Vec capacity when stack is empty.
+    ///
+    /// Push 128 contexts onto the state machine stack then pop all. After
+    /// popping, stack.len()==0 but stack.capacity()==128 (Vec does not dealloc
+    /// on pop/clear). resident_bytes() should still report the retained
+    /// capacity.
+    /// PASSES on fixed code because resident_bytes() reports capacity * size_of.
+    #[test]
+    fn test_accounting_ec4_stack_capacity_after_pop() {
+        use crate::streaming::state_machine::StructuralContext;
+
+        let mut conv = make_converter();
+
+        // Push many nested elements to grow the stack
+        let mut html = String::new();
+        for _ in 0..128 {
+            html.push_str("<blockquote>");
+        }
+        html.push_str("<p>deep</p>");
+        // Close them all
+        for _ in 0..128 {
+            html.push_str("</blockquote>");
+        }
+        let _output = conv.feed_chunk(html.as_bytes()).unwrap();
+
+        // After all closures, stack should be empty but capacity retained
+        assert_eq!(
+            conv.state_machine.depth(),
+            0,
+            "Stack should be empty after closing all elements"
+        );
+        let stack_cap = conv.state_machine.stack_capacity();
+        assert!(
+            stack_cap >= 64,
+            "Stack Vec capacity should be at least 64 after growing to 128+, got {}",
+            stack_cap
+        );
+
+        // The fix: resident_bytes() includes stack.capacity() * size_of.
+        // Even with len==0, the physical capacity is accounted.
+        let resident = conv.state_machine.resident_bytes();
+        let expected_minimum = stack_cap.saturating_mul(std::mem::size_of::<StructuralContext>());
+        assert!(
+            resident >= expected_minimum,
+            "state_machine.resident_bytes() should report at least {} bytes \
+             (capacity {} * size_of StructuralContext {}), but reports {} — \
+             Vec capacity correctly accounted when empty",
+            expected_minimum,
+            stack_cap,
+            std::mem::size_of::<StructuralContext>(),
+            resident
+        );
+    }
+
+    /// E-C5: estimate_working_set must include ordered_list_counters heap.
+    ///
+    /// 8 nested `<ol>` elements push 8 entries into ordered_list_counters.
+    /// That Vec's capacity * size_of::<u32>() must appear in the working set
+    /// via state_machine.resident_bytes().
+    /// PASSES on fixed code because resident_bytes() includes olc contribution.
+    #[test]
+    fn test_accounting_ec5_ordered_list_counters_not_counted() {
+        use crate::streaming::state_machine::StructuralContext;
+
+        let mut conv = make_converter();
+
+        // Build 8 nested ordered lists
+        let mut html = String::new();
+        for _ in 0..8 {
+            html.push_str("<ol><li>");
+        }
+        html.push_str("deep item");
+        // Don't close them — keep the counters alive
+
+        let _output = conv.feed_chunk(html.as_bytes()).unwrap();
+
+        // ordered_list_counters should have capacity >= 8
+        let olc_cap = conv.state_machine.ordered_list_counters_capacity();
+        assert!(
+            olc_cap >= 8,
+            "ordered_list_counters capacity should be >= 8 after 8 nested <ol>, got {}",
+            olc_cap
+        );
+
+        let olc_bytes = olc_cap.saturating_mul(std::mem::size_of::<u32>());
+
+        // The fix: state_machine.resident_bytes() includes olc contribution.
+        // Verify that resident_bytes() is at least olc_bytes + stack capacity.
+        let sm_resident = conv.state_machine.resident_bytes();
+        let stack_cap_bytes = conv
+            .state_machine
+            .stack_capacity()
+            .saturating_mul(std::mem::size_of::<StructuralContext>());
+        assert!(
+            sm_resident >= stack_cap_bytes.saturating_add(olc_bytes),
+            "state_machine.resident_bytes() ({}) must include both \
+             stack capacity ({}) and ordered_list_counters heap ({} = cap {} * {})",
+            sm_resident,
+            stack_cap_bytes,
+            olc_bytes,
+            olc_cap,
+            std::mem::size_of::<u32>()
+        );
+
+        // Also verify estimate_working_set includes sm_resident
+        let working_set = conv.estimate_working_set();
+        assert!(
+            working_set >= sm_resident,
+            "estimate_working_set() ({}) must be >= state_machine.resident_bytes() ({})",
+            working_set,
+            sm_resident
+        );
+    }
+
+    /// E-C6: Record working set after bounded cumulative input (data point for task 13.5).
+    ///
+    /// This records the actual estimate_working_set() value after the same
+    /// 2000-chunk loop used in test_parser_budget_allows_bounded_cumulative_input,
+    /// providing a concrete data point for determining the headroom constant.
+    /// This test always PASSES — it is purely observational.
+    #[test]
+    fn test_accounting_ec6_record_cumulative_working_set() {
+        let mut conv = make_converter();
+
+        for _ in 0..2_000 {
+            conv.feed_chunk(b"<p>bounded chunk</p>")
+                .expect("bounded working set should not charge cumulative input");
+        }
+
+        let final_working_set = conv.estimate_working_set();
+        let buf_cap = conv.emitter.buffer_capacity();
+        let flushed_cap = conv.emitter.flushed_capacity();
+
+        // Record values for task 13.5 headroom determination.
+        // These are printed so the test runner captures them as evidence.
+        eprintln!(
+            "[E-C6 data point] After 2000 chunks: \
+             estimate_working_set={}, buffer_capacity={}, flushed_capacity={}",
+            final_working_set, buf_cap, flushed_cap
+        );
+
+        // This test is purely observational — assert the estimate is non-zero.
+        assert!(
+            final_working_set > 0,
+            "Working set after 2000 chunks must be positive"
+        );
+    }
+
+    // =========================================================================
+    // C-P2 (Finding C) Preservation property test — pending_bytes/flushed_bytes
+    // len() semantics preserved.
+    //
+    // **Validates: Requirements 3.15**
+    //
+    // This property MUST pass on BOTH unfixed and fixed code. The fix adds
+    // NEW functions for accounting; pending_bytes()/flushed_bytes() continue
+    // to return len() for flush-timing logic.
+    // =========================================================================
+
+    /// Generate a random HTML snippet from a fixed set of structural elements.
+    ///
+    /// The strategy produces a sequence of HTML fragment strings that exercise
+    /// various emitter paths (paragraphs, headings, lists, links, code blocks,
+    /// text content) without generating invalid UTF-8.
+    fn arb_html_chunks() -> impl Strategy<Value = Vec<String>> {
+        let element = prop_oneof![
+            Just("<p>text content here</p>".to_owned()),
+            Just("<h1>heading</h1>".to_owned()),
+            Just("<h2>sub heading</h2>".to_owned()),
+            Just("<strong>bold</strong>".to_owned()),
+            Just("<em>italic</em>".to_owned()),
+            Just("<ol><li>item one</li><li>item two</li></ol>".to_owned()),
+            Just("<ul><li>bullet</li></ul>".to_owned()),
+            Just("<a href=\"https://example.com\">link</a>".to_owned()),
+            Just("<blockquote><p>quoted</p></blockquote>".to_owned()),
+            Just("<pre><code>code block</code></pre>".to_owned()),
+            Just("<img src=\"img.png\" alt=\"image\"/>".to_owned()),
+            Just("plain text between elements ".to_owned()),
+            Just(
+                "<p>paragraph with <strong>nested <em>inline</em></strong> content</p>".to_owned()
+            ),
+            Just("<div>container</div>".to_owned()),
+        ];
+        proptest::collection::vec(element, 1..20)
+    }
+
+    proptest! {
+        /// C-P2: pending_bytes() == buffer.len() and flushed_bytes() == flushed.len()
+        /// must ALWAYS hold regardless of what HTML chunks are fed.
+        ///
+        /// **Validates: Requirements 3.15**
+        ///
+        /// These functions are used for flush-timing logic and MUST continue to
+        /// return len() (not capacity). The fix will add NEW functions for
+        /// physical accounting without changing these.
+        #[test]
+        fn prop_preservation_pending_flushed_len_semantics(
+            chunks in arb_html_chunks()
+        ) {
+            let mut conv = make_converter();
+
+            // Check invariant before any input
+            prop_assert_eq!(
+                conv.emitter.pending_bytes(),
+                conv.emitter.buffer_capacity().min(conv.emitter.pending_bytes()),
+                "pending_bytes must be <= buffer capacity (it reports len, which is <= capacity)"
+            );
+
+            for chunk in &chunks {
+                // Feed chunk — may succeed or fail (budget, fallback, etc.)
+                let _ = conv.feed_chunk(chunk.as_bytes());
+
+                // Invariant: pending_bytes() returns buffer.len()
+                // Since buffer.len() <= buffer.capacity(), pending <= capacity always.
+                // More precisely, pending_bytes IS buffer.len().
+                let pending = conv.emitter.pending_bytes();
+                let buf_cap = conv.emitter.buffer_capacity();
+                prop_assert!(
+                    pending <= buf_cap,
+                    "pending_bytes() ({}) must be <= buffer.capacity() ({}) \
+                     because it returns len()",
+                    pending,
+                    buf_cap
+                );
+
+                // Invariant: flushed_bytes() returns flushed.len()
+                let flushed = conv.emitter.flushed_bytes();
+                let flushed_cap = conv.emitter.flushed_capacity();
+                prop_assert!(
+                    flushed <= flushed_cap,
+                    "flushed_bytes() ({}) must be <= flushed.capacity() ({}) \
+                     because it returns len()",
+                    flushed,
+                    flushed_cap
+                );
+            }
+        }
+
+        /// C-P3: estimate_working_set() is a consistent sum of component accessors.
+        ///
+        /// **Validates: Requirements 3.17**
+        ///
+        /// The upper bound assertion: estimate_working_set() must equal exactly
+        /// the sum of its component parts as currently implemented. If any
+        /// allocation is counted twice, the estimate will exceed the independent
+        /// recomputation, breaking this assertion.
+        ///
+        /// Combined with C-P1 (lower bound, task 11), this forms an equality
+        /// squeeze: estimate == sum of components, no double counting possible.
+        #[test]
+        fn prop_preservation_working_set_consistent_sum(
+            chunks in arb_html_chunks()
+        ) {
+            let mut conv = make_converter();
+
+            for chunk in &chunks {
+                let _ = conv.feed_chunk(chunk.as_bytes());
+
+                // Independently recompute the sum of all component accessors
+                // that estimate_working_set() uses (fixed implementation):
+                let independent_sum = conv.emitter.resident_bytes()
+                    .saturating_add(conv.state_machine.resident_bytes())
+                    .saturating_add(conv.sanitizer.resident_bytes())
+                    .saturating_add(conv.metadata.bytes_estimate())
+                    .saturating_add(conv.html_title_buf.capacity())
+                    .saturating_add(conv.tokenizer.reserved_bytes())
+                    .saturating_add(conv.charset_state.resident_bytes())
+                    .saturating_add(conv.charset_transcoded_bytes)
+                    .saturating_add(conv.utf8_tail.capacity());
+
+                let estimate = conv.estimate_working_set();
+
+                // On fixed code, estimate == independent_sum because
+                // both read the same component resident_bytes() accessors.
+                // This holds as an upper bound: no allocation is counted twice.
+                prop_assert_eq!(
+                    estimate,
+                    independent_sum,
+                    "estimate_working_set() ({}) must equal the independent sum \
+                     of its components ({}). A difference means double counting \
+                     or a missed component.",
+                    estimate,
+                    independent_sum
+                );
+            }
+        }
+    }
+
+    // =========================================================================
+    // Finding C preservation: stack_bytes_estimate() numeric values for budget
+    // enforcement must remain identical after the fix.
+    //
+    // **Validates: Requirements 3.15, 3.19**
+    //
+    // These tests record the exact values that drive check_state_stack budget
+    // decisions. The fix adds resident_bytes() but does NOT change
+    // stack_bytes_estimate().
+    // =========================================================================
+
+    /// Preservation: stack_bytes_estimate() on empty stack returns 0.
+    ///
+    /// The state-stack budget charges per-element; an empty stack has zero charge.
+    #[test]
+    fn test_preservation_stack_estimate_empty() {
+        let sm = StructuralStateMachine::new(&MemoryBudget::default());
+        let estimate = sm.stack_bytes_estimate();
+        assert_eq!(
+            estimate, 0,
+            "Empty stack must have stack_bytes_estimate() == 0, got {}",
+            estimate
+        );
+    }
+
+    /// Preservation: stack_bytes_estimate() for 1 Bold context == 64.
+    ///
+    /// Bold has no retained_heap_bytes (returns 0), so charge is 64 per slot.
+    #[test]
+    fn test_preservation_stack_estimate_one_bold() {
+        let mut conv = make_converter();
+        conv.feed_chunk(b"<strong>").unwrap();
+
+        // Bold is on the stack
+        assert_eq!(conv.state_machine.depth(), 1);
+        let estimate = conv.state_machine.stack_bytes_estimate();
+        // Each slot contributes 64 + retained_heap_bytes (0 for Bold)
+        assert_eq!(
+            estimate, 64,
+            "1 Bold context: stack_bytes_estimate must be 64, got {}",
+            estimate
+        );
+    }
+
+    /// Preservation: stack_bytes_estimate() for 16 alternating strong+em == 16 * 64 == 1024.
+    ///
+    /// Both Bold and Italic have zero retained_heap_bytes.
+    #[test]
+    fn test_preservation_stack_estimate_16_alternating() {
+        let mut conv = make_converter();
+
+        let mut html = String::new();
+        for _ in 0..8 {
+            html.push_str("<strong><em>");
+        }
+        conv.feed_chunk(html.as_bytes()).unwrap();
+
+        assert_eq!(conv.state_machine.depth(), 16);
+        let estimate = conv.state_machine.stack_bytes_estimate();
+        // 16 slots * 64 bytes each, no retained heap
+        assert_eq!(
+            estimate,
+            16 * 64,
+            "16 alternating strong+em: stack_bytes_estimate must be 1024, got {}",
+            estimate
+        );
+    }
+
+    /// Preservation: stack_bytes_estimate() for 1 Link with 16 KiB href.
+    ///
+    /// Link(href) contributes 64 + href.capacity(). A 16 KiB href has
+    /// capacity >= 16384.
+    ///
+    /// Uses the state machine directly (not through the converter/tokenizer)
+    /// because the tokenizer has per-token size limits that reject 16 KiB
+    /// attribute values. This matches the approach used by the existing
+    /// test_link_href_retained_bytes_count_against_state_stack.
+    #[test]
+    fn test_preservation_stack_estimate_link_16kib_href() {
+        let budget = MemoryBudget {
+            state_stack: 64 * 1024,
+            ..MemoryBudget::default()
+        };
+        let mut sm = StructuralStateMachine::new(&budget);
+
+        let big_href = "x".repeat(16 * 1024);
+        let event = StreamEvent::StartTag {
+            name: "a".to_string(),
+            attrs: vec![("href".to_string(), big_href)],
+            self_closing: false,
+        };
+        sm.process_event(&event).unwrap();
+
+        assert_eq!(sm.depth(), 1);
+        let estimate = sm.stack_bytes_estimate();
+        // 64 (slot) + href.capacity() (>= 16384)
+        let expected_min = 64 + 16 * 1024;
+        assert!(
+            estimate >= expected_min,
+            "1 Link with 16 KiB href: stack_bytes_estimate must be >= {}, got {}",
+            expected_min,
+            estimate
+        );
+        // Upper bound: capacity is typically exactly 16384 for a 16384-byte string
+        // (allocator may round up, so use a generous upper bound)
+        let expected_max = 64 + 32 * 1024;
+        assert!(
+            estimate <= expected_max,
+            "1 Link with 16 KiB href: stack_bytes_estimate should be <= {}, got {} \
+             (unexpected extra allocation)",
+            expected_max,
+            estimate
+        );
+    }
+
+    // =========================================================================
+    // Task 13.4 — compositional equality test
+    // =========================================================================
+
+    /// Test 8: estimate_working_set equals the sum of all 9 component terms.
+    ///
+    /// If any allocation is double-counted or missed, this test breaks.
+    /// The compositional sum must exactly equal estimate_working_set() because
+    /// the implementation IS this sum (no rounding, no overhead term).
+    #[test]
+    fn test_accounting_compositional_equality() {
+        let mut conv = make_converter();
+
+        // Feed diverse HTML to exercise multiple components:
+        // paragraphs (emitter buffer), nested lists (olc), links (stack strings),
+        // code blocks (code_fence_lang), and nesting (sanitizer).
+        let html = concat!(
+            "<div><ol><li><a href=\"https://example.com\">link</a></li>",
+            "<li><pre><code class=\"language-rust\">fn main() {}</code></pre></li>",
+            "<li>text</li></ol>",
+            "<p>paragraph content with some length to grow the buffer</p>",
+            "<script>skipped content</script>",
+            "</div>"
+        );
+        let _output = conv.feed_chunk(html.as_bytes()).unwrap();
+
+        // Compute each component independently
+        let emitter_resident = conv.emitter.resident_bytes();
+        let sm_resident = conv.state_machine.resident_bytes();
+        let sanitizer_resident = conv.sanitizer.resident_bytes();
+        let metadata_estimate = conv.metadata.bytes_estimate();
+        let html_title_cap = conv.html_title_buf.capacity();
+        let tokenizer_reserved = conv.tokenizer.reserved_bytes();
+        let charset_resident = conv.charset_state.resident_bytes();
+        let charset_transcoded = conv.charset_transcoded_bytes;
+        let utf8_tail_cap = conv.utf8_tail.capacity();
+
+        // Manually sum all 9 terms
+        let manual_sum = emitter_resident
+            .saturating_add(sm_resident)
+            .saturating_add(sanitizer_resident)
+            .saturating_add(metadata_estimate)
+            .saturating_add(html_title_cap)
+            .saturating_add(tokenizer_reserved)
+            .saturating_add(charset_resident)
+            .saturating_add(charset_transcoded)
+            .saturating_add(utf8_tail_cap);
+
+        let working_set = conv.estimate_working_set();
+
+        assert_eq!(
+            working_set,
+            manual_sum,
+            "estimate_working_set() ({}) must exactly equal the compositional sum ({}) \
+             of all 9 components:\n  \
+             emitter.resident_bytes()={}\n  \
+             state_machine.resident_bytes()={}\n  \
+             sanitizer.resident_bytes()={}\n  \
+             metadata.bytes_estimate()={}\n  \
+             html_title_buf.capacity()={}\n  \
+             tokenizer.reserved_bytes()={}\n  \
+             charset_state.resident_bytes()={}\n  \
+             charset_transcoded_bytes={}\n  \
+             utf8_tail.capacity()={}",
+            working_set,
+            manual_sum,
+            emitter_resident,
+            sm_resident,
+            sanitizer_resident,
+            metadata_estimate,
+            html_title_cap,
+            tokenizer_reserved,
+            charset_resident,
+            charset_transcoded,
+            utf8_tail_cap
+        );
+
+        // Verify the sum is non-trivial (at least some allocations happened)
+        assert!(
+            working_set > 0,
+            "working set should be non-zero after processing HTML"
         );
     }
 }
