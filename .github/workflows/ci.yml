@@ -252,9 +252,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Rule 61 validates baseline source SHAs against the repository
-          # history.  The active baseline SHAs are retained by immutable
-          # perf-baseline/* tags, so a shallow checkout cannot verify them.
+          # Rule 61 resolves every finalized baseline's source_git_commit
+          # against this checkout, which a shallow default checkout cannot
+          # do.  Full depth plus tags is the durability and speed
+          # mechanism, not the correctness guarantee: it makes each
+          # measurement commit reachable through a normal fetch and lets
+          # the anchor check take its constant-time fast path.  Correctness
+          # is carried by the "Prepare baseline measurement provenance"
+          # step below, which verifies every measurement commit explicitly
+          # and fails the job when one is still unavailable.
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
@@ -286,6 +292,83 @@ jobs:
 
       - name: Run repository harness checks
         run: make harness-check
+
+      - name: Prepare baseline measurement provenance
+        # make harness-security-checks runs detect_baseline_hand_edit.py
+        # (Rule 61), which resolves every finalized baseline's
+        # source_git_commit in this checkout.  A measurement commit always
+        # predates the commit that records it, so the durable
+        # perf-baseline/* anchor tags are what keep it reachable.  Fetch
+        # those first: they carry the objects and let the anchor check take
+        # its constant-time fast path, and an object-only fetch would
+        # otherwise land the commit as a second shallow root that no ref
+        # reaches.  A commit still missing afterwards is fetched by
+        # explicit SHA as a last resort, then proven present with
+        # git cat-file.  A failed fetch is reported but never decides the
+        # outcome: the cat-file check does, and it fails the job with the
+        # missing SHA and the baselines that require it, instead of letting
+        # the raw "not our ref" abort hide which evidence broke.
+        #
+        # This step only makes objects queryable.  The verdict stays with
+        # the detector, which independently re-checks presence, anchoring
+        # and artifact digests.
+        run: |
+          set -euo pipefail
+
+          git fetch --no-tags origin \
+            '+refs/tags/perf-baseline/*:refs/tags/perf-baseline/*'
+
+          manifest="$(python3 - <<'PY'
+          import json
+          import pathlib
+          import re
+
+          owners = {}
+          baselines = pathlib.Path("perf/baselines")
+          for path in sorted(baselines.glob("module-baseline-*.json")):
+              if "-raw" in path.name:
+                  continue
+              with open(path, encoding="utf-8") as handle:
+                  document = json.load(handle)
+              policy = document.get("baseline_policy")
+              if not isinstance(policy, dict):
+                  raise SystemExit("missing baseline_policy in " + path.name)
+              sha = policy.get("source_git_commit")
+              if not isinstance(sha, str) or not re.fullmatch(
+                  r"[0-9a-f]{40}", sha
+              ):
+                  raise SystemExit(
+                      "invalid baseline_policy.source_git_commit in "
+                      + path.name
+                  )
+              owners.setdefault(sha, []).append(path.name)
+          if not owners:
+              raise SystemExit("no finalized module baseline was found")
+          for sha in sorted(owners):
+              print(sha, ",".join(owners[sha]))
+          PY
+          )"
+
+          while IFS= read -r entry; do
+            [[ -n "${entry}" ]] || continue
+            sha="${entry%% *}"
+            required_by="${entry#* }"
+            if git cat-file -e "${sha}^{commit}" 2>/dev/null; then
+              echo "present ${sha} (${required_by})"
+              continue
+            fi
+            echo "fetching ${sha} (${required_by})"
+            if ! git fetch --no-tags --depth=1 origin "${sha}"; then
+              echo "fetch of measurement commit ${sha} failed" >&2
+            fi
+            if ! git cat-file -e "${sha}^{commit}" 2>/dev/null; then
+              echo "measurement commit ${sha} required by ${required_by}" \
+                "is unavailable in this checkout; anchor it with a durable" \
+                "perf-baseline tag (see perf/baselines/README.md)" >&2
+              exit 1
+            fi
+            echo "fetched ${sha} (${required_by})"
+          done <<< "${manifest}"
 
       - name: Run repository harness security checks
         run: make harness-security-checks

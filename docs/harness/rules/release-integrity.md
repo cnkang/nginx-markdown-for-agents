@@ -99,6 +99,24 @@ not prevent the churn because the *workflow* did not manage the lifecycle:
    `source_git_commit` and an existing retained artifact, but their
    remaining provenance fields stay as imported rather than being
    retro-fitted to the finalizer schema.
+10. **A durable measurement ref anchors every measurement commit.**
+    Presence is not provenance.  A measurement commit always predates the
+    commit that records it, because no commit can carry a baseline whose
+    provenance hash is its own hash, so a finalized baseline stays
+    verifiable only while a ref still reaches that older commit.  An object
+    that no ref reaches survives only until the server collects it, so a
+    fetch by explicit SHA must never substitute for an anchor.  Anchor the
+    commit with an annotated tag named
+    `refs/tags/perf-baseline/<baseline-stem>`, a namespace disjoint from
+    the release tags `v<MAJOR>.<MINOR>.<PATCH>`.  The tag message must
+    record the baseline stem, `source_run`, and `source_artifact_sha256`,
+    so the ref audits itself.  A pushed anchor is immutable: never move it
+    and never delete it.  Create one only when the finalizer produces a new
+    canonical baseline whose measurement commit no existing ref anchors —
+    a commit that `main` or a release tag already reaches must not receive
+    a redundant ref.  Archival `verbatim_import` packs receive no
+    exemption from this clause.  Naming and lifecycle policy live in
+    `perf/baselines/README.md`, section `Measurement Commit Durability`.
 
 Verification:
 - `python3 tools/harness/detect_baseline_hand_edit.py` — full audit over
@@ -108,6 +126,17 @@ Verification:
 - `python3 tools/harness/detect_baseline_hand_edit.py --changed <paths>`
   — changed-file mode for pre-commit use: flags finalized baselines that
   changed without their raw inputs.
+- The same full audit resolves the durable measurement ref through
+  `repo_commit_anchored(sha, stem)`: the canonical
+  `refs/tags/perf-baseline/<stem>` fast path first, then any ref that
+  reaches the commit, and an explicit SKIP plus a finding when a shallow or
+  tagless checkout cannot decide. A present but unanchored commit fails
+  the gate and the finding names the ref to create. The `harness-tooling`
+  CI job first fetches the anchor refspec
+  `+refs/tags/perf-baseline/*:refs/tags/perf-baseline/*`, then proves each
+  commit present with `git cat-file -e` before the gate runs. An
+  object-only fetch by explicit SHA does not satisfy this contract: it
+  lands the commit as a second shallow root that no ref reaches.
 
 **Verification:**
 - `RELEASE_GATE_ALLOW_SKIP_MODULE=1 make release-gates-check-092` — blocking
@@ -197,6 +226,16 @@ sort) in the same way.
 - **`tools/perf/evidence_gate.py`**: Blocking evidence gate implementation
 
 ## History
+- **2026-08-22**: Added Rule 61 clause 10, the durable measurement ref.
+  Two measurement commits behind the checked-in 0.9.1 and 0.9.2 baselines
+  had fallen out of every branch and tag during the 2026-08-20/21 evidence
+  churn, so the blocking provenance gate failed on any clean checkout, full
+  clone included. Clauses 1–9 bound the evidence but never kept the
+  measurement commit reachable. The clause records the anchor namespace,
+  the annotated-tag and immutability requirements, and the rule that a
+  commit an existing ref already reaches must not receive a redundant ref.
+  `detect_baseline_hand_edit.py` gained `repo_commit_anchored()` and the
+  `harness-tooling` CI job gained a provenance preparation step.
 - **2026-07-29**: Corrected Rule 61 provenance field table to match real
   `baseline_policy` schema: `source_run` (not `source_workflow_run` +
   `source_workflow_attempt`), `source_artifact_sha256` (not
