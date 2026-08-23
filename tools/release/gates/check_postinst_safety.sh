@@ -38,7 +38,7 @@
 #     - Modifying nginx.conf (sed -i, echo to nginx.conf)
 #     - Enabling snippets (ln -s to modules-enabled or conf.d)
 #   2. Trusted-PATH invariant (structural):
-#     - An unconditional PATH= assignment (no self-reference) must exist
+#     - A literal trusted PATH assignment must exist in the top-level prologue
 #     - It must precede any external command resolution from a known list
 #
 # NOTES:
@@ -274,11 +274,11 @@ check_file() {
     return 0
 }
 
-# check_trusted_path — verify that an unconditional trusted PATH assignment
+# check_trusted_path — verify that a top-level trusted PATH assignment
 # precedes any external command resolution in a maintainer script.
 #
 # This is a STRUCTURAL check: it validates that:
-#   1. A PATH= assignment exists that does NOT self-reference ($PATH / ${PATH)
+#   1. A trusted PATH= assignment exists in the top-level script prologue
 #   2. No external command from a known list is resolved before that assignment
 #
 # Arguments: $1 = file path (original, for reporting)
@@ -311,27 +311,56 @@ check_trusted_path() {
     local first_cmd_line=0
     local line_num=0
     local line=""
+    local trimmed=""
+    local trusted_path_root_initialized=0
 
-    # Pass 1: find first unconditional PATH= assignment (no self-reference)
+    # Pass 1: find a literal trusted PATH assignment in the top-level
+    # prologue.  Do not accept assignments inside functions or control-flow
+    # blocks: they can leave later command resolution under caller PATH.
     line_num=0
     while IFS= read -r line || [[ -n "$line" ]]; do
         line_num=$((line_num + 1))
-        # Match: optional leading whitespace, optional "export ", PATH=<value>
-        # where value does NOT contain $PATH or ${PATH
-        if [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?PATH= ]]; then
-            # Extract the value after PATH=
-            local path_value="${line#*PATH=}"
-            # Check for self-reference: $PATH or ${PATH
-            case "$path_value" in
-                *'$PATH'*|*'${PATH'*)
-                    # Self-referencing — not an unconditional trusted assignment
-                    ;;
-                *)
-                    first_path_line=$line_num
-                    break
-                    ;;
-            esac
+
+        trimmed="${line#"${line%%[![:space:]]*}"}"
+        if [[ -z "$trimmed" || "$trimmed" == "#"* ]]; then
+            continue
         fi
+
+        # A top-level assignment is never indented.  Once the prologue has
+        # entered a block or executed another statement, a later PATH= is not
+        # unconditional for this check.
+        if [[ "$line" != "$trimmed" ]]; then
+            break
+        fi
+
+        case "$line" in
+            'PATH=/usr/sbin:/usr/bin:/sbin:/bin'|\
+            'PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH')
+                first_path_line=$line_num
+                break
+                ;;
+            'PATH="${TRUSTED_PATH_ROOT}/usr/sbin:${TRUSTED_PATH_ROOT}/usr/bin:${TRUSTED_PATH_ROOT}/sbin:${TRUSTED_PATH_ROOT}/bin"')
+                if [[ "$trusted_path_root_initialized" -eq 1 ]]; then
+                    first_path_line=$line_num
+                fi
+                break
+                ;;
+            'TRUSTED_PATH_ROOT=""')
+                trusted_path_root_initialized=1
+                ;;
+            PATH=*)
+                # A non-literal or self-referencing PATH must not be used as
+                # a precursor to a later trusted assignment.
+                break
+                ;;
+            set[[:space:]]*|[A-Za-z_]*=*)
+                # Shell options and simple variable assignments are safe in
+                # the prologue and do not resolve commands through PATH.
+                ;;
+            *)
+                break
+                ;;
+        esac
     done < "$stripped_tmp"
 
     # Pass 2: find first external command usage

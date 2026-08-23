@@ -447,7 +447,8 @@ def test_ea2_shallow_clone_fails_closed_then_passes_after_preparation(
     captured = capsys.readouterr().err
     assert "anchor not decidable" in captured, captured
 
-    _git(origin, "tag", "-a", "-m", "durable measurement anchor",
+    _git(origin, *_GIT_IDENTITY, "tag", "-a", "-m",
+         "durable measurement anchor",
          "perf-baseline/module-baseline-092", parent_sha)
     _git(clone, "fetch", "--no-tags", "origin",
          "+refs/tags/perf-baseline/*:refs/tags/perf-baseline/*")
@@ -956,7 +957,8 @@ def test_canonical_anchor_tag_passes_through_the_fast_path(
     assert "is not anchored by any ref" in unanchored_findings[0], \
         unanchored_findings[0]
 
-    _git(origin, "tag", "-a", "-m", "durable measurement anchor",
+    _git(origin, *_GIT_IDENTITY, "tag", "-a", "-m",
+         "durable measurement anchor",
          f"perf-baseline/{stem}", orphan_sha)
     calls = _git_stdout_spy(monkeypatch)
     assert module.repo_commit_anchored(orphan_sha, stem) is True
@@ -985,7 +987,8 @@ def test_ordinary_tag_or_branch_anchor_passes_through_the_fallback(
     """
     origin, tip_sha = real_git_sandbox
     stem = "module-baseline-brotli-091"
-    _git(origin, "tag", "-a", "-m", "release", "v0.0.1", tip_sha)
+    _git(origin, *_GIT_IDENTITY, "tag", "-a", "-m", "release",
+         "v0.0.1", tip_sha)
     _bind_real_git(monkeypatch, origin)
     canonical = f"{module.ANCHOR_TAG_NAMESPACE}/{stem}^{{commit}}"
     assert module._git_stdout("rev-parse", "--verify", "--quiet",
@@ -1037,7 +1040,8 @@ def test_verbatim_import_is_not_exempt_from_the_anchor_check(
     # Clean fixture: with the durable tag in place the archival pack audits
     # clean, so the finding above is the anchor judgment rather than the
     # archival profile itself being rejected.
-    _git(origin, "tag", "-a", "-m", "durable measurement anchor",
+    _git(origin, *_GIT_IDENTITY, "tag", "-a", "-m",
+         "durable measurement anchor",
          f"perf-baseline/{stem}", orphan_sha)
     archival = _write_sandbox_baseline(origin, orphan_sha, stem=stem,
                                        baseline_type="verbatim_import")

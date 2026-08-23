@@ -20,7 +20,7 @@ set -e
 # Executable-trust invariant: establish trusted PATH before any command
 # resolution. The literal empty assignment ensures a caller-controlled
 # environment variable of the same name cannot influence the resolved set.
-# Tests override TRUSTED_PATH_ROOT to redirect resolution into a sandbox.
+# Tests rewrite this literal only in a temporary fixture copy.
 ##############################################################################
 
 TRUSTED_PATH_ROOT=""
