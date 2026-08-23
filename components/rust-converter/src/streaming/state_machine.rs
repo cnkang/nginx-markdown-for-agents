@@ -669,11 +669,52 @@ impl StructuralStateMachine {
     /// Includes the fixed enum-slot overhead plus the retained heap bytes of
     /// every variable-sized String payload currently on the stack, so the
     /// estimate never omits input-derived retained state.
+    ///
+    /// This is the state-stack **budget** entry point (charges per current element).
+    /// For physical retained-memory accounting (by capacity), see `resident_bytes()`.
     pub fn stack_bytes_estimate(&self) -> usize {
         self.stack
             .iter()
             .map(|ctx| 64usize.saturating_add(ctx.retained_heap_bytes()))
             .fold(0usize, usize::saturating_add)
+    }
+
+    /// Total physical heap capacity retained by this state machine.
+    ///
+    /// Includes the stack Vec backing allocation (capacity * size_of element),
+    /// the nested String heap of each element currently on the stack (by capacity),
+    /// and the ordered_list_counters Vec allocation.
+    ///
+    /// This is the physical retained-memory accounting entry point. For
+    /// state-stack budget enforcement (per-element charging), see
+    /// stack_bytes_estimate().
+    pub(crate) fn resident_bytes(&self) -> usize {
+        self.stack
+            .capacity()
+            .saturating_mul(std::mem::size_of::<StructuralContext>())
+            .saturating_add(
+                self.stack
+                    .iter()
+                    .map(|ctx| ctx.retained_heap_bytes())
+                    .fold(0usize, usize::saturating_add),
+            )
+            .saturating_add(
+                self.ordered_list_counters
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<u32>()),
+            )
+    }
+
+    /// Physical capacity of the stack Vec in number of slots (for accounting tests).
+    #[cfg(test)]
+    pub(crate) fn stack_capacity(&self) -> usize {
+        self.stack.capacity()
+    }
+
+    /// Physical capacity retained by the ordered list counters Vec (for accounting tests).
+    #[cfg(test)]
+    pub(crate) fn ordered_list_counters_capacity(&self) -> usize {
+        self.ordered_list_counters.capacity()
     }
 }
 
@@ -1487,6 +1528,157 @@ mod tests {
         assert!(
             sm.ordered_list_counters.is_empty(),
             "ordered_list_counters must be empty after ul drains ol"
+        );
+    }
+
+    // =========================================================================
+    // Task 13.4 — accounting tests verifying FIXED resident_bytes() behavior
+    // =========================================================================
+
+    /// Test 2: resident_bytes reports capacity after clear (stack emptied).
+    ///
+    /// Push elements to grow the stack Vec, then pop/drain all. After drain,
+    /// len==0 but capacity > 0, and resident_bytes() must still report the
+    /// retained capacity.
+    #[test]
+    fn test_resident_bytes_capacity_after_clear() {
+        let budget = MemoryBudget {
+            state_stack: 256 * 1024,
+            ..MemoryBudget::default()
+        };
+        let mut sm = StructuralStateMachine::new(&budget);
+
+        // Push many elements to grow the stack
+        for _ in 0..64 {
+            let ev = start_tag("blockquote");
+            sm.process_event(&ev).unwrap();
+        }
+        assert_eq!(sm.depth(), 64);
+
+        // Pop all elements
+        for _ in 0..64 {
+            let ev = end_tag("blockquote");
+            sm.process_event(&ev).unwrap();
+        }
+        assert_eq!(sm.depth(), 0, "stack should be empty after popping all");
+
+        // Vec capacity is retained even though len == 0
+        let cap = sm.stack_capacity();
+        assert!(cap > 0, "capacity must be > 0 after growing and clearing");
+
+        // resident_bytes must reflect the retained capacity
+        let resident = sm.resident_bytes();
+        let expected_min = cap.saturating_mul(std::mem::size_of::<StructuralContext>());
+        assert!(
+            resident >= expected_min,
+            "resident_bytes() ({}) must be >= capacity ({}) * size_of ({}) = {} \
+             even with empty stack",
+            resident,
+            cap,
+            std::mem::size_of::<StructuralContext>(),
+            expected_min
+        );
+    }
+
+    /// Test 5: resident_bytes includes ordered_list_counters heap.
+    ///
+    /// 8 nested `<ol>` elements grow ordered_list_counters. Its
+    /// capacity * size_of::<u32>() must be included in resident_bytes().
+    #[test]
+    fn test_resident_bytes_includes_ordered_list_counters() {
+        let budget = MemoryBudget::default();
+        let mut sm = StructuralStateMachine::new(&budget);
+
+        // Push 8 nested ordered lists (each pushes OrderedList + counter)
+        for _ in 0..8 {
+            let ol_ev = start_tag("ol");
+            sm.process_event(&ol_ev).unwrap();
+            let li_ev = start_tag("li");
+            sm.process_event(&li_ev).unwrap();
+        }
+
+        let olc_cap = sm.ordered_list_counters_capacity();
+        assert!(
+            olc_cap >= 8,
+            "ordered_list_counters capacity should be >= 8 after 8 nested <ol>, got {}",
+            olc_cap
+        );
+
+        let olc_bytes = olc_cap.saturating_mul(std::mem::size_of::<u32>());
+        let resident = sm.resident_bytes();
+
+        // resident must include at least olc_bytes
+        assert!(
+            resident >= olc_bytes,
+            "resident_bytes() ({}) must include ordered_list_counters \
+             contribution ({} = cap {} * size_of::<u32>() {})",
+            resident,
+            olc_bytes,
+            olc_cap,
+            std::mem::size_of::<u32>()
+        );
+
+        // Decomposition check: stack contribution + olc contribution
+        let stack_cap_bytes = sm
+            .stack_capacity()
+            .saturating_mul(std::mem::size_of::<StructuralContext>());
+        assert!(
+            resident >= stack_cap_bytes.saturating_add(olc_bytes),
+            "resident_bytes() ({}) must be >= stack_bytes ({}) + olc_bytes ({})",
+            resident,
+            stack_cap_bytes,
+            olc_bytes
+        );
+    }
+
+    /// Test 6: resident_bytes counts Link/Image/CodeBlock by String capacity.
+    ///
+    /// StructuralContext::Link(String), Image{src, alt}, CodeBlock(Some(lang))
+    /// have heap-allocated Strings. Their capacity must be counted in
+    /// resident_bytes() via retained_heap_bytes().
+    #[test]
+    fn test_resident_bytes_link_image_codeblock_by_capacity() {
+        let budget = MemoryBudget {
+            state_stack: 256 * 1024,
+            ..MemoryBudget::default()
+        };
+        let mut sm = StructuralStateMachine::new(&budget);
+
+        // Push a Link with a known href
+        let href = "https://example.com/very-long-url-to-ensure-capacity".to_string();
+        let href_cap = href.capacity();
+        let link_ev = StreamEvent::StartTag {
+            name: "a".to_string(),
+            attrs: vec![("href".to_string(), href)],
+            self_closing: false,
+        };
+        sm.process_event(&link_ev).unwrap();
+
+        let resident_with_link = sm.resident_bytes();
+        assert!(
+            resident_with_link >= href_cap,
+            "resident_bytes() ({}) must include Link href capacity ({})",
+            resident_with_link,
+            href_cap
+        );
+
+        // Push a code block with language
+        let lang = "javascript".to_string();
+        let lang_cap = lang.capacity();
+        let pre_ev = start_tag("pre");
+        sm.process_event(&pre_ev).unwrap();
+        let code_ev = start_tag_with_attrs("code", vec![("class", "language-javascript")]);
+        sm.process_event(&code_ev).unwrap();
+
+        let resident_with_code = sm.resident_bytes();
+        // Must include href_cap + the lang capacity from CodeBlock
+        assert!(
+            resident_with_code >= href_cap.saturating_add(lang_cap),
+            "resident_bytes() ({}) must include both Link href ({}) and \
+             CodeBlock lang ({}) capacities",
+            resident_with_code,
+            href_cap,
+            lang_cap
         );
     }
 }
