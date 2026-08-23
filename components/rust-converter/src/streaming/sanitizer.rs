@@ -214,7 +214,7 @@ impl StreamingSanitizer {
         let stack_entry_bytes = |stack: &Vec<String>| -> usize {
             stack
                 .iter()
-                .map(|s| s.capacity())
+                .map(String::capacity)
                 .fold(0usize, usize::saturating_add)
                 .saturating_add(
                     stack
@@ -225,8 +225,8 @@ impl StreamingSanitizer {
 
         self.skip_element
             .as_ref()
-            .map_or(0, |s| s.capacity())
-            .saturating_add(self.prune_element.as_ref().map_or(0, |s| s.capacity()))
+            .map_or(0, String::capacity)
+            .saturating_add(self.prune_element.as_ref().map_or(0, String::capacity))
             .saturating_add(stack_entry_bytes(&self.strip_stack))
             .saturating_add(stack_entry_bytes(&self.nesting_stack))
             .saturating_add(stack_entry_bytes(&self.implied_closures))
