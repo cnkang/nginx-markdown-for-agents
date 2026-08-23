@@ -5135,6 +5135,67 @@ ngx_http_markdown_streaming_finalize_on_last_buf(
 
 
 /*
+ * Handle new non-NULL input while a pending header output exists
+ * (the next header block is queued but not yet accepted downstream).
+ *
+ * Enqueue the input remainder; on enqueue failure route through the
+ * post-commit error handler when the header block was already mutated,
+ * otherwise precommit_error() with fail-open/fail-closed selection.
+ *
+ * Extracted from ngx_http_markdown_streaming_handle_new_input_with_pending
+ * to keep both functions below the SonarCloud c:S3776 threshold.
+ *
+ * Returns NGX_AGAIN when the input was enqueued (caller should return
+ * NGX_AGAIN), or a final error/fail-open rc the caller propagates.
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_enqueue_with_pending_header(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf, ngx_chain_t *in)
+{
+    uint32_t   enqueue_error = ERROR_BUDGET_EXCEEDED;
+    ngx_int_t  rc;
+
+    rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
+        r, ctx, conf, in, &enqueue_error);
+    if (rc == NGX_OK) {
+        ngx_http_markdown_streaming_sync_buffered(r, ctx);
+        return NGX_AGAIN;
+    }
+
+    ngx_http_markdown_streaming_release_pending_header_output(ctx);
+    if (ctx->stream_sm.headers_committed
+        || ctx->streaming.commit_state
+           == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
+    {
+        /* The header block was already mutated and accepted (queued
+         * by the write filter) — this is a post-commit enqueue
+         * failure, so precommit_error() would re-enter pre-commit
+         * handling, duplicate counters/logs, or select fail-open
+         * against committed Markdown-contract headers.  Route
+         * through the post-commit error handler instead. */
+        return ngx_http_markdown_streaming_handle_postcommit_error(
+            r, ctx, conf, enqueue_error);
+    }
+    rc = ngx_http_markdown_streaming_precommit_error(
+        r, ctx, conf, enqueue_error);
+    if (rc == NGX_DECLINED && !ctx->eligible) {
+        if (ctx->stream_sm.headers_committed) {
+            /* The header block was already mutated and accepted
+             * (queued by the write filter).  Fail-open here would pair
+             * Markdown-contract headers with the original HTML
+             * body, a mismatched response.  Fail closed instead;
+             * the request terminates with an error. */
+            return NGX_ERROR;
+        }
+        return ngx_http_markdown_streaming_failopen_passthrough(
+            r, ctx, in);
+    }
+    return rc;
+}
+
+
+/*
  * Handle new non-NULL input arriving while streaming pending_output
  * is non-NULL (downstream backpressure active).
  *
@@ -5171,44 +5232,8 @@ ngx_http_markdown_streaming_handle_new_input_with_pending(
     }
 
     if (ctx->streaming.pending_meta.pending_header_output != NULL) {
-        uint32_t  enqueue_error = ERROR_BUDGET_EXCEEDED;
-
-        rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
-            r, ctx, conf, in, &enqueue_error);
-        if (rc == NGX_OK) {
-            ngx_http_markdown_streaming_sync_buffered(r, ctx);
-            return NGX_AGAIN;
-        }
-
-        ngx_http_markdown_streaming_release_pending_header_output(ctx);
-        if (ctx->stream_sm.headers_committed
-            || ctx->streaming.commit_state
-               == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
-        {
-            /* The header block was already mutated and accepted (queued
-             * by the write filter) — this is a post-commit enqueue
-             * failure, so precommit_error() would re-enter pre-commit
-             * handling, duplicate counters/logs, or select fail-open
-             * against committed Markdown-contract headers.  Route
-             * through the post-commit error handler instead. */
-            return ngx_http_markdown_streaming_handle_postcommit_error(
-                r, ctx, conf, enqueue_error);
-        }
-        rc = ngx_http_markdown_streaming_precommit_error(
-            r, ctx, conf, enqueue_error);
-        if (rc == NGX_DECLINED && !ctx->eligible) {
-            if (ctx->stream_sm.headers_committed) {
-                /* The header block was already mutated and accepted
-                 * (queued by the write filter).  Fail-open here would pair
-                 * Markdown-contract headers with the original HTML
-                 * body, a mismatched response.  Fail closed instead;
-                 * the request terminates with an error. */
-                return NGX_ERROR;
-            }
-            return ngx_http_markdown_streaming_failopen_passthrough(
-                r, ctx, in);
-        }
-        return rc;
+        return ngx_http_markdown_streaming_enqueue_with_pending_header(
+            r, ctx, conf, in);
     }
 
     /*
