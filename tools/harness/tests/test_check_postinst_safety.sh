@@ -30,8 +30,8 @@ GATE_SCRIPT="${REPO_ROOT}/tools/release/gates/check_postinst_safety.sh"
 PASS_COUNT=0
 FAIL_COUNT=0
 
-pass() { PASS_COUNT=$((PASS_COUNT + 1)); printf 'PASS: %s\n' "$1" >&2; return 0; }
-fail() { FAIL_COUNT=$((FAIL_COUNT + 1)); printf 'FAIL: %s\n' "$1" >&2; return 0; }
+pass() { local msg="$1"; PASS_COUNT=$((PASS_COUNT + 1)); printf 'PASS: %s\n' "$msg" >&2; return 0; }
+fail() { local msg="$1"; FAIL_COUNT=$((FAIL_COUNT + 1)); printf 'FAIL: %s\n' "$msg" >&2; return 0; }
 
 ##############################################################################
 # Setup
