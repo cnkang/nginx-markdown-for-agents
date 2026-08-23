@@ -301,6 +301,55 @@ while IFS= read -r match; do
         continue
     fi
 
+    # ── Type awareness: determine source type class within function scope ──
+    # Extract the first identifier after (size_t): the cast target variable.
+    cast_ident="$(printf '%s' "$content_line" | sed -n 's/.*(size_t)[[:space:]]*\([A-Za-z_][A-Za-z0-9_]*\).*/\1/p')"
+
+    if [[ -n "$cast_ident" ]]; then
+        # Determine function boundary: find the nearest preceding line
+        # matching ^} (NGINX style: function-closing brace at column 0).
+        # Window starts from the line after that brace (or file start).
+        func_start=1
+        if [[ "$line" -gt 1 ]]; then
+            # Search backwards from the line before the cast
+            func_boundary="$(sed -n "1,$((line - 1))p" "$file" 2>/dev/null \
+                | grep -n '^}' | tail -1 | cut -d: -f1 || true)"
+            if [[ -n "$func_boundary" ]]; then
+                func_start=$((func_boundary + 1))
+            fi
+        fi
+
+        # Search for variable declaration in the function window
+        func_window="$(sed -n "${func_start},${line}p" "$file" 2>/dev/null)"
+
+        # Unsigned type set
+        is_unsigned=0
+        if printf '%s\n' "$func_window" | grep -qE \
+            "(ngx_uint_t|size_t|uint8_t|uint16_t|uint32_t|uint64_t|uintptr_t|u_char|unsigned)[[:space:]*]+${cast_ident}\\b"; then
+            is_unsigned=1
+        fi
+
+        # Signed type set
+        is_signed=0
+        if printf '%s\n' "$func_window" | grep -E \
+            "(ssize_t|ngx_int_t|off_t|time_t|ptrdiff_t|int|long|short|char)[[:space:]*]+${cast_ident}\\b" \
+            | grep -qvE 'u_char|unsigned'; then
+            is_signed=1
+        fi
+        # Refine: if matches both signed and unsigned (e.g., 'unsigned int'),
+        # treat as unsigned (the unsigned qualifier wins).
+        # Actually, re-check: if unsigned was found, it's unsigned regardless.
+
+        # Decision: unsigned and NOT signed → skip guard check (cannot be negative)
+        if [[ "$is_unsigned" -eq 1 ]] && [[ "$is_signed" -eq 0 ]]; then
+            echo "  OK      ${file}:${line} — unsigned source type for '${cast_ident}' cannot be negative" >&2
+            ssize_hits=$((ssize_hits + 1))
+            continue
+        fi
+        # Signed found (or both) → continue to guard detection
+        # Neither found (unknown type) → continue to guard detection (fail-closed)
+    fi
+
     # Check for guard in preceding 8 lines (expanded from 5 to capture
     # more complex guard-to-cast relationships like upper-bound checks)
     context_start=$((line - 8))
@@ -309,10 +358,20 @@ while IFS= read -r match; do
     fi
     has_guard=0
     context_block="$(sed -n "${context_start},${line}p" "$file" 2>/dev/null)"
-    if echo "$context_block" | grep -qiE '< 0|>= 0|!= NGX_ERROR|== NGX_ERROR|NGX_OK'; then
+    if echo "$context_block" | grep -qiE '< 0|>= 0|!= NGX_ERROR|== NGX_ERROR|(!=|==)[[:space:]]*NGX_OK|NGX_OK[[:space:]]*(!=|==)'; then
         has_guard=1
     fi
     if echo "$context_block" | grep -qiE '> NGX_MAX_SIZE_T_VALUE|> max_size_t|> SIZE_MAX|> UINT_MAX|> [A-Z_]+_MAX|> [A-Z_]+_LIMIT|\(size_t\)[[:space:]]*[[:alnum:]_]+[[:space:]]*>[[:space:]]*max'; then
+        has_guard=1
+    fi
+    # ((size_t) -1) is the standard C idiom for SIZE_MAX
+    if echo "$context_block" | grep -qE '>[[:space:]]*\(\(size_t\)[[:space:]]*-1\)'; then
+        has_guard=1
+    fi
+    # Division precheck is the standard C idiom for multiplication overflow:
+    # if (a > ((size_t) -1) / b) { error; } — semantically equivalent to
+    # if (a * b > SIZE_MAX) { error; } but without the overflow.
+    if echo "$context_block" | grep -qE '>[[:space:]]*\(\(size_t\)[[:space:]]*-1\)[[:space:]]*/|>[[:space:]]*(SIZE_MAX|[A-Z_]+_MAX)[[:space:]]*/'; then
         has_guard=1
     fi
     if echo "$context_block" | grep -qiE '/\* CWE-190:guarded \*/'; then

@@ -17,6 +17,32 @@ Required:
 - Never interpolate untrusted shell values into inline Python code strings.
 - Pass dynamic file paths via environment variables or safe argument passing.
 
+#### Executable-trust PATH distinction
+
+Two independent trusted-PATH mechanisms exist in this repository. They serve
+different threat models and MUST NOT merge or import from each other:
+
+- `tools/lib/executable_validation.py`: serves dev/CI machines for
+  non-privileged repository tooling scripts. Includes `/usr/local/bin` and
+  `/opt/homebrew/bin` (developer tools), excludes `/sbin` (not needed for
+  non-root repo operations). Validated by the `validate_executable()` helper.
+
+- Packaging trusted PATH (maintainer scripts): serves production hosts
+  running as root during package install/remove. Uses the strict POSIX subset
+  `/usr/sbin:/usr/bin:/sbin:/bin` — includes `/sbin` for system administration
+  commands (for example, `nginx` on some distros), excludes developer-only paths.
+  Enforced by unconditional `PATH=...` assignment at script top.
+
+Rationale: a dev/CI tool that includes `/sbin` in its PATH resolution risks
+resolving system administration binaries in contexts where they are
+unnecessary. Conversely, a root-run maintainer script that includes
+`/usr/local/bin` or `/opt/homebrew/bin` widens the attack surface to
+user-writable directories.
+
+Verification:
+- `bash tools/release/gates/check_postinst_safety.sh` (structural gate)
+- `bash packaging/tests/test-maintainer-script-executable-trust.sh` (runtime negative control)
+
 ---
 
 ### 32. Integer overflow in ssize_t→size_t and narrowing conversions (CWE-190)
