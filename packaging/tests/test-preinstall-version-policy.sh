@@ -10,6 +10,11 @@
 # `nginx` executable that prints a configurable version, then invokes the
 # real preinstall script with a baked-in target version.
 #
+# The script under test establishes its own trusted PATH via TRUSTED_PATH_ROOT.
+# Tests redirect TRUSTED_PATH_ROOT into a sandbox filesystem tree so that the
+# script resolves commands only within the sandbox — the host's real PATH and
+# real nginx are unreachable.
+#
 # Usage:
 #   ./test-preinstall-version-policy.sh
 #
@@ -21,8 +26,30 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PREINSTALL="${SCRIPT_DIR}/../nfpm/scripts/preinstall.sh"
-FAKE_BIN_DIR="$(mktemp -d)"
-trap 'rm -rf "${FAKE_BIN_DIR}"' EXIT
+
+##############################################################################
+# Sandbox setup: build a mini filesystem tree that TRUSTED_PATH_ROOT points to.
+# The script under test sets PATH="${TRUSTED_PATH_ROOT}/usr/sbin:..." so we
+# must place fake nginx in ${FAKE_ROOT}/usr/sbin and symlink needed utilities
+# into ${FAKE_ROOT}/usr/bin.
+##############################################################################
+
+FAKE_ROOT="$(mktemp -d)"
+trap 'rm -rf "${FAKE_ROOT}"' EXIT
+
+mkdir -p "${FAKE_ROOT}/usr/sbin"
+mkdir -p "${FAKE_ROOT}/usr/bin"
+mkdir -p "${FAKE_ROOT}/sbin"
+mkdir -p "${FAKE_ROOT}/bin"
+
+# Symlink real commands needed by preinstall.sh into the sandbox.
+# Only link the fixed manifest — never recursive copy.
+for cmd in cat sed readlink rm rmdir printf basename; do
+    real_path="$(command -v "${cmd}" 2>/dev/null || true)"
+    if [[ -n "${real_path}" ]]; then
+        ln -sf "${real_path}" "${FAKE_ROOT}/usr/bin/${cmd}"
+    fi
+done
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -33,24 +60,39 @@ fail() { FAIL_COUNT=$((FAIL_COUNT + 1)); echo "FAIL: $1" >&2; }
 # fake_nginx — install a fake nginx binary reporting $1 as its version.
 fake_nginx() {
     local version="$1"
-    cat > "${FAKE_BIN_DIR}/nginx" <<EOF
+    cat > "${FAKE_ROOT}/usr/sbin/nginx" <<EOF
 #!/bin/bash
 echo "nginx version: nginx/${version}"
 exit 0
 EOF
-    chmod +x "${FAKE_BIN_DIR}/nginx"
+    chmod +x "${FAKE_ROOT}/usr/sbin/nginx"
 }
 
-# run_preinstall — run the real preinstall script with target baked in.
-# preinstall.sh reads the lifecycle action as $1; `bash -c` treats the word
-# after the script string as $0 (the process name), so pass a placeholder
-# name first and the action as the real first argument.
+# run_preinstall — run the real preinstall script with target baked in and
+# TRUSTED_PATH_ROOT redirected into the sandbox.
+#
+# Two sed substitutions:
+#   1. Replace %%NGINX_VERSION%% with the target version
+#   2. Replace TRUSTED_PATH_ROOT="" with TRUSTED_PATH_ROOT="${FAKE_ROOT}"
+#
+# After sed, ASSERT that the TRUSTED_PATH_ROOT substitution succeeded — if
+# the script's variable assignment syntax ever changes, the test must fail
+# loudly rather than silently testing an unhardened script.
 run_preinstall() {
     local target="$1"
     local action="${2:-install}"
     local script
-    script="$(sed "s|%%NGINX_VERSION%%|${target}|g" "${PREINSTALL}")"
-    PATH="${FAKE_BIN_DIR}:${PATH}" bash -c "${script}" preinstall.sh "${action}" 2>/dev/null
+    script="$(sed -e "s|%%NGINX_VERSION%%|${target}|g" \
+                  -e "s|^TRUSTED_PATH_ROOT=\"\"$|TRUSTED_PATH_ROOT=\"${FAKE_ROOT}\"|" \
+                  "${PREINSTALL}")"
+
+    # Assert the substitution landed
+    if ! echo "${script}" | grep -q "TRUSTED_PATH_ROOT=\"${FAKE_ROOT}\""; then
+        echo "FATAL: TRUSTED_PATH_ROOT substitution failed — test infrastructure broken" >&2
+        exit 2
+    fi
+
+    bash -c "${script}" preinstall.sh "${action}" 2>/dev/null
     return $?
 }
 
@@ -91,10 +133,11 @@ else
 fi
 
 # Scenario 5: nginx not installed → proceed (exit 0).
-# Restrict PATH to the fake dir only so an inherited system nginx on a
-# developer/CI machine cannot satisfy the check and mask this scenario.
-rm -f "${FAKE_BIN_DIR}/nginx"
-if PATH="${FAKE_BIN_DIR}:/usr/bin:/bin" run_preinstall "1.26.3"; then
+# Since the trusted PATH only resolves within FAKE_ROOT, not placing nginx in
+# the sandbox means the host's real nginx is unreachable — this is STRONGER
+# than the old PATH-prefix approach.
+rm -f "${FAKE_ROOT}/usr/sbin/nginx"
+if run_preinstall "1.26.3"; then
     pass "nginx not installed → proceed (dependency will handle it)"
 else
     fail "missing nginx should proceed"
@@ -124,22 +167,72 @@ else
     fail "matching fake binary should proceed via resolved identity"
 fi
 
-cat > "${FAKE_BIN_DIR}/nginx" <<'EOF'
+cat > "${FAKE_ROOT}/usr/sbin/nginx" <<'EOF'
 #!/bin/bash
 echo "nginx: corrupted -v output simulation" >&2
 exit 0
 EOF
-chmod +x "${FAKE_BIN_DIR}/nginx"
-if PATH="${FAKE_BIN_DIR}:/usr/bin:/bin" run_preinstall "1.26.3"; then
-    rc_probe=0
-else
-    rc_probe=$?
-fi
-if [[ "${rc_probe}" == "0" ]]; then
+chmod +x "${FAKE_ROOT}/usr/sbin/nginx"
+if run_preinstall "1.26.3"; then
     pass "unparseable 'nginx -v' output takes the warn path with exit 0 (no command-not-found)"
 else
-    fail "unparseable 'nginx -v' output should warn and exit 0, got rc=${rc_probe}"
+    fail "unparseable 'nginx -v' output should warn and exit 0"
 fi
+
+# Scenario 8: negative control (T-B4) — simultaneous PATH injection AND
+# TRUSTED_PATH_ROOT environment variable injection must both be ineffective.
+#
+# The script contains a literal `TRUSTED_PATH_ROOT=""` assignment that
+# overwrites any inherited environment variable. We verify this by:
+#   1. Creating an EVIL directory outside the sandbox with a fake nginx
+#      that touches a MARKER file
+#   2. Running with TRUSTED_PATH_ROOT="${EVIL}" in the environment
+#   3. Asserting the MARKER does NOT exist (evil nginx was never executed)
+#   4. Asserting the script exits 0 taking the "NGINX not found" info path
+#      (because the script's own empty TRUSTED_PATH_ROOT="" means PATH becomes
+#       /usr/sbin:/usr/bin:/sbin:/bin — the EVIL dir is not in it)
+EVIL_DIR="$(mktemp -d)"
+MARKER="${EVIL_DIR}/MARKER_SHOULD_NOT_EXIST"
+mkdir -p "${EVIL_DIR}/usr/sbin"
+
+cat > "${EVIL_DIR}/usr/sbin/nginx" <<EOF
+#!/bin/bash
+touch "${MARKER}"
+echo "nginx version: nginx/1.26.3"
+exit 0
+EOF
+chmod +x "${EVIL_DIR}/usr/sbin/nginx"
+
+# Also place the evil nginx directly in EVIL_DIR for a bare PATH injection
+cat > "${EVIL_DIR}/nginx" <<EOF
+#!/bin/bash
+touch "${MARKER}"
+echo "nginx version: nginx/1.26.3"
+exit 0
+EOF
+chmod +x "${EVIL_DIR}/nginx"
+
+# Run preinstall WITHOUT our sandbox substitution — use the script as-is
+# (only substitute %%NGINX_VERSION%%) so TRUSTED_PATH_ROOT="" stays literal.
+# The attacker injects TRUSTED_PATH_ROOT via environment.
+evil_script="$(sed "s|%%NGINX_VERSION%%|1.26.3|g" "${PREINSTALL}")"
+sc8_rc=0
+PATH="${EVIL_DIR}:${PATH}" TRUSTED_PATH_ROOT="${EVIL_DIR}" \
+    bash -c "${evil_script}" preinstall.sh install 2>/dev/null || sc8_rc=$?
+
+if [[ -f "${MARKER}" ]]; then
+    fail "Scenario 8: MARKER exists — evil nginx was executed despite trusted PATH"
+else
+    pass "Scenario 8: MARKER does not exist — evil nginx was NOT executed"
+fi
+
+if [[ "${sc8_rc}" == "0" ]]; then
+    pass "Scenario 8: script exits 0 (NGINX not found in trusted PATH)"
+else
+    fail "Scenario 8: expected exit 0 (NGINX not found path), got rc=${sc8_rc}"
+fi
+
+rm -rf "${EVIL_DIR}"
 
 echo "" >&2
 echo "Results: ${PASS_COUNT} passed, ${FAIL_COUNT} failed" >&2

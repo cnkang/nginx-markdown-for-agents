@@ -1,12 +1,12 @@
 #!/bin/bash
 # ---------------------------------------------------------------------------
-# check_postinst_safety.sh — Static analysis of postinst scripts for safety
+# check_postinst_safety.sh — Static analysis of maintainer scripts for safety
 #
 # PURPOSE:
-#   Verifies that postinst (DEB) and %post (RPM) scripts do not contain
-#   forbidden operations that could modify NGINX state during package
-#   installation. The package installation MUST be non-invasive: no
-#   reload/restart, no config modification, no snippet enablement.
+#   Verifies that all package maintainer scripts do not contain forbidden
+#   operations that could modify NGINX state during package installation,
+#   and that each script establishes a trusted PATH before resolving any
+#   external command.
 #
 # USAGE:
 #   check_postinst_safety.sh [<file> ...]
@@ -18,20 +18,28 @@
 # ARGUMENTS:
 #   If no files are provided, defaults to checking:
 #     - packaging/debian/postinst
+#     - packaging/debian/postrm
+#     - packaging/nfpm/scripts/preinstall.sh
+#     - packaging/nfpm/scripts/postinstall.sh
+#     - packaging/nfpm/scripts/preremove.sh
 #     - packaging/rpm/SPECS/nginx-module-markdown.spec (%post section)
 #
 # EXIT CODES:
-#   0  No forbidden patterns found
-#   1  One or more forbidden patterns detected
+#   0  No forbidden patterns or trusted-PATH violations found
+#   1  One or more violations detected
 #   2  Usage error (bad option or file not found)
 #
-# FORBIDDEN PATTERNS:
-#   - nginx -s reload / nginx -s restart
-#   - systemctl restart nginx / systemctl reload nginx
-#   - service nginx restart / service nginx reload
-#   - Writing to /etc/nginx/ (cp, mv, tee, > redirects)
-#   - Modifying nginx.conf (sed -i, echo to nginx.conf)
-#   - Enabling snippets (ln -s to modules-enabled or conf.d)
+# CHECKS PERFORMED:
+#   1. Forbidden patterns (existing):
+#     - nginx -s reload / nginx -s restart
+#     - systemctl restart nginx / systemctl reload nginx
+#     - service nginx restart / service nginx reload
+#     - Writing to /etc/nginx/ (cp, mv, tee, > redirects)
+#     - Modifying nginx.conf (sed -i, echo to nginx.conf)
+#     - Enabling snippets (ln -s to modules-enabled or conf.d)
+#   2. Trusted-PATH invariant (structural):
+#     - An unconditional PATH= assignment (no self-reference) must exist
+#     - It must precede any external command resolution from a known list
 #
 # NOTES:
 #   - macOS bash 3.2 compatible (no bash 4+ features)
@@ -60,11 +68,16 @@ usage() {
     printf 'Usage: %s [<file> ...]\n' "$SCRIPT_NAME" >&2
     printf '       %s --help\n' "$SCRIPT_NAME" >&2
     printf '\n' >&2
-    printf 'Static analysis of postinst scripts for forbidden operations.\n' >&2
+    printf 'Static analysis of maintainer scripts for forbidden operations\n' >&2
+    printf 'and trusted-PATH invariant violations.\n' >&2
     printf '\n' >&2
     printf 'If no files are provided, defaults to checking:\n' >&2
     printf '  packaging/debian/postinst\n' >&2
-    printf '  packaging/rpm/SPECS/nginx-module-markdown.spec\n' >&2
+    printf '  packaging/debian/postrm\n' >&2
+    printf '  packaging/nfpm/scripts/preinstall.sh\n' >&2
+    printf '  packaging/nfpm/scripts/postinstall.sh\n' >&2
+    printf '  packaging/nfpm/scripts/preremove.sh\n' >&2
+    printf '  packaging/rpm/SPECS/nginx-module-markdown.spec (%%post section)\n' >&2
     printf '\n' >&2
     printf 'Options:\n' >&2
     printf '  -h, --help    Show this help message\n' >&2
@@ -261,6 +274,123 @@ check_file() {
     return 0
 }
 
+# check_trusted_path — verify that an unconditional trusted PATH assignment
+# precedes any external command resolution in a maintainer script.
+#
+# This is a STRUCTURAL check: it validates that:
+#   1. A PATH= assignment exists that does NOT self-reference ($PATH / ${PATH)
+#   2. No external command from a known list is resolved before that assignment
+#
+# Arguments: $1 = file path (original, for reporting)
+# Returns: 0 always (violations tracked in VIOLATION_COUNT)
+check_trusted_path() {
+    local file="$1"
+
+    # Known external commands that resolve from PATH in maintainer scripts
+    local -a EXTERNAL_CMDS=(
+        "command -v"
+        "cat"
+        "readlink"
+        "rm"
+        "rmdir"
+        "sed"
+        "ln"
+        "cp"
+        "mv"
+        "tee"
+        "install"
+        "nginx"
+    )
+
+    # Strip heredocs to avoid false positives from instructional text
+    local stripped_tmp
+    stripped_tmp="$(mktemp)"
+    strip_heredocs "$file" > "$stripped_tmp"
+
+    local first_path_line=0
+    local first_cmd_line=0
+    local line_num=0
+    local line=""
+
+    # Pass 1: find first unconditional PATH= assignment (no self-reference)
+    line_num=0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line_num=$((line_num + 1))
+        # Match: optional leading whitespace, optional "export ", PATH=<value>
+        # where value does NOT contain $PATH or ${PATH
+        if [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?PATH= ]]; then
+            # Extract the value after PATH=
+            local path_value="${line#*PATH=}"
+            # Check for self-reference: $PATH or ${PATH
+            case "$path_value" in
+                *'$PATH'*|*'${PATH'*)
+                    # Self-referencing — not an unconditional trusted assignment
+                    ;;
+                *)
+                    first_path_line=$line_num
+                    break
+                    ;;
+            esac
+        fi
+    done < "$stripped_tmp"
+
+    # Pass 2: find first external command usage
+    line_num=0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line_num=$((line_num + 1))
+
+        # Skip comment lines
+        local trimmed
+        trimmed="${line#"${line%%[![:space:]]*}"}"
+        if [[ "$trimmed" == "#"* ]]; then
+            continue
+        fi
+        # Skip empty lines
+        if [[ -z "$trimmed" ]]; then
+            continue
+        fi
+
+        # Check each known external command
+        local cmd=""
+        for cmd in "${EXTERNAL_CMDS[@]}"; do
+            # Build a pattern that matches the command as a word boundary
+            # For "command -v", match literally
+            # For single-word commands, match as standalone token
+            case "$cmd" in
+                "command -v")
+                    if [[ "$line" =~ (^|[[:space:]\"\'\(;|&])command[[:space:]]+-v($|[[:space:]]) ]]; then
+                        first_cmd_line=$line_num
+                        break 2
+                    fi
+                    ;;
+                *)
+                    # Match command at: start of line (with optional whitespace),
+                    # after $( ), after ` `, after pipe, after semicolon, after &&/||
+                    if [[ "$line" =~ (^|[[:space:]\"\'\`\$\(;|&])${cmd}($|[[:space:];|&\)\>]) ]]; then
+                        first_cmd_line=$line_num
+                        break 2
+                    fi
+                    ;;
+            esac
+        done
+    done < "$stripped_tmp"
+
+    rm -f "$stripped_tmp"
+
+    # Decision logic
+    if [[ "$first_path_line" -eq 0 ]]; then
+        log_violation "$file" "0" "missing unconditional trusted PATH assignment"
+        printf 'VIOLATION %s:0 missing unconditional trusted PATH assignment\n' "$file"
+        VIOLATION_COUNT=$((VIOLATION_COUNT + 1))
+    elif [[ "$first_cmd_line" -ne 0 ]] && [[ "$first_cmd_line" -lt "$first_path_line" ]]; then
+        log_violation "$file" "$first_cmd_line" "external command resolved before trusted PATH is established (PATH set at line $first_path_line)"
+        printf 'VIOLATION %s:%s external command resolved before trusted PATH is established\n' "$file" "$first_cmd_line"
+        VIOLATION_COUNT=$((VIOLATION_COUNT + 1))
+    fi
+
+    return 0
+}
+
 # extract_rpm_post — extract %post section from RPM spec for analysis
 # Arguments: $1 = RPM spec file path
 # Outputs: extracted %post content to a temp file, prints temp file path
@@ -327,15 +457,47 @@ main() {
     local had_error=0
 
     if [[ $# -eq 0 ]]; then
-        # Default: check known postinst locations
+        # Default: check all known maintainer script locations
         log_info "No files specified; using defaults"
 
+        # --- DEB maintainer scripts ---
         if [[ -f "packaging/debian/postinst" ]]; then
-            files_to_check="packaging/debian/postinst"
+            check_file "packaging/debian/postinst" || had_error=1
+            check_trusted_path "packaging/debian/postinst"
         else
             log_warn "Default file not found: packaging/debian/postinst"
         fi
 
+        if [[ -f "packaging/debian/postrm" ]]; then
+            check_file "packaging/debian/postrm" || had_error=1
+            check_trusted_path "packaging/debian/postrm"
+        else
+            log_warn "Default file not found: packaging/debian/postrm"
+        fi
+
+        # --- nFPM maintainer scripts ---
+        if [[ -f "packaging/nfpm/scripts/preinstall.sh" ]]; then
+            check_file "packaging/nfpm/scripts/preinstall.sh" || had_error=1
+            check_trusted_path "packaging/nfpm/scripts/preinstall.sh"
+        else
+            log_warn "Default file not found: packaging/nfpm/scripts/preinstall.sh"
+        fi
+
+        if [[ -f "packaging/nfpm/scripts/postinstall.sh" ]]; then
+            check_file "packaging/nfpm/scripts/postinstall.sh" || had_error=1
+            check_trusted_path "packaging/nfpm/scripts/postinstall.sh"
+        else
+            log_warn "Default file not found: packaging/nfpm/scripts/postinstall.sh"
+        fi
+
+        if [[ -f "packaging/nfpm/scripts/preremove.sh" ]]; then
+            check_file "packaging/nfpm/scripts/preremove.sh" || had_error=1
+            check_trusted_path "packaging/nfpm/scripts/preremove.sh"
+        else
+            log_warn "Default file not found: packaging/nfpm/scripts/preremove.sh"
+        fi
+
+        # --- RPM spec %post section ---
         if [[ -f "packaging/rpm/SPECS/nginx-module-markdown.spec" ]]; then
             # Extract %post section to a temp file for analysis
             local rpm_post_tmp
@@ -343,6 +505,7 @@ main() {
             if [[ -s "$rpm_post_tmp" ]]; then
                 log_info "Extracted %%post section from RPM spec"
                 check_file "$rpm_post_tmp" || had_error=1
+                check_trusted_path "$rpm_post_tmp"
                 rm -f "$rpm_post_tmp"
             else
                 log_info "No %%post section found in RPM spec (or section is empty)"
@@ -351,15 +514,11 @@ main() {
         else
             log_warn "Default file not found: packaging/rpm/SPECS/nginx-module-markdown.spec"
         fi
-
-        # Check the DEB postinst if found
-        if [[ -n "$files_to_check" ]]; then
-            check_file "$files_to_check" || had_error=1
-        fi
     else
         # Check each provided file
         for file in "$@"; do
             check_file "$file" || had_error=1
+            check_trusted_path "$file"
         done
     fi
 

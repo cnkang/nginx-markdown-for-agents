@@ -5,6 +5,10 @@
 
 set -e
 
+# Executable-trust: unconditional trusted PATH, no caller influence.
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
 MODULE_SNIPPET="/etc/nginx/modules-available/mod-markdown.conf"
 
 case "$1" in

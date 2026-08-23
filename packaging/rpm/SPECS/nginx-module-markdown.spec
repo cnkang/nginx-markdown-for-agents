@@ -62,6 +62,7 @@ install -m 0644 LICENSE \
     %{buildroot}/usr/share/licenses/nginx-markdown-for-agents/LICENSE
 
 %post
+PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH
 cat >&2 <<'EOF'
 ======================================================================
 nginx-markdown-for-agents module installed successfully.

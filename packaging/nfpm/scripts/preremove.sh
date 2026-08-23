@@ -21,6 +21,17 @@
 set -e
 
 ##############################################################################
+# Executable-trust invariant: establish trusted PATH before any command
+# resolution. The literal empty assignment ensures a caller-controlled
+# environment variable of the same name cannot influence the resolved set.
+# Tests override TRUSTED_PATH_ROOT to redirect resolution into a sandbox.
+##############################################################################
+
+TRUSTED_PATH_ROOT=""
+PATH="${TRUSTED_PATH_ROOT}/usr/sbin:${TRUSTED_PATH_ROOT}/usr/bin:${TRUSTED_PATH_ROOT}/sbin:${TRUSTED_PATH_ROOT}/bin"
+export PATH
+
+##############################################################################
 # Constants
 ##############################################################################
 

@@ -18,6 +18,17 @@
 set -e
 
 ##############################################################################
+# Executable-trust invariant: establish trusted PATH before any command
+# resolution. The literal empty assignment ensures a caller-controlled
+# environment variable of the same name cannot influence the resolved set.
+# Tests override TRUSTED_PATH_ROOT to redirect resolution into a sandbox.
+##############################################################################
+
+TRUSTED_PATH_ROOT=""
+PATH="${TRUSTED_PATH_ROOT}/usr/sbin:${TRUSTED_PATH_ROOT}/usr/bin:${TRUSTED_PATH_ROOT}/sbin:${TRUSTED_PATH_ROOT}/bin"
+export PATH
+
+##############################################################################
 # Constants — target NGINX version baked in at package build time.
 # nFPM expands ${NGINX_VERSION} from the build environment into the script
 # content stored inside the package, so this is a literal string at install
@@ -55,7 +66,7 @@ case "$ACTION" in
         # could land on different executables (executable-trust invariant).
         NGINX_BIN="$(command -v nginx 2>/dev/null || true)"
         if [[ -z "${NGINX_BIN}" ]]; then
-            info "NGINX not yet installed; package dependency will handle installation."
+            info "NGINX not found in trusted PATH (/usr/sbin:/usr/bin:/sbin:/bin); package dependency will handle installation."
             exit 0
         fi
 

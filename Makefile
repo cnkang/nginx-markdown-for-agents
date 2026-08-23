@@ -501,6 +501,7 @@ test-harness:
 	bash tools/harness/tests/test_detect_ngx_again_call_sites.sh
 	bash tools/harness/tests/test_detect_uninitialized_stack_struct.sh
 	bash tools/harness/tests/test_detect_shell_hygiene.sh
+	bash tools/harness/tests/test_check_postinst_safety.sh
 	python3 -m pytest tools/harness/tests/ -q --tb=short -k "not check_harness_sync"
 
 license-check:
@@ -709,6 +710,13 @@ release-gates-check-070:
 		{ echo "FAIL: preinstall exact-version policy test failed" >&2; exit 1; }; \
 	else \
 	echo "  SKIP: packaging/tests/test-preinstall-version-policy.sh not found"; \
+	fi
+	@echo "  [executable-trust] Validating maintainer script executable trust..."
+	@if test -f packaging/tests/test-maintainer-script-executable-trust.sh; then \
+	bash packaging/tests/test-maintainer-script-executable-trust.sh || \
+		{ echo "FAIL: maintainer script executable trust test failed" >&2; exit 1; }; \
+	else \
+	echo "  SKIP: packaging/tests/test-maintainer-script-executable-trust.sh not found"; \
 	fi
 	@echo "  Package Compatibility Gate: ALL PASSED"
 	@echo "=== Fuzz CI Gate ==="
