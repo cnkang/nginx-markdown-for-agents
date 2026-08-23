@@ -4,7 +4,7 @@
 # PURPOSE:
 #   Validates that the check_postinst_safety.sh gate correctly detects
 #   trusted-PATH violations through structural analysis, using synthetic
-#   fixture scripts covering the 4 core detection scenarios, plus a
+#   fixture scripts covering the 5 core detection scenarios, plus a
 #   structural assertion that the gate's default target set includes
 #   all nfpm scripts.
 #
@@ -12,8 +12,9 @@
 #   1. No PATH assignment → VIOLATION (missing unconditional trusted PATH)
 #   2. Self-referencing PATH ($PATH:/x) → VIOLATION
 #   3. PATH after first command (cat before PATH=) → VIOLATION
-#   4. Correct script (PATH= without self-ref before any command) → 0 violations
-#   5. Default target set includes all 3 nfpm scripts
+#   4. Conditional PATH assignment → VIOLATION
+#   5. Correct script (PATH= without self-ref before any command) → 0 violations
+#   6. Default target set includes all 3 nfpm scripts
 #
 # EXIT CODES:
 #   0 — All fixture assertions passed
@@ -158,13 +159,49 @@ fi
 echo "" >&2
 
 ##############################################################################
-# Fixture 4: Correct script → 0 violations
+# Fixture 4: Conditional PATH assignment → VIOLATION
 ##############################################################################
 
-echo "--- Fixture 4: Correct script (clean) ---" >&2
+echo "--- Fixture 4: Conditional PATH assignment ---" >&2
 
-FIXTURE_4="${WORK_DIR}/fixture_correct.sh"
+FIXTURE_4="${WORK_DIR}/fixture_conditional_path.sh"
 cat > "${FIXTURE_4}" <<'SCRIPT'
+#!/bin/sh
+set -e
+if false; then
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+fi
+cat /dev/null
+exit 0
+SCRIPT
+chmod +x "${FIXTURE_4}"
+
+RC=0
+OUTPUT="$(bash "${GATE_SCRIPT}" "${FIXTURE_4}" 2>&1)" || RC=$?
+
+if [[ "${RC}" -ne 0 ]]; then
+    pass "Fixture 4: gate returned non-zero (conditional PATH rejected)"
+else
+    fail "Fixture 4: gate returned 0 (expected violation)"
+fi
+
+if printf '%s\n' "${OUTPUT}" | grep -q "missing unconditional trusted PATH"; then
+    pass "Fixture 4: conditional PATH is not accepted as unconditional"
+else
+    fail "Fixture 4: expected missing unconditional trusted PATH violation"
+fi
+
+echo "" >&2
+
+##############################################################################
+# Fixture 5: Correct script → 0 violations
+##############################################################################
+
+echo "--- Fixture 5: Correct script (clean) ---" >&2
+
+FIXTURE_5="${WORK_DIR}/fixture_correct.sh"
+cat > "${FIXTURE_5}" <<'SCRIPT'
 #!/bin/sh
 set -e
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
@@ -173,32 +210,32 @@ cat /dev/null
 echo "done" >&2
 exit 0
 SCRIPT
-chmod +x "${FIXTURE_4}"
+chmod +x "${FIXTURE_5}"
 
 RC=0
-OUTPUT="$(bash "${GATE_SCRIPT}" "${FIXTURE_4}" 2>&1)" || RC=$?
+OUTPUT="$(bash "${GATE_SCRIPT}" "${FIXTURE_5}" 2>&1)" || RC=$?
 
 if [[ "${RC}" -eq 0 ]]; then
-    pass "Fixture 4: gate returned 0 (no violations)"
+    pass "Fixture 5: gate returned 0 (no violations)"
 else
-    fail "Fixture 4: gate returned ${RC} (expected 0)"
+    fail "Fixture 5: gate returned ${RC} (expected 0)"
 fi
 
 VIOLATION_COUNT="$(printf '%s\n' "${OUTPUT}" | grep -c '^\[VIOLATION\]' || true)"
 VIOLATION_COUNT="${VIOLATION_COUNT//[[:space:]]/}"
 if [[ "${VIOLATION_COUNT}" -eq 0 ]]; then
-    pass "Fixture 4: zero VIOLATION lines emitted"
+    pass "Fixture 5: zero VIOLATION lines emitted"
 else
-    fail "Fixture 4: ${VIOLATION_COUNT} VIOLATION lines found (expected 0)"
+    fail "Fixture 5: ${VIOLATION_COUNT} VIOLATION lines found (expected 0)"
 fi
 
 echo "" >&2
 
 ##############################################################################
-# Fixture 5: Default target set includes all 3 nfpm scripts
+# Fixture 6: Default target set includes all 3 nfpm scripts
 ##############################################################################
 
-echo "--- Fixture 5: Default target set coverage ---" >&2
+echo "--- Fixture 6: Default target set coverage ---" >&2
 
 RC=0
 OUTPUT="$(cd "${REPO_ROOT}" && bash "${GATE_SCRIPT}" 2>&1)" || RC=$?
@@ -215,9 +252,9 @@ for script_name in "nfpm/scripts/preinstall.sh" "nfpm/scripts/postinstall.sh" "n
 done
 
 if [[ "${NFPM_SCRIPTS_FOUND}" -eq 3 ]]; then
-    pass "Fixture 5: default target set includes all 3 nfpm scripts"
+    pass "Fixture 6: default target set includes all 3 nfpm scripts"
 else
-    fail "Fixture 5: missing nfpm scripts in default set:${NFPM_SCRIPTS_MISSING}"
+    fail "Fixture 6: missing nfpm scripts in default set:${NFPM_SCRIPTS_MISSING}"
 fi
 
 echo "" >&2
