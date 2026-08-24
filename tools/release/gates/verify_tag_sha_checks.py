@@ -521,7 +521,7 @@ def _write_required_checks(path: Path, checks: list[RequiredCheck], *, branch: s
         file_fd = os.open(
             safe_path.name,
             os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
-            0o644,
+            0o600,
             dir_fd=parent_fd,
         )
         with os.fdopen(file_fd, "w", encoding="utf-8") as stream:
