@@ -268,6 +268,7 @@ typedef struct {
     struct {
         ngx_atomic_t  backpressure_total;
         ngx_atomic_t  backpressure_resume_total;
+        ngx_atomic_t  backpressure_resume_failure_total;
         ngx_atomic_t  pending_output_high_watermark_bytes;
         ngx_atomic_t  decompression_streaming_total;
         ngx_atomic_t  decompression_fullbuffer_total;
@@ -816,6 +817,8 @@ test_v1_engine_delivery_and_event_sources(void)
     snapshot.streaming.succeeded_total = 7;
     snapshot.streaming.commit_total = 2;
     snapshot.perf.backpressure_resume_total = 3;
+    snapshot.streaming.failed_total = 99;
+    snapshot.perf.backpressure_resume_failure_total = 6;
 
     ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
 
@@ -827,6 +830,8 @@ test_v1_engine_delivery_and_event_sources(void)
                 "commit events must use successful header commits");
     TEST_ASSERT(v1.streaming_events.resume_success == 3,
                 "resume successes must use downstream resume counter");
+    TEST_ASSERT(v1.streaming_events.resume_failure == 6,
+                "resume failures must use the downstream resume-failure counter");
     TEST_PASS("v1 engine delivery and event sources");
 }
 

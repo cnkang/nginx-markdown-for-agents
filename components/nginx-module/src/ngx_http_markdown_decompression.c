@@ -598,14 +598,14 @@ ngx_http_markdown_chain_to_buffer(const ngx_chain_t *in, u_char *dest,
     size_t  len;
     
     copied = 0;
-    
+
     for (const ngx_chain_t *cl = in; cl != NULL; cl = cl->next) {
         if (cl->buf == NULL) {
             continue;
         }
-        
+
         len = ngx_http_markdown_buf_len_safe(cl->buf);
-        
+
         if (copied > size || len > size - copied) {
             return NGX_ERROR;
         }
@@ -613,11 +613,11 @@ ngx_http_markdown_chain_to_buffer(const ngx_chain_t *in, u_char *dest,
         if (len == 0) {
             continue;
         }
-        
+
         ngx_memcpy(dest + copied, cl->buf->pos, len);
         copied += len;
     }
-    
+
     return NGX_OK;
 }
 

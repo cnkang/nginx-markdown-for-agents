@@ -721,6 +721,8 @@ ngx_http_markdown_collect_performance_snapshot(
     snapshot->perf.backpressure_total = metrics->perf.backpressure_total;
     snapshot->perf.backpressure_resume_total =
         metrics->perf.backpressure_resume_total;
+    snapshot->perf.backpressure_resume_failure_total =
+        metrics->perf.backpressure_resume_failure_total;
     snapshot->perf.pending_output_high_watermark_bytes =
         metrics->perf.pending_output_high_watermark_bytes;
     snapshot->perf.decompression_streaming_total =
@@ -905,18 +907,9 @@ ngx_http_markdown_metrics_to_v1(
         snapshot->streaming.streaming_failure_postcommit_abort;
     v1->streaming_events.resume_success =
         snapshot->perf.backpressure_resume_total;
-    /*
-     * resume_failure counts streaming failures that reached a resume
-     * attempt.  failed_total includes post-commit aborts (delivered then
-     * aborted), which the v1 renderer reclassifies into requests.aborted
-     * (metrics_impl.h:841-846) and must not inflate resume_failure.
-     * Subtract the same terminal_aborted_total with a saturating floor,
-     * mirroring the failed_closed deduction above.
-     */
-    v1->streaming_events.resume_failure = snapshot->streaming.failed_total
-        >= snapshot->streaming.terminal_aborted_total
-        ? snapshot->streaming.failed_total - snapshot->streaming.terminal_aborted_total
-        : 0;
+    /* Count only failures observed while resuming pending output. */
+    v1->streaming_events.resume_failure =
+        snapshot->perf.backpressure_resume_failure_total;
 #endif
 
     v1->decompression.gzip_success = snapshot->decompressions.gzip;

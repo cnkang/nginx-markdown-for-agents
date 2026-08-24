@@ -1702,6 +1702,7 @@ typedef struct {
     struct {
         ngx_atomic_t  backpressure_total;
         ngx_atomic_t  backpressure_resume_total;
+        ngx_atomic_t  backpressure_resume_failure_total;
         ngx_atomic_t  pending_output_high_watermark_bytes;
         ngx_atomic_t  decompression_streaming_total;
         ngx_atomic_t  decompression_fullbuffer_total;

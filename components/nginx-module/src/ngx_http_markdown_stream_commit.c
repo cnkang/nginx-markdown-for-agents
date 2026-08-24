@@ -318,10 +318,14 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
                                          const ngx_http_markdown_conf_t *conf)
 {
     ngx_int_t                        rc;
+#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
     ngx_flag_t                       auth_cache_control_required;
+#endif
     ngx_http_markdown_commit_snap_t  snap;
 
+#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
     auth_cache_control_required = 0;
+#endif
 
     if (r == NULL || ctx == NULL) {
         return NGX_ERROR;
@@ -379,6 +383,7 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
+#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
     rc = ngx_http_markdown_auth_cache_control_required(
         r, conf, &auth_cache_control_required);
     if (rc == NGX_OK && auth_cache_control_required) {
@@ -391,6 +396,9 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
         ngx_http_markdown_stream_commit_rollback(r, &snap);
         return NGX_ERROR;
     }
+#else
+    (void) conf;
+#endif
 
     /*
      * --- Phase 2: Infallible mutations ---

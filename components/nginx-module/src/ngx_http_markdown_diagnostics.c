@@ -404,25 +404,7 @@ ngx_http_markdown_diagnostics_recording_active(void)
 }
 
 
-/*
- * HTTP content handler for the diagnostics endpoint.
- *
- * Enforces access control before method handling, then:
- *   - GET/HEAD: builds and sends the full diagnostics JSON response
- *   - Other methods: returns 405 Not Allowed; the endpoint has no mutation
- *     operation.  Keeping access control first prevents unauthorized callers
- *     from learning handler behavior through the method-rejection branch.
- *
- * The response Content-Type is application/json.
- *
- * Parameters:
- *   r - HTTP request
- *
- * Returns:
- *   NGX_OK on success, NGX_HTTP_FORBIDDEN on access denial,
- *   NGX_HTTP_INTERNAL_SERVER_ERROR on build failure.  Method errors return
- *   NGX_OK after sending a short 405 response body.
- */
+/* Send the diagnostics endpoint's 405 response and Allow header. */
 static ngx_int_t
 ngx_http_markdown_diagnostics_method_not_allowed(ngx_http_request_t *r)
 {
@@ -491,6 +473,25 @@ ngx_http_markdown_diagnostics_method_not_allowed(ngx_http_request_t *r)
     return ngx_http_output_filter(r, &out);
 }
 
+/*
+ * HTTP content handler for the diagnostics endpoint.
+ *
+ * Enforces access control before method handling, then:
+ *   - GET/HEAD: builds and sends the full diagnostics JSON response
+ *   - Other methods: returns 405 Not Allowed; the endpoint has no mutation
+ *     operation.  Keeping access control first prevents unauthorized callers
+ *     from learning handler behavior through the method-rejection branch.
+ *
+ * The response Content-Type is application/json.
+ *
+ * Parameters:
+ *   r - HTTP request
+ *
+ * Returns:
+ *   NGX_OK on success, NGX_HTTP_FORBIDDEN on access denial,
+ *   NGX_HTTP_INTERNAL_SERVER_ERROR on build failure.  Method errors return
+ *   NGX_OK after sending a short 405 response body.
+ */
 ngx_int_t
 ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
 {

@@ -4,6 +4,7 @@
 typedef struct {
     ngx_atomic_uint_t backpressure_total;
     ngx_atomic_uint_t backpressure_resume_total;
+    ngx_atomic_uint_t backpressure_resume_failure_total;
     ngx_atomic_uint_t pending_output_high_watermark_bytes;
     ngx_atomic_uint_t decompression_streaming_total;
     ngx_atomic_uint_t decompression_fullbuffer_total;
@@ -22,6 +23,7 @@ typedef struct {
     "  \"perf\": {\n"                                                       \
     "    \"backpressure_total\": %uA,\n"                                    \
     "    \"backpressure_resume_total\": %uA,\n"                             \
+    "    \"backpressure_resume_failure_total\": %uA,\n"                    \
     "    \"pending_output_high_watermark_bytes\": %uA,\n"                   \
     "    \"decompression_streaming_total\": %uA,\n"                         \
     "    \"decompression_fullbuffer_total\": %uA,\n"                       \
@@ -30,7 +32,7 @@ typedef struct {
     "  }\n"
 
 #define NGX_HTTP_MARKDOWN_JSON_PERF_MAX_SIZE \
-    (sizeof(NGX_HTTP_MARKDOWN_JSON_PERF_FORMAT) - 1 + 7 * 20)
+    (sizeof(NGX_HTTP_MARKDOWN_JSON_PERF_FORMAT) - 1 + 8 * 20)
 
 
 static u_char *
@@ -43,6 +45,7 @@ ngx_http_markdown_metrics_write_json_perf(
         NGX_HTTP_MARKDOWN_JSON_PERF_FORMAT,
         perf->backpressure_total,
         perf->backpressure_resume_total,
+        perf->backpressure_resume_failure_total,
         perf->pending_output_high_watermark_bytes,
         perf->decompression_streaming_total,
         perf->decompression_fullbuffer_total,

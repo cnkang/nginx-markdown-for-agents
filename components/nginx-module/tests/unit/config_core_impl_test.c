@@ -1317,7 +1317,6 @@ test_memory_budget_priority_chain(void)
         child_conf.advanced.prune_noise = NGX_CONF_UNSET;
         child_conf.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
         child_conf.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
-        child_conf.limits.conversion_memory = 50 * 1024 * 1024;
 
         rc = ngx_http_markdown_merge_conf(&merge_cf, &parent_conf, &child_conf);
         TEST_ASSERT(rc == NGX_CONF_OK,
