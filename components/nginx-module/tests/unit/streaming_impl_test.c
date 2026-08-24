@@ -1431,7 +1431,8 @@ ngx_http_markdown_pending_output_set(ngx_chain_t **slot, ngx_chain_t *value)
     }
     if (*slot == NULL && value != NULL) {
         g_pending_output_state++;
-    } else if (*slot != NULL && value == NULL) {
+    } else if (*slot != NULL && value == NULL
+               && g_pending_output_state > 0) {
         g_pending_output_state--;
     }
     *slot = value;

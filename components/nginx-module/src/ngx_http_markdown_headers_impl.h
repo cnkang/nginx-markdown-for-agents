@@ -743,13 +743,19 @@ ngx_http_markdown_header_snapshot_prepare(
 }
 
 
-static void
+static ngx_int_t
 ngx_http_markdown_header_snapshot_restore(
     ngx_http_request_t *r,
     const ngx_http_markdown_header_snapshot_t *snapshot)
 {
-    if (snapshot == NULL) {
-        return;
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *headers;
+    ngx_uint_t        restored;
+
+    if (r == NULL || snapshot == NULL
+        || (snapshot->entry_count != 0 && snapshot->entries == NULL))
+    {
+        return NGX_ERROR;
     }
 
     if (snapshot->original_last != NULL) {
@@ -761,34 +767,44 @@ ngx_http_markdown_header_snapshot_restore(
     r->allow_ranges = snapshot->allow_ranges;
 
     /*
-     * Re-walk the live list after restoring its metadata.  NGINX normally
-     * appends a new part without moving existing elements, but a compatible
-     * list implementation may relocate a part while pushing.  Ordinal
-     * restoration avoids writing through snapshot-time element pointers and
-     * also leaves a truncated/malformed list fail-closed.
+     * Validate the restored list before writing any saved elements.  NGINX
+     * normally appends a new part without moving existing elements, but a
+     * compatible list implementation may relocate a part while pushing.
+     * Ordinal restoration avoids writing through snapshot-time element
+     * pointers and rejects a truncated or malformed live list.
      */
+    restored = 0;
+    for (part = &r->headers_out.headers.part;
+         part != NULL;
+         part = part->next)
     {
-        ngx_table_elt_t  *headers;
-        ngx_uint_t        restored;
-
-        restored = 0;
-        for (ngx_list_part_t *part = &r->headers_out.headers.part;
-             part != NULL && restored < snapshot->entry_count;
-             part = part->next)
+        if (restored > snapshot->entry_count
+            || part->nelts > snapshot->entry_count - restored
+            || (part->nelts != 0 && part->elts == NULL))
         {
-            if (part->nelts > snapshot->entry_count - restored
-                || (part->nelts != 0 && part->elts == NULL))
-            {
-                return;
-            }
+            return NGX_ERROR;
+        }
 
-            headers = part->elts;
-            for (ngx_uint_t i = 0; i < part->nelts; i++) {
-                headers[i] = snapshot->entries[restored].saved;
-                restored++;
-            }
+        restored += part->nelts;
+    }
+
+    if (restored != snapshot->entry_count) {
+        return NGX_ERROR;
+    }
+
+    restored = 0;
+    for (part = &r->headers_out.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        headers = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            headers[i] = snapshot->entries[restored].saved;
+            restored++;
         }
     }
+
+    return NGX_OK;
 }
 
 
@@ -1165,7 +1181,12 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: header_plan_apply_error: "
             "FFI plan prepare aborted");
-        ngx_http_markdown_header_snapshot_restore(r, &snapshot);
+        if (ngx_http_markdown_header_snapshot_restore(r, &snapshot)
+            != NGX_OK)
+        {
+            ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                "markdown: header snapshot restore failed");
+        }
         return NGX_ERROR;
     }
 
@@ -1175,7 +1196,12 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: header_plan_apply_error: "
             "ETag prepare failed");
-        ngx_http_markdown_header_snapshot_restore(r, &snapshot);
+        if (ngx_http_markdown_header_snapshot_restore(r, &snapshot)
+            != NGX_OK)
+        {
+            ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                "markdown: header snapshot restore failed");
+        }
         return NGX_ERROR;
     }
 
@@ -1185,7 +1211,12 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: header_plan_apply_error: "
             "Vary prepare failed");
-        ngx_http_markdown_header_snapshot_restore(r, &snapshot);
+        if (ngx_http_markdown_header_snapshot_restore(r, &snapshot)
+            != NGX_OK)
+        {
+            ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                "markdown: header snapshot restore failed");
+        }
         return NGX_ERROR;
     }
 
@@ -1195,7 +1226,12 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: header_plan_apply_error: "
             "token header prepare failed");
-        ngx_http_markdown_header_snapshot_restore(r, &snapshot);
+        if (ngx_http_markdown_header_snapshot_restore(r, &snapshot)
+            != NGX_OK)
+        {
+            ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                "markdown: header snapshot restore failed");
+        }
         return NGX_ERROR;
     }
 
@@ -1211,7 +1247,12 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: header_plan_apply_error: "
             "Cache-Control auth modification failed");
-        ngx_http_markdown_header_snapshot_restore(r, &snapshot);
+        if (ngx_http_markdown_header_snapshot_restore(r, &snapshot)
+            != NGX_OK)
+        {
+            ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                "markdown: header snapshot restore failed");
+        }
         return NGX_ERROR;
     }
 
@@ -1339,7 +1380,13 @@ ngx_http_markdown_head_representation_headers(ngx_http_request_t *r)
     /* Vary: Accept — the representation varies by Accept negotiation. */
     rc = ngx_http_markdown_add_vary_accept(r);
     if (rc != NGX_OK) {
-        ngx_http_markdown_header_snapshot_restore(r, &snapshot);
+        if (ngx_http_markdown_header_snapshot_restore(r, &snapshot)
+            != NGX_OK)
+        {
+            ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
+                "markdown: HEAD header snapshot restore failed");
+            return NGX_ERROR;
+        }
         return rc;
     }
 

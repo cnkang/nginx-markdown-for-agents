@@ -43,6 +43,7 @@ typedef struct ngx_list_part_s ngx_list_part_t;
 #define NGX_HTTP_HEAD 4
 #define NGX_HTTP_GET 2
 #define NGX_LOG_DEBUG_HTTP 0
+#define NGX_LOG_CRIT 2
 #define NGX_LOG_ERR 1
 #define NGX_LOG_WARN 2
 #define NGX_INT32_LEN 11

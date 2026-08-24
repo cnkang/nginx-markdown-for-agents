@@ -15,6 +15,10 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
+#ifndef NGX_HAVE_UNIX_DOMAIN
+#define NGX_HAVE_UNIX_DOMAIN 1
+#endif
+
 #define NGX_HTTP_GET                 0x0002
 #define NGX_HTTP_HEAD                0x0004
 #define NGX_HTTP_POST                0x0008

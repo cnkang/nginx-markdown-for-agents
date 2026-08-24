@@ -378,6 +378,7 @@ ngx_http_markdown_handle_encoding_collection_failure(
      */
     if (rc == NGX_AGAIN) {
         ctx->headers_forwarded = 1;
+        ctx->fullbuffer.failopen_delivery_pending = 1;
         return rc;
     }
     if (rc == NGX_OK || rc == NGX_DONE) {
@@ -742,6 +743,7 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
         /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
         if (rc == NGX_AGAIN) {
             ctx->headers_forwarded = 1;
+            ctx->fullbuffer.failopen_delivery_pending = 1;
             return rc;
         }
         if (rc == NGX_OK || rc == NGX_DONE) {
@@ -783,6 +785,7 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
         /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
         if (rc == NGX_AGAIN) {
             ctx->headers_forwarded = 1;
+            ctx->fullbuffer.failopen_delivery_pending = 1;
             return rc;
         }
         if (rc == NGX_OK || rc == NGX_DONE) {
@@ -989,6 +992,7 @@ ngx_http_markdown_handle_encoding_header_invalid(
     /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
     if (rc == NGX_AGAIN) {
         ctx->headers_forwarded = 1;
+        ctx->fullbuffer.failopen_delivery_pending = 1;
         return rc;
     }
     if (rc == NGX_OK || rc == NGX_DONE) {
@@ -1096,6 +1100,7 @@ encoding_policy:
          */
         if (*rc == NGX_AGAIN) {
             ctx->headers_forwarded = 1;
+            ctx->fullbuffer.failopen_delivery_pending = 1;
             return 1;
         }
         if (*rc == NGX_OK || *rc == NGX_DONE) {

@@ -45,6 +45,9 @@ struct MarkdownConverterHandle { int dummy; };
 #ifndef NGX_LOG_ERR
 #define NGX_LOG_ERR 3
 #endif
+#ifndef NGX_LOG_CRIT
+#define NGX_LOG_CRIT 2
+#endif
 #ifndef NGX_LOG_WARN
 #define NGX_LOG_WARN 4
 #endif

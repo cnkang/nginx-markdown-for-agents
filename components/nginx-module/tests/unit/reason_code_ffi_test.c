@@ -81,7 +81,7 @@ static const char *stub_metric_keys[] = {
     "markdown_failed_closed_total",  /* 17 */
     "markdown_errors_total",         /* 18 */
     "markdown_errors_total",         /* 19 */
-    "markdown_errors_total",         /* 20 */
+    "markdown_skipped_total",        /* 20 — overload */
     "markdown_errors_total",         /* 21 */
     "markdown_errors_total",         /* 22 */
     "markdown_errors_total",         /* 23 */
@@ -396,6 +396,29 @@ test_bypass_no_transform_metric_key(void)
 
 
 /*
+ * Test: code 20 (overload) is an eligibility skip metric.
+ */
+static void
+test_overload_metric_key(void)
+{
+    ngx_str_t  str;
+    ngx_int_t  rc;
+
+    TEST_SUBSECTION("overload metric key");
+
+    rc = ngx_http_markdown_get_reason_code_metric_key(20, &str);
+    TEST_ASSERT(rc == NGX_OK,
+                "code 20 metric key should return NGX_OK");
+    TEST_ASSERT(str.len == sizeof("markdown_skipped_total") - 1,
+                "code 20 metric key length should match expected value");
+    TEST_ASSERT(memcmp(str.data, "markdown_skipped_total", str.len) == 0,
+                "code 20 metric key should be markdown_skipped_total");
+
+    TEST_PASS("overload metric key correct");
+}
+
+
+/*
  * Test: all valid codes produce non-empty strings
  */
 static void
@@ -451,6 +474,7 @@ main(void)
     test_get_reason_code_metric_key_invalid();
     test_reason_code_total_count();
     test_bypass_no_transform_metric_key();
+    test_overload_metric_key();
     test_all_codes_produce_strings();
 
     printf("\n========================================\n");

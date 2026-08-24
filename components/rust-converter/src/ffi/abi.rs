@@ -236,14 +236,15 @@ pub struct MarkdownOptions {
     pub prune_protection_selectors: *const u8,
     /// Length in bytes of [`MarkdownOptions::prune_protection_selectors`].
     pub prune_protection_selector_len: usize,
-    /// Unified memory budget in bytes (0 = use per-engine defaults).
+    /// Frozen `markdown_limits conversion_memory=<size>` budget in bytes.
     ///
-    /// When non-zero, NGINX may use this value to derive full-buffer
-    /// max_size when no explicit markdown_limits memory= is set. The
-    /// full-buffer engine enforces this budget as a cap on generated
-    /// Markdown output (check_output_budget); set_output_budget(0) selects
-    /// the 64 MiB default. Streaming/incremental paths enforce it too.
-    /// Populated from `markdown_limits memory=<size>` (Config V2).
+    /// NGINX uses this value as the cumulative input-size eligibility cap.
+    /// The Rust full-buffer path also passes it to `set_output_budget`; a
+    /// non-zero value caps generated Markdown output and zero selects the
+    /// fixed 64 MiB Rust default. Zero is therefore a default selector, not
+    /// an unlimited-budget escape hatch. Streaming paths enforce the same
+    /// conversion-memory contract for their working set.
+    /// Populated from `markdown_limits conversion_memory=<size>` (Config V2).
     pub memory_budget: u64,
     /// Parse-specific timeout in milliseconds (0 = use `timeout_ms` fallback).
     ///

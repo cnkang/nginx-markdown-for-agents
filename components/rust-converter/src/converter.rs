@@ -2412,6 +2412,20 @@ mod tests {
         assert!(matches!(result, Err(ConversionError::MemoryLimit(_))));
     }
 
+    #[test]
+    fn test_nested_list_budget_counts_actual_newlines() {
+        let dom = parse_html(
+            b"<ul><li>outer<ul><li>nested one</li><li>nested two</li></ul></li></ul>",
+        )
+        .expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let mut ctx = ConversionContext::new(std::time::Duration::ZERO);
+        ctx.set_output_budget(100);
+
+        let result = converter.convert_with_context(&dom, &mut ctx);
+        assert!(result.is_ok(), "nested list unexpectedly exceeded budget: {result:?}");
+    }
+
     // Tests for combined elements
     #[test]
     fn test_link_in_list() {

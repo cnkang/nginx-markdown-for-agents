@@ -21,6 +21,7 @@ typedef uintptr_t ngx_msec_t;
 #define NGX_OK 0
 #define NGX_ERROR -1
 #define NGX_LOG_DEBUG_HTTP 0
+#define NGX_LOG_CRIT 3
 #define NGX_LOG_ERR 1
 #define NGX_LOG_WARN 2
 #define NGX_INT32_LEN 11

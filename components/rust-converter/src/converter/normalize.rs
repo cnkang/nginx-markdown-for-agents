@@ -105,9 +105,13 @@ impl MarkdownConverter {
 
         for line in output.lines() {
             let fence_len = measure_fence_len(line);
-            let is_opening_fence = active_fence_len.is_none() && fence_len >= 3;
+            let fence_line = line.trim_start_matches(|c| c == ' ' || c == '\t');
+            let fence_info = fence_line.get(fence_len..).unwrap_or("");
+            let is_opening_fence = active_fence_len.is_none()
+                && fence_len >= 3
+                && !fence_info.contains('`');
             let is_closing_fence = active_fence_len
-                .map(|len| fence_len >= len && line.trim_start()[fence_len..].trim().is_empty())
+                .map(|len| fence_len >= len && fence_info.trim().is_empty())
                 .unwrap_or(false);
 
             if is_opening_fence || is_closing_fence {
@@ -173,7 +177,10 @@ pub(crate) fn measure_fence_len(line: &str) -> usize {
     if leading_indent_columns(line) > 3 {
         return 0;
     }
-    line.trim_start().bytes().take_while(|&b| b == b'`').count()
+    line.trim_start_matches(|c| c == ' ' || c == '\t')
+        .bytes()
+        .take_while(|&b| b == b'`')
+        .count()
 }
 
 fn fix_trailing_newlines(mut result: String) -> String {
@@ -243,6 +250,19 @@ mod tests {
         assert!(
             !out.contains("a  b"),
             "no fence mode entered (double space would be preserved): {out:?}"
+        );
+    }
+
+    #[test]
+    fn normalize_output_rejects_backtick_in_fence_info() {
+        let converter = MarkdownConverter::with_options(Default::default());
+        let out = converter.normalize_output(
+            "```rust`\na  b\n```\n".to_string(),
+        );
+
+        assert!(
+            !out.contains("a  b"),
+            "a backtick in the info string must not open a fence: {out:?}"
         );
     }
 

@@ -283,6 +283,7 @@ impl MarkdownConverter {
     /// once after traversal, before the output buffer is mutated.
     fn format_list_item_upper_bound(
         content_len: usize,
+        newline_count: usize,
         depth: usize,
         ordered: bool,
     ) -> Result<usize, ConversionError> {
@@ -295,7 +296,7 @@ impl MarkdownConverter {
                 "generated Markdown list marker length overflow".to_string(),
             )
         })?;
-        let line_count = content_len.checked_add(1).ok_or_else(|| {
+        let line_count = newline_count.checked_add(1).ok_or_else(|| {
             ConversionError::MemoryLimit("generated Markdown list line count overflow".to_string())
         })?;
         let per_line_overhead = prefix_len
@@ -392,8 +393,11 @@ impl MarkdownConverter {
         ctx: Option<&mut ConversionContext>,
     ) -> Result<(), ConversionError> {
         let mut item_output = String::new();
+        let mut newline_count = 0usize;
         let mut ctx = ctx;
         for child in node.children.borrow().iter() {
+            let child_output_start = item_output.len();
+
             match child.data {
                 NodeData::Element { ref name, .. } => {
                     let tag_name = name.local.as_ref();
@@ -438,9 +442,24 @@ impl MarkdownConverter {
                 }
             }
 
+            let appended_newlines = item_output[child_output_start..]
+                .bytes()
+                .filter(|byte| *byte == b'\n')
+                .count();
+            newline_count = newline_count.checked_add(appended_newlines).ok_or_else(|| {
+                ConversionError::MemoryLimit(
+                    "generated Markdown list newline count overflow".to_string(),
+                )
+            })?;
+
             if let Some(context) = ctx.as_deref_mut() {
                 let upper_bound =
-                    Self::format_list_item_upper_bound(item_output.len(), depth, ordered)?;
+                    Self::format_list_item_upper_bound(
+                        item_output.len(),
+                        newline_count,
+                        depth,
+                        ordered,
+                    )?;
                 let projected_len = output.len().checked_add(upper_bound).ok_or_else(|| {
                     ConversionError::MemoryLimit(
                         "generated Markdown list output length overflow".to_string(),

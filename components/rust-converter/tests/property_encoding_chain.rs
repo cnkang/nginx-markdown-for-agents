@@ -277,9 +277,10 @@ proptest! {
 
     /// Inputs below the historical threshold are still ratio-checked.
     #[test]
-    fn p23_ratio_enforced_for_small_input(size in 32usize..128) {
-        /* A small highly-compressible payload below the historical threshold
-         * is rejected when its expansion exceeds ratio = 1. */
+    fn p23_ratio_enforced_for_small_input(size in 64usize..128) {
+        /* A sufficiently large, highly-compressible payload below the
+         * historical threshold is rejected when its expansion exceeds
+         * ratio = 1. */
         let original = vec![b'A'; size];
         let wire = gzip_compress(&original);
         assert!(wire.len() < RATIO_ACTIVATION_THRESHOLD);

@@ -27,6 +27,7 @@ typedef unsigned long ngx_atomic_uint_t;
 typedef struct {
     ngx_atomic_uint_t backpressure_total;
     ngx_atomic_uint_t backpressure_resume_total;
+    ngx_atomic_uint_t backpressure_resume_failure_total;
     ngx_atomic_uint_t pending_output_high_watermark_bytes;
     ngx_atomic_uint_t decompression_streaming_total;
     ngx_atomic_uint_t decompression_fullbuffer_total;
@@ -78,6 +79,7 @@ typedef struct { /* SONAR_NOTE: mirrors production snapshot */
         ngx_atomic_t  requests_total;
         ngx_atomic_t  fallback_total;
         ngx_atomic_t  succeeded_total;
+        ngx_atomic_t  commit_total;
         ngx_atomic_t  failed_total;
         ngx_atomic_t  postcommit_error_total;
         ngx_atomic_t  precommit_failopen_total;
@@ -91,6 +93,7 @@ typedef struct { /* SONAR_NOTE: mirrors production snapshot */
         ngx_atomic_t  streaming_fallback_precommit_reject;
         ngx_atomic_t  streaming_failure_postcommit_abort;
         ngx_atomic_t  streaming_failure_postcommit_safe_finish;
+        ngx_atomic_t  terminal_aborted_total;
         struct {
             ngx_atomic_t  streaming;
             ngx_atomic_t  full_buffer;
@@ -122,9 +125,21 @@ typedef struct { /* SONAR_NOTE: mirrors production snapshot */
     struct {
         ngx_atomic_t  failopen_count;
         ngx_atomic_t  delivery_count;
+        ngx_atomic_t  full_buffer_delivery_count;
         ngx_atomic_t  decision_count;
         ngx_atomic_t  estimated_token_savings;
         ngx_atomic_t  replay_buffer_errors_total;
+        struct {
+            ngx_atomic_t  success;
+            ngx_atomic_t  failure_schema_version;
+            ngx_atomic_t  failure_unknown_key;
+            ngx_atomic_t  failure_duplicate_key;
+            ngx_atomic_t  failure_invalid_type;
+            ngx_atomic_t  failure_out_of_range;
+            ngx_atomic_t  failure_size_exceeded;
+            ngx_atomic_t  failure_parse_error;
+            ngx_atomic_t  failure_file_error;
+        } dynconf_reloads;
         struct {
             ngx_atomic_t  parse_timeouts_total;
             ngx_atomic_t  parse_budget_exceeded_total;

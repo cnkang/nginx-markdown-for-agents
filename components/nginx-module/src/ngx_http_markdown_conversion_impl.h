@@ -2024,6 +2024,8 @@ ngx_http_markdown_body_filter_resume_pending(ngx_http_request_t *r,
         NGX_HTTP_MARKDOWN_METRIC_INC(results.full_buffer_delivery_count);
         /* Backpressure resume: drain completed successfully */
         NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_resume_total);
+    } else {
+        ngx_http_markdown_record_buffered_delivery_failure(ctx);
     }
 
     ngx_http_markdown_pending_output_set(

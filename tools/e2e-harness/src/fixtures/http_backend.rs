@@ -518,7 +518,8 @@ fn md_html_response(
      * not exist upstream, and the module would pass the already-Markdown
      * response through untouched. */
     if method == Method::HEAD {
-        return html_response(method, 200, "<h1>fixture html</h1>", true, Some(etag), vary);
+        return html_response(method, 200, "<h1>fixture html</h1>", true, Some(etag), vary)
+            .into_response_with_cache(cc, etag, vary);
     }
 
     html_or_markdown_by_accept(

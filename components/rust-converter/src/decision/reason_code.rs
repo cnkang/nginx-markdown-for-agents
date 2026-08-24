@@ -336,7 +336,7 @@ impl ReasonCode {
     /// use nginx_markdown_converter::decision::reason_code::ReasonCode;
     ///
     /// assert_eq!(ReasonCode::from_discriminant(0), Some(ReasonCode::Converted));
-    /// assert_eq!(ReasonCode::from_discriminant(255), None);
+    /// assert_eq!(ReasonCode::from_discriminant(27), None);
     /// ```
     pub fn from_discriminant(value: u32) -> Option<Self> {
         match value {
