@@ -54,7 +54,8 @@ ADR-justified exception.
 ### Trusted proxies — http-only CIDR trust
 
 Source IP for the trusted-proxy CIDR evaluation comes from the original
-transport peer: `r->connection->realip` when the NGINX `realip` module
+transport peer: the NGINX `realip_remote_addr` variable, represented in the C
+request as `r->connection->realip`, when the NGINX `realip` module
 has preserved it, otherwise `r->connection->addr_text`.  When the
 operator enables the NGINX `realip` module (or PROXY protocol), NGINX
 rewrites `r->connection->addr_text` to the resolved client address
@@ -64,7 +65,9 @@ reaches the content phase, while the original connecting peer is kept in
 `addr_text` would classify the request by the spoofable client address
 instead of the actual proxy, so the module uses the **original transport
 peer** (`realip`, falling back to `addr_text` when realip did not run).
-`markdown_trusted_proxies` is **http context only**, CIDR-based (IPv4 +
+`realip_remote_addr` names the public NGINX realip contract. The C field is the
+transport-peer value passed across the FFI boundary. `markdown_trusted_proxies`
+is **http context only**, CIDR-based (IPv4 +
 IPv6, parsed at config time). An immediate peer that is **outside**
 `markdown_trusted_proxies` is the client: the module ignores any
 `Forwarded` or `X-Forwarded-*` headers it carries and uses the peer

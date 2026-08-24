@@ -1,6 +1,6 @@
 ---
 domain: dynconf-snapshot
-rules: [34, 35, 45]
+rules: [34, 35, 45, 71]
 paths:
   - "components/nginx-module/src/dynconf/**"
   - "components/nginx-module/src/config/**"
@@ -158,7 +158,7 @@ Verification:
 
 ---
 
-### 46. Static explicit settings block dynamic overrides and propagate to child levels
+### 71. Static explicit settings block dynamic overrides and propagate to child levels
 
 Historical context: the dynconf precedence question (whether an http-level
 explicit setting locks the field for every location) resolves as follows.

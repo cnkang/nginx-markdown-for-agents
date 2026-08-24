@@ -15,10 +15,6 @@ Validate the binary and configuration:
 SNAPSHOT_DIR="$(mktemp -d)"
 nginx -t
 nginx -T 2>/dev/null | grep -E 'markdown_(filter|streaming|auto_decompress|cache_validation|limits|error_policy)'
-curl -fsS -H 'Accept: text/plain; version=0.0.4' \
-  http://localhost/markdown-metrics > "$SNAPSHOT_DIR/markdown-metrics.baseline"
-curl -fsS -H 'Accept: application/json' \
-  http://localhost/nginx-markdown/diagnostics > "$SNAPSHOT_DIR/markdown-diagnostics.baseline.json"
 ```
 
 Start with explicit, bounded settings:
@@ -51,9 +47,26 @@ http {
 }
 ```
 
+After NGINX loads the configuration and the local metrics/diagnostics locations
+are reachable, capture the baseline. Keeping these commands after the endpoint
+definition prevents a successful shell redirect from being mistaken for valid
+evidence when the endpoint is not available yet:
+
+```bash
+curl -fsS -H 'Accept: text/plain; version=0.0.4' \
+  http://localhost/markdown-metrics > "$SNAPSHOT_DIR/markdown-metrics.baseline"
+curl -fsS -H 'Accept: application/json' \
+  http://localhost/nginx-markdown/diagnostics > \
+  "$SNAPSHOT_DIR/markdown-diagnostics.baseline.json"
+```
+
 Keep `markdown_error_policy pass` during the initial rollout so conversion
-errors preserve the upstream response. Use `markdown_streaming force` only for
-paths whose response size, cache requirements, and compressed encodings have completed testing.
+errors that occur before headers commit can preserve the upstream response.
+After NGINX commits headers or converted bytes, the original HTML is no longer
+replayable. A later failure follows the safe-finish/abort contract and
+may leave the client with a truncated Markdown response. Use
+`markdown_streaming force` only for paths whose response size, cache
+requirements, and compressed encodings have completed testing.
 
 ## Staged enablement
 

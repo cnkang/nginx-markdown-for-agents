@@ -255,7 +255,7 @@ sed -i 's/reason="FAIL_/reason="failed_/g' dashboard.json
 
 # Step 3: Replace old metric names with new unified families
 sed -i 's/markdown_skipped_accept_total/markdown_skipped_total{reason="skipped_accept"}/g' dashboard.json
-sed -i 's/markdown_parse_timeouts_total/markdown_failures_total{reason="timeout"}/g' dashboard.json
+sed -i 's/markdown_parse_timeouts_total/nginx_markdown_failures_total{reason="timeout"}/g' dashboard.json
 ```
 
 #### Alert Migration Tips

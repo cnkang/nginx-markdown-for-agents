@@ -38,8 +38,12 @@ Reusing the same environment run for both tests without a recorded
 distinction is an incomplete release record.
 Gate 4 passes via chart lint/render validation, promoted cluster smoke, and F5
 assessment evidence. Final Go requires the package-signature and
-upgrade/rollback records in addition to the Gate 4 records. Missing records
-remain blocking even when the workflow itself is green.
+upgrade/rollback records in addition to the Gate 4 records. Gate 4 image
+evidence must bind the immutable multi-platform index digest and the matching
+platform manifest digest for every Ready pod. Missing records remain blocking
+even when the workflow itself is green, and the release record must include a
+signed gate-review artifact naming reviewer, date, candidate, scope, and
+evidence references.
 
 ---
 
@@ -84,9 +88,10 @@ remain blocking even when the workflow itself is green.
 | 3.1 | nFPM DEB build (full matrix) | CI workflow `release-packages.yml` | All matrix entries build successfully |
 | 3.2 | RPM build (full matrix) | CI workflow `release-rpm.yml` | All matrix entries build successfully |
 | 3.3 | Package signature verification | `gpg --verify` / `rpm -K` | Valid signatures |
-| 3.4 | Install smoke tests | `dpkg -i` + `rpm -i` + `nginx -V` + `curl` | Module loads and converts |
-| 3.5 | Upgrade/rollback tests | Version switch test | Upgrade and rollback succeed without service interruption |
-| 3.6 | Independent upgrade/rollback evidence | Release record review | Independent upgrade/rollback evidence is attached to the release record (missing evidence is release-blocking) |
+| 3.4 | Package checksum verification | `sha256sum -c SHA256SUMS` against the exact package artifacts | Every published package matches the signed checksum manifest |
+| 3.5 | Install smoke tests | `dpkg -i` + `rpm -i` + `nginx -V` + `curl` | Module loads and converts |
+| 3.6 | Upgrade/rollback tests | Version switch test | Upgrade and rollback succeed without service interruption |
+| 3.7 | Independent upgrade/rollback evidence | Release record review | Independent upgrade/rollback evidence is attached to the release record (missing evidence is release-blocking) |
 
 **Fail action**: Block release. Resolve package build, install-layout, checksum, smoke-test, signature, or missing upgrade/rollback-evidence gaps before proceeding.
 

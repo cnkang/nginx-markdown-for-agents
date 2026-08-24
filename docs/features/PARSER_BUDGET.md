@@ -245,8 +245,9 @@ Request arrives
     │
     ├─ html5ever parse_document (uninterruptible)
     │   └─ Input capped by markdown_limits conversion_memory= before parsing
-    │      (default 64 MiB, configurable); parser allocations are bounded by
-    │      parser_memory=, not this directive
+    │      (default 64 MiB, configurable). An oversized input is classified as
+    │      not_eligible. Parser working-set estimates are bounded separately
+    │      by parser_memory=
     │
     ├─ markdown_limits conversion_timeout= / parser_timeout= post-parse check
     │   └─ FAIL → outcome failed_open|failed_closed (per error policy), category: timeout
@@ -266,7 +267,9 @@ The failure branches use the canonical lowercase codes from
 `failed_open` (with `markdown_error_policy pass`) or `failed_closed`
 (with `fail_closed`/`status N`), and the **failure category** is
 `timeout` or `budget_exceeded` (also `memory_budget_exceeded` for the
-`conversion_memory` cap). The category appears as the `reason` label on
+`conversion_memory` is an eligibility cap and therefore emits `not_eligible`
+before the FFI conversion attempt. The category for a parser working-set
+failure is `budget_exceeded`. The category appears as the `reason` label on
 `nginx_markdown_requests_total`. The outcome appears in the `outcome`
 label. Both labels are lowercase canonical values — the internal
 converter constants (`PARSE_TIMEOUT`, `PARSE_BUDGET_EXCEEDED`) are not

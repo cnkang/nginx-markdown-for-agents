@@ -1,6 +1,7 @@
 # Streaming Default & Noise Pruning Migration Guide
 
-**Version**: 0.8.0
+**Scope**: Historical 0.8.0 migration guidance, retained for operators who
+still have 0.5.x–0.7.x configurations
 **Audience**: Operators upgrading from 0.5.x/0.6.x/0.7.x to 0.8.0
 
 > **v0.9.1+ operators:** the 0.9.1 release removed `markdown_streaming_engine` and replaced it with `markdown_streaming`. If you are reading this guide for the streaming behavior changes, please replace `markdown_streaming_engine off;` with `markdown_streaming off;` in your configuration files. Only the historical sections below retain the obsolete `markdown_streaming_engine` directive for background. Current configuration examples use `markdown_streaming`.
@@ -12,20 +13,22 @@
 v0.6.0 introduced two default behavior changes. v0.8.0 removes the
 v0.6.x compatibility bridge entirely:
 
-| Default | 0.5.x | 0.6.0–0.7.x | 0.8.0 | Impact |
+| Default/directive | 0.5.x | 0.6.0–0.7.x | 0.8.0–0.9.1 historical | 0.9.2 current |
 |---|---|---|---|---|
-| `markdown_streaming_engine` | `off` (full-buffer) | `auto` (per-request selection) | `auto` (per-request selection) | Large/chunked responses use streaming by default |
-| `markdown_prune_noise` | N/A (compile-time opt-in) | `on` (runtime, default-enabled) | `on` (runtime, default-enabled) | Noise regions (nav, footer, ads) removed by default |
-| `markdown_streaming_auto_threshold` | N/A (new in 0.6.0) | Accepted (32k default) | **Removed** — `nginx -t` fails | Auto mode used the then-current threshold; see the 0.9.2 note below |
-| `markdown_streaming_engine` `$variable` | Accepted | Accepted | **Removed** — `nginx -t` fails | Must use fixed `off`/`auto`/`force` in 0.9.2 (historical `on` value replaced by `force`) |
+| `markdown_streaming_engine` | `off` (full-buffer) | `auto` (per-request selection) | `auto` (per-request selection) | Removed. Use `markdown_streaming off`, `auto`, or `force` |
+| `markdown_prune_noise` | N/A (compile-time opt-in) | `on` (runtime, default-enabled) | `on` (runtime, default-enabled) | `on` (runtime, default-enabled) |
+| `markdown_streaming_auto_threshold` | N/A (new in 0.6.0) | Accepted (32k default) | Accepted (historical default) | **Removed** — `nginx -t` fails. 1 MiB is fixed internally |
+| `markdown_streaming_engine` `$variable` | Accepted | Accepted | Accepted until 0.9.0 | **Removed** — `nginx -t` fails |
 
 **Key guarantee**: An explicit `off` configuration produces identical behavior
 to 0.5.x. The 0.9.2 policy values are `off`, `auto`, and `force`. The
-historical `on` value is not an accepted 0.9.2 value (the module replaces it
-with `force`), so the equivalence claim covers only `off`. Configurations using
+historical `on` value is not an accepted 0.9.2 value. The 0.9.1 migration
+mapped it to `force`, so the equivalence claim covers only `off`. Configurations using
 `markdown_streaming_auto_threshold` or
-`markdown_streaming_engine $variable` **need updating before you upgrade to 0.8.0**.
-You must update these configurations before the upgrade. The removed directives fail `nginx -t`. Update them or the upgrade fails.
+`markdown_streaming_engine $variable` **need updating before you use the current
+0.9.2 configuration contract**. The removed directives fail `nginx -t` on
+0.9.2. Update them before loading the current module. Do not copy the
+historical directive names into a new configuration.
 
 ## Migration Paths
 

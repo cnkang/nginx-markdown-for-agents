@@ -51,7 +51,9 @@
 
 ### C-M7 (Medium) — `components/nginx-module/src/ngx_http_markdown_payload_impl.h:1269-1275`
 - **Issue**: "On every failure class the function follows a fail-open strategy" — false for `on_error == REJECT`, which finalizes with `conf->error_status` (fail-closed).
-- **Fix**: "Route by error policy: pass → fail-open original forwarding, fail_closed → configured error status".
+- **Fix**: "Route by `ErrorPolicy`: `pass` (0) forwards the original
+  response fail-open, `status` (1) returns the configured error status, and
+  `fail_closed` (2) rejects according to the fail-closed contract".
 
 ### C-M8 (Medium) — `components/nginx-module/src/ngx_http_markdown_stream_replay.c:231-242`
 - **Issue**: "points the buffer at the replay data" — implementation (276-283) is `ngx_palloc` + `ngx_memcpy` copy into the request pool.

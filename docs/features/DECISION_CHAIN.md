@@ -52,7 +52,7 @@ flowchart TD
     T -->|Failure + fail_closed| W["failed_closed"]
 ```
 
-> **Note on eligibility granularity.** Checks 2 through 8 (method, status, range,
+> **Note on eligibility granularity.** Checks 2 through 7 (method, status, range,
 > content-type, size, auth) no longer produce distinct reason codes. They are
 > collapsed into a single canonical code `not_eligible`, because the request
 > state is the same — *not eligible for conversion* — regardless of which
@@ -165,7 +165,8 @@ Every request that enters the decision chain ends up in one of four mutually exc
 
 Operators can determine request state counts from metrics and logs:
 - NOT_ENABLED: count of `reason="disabled"` in decision log entries (`grep "reason=disabled" error.log`)
-- SKIPPED: count of `reason="not_eligible"`, `reason="skipped_*"` in decision log entries
+- SKIPPED: count of `reason="not_eligible"`, `reason="skipped_*"`, and
+  `reason="bypass_no_transform"` in decision log entries
 - CONVERTED: `nginx_markdown_requests_total{outcome="converted"}` metric (successful deliveries are additionally tracked by `nginx_markdown_conversion_deliveries_total`)
 - FAILED_OPEN: `nginx_markdown_requests_total{outcome="failed_open"}` (`failed_open`)
 - FAILED_CLOSED: `nginx_markdown_requests_total{outcome="failed_closed"}` (`failed_closed`)

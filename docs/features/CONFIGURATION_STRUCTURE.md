@@ -60,16 +60,17 @@ Each key inherits independently across `http`, `server`, and `location`.
 The merge step then binds the effective values to the runtime fields shown in
 the structure above and rejects cross-key violations before mutation:
 
-- `parser_timeout <= conversion_timeout`
+- `parser_timeout <= conversion_timeout` when `conversion_timeout` is nonzero
 - `parser_memory <= conversion_memory`
 - `streaming_buffer <= conversion_memory`
 
-Zero handling: `conversion_timeout=0` disables only the overall conversion
-deadline. A nonzero `parser_timeout` stays valid beside it and keeps its
-parser-phase deadline. When both keys are explicitly configured and
-`parser_timeout` exceeds `conversion_timeout`, `nginx -t` fails. When only
-one side is explicit, the merge step clamps the parser value down to the
-conversion bound instead.
+Zero handling: `conversion_timeout=0` disables the overall conversion
+deadline and removes that upper-bound comparison. A nonzero `parser_timeout`
+stays valid beside it and keeps its parser-phase deadline, including when
+both keys are explicitly configured. When `conversion_timeout` is nonzero and
+both keys are explicitly configured, `nginx -t` fails if
+`parser_timeout` exceeds it. When only one side is explicit, the merge step
+clamps the parser value down only to a nonzero conversion bound.
 
 `streaming_buffer` is the total per-request streaming working-set and
 pre-commit replay budget. It is not merely a transport chunk size. A value

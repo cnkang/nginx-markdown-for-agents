@@ -132,10 +132,15 @@ A 0.9.1 configuration fails `nginx -t` under the 0.9.2 binary (removed
 directives produce errors), so configuration migration must happen before
 the restart in the next step.
 
-### 6. Validate and restart
+### 6. Validate and restart with the active service manager
 
 ```bash
-sudo nginx -t && sudo systemctl restart nginx
+sudo nginx -t
+# systemd-managed host:
+sudo systemctl restart nginx
+# If another supervisor owns NGINX, use its restart/reload operation instead.
+# For a directly managed master process, the equivalent is:
+# sudo nginx -s reload
 ```
 
 ---
@@ -188,7 +193,10 @@ if [[ -z "${MODULES_DIR}" || ! -d "${MODULES_DIR}" ]]; then
     exit 1
 fi
 sudo cp objs/ngx_http_markdown_filter_module.so "${MODULES_DIR}/"
-sudo nginx -t && sudo systemctl restart nginx
+sudo nginx -t
+# Restart through the host's service manager. For a directly managed master,
+# use: sudo nginx -s reload
+sudo systemctl restart nginx
 ```
 
 ---

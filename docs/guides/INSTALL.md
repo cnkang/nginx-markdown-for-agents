@@ -228,10 +228,12 @@ For the full list of supported versions and architectures, see the
 [Compatibility Matrix](./INSTALLATION.md#7-compatibility-matrix).
 
 For Kubernetes and Helm deployments, see
-[`KUBERNETES_DEPLOYMENT.md`](./KUBERNETES_DEPLOYMENT.md). The Helm chart runs
-with stock NGINX by default. To use the module, deploy an explicit
-module-enabled image. When `markdown.enabled=true`, set `markdown.loadModule`
-to the in-container module path.
+[`KUBERNETES_DEPLOYMENT.md`](./KUBERNETES_DEPLOYMENT.md). The Helm chart
+requires explicit `image.repository` and `image.tag` values. A stock NGINX
+the chart supports this image only as its module-disabled smoke-test override.
+it does not contain this module. To use Markdown conversion, deploy an image
+that contains the module, set `markdown.enabled=true`, and set
+`markdown.loadModule` to the in-container module path.
 
 ### Automated Diagnostics
 

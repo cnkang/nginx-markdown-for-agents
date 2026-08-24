@@ -41,7 +41,11 @@ selection reason. Prefer it over grepping `nginx -T`, which shows the
 configured value, not the per-request decision:
 
 ```bash
-curl -s http://127.0.0.1/nginx-markdown/diagnostics | jq '.streaming_config'
+curl -s -H 'Accept: application/json' \
+  http://127.0.0.1/nginx-markdown/diagnostics | \
+  jq '{effective: .configuration.effective,
+       sources: .configuration.effective_sources,
+       recent_decisions}'
 ```
 
 - `off` intentionally selects full-buffer.
@@ -58,8 +62,9 @@ The following conditions still select full-buffer or passthrough:
 - A build without the Brotli streaming feature uses the bounded full-buffer
   Brotli path.
 
-Inspect the `streaming` and `configuration.effective` objects in diagnostics,
-then compare attempts by engine:
+Inspect `configuration.effective`, `configuration.effective_sources`, and
+the `recent_decisions[]` entries in diagnostics, then compare attempts by
+engine:
 
 ```bash
 curl -s -H 'Accept: text/plain; version=0.0.4' \

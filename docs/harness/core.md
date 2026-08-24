@@ -177,10 +177,10 @@ Repo-owned docs keep durable truth. The state carrier keeps execution memory.
 
 ## Coverage Standards
 
-- **Minimum**: 80% aggregate line coverage for both the C module and the Rust converter. The coverage gate (`coverage_gate.py`) enforces this bound and blocks below it
+- **Minimum**: 80% aggregate line coverage for both the C module and the Rust converter. The repository gate `tools/coverage/coverage_gate.py` enforces this bound and blocks below it
 - **Target**: 90% aggregate line coverage. This target is aspirational and not enforced
 - **Critical paths** (auth, error handling, FFI boundary, conditional requests): 90% line coverage for new code. This threshold is advisory — the gate logs it at runtime but does not block on it
-- The project collects coverage via `make coverage-c` (C module E2E + gcov/lcov) and `make coverage-rust` (Rust `cargo llvm-cov`)
+- The project collects coverage via `make coverage-c` (C module E2E + gcov/lcov) and `make coverage-rust` (Rust `cargo llvm-cov`). Both feed `tools/coverage/coverage_gate.py`
 - Per-file thresholds stay advisory: the programmatic gate enforces only the aggregate minimum above
 - The lcov report is always produced regardless of coverage level, ensuring SonarCloud trends remain visible
 

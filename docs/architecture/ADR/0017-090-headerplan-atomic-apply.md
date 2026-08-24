@@ -49,9 +49,17 @@ handled in the HeaderPlan commit. They are C-side post-plan operations (see
 the atomic scope boundary below). This keeps them consistent with the
 rationale: ETag set/clear and Vary add execute in C after the plan commits.
 The HeaderPlan atomicity invariant therefore applies **only to the core
-wire-critical fields Content-Type, Content-Encoding, and Content-Length**;
+wire-critical fields Content-Type, Content-Encoding, and Content-Length**.
 ETag, Vary, token, and authentication-header operations are explicitly
 exempt via the atomic-scope exception below.
+
+HeaderPlan is the sole authority for invalidating an upstream
+`Content-Length`: it removes the stale list entries and clears the scalar
+field together. The later C-side scalar assignment is a separate,
+infallible operation that records the length of the newly generated
+representation after the plan has committed. It is not a second invalidation
+path, and must run before `ngx_http_send_header()`. The C-side implementation
+omits it when the new representation length is not known.
 
 ### Streaming vs full-buffer header matrix
 
@@ -131,7 +139,7 @@ headers are sent).
 |---------------------|------------------|
 | ETag set/clear | `NGX_ERROR` — abort before send |
 | `Vary: Accept` add | `NGX_ERROR` — abort before send |
-| Content-Length set (new value) | Scalar assignment — cannot fail |
+| Generated Content-Length set (new value after plan commit) | Scalar assignment — cannot fail |
 | `X-Markdown-Tokens` header | `NGX_ERROR` — abort before send |
 | `Accept-Ranges` removal | Scalar assignment — cannot fail |
 | Auth `Cache-Control` modify | `NGX_ERROR` — abort before send |

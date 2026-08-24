@@ -678,7 +678,8 @@ View the latest CI status: [GitHub Actions](https://github.com/cnkang/nginx-mark
 - macOS (Apple Silicon and Intel)
 - Linux (x86_64 and aarch64)
 - NGINX 1.24.0 and later
-- Rust 1.97.1 and later for source builds (pinned baseline, MSRV 1.97)
+- Rust 1.97.1 is the repository's pinned build toolchain. Rust 1.97 is the
+  public source-build MSRV
 
 ### Docker Support
 - Official NGINX base images

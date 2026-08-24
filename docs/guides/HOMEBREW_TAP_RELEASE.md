@@ -27,9 +27,9 @@ Set these in this repository before running the workflows:
      version.
    - Read the Formula source from that exact tag commit, even for a manual
      recovery run.
-   - Download `https://github.com/<owner>/<repo>/archive/refs/tags/<tag>.tar.gz`
-     and compare its normalized tracked-file content with a local `git archive`
-     of the resolved tag commit.
+   - Download `https://github.com/<owner>/<repo>/archive/<full-commit>.tar.gz`
+     using the resolved full commit, and compare its normalized tracked-file
+     content with a local `git archive` of that same commit.
    - Compute SHA-256 from those exact verified downloaded bytes.
    - Update only the Formula's class-level `url`, `version`, and `sha256`
      fields, preserving nested resource identities.
@@ -40,7 +40,8 @@ Set these in this repository before running the workflows:
 The team accepts manual publication only when the workflow itself runs from the
 repository's default branch. The Formula program, verified source tree,
 archive URL, version, and checksum therefore all derive from one reviewed
-release tag commit.
+release tag commit. A movable tag archive is never used as the checksum
+source.
 
 ## Post-Release macOS Verification
 

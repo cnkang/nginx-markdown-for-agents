@@ -63,8 +63,10 @@ When a checklist item cannot pass:
 1. The team must escalate the item to the Go/No-Go review
 2. The team must record an explicit exception, including: rationale, risk assessment, mitigation plan
 3. Recording an exception does **not** by itself authorize release: any failed
-   P0-gate override additionally requires written release-owner authorization
-   identifying the gate, the release candidate, and the exact override scope
+   P0 sub-spec DoD cannot be overridden by an exception or release-owner
+   authorization. It remains a No-Go until the team fixes the DoD. A non-P0
+   exception may require written release-owner authorization identifying the
+   gate, release candidate, and exact exception scope
 4. Unresolved failures without exceptions block the release
 
 ## Document Updates

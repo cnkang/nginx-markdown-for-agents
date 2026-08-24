@@ -76,17 +76,17 @@ ARCH=amd64
 BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}"
 PKG="nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
 
-curl -fsSLo SHA256SUMS "${BASE_URL}/SHA256SUMS"
-curl -fsSLo SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
-curl -fsSLo "${PKG}" "${BASE_URL}/${PKG}"
-# Set TRUSTED_FINGERPRINT only from an independently authenticated channel.
+curl -fsSL -o SHA256SUMS "${BASE_URL}/SHA256SUMS"
+curl -fsSL -o SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
+curl -fsSL -o "${PKG}" "${BASE_URL}/${PKG}"
+# Supply both values through an independently authenticated channel. Do not
+# import a key from this repository or from the same release asset set.
+: "${RELEASE_KEY_PATH:?set RELEASE_KEY_PATH to an independently authenticated public-key file}"
 : "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated}"
 [[ "${TRUSTED_FINGERPRINT}" =~ ^[A-Fa-f0-9]{40}$ ]] || exit 1
-# Import the checked-in project public key into an isolated keyring first,
-# so gpg verifies the signature against the project key only.
 GNUPGDIR="$(mktemp -d)"
 trap 'rm -rf "${GNUPGDIR}"' EXIT
-gpg --batch --homedir "${GNUPGDIR}" --import packaging/nginx-markdown-for-agents-release.asc
+gpg --batch --homedir "${GNUPGDIR}" --import "${RELEASE_KEY_PATH}"
 VALIDSIG="$(gpg --batch --homedir "${GNUPGDIR}" --status-fd=1 \
     --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
     | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
@@ -109,17 +109,17 @@ ARCH=x86_64
 BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}"
 PKG="nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
 
-curl -fsSLo SHA256SUMS "${BASE_URL}/SHA256SUMS"
-curl -fsSLo SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
-curl -fsSLo "${PKG}" "${BASE_URL}/${PKG}"
-# Set TRUSTED_FINGERPRINT only from an independently authenticated channel.
+curl -fsSL -o SHA256SUMS "${BASE_URL}/SHA256SUMS"
+curl -fsSL -o SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
+curl -fsSL -o "${PKG}" "${BASE_URL}/${PKG}"
+# Supply both values through an independently authenticated channel. Do not
+# import a key from this repository or from the same release asset set.
+: "${RELEASE_KEY_PATH:?set RELEASE_KEY_PATH to an independently authenticated public-key file}"
 : "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated}"
 [[ "${TRUSTED_FINGERPRINT}" =~ ^[A-Fa-f0-9]{40}$ ]] || exit 1
-# Import the checked-in project public key into an isolated keyring first,
-# so gpg verifies the signature against the project key only.
 GNUPGDIR="$(mktemp -d)"
 trap 'rm -rf "${GNUPGDIR}"' EXIT
-gpg --batch --homedir "${GNUPGDIR}" --import packaging/nginx-markdown-for-agents-release.asc
+gpg --batch --homedir "${GNUPGDIR}" --import "${RELEASE_KEY_PATH}"
 VALIDSIG="$(gpg --batch --homedir "${GNUPGDIR}" --status-fd=1 \
     --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
     | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"

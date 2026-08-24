@@ -111,7 +111,12 @@ When the detector finds a version inconsistency:
    # tools/corpus/test-corpus-conversion/Cargo.toml
    nginx-markdown-converter = { version = "<current-version>", path = "..." }
    ```
-4. **Update documentation examples**: Replace outdated version references in INSTALLATION.md and other guides
+4. **Update packaging artifacts and documentation examples**: update
+   `packaging/nfpm/nfpm.yaml`,
+   `packaging/rpm/SPECS/nginx-module-markdown.spec`,
+   `packaging/homebrew/nginx-markdown-module.rb`, release workflow artifact
+   names, and INSTALLATION.md or other current guides together. Replace
+   outdated version references without changing historical migration entries.
 5. **Update the Rust baseline atomically**: Change `rust-toolchain.toml`, all
    first-party `rust-version` fields, classified workflows, source-build
    packaging, and current build documentation in the same change set. Do not

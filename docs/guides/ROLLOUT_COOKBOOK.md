@@ -1150,11 +1150,11 @@ request-based failure rate from the conversion-attempt-based failure rate:
 conversion_delivery_rate = sum(rate(nginx_markdown_conversion_deliveries_total[5m]))
                             / clamp_min(sum(rate(nginx_markdown_conversion_attempts_total[5m])), 1e-9)
 # Conversion-attempt-based failure rate: failed outcomes per conversion attempt.
-conversion_failure_rate = sum(rate(nginx_markdown_requests_total{outcome=~"failed_.*"}[5m]))
+conversion_failure_rate = sum(rate(nginx_markdown_requests_total{outcome=~"failed_.*|aborted"}[5m]))
                           / clamp_min(sum(rate(nginx_markdown_conversion_attempts_total[5m])), 1e-9)
 # Request-based failure rate: failed outcomes per request that entered the
 # decision chain (includes skipped and disabled requests in the denominator).
-request_failure_rate = sum(rate(nginx_markdown_requests_total{outcome=~"failed_.*"}[5m]))
+request_failure_rate = sum(rate(nginx_markdown_requests_total{outcome=~"failed_.*|aborted"}[5m]))
                        / clamp_min(sum(rate(nginx_markdown_requests_total[5m])), 1e-9)
 ```
 

@@ -79,7 +79,7 @@ decompression family is:
 nginx_markdown_decompression_events_total{
   encoding="gzip|deflate|brotli",
   outcome="success|failure",
-  reason="ok|budget_exceeded|format_error|truncated_input|io_error"
+  reason="budget_exceeded|format_error|io_error|ok|truncated_input"
 }
 ```
 

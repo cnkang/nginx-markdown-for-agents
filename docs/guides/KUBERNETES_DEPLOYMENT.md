@@ -26,9 +26,23 @@ different customization approaches.
 
 ### Verify
 
+Verify the active configuration and a module-specific request. `nginx -V`
+describes how the base binary was built. It does not prove that NGINX loaded a
+separately compiled dynamic module.
+
 ```bash
-kubectl exec -n ingress-nginx <pod> -- nginx -V 2>&1 | grep markdown
+kubectl exec -n ingress-nginx <pod> -- nginx -T 2>&1 \
+  | grep -F 'load_module'
+kubectl exec -n ingress-nginx <pod> -- nginx -t
+curl -fsS -H 'Accept: text/markdown' https://<ingress-host>/docs/example
 ```
+
+The first command must show the active module load, the second must parse the
+`markdown_filter` directive from the active configuration, and the request
+must return Markdown rather than the upstream HTML. For a negative control,
+temporarily remove the active `load_module` line and repeat `nginx -t`. The
+module-specific configuration must then fail. The smoke test must report that
+failure rather than treating it as successful.
 
 ### Disable
 
@@ -104,7 +118,7 @@ Use a different base Ingress Controller image:
 
 ```bash
 docker build -f examples/kubernetes/Dockerfile.ingress \
-  --build-arg NGINX_INGRESS_IMAGE=nginx/nginx-ingress:3.7.2 \
+  --build-arg NGINX_INGRESS_IMAGE=nginx/nginx-ingress@sha256:60f690573c0599aadd45468899f9baaa97a4775e852c4402b0003a1e58a8dc17 \
   --build-arg MODULE_SHA="$(git rev-parse HEAD)" \
   -t my-ingress:custom .
 ```
@@ -114,7 +128,7 @@ For plain NGINX (non-Ingress deployment):
 ```bash
 docker build -f examples/kubernetes/Dockerfile.ingress \
   --build-arg NGINX_VERSION=1.26.3 \
-  --build-arg NGINX_INGRESS_IMAGE=nginx:1.26.3 \
+  --build-arg NGINX_INGRESS_IMAGE=nginx:1.26.3@sha256:41b194461e4bae16f9b25d68b0976ed4735b89ca625c89aad88e1c1c3b7e8860 \
   --build-arg MODULE_SHA="$(git rev-parse HEAD)" \
   -t my-nginx-markdown:latest .
 ```
@@ -154,7 +168,7 @@ The following build arguments control the image build:
 | Build Arg | Default | Description |
 |-----------|---------|-------------|
 | `NGINX_VERSION` | `1.26.3` | NGINX version for module compilation. Must match the NGINX binary in the base image exactly. Minimum supported: 1.24.0. |
-| `NGINX_INGRESS_IMAGE` | `nginx/nginx-ingress:3.7.2` | Base Ingress Controller image. Can be any image containing an NGINX binary (including plain `nginx:*` images). |
+| `NGINX_INGRESS_IMAGE` | `nginx/nginx-ingress@sha256:60f690...` | Immutable base Ingress Controller image. Custom values must include a full digest and contain an NGINX binary. |
 | `MODULE_REPO` | `https://github.com/cnkang/nginx-markdown-for-agents.git` | Git repository URL for the module source code. |
 | `MODULE_REF` | `main` | Branch or tag used only as a reachability hint when direct object fetch is unavailable. |
 | `MODULE_SHA` | required | Full 40-character reviewed commit identity. The build verifies exact equality before running repository code. |
@@ -166,11 +180,13 @@ After building the image, verify the module is correctly compiled and loaded:
 #### Check NGINX Version and Module
 
 ```bash
-docker run --rm my-ingress:latest nginx -V 2>&1 | grep -E '(version|markdown)'
+docker run --rm my-ingress:latest nginx -T 2>&1 | grep -F 'load_module'
+docker run --rm my-ingress:latest nginx -t
 ```
 
-Expected output includes the NGINX version and the module in the configure
-arguments.
+The first command must show the active module load, and the second must
+successfully parse the active configuration. `nginx -V` only describes how
+the binary was built. It does not prove that NGINX loaded a dynamic module.
 
 #### Validate NGINX Configuration
 
@@ -204,7 +220,8 @@ load_module /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so;
 After deploying the custom image to your cluster:
 
 ```bash
-kubectl exec -n ingress-nginx <pod-name> -- nginx -V 2>&1 | grep markdown
+kubectl exec -n ingress-nginx <pod-name> -- nginx -T 2>&1 \
+  | grep -F 'load_module'
 kubectl exec -n ingress-nginx <pod-name> -- nginx -t
 ```
 
@@ -224,7 +241,7 @@ version inside the base Ingress Controller image.
 **Solution:**
 1. Check the NGINX version in the base image:
    ```bash
-   docker run --rm nginx/nginx-ingress:3.7.2 nginx -v
+   docker run --rm nginx/nginx-ingress@sha256:60f690573c0599aadd45468899f9baaa97a4775e852c4402b0003a1e58a8dc17 nginx -v
    ```
 2. Rebuild with the matching version:
    ```bash
@@ -527,11 +544,13 @@ local Docker commands.
 #### What It Verifies
 
 1. **Docker build** — Image builds without errors
-2. **nginx -V** — NGINX reports the markdown module (or `nginx -t` passes
-   for dynamic modules)
-3. **Module file** — `.so` file exists at
+2. **Active module configuration** — `nginx -T` lists the active
+   `load_module` line, and positive/negative `nginx -t` checks prove that
+   the module-specific directive requires the module
+3. **HTTP conversion** — `Accept: text/markdown` returns converted content
+4. **Module file** — `.so` file exists at
    `/usr/lib/nginx/modules/ngx_http_markdown_filter_module.so`
-4. **load_module snippet** — Configuration snippet at
+5. **load_module snippet** — Configuration snippet at
    `/etc/nginx/modules/10-mod-markdown.conf` references the module
 
 #### Usage
@@ -573,17 +592,19 @@ All options:
 [INFO]  Test: Docker image builds successfully
 [PASS]  Docker image built successfully: nginx-markdown-test:latest
 
-[INFO]  Test: nginx -V reports markdown module
-[PASS]  nginx -t passes (module loads without error)
+[INFO]  Test: active load_module, directive parsing, and negative control
+[PASS]  active include and positive/negative module configuration checks passed
+[INFO]  Test: HTTP Accept: text/markdown conversion
+[PASS]  HTTP Accept: text/markdown returned converted content
 [INFO]  Test: Module .so file exists at expected path
 [PASS]  Module file exists: /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
 [INFO]  Test: load_module configuration snippet exists
 [PASS]  load_module snippet correctly references markdown module
 
 ------------------------------------------------------------
-[INFO]  Results: 4 passed, 0 failed
+[INFO]  Results: 5 passed, 0 failed
 ------------------------------------------------------------
-RESULT: PASS (4/4 checks passed)
+RESULT: PASS (5/5 checks passed)
 ```
 
 Exit code `0` means all checks passed. `1` means one or more failed.
