@@ -106,15 +106,16 @@ impl PruneConfig {
         }
 
         let selectors = match selectors_str {
-            Some(s) if !s.is_empty() => s.split_whitespace().map(|tok| tok.to_owned()).collect(),
+            Some(s) if !s.is_empty() => s.split_whitespace().map(str::to_owned).collect(),
             _ => DEFAULT_NOISE_REGION_ELEMENTS
                 .iter()
-                .map(|s| (*s).to_owned())
+                .copied()
+                .map(str::to_owned)
                 .collect(),
         };
 
         let protection_selectors = match protection_selectors_str {
-            Some(s) if !s.is_empty() => s.split_whitespace().map(|tok| tok.to_owned()).collect(),
+            Some(s) if !s.is_empty() => s.split_whitespace().map(str::to_owned).collect(),
             _ => Vec::new(),
         };
 
