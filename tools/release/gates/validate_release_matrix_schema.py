@@ -72,15 +72,8 @@ def run_normalization(doc: dict) -> tuple[bool, str]:
     return False, proc.stderr.strip()
 
 
-def check_schema_shape(schema: dict, failures: list) -> None:
-    """Validate the schema declares the canonical contract."""
-    properties = schema.get("properties")
-    if not isinstance(properties, dict):
-        failures.append(
-            "schema must declare 'properties' as an object (got "
-            f"{type(properties).__name__ if properties is not None else 'missing'})"
-        )
-        return
+def _check_schema_version_and_entries(properties: dict, failures: list) -> None:
+    """Validate schema_version const and canonical top-level entries."""
     schema_version_prop = properties.get("schema_version", {})
     if not isinstance(schema_version_prop, dict):
         failures.append(
@@ -93,30 +86,54 @@ def check_schema_shape(schema: dict, failures: list) -> None:
     if "entries" not in properties:
         failures.append("schema must declare the canonical top-level 'entries'")
 
+
+def _get_entry_properties(schema: dict, failures: list) -> dict | None:
+    """Validate $defs.entry.properties and return the entry properties dict."""
     defs = schema.get("$defs")
     if not isinstance(defs, dict):
         failures.append(
             "schema must declare '$defs' as an object (got "
             f"{type(defs).__name__ if defs is not None else 'missing'})"
         )
-        return
+        return None
     entry_def = defs.get("entry")
     if not isinstance(entry_def, dict):
         failures.append(
             "schema $defs.entry must be an object (got "
             f"{type(entry_def).__name__ if entry_def is not None else 'missing'})"
         )
-        return
+        return None
     entry_props = entry_def.get("properties", {})
     if not isinstance(entry_props, dict):
         failures.append(
             "schema $defs.entry.properties must be an object (got "
             f"{type(entry_props).__name__})"
         )
-        return
+        return None
+    return entry_props
+
+
+def _check_canonical_keys(entry_props: dict, failures: list) -> None:
+    """Report missing canonical keys from entry properties."""
     for key in CANONICAL_KEYS:
         if key not in entry_props:
             failures.append(f"schema entry must declare canonical key {key!r}")
+
+
+def check_schema_shape(schema: dict, failures: list) -> None:
+    """Validate the schema declares the canonical contract."""
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        failures.append(
+            "schema must declare 'properties' as an object (got "
+            f"{type(properties).__name__ if properties is not None else 'missing'})"
+        )
+        return
+    _check_schema_version_and_entries(properties, failures)
+    entry_props = _get_entry_properties(schema, failures)
+    if entry_props is None:
+        return
+    _check_canonical_keys(entry_props, failures)
 
 
 POSITIVE_ENTRY_KEYS = ("nginx_version", "os", "libc", "target", "artifact_type")
