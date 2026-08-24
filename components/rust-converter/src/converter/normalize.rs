@@ -105,7 +105,7 @@ impl MarkdownConverter {
 
         for line in output.lines() {
             let fence_len = measure_fence_len(line);
-            let fence_line = line.trim_start_matches(|c| c == ' ' || c == '\t');
+            let fence_line = line.trim_start_matches([' ', '\t']);
             let fence_info = fence_line.get(fence_len..).unwrap_or("");
             let is_opening_fence =
                 active_fence_len.is_none() && fence_len >= 3 && !fence_info.contains('`');
@@ -176,7 +176,7 @@ pub(crate) fn measure_fence_len(line: &str) -> usize {
     if leading_indent_columns(line) > 3 {
         return 0;
     }
-    line.trim_start_matches(|c| c == ' ' || c == '\t')
+    line.trim_start_matches([' ', '\t'])
         .bytes()
         .take_while(|&b| b == b'`')
         .count()
