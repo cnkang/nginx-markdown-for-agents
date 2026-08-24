@@ -196,7 +196,7 @@ fn lookup_streaming_candidate(
         EventKind::StrictEtag => plan_action(Action::SwitchFullBuffer, "strict_etag", "PLAN-06"),
         EventKind::AutoRisk => plan_action(Action::SwitchFullBuffer, "auto_risk", "PLAN-07"),
         EventKind::BudgetInitFailure => {
-            plan_precommit_error_recovery(ctx, "budget_init_failure", "PLAN-08")
+            plan_precommit_recovery(ctx, "budget_init_failure", "PLAN-08")
         }
         _ => invalid_transition(StreamingState::StreamingCandidate, event),
     }
@@ -211,9 +211,9 @@ fn lookup_pre_commit(
         EventKind::LookBehindOverflow => {
             plan_action(Action::None, "look_behind_overflow", "PLAN-10")
         }
-        EventKind::ParserUnsuitable => plan_precommit_fallback(ctx, "parser_unsuitable", "PLAN-11"),
-        EventKind::ResourceLimit => plan_precommit_fallback(ctx, "resource_limit", "PLAN-12"),
-        EventKind::Error => plan_precommit_error_recovery(ctx, "error", "PLAN-13"),
+        EventKind::ParserUnsuitable => plan_precommit_recovery(ctx, "parser_unsuitable", "PLAN-11"),
+        EventKind::ResourceLimit => plan_precommit_recovery(ctx, "resource_limit", "PLAN-12"),
+        EventKind::Error => plan_precommit_recovery(ctx, "error", "PLAN-13"),
         EventKind::Commit => plan_action(Action::CommitHeaders, "commit", "PLAN-14"),
         EventKind::UpstreamEnd => Err(StateMachineError::InvariantViolation {
             message: concat!(
@@ -319,49 +319,13 @@ fn cleanup_plan_id(state: StreamingState) -> u8 {
     }
 }
 
-/// PRE_COMMIT fallback logic for PARSER_UNSUITABLE and RESOURCE_LIMIT.
+/// Resolve the pre-commit recovery action for all recoverable failures.
 ///
 /// Truth table:
 /// - full_input_reconstructible AND full_buffer_resources_allow → SWITCH_FULL_BUFFER
 /// - Otherwise, PASS → PASS_HTML
 /// - Otherwise, STATUS_xxx → REJECT_STATUS
-fn plan_precommit_fallback(
-    ctx: &PlanContext,
-    reason: &str,
-    plan_id: &str,
-) -> Result<PlanTransition, StateMachineError> {
-    if ctx.full_input_reconstructible && ctx.full_buffer_resources_allow {
-        Ok(PlanTransition {
-            action: Action::SwitchFullBuffer,
-            action_payload: ActionPayload::NULL,
-            reason: reason.to_string(),
-            transition_id: plan_id.to_string(),
-        })
-    } else {
-        match ctx.resolved_error_policy {
-            ResolvedErrorPolicy::Pass => Ok(PlanTransition {
-                action: Action::PassHtml,
-                action_payload: ActionPayload::NULL,
-                reason: reason.to_string(),
-                transition_id: plan_id.to_string(),
-            }),
-            _ => {
-                let status = resolve_reject_status(ctx.resolved_error_policy, reason);
-                Ok(PlanTransition {
-                    action: Action::RejectStatus,
-                    action_payload: ActionPayload {
-                        reject_status: status,
-                    },
-                    reason: reason.to_string(),
-                    transition_id: plan_id.to_string(),
-                })
-            }
-        }
-    }
-}
-
-/// PRE_COMMIT error recovery (includes BUDGET_INIT_FAILURE in STREAMING_CANDIDATE).
-fn plan_precommit_error_recovery(
+fn plan_precommit_recovery(
     ctx: &PlanContext,
     reason: &str,
     plan_id: &str,

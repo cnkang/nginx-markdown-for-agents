@@ -1,4 +1,4 @@
-//! Streaming lifecycle state machine (formal model).
+//! Streaming lifecycle state machine (executable specification).
 //!
 //! Implements the two-phase decision protocol for the streaming conversion
 //! lifecycle. This module governs the formal states, events, actions, and
@@ -22,6 +22,11 @@
 //! Normal per-chunk streaming feed is NOT a formal action — it is driven by
 //! the outer streaming engine (NGINX body filter loop). This module handles
 //! only lifecycle boundary events.
+//!
+//! The production request path remains in the NGINX module. This Rust module
+//! is intentionally not called from that path; model, property, and delivery
+//! matrix tests execute it as the authoritative lifecycle specification and
+//! parity reference for the production state transitions.
 
 pub mod apply;
 pub mod plan;
