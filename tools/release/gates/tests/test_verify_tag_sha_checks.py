@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import stat
 import sys
 from pathlib import Path
 
@@ -212,6 +213,7 @@ def test_main_writes_effective_required_check_enumeration(
         "schema_version": "release.required-checks.v1",
         "tag_sha": "a" * 40,
     }
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
     assert "Effective required checks:" in capsys.readouterr().out
 
 
