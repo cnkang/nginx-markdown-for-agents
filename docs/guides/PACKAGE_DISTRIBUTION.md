@@ -194,6 +194,12 @@ release-manifest.json → included in SHA256SUMS → signed as SHA256SUMS.asc
 The manifest provides release asset traceability and checksum cross-reference.
 It does not by itself prove byte-for-byte reproducible builds.
 
+Tag promotion also requires the protected `release-signing` environment secret
+`RELEASE_APPROVED_CANDIDATE_SHA`. Set it to the exact 40-character commit SHA
+approved by the release owner after qualification. The package workflow rejects
+an older commit that is merely an ancestor of `main`, even when that commit
+passed its own checks.
+
 Download the manifest from the same GitHub Release page:
 
 ```bash
