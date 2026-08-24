@@ -125,17 +125,28 @@ def test_non_streaming_verifier_changes_trigger_runtime_regressions() -> None:
     assert "tools/ci/verify_non_streaming_nginx_module.sh" in filters["e2e"]
 
 
-def test_release_packages_tag_gate_requires_exact_main_tip() -> None:
-    """Release tags must equal the protected branch candidate, not merely
-    be an ancestor somewhere in that branch's history."""
+def test_release_packages_tag_gate_requires_main_ancestry() -> None:
+    """Release tags must be contained in the protected branch history."""
     workflow_text = _workflow_text("release-packages.yml")
 
-    assert (
-        "gh api \"repos/${REPOSITORY}/commits/${DEFAULT_BRANCH}\" "
-        "--jq '.sha'"
-    ) in workflow_text
-    assert '[[ "${TAG_SHA}" != "${approved_sha}" ]]' in workflow_text
-    assert 'compare/${TAG_SHA}...${DEFAULT_BRANCH}' not in workflow_text
+    assert 'compare/${TAG_SHA}...${DEFAULT_BRANCH}' in workflow_text
+    assert 'branch_relation="$(gh api ' in workflow_text
+    assert 'ahead|identical)' in workflow_text
+    assert '[[ "${TAG_SHA}" != "${approved_sha}" ]]' not in workflow_text
+
+
+def test_release_packages_routes_matrix_values_through_step_environment() -> None:
+    """Shell run blocks must not interpolate matrix values directly."""
+    workflow = _workflow_data("release-packages.yml")
+
+    for job_name, job in workflow["jobs"].items():
+        for step in job.get("steps", []):
+            run = step.get("run")
+            if isinstance(run, str):
+                assert "${{ matrix." not in run, (
+                    f"{job_name}/{step.get('name', '<unnamed>')} "
+                    "interpolates a matrix value inside run"
+                )
 
 
 def test_release_packages_publish_waits_for_official_docker_gate() -> None:

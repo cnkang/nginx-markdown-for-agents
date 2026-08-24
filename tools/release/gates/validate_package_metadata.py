@@ -37,7 +37,6 @@ RPM_SPEC = (
 )
 GITHUB_WORKFLOWS_DIR = PROJECT_ROOT / ".github" / "workflows"
 RELEASE_PACKAGES_WORKFLOW = GITHUB_WORKFLOWS_DIR / "release-packages.yml"
-RELEASE_DEB_WORKFLOW = GITHUB_WORKFLOWS_DIR / "release-deb.yml"
 RELEASE_RPM_WORKFLOW = GITHUB_WORKFLOWS_DIR / "release-rpm.yml"
 SIGN_AND_PUBLISH_WORKFLOW = GITHUB_WORKFLOWS_DIR / "sign-and-publish.yml"
 CHECKSUMS_FILE = PROJECT_ROOT / "packaging" / "checksums.sha256"
@@ -92,11 +91,9 @@ MODULE_NAME_SURFACES = [
     NFPM_CONFIG,
     RPM_SPEC,
     PROJECT_ROOT / "packaging" / "rpm" / "nginx-markdown-module.spec",
-    PROJECT_ROOT / "packaging" / "debian" / "postinst",
     PROJECT_ROOT / "packaging" / "snippets" / "mod-markdown-for-agents.conf",
     PROJECT_ROOT / "packaging" / "nfpm" / "modules-available" / "mod-markdown.conf",
     NFPM_POSTINSTALL,
-    PROJECT_ROOT / "packaging" / "scripts" / "build-deb.sh",
     SMOKE_TEST_BASIC,
     PROJECT_ROOT / "packaging" / "scripts" / "smoke-test-diagnostics.sh",
     PROJECT_ROOT / "tools" / "release" / "gates" / "check_install_layout.sh",
@@ -105,12 +102,10 @@ MODULE_NAME_SURFACES = [
     PROJECT_ROOT / "docs" / "COMPATIBILITY.md",
     PROJECT_ROOT / "docs" / "guides" / "INSTALL.md",
     RELEASE_PACKAGES_WORKFLOW,
-    RELEASE_DEB_WORKFLOW,
     RELEASE_RPM_WORKFLOW,
 ]
 RELEASE_VERSION_SURFACES = [
     RELEASE_PACKAGES_WORKFLOW,
-    RELEASE_DEB_WORKFLOW,
     RELEASE_RPM_WORKFLOW,
     *RELEASE_DOCKERFILES,
 ]
@@ -119,9 +114,6 @@ RELEASE_ARTIFACT_SNIPPETS = {
         "name: pkg-deb-${{ matrix.nginx_version }}-${{ matrix.arch }}",
         "name: pkg-rpm-${{ matrix.nginx_version }}-${{ matrix.arch }}",
         "name: pkg-${{ matrix.format }}-${{ matrix.nginx_version }}-${{ matrix.arch }}",
-    ],
-    RELEASE_DEB_WORKFLOW: [
-        "name: pkg-deb-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.nginx_channel }}",
     ],
     RELEASE_RPM_WORKFLOW: [
         "name: pkg-rpm-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.nginx_channel }}",
@@ -133,18 +125,6 @@ ARCH_RUNNER_SNIPPET = (
     "'ubuntu-24.04' }}"
 )
 STANDALONE_CONTAINER_BASH_SHELL = "defaults:\n      run:\n        shell: bash"
-STANDALONE_DEB_SNIPPETS = [
-    "INPUT_VERSION: ${{ inputs.version }}",
-    './packaging/scripts/validate-version.sh "$INPUT_VERSION"',
-    f'PKG_NAME="{CANONICAL_PACKAGE_NAME}"',
-    "/usr/share/doc/nginx-markdown-for-agents",
-    "/usr/share/licenses/nginx-markdown-for-agents",
-    "docs/guides/INSTALL.md",
-    "docs/COMPATIBILITY.md",
-    "Depends: nginx (= ${NGINX_VERSION})",
-    "tools/release/gates/check_install_layout.sh dist/*.deb",
-    '"dist/${PKG_NAME}_${PKG_VERSION}_nginx-${NGINX_VERSION}_${PKG_ARCH}.deb"',
-]
 STANDALONE_RPM_WORKFLOW_SNIPPETS = [
     "INPUT_VERSION: ${{ inputs.version }}",
     './packaging/scripts/validate-version.sh "$INPUT_VERSION"',
@@ -884,24 +864,6 @@ def _check_minimum_count(
         result.fail(check_id, f"{message} ({count}/{minimum})")
 
 
-def _validate_standalone_deb(result: ValidationResult) -> None:
-    """Validate standalone DEB workflow matches canonical package layout."""
-    deb_workflow = read_safe(RELEASE_DEB_WORKFLOW)
-    if not deb_workflow:
-        result.fail("standalone-deb:exists",
-                    f"{RELEASE_DEB_WORKFLOW.name} not found")
-        return
-    _check_container_bash_shell(deb_workflow, "standalone-deb", result)
-    _check_snippets(
-        deb_workflow, STANDALONE_DEB_SNIPPETS, "standalone-deb",
-        RELEASE_DEB_WORKFLOW.name, result,
-    )
-    _check_forbidden_snippets(
-        deb_workflow, STANDALONE_VERSION_FORBIDDEN_SNIPPETS, "standalone-deb",
-        RELEASE_DEB_WORKFLOW.name, result,
-    )
-
-
 def _validate_standalone_rpm_workflow(result: ValidationResult) -> None:
     """Validate standalone RPM workflow matches canonical package layout."""
     rpm_workflow = read_safe(RELEASE_RPM_WORKFLOW)
@@ -943,8 +905,7 @@ def _validate_standalone_rpm_spec(result: ValidationResult) -> None:
 
 
 def validate_standalone_workflow_packaging(result: ValidationResult) -> None:
-    """Validate standalone DEB/RPM workflows match canonical package layout."""
-    _validate_standalone_deb(result)
+    """Validate the retained standalone RPM workflow and spec."""
     _validate_standalone_rpm_workflow(result)
     _validate_standalone_rpm_spec(result)
 

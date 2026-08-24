@@ -84,3 +84,18 @@ def test_cargo_dependency_feature_consumers_reject_forbidden_names() -> None:
     )
 
     assert any("forbidden Cargo feature name 'brotli'" in failure for failure in failures)
+
+
+def test_non_string_dependency_feature_fails_closed() -> None:
+    """Malformed feature arrays produce a validation error, not a crash."""
+    failures: list[str] = []
+    validator.check_cargo_features(
+        '[features]\n'
+        'default = ["incremental", "streaming", "prune_noise_regions"]\n'
+        '[dependencies.parser]\n'
+        'version = "1"\n'
+        'features = [1]\n',
+        failures,
+    )
+
+    assert any("non-string" in failure for failure in failures)

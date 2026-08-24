@@ -82,6 +82,12 @@ def check_schema_shape(schema: dict, failures: list) -> None:
         )
         return
     schema_version_prop = properties.get("schema_version", {})
+    if not isinstance(schema_version_prop, dict):
+        failures.append(
+            "schema_version property must be an object (got "
+            f"{type(schema_version_prop).__name__})"
+        )
+        schema_version_prop = {}
     if schema_version_prop.get("const") != 1:
         failures.append("schema must declare schema_version const 1")
     if "entries" not in properties:
@@ -94,29 +100,67 @@ def check_schema_shape(schema: dict, failures: list) -> None:
             f"{type(defs).__name__ if defs is not None else 'missing'})"
         )
         return
-    entry_props = defs.get("entry", {}).get("properties", {})
+    entry_def = defs.get("entry")
+    if not isinstance(entry_def, dict):
+        failures.append(
+            "schema $defs.entry must be an object (got "
+            f"{type(entry_def).__name__ if entry_def is not None else 'missing'})"
+        )
+        return
+    entry_props = entry_def.get("properties", {})
+    if not isinstance(entry_props, dict):
+        failures.append(
+            "schema $defs.entry.properties must be an object (got "
+            f"{type(entry_props).__name__})"
+        )
+        return
     for key in CANONICAL_KEYS:
         if key not in entry_props:
             failures.append(f"schema entry must declare canonical key {key!r}")
 
 
+POSITIVE_ENTRY_KEYS = ("nginx_version", "os", "libc", "target", "artifact_type")
+
+
+def _report_positive_entry_keys(name: str, entries: list, failures: list) -> None:
+    """Report canonical keys missing from normalized matrix entries."""
+    for entry in entries:
+        for key in POSITIVE_ENTRY_KEYS:
+            if key not in entry:
+                failures.append(
+                    f"positive case {name!r} entry missing canonical key {key!r}"
+                )
+
+
+def _validate_positive_output(name: str, output: str, failures: list) -> None:
+    """Validate one successful normalization result."""
+    normalized = json.loads(output)
+    if not isinstance(normalized, dict):
+        failures.append(f"positive case {name!r} returned a non-object")
+        return
+    if "entries" not in normalized:
+        failures.append(f"positive case {name!r} lost the entries array")
+        return
+    entries = normalized["entries"]
+    if not isinstance(entries, list):
+        failures.append(f"positive case {name!r} returned non-list entries")
+        return
+    _report_positive_entry_keys(name, entries, failures)
+
+
+def _check_positive_case(name: str, doc: str, failures: list) -> None:
+    """Run and validate one positive normalization fixture."""
+    ok, output = run_normalization(doc)
+    if not ok:
+        failures.append(f"positive case {name!r} failed: {output}")
+        return
+    _validate_positive_output(name, output, failures)
+
+
 def check_positive_cases(cases: list, failures: list) -> None:
     """Run positive normalization fixtures and validate canonical output."""
     for name, doc in cases:
-        ok, output = run_normalization(doc)
-        if not ok:
-            failures.append(f"positive case {name!r} failed: {output}")
-            continue
-        normalized = json.loads(output)
-        if "entries" not in normalized:
-            failures.append(f"positive case {name!r} lost the entries array")
-            continue
-        for entry in normalized["entries"]:
-            for key in ("nginx_version", "os", "libc", "target", "artifact_type"):
-                if key not in entry:
-                    failures.append(
-                        f"positive case {name!r} entry missing canonical key {key!r}"
-                    )
+        _check_positive_case(name, doc, failures)
 
 
 def check_negative_cases(cases: list, failures: list) -> None:

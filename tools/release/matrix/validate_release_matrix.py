@@ -12,9 +12,8 @@ Validates that the generated release-contract projection
    top-level `matrix` array, and contains no dropped legacy metadata keys.
 3. Bound to the final frozen FFI ABI version (`MARKDOWN_ABI_VERSION` in the
    generated `components/rust-converter/include/markdown_converter.h`) and
-   to the official build feature manifest digest
-   (`artifacts/release/0.9.2/official-build-feature-manifest.json`) for
-   every entry.
+   to the official build feature manifest digest in the active release
+   artifact directory for every entry.
 4. Generated from the sole manually maintained policy matrix
    (`tools/release-matrix.json`) without projection drift.
 
@@ -29,6 +28,7 @@ Exit codes:
 from __future__ import annotations
 
 import hashlib
+import importlib.util as _importlib_util
 import json
 import pathlib
 import re
@@ -38,22 +38,62 @@ import sys
 try:
     from .normalize_matrix import RELEASE_VERSION
 except ImportError:
-    import importlib.util as _importlib_util
-
     _norm_path = pathlib.Path(__file__).resolve().parent / "normalize_matrix.py"
+    if not _norm_path.is_file():
+        raise SystemExit(
+            f"ERROR: matrix normalizer module is missing: {_norm_path}"
+        )
     _norm_spec = _importlib_util.spec_from_file_location(
         "normalize_matrix_standalone", str(_norm_path)
     )
-    RELEASE_VERSION = "0.9.2"
-    if _norm_spec is not None and _norm_spec.loader is not None:
-        _norm_mod = _importlib_util.module_from_spec(_norm_spec)
+    if _norm_spec is None or _norm_spec.loader is None:
+        raise SystemExit(
+            f"ERROR: unable to load matrix normalizer module: {_norm_path}"
+        )
+    _norm_mod = _importlib_util.module_from_spec(_norm_spec)
+    try:
         _norm_spec.loader.exec_module(_norm_mod)
-        RELEASE_VERSION = getattr(_norm_mod, "RELEASE_VERSION", "0.9.2")
+    except Exception as exc:
+        raise SystemExit(
+            f"ERROR: matrix normalizer module failed to load: {exc}"
+        ) from exc
+    RELEASE_VERSION = getattr(_norm_mod, "RELEASE_VERSION", None)
+    if not isinstance(RELEASE_VERSION, str) or not RELEASE_VERSION:
+        raise SystemExit(
+            "ERROR: matrix normalizer does not export RELEASE_VERSION"
+        )
 
 try:
     from .generate_release_contract_matrix import build_projection
 except ImportError:
-    from generate_release_contract_matrix import build_projection
+    _projection_path = (
+        pathlib.Path(__file__).resolve().parent
+        / "generate_release_contract_matrix.py"
+    )
+    if not _projection_path.is_file():
+        raise SystemExit(
+            f"ERROR: release matrix projection module is missing: {_projection_path}"
+        )
+    _projection_spec = _importlib_util.spec_from_file_location(
+        "generate_release_contract_matrix_standalone", str(_projection_path)
+    )
+    if _projection_spec is None or _projection_spec.loader is None:
+        raise SystemExit(
+            f"ERROR: unable to load release matrix projection module: {_projection_path}"
+        )
+    _projection_mod = _importlib_util.module_from_spec(_projection_spec)
+    try:
+        _projection_spec.loader.exec_module(_projection_mod)
+    except Exception as exc:
+        raise SystemExit(
+            f"ERROR: release matrix projection module failed to load: {exc}"
+        ) from exc
+    build_projection = getattr(_projection_mod, "build_projection", None)
+    if not callable(build_projection):
+        raise SystemExit(
+            "ERROR: release matrix projection module does not export "
+            "build_projection"
+        )
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 MATRIX_PATH = REPO_ROOT / "docs" / "releases" / "release-matrix.json"

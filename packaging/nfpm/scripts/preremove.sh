@@ -62,8 +62,11 @@ main() {
     if [[ -L "${SYMLINK_PATH}" ]]; then
         TARGET="$(readlink "${SYMLINK_PATH}" 2>/dev/null || true)"
         if [[ "${TARGET}" = "${MODULES_AVAILABLE_CONF}" ]]; then
-            info "Removing module symlink: ${SYMLINK_PATH} -> ${TARGET}"
-            rm -f "${SYMLINK_PATH}"
+            if rm -f "${SYMLINK_PATH}"; then
+                info "Removed module symlink: ${SYMLINK_PATH} -> ${TARGET}"
+            else
+                info "Could not remove module symlink: ${SYMLINK_PATH}; continuing cleanup"
+            fi
         else
             info "Not removing ${SYMLINK_PATH}: symlink target ${TARGET} is not this module's config (${MODULES_AVAILABLE_CONF})"
         fi

@@ -120,6 +120,18 @@ _CHECK_HELM_RENDER_MODULE_MISSING = "helm:render-module-missing"
 _CHECK_HELM_RENDER_METRICS_WITHOUT_MODULE = "helm:render-metrics-without-module"
 _CHECK_HELM_RENDER_MODULE_ENABLED = "helm:render-module-enabled"
 _CHECK_HELM_RENDER_MODULE_METRICS = "helm:render-module-metrics"
+_CHECK_HELM_TEMPLATE_EXPLICIT = "helm:template:explicit-image"
+
+_EXPLICIT_IMAGE_ARGS = [
+    "--set-string",
+    "image.repository=nginx",
+    "--set-string",
+    "image.tag=1.26.3",
+]
+_IMAGE_REQUIRED_MESSAGES = (
+    "image.repository must be set explicitly",
+    "image.tag must be set explicitly",
+)
 
 
 class ValidationResult:
@@ -389,17 +401,47 @@ def _validate_default_helm_template(
     helm: str,
     chart_dir: Path,
 ) -> str | None:
-    """Render default Helm output and validate stock-image-safe snippets."""
-    rendered = _run_helm_template(result, _CHECK_HELM_TEMPLATE, helm, chart_dir)
+    """Validate the empty-image contract and an explicit-image render."""
+    missing_image = _run_helm_template(
+        result, _CHECK_HELM_TEMPLATE, helm, chart_dir
+    )
+    if missing_image is None:
+        return None
+    if missing_image.returncode == 0:
+        result.fail(
+            _CHECK_HELM_TEMPLATE,
+            "helm template without image.repository/image.tag must fail",
+        )
+        return None
+    if not any(message in missing_image.stdout for message in _IMAGE_REQUIRED_MESSAGES):
+        result.fail(
+            _CHECK_HELM_TEMPLATE,
+            "empty-image Helm render failed for an unexpected reason: "
+            f"{_truncate_output(missing_image.stdout.strip())}",
+        )
+        return None
+    result.pass_(
+        _CHECK_HELM_TEMPLATE,
+        "helm template without image overrides fails on the required image contract",
+    )
+
+    rendered = _run_helm_template(
+        result,
+        _CHECK_HELM_TEMPLATE_EXPLICIT,
+        helm,
+        chart_dir,
+        _EXPLICIT_IMAGE_ARGS,
+    )
     if rendered is None:
         return None
     if rendered.returncode != 0:
         result.fail(
-            _CHECK_HELM_TEMPLATE,
-            f"helm template failed: {_truncate_output(rendered.stdout.strip())}",
+            _CHECK_HELM_TEMPLATE_EXPLICIT,
+            "explicit-image Helm template failed: "
+            f"{_truncate_output(rendered.stdout.strip())}",
         )
         return None
-    result.pass_(_CHECK_HELM_TEMPLATE, "helm template rendered successfully")
+    result.pass_(_CHECK_HELM_TEMPLATE_EXPLICIT, "explicit-image Helm template rendered successfully")
     _validate_rendered_yaml(result, rendered.stdout)
     _validate_rendered_required_snippets(result, rendered.stdout)
     _validate_rendered_default_forbidden_snippets(result, rendered.stdout)
@@ -467,7 +509,7 @@ def _validate_missing_module_guard(
         _CHECK_HELM_RENDER_MODULE_MISSING,
         helm,
         chart_dir,
-        ["--set", "markdown.enabled=true"],
+        [*_EXPLICIT_IMAGE_ARGS, "--set", "markdown.enabled=true"],
     )
     if rendered is None:
         return
@@ -492,7 +534,7 @@ def _validate_metrics_without_module_guard(
         _CHECK_HELM_RENDER_METRICS_WITHOUT_MODULE,
         helm,
         chart_dir,
-        ["--set", "metrics.enabled=true"],
+        [*_EXPLICIT_IMAGE_ARGS, "--set", "metrics.enabled=true"],
     )
     if rendered is None:
         return
@@ -509,6 +551,7 @@ def _validate_metrics_without_module_guard(
 def _module_enabled_args() -> list[str]:
     """Return Helm args that enable the markdown dynamic module."""
     return [
+        *_EXPLICIT_IMAGE_ARGS,
         "--set",
         "markdown.enabled=true",
         "--set-string",

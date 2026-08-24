@@ -16,6 +16,7 @@ Exit codes:
 """
 
 import hashlib
+import importlib.util
 import json
 import pathlib
 import sys
@@ -23,24 +24,39 @@ import tomllib
 from argparse import ArgumentParser
 from collections.abc import Iterator
 
-try:
-    from tools.release.matrix.normalize_matrix import RELEASE_VERSION
-except ImportError:
-    import importlib.util as _importlib_util
+def _load_release_version() -> str:
+    """Load the release artifact version without a hardcoded fallback."""
+    try:
+        from tools.release.matrix.normalize_matrix import RELEASE_VERSION
+    except ImportError:
+        norm_path = pathlib.Path(__file__).resolve().parents[1] / "matrix" / "normalize_matrix.py"
+        norm_spec = importlib.util.spec_from_file_location(
+            "normalize_matrix_standalone", str(norm_path)
+        )
+        if norm_spec is None or norm_spec.loader is None:
+            raise ImportError(f"cannot load release matrix normalizer: {norm_path}")
+        norm_module = importlib.util.module_from_spec(norm_spec)
+        norm_spec.loader.exec_module(norm_module)
+        RELEASE_VERSION = getattr(norm_module, "RELEASE_VERSION", None)
+    if not isinstance(RELEASE_VERSION, str) or not RELEASE_VERSION:
+        raise ValueError("release matrix normalizer does not export RELEASE_VERSION")
+    return RELEASE_VERSION
 
-    _norm_path = pathlib.Path(__file__).resolve().parents[1] / "matrix" / "normalize_matrix.py"
-    _norm_spec = _importlib_util.spec_from_file_location(
-        "normalize_matrix_standalone", str(_norm_path)
-    )
-    RELEASE_VERSION = "0.9.2"
-    if _norm_spec is not None and _norm_spec.loader is not None:
-        _norm_mod = _importlib_util.module_from_spec(_norm_spec)
-        _norm_spec.loader.exec_module(_norm_mod)
-        RELEASE_VERSION = getattr(_norm_mod, "RELEASE_VERSION", "0.9.2")
+
+try:
+    RELEASE_VERSION = _load_release_version()
+    RELEASE_VERSION_ERROR = None
+except Exception as exc:  # fail closed in main() with a structured error
+    RELEASE_VERSION = None
+    RELEASE_VERSION_ERROR = str(exc)
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
 def _manifest_path() -> pathlib.Path:
+    if RELEASE_VERSION is None:
+        raise RuntimeError(
+            f"release version is unavailable: {RELEASE_VERSION_ERROR}"
+        )
     return REPO_ROOT / "artifacts" / "release" / RELEASE_VERSION / "official-build-feature-manifest.json"
 
 def _cargo_toml_path() -> pathlib.Path:
@@ -172,10 +188,16 @@ def _normalize_feature_token(feature: str) -> tuple[str, list[str]]:
 
 def _forbidden_feature_values(
     values: list, path: tuple[str, ...]
-) -> Iterator[tuple[str, str]]:
+) -> Iterator[tuple[object, str]]:
     """Yield forbidden values from one Cargo ``features`` array."""
     location = ".".join(path)
     for feature in values:
+        if not isinstance(feature, str):
+            # TOML accepts arrays containing mixed scalar types.  A malformed
+            # feature request must fail closed instead of reaching string
+            # normalization and raising an unhandled AttributeError.
+            yield f"<non-string:{type(feature).__name__}> {feature!r}", location
+            continue
         # Both the dependency segment and the feature segment are
         # checked: a forbidden dependency name must not slip through as
         # the prefix of a slash-delimited token.
@@ -244,6 +266,13 @@ def main(argv=None) -> int:
         help="Create the ignored build artifact before validating it.",
     )
     args = parser.parse_args(argv)
+
+    if RELEASE_VERSION is None:
+        print(
+            f"ERROR: cannot resolve release artifact version: {RELEASE_VERSION_ERROR}",
+            file=sys.stderr,
+        )
+        return 1
 
     if args.write and write_manifest() != 0:
         return 1

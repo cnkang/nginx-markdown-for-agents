@@ -100,7 +100,16 @@ echo "--- Property 4: git diff shows only prefix string changes ---"
 # Later fix batches legitimately change log components elsewhere (e.g. a
 # severity upgrade or a removed log site); those are covered by their own
 # gates and must not fail this prefix-preservation guard.
-GIT_DIFF=$(git diff -- "components/nginx-module/src/ngx_http_markdown_stream_commit.c" "components/nginx-module/src/ngx_http_markdown_stream_postcommit.c" 2>/dev/null || true)
+PR_BASE_REF="${GITHUB_BASE_SHA:-}"
+if [[ -z "$PR_BASE_REF" ]]; then
+    PR_BASE_BRANCH="${GITHUB_BASE_REF:-${BASE_REF:-main}}"
+    PR_BASE_REF="origin/${PR_BASE_BRANCH}"
+fi
+MERGE_BASE=""
+if ! MERGE_BASE=$(git merge-base HEAD "$PR_BASE_REF" 2>/dev/null); then
+    MERGE_BASE=$(git rev-parse HEAD)
+fi
+GIT_DIFF=$(git diff "$MERGE_BASE" -- "components/nginx-module/src/ngx_http_markdown_stream_commit.c" "components/nginx-module/src/ngx_http_markdown_stream_postcommit.c" 2>/dev/null || true)
 
 if [[ -z "$GIT_DIFF" ]]; then
     echo "PASS: No uncommitted changes in $SRCDIR (baseline state)"

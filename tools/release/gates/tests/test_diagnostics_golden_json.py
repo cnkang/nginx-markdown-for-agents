@@ -95,18 +95,20 @@ def redact_last_error(error_text):
     pattern and clamp the result so it always satisfies the contract.
     """
     redacted = error_text
-    for pattern in _PATH_PATTERNS + _SECRET_PATTERNS:
-        redacted = pattern.sub("<redacted>", redacted)
-    encoded = redacted.encode("utf-8")
-    if len(encoded) > 512:
-        redacted = encoded[:512].decode("utf-8", errors="ignore")
+    patterns = _PATH_PATTERNS + _SECRET_PATTERNS
+    for _ in range(len(patterns) + 2):
+        for pattern in patterns:
+            redacted = pattern.sub("<redacted>", redacted)
+        encoded = redacted.encode("utf-8")
+        if len(encoded) <= 512:
+            return redacted
         # A truncation boundary can split a path/filename pattern, leaving
         # a newly-formed forbidden suffix (for example a config filename
-        # ending in ".conf").  Re-run the scrub after clamping so the
-        # result satisfies the contract for every truncation point.
-        for pattern in _PATH_PATTERNS + _SECRET_PATTERNS:
-            redacted = pattern.sub("<redacted>", redacted)
-    return redacted
+        # ending in ".conf").  Clamp only after substitutions, then repeat
+        # the scrub so replacements can never push the final value above the
+        # byte limit.
+        redacted = encoded[:512].decode("utf-8", errors="ignore")
+    return redacted.encode("utf-8")[:512].decode("utf-8", errors="ignore")
 
 
 def _redact_error_for_test(error_text):

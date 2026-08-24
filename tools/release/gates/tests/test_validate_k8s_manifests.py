@@ -31,6 +31,68 @@ def test_helm_defaults_are_stock_nginx_safe() -> None:
     assert "markdown_metrics" in HELM_RENDER_FORBIDDEN_DEFAULT_SNIPPETS
 
 
+def test_empty_image_render_is_expected_but_explicit_image_must_render(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The chart keeps empty image defaults while explicit images render."""
+    explicit_output = (
+        "apiVersion: v1\n"
+        "data:\n"
+        "  nginx.conf: |\n"
+        + "\n".join(
+            f"    {snippet}" for snippet in validator.HELM_RENDER_REQUIRED_SNIPPETS
+        )
+        + "\n"
+    )
+    responses = iter(
+        [
+            subprocess.CompletedProcess(
+                args=["helm", "template"],
+                returncode=1,
+                stdout="Error: image.repository must be set explicitly",
+            ),
+            subprocess.CompletedProcess(
+                args=["helm", "template"],
+                returncode=0,
+                stdout=explicit_output,
+            ),
+        ]
+    )
+    monkeypatch.setattr(validator, "_run_helm_template", lambda *args: next(responses))
+
+    result = ValidationResult()
+    rendered = validator._validate_default_helm_template(
+        result, "helm", Path("chart")
+    )
+
+    assert rendered == explicit_output
+    assert not result.has_failures, result.results
+    assert any(
+        check_id == validator._CHECK_HELM_TEMPLATE
+        and "required image contract" in message
+        for status, check_id, message in result.results
+        if status == "PASS"
+    )
+
+
+def test_empty_image_render_rejects_unrelated_helm_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An arbitrary default-render failure must not be accepted as expected."""
+    completed = subprocess.CompletedProcess(
+        args=["helm", "template"],
+        returncode=1,
+        stdout="Error: unrelated chart rendering failure",
+    )
+    monkeypatch.setattr(validator, "_run_helm_template", lambda *args: completed)
+
+    result = ValidationResult()
+    assert validator._validate_default_helm_template(
+        result, "helm", Path("chart")
+    ) is None
+    assert result.has_failures
+
+
 def test_helm_module_enablement_requires_explicit_module_path() -> None:
     """markdown.enabled=true must fail clearly when loadModule is absent."""
     assert (

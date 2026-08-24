@@ -657,6 +657,7 @@ def write_nginx_conf(runtime_dir: pathlib.Path, port: int, root: str, module_so:
         )
     (validated_runtime_dir / "logs").mkdir(parents=True, exist_ok=True)
     conf = f"""worker_processes 1;
+daemon off;
 error_log {runtime_text}/logs/error.log notice;
 pid {runtime_text}/nginx.pid;
 {load_line}

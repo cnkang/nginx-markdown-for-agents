@@ -19,3 +19,18 @@ def test_run_normalization_fails_closed_when_process_cannot_start(monkeypatch):
 
     assert not ok
     assert "normalizer execution failed" in message
+
+
+def test_malformed_schema_types_are_reported_without_attribute_error():
+    """Malformed schema nodes produce structured failures, not a crash."""
+    failures: list[str] = []
+    validator.check_schema_shape(
+        {
+            "properties": {"schema_version": "not-an-object"},
+            "$defs": {"entry": {"properties": []}},
+        },
+        failures,
+    )
+
+    assert any("schema_version property must be an object" in item for item in failures)
+    assert any("entry.properties must be an object" in item for item in failures)

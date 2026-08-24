@@ -485,10 +485,10 @@ def _read_matrix_json(path: Path) -> dict:
 def _source_only_entry(normalized: dict) -> dict | None:
     """Project a source row for the legacy/doc-sync matrix vocabulary.
 
-    Source rows intentionally retain the historical ``source_only`` shape so
-    the canonical, legacy, and generated documentation consumers continue to
-    describe the same row.  Keep this projection separate from dynamic-module
-    handling so a future artifact type cannot accidentally inherit it.
+    Keep source rows separate from dynamic-module handling so a future artifact
+    type cannot accidentally inherit the projection.  The merge step omits a
+    source-only row when the same NGINX version already has generated binary
+    coverage, because that row would contradict the platform table.
     """
     if (
         normalized.get("artifact_type") == "source"
@@ -750,6 +750,26 @@ def merge_matrix(auto_entries: list[dict], manual_entries: list[dict]) -> list[d
     """
     _assert_unique_identities(auto_entries, "auto")
     _assert_unique_identities(manual_entries, "manual")
+    covered_versions = {
+        _matrix_entry_identity(entry)[0]
+        for entry in auto_entries
+        if entry.get("support_tier") == SUPPORT_TIER
+    }
+    manual_entries = [
+        entry
+        for entry in manual_entries
+        if not (
+            entry.get("support_tier") == "source_only"
+            and (
+                entry.get("artifact_type") == "source"
+                or (
+                    entry.get("os_type") == "n/a"
+                    and entry.get("arch") == "any"
+                )
+            )
+            and _matrix_entry_identity(entry)[0] in covered_versions
+        )
+    ]
     manual_keys = {_matrix_entry_identity(e) for e in manual_entries}
 
     # Keep only auto entries whose key does not collide with a manual entry

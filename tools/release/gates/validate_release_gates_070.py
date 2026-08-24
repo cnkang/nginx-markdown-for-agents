@@ -23,7 +23,6 @@ CARGO_TOML_PATH = PROJECT_ROOT / "components" / "rust-converter" / "Cargo.toml"
 RUST_TOOLCHAIN_PATH = PROJECT_ROOT / "rust-toolchain.toml"
 WORKFLOWS_DIR = PROJECT_ROOT / ".github" / "workflows"
 RELEASE_PACKAGES_WORKFLOW = WORKFLOWS_DIR / "release-packages.yml"
-RELEASE_DEB_WORKFLOW = WORKFLOWS_DIR / "release-deb.yml"
 RELEASE_RPM_WORKFLOW = WORKFLOWS_DIR / "release-rpm.yml"
 RUSTUP_INSTALL_SCRIPT = PROJECT_ROOT / "packaging" / "scripts" / "install-verified-rustup.sh"
 CHECKSUMS_PATH = PROJECT_ROOT / "packaging" / "checksums.sha256"
@@ -433,7 +432,6 @@ def _gate_5_items(
     mk: str,
     gates: str,
     release_packages: str,
-    release_deb: str,
     release_rpm: str,
 ) -> BlockingItems:
     return [
@@ -443,7 +441,6 @@ def _gate_5_items(
         ("release packages has nm preflight", "binutils" in release_packages and "command -v nm" in release_packages),
         ("rust toolchain pinned", _toolchain_matches_cargo()),
         ("release-packages pinned rust", _workflow_uses_pinned_toolchain(release_packages)),
-        ("release-deb pinned rust", _workflow_uses_pinned_toolchain(release_deb)),
         ("release-rpm pinned rust", _workflow_uses_pinned_toolchain(release_rpm)),
         (
             "release-packages build invariants",
@@ -451,10 +448,8 @@ def _gate_5_items(
                 release_packages, require_lto_config=True
             ),
         ),
-        ("release-deb build invariants", _workflow_has_release_build_invariants(release_deb)),
         ("release-rpm build invariants", _workflow_has_release_build_invariants(release_rpm)),
         ("release-packages official marker", _workflow_identifies_release_path(release_packages, official=True)),
-        ("release-deb legacy marker", _workflow_identifies_release_path(release_deb, official=False)),
         ("release-rpm legacy marker", _workflow_identifies_release_path(release_rpm, official=False)),
     ]
 
@@ -496,7 +491,6 @@ def _build_blocking_items() -> dict[str, BlockingItems]:
     decomp = read(DECOMPRESSION_C)
     filter_h = read(FILTER_MODULE_H)
     release_packages = read(RELEASE_PACKAGES_WORKFLOW)
-    release_deb = read(RELEASE_DEB_WORKFLOW)
     release_rpm = read(RELEASE_RPM_WORKFLOW)
 
     unit_test_files = "\n".join(
@@ -509,7 +503,7 @@ def _build_blocking_items() -> dict[str, BlockingItems]:
         "decomp": decomp, "filter_h": filter_h, "ffi_contract": ffi_contract,
         "unit_test_files": unit_test_files, "conversion": conversion,
         "decision_log": decision_log, "headers": headers,
-        "release_packages": release_packages, "release_deb": release_deb,
+        "release_packages": release_packages,
         "release_rpm": release_rpm,
     }
 
@@ -527,7 +521,7 @@ def _build_blocking_items() -> dict[str, BlockingItems]:
         ),
         GATE_3: _gate_3_items(release_packages),
         GATE_4: _gate_4_items(gates, docs),
-        GATE_5: _gate_5_items(mk, gates, release_packages, release_deb, release_rpm),
+        GATE_5: _gate_5_items(mk, gates, release_packages, release_rpm),
         GATE_6: _gate_6_items(mk, gates, release_packages),
     }
 

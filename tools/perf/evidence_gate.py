@@ -2811,17 +2811,17 @@ def _resolve_baseline(
     if head_result is not None:
         return head_result
 
-    ineligible_result = _resolve_ineligible_baseline(
-        report, args, blocking, baseline_report
-    )
-    if ineligible_result is not None:
-        return ineligible_result
-
     integrity_rc = _validate_baseline_evidence(
         report, args, baseline_report, blocking
     )
     if integrity_rc is not None:
         return {}, False, integrity_rc
+
+    ineligible_result = _resolve_ineligible_baseline(
+        report, args, blocking, baseline_report
+    )
+    if ineligible_result is not None:
+        return ineligible_result
 
     environment_result = _resolve_environment_mismatch(
         report, args, blocking, baseline_report
