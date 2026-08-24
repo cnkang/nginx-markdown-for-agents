@@ -98,3 +98,16 @@ def test_missing_failopen_deduction_is_violation(tmp_path) -> None:
 def test_missing_renderer_is_hard_violation(tmp_path) -> None:
     violations, _ = _audit_text("/* no renderer here */\n", tmp_path)
     assert len(violations) >= 1
+
+
+def test_comment_blanking_preserves_newline_structure() -> None:
+    source = "before /* first line\n second line */ after\n// line comment\nend\n"
+    blanked = module._strip_c_comments(source)
+
+    assert len(blanked) == len(source)
+    assert blanked.count("\n") == source.count("\n")
+    assert blanked.splitlines()[0].startswith("before ")
+    assert blanked.splitlines()[1].endswith(" after")
+    assert blanked.splitlines()[-1] == "end"
+    assert "first" not in blanked and "second" not in blanked
+    assert "line comment" not in blanked

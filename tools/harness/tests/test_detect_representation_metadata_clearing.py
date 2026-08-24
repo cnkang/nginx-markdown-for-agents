@@ -362,6 +362,23 @@ def test_stop_after_first_still_flags():
     assert len(hits) == 1, "stop_after_first=1 leaves duplicates alive"
 
 
+def test_unrelated_stop_after_first_does_not_poison_clean_invalidation():
+    source = (
+        "static void\n"
+        "clear_lm_with_unrelated_option(ngx_http_request_t *r)\n"
+        "{\n"
+        "    r->headers_out.last_modified_time = (time_t) -1;\n"
+        "    r->headers_out.last_modified = NULL;\n"
+        "    unrelated_helper(stop_after_first=1);\n"
+        "    ngx_http_markdown_invalidate_headers(r,\n"
+        "        ngx_http_markdown_hdr_last_modified,\n"
+        "        sizeof(ngx_http_markdown_hdr_last_modified) - 1,\n"
+        "        0, NULL);\n"
+        "}\n"
+    )
+    assert findings_for(source) == []
+
+
 # ── strict / fail-on-unparsed (unparsed-candidate accounting) ──────
 
 def test_unparsed_candidates_are_recorded():

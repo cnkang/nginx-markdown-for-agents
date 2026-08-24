@@ -89,6 +89,30 @@ def test_manifest_command_reachability_rejects_missing_surface(tmp_path, monkeyp
     assert ".github/workflows/missing.yml" in result.detail
 
 
+def test_manifest_command_reachability_checks_every_compound_segment(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "Makefile").write_text("check:\n\t@true\n", encoding="utf-8")
+    (tmp_path / "components" / "ok.c").parent.mkdir(parents=True)
+    (tmp_path / "components" / "ok.c").write_text("", encoding="utf-8")
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+
+    result = sync._check_manifest_command_reachability(
+        {
+            "verification_families": {
+                "fixture": {
+                    "commands": [
+                        "make check && python3 docs/missing.py && components/ok.c",
+                    ]
+                }
+            }
+        }
+    )
+
+    assert result.status == sync.FAIL
+    assert "docs/missing.py" in result.detail
+
+
 def test_manifest_command_reachability_skips_make_include_dir(tmp_path, monkeypatch):
     """``make -I <dir> check`` must not treat the include directory as a
     target: ``-I`` is a value-taking flag whose argument is skipped during

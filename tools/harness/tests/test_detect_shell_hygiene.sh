@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # test_detect_shell_hygiene.sh - Fixture tests for detect_shell_hygiene.sh
-# pattern (f): $? inside negated conditional bodies (Rule 11/18, 6fcf1bb9).
+# pattern (f): $? inside negated conditional bodies (Rules 11/18).
 #
 # Adversarial fixtures reproduce the dead-branch defect shape:
 #   if ! run_case; then rc=$?    <- $? reads the NEGATED status
@@ -18,22 +18,42 @@ trap 'rm -rf "${TMPDIR_TEST}"' EXIT
 printf 'Unit Tests: detect_shell_hygiene.sh pattern (f)\n'
 
 failures=0
+DETECTOR_RC=0
+DETECTOR_OUTPUT=""
 
 # The detector exits non-zero when it finds violations, so capture output
 # before inspecting it (pipefail would invert the pipeline status).
 run_detector() {
     local fixture="$1"
-    bash "${SCRIPT_DIR}/../detect_shell_hygiene.sh" "${fixture}" 2>&1 \
-        || true
+    local output
+    if output="$(bash "${SCRIPT_DIR}/../detect_shell_hygiene.sh" "${fixture}" 2>&1)"; then
+        DETECTOR_RC=0
+    else
+        DETECTOR_RC=$?
+    fi
+    DETECTOR_OUTPUT="${output}"
+    return 0
+}
+
+run_arbitrary_detector() {
+    local detector="$1"
+    local fixture="$2"
+    local output
+    if output="$(bash "${detector}" "${fixture}" 2>&1)"; then
+        DETECTOR_RC=0
+    else
+        DETECTOR_RC=$?
+    fi
+    DETECTOR_OUTPUT="${output}"
     return 0
 }
 
 assert_detector_flags() {
     local fixture="$1"
     local label="$2"
-    local output
-    output="$(run_detector "${fixture}")"
-    if [[ "${output}" == *"ERROR"*"negated conditional"* ]]; then
+    run_detector "${fixture}"
+    if [[ "${DETECTOR_RC}" -eq 1 ]] \
+        && [[ "${DETECTOR_OUTPUT}" == *"ERROR"*"negated conditional"* ]]; then
         echo "  PASS: ${label} flagged"
     else
         echo "  FAIL: ${label} not flagged"
@@ -45,9 +65,11 @@ assert_detector_flags() {
 assert_detector_clean() {
     local fixture="$1"
     local label="$2"
-    local output
-    output="$(run_detector "${fixture}")"
-    if [[ "${output}" == *"ERROR"*"negated conditional"* ]]; then
+    run_detector "${fixture}"
+    if [[ "${DETECTOR_RC}" -ne 0 ]]; then
+        echo "  FAIL: ${label} detector exited ${DETECTOR_RC}"
+        failures=$((failures + 1))
+    elif [[ "${DETECTOR_OUTPUT}" == *"ERROR"*"negated conditional"* ]]; then
         echo "  FAIL: ${label} wrongly flagged"
         failures=$((failures + 1))
     else
@@ -56,7 +78,7 @@ assert_detector_clean() {
     return 0
 }
 
-# Fixture 1: multi-line dead branch (the 6fcf1bb9 defect shape).
+# Fixture 1: multi-line dead branch.
 mkdir -p "${TMPDIR_TEST}/case1"
 cat > "${TMPDIR_TEST}/case1/dead_branch.sh" << 'EOF'
 #!/bin/bash
@@ -117,6 +139,34 @@ assert_detector_flags "${TMPDIR_TEST}/case1" "multi-line dead branch"
 assert_detector_flags "${TMPDIR_TEST}/case2" "single-line dead branch"
 assert_detector_clean "${TMPDIR_TEST}/case3" "capture idiom"
 assert_detector_clean "${TMPDIR_TEST}/case4" "plain status usage"
+
+# Fixture 5: nested control flow must retain the outer negated branch.
+mkdir -p "${TMPDIR_TEST}/case5"
+cat > "${TMPDIR_TEST}/case5/nested_branch.sh" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+probe() {
+    return 3
+}
+if ! probe; then
+    if true; then
+        rc=$?
+    fi
+fi
+EOF
+
+assert_detector_flags "${TMPDIR_TEST}/case5" "nested negated branch"
+
+# A detector crash must not be mistaken for a clean result.  This exercises
+# the shared status capture path with a deliberately missing executable.
+run_arbitrary_detector \
+    "${TMPDIR_TEST}/missing-detector.sh" "${TMPDIR_TEST}/case4"
+if [[ "${DETECTOR_RC}" -ge 2 ]]; then
+    echo "  PASS: detector crash is visible (exit ${DETECTOR_RC})"
+else
+    echo "  FAIL: detector crash was hidden (exit ${DETECTOR_RC}): ${DETECTOR_OUTPUT}"
+    failures=$((failures + 1))
+fi
 
 if [[ "${failures}" -gt 0 ]]; then
     echo "FAILED: ${failures} case(s)" >&2

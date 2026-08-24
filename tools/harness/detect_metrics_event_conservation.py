@@ -89,9 +89,7 @@ def _strip_c_comments(text: str) -> str:
 
     def _blank(match: re.Match) -> str:
         token = match.group(0)
-        if token.startswith("//"):
-            return " " * len(token.rstrip("\n")) + token[len(token.rstrip("\n")):]
-        return " " * len(token)
+        return "".join("\n" if char == "\n" else " " for char in token)
 
     return pattern.sub(_blank, text)
 

@@ -6,6 +6,7 @@ commits (0e32598a, 8df10b9c) and stayed tracked.
 """
 
 import sys
+import subprocess
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -61,6 +62,27 @@ def test_legitimate_tooling_passes():
     assert module.classify("tools/perf/run_module_benchmark.sh") is None
     assert module.classify("Makefile") is None
     assert module.classify("docs/guides/INSTALLATION.md") is None
+    assert module.classify("tools/template_helpers.py") is None
+    assert module.classify("tools/tempfile_helpers.py") is None
+    assert module.classify("tools/parse_notes.txt") is None
+
+
+def test_standalone_temp_names_are_still_violations():
+    assert module.classify("tools/temp.py") is not None
+    assert module.classify("tools/temp-output.json") is not None
+
+
+def test_git_plumbing_failure_fails_closed(monkeypatch):
+    """A git inventory failure must not be reported as a clean scan."""
+    failed = subprocess.CompletedProcess(
+        args=["git"], returncode=128, stdout="", stderr="repository unavailable"
+    )
+    monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: failed)
+
+    assert module.tracked_files() is None
+    assert module.staged_files() is None
+    monkeypatch.setattr(sys, "argv", ["detect_scratch_files.py"])
+    assert module.main() == 1
 
 
 def test_clusterfuzz_entrypoint_allowlisted():

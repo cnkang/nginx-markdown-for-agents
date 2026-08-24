@@ -44,10 +44,6 @@ def _write_valid_fixture(root: Path) -> None:
             "COPY rust-toolchain.toml /src/rust-toolchain.toml\n"
             "RUN rustup toolchain install\n",
         )
-    _write(
-        root / "packaging/debian/control",
-        "Build-Depends: cargo, rustc (>= 1.97), nginx-dev\n",
-    )
     for path in baseline.CURRENT_BUILD_DOCS:
         _write(root / path, "Source builds require Rust 1.97.0 or newer.\n")
 

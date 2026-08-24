@@ -400,8 +400,9 @@ def _collect_probe_stem(path, changed_probe_stems):
         if seg.endswith("-raw-probes"):
             stem = seg[: -len("-raw-probes")]
             in_baseline_dir = (
-                i > 0 and path.parts[i - 1] == "perf"
-                and "baselines" in path.parts
+                i >= 2
+                and path.parts[i - 2] == "perf"
+                and path.parts[i - 1] == "baselines"
             )
             if stem.startswith("module-baseline-") or in_baseline_dir:
                 changed_probe_stems.add(stem)

@@ -132,6 +132,44 @@ function_contains_line() {
     return $?
 }
 
+comment_free_line() {
+    local file="$1" target_line="$2"
+    awk -v target="${target_line}" '
+        function strip_comments(text, start, stop, line_comment) {
+            while (1) {
+                if (in_block) {
+                    stop = index(text, "*/")
+                    if (!stop) {
+                        return ""
+                    }
+                    text = substr(text, stop + 2)
+                    in_block = 0
+                    continue
+                }
+                start = index(text, "/*")
+                line_comment = index(text, "//")
+                if (line_comment > 0 \
+                    && (start == 0 || line_comment < start)) {
+                    return substr(text, 1, line_comment - 1)
+                }
+                if (!start) {
+                    return text
+                }
+                text = substr(text, 1, start - 1) \
+                    substr(text, start + 2)
+                in_block = 1
+            }
+        }
+        {
+            cleaned = strip_comments($0)
+            if (NR == target) {
+                print cleaned
+                exit
+            }
+        }
+    ' "${file}"
+}
+
 echo "=== Effective-Config Live Conf Read Detection ===" >&2
 echo "Scanning: ${SRC_DIR}" >&2
 echo "Mutable fields: ${MUTABLE_FIELDS}" >&2
@@ -151,6 +189,10 @@ while IFS= read -r match; do
     file="$(echo "$match" | cut -d: -f1)"
     line="$(echo "$match" | cut -d: -f2)"
     content="$(echo "$match" | cut -d: -f3-)"
+    content="$(comment_free_line "$file" "$line")"
+    if ! echo "$content" | grep -qE "conf->(${MUTABLE_FIELDS})[^_a-zA-Z]"; then
+        continue
+    fi
     basename="$(basename "$file")"
 
     # Skip allowlisted files
