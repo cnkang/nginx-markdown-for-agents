@@ -39,6 +39,30 @@ else
     exit_code=$?
 fi
 
+comment_dir="${fixture_dir}/comments"
+mkdir -p "${comment_dir}"
+cat >"${comment_dir}/comment_only.c" <<'SOURCE'
+/*
+conf->enabled appears in documentation, not in executable code.
+*/
+static int clean(void)
+{
+    return 0;
+}
+SOURCE
+
+if comment_output="$(bash "${DETECTOR}" "${comment_dir}" 2>&1)"; then
+    comment_exit_code=0
+else
+    comment_exit_code=$?
+fi
+
+if [[ "${comment_exit_code}" -ne 0 ]]; then
+    printf 'FAIL: multiline comment was treated as a live conf read\n' >&2
+    printf '%s\n' "${comment_output}" >&2
+    exit 1
+fi
+
 if [[ "${exit_code}" -eq 1 ]] \
     && [[ "${output}" == *"request-path reads live conf->"* ]] \
     && [[ "${output}" == *"fixture.c"* ]]; then

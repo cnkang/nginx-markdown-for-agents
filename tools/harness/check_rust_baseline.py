@@ -35,7 +35,6 @@ OBSERVATION_ACTION_WORKFLOWS = (
 )
 RELEASE_WORKFLOWS = (
     Path(".github/workflows/release-packages.yml"),
-    Path(".github/workflows/release-deb.yml"),
     Path(".github/workflows/release-rpm.yml"),
 )
 RELEASE_DOCKERFILES = (
@@ -196,22 +195,6 @@ def _check_release_dockerfiles(root: Path, errors: list[str]) -> None:
                 )
 
 
-def _check_packaging(root: Path, expected_msrv: str, errors: list[str]) -> None:
-    """Check the source-build package compiler floor."""
-    relative_path = Path("packaging/debian/control")
-    content = _read_text(root, relative_path, errors)
-    if content is None:
-        return
-    match = re.search(r"\brustc\s*\(>=\s*(\d+\.\d+)\s*\)", content)
-    if match is None:
-        errors.append(f"{relative_path}: missing rustc (>= MAJOR.MINOR) build dependency")
-    elif match.group(1) != expected_msrv:
-        errors.append(
-            f"{relative_path}: rustc floor is {match.group(1)!r}; "
-            f"expected {expected_msrv!r}"
-        )
-
-
 def _check_current_docs(
     root: Path, exact: str, expected_msrv: str, errors: list[str]
 ) -> None:
@@ -263,7 +246,6 @@ def collect_errors(root: Path = REPO_ROOT) -> tuple[str | None, str | None, list
     )
     _check_workflow_inventory(root, errors)
     _check_release_dockerfiles(root, errors)
-    _check_packaging(root, msrv, errors)
     _check_current_docs(root, exact, msrv, errors)
     return exact, msrv, errors
 

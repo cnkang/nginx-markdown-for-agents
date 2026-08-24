@@ -353,7 +353,21 @@ def _manifest_path_candidate(token: str) -> Path | None:
         token = token[2:]
     if not token or token.startswith("-") or token.startswith(("$", "${")):
         return None
-    if token.startswith(("tools/", "packaging/", "charts/", ".github/workflows/")):
+    if token.startswith(
+        (
+            "tools/",
+            "packaging/",
+            "charts/",
+            ".github/workflows/",
+            "components/",
+            "docs/",
+            "tests/",
+            "examples/",
+            "schemas/",
+            "skills/",
+            "fuzz/",
+        )
+    ):
         if any(char in token for char in ";&|<>*?"):
             return None
         if ".." in token.split("/"):
@@ -484,29 +498,55 @@ def _missing_plain_command_path(command: str, token: str) -> list[str]:
     ]
 
 
+def _command_segments(tokens: list[str]) -> list[list[str]]:
+    """Split shell-like command tokens at the supported control operators."""
+    operators = {"&&", "||", ";", "|", "&"}
+    segments: list[list[str]] = []
+    segment: list[str] = []
+    for token in tokens:
+        if token in operators:
+            if segment:
+                segments.append(segment)
+            segment = []
+            continue
+        segment.append(token)
+    if segment:
+        segments.append(segment)
+    return segments
+
+
+def _missing_manifest_segment(
+    command: str, segment: list[str], targets: set[str]
+) -> list[str]:
+    """Return reachability findings for one shell command segment."""
+    missing: list[str] = []
+    for index, token in enumerate(segment):
+        if token == "make":
+            missing.extend(_missing_make_targets(command, segment, targets))
+            break
+        if token == "pytest":
+            missing.extend(_missing_command_paths(command, segment, index + 1))
+            break
+        if token in {"python", "python3", "bash", "sh"}:
+            missing.extend(_missing_interpreter_path(command, segment, index))
+            continue
+        missing.extend(_missing_plain_command_path(command, token))
+    return missing
+
+
 def _missing_one_manifest_command(
     command: str, targets: set[str]
 ) -> list[str]:
-    """Return reachability findings for one manifest command."""
+    """Return reachability findings for every segment of one command."""
     try:
         tokens = shlex.split(command)
     except ValueError as exc:
         return [f"{command!r}: cannot parse command: {exc}"]
 
-    for index, token in enumerate(tokens):
-        if token == "make":
-            return _missing_make_targets(command, tokens, targets)
-        if token == "pytest":
-            return _missing_command_paths(command, tokens, index + 1)
-        if token in {"python", "python3", "bash", "sh"}:
-            missing = _missing_interpreter_path(command, tokens, index)
-            if missing:
-                return missing
-            continue
-        missing = _missing_plain_command_path(command, token)
-        if missing:
-            return missing
-    return []
+    missing: list[str] = []
+    for segment in _command_segments(tokens):
+        missing.extend(_missing_manifest_segment(command, segment, targets))
+    return list(dict.fromkeys(missing))
 
 
 def _check_manifest_command_reachability(manifest: dict) -> CheckResult:

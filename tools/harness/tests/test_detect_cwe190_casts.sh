@@ -179,6 +179,38 @@ else
     fi
 fi
 
+# ── Fixture: clean-3 (nearest declaration in a nested scope) ──
+# The outer parameter and the inner shadow use the same identifier.  The cast
+# is inside the inner scope, so its nearest declaration is the unsigned one.
+
+fixture_clean3_dir="${tmp_dir}/fixture-clean3/components/nginx-module/src"
+mkdir -p "${fixture_clean3_dir}"
+
+cat >"${fixture_clean3_dir}/test_clean3.c" <<'C'
+typedef unsigned int ngx_uint_t;
+typedef int ngx_int_t;
+
+static size_t
+shadowed_value(ngx_int_t value)
+{
+    {
+        ngx_uint_t value = 1;
+        return (size_t) value;
+    }
+}
+C
+
+output_file="${tmp_dir}/clean3.out"
+exit_code=0
+(cd "${tmp_dir}/fixture-clean3" && bash "${DETECTOR}" "${fixture_clean3_dir}") >"${output_file}" 2>&1 || exit_code=$?
+if [[ "${exit_code}" -eq 0 ]] && ! grep -q 'WARNING' "${output_file}" \
+    && grep -q 'unsigned source type' "${output_file}"; then
+    pass "clean-3: detector uses the nearest nested-scope declaration"
+else
+    fail "clean-3: nearest nested-scope declaration was not selected" \
+        "got exit ${exit_code}: $(cat "${output_file}")"
+fi
+
 # ── Fixture: adversarial-1 (true positive — signed without guard) ──
 # ngx_int_t n without any guard → must produce WARNING.
 

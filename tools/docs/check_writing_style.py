@@ -18,9 +18,10 @@ Modes:
     --strict       fail (exit 1) when any warning is found
     --changed      fail (exit 1) when any warning appears in files changed
                    since the explicitly supplied --base commit: working-tree
-                   + staged diffs. The base is required and must resolve to a
-                   valid commit. An empty diff is valid only when the caller
-                   explicitly selected a valid base such as HEAD.
+                   + staged diffs + untracked Markdown files. The base is
+                   required and must resolve to a valid commit. An empty diff
+                   is valid only when the caller explicitly selected a valid
+                   base such as HEAD.
     --baseline [N] fail (exit 1) when the total warning count exceeds the
                    baseline N (default 0). Guards against regressions on
                    the retained-warning budget; lower N as docs improve.

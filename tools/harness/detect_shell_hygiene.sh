@@ -127,11 +127,6 @@ readonly WARNING_ALLOWLIST=(
 "packaging/scripts/build-apt-repo.sh:return:err:trivial echo-only logger; implicit return is always 0"
 "packaging/scripts/build-apt-repo.sh:return:diag:trivial echo-only logger; implicit return is always 0"
 "packaging/scripts/build-apt-repo.sh:return:section:trivial echo-only logger; implicit return is always 0"
-"packaging/scripts/build-deb.sh:return:info:trivial echo-only logger; implicit return is always 0"
-"packaging/scripts/build-deb.sh:return:warn:trivial echo-only logger; implicit return is always 0"
-"packaging/scripts/build-deb.sh:return:err:trivial echo-only logger; implicit return is always 0"
-"packaging/scripts/build-deb.sh:return:diag:trivial echo-only logger; implicit return is always 0"
-"packaging/scripts/build-deb.sh:return:section:trivial echo-only logger; implicit return is always 0"
 "packaging/scripts/build-yum-repo.sh:return:info:trivial echo-only logger; implicit return is always 0"
 "packaging/scripts/build-yum-repo.sh:return:warn:trivial echo-only logger; implicit return is always 0"
 "packaging/scripts/build-yum-repo.sh:return:err:trivial echo-only logger; implicit return is always 0"
@@ -223,8 +218,6 @@ readonly WARNING_ALLOWLIST=(
 "packaging/nfpm/scripts/preremove.sh:return:usage:function calls exit; return is unreachable"
 "packaging/scripts/build-apt-repo.sh:return:die:function calls exit; return is unreachable"
 "packaging/scripts/build-apt-repo.sh:return:usage:function calls exit; return is unreachable"
-"packaging/scripts/build-deb.sh:return:die:function calls exit; return is unreachable"
-"packaging/scripts/build-deb.sh:return:usage:function calls exit; return is unreachable"
 "packaging/scripts/build-yum-repo.sh:return:die:function calls exit; return is unreachable"
 "packaging/scripts/build-yum-repo.sh:return:usage:function calls exit; return is unreachable"
 "packaging/scripts/generate-checksums.sh:return:die:function calls exit; return is unreachable"
@@ -597,41 +590,86 @@ while IFS= read -r script_file; do
         errors=$((errors + 1))
         negation_hits=$((negation_hits + 1))
     done < <(awk '
-        BEGIN { ifdepth = 0; pending = 0 }
+        BEGIN { depth = 0 }
         {
             line = $0
             trimmed = line
             sub(/^[[:space:]]+/, "", trimmed)
 
             is_comment = (trimmed ~ /^#/)
-            is_fi      = (trimmed ~ /^fi([[:space:];)]|$)/)
-            is_else    = (trimmed ~ /^else([[:space:];)]|$)/)
-            is_elif    = (trimmed ~ /^elif([[:space:]]|$)/)
-            is_done    = (trimmed ~ /^done([[:space:];)]|$)/)
-            is_esac    = (trimmed ~ /^esac([[:space:];)]|$)/)
-            is_open    = (trimmed ~ /^(if|while|until|for|case)([[:space:];]|$)/)
+            is_fi = (trimmed ~ /^fi([[:space:];)]|$)/)
+            is_else = (trimmed ~ /^else([[:space:];)]|$)/)
+            is_elif = (trimmed ~ /^elif([[:space:]]|$)/)
+            is_done = (trimmed ~ /^done([[:space:];)]|$)/)
+            is_esac = (trimmed ~ /^esac([[:space:];)]|$)/)
+            is_if = (trimmed ~ /^if([[:space:];]|$)/)
+            is_loop = (trimmed ~ /^(while|until|for)([[:space:];]|$)/)
+            is_case = (trimmed ~ /^case([[:space:];]|$)/)
             is_negopen = (trimmed ~ /^(if|while|until)[[:space:]]+!/)
             is_elifneg = (trimmed ~ /^elif[[:space:]]+!/)
+            has_then = (line ~ /(^|[;[:space:]])then([;[:space:]]|$)/)
+            has_do = (line ~ /(^|[;[:space:]])do([;[:space:]]|$)/)
 
-            if ((pending > 0) && (!is_comment) && (line ~ /\$\?/) \
+            active = 0
+            for (i = 1; i <= depth; i++) {
+                if (block_neg[i] && block_active[i]) {
+                    active = 1
+                }
+            }
+            if (active && !is_comment && line ~ /\$\?/ \
                 && !(is_negopen || is_elifneg) \
                 && (line !~ /\|\|[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*\$\?/)) {
                 print NR ":" line
             }
 
-            if (is_fi || is_done || is_esac || is_else || is_elif) {
-                if (pending > 0 && openlevel[pending] == ifdepth) {
-                    pending--
-                }
-            }
             if (is_fi || is_done || is_esac) {
-                if (ifdepth > 0) ifdepth--
-            } else if (is_open && !(is_negopen || is_elifneg)) {
-                ifdepth++
+                if (depth > 0) {
+                    delete block_type[depth]
+                    delete block_neg[depth]
+                    delete block_active[depth]
+                    depth--
+                }
+                next
             }
-            if (is_negopen || is_elifneg) {
-                pending++
-                openlevel[pending] = ifdepth
+            if (is_else) {
+                if (depth > 0 && block_type[depth] == "if") {
+                    block_active[depth] = 0
+                }
+                next
+            }
+            if (is_elif) {
+                if (depth > 0 && block_type[depth] == "if") {
+                    block_neg[depth] = is_elifneg
+                    block_active[depth] = has_then
+                }
+                next
+            }
+            if (is_if) {
+                depth++
+                block_type[depth] = "if"
+                block_neg[depth] = is_negopen
+                block_active[depth] = has_then
+                next
+            }
+            if (is_loop) {
+                depth++
+                block_type[depth] = "loop"
+                block_neg[depth] = is_negopen
+                block_active[depth] = has_do
+                next
+            }
+            if (is_case) {
+                depth++
+                block_type[depth] = "case"
+                block_neg[depth] = 0
+                block_active[depth] = 0
+                next
+            }
+            if (has_then && depth > 0 && block_type[depth] == "if") {
+                block_active[depth] = 1
+            }
+            if (has_do && depth > 0 && block_type[depth] == "loop") {
+                block_active[depth] = 1
             }
         }
     ' "$script_file" 2>/dev/null || true)

@@ -79,6 +79,10 @@ FUNC_NAME_RE = re.compile(r"([a-zA-Z_]\w*)$")
 LM_STOP_AFTER_FIRST_RE = re.compile(
     r"stop_after_first[^,;)]{0,40}1\b|,\s*1\s*,\s*NULL\s*\)"
 )
+LM_INVALIDATE_CALL_START_RE = re.compile(
+    r"ngx_http_markdown_(?:invalidate_headers|"
+    r"stream_commit_invalidate_header|invalidate_response_header)\s*\("
+)
 
 TRAILER_MARKER_RE = re.compile(r"hdr_trailer\b|[\"']Trailer[\"']")
 CLEAR_TRAILERS_RE = re.compile(r"ngx_http_markdown_clear_trailers\s*\(")
@@ -338,6 +342,40 @@ def _check_trailer_suppression(body, flag):
                   "ngx_http_markdown_clear_trailers() in same function")
 
 
+def _balanced_call_text(body, match):
+    """Return one invalidate call, or None when its parentheses are unbalanced."""
+    depth = 1
+    index = match.end()
+    while index < len(body) and depth:
+        if body[index] == "(":
+            depth += 1
+        elif body[index] == ")":
+            depth -= 1
+        index += 1
+    if depth:
+        return None
+    return body[match.start():index]
+
+
+def _is_partial_lm_call(body, match):
+    """Return whether one invalidate call stops after the first entry."""
+    call = _balanced_call_text(body, match)
+    if call is None:
+        return False
+    return bool(
+        re.search(r"hdr_last_modified\b|[\"']Last-Modified[\"']", call)
+        and LM_STOP_AFTER_FIRST_RE.search(call)
+    )
+
+
+def _has_partial_lm_invalidation(body):
+    """Return whether an audited Last-Modified call stops after one entry."""
+    for match in LM_INVALIDATE_CALL_START_RE.finditer(body):
+        if _is_partial_lm_call(body, match):
+            return True
+    return False
+
+
 def _check_last_modified_mirrors(body, flag):
     """Rule 69 P: Last-Modified mirror-pair/list completeness.
 
@@ -350,13 +388,14 @@ def _check_last_modified_mirrors(body, flag):
     time_strip = bool(LM_TIME_STRIP_RE.search(body))
     ptr_null = bool(LM_PTR_NULL_RE.search(body))
     invalidate = bool(LM_INVALIDATE_RE.search(body))
+    partial_invalidate = _has_partial_lm_invalidation(body)
     delegates_304 = bool(SEND_304_RE.search(body))
 
     if time_strip:
         complete = (
             ptr_null
             and invalidate
-            and not LM_STOP_AFTER_FIRST_RE.search(body)
+            and not partial_invalidate
         )
         if not complete and not delegates_304:
             flag("P", "last_modified_time stripped to -1 without the full "

@@ -319,19 +319,26 @@ while IFS= read -r match; do
             fi
         fi
 
-        # Search for variable declaration in the function window
+        # Search for the nearest declaration in the function window. A
+        # function can contain multiple scopes, and aggregating every
+        # declaration for the same identifier lets an unrelated earlier
+        # declaration change the type classification for this cast.
         func_window="$(sed -n "${func_start},${line}p" "$file" 2>/dev/null)"
+        declaration_line="$(printf '%s\n' "$func_window" \
+            | grep -nE \
+                "(ssize_t|ngx_int_t|off_t|time_t|ptrdiff_t|int|long|short|char|ngx_uint_t|size_t|uint8_t|uint16_t|uint32_t|uint64_t|uintptr_t|u_char|unsigned)[[:space:]*]+${cast_ident}\\b" \
+            | tail -1 || true)"
 
         # Unsigned type set
         is_unsigned=0
-        if printf '%s\n' "$func_window" | grep -qE \
+        if printf '%s\n' "$declaration_line" | grep -qE \
             "(ngx_uint_t|size_t|uint8_t|uint16_t|uint32_t|uint64_t|uintptr_t|u_char|unsigned)[[:space:]*]+${cast_ident}\\b"; then
             is_unsigned=1
         fi
 
         # Signed type set
         is_signed=0
-        if printf '%s\n' "$func_window" | grep -E \
+        if printf '%s\n' "$declaration_line" | grep -E \
             "(ssize_t|ngx_int_t|off_t|time_t|ptrdiff_t|int|long|short|char)[[:space:]*]+${cast_ident}\\b" \
             | grep -qvE 'u_char|unsigned'; then
             is_signed=1

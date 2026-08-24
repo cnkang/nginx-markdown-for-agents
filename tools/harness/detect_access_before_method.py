@@ -96,24 +96,54 @@ def _matching_brace(text: str, open_idx: int) -> int:
     return -1
 
 
-def _iter_signature_candidates(text: str):
-    """Yield (function name, signature end offset) for candidate lines."""
-    offset = 0
-    for line in text.splitlines(keepends=True):
-        logical_line = line.rstrip("\r\n")
-        open_idx = logical_line.find("(")
-        close_idx = logical_line.rfind(")")
-        if open_idx == -1 or close_idx <= open_idx:
-            offset += len(line)
+def _iter_top_level_parentheses(blanked: str):
+    """Yield offsets for balanced top-level parenthesis groups."""
+    paren_depth = 0
+    open_idx = -1
+    for index, char in enumerate(blanked):
+        if char == "(":
+            if paren_depth == 0:
+                open_idx = index
+            paren_depth += 1
             continue
-        if logical_line[close_idx + 1 :].strip():
-            offset += len(line)
+        if char != ")" or paren_depth == 0:
             continue
+        paren_depth -= 1
+        if paren_depth == 0 and open_idx != -1:
+            yield open_idx, index
+            open_idx = -1
 
-        name_match = FUNC_NAME_RE.search(logical_line[:open_idx].rstrip())
-        if name_match is not None:
-            yield name_match.group(0), offset + len(logical_line)
-        offset += len(line)
+
+def _signature_body_start(blanked: str, close_idx: int) -> int:
+    """Return the body brace after a signature, or -1 if absent."""
+    body_idx = close_idx + 1
+    while body_idx < len(blanked) and blanked[body_idx].isspace():
+        body_idx += 1
+    if body_idx >= len(blanked) or blanked[body_idx] != "{":
+        return -1
+    return body_idx
+
+
+def _signature_name(blanked: str, open_idx: int) -> str | None:
+    """Return a function name before an opening signature parenthesis."""
+    name_match = FUNC_NAME_RE.search(blanked[:open_idx].rstrip())
+    if name_match is None:
+        return None
+    if name_match.group(0) in {"if", "for", "while", "switch", "catch"}:
+        return None
+    return name_match.group(0)
+
+
+def _iter_signature_candidates(text: str):
+    """Yield function names and body offsets for single/multiline signatures."""
+    blanked = _blank_literals_and_comments(text)
+    for open_idx, close_idx in _iter_top_level_parentheses(blanked):
+        body_idx = _signature_body_start(blanked, close_idx)
+        if body_idx == -1:
+            continue
+        name = _signature_name(blanked, open_idx)
+        if name is not None:
+            yield name, body_idx
 
 
 def _iter_functions(text: str):

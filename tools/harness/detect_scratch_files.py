@@ -38,8 +38,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Basename patterns (case-insensitive, full match) that indicate scratch.
 SCRATCH_BASENAME_RE = re.compile(
-    r"^(pr_body.*|notes?|todo|draft.*|scratch.*|tmp.*|temp.*|"
-    r"(parse|process|digest)[_-].*)$",
+    r"^(?:pr_body|notes?|todo|draft|scratch|tmp|temp)(?:[._-].*)?$",
     re.IGNORECASE,
 )
 
@@ -61,30 +60,38 @@ ALLOWLIST = [
 ]
 
 
-def tracked_files():
-    result = subprocess.run(
-        ["git", "ls-files", "-z"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-    )
+def tracked_files() -> list[str] | None:
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        print(f"ERROR git ls-files failed: {exc}", file=sys.stderr)
+        return None
     if result.returncode != 0:
         print(f"ERROR git ls-files failed: {result.stderr}", file=sys.stderr)
-        return []
+        return None
     return [f for f in result.stdout.split("\0") if f]
 
 
-def staged_files():
-    result = subprocess.run(
-        ["git", "diff", "--cached", "--name-only",
-         "--diff-filter=ACR", "-z"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-    )
+def staged_files() -> list[str] | None:
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--cached", "--name-only",
+             "--diff-filter=ACR", "-z"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        print(f"ERROR git diff failed: {exc}", file=sys.stderr)
+        return None
     if result.returncode != 0:
         print(f"ERROR git diff failed: {result.stderr}", file=sys.stderr)
-        return []
+        return None
     return [f for f in result.stdout.split("\0") if f]
 
 
@@ -139,6 +146,8 @@ def main():
     args = parser.parse_args()
 
     files = staged_files() if args.staged else tracked_files()
+    if files is None:
+        return 1
     findings = []
     for path in files:
         reason = classify(path)
