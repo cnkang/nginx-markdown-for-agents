@@ -34,6 +34,13 @@
 
 #include <zlib.h>
 
+/*
+ * A tiny streaming prefix is not representative of the complete response
+ * ratio.  Keep the absolute decompressed-size budget active, and defer the
+ * cumulative ratio check until this floor is reached or the stream finishes.
+ */
+#define NGX_HTTP_MARKDOWN_STREAMING_DECOMP_RATIO_MIN_OUTPUT  4096
+
 #ifdef NGX_HTTP_BROTLI
 #include <brotli/decode.h>
 #endif
@@ -2206,6 +2213,9 @@ ngx_http_markdown_streaming_decomp_apply_limits(
      * output; it must not wrap into a smaller limit. */
     if (decomp->decompression_ratio > 0
         && decomp->total_compressed > 0
+        && (decomp->finished
+            || projected
+               >= NGX_HTTP_MARKDOWN_STREAMING_DECOMP_RATIO_MIN_OUTPUT)
         && decomp->decompression_ratio
             <= NGX_MAX_SIZE_T_VALUE / decomp->total_compressed)
     {

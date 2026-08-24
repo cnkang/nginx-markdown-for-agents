@@ -591,10 +591,8 @@ ngx_http_markdown_stream_postcommit_latch_terminal(
     }
     if (r == r->main && buf->last_buf) {
         ctx->streaming.main_terminal_sent = 1;
-        /* subrequest: streaming conversion terminal delivered — release the
-         * inflight slot now (idempotent; pool cleanup remains as the
-         * backstop).  For subrequests this frees the slot before the
-         * shared parent pool is destroyed. */
+        /* Main-request streaming conversion terminal delivered — release the
+         * inflight slot now; pool cleanup remains the idempotent backstop. */
         ngx_http_markdown_inflight_release(ctx);
     }
     if (r != r->main && buf->last_in_chain) {

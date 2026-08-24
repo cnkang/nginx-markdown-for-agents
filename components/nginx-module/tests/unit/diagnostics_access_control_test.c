@@ -3,8 +3,8 @@
  *
  * Validates the diagnostics content-handler boundary:
  *   - Native NGINX access-phase directives own CIDR allow/deny policy
- *   - The content handler only rejects a missing client sockaddr
- *   - NULL sockaddr → deny
+ *   - The content handler rejects a missing or non-loopback client sockaddr
+ *   - NULL/non-loopback sockaddr → deny
  *   - GET/HEAD only, other methods → 405
  *   - Ring buffer initialization and capacity clamping
  *   - Record decision with timestamp and reason code

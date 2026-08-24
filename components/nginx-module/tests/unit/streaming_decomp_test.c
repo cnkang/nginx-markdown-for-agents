@@ -852,7 +852,7 @@ test_ratio_limit_applies_to_small_stream(void)
     u_char                              *out;
     size_t                               out_len;
     ngx_int_t                            rc;
-    u_char                              text[1024];
+    u_char                              text[8192];
 
     TEST_SUBSECTION("small streaming inputs enforce decompression ratio");
 
@@ -890,6 +890,53 @@ test_ratio_limit_applies_to_small_stream(void)
     free(decomp);
     free(compressed);
     TEST_PASS("small streaming input enforces ratio limit");
+}
+
+
+/* A small streaming prefix is not representative of the final response
+ * ratio.  Defer the ratio check below the absolute output floor, but keep the
+ * check strict once the floor is reached and when the stream is complete. */
+static void
+test_ratio_limit_defers_small_prefix(void)
+{
+    ngx_http_markdown_streaming_decomp_t  decomp;
+    ngx_int_t                             rc;
+    u_char                               *buf;
+    size_t                                small_output;
+
+    TEST_SUBSECTION("streaming ratio defers a small prefix");
+
+    memset(&decomp, 0, sizeof(decomp));
+    decomp.decompression_ratio = 1;
+    decomp.total_compressed = 1;
+    decomp.max_decompressed_size = 8192;
+    buf = NULL;
+    small_output =
+        NGX_HTTP_MARKDOWN_STREAMING_DECOMP_RATIO_MIN_OUTPUT - 1;
+
+    rc = ngx_http_markdown_streaming_decomp_apply_limits(
+        &decomp, small_output, &buf, &test_log);
+    TEST_ASSERT(rc == NGX_OK,
+        "small streaming prefixes must defer the cumulative ratio check");
+    TEST_ASSERT(decomp.total_decompressed == small_output,
+        "deferred ratio check must retain decompressed accounting");
+
+    rc = ngx_http_markdown_streaming_decomp_apply_limits(
+        &decomp, 1, &buf, &test_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_RATIO_EXCEEDED,
+        "ratio must be enforced once the output floor is reached");
+    TEST_ASSERT(decomp.total_decompressed == small_output,
+        "ratio rejection must not advance cumulative output accounting");
+
+    memset(&decomp, 0, sizeof(decomp));
+    decomp.decompression_ratio = 1;
+    decomp.total_compressed = 1;
+    decomp.finished = 1;
+    rc = ngx_http_markdown_streaming_decomp_apply_limits(
+        &decomp, small_output, &buf, &test_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_RATIO_EXCEEDED,
+        "completed streams must enforce ratio below the output floor");
+    TEST_PASS("streaming ratio defers unrepresentative prefixes");
 }
 
 
@@ -3763,6 +3810,7 @@ test_deflate_exact_budget_round_trip(void)
 
         free(body);
         free(compressed);
+        ngx_http_markdown_streaming_decomp_cleanup(decomp);
         free(decomp);
         TEST_PASS("deflate exact-budget round trip verified");
     }
@@ -5822,6 +5870,7 @@ main(void)
 #endif
     test_tiny_chunks_do_not_amplify_request_pool();
     test_ratio_limit_applies_to_small_stream();
+    test_ratio_limit_defers_small_prefix();
     test_budget_and_invalid_type_branches();
     test_truncated_finish_errors();
     test_malformed_zlib_formats_are_classified();

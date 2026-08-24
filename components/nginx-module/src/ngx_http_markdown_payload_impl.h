@@ -1159,6 +1159,12 @@ ngx_http_markdown_decompress_via_rust(
     size_t                 input_size;
     u_char                *input_buf;
     ngx_int_t              rc;
+    ngx_uint_t             ratio;
+
+    ratio = conf->limits.decompression_ratio;
+    if (ratio == NGX_CONF_UNSET_UINT) {
+        ratio = NGX_HTTP_MARKDOWN_LIMITS_DECOMPRESSION_RATIO_DEFAULT;
+    }
 
     /*
      * Multi-layer chains (2 or 3 non-identity layers) decode via the
@@ -1168,17 +1174,11 @@ ngx_http_markdown_decompress_via_rust(
      */
     if (ctx->decompression.layer_count > 1) {
         FFIChainDecodeResult  chain_result;
-        ngx_uint_t            ratio;
 
         rc = ngx_http_markdown_decompression_input(
             r, compressed_chain, &input_buf, &input_size);
         if (rc != NGX_OK) {
             return rc;
-        }
-
-        ratio = conf->limits.decompression_ratio;
-        if (ratio == NGX_CONF_UNSET_UINT) {
-            ratio = NGX_HTTP_MARKDOWN_LIMITS_DECOMPRESSION_RATIO_DEFAULT;
         }
 
         markdown_chain_decode_result_init(&chain_result);
@@ -1268,7 +1268,7 @@ ngx_http_markdown_decompress_via_rust(
         (uintptr_t) input_size,
         format,
         (uintptr_t) conf->decompress.max_size,
-        (uint64_t) conf->limits.decompression_ratio,
+        (uint64_t) ratio,
         &result);
 
     if (ffi_rc != 0) {
@@ -1607,19 +1607,9 @@ ngx_http_markdown_forward_headers(ngx_http_request_t *r, ngx_http_markdown_ctx_t
             ctx->lifecycle.last_modified.source_last_modified_time;
     }
 
-    /*
-     * A streaming fail-open response is the original upstream
-     * representation.  Do not apply the authenticated-content rewrite to
-     * its Cache-Control header: the fail-open path must preserve the
-     * upstream header set before downstream filters run.
-     */
-    if (ctx->streaming.completion.failopen_active) {
-        rc = ngx_http_next_header_filter(r);
-    } else {
-        rc = ngx_http_markdown_next_header_filter_with_auth(
-            r, ngx_http_get_module_loc_conf(r,
-                ngx_http_markdown_filter_module));
-    }
+    rc = ngx_http_markdown_next_header_filter_with_auth(
+        r, ngx_http_get_module_loc_conf(r,
+            ngx_http_markdown_filter_module));
     /*
      * Canonical NGINX model: header-chain NGX_AGAIN means the write filter
      * queued the header block — the headers are ACCEPTED and the header

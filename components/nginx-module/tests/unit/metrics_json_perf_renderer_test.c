@@ -82,6 +82,7 @@ test_json_perf_renderer_emits_all_fields(void)
     memset(&perf, 0, sizeof(perf));
     perf.backpressure_total = 7;
     perf.backpressure_resume_total = 3;
+    perf.backpressure_resume_failure_total = 6;
     perf.pending_output_high_watermark_bytes = 65536;
     perf.decompression_streaming_total = 12;
     perf.decompression_fullbuffer_total = 8;
@@ -100,6 +101,9 @@ test_json_perf_renderer_emits_all_fields(void)
         "JSON has backpressure_total");
     TEST_ASSERT(contains((char *) buf, "\"backpressure_resume_total\": 3"),
         "JSON has backpressure_resume_total");
+    TEST_ASSERT(contains((char *) buf,
+        "\"backpressure_resume_failure_total\": 6"),
+        "JSON has backpressure_resume_failure_total");
     TEST_ASSERT(contains((char *) buf,
         "\"pending_output_high_watermark_bytes\": 65536"),
         "JSON has pending_output_high_watermark_bytes");

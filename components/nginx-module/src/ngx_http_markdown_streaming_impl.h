@@ -32,6 +32,7 @@ static ngx_int_t
 ngx_http_markdown_next_header_filter_with_auth(
     ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf)
 {
+#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
     ngx_flag_t  auth_cache_control_required;
     ngx_int_t   rc;
 
@@ -42,13 +43,14 @@ ngx_http_markdown_next_header_filter_with_auth(
         return rc;
     }
 
-#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
     if (auth_cache_control_required) {
         rc = ngx_http_markdown_modify_cache_control_for_auth(r);
         if (rc != NGX_OK) {
             return rc;
         }
     }
+#else
+    (void) conf;
 #endif
 
     return ngx_http_next_header_filter(r);
@@ -1769,6 +1771,7 @@ ngx_http_markdown_streaming_resume_failure(
     ngx_int_t downstream_rc,
     ngx_http_markdown_streaming_pending_snapshot_t pending)
 {
+    NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_resume_failure_total);
     ctx->streaming.completion.pending_terminal_metrics = 0;
     ctx->streaming.completion.pending_failopen_delivery = 0;
     ctx->streaming.completion.safe_finish_error_pending = 0;
