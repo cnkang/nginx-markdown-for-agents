@@ -307,40 +307,20 @@ def validate_owner_workflow_refs(matrix_path: Path) -> list[str]:
     return errors
 
 
-def validate_release_blocking_publish_dag(matrix_path: Path) -> list[str]:
-    """Ensure release-blocking Docker artifacts gate canonical publication."""
-    errors: list[str] = []
-
-    validated = validate_read_path(
-        matrix_path, purpose="release-blocking publish DAG check"
-    )
-    with open(validated, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    entries, error = _canonical_entries(data)
-    if error is not None:
-        errors.append(error)
-        return errors
-
-    docker_owners = {
+def _release_blocking_docker_owners(entries: list[dict]) -> set[str]:
+    return {
         entry.get("owner_workflow", "")
         for entry in entries
         if entry.get("artifact_type") == "docker-image"
         and entry.get("release_blocking") is True
+        and entry.get("owner_workflow", "")
     }
-    docker_owners.discard("")
-    if not docker_owners:
-        return errors
 
-    canonical_path = WORKFLOWS_DIR / RELEASE_PACKAGES_WORKFLOW
-    if not canonical_path.exists():
-        return [
-            "Release-blocking Docker entries exist but the canonical "
-            f"workflow is missing: {canonical_path}"
-        ]
-    canonical_content = canonical_path.read_text(encoding="utf-8")
-    publish_needs = _publish_job_needs(canonical_content)
 
+def _validate_official_docker_gate(
+    canonical_content: str, publish_needs: set[str]
+) -> list[str]:
+    errors: list[str] = []
     official_job = _workflow_job_block(
         canonical_content, "official-docker-release-gate"
     )
@@ -349,20 +329,23 @@ def validate_release_blocking_publish_dag(matrix_path: Path) -> list[str]:
             "release-packages.yml does not define "
             "official-docker-release-gate for release-blocking Docker artifacts"
         )
-    else:
-        actual_uses = _job_uses(official_job)
-        if actual_uses != OFFICIAL_DOCKER_WORKFLOW_REF:
-            errors.append(
-                "release-packages.yml official-docker-release-gate must use "
-                f"{OFFICIAL_DOCKER_WORKFLOW_REF!r}, got {actual_uses!r}"
-            )
+    elif _job_uses(official_job) != OFFICIAL_DOCKER_WORKFLOW_REF:
+        errors.append(
+            "release-packages.yml official-docker-release-gate must use "
+            f"{OFFICIAL_DOCKER_WORKFLOW_REF!r}, got "
+            f"{_job_uses(official_job)!r}"
+        )
     if "official-docker-release-gate" not in publish_needs:
         errors.append(
             "release-packages.yml publish job does not depend on "
             "official-docker-release-gate"
         )
+    return errors
 
-    for owner in sorted(docker_owners):
+
+def _validate_docker_owner_workflows(owners: set[str]) -> list[str]:
+    errors: list[str] = []
+    for owner in sorted(owners):
         owner_path = REPO_ROOT / owner
         if not owner_path.exists():
             continue
@@ -372,7 +355,36 @@ def validate_release_blocking_publish_dag(matrix_path: Path) -> list[str]:
                 f"{owner} must expose workflow_call before it can be a "
                 "release-blocking reusable Docker gate"
             )
+    return errors
 
+
+def validate_release_blocking_publish_dag(matrix_path: Path) -> list[str]:
+    """Ensure release-blocking Docker artifacts gate canonical publication."""
+    validated = validate_read_path(
+        matrix_path, purpose="release-blocking publish DAG check"
+    )
+    with open(validated, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    entries, error = _canonical_entries(data)
+    if error is not None:
+        return [error]
+
+    docker_owners = _release_blocking_docker_owners(entries)
+    if not docker_owners:
+        return []
+
+    canonical_path = WORKFLOWS_DIR / RELEASE_PACKAGES_WORKFLOW
+    if not canonical_path.exists():
+        return [
+            "Release-blocking Docker entries exist but the canonical "
+            f"workflow is missing: {canonical_path}"
+        ]
+    canonical_content = canonical_path.read_text(encoding="utf-8")
+    errors = _validate_official_docker_gate(
+        canonical_content, _publish_job_needs(canonical_content)
+    )
+    errors.extend(_validate_docker_owner_workflows(docker_owners))
     return errors
 
 

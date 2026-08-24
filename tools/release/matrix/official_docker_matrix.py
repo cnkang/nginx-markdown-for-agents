@@ -20,13 +20,7 @@ SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 
-def resolve_official_docker_entries(data: dict[str, Any]) -> list[dict[str, str]]:
-    """Return every supported, release-blocking Docker execution entry.
-
-    The release matrix is the only source of row identity.  Image tags and
-    libc-specific variants are derived from each row and the recorded digest
-    remains bound to that exact image reference.
-    """
+def _canonical_entries(data: dict[str, Any]) -> list[dict[str, Any]]:
     if "matrix" in data or "additional_artifacts" in data:
         raise ValueError(
             "release matrix must not contain legacy matrix aliases"
@@ -36,74 +30,82 @@ def resolve_official_docker_entries(data: dict[str, Any]) -> list[dict[str, str]
         raise ValueError("release matrix entries must be a non-empty list")
     if not all(isinstance(entry, dict) for entry in entries):
         raise ValueError("release matrix entries must contain only objects")
+    return entries
+
+
+def _is_release_blocking_docker(entry: dict[str, Any]) -> bool:
+    return (
+        entry.get("artifact_type") == "docker-image"
+        and entry.get("support_tier") == "supported"
+        and entry.get("release_blocking") is True
+        and entry.get("owner_workflow") == DOCKER_WORKFLOW
+    )
+
+
+def _resolve_docker_entry(entry: dict[str, Any]) -> dict[str, str]:
+    version = entry.get("nginx_version")
+    operating_system = entry.get("os")
+    libc = entry.get("libc")
+    arch = entry.get("arch")
+    image_ref = entry.get("image_ref")
+    image_digest = entry.get("image_digest")
+    values = (version, operating_system, libc, arch, image_ref, image_digest)
+    if not all(isinstance(value, str) and value for value in values):
+        raise ValueError(
+            "every blocking Docker row must define version, os, libc, "
+            "arch, image_ref, and image_digest"
+        )
+    if VERSION_RE.fullmatch(version) is None:
+        raise ValueError(f"invalid Docker NGINX version: {version}")
+    if libc not in {"glibc", "musl"}:
+        raise ValueError(f"unsupported Docker libc: {libc}")
+    if SHA256_RE.fullmatch(image_digest) is None:
+        raise ValueError(f"invalid Docker image digest: {image_digest}")
+
+    expected_suffix = "-alpine" if libc == "musl" else ""
+    expected_ref = f"nginx:{version}{expected_suffix}"
+    if image_ref != expected_ref:
+        raise ValueError(
+            f"Docker image_ref {image_ref!r} does not match row "
+            f"{version}/{libc}; expected {expected_ref!r}"
+        )
+
+    return {
+        "matrix_row_id": f"{version}/{operating_system}/{libc}/{arch}",
+        "nginx_version": version,
+        "os": operating_system,
+        "libc": libc,
+        "arch": arch,
+        "image_ref": image_ref,
+        "image_digest": image_digest,
+    }
+
+
+def _docker_sort_key(row: dict[str, str]) -> tuple[tuple[int, ...], str, str, str]:
+    return (
+        tuple(int(part) for part in row["nginx_version"].split(".")),
+        row["os"],
+        row["libc"],
+        row["arch"],
+    )
+
+
+def resolve_official_docker_entries(data: dict[str, Any]) -> list[dict[str, str]]:
+    """Return every supported, release-blocking Docker execution entry.
+
+    The release matrix is the only source of row identity. Image tags and
+    libc-specific variants are derived from each row and the recorded digest
+    remains bound to that exact image reference.
+    """
+    entries = _canonical_entries(data)
 
     resolved: list[dict[str, str]] = []
     for entry in entries:
-        if (
-            entry.get("artifact_type") != "docker-image"
-            or entry.get("support_tier") != "supported"
-            or entry.get("release_blocking") is not True
-            or entry.get("owner_workflow") != DOCKER_WORKFLOW
-        ):
+        if not _is_release_blocking_docker(entry):
             continue
+        resolved.append(_resolve_docker_entry(entry))
 
-        version = entry.get("nginx_version")
-        operating_system = entry.get("os")
-        libc = entry.get("libc")
-        arch = entry.get("arch")
-        image_ref = entry.get("image_ref")
-        image_digest = entry.get("image_digest")
-        if not all(
-            isinstance(value, str) and value
-            for value in (
-                version,
-                operating_system,
-                libc,
-                arch,
-                image_ref,
-                image_digest,
-            )
-        ):
-            raise ValueError(
-                "every blocking Docker row must define version, os, libc, "
-                "arch, image_ref, and image_digest"
-            )
-        if VERSION_RE.fullmatch(version) is None:
-            raise ValueError(f"invalid Docker NGINX version: {version}")
-        if libc not in {"glibc", "musl"}:
-            raise ValueError(f"unsupported Docker libc: {libc}")
-        if SHA256_RE.fullmatch(image_digest) is None:
-            raise ValueError(f"invalid Docker image digest: {image_digest}")
-
-        expected_suffix = "-alpine" if libc == "musl" else ""
-        expected_ref = f"nginx:{version}{expected_suffix}"
-        if image_ref != expected_ref:
-            raise ValueError(
-                f"Docker image_ref {image_ref!r} does not match row "
-                f"{version}/{libc}; expected {expected_ref!r}"
-            )
-
-        row_id = f"{version}/{operating_system}/{libc}/{arch}"
-        resolved.append(
-            {
-                "matrix_row_id": row_id,
-                "nginx_version": version,
-                "os": operating_system,
-                "libc": libc,
-                "arch": arch,
-                "image_ref": image_ref,
-                "image_digest": image_digest,
-            }
-        )
-
-    resolved.sort(
-        key=lambda row: (
-            tuple(int(part) for part in row["nginx_version"].split(".")),
-            row["os"],
-            row["libc"],
-            row["arch"],
-        )
-    )
+    resolved.sort(key=_docker_sort_key)
     if not resolved:
         raise ValueError("no blocking official Docker rows were found")
     row_ids = [row["matrix_row_id"] for row in resolved]

@@ -107,9 +107,8 @@ impl MarkdownConverter {
             let fence_len = measure_fence_len(line);
             let fence_line = line.trim_start_matches(|c| c == ' ' || c == '\t');
             let fence_info = fence_line.get(fence_len..).unwrap_or("");
-            let is_opening_fence = active_fence_len.is_none()
-                && fence_len >= 3
-                && !fence_info.contains('`');
+            let is_opening_fence =
+                active_fence_len.is_none() && fence_len >= 3 && !fence_info.contains('`');
             let is_closing_fence = active_fence_len
                 .map(|len| fence_len >= len && fence_info.trim().is_empty())
                 .unwrap_or(false);
@@ -256,9 +255,7 @@ mod tests {
     #[test]
     fn normalize_output_rejects_backtick_in_fence_info() {
         let converter = MarkdownConverter::with_options(Default::default());
-        let out = converter.normalize_output(
-            "```rust`\na  b\n```\n".to_string(),
-        );
+        let out = converter.normalize_output("```rust`\na  b\n```\n".to_string());
 
         assert!(
             !out.contains("a  b"),

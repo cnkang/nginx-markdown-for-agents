@@ -383,6 +383,38 @@ impl MarkdownConverter {
         self.handle_list_item_with_marker(node, output, depth, false, ctx)
     }
 
+    fn render_list_item_child(
+        &self,
+        child: &Handle,
+        item_output: &mut String,
+        depth: usize,
+        ctx: &mut Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
+        match child.data {
+            NodeData::Element { ref name, .. } => {
+                let tag_name = name.local.as_ref();
+                if tag_name == "ul" || tag_name == "ol" {
+                    if !item_output.is_empty() && !item_output.ends_with('\n') {
+                        item_output.push('\n');
+                    }
+                    self.handle_list_with_context(
+                        child,
+                        item_output,
+                        depth + 1,
+                        tag_name == "ol",
+                        ctx.as_deref_mut(),
+                    )?;
+                } else {
+                    self.traverse_node_optional(child, item_output, depth + 1, ctx.as_deref_mut())?;
+                }
+            }
+            _ => {
+                self.traverse_node_optional(child, item_output, depth + 1, ctx.as_deref_mut())?;
+            }
+        }
+        Ok(())
+    }
+
     /// Handle list item elements with specific marker type.
     pub(super) fn handle_list_item_with_marker(
         &self,
@@ -398,68 +430,27 @@ impl MarkdownConverter {
         for child in node.children.borrow().iter() {
             let child_output_start = item_output.len();
 
-            match child.data {
-                NodeData::Element { ref name, .. } => {
-                    let tag_name = name.local.as_ref();
-                    if tag_name == "ul" {
-                        if !item_output.is_empty() && !item_output.ends_with('\n') {
-                            item_output.push('\n');
-                        }
-                        self.handle_list_with_context(
-                            child,
-                            &mut item_output,
-                            depth + 1,
-                            false,
-                            ctx.as_deref_mut(),
-                        )?;
-                    } else if tag_name == "ol" {
-                        if !item_output.is_empty() && !item_output.ends_with('\n') {
-                            item_output.push('\n');
-                        }
-                        self.handle_list_with_context(
-                            child,
-                            &mut item_output,
-                            depth + 1,
-                            true,
-                            ctx.as_deref_mut(),
-                        )?;
-                    } else {
-                        self.traverse_node_optional(
-                            child,
-                            &mut item_output,
-                            depth + 1,
-                            ctx.as_deref_mut(),
-                        )?;
-                    }
-                }
-                _ => {
-                    self.traverse_node_optional(
-                        child,
-                        &mut item_output,
-                        depth + 1,
-                        ctx.as_deref_mut(),
-                    )?;
-                }
-            }
+            self.render_list_item_child(child, &mut item_output, depth, &mut ctx)?;
 
             let appended_newlines = item_output[child_output_start..]
                 .bytes()
                 .filter(|byte| *byte == b'\n')
                 .count();
-            newline_count = newline_count.checked_add(appended_newlines).ok_or_else(|| {
-                ConversionError::MemoryLimit(
-                    "generated Markdown list newline count overflow".to_string(),
-                )
-            })?;
+            newline_count = newline_count
+                .checked_add(appended_newlines)
+                .ok_or_else(|| {
+                    ConversionError::MemoryLimit(
+                        "generated Markdown list newline count overflow".to_string(),
+                    )
+                })?;
 
             if let Some(context) = ctx.as_deref_mut() {
-                let upper_bound =
-                    Self::format_list_item_upper_bound(
-                        item_output.len(),
-                        newline_count,
-                        depth,
-                        ordered,
-                    )?;
+                let upper_bound = Self::format_list_item_upper_bound(
+                    item_output.len(),
+                    newline_count,
+                    depth,
+                    ordered,
+                )?;
                 let projected_len = output.len().checked_add(upper_bound).ok_or_else(|| {
                     ConversionError::MemoryLimit(
                         "generated Markdown list output length overflow".to_string(),
