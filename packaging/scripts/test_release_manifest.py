@@ -372,7 +372,12 @@ class TestValidateManifest(unittest.TestCase):
         if self.sha256sums_path.exists():
             args.extend(["--sha256sums", str(self.sha256sums_path)])
         for k, v in kwargs.items():
-            args.extend([f"--{k.replace('_', '-')}", str(v)])
+            flag = f"--{k.replace('_', '-')}"
+            if isinstance(v, bool):
+                if v:
+                    args.append(flag)
+            else:
+                args.extend([flag, str(v)])
         result = subprocess.run(
             args, capture_output=True, text=True, timeout=30, check=False
         )
@@ -401,6 +406,53 @@ class TestValidateManifest(unittest.TestCase):
         )
         self.sha256sums_path.write_text("\n".join(entries) + "\n")
         errors = self._validate()
+        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+
+    def test_bootstrap_assets_are_optional_by_default(self):
+        """A tag manifest may omit optional bootstrap files and sums entries."""
+        self._make_valid_manifest()
+        (self.artifact_dir / "release-manifest.json").write_text(
+            self.manifest_path.read_text()
+        )
+        self._make_sha256sums()
+        errors = self._validate()
+        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+
+    def test_bootstrap_assets_can_be_required_explicitly(self):
+        """The explicit strict mode requires both bootstrap assets."""
+        self._make_valid_manifest()
+        (self.artifact_dir / "release-manifest.json").write_text(
+            self.manifest_path.read_text()
+        )
+        self._make_sha256sums()
+        errors = self._validate(require_bootstrap_assets=True)
+        self.assertTrue(
+            any("Bootstrap asset" in error for error in errors),
+            f"Expected required bootstrap asset errors, got: {errors}",
+        )
+
+    def test_prerelease_build_tag_bootstrap_assets_validate(self):
+        """Bootstrap filenames support full semantic release tags."""
+        manifest = self._make_valid_manifest()
+        tag = "v0.8.3-rc.1+build.7"
+        manifest["git"]["tag"] = tag
+        self.manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+
+        installer = f"nginx-markdown-for-agents-installer-{tag}.sh"
+        (self.artifact_dir / installer).write_bytes(b"installer")
+        (self.artifact_dir / "nginx-markdown-for-agents-release.asc").write_bytes(
+            b"signature"
+        )
+        (self.artifact_dir / "release-manifest.json").write_text(
+            self.manifest_path.read_text()
+        )
+        entries = [
+            f"{sha256_bytes(path.read_bytes())}  {path.name}"
+            for path in sorted(self.artifact_dir.iterdir())
+        ]
+        self.sha256sums_path.write_text("\n".join(entries) + "\n")
+
+        errors = self._validate(require_bootstrap_assets=True)
         self.assertEqual(errors, [], f"Unexpected errors: {errors}")
 
     def test_missing_top_level_key(self):

@@ -280,6 +280,29 @@ def test_load_matrix_valid(tmp_path):
     assert manual_entries[0]["managed_by"] == "manual"
 
 
+def test_merge_matrix_omits_redundant_source_only_version():
+    """A source fallback row must not duplicate a fully covered version."""
+    auto_entries = [
+        {
+            "nginx": "1.26.3",
+            "os_type": "glibc",
+            "arch": "x86_64",
+            "support_tier": "full",
+        },
+    ]
+    manual_entries = [
+        {
+            "nginx": "1.26.3",
+            "os_type": "n/a",
+            "arch": "any",
+            "support_tier": "source_only",
+            "managed_by": "manual",
+        },
+    ]
+
+    assert um.merge_matrix(auto_entries, manual_entries) == auto_entries
+
+
 def test_load_matrix_auto_explicit(tmp_path):
     """Entries with managed_by: 'auto' are treated as auto-managed."""
     matrix_data = {

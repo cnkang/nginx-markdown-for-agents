@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -162,6 +163,55 @@ def test_main_accepts_generated_responses_inside_the_checkout(
 
     assert main() == 0
     assert "passed all required checks" in capsys.readouterr().out
+
+
+def test_main_writes_effective_required_check_enumeration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A successful gate can emit the exact active ruleset checks for release evidence."""
+    repository = tmp_path / "repository"
+    input_dir = repository / ".tag-sha-checks"
+    input_dir.mkdir(parents=True)
+    (input_dir / "rules.json").write_text(
+        '[{"type": "required_status_checks", "parameters": '
+        '{"required_status_checks": [{"context": "CI / test", '
+        '"integration_id": 123}]}}]',
+        encoding="utf-8",
+    )
+    (input_dir / "check-runs.json").write_text(
+        '[{"check_runs": [{"id": 1, "name": "CI / test", '
+        '"app": {"id": 123}, "status": "completed", '
+        '"conclusion": "success"}]}]',
+        encoding="utf-8",
+    )
+    output = input_dir / "effective-required-checks.json"
+    monkeypatch.chdir(repository)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "verify_tag_sha_checks.py",
+            "--rules-file",
+            ".tag-sha-checks/rules.json",
+            "--check-runs-file",
+            ".tag-sha-checks/check-runs.json",
+            "--tag-sha",
+            "a" * 40,
+            "--branch",
+            "main",
+            "--required-checks-output",
+            ".tag-sha-checks/effective-required-checks.json",
+        ],
+    )
+
+    assert main() == 0
+    assert json.loads(output.read_text(encoding="utf-8")) == {
+        "branch": "main",
+        "required_checks": [{"context": "CI / test", "integration_id": 123}],
+        "schema_version": "release.required-checks.v1",
+        "tag_sha": "a" * 40,
+    }
+    assert "Effective required checks:" in capsys.readouterr().out
 
 
 def test_main_rejects_an_absolute_input_path(

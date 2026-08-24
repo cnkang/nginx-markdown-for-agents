@@ -128,8 +128,13 @@ done
 
 if [[ "$MODULE_FOUND" -eq 0 ]]; then
     # Check dpkg contents for the actual path
-    SO_PATH=$(dpkg -L nginx-markdown-module 2>/dev/null | grep '\.so$' | head -1) || SO_PATH=""
-    if [[ -n "$SO_PATH" ]] && [ -f "$SO_PATH" ]; then
+    PKG_NAME="$(dpkg-deb -f "$DEB_FILE" Package 2>/dev/null || true)"
+    if [[ -n "$PKG_NAME" ]]; then
+        SO_PATH=$(dpkg -L "$PKG_NAME" 2>/dev/null | grep '\.so$' | head -1) || SO_PATH=""
+    else
+        SO_PATH=""
+    fi
+    if [[ -n "$SO_PATH" ]] && [[ -f "$SO_PATH" ]]; then
         pass "module .so found at $SO_PATH"
         FOUND_MODULE_PATH="$SO_PATH"
     else

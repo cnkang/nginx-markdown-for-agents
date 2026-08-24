@@ -411,7 +411,7 @@ class TestReleaseGateSnippetExpectations:
         assert "Requires:       nginx = %{nginx_version}" in validator.FORBIDDEN_NAKED_EXACT_NGINX_DEPS
         assert "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so" in validator.STANDALONE_RPM_SPEC_SNIPPETS
 
-    def test_standalone_workflows_validate_input_version(self) -> None:
+    def test_standalone_rpm_workflow_validate_input_version(self) -> None:
         """Ensure workflow expressions are isolated from shell evaluation."""
         env_binding = "INPUT_VERSION: ${{ inputs.version }}"
         validator_cmd = './packaging/scripts/validate-version.sh "$INPUT_VERSION"'
@@ -419,24 +419,27 @@ class TestReleaseGateSnippetExpectations:
             './packaging/scripts/validate-version.sh "${{ inputs.version }}"'
         )
 
-        for snippets in (validator.STANDALONE_DEB_SNIPPETS, validator.STANDALONE_RPM_WORKFLOW_SNIPPETS):
-            assert env_binding in snippets
-            assert validator_cmd in snippets
-            assert direct_interpolation not in snippets
+        snippets = validator.STANDALONE_RPM_WORKFLOW_SNIPPETS
+        assert env_binding in snippets
+        assert validator_cmd in snippets
+        assert direct_interpolation not in snippets
         assert direct_interpolation in validator.STANDALONE_VERSION_FORBIDDEN_SNIPPETS
 
-    def test_standalone_workflow_rejects_direct_expression_in_shell(
+    def test_standalone_rpm_workflow_rejects_direct_expression_in_shell(
         self, monkeypatch
     ) -> None:
         """Fail when a workflow expression is interpolated into shell source."""
         direct_interpolation = (
             './packaging/scripts/validate-version.sh "${{ inputs.version }}"'
         )
-        content = "\n".join([*validator.STANDALONE_DEB_SNIPPETS, direct_interpolation])
+        content = "\n".join([
+            *validator.STANDALONE_RPM_WORKFLOW_SNIPPETS,
+            direct_interpolation,
+        ])
         monkeypatch.setattr(validator, "read_safe", lambda _path: content)
         result = validator.ValidationResult()
 
-        validator._validate_standalone_deb(result)
+        validator._validate_standalone_rpm_workflow(result)
 
         assert any(
             status == "FAIL" and ":forbid:" in check_id

@@ -83,7 +83,7 @@
         },
         "owner_workflow": {
           "type": "string",
-          "description": "GitHub Actions workflow file responsible for this entry (e.g. \"release-deb.yml\")."
+          "description": "GitHub Actions workflow file responsible for this entry (e.g. \"release-packages.yml\")."
         },
         "feature_manifest_digest": {
           "type": "string",

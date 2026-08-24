@@ -46,7 +46,6 @@ CANONICAL_DYNAMIC_WORKFLOWS = {
 # Workflows explicitly marked as legacy/non-canonical.
 # Hardcoded versions here produce warnings, not errors.
 LEGACY_WORKFLOWS = {
-    "release-deb.yml",
     "release-rpm.yml",
 }
 
@@ -366,7 +365,7 @@ def validate_release_blocking_publish_dag(matrix_path: Path) -> list[str]:
 
 
 def _publish_job_needs(content: str) -> set[str]:
-    """Return inline ``needs`` entries declared by the ``publish`` job.
+    """Return scalar, flow-sequence, or block-sequence ``needs`` entries.
 
     The workflow validator only needs the publish job's dependency names.
     Walking the small YAML structure directly keeps the check bounded and
@@ -375,7 +374,8 @@ def _publish_job_needs(content: str) -> set[str]:
     publish_indent = 2
     in_publish = False
 
-    for line in content.splitlines():
+    lines = content.splitlines()
+    for index, line in enumerate(lines):
         parts = _publish_line_parts(line)
         if parts is None:
             continue
@@ -391,7 +391,9 @@ def _publish_job_needs(content: str) -> set[str]:
 
         needs_value = _needs_value(stripped)
         if needs_value is not None:
-            return _parse_inline_needs(needs_value)
+            if needs_value:
+                return _parse_inline_needs(needs_value)
+            return _parse_block_needs(lines, index, indent)
 
     return set()
 
@@ -418,14 +420,43 @@ def _needs_value(stripped: str) -> str | None:
 
 
 def _parse_inline_needs(value: str) -> set[str]:
-    """Parse the bounded inline dependency list used by the release workflow."""
-    if not (value.startswith("[") and value.endswith("]")):
+    """Parse a scalar or bounded flow-sequence dependency value."""
+    value = value.strip()
+    if value.startswith("[") and value.endswith("]"):
+        value = value[1:-1]
+        entries = value.split(",")
+    elif value.startswith("[") or value.endswith("]"):
         return set()
+    else:
+        entries = [value]
+
     return {
-        entry.strip()
-        for entry in value[1:-1].split(",")
-        if entry.strip()
+        entry.strip().strip("'\"")
+        for entry in entries
+        if entry.strip().strip("'\"")
     }
+
+
+def _parse_block_needs(
+    lines: list[str], needs_line_index: int, needs_indent: int
+) -> set[str]:
+    """Parse a YAML block sequence immediately below ``needs:``."""
+    dependencies: set[str] = set()
+    item_indent = needs_indent + 2
+    for line in lines[needs_line_index + 1 :]:
+        parts = _publish_line_parts(line)
+        if parts is None:
+            continue
+        indent, stripped = parts
+        if indent <= needs_indent:
+            break
+        if indent != item_indent or not stripped.startswith("-"):
+            return set()
+        value = stripped[1:].strip().strip("'\"")
+        if not value:
+            return set()
+        dependencies.add(value)
+    return dependencies
 
 
 def _has_top_level_workflow_call(content: str) -> bool:

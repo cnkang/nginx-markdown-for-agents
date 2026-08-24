@@ -225,11 +225,11 @@ CONF
     info "Positive module request verified Content-Type, Vary, and Markdown body"
 
     info "Running negative control without load_module..."
-    if "$NGINX_BIN" -p "$smoke_prefix" -c "$negative_conf" \
+    if "$NGINX_BIN" -t -p "$smoke_prefix" -c "$negative_conf" \
         >"$negative_log" 2>&1; then
         die "Negative module smoke control unexpectedly passed without load_module"
     fi
-    info "Negative control rejected markdown_filter without the module"
+    info "Negative control rejected markdown_filter during nginx -t without the module"
 
     rm -rf "$smoke_root" "$smoke_prefix"
     return 0

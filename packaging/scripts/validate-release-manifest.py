@@ -5,7 +5,7 @@ Checks schema, package integrity, SHA256SUMS inclusion, and absence of
 placeholder values.
 
 Usage:
-    validate-release-manifest.py -m MANIFEST -d ARTIFACT_DIR [--sha256sums SHA256SUMS] [--version VERSION]
+    validate-release-manifest.py -m MANIFEST -d ARTIFACT_DIR [--sha256sums SHA256SUMS] [--version VERSION] [--require-bootstrap-assets]
 
 Exit codes:
     0  All validations passed
@@ -27,6 +27,14 @@ PLACEHOLDER_PATTERNS = [
     re.compile(r"TODO", re.IGNORECASE),
     re.compile(r"FIXME", re.IGNORECASE),
 ]
+
+SEMVER_TAG_RE = re.compile(
+    r"v?(?:0|[1-9][0-9]*)\."
+    r"(?:0|[1-9][0-9]*)\."
+    r"(?:0|[1-9][0-9]*)"
+    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+)
 
 
 def sha256_file(path: Path) -> str:
@@ -83,6 +91,7 @@ def validate_manifest(
     artifact_dir: Path,
     sha256sums_path: Path | None,
     expected_version: str | None,
+    require_bootstrap_assets: bool = False,
 ) -> list[str]:
     errors: list[str] = []
 
@@ -308,9 +317,7 @@ def validate_manifest(
         bootstrap_filenames: set[str] = set()
         if is_tag_release and isinstance(git, dict):
             tag = git.get("tag", "")
-            if isinstance(tag, str) and re.fullmatch(
-                r"v?[0-9]+\.[0-9]+\.[0-9]+", tag
-            ):
+            if isinstance(tag, str) and SEMVER_TAG_RE.fullmatch(tag):
                 bootstrap_filenames = {
                     f"nginx-markdown-for-agents-installer-{tag}.sh",
                     "nginx-markdown-for-agents-release.asc",
@@ -342,12 +349,13 @@ def validate_manifest(
 
         for fname in sorted(bootstrap_filenames):
             fpath = artifact_dir / fname
-            if not fpath.is_file():
-                errors.append(f"Bootstrap asset not found in artifacts: {fname}")
-                continue
             sums_sha = sha256_entries.get(fname)
             if sums_sha is None:
-                errors.append(f"Bootstrap asset {fname} not found in SHA256SUMS")
+                if require_bootstrap_assets:
+                    errors.append(f"Bootstrap asset {fname} not found in SHA256SUMS")
+                continue
+            if not fpath.is_file():
+                errors.append(f"Bootstrap asset {fname} listed in SHA256SUMS but not found in artifacts")
                 continue
             actual_sha = sha256_file(fpath)
             if sums_sha != actual_sha:
@@ -357,6 +365,10 @@ def validate_manifest(
                 )
     elif sha256sums_path:
         errors.append(f"SHA256SUMS file not found: {sha256sums_path}")
+    elif require_bootstrap_assets and is_tag_release:
+        errors.append(
+            "SHA256SUMS is required when bootstrap assets are explicitly required"
+        )
 
     # Check packages are sorted deterministically
     if packages:
@@ -373,13 +385,24 @@ def main() -> None:
     parser.add_argument("-d", "--artifact-dir", required=True, help="Artifact directory")
     parser.add_argument("--sha256sums", default=None, help="Path to SHA256SUMS file")
     parser.add_argument("--version", default=None, help="Expected version")
+    parser.add_argument(
+        "--require-bootstrap-assets",
+        action="store_true",
+        help="Require the installer and release-signature bootstrap assets",
+    )
     args = parser.parse_args()
 
     manifest_path = Path(args.manifest)
     artifact_dir = Path(args.artifact_dir)
     sha256sums_path = Path(args.sha256sums) if args.sha256sums else None
 
-    errors = validate_manifest(manifest_path, artifact_dir, sha256sums_path, args.version)
+    errors = validate_manifest(
+        manifest_path,
+        artifact_dir,
+        sha256sums_path,
+        args.version,
+        args.require_bootstrap_assets,
+    )
 
     if errors:
         print("VALIDATION FAILED:", file=sys.stderr)

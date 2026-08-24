@@ -22,13 +22,13 @@ _BASE_MANIFEST = {
     "run_status": "pass",
     "entries": [
         {
-            "category": "coverage",
+            "domain": "coverage",
             "blocking": True,
             "status": "pass",
             "artifact_ref": "workflow:coverage",
         },
         {
-            "category": "documentation",
+            "domain": "documentation",
             "blocking": False,
             "status": "skip",
             "artifact_ref": "workflow:docs",
@@ -45,6 +45,11 @@ def _manifest_with(entries_override=None, **top_override):
     if entries_override is not None:
         manifest["entries"] = entries_override
     return manifest
+
+
+def test_fixture_validation_uses_the_final_manifest_schema() -> None:
+    """Fixture validation accepts the same shape used by real mode."""
+    assert gate.validate_record(_BASE_MANIFEST) == []
 
 
 def test_blocking_entry_with_fail_status_is_rejected() -> None:
@@ -106,7 +111,7 @@ def test_blocking_rule_reason_names_category() -> None:
     entries[0]["status"] = "pending"
     reasons: list[str] = []
     gate._check_blocking_semantics(_manifest_with(entries), reasons)
-    assert any("category='coverage'" in r for r in reasons)
+    assert any("domain='coverage'" in r for r in reasons)
 
 
 def test_verify_head_flags_drifted_evidence(monkeypatch) -> None:

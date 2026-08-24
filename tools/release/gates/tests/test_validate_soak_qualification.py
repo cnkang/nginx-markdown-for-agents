@@ -175,6 +175,22 @@ def test_runtime_directory_rejects_external_override(
         validator._runtime_directory()
 
 
+def test_soak_nginx_runs_in_foreground_for_reliable_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The soak master must own the launcher process and its shutdown."""
+    monkeypatch.setattr(validator, "REPO_ROOT", tmp_path)
+    runtime_dir = tmp_path / "runtime"
+    document_root = runtime_dir / "html"
+    document_root.mkdir(parents=True)
+
+    validator.write_nginx_conf(runtime_dir, 19000, str(document_root), None)
+    config = (runtime_dir / "nginx.conf").read_text(encoding="utf-8")
+
+    assert "daemon off;" in config
+    assert f"pid {runtime_dir}/nginx.pid;" in config
+
+
 def test_record_output_path_rejects_external_override(tmp_path: Path) -> None:
     """Qualification records must stay under the generated output root."""
     args = type("Args", (), {

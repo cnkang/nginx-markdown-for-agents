@@ -65,6 +65,38 @@ def _normalize_target(target: str) -> str:
     return canonical_arch(target)
 
 
+def _is_supported_dynamic_entry(item: dict) -> bool:
+    """Return whether an entry represents a supported packaged platform."""
+    return (
+        item.get("artifact_type") == "dynamic-module"
+        and item.get("support_tier") == "supported"
+        and item.get("libc") in {"glibc", "musl"}
+        and canonical_arch(item.get("target", "")) in {"x86_64", "aarch64"}
+    )
+
+
+def _covered_versions(data: dict) -> set[str]:
+    """Return versions that already have supported packaged platforms."""
+    return {
+        item["nginx_version"]
+        for item in data.get("entries", [])
+        if _is_supported_dynamic_entry(item)
+    }
+
+
+def _is_required_source_fallback(
+    item: dict, covered_versions: set[str]
+) -> bool:
+    """Return whether an uncovered version needs its source fallback row."""
+    return (
+        item.get("artifact_type") == "source"
+        and item.get("support_tier") == "best-effort"
+        and item.get("libc") == "n/a"
+        and item.get("target") == "any"
+        and item.get("nginx_version") not in covered_versions
+    )
+
+
 def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
     """
     Load matrix entries from a release-matrix JSON file and normalize their support tier.
@@ -79,6 +111,7 @@ def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
     with open(validated, "r", encoding="utf-8") as f:
         data = normalize_compatibility_document(json.load(f))
 
+    covered_versions = _covered_versions(data)
     entries = []
     entries.extend(
         (
@@ -88,20 +121,8 @@ def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
             _normalize_tier(item["support_tier"]),
         )
         for item in data.get("entries", [])
-        if (
-            (
-                item.get("artifact_type") == "dynamic-module"
-                and item.get("support_tier") == "supported"
-                and item.get("libc") in {"glibc", "musl"}
-                and canonical_arch(item.get("target", "")) in {"x86_64", "aarch64"}
-            )
-            or (
-                item.get("artifact_type") == "source"
-                and item.get("support_tier") == "best-effort"
-                and item.get("libc") == "n/a"
-                and item.get("target") == "any"
-            )
-        )
+        if _is_supported_dynamic_entry(item)
+        or _is_required_source_fallback(item, covered_versions)
     )
     return sorted(entries)
 

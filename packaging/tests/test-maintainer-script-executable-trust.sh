@@ -85,7 +85,7 @@ link_trusted_command() {
 # prepare_sandboxed_script — Copy a maintainer script into a temporary root.
 # The copy preserves the unconditional PATH overwrite while redirecting its
 # fixed paths to a fixture. It never executes the production script directly.
-# Arguments: $1 = source script, $2 = fixture label, $3 = nfpm|debian
+# Arguments: $1 = source script, $2 = fixture label, $3 = nfpm
 # Outputs: Sets SANDBOX_ROOT and SCRIPT_UNDER_TEST variables
 prepare_sandboxed_script() {
     local source_script="$1"
@@ -118,13 +118,6 @@ prepare_sandboxed_script() {
                 -e "s|/etc/nginx|${SANDBOX_ROOT}/etc/nginx|g" \
                 -e "s|/usr/share/nginx|${SANDBOX_ROOT}/usr/share/nginx|g" \
                 -e 's|%%NGINX_VERSION%%|1.26.3|g' \
-                "${source_script}" > "${SCRIPT_UNDER_TEST}"
-            ;;
-        debian)
-            sed \
-                -e "s|PATH=/usr/sbin:/usr/bin:/sbin:/bin|PATH=${SANDBOX_ROOT}/usr/sbin:${SANDBOX_ROOT}/usr/bin:${SANDBOX_ROOT}/sbin:${SANDBOX_ROOT}/bin|" \
-                -e "s|/etc/nginx|${SANDBOX_ROOT}/etc/nginx|g" \
-                -e "s|/usr/share/nginx|${SANDBOX_ROOT}/usr/share/nginx|g" \
                 "${source_script}" > "${SCRIPT_UNDER_TEST}"
             ;;
         *)
@@ -198,6 +191,21 @@ assert_path_absent() {
     return 0
 }
 
+# assert_path_present — Assert that a cleanup path remains after a simulated
+# cleanup failure.
+# Arguments: $1 = label, $2 = path
+assert_path_present() {
+    local label="$1"
+    local path="$2"
+
+    if [[ -e "${path}" || -L "${path}" ]]; then
+        pass "${label}: sandbox path preserved"
+    else
+        fail "${label}: sandbox path was removed unexpectedly"
+    fi
+    return 0
+}
+
 echo "========================================" >&2
 echo "Negative Control: Executable Trust" >&2
 echo "========================================" >&2
@@ -252,6 +260,28 @@ if [[ -f "${SOURCE_SCRIPT}" ]]; then
     else
         fail "preremove.sh: exit code ${RC} (expected 0)"
     fi
+
+    echo "--- NC-2b: preremove.sh cleanup failure ---" >&2
+    create_evil_dir "preremove-failure"
+    prepare_sandboxed_script "${SOURCE_SCRIPT}" "preremove-failure" "nfpm"
+    touch "${SANDBOX_ROOT}/usr/share/nginx/modules-available/mod-markdown.conf"
+    ln -s "${SANDBOX_ROOT}/usr/share/nginx/modules-available/mod-markdown.conf" \
+        "${SANDBOX_ROOT}/etc/nginx/modules-enabled/50-mod-markdown.conf"
+    rm -f "${SANDBOX_ROOT}/usr/bin/rm"
+    cat > "${SANDBOX_ROOT}/usr/bin/rm" <<'SCRIPT'
+#!/bin/sh
+exit 1
+SCRIPT
+    chmod +x "${SANDBOX_ROOT}/usr/bin/rm"
+    run_sandboxed_script bash remove
+
+    assert_path_present "preremove.sh failed rm" \
+        "${SANDBOX_ROOT}/etc/nginx/modules-enabled/50-mod-markdown.conf"
+    if [[ "${RC}" -eq 0 ]]; then
+        pass "preremove.sh: cleanup failure is non-fatal"
+    else
+        fail "preremove.sh: cleanup failure exited ${RC}"
+    fi
 else
     fail "preremove.sh: script not found at ${SOURCE_SCRIPT}"
 fi
@@ -259,65 +289,10 @@ fi
 echo "" >&2
 
 ##############################################################################
-# NC-3: packaging/debian/postinst (sh, no TRUSTED_PATH_ROOT — uses hardcoded)
+# NC-3: nfpm/scripts/preinstall.sh (bash, TRUSTED_PATH_ROOT override)
 ##############################################################################
 
-echo "--- NC-3: debian/postinst ---" >&2
-
-SOURCE_SCRIPT="${REPO_ROOT}/packaging/debian/postinst"
-if [[ -f "${SOURCE_SCRIPT}" ]]; then
-    create_evil_dir "deb_postinst"
-    prepare_sandboxed_script "${SOURCE_SCRIPT}" "deb_postinst" "debian"
-    run_sandboxed_script sh configure
-
-    assert_no_markers "debian/postinst"
-
-    if [[ "${RC}" -eq 0 ]]; then
-        pass "debian/postinst: exit code 0 (configure)"
-    else
-        fail "debian/postinst: exit code ${RC} (expected 0)"
-    fi
-else
-    fail "debian/postinst: script not found at ${SOURCE_SCRIPT}"
-fi
-
-echo "" >&2
-
-##############################################################################
-# NC-4: packaging/debian/postrm (sh, no TRUSTED_PATH_ROOT — uses hardcoded)
-##############################################################################
-
-echo "--- NC-4: debian/postrm ---" >&2
-
-SOURCE_SCRIPT="${REPO_ROOT}/packaging/debian/postrm"
-if [[ -f "${SOURCE_SCRIPT}" ]]; then
-    create_evil_dir "deb_postrm"
-    prepare_sandboxed_script "${SOURCE_SCRIPT}" "deb_postrm" "debian"
-    touch "${SANDBOX_ROOT}/etc/nginx/modules-available/mod-markdown.conf"
-    run_sandboxed_script sh purge
-
-    assert_no_markers "debian/postrm"
-    assert_path_absent "debian/postrm snippet" \
-        "${SANDBOX_ROOT}/etc/nginx/modules-available/mod-markdown.conf"
-    assert_path_absent "debian/postrm directory" \
-        "${SANDBOX_ROOT}/etc/nginx/modules-available"
-
-    if [[ "${RC}" -eq 0 ]]; then
-        pass "debian/postrm: exit code 0 (purge)"
-    else
-        fail "debian/postrm: exit code ${RC} (expected 0)"
-    fi
-else
-    fail "debian/postrm: script not found at ${SOURCE_SCRIPT}"
-fi
-
-echo "" >&2
-
-##############################################################################
-# NC-5: nfpm/scripts/preinstall.sh (bash, TRUSTED_PATH_ROOT override)
-##############################################################################
-
-echo "--- NC-5: preinstall.sh ---" >&2
+echo "--- NC-3: preinstall.sh ---" >&2
 
 SOURCE_SCRIPT="${REPO_ROOT}/packaging/nfpm/scripts/preinstall.sh"
 if [[ -f "${SOURCE_SCRIPT}" ]]; then

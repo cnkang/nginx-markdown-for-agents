@@ -229,11 +229,6 @@ class TestValidateLegacyWorkflows:
         wf_dir = tmp_path / ".github" / "workflows"
         wf_dir.mkdir(parents=True)
 
-        (wf_dir / "release-deb.yml").write_text(
-            'name: "Legacy: Release DEB (nginx 1.26.3 only)"\n'
-            'env:\n'
-            '  NGINX_VERSION: "1.26.3"\n'
-        )
         (wf_dir / "release-rpm.yml").write_text(
             'name: "Legacy: Release RPM (nginx 1.26.3 only)"\n'
             'env:\n'
@@ -255,7 +250,7 @@ class TestValidateLegacyWorkflows:
         wf_dir = tmp_path / ".github" / "workflows"
         wf_dir.mkdir(parents=True)
 
-        (wf_dir / "release-deb.yml").write_text(
+        (wf_dir / "release-rpm.yml").write_text(
             'NGINX_VERSION="1.22.0"\n'
         )
 
@@ -381,6 +376,23 @@ class TestValidateReleaseBlockingPublishDag:
     def test_publish_needs_returns_inline_dependencies(self) -> None:
         content = "  publish:\n    needs: [release-gate, official-docker-release-gate]\n"
 
+        assert _publish_job_needs(content) == {
+            "release-gate",
+            "official-docker-release-gate",
+        }
+
+    def test_publish_needs_returns_scalar_dependency(self) -> None:
+        assert _publish_job_needs(
+            "  publish:\n    needs: official-docker-release-gate\n"
+        ) == {"official-docker-release-gate"}
+
+    def test_publish_needs_returns_block_dependencies(self) -> None:
+        content = (
+            "  publish:\n"
+            "    needs:\n"
+            "      - release-gate\n"
+            "      - official-docker-release-gate\n"
+        )
         assert _publish_job_needs(content) == {
             "release-gate",
             "official-docker-release-gate",

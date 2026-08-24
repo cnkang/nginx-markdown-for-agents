@@ -11,8 +11,8 @@ diagnostics. No CI matrix tests all feature-flag combinations.
 This model encodes the official feature manifest contract as a single
 source of truth that must stay in sync with the Cargo default features,
 the official-build-feature-manifest.json artifact, and every official
-artifact producer workflow (release-packages, release-deb, release-rpm,
-nightly-perf module baseline). It does NOT link against C code.
+artifact producer workflow (release-packages, release-rpm, nightly-perf
+module baseline). It does NOT link against C code.
 
 Validates: Requirements 14.2, 15.16
 
@@ -87,7 +87,6 @@ WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
 # module with the same fixed feature set.
 OFFICIAL_PRODUCER_WORKFLOWS = (
     "release-packages.yml",
-    "release-deb.yml",
     "release-rpm.yml",
     "nightly-perf.yml",
 )
@@ -134,17 +133,25 @@ def _workflow_feature_assignments(path: pathlib.Path) -> list[str]:
     ]
 
 
-def _workflow_feature_flags(path: pathlib.Path) -> list[set[str]]:
-    """Extract `--features X` / `--all-features` / `--no-default-features`.
+def _workflow_feature_sentinels(path: pathlib.Path) -> dict[str, bool]:
+    """Return Cargo feature-mode switches separately from feature lists."""
+    text = path.read_text(encoding="utf-8")
+    return {
+        "all_features": bool(re.search(r"--all-features(?:\s|$)", text)),
+        "no_default_features": bool(
+            re.search(r"--no-default-features(?:\s|$)", text)
+        ),
+    }
 
-    `--all-features` is represented by the sentinel `*all*` so callers
-    can distinguish it from an explicit feature list.
+
+def _workflow_feature_flags(path: pathlib.Path) -> list[set[str]]:
+    """Extract only explicit `--features X` lists.
+
+    ``--all-features`` and ``--no-default-features`` are modes, not feature
+    sets. Keeping them out of this list prevents a sentinel from looking like
+    a second matrix entry or an empty explicit declaration.
     """
     text = path.read_text(encoding="utf-8")
-    no_default = bool(
-        re.search(r"--no-default-features(?:\s|$)", text)
-    )
-    all_features = bool(re.search(r"--all-features(?:\s|$)", text))
     flags = re.findall(
         r"--features(?:=|\s+)[\"']?([A-Za-z0-9_,][A-Za-z0-9_, ]*)[\"']?",
         text,
@@ -153,10 +160,6 @@ def _workflow_feature_flags(path: pathlib.Path) -> list[set[str]]:
         {f.strip() for f in re.split(r"[,\s]+", flag) if f.strip()}
         for flag in flags
     ]
-    if all_features:
-        parsed.append({"*all*"})
-    if no_default:
-        parsed.append(set())
     return parsed
 
 
@@ -183,7 +186,8 @@ def test_official_producer_exposes_feature_declaration(workflow: str) -> None:
     assert path.is_file(), f"{workflow} must exist in this checkout"
     flags = _workflow_feature_flags(path)
     assignments = _workflow_feature_assignments(path)
-    assert flags or assignments, (
+    sentinels = _workflow_feature_sentinels(path)
+    assert flags or assignments or any(sentinels.values()), (
         f"{workflow} must declare a feature set (--features/--all-features/"
         f"--no-default-features or RUST_FEATURES) so the official "
         f"feature-set contract can be validated"
@@ -197,6 +201,13 @@ def test_official_producer_uses_fixed_feature_set(workflow: str) -> None:
     path = WORKFLOW_DIR / workflow
     assert path.is_file(), f"{workflow} must exist in this checkout"
     feature_sets = _workflow_feature_flags(path)
+    sentinels = _workflow_feature_sentinels(path)
+    assert not sentinels["all_features"], (
+        f"{workflow} must not use --all-features for an official build"
+    )
+    assert not sentinels["no_default_features"], (
+        f"{workflow} must not disable Cargo defaults for an official build"
+    )
     if not feature_sets:
         return  # producer relies on Cargo defaults, which the other tests pin
     for features in feature_sets:
@@ -242,8 +253,8 @@ def test_custom_builds_never_disable_required_feature_via_no_default() -> None:
         path = WORKFLOW_DIR / workflow
         if not path.is_file():
             continue
-        text = path.read_text(encoding="utf-8")
-        if "no-default-features" not in text:
+        sentinels = _workflow_feature_sentinels(path)
+        if not sentinels["no_default_features"]:
             continue
         flags = _workflow_feature_flags(path)
         explicit = [s for s in flags if s]
@@ -258,9 +269,27 @@ def test_official_producer_does_not_disable_required_features(workflow: str) -> 
     """Every explicit feature list contains the complete official set."""
     path = WORKFLOW_DIR / workflow
     assert path.is_file(), f"{workflow} must exist in this checkout"
-    text = path.read_text(encoding="utf-8")
-    assert "no-default-features" not in text
+    sentinels = _workflow_feature_sentinels(path)
+    assert not sentinels["no_default_features"]
+    assert not sentinels["all_features"]
     for features in _workflow_feature_flags(path):
         assert features == set(OFFICIAL_FEATURES), (
             f"{workflow} declares a feature subset: {sorted(features)}"
         )
+
+
+def test_feature_flag_parser_separates_cargo_sentinels(tmp_path: pathlib.Path) -> None:
+    """Cargo mode switches must not masquerade as explicit feature sets."""
+    workflow = tmp_path / "workflow.yml"
+    workflow.write_text(
+        "run: cargo build --no-default-features "
+        "--features incremental,streaming,prune_noise_regions "
+        "--all-features\n",
+        encoding="utf-8",
+    )
+
+    assert _workflow_feature_flags(workflow) == [set(OFFICIAL_FEATURES)]
+    assert _workflow_feature_sentinels(workflow) == {
+        "all_features": True,
+        "no_default_features": True,
+    }

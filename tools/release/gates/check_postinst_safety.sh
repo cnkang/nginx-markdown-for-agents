@@ -17,8 +17,6 @@
 #
 # ARGUMENTS:
 #   If no files are provided, defaults to checking:
-#     - packaging/debian/postinst
-#     - packaging/debian/postrm
 #     - packaging/nfpm/scripts/preinstall.sh
 #     - packaging/nfpm/scripts/postinstall.sh
 #     - packaging/nfpm/scripts/preremove.sh
@@ -72,8 +70,6 @@ usage() {
     printf 'and trusted-PATH invariant violations.\n' >&2
     printf '\n' >&2
     printf 'If no files are provided, defaults to checking:\n' >&2
-    printf '  packaging/debian/postinst\n' >&2
-    printf '  packaging/debian/postrm\n' >&2
     printf '  packaging/nfpm/scripts/preinstall.sh\n' >&2
     printf '  packaging/nfpm/scripts/postinstall.sh\n' >&2
     printf '  packaging/nfpm/scripts/preremove.sh\n' >&2
@@ -488,39 +484,33 @@ main() {
         # Default: check all known maintainer script locations
         log_info "No files specified; using defaults"
 
-        # --- DEB maintainer scripts ---
-        if [[ -f "packaging/debian/postinst" ]]; then
-            check_file "packaging/debian/postinst" || had_error=1
-            check_trusted_path "packaging/debian/postinst"
-        else
-            log_warn "Default file not found: packaging/debian/postinst"
-        fi
-
-        if [[ -f "packaging/debian/postrm" ]]; then
-            check_file "packaging/debian/postrm" || had_error=1
-            check_trusted_path "packaging/debian/postrm"
-        else
-            log_warn "Default file not found: packaging/debian/postrm"
-        fi
-
         # --- nFPM maintainer scripts ---
         if [[ -f "packaging/nfpm/scripts/preinstall.sh" ]]; then
-            check_file "packaging/nfpm/scripts/preinstall.sh" || had_error=1
-            check_trusted_path "packaging/nfpm/scripts/preinstall.sh"
+            if check_file "packaging/nfpm/scripts/preinstall.sh"; then
+                check_trusted_path "packaging/nfpm/scripts/preinstall.sh"
+            else
+                had_error=1
+            fi
         else
             log_warn "Default file not found: packaging/nfpm/scripts/preinstall.sh"
         fi
 
         if [[ -f "packaging/nfpm/scripts/postinstall.sh" ]]; then
-            check_file "packaging/nfpm/scripts/postinstall.sh" || had_error=1
-            check_trusted_path "packaging/nfpm/scripts/postinstall.sh"
+            if check_file "packaging/nfpm/scripts/postinstall.sh"; then
+                check_trusted_path "packaging/nfpm/scripts/postinstall.sh"
+            else
+                had_error=1
+            fi
         else
             log_warn "Default file not found: packaging/nfpm/scripts/postinstall.sh"
         fi
 
         if [[ -f "packaging/nfpm/scripts/preremove.sh" ]]; then
-            check_file "packaging/nfpm/scripts/preremove.sh" || had_error=1
-            check_trusted_path "packaging/nfpm/scripts/preremove.sh"
+            if check_file "packaging/nfpm/scripts/preremove.sh"; then
+                check_trusted_path "packaging/nfpm/scripts/preremove.sh"
+            else
+                had_error=1
+            fi
         else
             log_warn "Default file not found: packaging/nfpm/scripts/preremove.sh"
         fi
@@ -532,8 +522,11 @@ main() {
             rpm_post_tmp="$(extract_rpm_post "packaging/rpm/SPECS/nginx-module-markdown.spec")"
             if [[ -s "$rpm_post_tmp" ]]; then
                 log_info "Extracted %%post section from RPM spec"
-                check_file "$rpm_post_tmp" || had_error=1
-                check_trusted_path "$rpm_post_tmp"
+                if check_file "$rpm_post_tmp"; then
+                    check_trusted_path "$rpm_post_tmp"
+                else
+                    had_error=1
+                fi
                 rm -f "$rpm_post_tmp"
             else
                 log_info "No %%post section found in RPM spec (or section is empty)"
@@ -545,8 +538,11 @@ main() {
     else
         # Check each provided file
         for file in "$@"; do
-            check_file "$file" || had_error=1
-            check_trusted_path "$file"
+            if check_file "$file"; then
+                check_trusted_path "$file"
+            else
+                had_error=1
+            fi
         done
     fi
 

@@ -474,6 +474,20 @@ def _resolve_repository_input(path: Path) -> Path:
     return resolved
 
 
+def _resolve_repository_output(path: Path) -> Path:
+    """Resolve an output file without allowing it to escape the checkout."""
+    if path.is_absolute() or ".." in path.parts:
+        raise ValueError("output paths must be relative and cannot contain '..'")
+
+    repository_root = Path.cwd().resolve()
+    resolved = (repository_root / path).resolve()
+    if not resolved.is_relative_to(repository_root):
+        raise ValueError("output path must remain within the repository checkout")
+    if not resolved.parent.is_dir():
+        raise ValueError("output path parent must already exist")
+    return resolved
+
+
 def _load_json(path: Path) -> Any:
     """Load a JSON API response from a workflow temporary file."""
     safe_path = validate_read_path(
@@ -482,6 +496,28 @@ def _load_json(path: Path) -> Any:
     )
     with safe_path.open(encoding="utf-8") as stream:
         return json.load(stream)
+
+
+def _write_required_checks(path: Path, checks: list[RequiredCheck], *, branch: str,
+                           tag_sha: str) -> None:
+    """Write the effective required-check enumeration for release records."""
+    safe_path = _resolve_repository_output(path)
+    payload = {
+        "schema_version": "release.required-checks.v1",
+        "branch": branch,
+        "tag_sha": tag_sha,
+        "required_checks": [
+            {
+                "context": check.context,
+                "integration_id": check.integration_id,
+            }
+            for check in checks
+        ],
+    }
+    safe_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def main() -> int:
@@ -499,11 +535,20 @@ def main() -> int:
     )
     parser.add_argument("--tag-sha", required=True)
     parser.add_argument("--branch", required=True)
+    parser.add_argument(
+        "--required-checks-output",
+        type=Path,
+        default=None,
+        help="Optional repository-relative JSON file receiving the effective "
+        "required-check enumeration for release records.",
+    )
     args = parser.parse_args()
 
     try:
+        rules = _load_json(args.rules_file)
+        checks = required_checks(rules)
         errors = validate_required_checks(
-            _load_json(args.rules_file),
+            rules,
             _load_json(args.check_runs_file),
             _load_json(args.statuses_file) if args.statuses_file else None,
             branch=args.branch,
@@ -517,10 +562,33 @@ def main() -> int:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
 
+    if args.required_checks_output is not None:
+        try:
+            _write_required_checks(
+                args.required_checks_output,
+                checks,
+                branch=args.branch,
+                tag_sha=args.tag_sha,
+            )
+        except (OSError, ValueError) as error:
+            print(
+                f"ERROR: Unable to write effective required checks: {error}",
+                file=sys.stderr,
+            )
+            return 1
+
     print(
         f"Tag SHA {args.tag_sha} is contained in protected {args.branch} "
         "and passed all required checks."
     )
+    print("Effective required checks:")
+    for check in checks:
+        source = (
+            f"integration_id={check.integration_id}"
+            if check.integration_id is not None
+            else "integration_id=any"
+        )
+        print(f"- {check.context} ({source})")
     return 0
 
 

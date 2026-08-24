@@ -50,6 +50,12 @@ if [[ -n "${EVIDENCE_GATE_BENCHMARK_REPORT:-}" ]]; then
   GATE_ARGS+=(--benchmark-report "$EVIDENCE_GATE_BENCHMARK_REPORT")
 fi
 
+errexit_was_set=0
+case "$-" in
+  *e*) errexit_was_set=1 ;;
+  *) errexit_was_set=0 ;;
+esac
+
 set +e
 REQUIRE_BASELINE_HEAD="${EVIDENCE_GATE_REQUIRE_BASELINE_HEAD:-0}"
 if [[ "$GATE_MODE" == "blocking" && "$BASELINE_VERSION" == "092" ]]; then
@@ -59,7 +65,11 @@ MODULE_BASELINE_VERSION="$BASELINE_VERSION" \
     EVIDENCE_GATE_REQUIRE_BASELINE_HEAD="$REQUIRE_BASELINE_HEAD" \
     "$PYTHON3" tools/perf/evidence_gate.py "${GATE_ARGS[@]}"
 rc=$?
-set -e
+if [[ "$errexit_was_set" == "1" ]]; then
+  set -e
+else
+  set +e
+fi
 
 if [[ "$GATE_MODE" == "non-blocking" && $rc -eq 75 ]]; then
   echo "SKIP_NOT_PRESENT: Module benchmarks require NGINX_BIN." >&2
