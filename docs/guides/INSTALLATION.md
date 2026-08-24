@@ -761,10 +761,10 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.30.4 | glibc | x86_64 | Full |
 | 1.30.4 | musl | aarch64 | Full |
 | 1.30.4 | musl | x86_64 | Full |
-| 1.31.3 | glibc | aarch64 | Full |
-| 1.31.3 | glibc | x86_64 | Full |
-| 1.31.3 | musl | aarch64 | Full |
-| 1.31.3 | musl | x86_64 | Full |
+| 1.31.4 | glibc | aarch64 | Full |
+| 1.31.4 | glibc | x86_64 | Full |
+| 1.31.4 | musl | aarch64 | Full |
+| 1.31.4 | musl | x86_64 | Full |
 
 <!-- END AUTO-GENERATED MATRIX -->
 
@@ -776,8 +776,8 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
-| 1.31.3 | mainline | debian12 | glibc | arm64 | supported |
-| 1.31.3 | mainline | debian12 | glibc | amd64 | supported |
+| 1.31.4 | mainline | debian12 | glibc | arm64 | supported |
+| 1.31.4 | mainline | debian12 | glibc | amd64 | supported |
 | 1.30.4 | stable | debian12 | glibc | arm64 | supported |
 | 1.30.4 | stable | debian12 | glibc | amd64 | supported |
 | 1.28.3 | stable | debian12 | glibc | arm64 | supported |
@@ -791,10 +791,10 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
-| 1.31.3 | mainline | debian12 | glibc | arm64 | supported |
-| 1.31.3 | mainline | debian12 | glibc | amd64 | supported |
-| 1.31.3 | mainline | alpine3.20 | musl | arm64 | supported |
-| 1.31.3 | mainline | alpine3.20 | musl | amd64 | supported |
+| 1.31.4 | mainline | debian12 | glibc | arm64 | supported |
+| 1.31.4 | mainline | debian12 | glibc | amd64 | supported |
+| 1.31.4 | mainline | alpine3.20 | musl | arm64 | supported |
+| 1.31.4 | mainline | alpine3.20 | musl | amd64 | supported |
 | 1.26.3 | stable | debian12 | glibc | arm64 | supported |
 | 1.26.3 | stable | debian12 | glibc | amd64 | supported |
 | 1.26.3 | stable | alpine3.20 | musl | arm64 | supported |
@@ -804,10 +804,10 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
-| 1.31.3 | mainline | linux | glibc | arm64 | supported |
-| 1.31.3 | mainline | linux | musl | arm64 | supported |
-| 1.31.3 | mainline | linux | glibc | amd64 | supported |
-| 1.31.3 | mainline | linux | musl | amd64 | supported |
+| 1.31.4 | mainline | linux | glibc | arm64 | supported |
+| 1.31.4 | mainline | linux | musl | arm64 | supported |
+| 1.31.4 | mainline | linux | glibc | amd64 | supported |
+| 1.31.4 | mainline | linux | musl | amd64 | supported |
 | 1.30.4 | stable | linux | glibc | arm64 | supported |
 | 1.30.4 | stable | linux | musl | arm64 | supported |
 | 1.30.4 | stable | linux | glibc | amd64 | supported |
@@ -835,8 +835,8 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 
 | NGINX | Channel | OS | libc | Arch | Tier |
 |-------|---------|-----|------|------|------|
-| 1.31.3 | mainline | almalinux9 | glibc | arm64 | supported |
-| 1.31.3 | mainline | almalinux9 | glibc | amd64 | supported |
+| 1.31.4 | mainline | almalinux9 | glibc | arm64 | supported |
+| 1.31.4 | mainline | almalinux9 | glibc | amd64 | supported |
 | 1.30.4 | stable | almalinux9 | glibc | arm64 | supported |
 | 1.30.4 | stable | almalinux9 | glibc | amd64 | supported |
 | 1.28.3 | stable | almalinux9 | glibc | arm64 | supported |

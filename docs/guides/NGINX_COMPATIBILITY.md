@@ -29,7 +29,7 @@ exact tag. Building from source needs no asset verification.
 | 1.26.3 | stable | Full (prebuilt binary) |
 | 1.28.3 | stable | Full (prebuilt binary) |
 | 1.30.4 | stable | Full (prebuilt binary) |
-| 1.31.3 | mainline | Full (prebuilt binary) |
+| 1.31.4 | mainline | Full (prebuilt binary) |
 Architectures: `x86_64` (amd64) and `aarch64` (arm64), both glibc and musl.
 
 If your NGINX version is >= 1.24.0 but not listed above, build the module
@@ -200,6 +200,7 @@ prebuilt package for an nginx.org official build, or build from source with
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.9.2 | 2026-08-15 | Hermes | Release-asset verification applies before downloading a prebuilt asset only |
+| 0.9.1 | 2026-08-24 | Codex | Synced the human-readable compatibility matrix and packaging references with the canonical 1.31.4 mainline release. |
 | 0.9.1 | 2026-07-28 | Codex | Synced the human-readable NGINX compatibility matrix with the canonical 1.30.4 and 1.31.3 release entries; clarified that matrix coverage does not guarantee published package assets. |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.7.0 | 2026-05-20 | Kiro | Initial NGINX compatibility guide for docs/guides/ |
