@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime
@@ -498,9 +499,6 @@ def _write_required_checks(path: Path, checks: list[RequiredCheck], *, branch: s
         Path.cwd(),
         purpose="required-checks output",
     )
-    if not safe_path.parent.is_dir():
-        raise ValueError("output path parent must already exist")
-
     payload = {
         "schema_version": "release.required-checks.v1",
         "branch": branch,
@@ -513,10 +511,26 @@ def _write_required_checks(path: Path, checks: list[RequiredCheck], *, branch: s
             for check in checks
         ],
     }
-    safe_path.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    serialized_payload = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+
+    # Anchor the final open to the validated parent directory instead of
+    # passing a user-derived path to a convenience helper.
+    parent_fd = os.open(safe_path.parent, os.O_RDONLY)
+    file_fd = -1
+    try:
+        file_fd = os.open(
+            safe_path.name,
+            os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+            0o644,
+            dir_fd=parent_fd,
+        )
+        with os.fdopen(file_fd, "w", encoding="utf-8") as stream:
+            file_fd = -1
+            stream.write(serialized_payload)
+    finally:
+        if file_fd != -1:
+            os.close(file_fd)
+        os.close(parent_fd)
 
 
 def main() -> int:
