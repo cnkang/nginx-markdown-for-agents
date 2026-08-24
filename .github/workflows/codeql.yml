@@ -68,7 +68,7 @@ jobs:
           persist-credentials: false
 
       - name: Initialize CodeQL for C/C++
-        uses: github/codeql-action/init@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
+        uses: github/codeql-action/init@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
         env:
           # Overlay databases support only build-mode: none; this job needs
           # manual tracing to analyze the compiled production sources.
@@ -126,7 +126,7 @@ jobs:
           persist-credentials: false
 
       - name: Initialize CodeQL for Rust
-        uses: github/codeql-action/init@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
+        uses: github/codeql-action/init@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
         with:
           languages: rust
           build-mode: none
@@ -153,7 +153,7 @@ jobs:
           persist-credentials: false
 
       - name: Initialize CodeQL for Python
-        uses: github/codeql-action/init@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
+        uses: github/codeql-action/init@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
         with:
           languages: python
           build-mode: none
