@@ -18,6 +18,11 @@ class NginxMarkdownModule < Formula
   sha256 "dac472ba4016ab909cb08e3661fec1afb0358bf7fc02582aed2e1d369d82aedf"
   license "BSD-2-Clause"
 
+  # Dynamic modules are ABI-bound to the exact Homebrew nginx dependency.
+  # Increment the formula revision whenever nginx is upgraded so Homebrew
+  # rebuilds this module against the new nginx binary.
+  revision 1
+
   depends_on "cbindgen" => :build
   depends_on "pkgconf" => :build
   depends_on "brotli"
@@ -92,6 +97,9 @@ class NginxMarkdownModule < Formula
     module_path = lib/"nginx/modules/ngx_http_markdown_filter_module.so"
     assert_path_exists module_path
     assert_match "libbrotlidec", shell_output("otool -L #{module_path}")
+    nginx_version = Formula["nginx"].version.to_s
+    assert_match(/\A\d+\.\d+\.\d+\z/, nginx_version)
+    assert_match "nginx/#{nginx_version}", shell_output("#{formula_opt_bin(\"nginx\")}/nginx -v 2>&1")
 
     (testpath/"nginx.conf").write <<~EOS
       load_module #{module_path};

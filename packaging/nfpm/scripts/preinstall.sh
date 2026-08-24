@@ -13,7 +13,8 @@
 #
 # Exit codes:
 #   0  NGINX version matches exactly or NGINX is not yet installed
-#   1  NGINX version mismatch (any full-version difference, including patch) — abort installation
+#   1  NGINX is unparseable/unusable or its version mismatches the target —
+#      abort installation
 
 set -e
 
@@ -70,14 +71,21 @@ case "$ACTION" in
             exit 0
         fi
 
-        # Extract installed NGINX version from nginx -v output
-        # Format: "nginx version: nginx/1.26.3"
-        INSTALLED_NGINX_VERSION="$("${NGINX_BIN}" -v 2>&1 | sed -n 's|.*nginx/||p')"
+        # Extract installed NGINX version from nginx -v output.  A failed
+        # executable or an output format that cannot be parsed is unsafe for
+        # a version-bound dynamic module and must abort installation.
+        NGINX_VERSION_OUTPUT=""
+        if ! NGINX_VERSION_OUTPUT="$("${NGINX_BIN}" -v 2>&1)"; then
+            warn "Unable to execute '${NGINX_BIN} -v'; refusing installation."
+            exit 1
+        fi
+        INSTALLED_NGINX_VERSION="$(printf '%s\n' "${NGINX_VERSION_OUTPUT}" \
+            | sed -n 's|.*nginx/||p')"
 
         if [[ -z "${INSTALLED_NGINX_VERSION}" ]]; then
             warn "Could not determine installed NGINX version from 'nginx -v'."
-            warn "Proceeding with installation — verify ABI compatibility manually."
-            exit 0
+            warn "Refusing installation because ABI compatibility cannot be verified."
+            exit 1
         fi
 
         # NGINX dynamic modules require an EXACT version match: the core

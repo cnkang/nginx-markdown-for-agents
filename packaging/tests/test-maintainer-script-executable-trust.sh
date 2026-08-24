@@ -72,7 +72,10 @@ link_trusted_command() {
     local command_name="$1"
     local command_path=""
 
-    command_path="$(command -v "${command_name}")"
+    if ! command_path="$(command -v "${command_name}")"; then
+        fail "sandbox: trusted command not found: ${command_name}"
+        return 1
+    fi
     if [[ -z "${command_path}" || ! -x "${command_path}" ]]; then
         fail "sandbox: trusted command not found: ${command_name}"
         return 1
@@ -177,22 +180,8 @@ assert_no_markers() {
     return 0
 }
 
-# assert_path_absent — Assert that a sandbox cleanup path was removed.
-# Arguments: $1 = label, $2 = path
-assert_path_absent() {
-    local label="$1"
-    local path="$2"
-
-    if [[ ! -e "${path}" && ! -L "${path}" ]]; then
-        pass "${label}: sandbox path removed"
-    else
-        fail "${label}: sandbox path remains: ${path}"
-    fi
-    return 0
-}
-
-# assert_path_present — Assert that a cleanup path remains after a simulated
-# cleanup failure.
+# assert_path_present — Assert that a package cleanup path remains because the
+# package does not own operator-managed module configuration.
 # Arguments: $1 = label, $2 = path
 assert_path_present() {
     local label="$1"
@@ -252,7 +241,7 @@ if [[ -f "${SOURCE_SCRIPT}" ]]; then
     run_sandboxed_script bash remove
 
     assert_no_markers "preremove.sh"
-    assert_path_absent "preremove.sh symlink" \
+    assert_path_present "preremove.sh symlink" \
         "${SANDBOX_ROOT}/etc/nginx/modules-enabled/50-mod-markdown.conf"
 
     if [[ "${RC}" -eq 0 ]]; then
@@ -261,26 +250,19 @@ if [[ -f "${SOURCE_SCRIPT}" ]]; then
         fail "preremove.sh: exit code ${RC} (expected 0)"
     fi
 
-    echo "--- NC-2b: preremove.sh cleanup failure ---" >&2
-    create_evil_dir "preremove-failure"
-    prepare_sandboxed_script "${SOURCE_SCRIPT}" "preremove-failure" "nfpm"
-    touch "${SANDBOX_ROOT}/usr/share/nginx/modules-available/mod-markdown.conf"
-    ln -s "${SANDBOX_ROOT}/usr/share/nginx/modules-available/mod-markdown.conf" \
-        "${SANDBOX_ROOT}/etc/nginx/modules-enabled/50-mod-markdown.conf"
-    rm -f "${SANDBOX_ROOT}/usr/bin/rm"
-    cat > "${SANDBOX_ROOT}/usr/bin/rm" <<'SCRIPT'
-#!/bin/sh
-exit 1
-SCRIPT
-    chmod +x "${SANDBOX_ROOT}/usr/bin/rm"
-    run_sandboxed_script bash remove
+    echo "--- NC-2b: preremove.sh preserves an operator path ---" >&2
+    create_evil_dir "preremove-regular-file"
+    prepare_sandboxed_script "${SOURCE_SCRIPT}" "preremove-regular-file" "nfpm"
+    touch "${SANDBOX_ROOT}/etc/nginx/modules-enabled/50-mod-markdown.conf"
+    run_sandboxed_script bash upgrade
 
-    assert_path_present "preremove.sh failed rm" \
+    assert_no_markers "preremove.sh regular file"
+    assert_path_present "preremove.sh regular file" \
         "${SANDBOX_ROOT}/etc/nginx/modules-enabled/50-mod-markdown.conf"
     if [[ "${RC}" -eq 0 ]]; then
-        pass "preremove.sh: cleanup failure is non-fatal"
+        pass "preremove.sh: upgrade preserves operator file"
     else
-        fail "preremove.sh: cleanup failure exited ${RC}"
+        fail "preremove.sh: upgrade exited ${RC}"
     fi
 else
     fail "preremove.sh: script not found at ${SOURCE_SCRIPT}"

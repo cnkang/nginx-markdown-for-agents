@@ -6,6 +6,8 @@
 # Environment variables (injected by workflow matrix):
 #   PKG_VERSION          - Project version (e.g. 0.8.2)
 #   NGINX_VERSION        - Target NGINX version (e.g. 1.26.3)
+#   DEB_NGINX_VERSION    - Debian dependency version (e.g. 1.26.3)
+#   RPM_NGINX_EVR        - RPM dependency epoch/version/release (e.g. 1:1.26.3)
 #   NFPM_ARCH            - Target architecture (e.g. amd64, arm64)
 #
 # Usage:
@@ -37,11 +39,11 @@ license: "BSD-2-Clause"
 overrides:
   deb:
     depends:
-      - "nginx (= ${NGINX_VERSION})"
+      - "nginx (= ${DEB_NGINX_VERSION})"
       - "libbrotli1"
   rpm:
     depends:
-      - "nginx = 1:${NGINX_VERSION}"
+      - "nginx = ${RPM_NGINX_EVR}"
       - "libbrotli"
 
 contents:

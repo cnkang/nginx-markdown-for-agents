@@ -15,6 +15,9 @@ data:
     {{- if and .Values.metrics.enabled (not .Values.metrics.sidecar.enabled) }}
     {{- fail "metrics.enabled=true requires metrics.sidecar.enabled=true: the module's metrics endpoint is loopback-only, so Prometheus can only scrape through the in-pod sidecar proxy" }}
     {{- end }}
+    {{- if and .Values.metrics.enabled .Values.metrics.sidecar.enabled (eq .Values.metrics.sidecar.port 8080) }}
+    {{- fail "metrics.sidecar.port must not be 8080 because it conflicts with the module HTTP listener" }}
+    {{- end }}
     {{- if and .Values.markdown.enabled .Values.markdown.loadModule }}
     load_module {{ .Values.markdown.loadModule }};
     {{- end }}

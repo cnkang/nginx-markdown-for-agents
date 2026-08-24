@@ -36,6 +36,8 @@ The configuration uses template variables injected by the CI matrix:
 |----------|-------------|---------|
 | `PKG_VERSION` | Project version (from tag or workflow input) | `0.9.2` |
 | `NGINX_VERSION` | Target NGINX version from build matrix | `1.26.3` |
+| `DEB_NGINX_VERSION` | Exact Debian dependency version | `1.26.3` |
+| `RPM_NGINX_EVR` | Exact RPM dependency epoch/version/release | `1:1.26.3` |
 | `NFPM_ARCH` | Target architecture | `amd64`, `arm64` |
 
 ### Building Packages Locally
@@ -44,6 +46,8 @@ The configuration uses template variables injected by the CI matrix:
 # Set required environment variables
 export PKG_VERSION="0.9.2"
 export NGINX_VERSION="1.26.3"
+export DEB_NGINX_VERSION="${NGINX_VERSION}"
+export RPM_NGINX_EVR="1:${NGINX_VERSION}"
 export NFPM_ARCH="amd64"
 
 # Generate DEB

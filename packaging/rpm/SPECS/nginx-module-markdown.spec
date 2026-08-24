@@ -18,8 +18,8 @@ Built against nginx.org stable %{nginx_version}.
 WARNING: This module is built for nginx.org %{nginx_version} ONLY. NGINX
 dynamic modules require an exact version match — the core loader rejects
 any version difference (including a patch release) before signature
-checks. The RPM dependency pins the exact version, and the preinstall
-script enforces the exact-version guard at install time.
+checks. The RPM dependency and preinstall script both enforce that exact
+version at install time.
 It will NOT work with distro-provided, vendor-patched, OpenResty, Tengine,
 or custom-built NGINX binaries, or with any other NGINX version.
 

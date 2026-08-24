@@ -29,6 +29,9 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../scripts/verify-module-load.sh"
+
 PASS_COUNT=0
 FAIL_COUNT=0
 
@@ -139,11 +142,13 @@ echo "Step 5: Checking module .so file..." >&2
 
 MODULE_PATHS="/usr/lib64/nginx/modules /usr/lib/nginx/modules /usr/local/nginx/modules"
 MODULE_FOUND=0
+FOUND_MODULE_PATH=""
 
 for dir in $MODULE_PATHS; do
     if [[ -f "${dir}/ngx_http_markdown_filter_module.so" ]]; then
         pass "module .so found at ${dir}/ngx_http_markdown_filter_module.so"
         MODULE_FOUND=1
+        FOUND_MODULE_PATH="${dir}/ngx_http_markdown_filter_module.so"
         break
     fi
 done
@@ -153,8 +158,10 @@ if [[ "$MODULE_FOUND" -eq 0 ]]; then
     PKG_NAME=$(rpm -qp "$RPM_FILE" 2>/dev/null) || PKG_NAME=""
     if [[ -n "$PKG_NAME" ]]; then
         SO_PATH=$(rpm -ql "$PKG_NAME" 2>/dev/null | grep '\.so$' | head -1) || SO_PATH=""
-        if [[ -n "$SO_PATH" ]] && [ -f "$SO_PATH" ]; then
+        if [[ -n "$SO_PATH" ]] && [[ -f "$SO_PATH" ]]; then
             pass "module .so found at $SO_PATH"
+            MODULE_FOUND=1
+            FOUND_MODULE_PATH="$SO_PATH"
         else
             fail "module .so not found in expected paths"
         fi
@@ -163,21 +170,18 @@ if [[ "$MODULE_FOUND" -eq 0 ]]; then
     fi
 fi
 
-# --- Step 6: Verify NGINX config test passes ---
+# --- Step 6: Verify NGINX actually loads the module ---
 
-echo "Step 6: Testing NGINX configuration..." >&2
+echo "Step 6: Verifying module loads with nginx -t (load_module + markdown_filter on)..." >&2
 
-CONFIG_TEST=$(nginx -t 2>&1) || {
-    echo "Note: nginx -t failed (load_module directive may need to be added)" >&2
-    pass "nginx -t ran (module may need explicit load_module)"
-}
-
-if echo "$CONFIG_TEST" | grep -q "syntax is ok"; then
-    pass "nginx -t syntax OK"
-fi
-
-if echo "$CONFIG_TEST" | grep -q "test is successful"; then
-    pass "nginx -t test successful"
+if [[ "${MODULE_FOUND}" -eq 1 ]]; then
+    if verify_module_load nginx "${FOUND_MODULE_PATH}"; then
+        pass "positive load_module configuration succeeded and the directive required the module"
+    else
+        fail "module load verification failed: positive or negative configuration was unexpected"
+    fi
+else
+    fail "module .so not found — cannot verify module loading"
 fi
 
 # --- Summary ---

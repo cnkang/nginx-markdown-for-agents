@@ -97,7 +97,13 @@
                 }
               }
             },
-            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535,
+              "not": { "const": 8080 },
+              "description": "Sidecar port; 8080 is reserved for the module HTTP listener."
+            },
             "resources": {
               "type": "object",
               "description": "Kubernetes container resource requests and limits.",

@@ -28,6 +28,9 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../scripts/verify-module-load.sh"
+
 PASS_COUNT=0
 FAIL_COUNT=0
 
@@ -165,39 +168,11 @@ fi
 echo "Step 5: Verifying module loads with nginx -t (load_module + markdown_filter on)..." >&2
 
 if [[ -n "$FOUND_MODULE_PATH" ]]; then
-    TMP_CONF=$(mktemp "${TMPDIR:-/tmp}/deb-module-XXXXXX.conf") || {
-        fail "could not create temp config file"
-        exit 1
-    }
-    trap 'rm -f "$TMP_CONF"' EXIT
-
-    # Reuse the doctor's verification pattern: a minimal config that
-    # explicitly load_module's the .so and enables markdown_filter, then
-    # runs nginx -t.  This proves the module is loadable and the
-    # directive parses — `nginx -V` alone cannot prove dynamic-module
-    # loadability.
-    cat > "$TMP_CONF" <<CONF
-load_module "${FOUND_MODULE_PATH}";
-daemon off;
-worker_processes 1;
-events { worker_connections 64; }
-http {
-    markdown_filter on;
-    server {
-        listen 127.0.0.1:19999;
-        location / { return 200 "ok"; }
-    }
-}
-CONF
-
-    if nginx -t -c "$TMP_CONF" >/dev/null 2>&1; then
-        pass "nginx -t with load_module + markdown_filter on succeeded (module loads)"
+    if verify_module_load nginx "$FOUND_MODULE_PATH"; then
+        pass "positive load_module configuration succeeded and the directive required the module"
     else
-        fail "nginx -t with load_module failed — module did not load"
-        echo "Note: if nginx was not compiled with --with-compat or the version differs, loading fails." >&2
+        fail "module load verification failed: positive or negative configuration was unexpected"
     fi
-    rm -f "$TMP_CONF"
-    trap - EXIT
 else
     fail "module .so not found — cannot verify module loading"
 fi

@@ -17,8 +17,13 @@ clients.
 ### 1. Import the GPG signing key
 
 ```bash
-curl -fsSL https://pkg.example.com/nginx-markdown/gpg.key | \
-    sudo gpg --dearmor -o /usr/share/keyrings/nginx-markdown-archive-keyring.gpg
+key_file="$(mktemp)"
+curl -fsSL -o "$key_file" \
+    https://pkg.example.com/nginx-markdown/gpg.key
+gpg --show-keys --fingerprint "$key_file"
+sudo gpg --dearmor --yes --output \
+    /usr/share/keyrings/nginx-markdown-archive-keyring.gpg "$key_file"
+rm -f "$key_file"
 ```
 
 ### 2. Add the repository
@@ -133,15 +138,24 @@ repo/apt/
 Modern APT (Debian 12+, Ubuntu 22.04+):
 
 ```bash
-curl -fsSL https://pkg.example.com/nginx-markdown/gpg.key | \
-    sudo gpg --dearmor -o /usr/share/keyrings/nginx-markdown-archive-keyring.gpg
+key_file="$(mktemp)"
+curl -fsSL -o "$key_file" \
+    https://pkg.example.com/nginx-markdown/gpg.key
+gpg --show-keys --fingerprint "$key_file"
+sudo gpg --dearmor --yes --output \
+    /usr/share/keyrings/nginx-markdown-archive-keyring.gpg "$key_file"
+rm -f "$key_file"
 ```
 
 Legacy APT (older systems):
 
 ```bash
-curl -fsSL https://pkg.example.com/nginx-markdown/gpg.key | \
-    sudo apt-key add -
+key_file="$(mktemp)"
+curl -fsSL -o "$key_file" \
+    https://pkg.example.com/nginx-markdown/gpg.key
+gpg --show-keys --fingerprint "$key_file"
+sudo apt-key add "$key_file"
+rm -f "$key_file"
 ```
 
 ### Verifying Package Signatures
@@ -173,8 +187,8 @@ curl -fsSLo nginx-module-markdown-for-agents_0.9.1_nginx-1.30.4_amd64.deb \
 # then import it into an isolated keyring and verify the signing-subkey
 # fingerprint 15C792438EAA762B421E60D21E8D41E7D19A8A75 before trusting the
 # signature.
-curl -fsSLo nginx-markdown-for-agents-release.asc \
-  "${REPO_ROOT:-.}/packaging/nginx-markdown-for-agents-release.asc"
+cp "${REPO_ROOT:-.}/packaging/nginx-markdown-for-agents-release.asc" \
+  nginx-markdown-for-agents-release.asc
 KEYRING="$(mktemp -d)/keyring.gpg"
 gpg --no-default-keyring --keyring "$KEYRING" \
     --import nginx-markdown-for-agents-release.asc
@@ -252,8 +266,13 @@ If you encounter dependency errors:
 
 ```bash
 # Re-import the signing key
-curl -fsSL https://pkg.example.com/nginx-markdown/gpg.key | \
-    sudo gpg --dearmor -o /usr/share/keyrings/nginx-markdown-archive-keyring.gpg
+key_file="$(mktemp)"
+curl -fsSL -o "$key_file" \
+    https://pkg.example.com/nginx-markdown/gpg.key
+gpg --show-keys --fingerprint "$key_file"
+sudo gpg --dearmor --yes --output \
+    /usr/share/keyrings/nginx-markdown-archive-keyring.gpg "$key_file"
+rm -f "$key_file"
 sudo apt-get update
 ```
 

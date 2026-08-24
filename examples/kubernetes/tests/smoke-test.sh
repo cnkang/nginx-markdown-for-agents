@@ -112,6 +112,11 @@ cleanup() {
 }
 
 check_prerequisites() {
+    if [[ "$METRICS_PATH" != /* ]]; then
+        log_error "Metrics path must begin with '/': $METRICS_PATH"
+        return 2
+    fi
+
     if ! command -v curl >/dev/null 2>&1; then
         log_error "curl is required but not found in PATH"
         return 2

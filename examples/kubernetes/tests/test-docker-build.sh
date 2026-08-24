@@ -39,9 +39,10 @@
 #
 # CHECKS PERFORMED:
 #   1. Docker image builds without errors
-#   2. nginx -V reports the markdown module loaded
-#   3. Module .so file exists at /usr/lib/nginx/modules/
-#   4. load_module configuration snippet exists
+#   2. nginx -T proves the active configuration includes load_module
+#   3. A module-specific directive parses only with load_module present
+#   4. HTTP Accept: text/markdown returns converted content
+#   5. Module .so file and load_module snippet exist at expected paths
 #
 # NOTES:
 #   - Requires: docker (or compatible runtime like podman)
@@ -65,6 +66,7 @@ IMAGE_TAG="nginx-markdown-test:latest"
 BUILD_CONTEXT=""
 MODULE_SHA=""
 CLEANUP="yes"
+RUNTIME_CONTAINER=""
 PASS_COUNT=0
 FAIL_COUNT=0
 
@@ -96,6 +98,9 @@ log_error() {
 }
 
 cleanup() {
+    if [[ -n "$RUNTIME_CONTAINER" ]]; then
+        docker rm -f "$RUNTIME_CONTAINER" >/dev/null 2>&1 || true
+    fi
     if [ "$CLEANUP" = "yes" ] && [ -n "$IMAGE_TAG" ]; then
         log_info "Cleaning up: removing image $IMAGE_TAG"
         docker rmi "$IMAGE_TAG" >/dev/null 2>&1 || true
@@ -114,8 +119,13 @@ check_prerequisites() {
         return 2
     fi
 
-    if [ ! -f "$DOCKERFILE" ]; then
+    if [[ ! -f "$DOCKERFILE" ]]; then
         log_error "Dockerfile not found: $DOCKERFILE"
+        return 2
+    fi
+
+    if ! command -v curl >/dev/null 2>&1; then
+        log_error "curl is required for the HTTP conversion assertion"
         return 2
     fi
 
@@ -189,49 +199,126 @@ test_docker_build() {
     return 0
 }
 
-test_nginx_version() {
-    log_info "Test: nginx -V reports markdown module"
+test_active_module_configuration() {
+    log_info "Test: active load_module, directive parsing, and negative control"
 
-    local nginx_v_output
-    local run_rc
+    local active_output
+    local active_rc=0
+    local positive_output
+    local positive_rc=0
+    local negative_output
+    local negative_rc=0
 
-    # nginx -V outputs to stderr, capture both streams
-    nginx_v_output="$(docker run --rm "$IMAGE_TAG" nginx -V 2>&1)" || run_rc=$?
+    active_output="$(docker run --rm --entrypoint nginx "$IMAGE_TAG" -T 2>&1)" \
+        || active_rc=$?
 
-    if [ "${run_rc:-0}" -ne 0 ]; then
-        log_fail "nginx -V failed inside container (exit code $run_rc)"
-        printf '%s\n' "$nginx_v_output" | tail -10 >&2
+    if [[ "$active_rc" -ne 0 ]] || ! printf '%s\n' "$active_output" \
+        | grep -Eq '^[[:space:]]*load_module[[:space:]]+/usr/lib/nginx/modules/ngx_http_markdown_filter_module\.so;'; then
+        log_fail "nginx -T did not prove the active load_module include"
+        printf '%s\n' "$active_output" | tail -20 >&2
         return 1
     fi
 
-    # Check for the module in the configure arguments or loaded modules
-    case "$nginx_v_output" in
-        *markdown*|*ngx_http_markdown*|*nginx-markdown*)
-            log_pass "nginx -V output references markdown module"
+    positive_output="$(docker run --rm --entrypoint sh "$IMAGE_TAG" -c '
+cat > /tmp/markdown-positive.conf <<EOF
+load_module /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so;
+daemon off;
+worker_processes 1;
+pid /tmp/markdown-positive.pid;
+events { worker_connections 64; }
+http {
+    markdown_filter on;
+    markdown_accept wildcard;
+    server { listen 8080; location / { return 200 "ok"; } }
+}
+EOF
+nginx -t -c /tmp/markdown-positive.conf
+' 2>&1)" || positive_rc=$?
+
+    negative_output="$(docker run --rm --entrypoint sh "$IMAGE_TAG" -c '
+cat > /tmp/markdown-negative.conf <<EOF
+daemon off;
+worker_processes 1;
+pid /tmp/markdown-negative.pid;
+events { worker_connections 64; }
+http {
+    markdown_filter on;
+    server { listen 8080; location / { return 200 "ok"; } }
+}
+EOF
+nginx -t -c /tmp/markdown-negative.conf
+' 2>&1)" || negative_rc=$?
+
+    if [[ "$positive_rc" -ne 0 ]]; then
+        log_fail "module-specific directive failed with load_module present"
+        printf '%s\n' "$positive_output" | tail -20 >&2
+        return 1
+    fi
+    if [[ "$negative_rc" -eq 0 ]]; then
+        log_fail "module-specific directive parsed after load_module was removed"
+        printf '%s\n' "$negative_output" | tail -20 >&2
+        return 1
+    fi
+
+    log_pass "active include and positive/negative module configuration checks passed"
+
+    return 0
+}
+
+test_markdown_http() {
+    log_info "Test: HTTP Accept: text/markdown conversion"
+
+    local http_port="18089"
+    local response
+    local response_rc=0
+
+    RUNTIME_CONTAINER="nginx-markdown-k8s-test-${RANDOM}"
+    docker run -d --name "$RUNTIME_CONTAINER" \
+        -p "127.0.0.1:${http_port}:8080" \
+        --entrypoint sh "$IMAGE_TAG" -c '
+mkdir -p /tmp/markdown-html
+printf "%s\n" "<html><body><h1>Kubernetes module test</h1><p>active module</p></body></html>" > /tmp/markdown-html/index.html
+cat > /tmp/markdown-http.conf <<EOF
+load_module /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so;
+daemon off;
+worker_processes 1;
+pid /tmp/markdown-http.pid;
+error_log /tmp/markdown-http.error;
+events { worker_connections 64; }
+http {
+    markdown_filter on;
+    markdown_accept wildcard;
+    server {
+        listen 8080;
+        root /tmp/markdown-html;
+        location / { try_files $uri /index.html; }
+    }
+}
+EOF
+nginx -c /tmp/markdown-http.conf -g "daemon off;"
+' >/dev/null 2>&1
+
+    for _ in $(seq 1 20); do
+        if curl -fsS -o /dev/null "http://127.0.0.1:${http_port}/"; then
+            break
+        fi
+        sleep 1
+    done
+
+    response="$(curl -sS -D - -H 'Accept: text/markdown' \
+        "http://127.0.0.1:${http_port}/" 2>&1)" || response_rc=$?
+    if [[ "$response_rc" -ne 0 ]]; then
+        log_fail "HTTP conversion request failed"
+        return 1
+    fi
+    case "$response" in
+        *text/markdown*|*"# Kubernetes module test"*)
+            log_pass "HTTP Accept: text/markdown returned converted content"
             ;;
         *)
-            # Module may be dynamic (not in configure args) — check if nginx starts
-            log_info "  Module not in configure args (expected for dynamic modules)"
-            log_info "  Verifying nginx can start with module loaded..."
-
-            local test_output
-            test_output="$(docker run --rm "$IMAGE_TAG" nginx -t 2>&1)" || run_rc=$?
-
-            if [ "${run_rc:-0}" -ne 0 ]; then
-                log_fail "nginx -t failed — module may not load correctly"
-                printf '%s\n' "$test_output" | tail -10 >&2
-                return 1
-            fi
-
-            case "$test_output" in
-                *"syntax is ok"*|*"test is successful"*)
-                    log_pass "nginx -t passes (module loads without error)"
-                    ;;
-                *)
-                    log_fail "nginx -t output unexpected: $test_output"
-                    return 1
-                    ;;
-            esac
+            log_fail "HTTP response was not Markdown"
+            printf '%s\n' "$response" | tail -20 >&2
+            return 1
             ;;
     esac
 
@@ -399,8 +486,9 @@ main() {
 
     printf '\n' >&2
 
-    # Step 2-4: Validate the built image
-    test_nginx_version || true
+    # Step 2-5: Validate the built image
+    test_active_module_configuration || true
+    test_markdown_http || true
     test_module_file_exists || true
     test_load_module_snippet || true
 

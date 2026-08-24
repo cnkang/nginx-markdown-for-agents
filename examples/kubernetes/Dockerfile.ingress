@@ -24,14 +24,14 @@
 #   # Build with custom Ingress Controller version:
 #   docker build -f Dockerfile.ingress \
 #     --build-arg NGINX_VERSION=1.26.3 \
-#     --build-arg NGINX_INGRESS_IMAGE=nginx/nginx-ingress:3.7.2 \
+#     --build-arg NGINX_INGRESS_IMAGE=nginx/nginx-ingress@sha256:60f690573c0599aadd45468899f9baaa97a4775e852c4402b0003a1e58a8dc17 \
 #     --build-arg MODULE_SHA="FULL_40_HEX_COMMIT_SHA" \
 #     -t my-ingress:custom .
 #
 #   # Build with plain NGINX (non-Ingress deployment):
 #   docker build -f Dockerfile.ingress \
 #     --build-arg NGINX_VERSION=1.26.3 \
-#     --build-arg NGINX_INGRESS_IMAGE=nginx:1.26.3 \
+#     --build-arg NGINX_INGRESS_IMAGE=nginx:1.26.3@sha256:41b194461e4bae16f9b25d68b0976ed4735b89ca625c89aad88e1c1c3b7e8860 \
 #     --build-arg MODULE_SHA="FULL_40_HEX_COMMIT_SHA" \
 #     -t my-nginx-markdown:latest .
 #
@@ -43,7 +43,7 @@
 #
 # CUSTOMIZATION POINTS:
 #   - NGINX_VERSION: Target NGINX version for module compilation (must match base image)
-#   - NGINX_INGRESS_IMAGE: Base image (default: nginx/nginx-ingress:3.7.2)
+#   - NGINX_INGRESS_IMAGE: Immutable base image reference
 #   - MODULE_REPO / MODULE_REF: Source repository and reachability hint
 #   - MODULE_SHA: Required reviewed full commit identity
 #
@@ -72,8 +72,9 @@ ARG NGINX_VERSION=1.26.3
 # NGINX Ingress Controller base image.
 # Default uses the F5 NGINX Ingress Controller (nginx/nginx-ingress).
 # Alternatively, use a plain NGINX image for non-Ingress deployments:
-#   --build-arg NGINX_INGRESS_IMAGE=nginx:1.26.3
-ARG NGINX_INGRESS_IMAGE=nginx/nginx-ingress:3.7.2
+#   --build-arg NGINX_INGRESS_IMAGE=nginx:1.26.3@sha256:41b194461e4bae16f9b25d68b0976ed4735b89ca625c89aad88e1c1c3b7e8860
+ARG NGINX_INGRESS_IMAGE=nginx/nginx-ingress@sha256:60f690573c0599aadd45468899f9baaa97a4775e852c4402b0003a1e58a8dc17
+ARG BASE_IMAGE_DIGEST=sha256:60f690573c0599aadd45468899f9baaa97a4775e852c4402b0003a1e58a8dc17
 
 # Module source repository and ref (branch, tag, or commit SHA).
 ARG MODULE_REPO=https://github.com/cnkang/nginx-markdown-for-agents.git
@@ -84,13 +85,16 @@ ARG TARGETARCH
 # ---------------------------------------------------------------------------
 # Stage 1: module-build — Compile the markdown module against target NGINX
 # ---------------------------------------------------------------------------
-FROM debian:bookworm-slim AS module-build
+ARG MODULE_BUILD_IMAGE=debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241
+FROM ${MODULE_BUILD_IMAGE} AS module-build
 
 ARG NGINX_VERSION
 ARG MODULE_REPO
 ARG MODULE_REF
 ARG MODULE_SHA
 ARG TARGETARCH
+
+COPY rust-toolchain.toml /opt/nginx-markdown/rust-toolchain.toml
 
 COPY packaging/checksums.sha256 /opt/nginx-markdown/checksums.sha256
 COPY packaging/scripts/install-verified-rustup.sh /tmp/rustup-bootstrap/install-verified-rustup.sh
@@ -125,15 +129,18 @@ RUN set -eux; \
       arm64|aarch64) rustup_arch=arm64 ;; \
       *) echo "Unsupported Rust bootstrap architecture: ${arch}" >&2; exit 1 ;; \
     esac; \
+    rust_toolchain="$(sed -n 's/^channel[[:space:]]*=[[:space:]]*"\([^"]*\)"/\1/p' \
+      /opt/nginx-markdown/rust-toolchain.toml | head -1)"; \
+    test -n "${rust_toolchain}"; \
     chmod +x /tmp/rustup-bootstrap/install-verified-rustup.sh \
       /tmp/rustup-bootstrap/verify-checksum.sh \
       /opt/nginx-markdown/verify-checksum.sh; \
     /tmp/rustup-bootstrap/install-verified-rustup.sh \
       --arch "${rustup_arch}" \
-      --toolchain stable \
+      --toolchain "${rust_toolchain}" \
       --checksums /opt/nginx-markdown/checksums.sha256; \
     rm -rf /tmp/rustup-bootstrap; \
-    cargo install --locked cbindgen
+    cargo install --version 0.29.2 --locked cbindgen
 
 # Fetch and verify the exact reviewed module commit.
 RUN set -eux; \
@@ -185,6 +192,7 @@ FROM ${NGINX_INGRESS_IMAGE} AS runtime
 
 ARG NGINX_VERSION
 ARG NGINX_INGRESS_IMAGE
+ARG BASE_IMAGE_DIGEST
 
 # Metadata labels (OCI image spec)
 LABEL org.opencontainers.image.title="nginx-ingress-markdown" \
@@ -192,7 +200,8 @@ LABEL org.opencontainers.image.title="nginx-ingress-markdown" \
       org.opencontainers.image.source="https://github.com/cnkang/nginx-markdown-for-agents" \
       org.opencontainers.image.version="custom-markdown" \
       io.k8s.nginx.version="${NGINX_VERSION}" \
-      io.k8s.nginx.ingress.base="${NGINX_INGRESS_IMAGE}"
+      io.k8s.nginx.ingress.base="${NGINX_INGRESS_IMAGE}" \
+      io.k8s.nginx.ingress.base.digest="${BASE_IMAGE_DIGEST}"
 
 # Copy the compiled module into the standard NGINX modules directory
 COPY --from=module-build /out/ngx_http_markdown_filter_module.so \
