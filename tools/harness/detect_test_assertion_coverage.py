@@ -14,7 +14,7 @@ Detection strategy:
   This detector identifies tests that:
   1. Have no assertions at all (critical issue)
   2. Have only trivial assertions like assert!(true) (warning)
-  
+
   It excludes:
   - Tests that intentionally panic (should_panic attribute)
   - Tests that call functions which themselves assert
@@ -153,19 +153,19 @@ def extract_test_functions(content: str) -> List[Tuple[str, int, str, bool, bool
     return tests
 
 
-def check_test_assertions(func_name: str, line_num: int, func_body: str, 
+def check_test_assertions(func_name: str, line_num: int, func_body: str,
                          has_should_panic: bool, is_property_test: bool) -> List[str]:
     """Check if a test function has meaningful assertions."""
     issues = []
-    
+
     # Skip tests that are expected to panic
     if has_should_panic:
         return issues
-    
+
     # Skip property-based tests (they have their own assertion mechanisms)
     if is_property_test:
         return issues
-    
+
     # Check for direct assertions
     assertion_patterns = [
         r'\bassert!\s*\(',
@@ -179,9 +179,9 @@ def check_test_assertions(func_name: str, line_num: int, func_body: str,
         r'\.expect\s*\(',
         r'\.unwrap\s*\(\s*\)',
     ]
-    
+
     has_assertion = any(re.search(pattern, func_body) for pattern in assertion_patterns)
-    
+
     # Check for calls to helper functions that likely contain assertions
     # These are common patterns in test code
     assertion_helpers = [
@@ -190,22 +190,22 @@ def check_test_assertions(func_name: str, line_num: int, func_body: str,
         r'\bcheck_\w+\s*\(',  # check_something
         r'\bverify_\w+\s*\(',  # verify_something
     ]
-    
+
     has_assertion_helper = any(re.search(pattern, func_body) for pattern in assertion_helpers)
-    
+
     # Check for FFI calls that test NULL handling (not crashing is the assertion)
     # These tests call functions with NULL and verify they don't crash
     ffi_null_patterns = [
         r'ffi_\w+\s*\([^)]*null[^)]*\)',  # ffi_function(null)
         r'ptr::null_mut\(\)',  # ptr::null_mut()
     ]
-    
+
     has_ffi_null_test = any(re.search(pattern, func_body, re.IGNORECASE) for pattern in ffi_null_patterns)
-    
+
     # If no direct assertion, no assertion helper, and not a NULL safety test, flag it
     if not has_assertion and not has_assertion_helper and not has_ffi_null_test:
         issues.append(f"Test '{func_name}' (line {line_num}) has no assertions")
-    
+
     return issues
 
 
@@ -267,7 +267,7 @@ def main():
         all_issues.extend(
             [f"Harness could not read Rust test file: {err}" for err in read_errors]
         )
-    
+
     if all_issues:
         print(f"Found {len(all_issues)} test assertion coverage issue(s):")
         for issue in all_issues:

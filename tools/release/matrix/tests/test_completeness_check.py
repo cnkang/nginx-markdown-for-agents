@@ -60,11 +60,11 @@ _matrix = (
 def _expected_names(entries):
     """
     Compute the expected artifact filenames for the given matrix entries.
-    
+
     Parameters:
         entries (Iterable[dict]): An iterable of release matrix entry objects (dicts with keys like
             "nginx", "os_type", "arch", "support_tier") for which artifact names should be derived.
-    
+
     Returns:
         set: A set of expected artifact filename strings, one per entry.
     """

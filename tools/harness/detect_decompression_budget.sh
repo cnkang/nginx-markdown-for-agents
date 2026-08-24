@@ -59,7 +59,7 @@ for file in "${source_files[@]}"; do
     if ! grep -qE "(decompress|inflate|zlib|brotli|gzip|deflate)" "$file"; then
         continue
     fi
-    
+
     # Find functions that allocate memory
     while IFS= read -r line_num; do
         # Extract function context (look backwards for function signature)
@@ -67,48 +67,48 @@ for file in "${source_files[@]}"; do
             /^[a-zA-Z_].*\(.*\).*\{/ { last_func = NR }
             NR == end { print last_func; exit }
         ' "$file")
-        
+
         if [[ -z "$func_start" ]]; then
             continue
         fi
-        
+
         # Extract function name
         func_name=$(sed -n "${func_start}p" "$file" | grep -oE '^[a-zA-Z_][a-zA-Z0-9_]*' | head -1)
-        
+
         if [[ -z "$func_name" ]]; then
             continue
         fi
-        
+
         # Check if function has budget enforcement
         func_body=$(sed -n "${func_start},${line_num}p" "$file")
-        
+
         has_budget_check=0
-        
+
         # Check for budget/max_size references
         if echo "$func_body" | grep -qE '(max_size|decompress_max_size|budget|parser_budget)'; then
             has_budget_check=1
         fi
-        
+
         # Check for size tracking
         if echo "$func_body" | grep -qE '(total_out|output_size|decompressed_size|size.*check)'; then
             has_budget_check=1
         fi
-        
+
         # Check for budget exceeded error
         if echo "$func_body" | grep -qE 'NGX_HTTP_MARKDOWN_ERROR_DECOMPRESSION_BUDGET_EXCEEDED'; then
             has_budget_check=1
         fi
-        
+
         # Check for explicit budget comments
         if echo "$func_body" | grep -qiE '(budget.*check|enforce.*budget|prevent.*bomb)'; then
             has_budget_check=1
         fi
-        
+
         if [[ $has_budget_check -eq 0 ]]; then
             echo "ERROR: $file:$line_num: Function '$func_name' allocates memory but may lack budget enforcement" >&2
             violations=$((violations + 1))
         fi
-        
+
     done < <(grep -nE "ngx_palloc|ngx_alloc|ngx_pnalloc" "$file" | cut -d: -f1)
 done
 

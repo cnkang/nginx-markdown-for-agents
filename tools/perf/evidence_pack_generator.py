@@ -76,7 +76,7 @@ _SMALL_MEDIUM_TIER_PREFIXES = ("small", "medium")
 def _is_large_tier(tier_name: str) -> bool:
     """
     Determine whether a tier name is classified as large (includes prefixes "large", "extra-large", or "xlarge").
-    
+
     Returns:
         `True` if `tier_name` starts with one of the large-tier prefixes, `False` otherwise.
     """
@@ -86,7 +86,7 @@ def _is_large_tier(tier_name: str) -> bool:
 def _is_small_medium_tier(tier_name: str) -> bool:
     """
     Determine whether a tier is classified as small or medium.
-    
+
     Returns:
         `True` if the `tier_name` starts with "small" or "medium", `False` otherwise.
     """
@@ -101,14 +101,14 @@ def _is_small_medium_tier(tier_name: str) -> bool:
 def linear_regression_slope(x: list[float], y: list[float]) -> float:
     """
     Compute the least-squares slope of y with respect to x.
-    
+
     Parameters:
         x (list[float]): Independent variable values; must contain at least 2 elements.
         y (list[float]): Dependent variable values; must be the same length as `x`.
-    
+
     Returns:
         float: Slope of the best-fit line. Returns 0.0 when all `x` values are identical.
-    
+
     Raises:
         ValueError: If `x` and `y` have different lengths or contain fewer than 2 points.
     """

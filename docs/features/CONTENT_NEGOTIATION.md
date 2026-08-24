@@ -13,7 +13,7 @@ flowchart TD
     Accept -->|"application/json"| PassHTML
     Convert --> Response["Response with<br/>Content-Type: text/markdown"]
     PassHTML --> Response2["Response with<br/>Content-Type: text/html"]
-    
+
     style Convert fill:#009639,color:#fff
     style Wildcard fill:#f90,color:#000
 ```

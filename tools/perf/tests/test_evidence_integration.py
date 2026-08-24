@@ -271,7 +271,7 @@ class TestRealisticRustOutputCompatibility:
     def test_generate_evidence_pack_with_realistic_schema(self):
         """
         Verify evidence-pack generation using realistic full-buffer and streaming reports.
-        
+
         Asserts the returned pack contains required top-level keys, that the TTFB and no-regression gates report `PASS`, that bounded-memory reports `INSUFFICIENT_DATA` when insufficient tiers are present, that streaming parity is `UNKNOWN` when no parity report is provided, and that the overall `streaming_evidence_verdict` is `NO_GO`.
         """
         evidence_pack = generate_evidence_pack(

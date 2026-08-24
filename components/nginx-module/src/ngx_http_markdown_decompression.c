@@ -485,10 +485,10 @@ ngx_http_markdown_compression_type_e
 ngx_http_markdown_detect_compression(ngx_http_request_t *r)
 {
     ngx_table_elt_t  *h;
-    
+
     /* Get Content-Encoding header from response headers */
     h = r->headers_out.content_encoding;
-    
+
     /* Handle missing or empty Content-Encoding header (empty or missing Content-Encoding) */
     if (h == NULL || h->value.len == 0) {
         return NGX_HTTP_MARKDOWN_COMPRESSION_NONE;
@@ -517,7 +517,7 @@ ngx_http_markdown_detect_compression(ngx_http_request_t *r)
     {
         return NGX_HTTP_MARKDOWN_COMPRESSION_GZIP;
     }
-    
+
     /* Check for deflate compression (case-insensitive, deflate compression detection) */
     if (h->value.len == sizeof("deflate") - 1
         && ngx_strncasecmp(h->value.data,
@@ -526,7 +526,7 @@ ngx_http_markdown_detect_compression(ngx_http_request_t *r)
     {
         return NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE;
     }
-    
+
     /* Check for brotli compression (case-insensitive, brotli compression detection) */
     if (h->value.len == sizeof("br") - 1
         && ngx_strncasecmp(h->value.data,
@@ -535,13 +535,13 @@ ngx_http_markdown_detect_compression(ngx_http_request_t *r)
     {
         return NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI;
     }
-    
+
     /* Unknown or unsupported compression format (unknown or unsupported compression format) */
     ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                  "markdown: decompression unsupported, compression=%V, "
                  "returning original content",
                  &h->value);
-    
+
     return NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN;
 }
 
@@ -561,9 +561,9 @@ ngx_http_markdown_chain_size(const ngx_chain_t *in)
 {
     size_t  size;
     size_t  len;
-    
+
     size = 0;
-    
+
     for (const ngx_chain_t *cl = in; cl != NULL; cl = cl->next) {
         if (cl->buf != NULL) {
             len = ngx_http_markdown_buf_len_safe(cl->buf);
@@ -573,7 +573,7 @@ ngx_http_markdown_chain_size(const ngx_chain_t *in)
             size += len;
         }
     }
-    
+
     return size;
 }
 
@@ -596,7 +596,7 @@ ngx_http_markdown_chain_to_buffer(const ngx_chain_t *in, u_char *dest,
 {
     size_t  copied;
     size_t  len;
-    
+
     copied = 0;
 
     for (const ngx_chain_t *cl = in; cl != NULL; cl = cl->next) {
@@ -1577,12 +1577,12 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t    *conf;
 
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
-    
+
     /* Log that we're using zlib for decompression (zlib decompression path) */
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown: using zlib for gzip/deflate decompression, type=%d",
                   type);
-    
+
     /* Collect all input data into a single buffer and validate its size
      * (shared with the brotli path via ngx_http_markdown_decomp_collect_input
      * so the two decompression backends cannot drift apart on size checks). */
@@ -1598,12 +1598,12 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
                      "decoder counters, size=%uz", input_size);
         return NGX_ERROR;
     }
-    
+
     /* Initialize zlib stream */
     ngx_memzero(&stream, sizeof(z_stream));
     stream.next_in = input_data;
     stream.avail_in = (uInt) input_size;
-    
+
     /* Set windowBits based on compression type (windowBits selection based on compression type) */
     if (type == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP) {
         /* MAX_WBITS + 16 for gzip format */
@@ -1612,7 +1612,7 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
         /* MAX_WBITS for deflate format */
         window_bits = MAX_WBITS;
     }
-    
+
     zrc = inflateInit2(&stream, window_bits);
     if (zrc != Z_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
@@ -1620,7 +1620,7 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
                      "inflateInit2 error: %d, category=conversion", zrc);
         return NGX_ERROR;
     }
-    
+
     /* Estimate output size with independent decompression budget. */
     if (ngx_http_markdown_calc_output_size(r, input_size, conf->decompress.max_size, &output_size)
         != NGX_OK)
@@ -1628,7 +1628,7 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
         inflateEnd(&stream);
         return NGX_ERROR;
     }
-    
+
     /* Allocate transferable output using the same ngx_alloc/ngx_free
      * allocator family as ctx->buffer (Rule 43). */
     output_data = ngx_http_markdown_decomp_alloc_output(r, output_size,
@@ -1636,10 +1636,10 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
     if (output_data == NULL) {
         return NGX_ERROR;
     }
-    
+
     stream.next_out = output_data;
     stream.avail_out = (uInt) output_size;
-    
+
     /* Run the inflate loop (extracted for complexity reduction). */
     loop_rc = ngx_http_markdown_inflate_loop(r, conf, &stream,
                                              &output_data, &output_size,
@@ -1688,7 +1688,7 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
             return loop_rc;
         }
     }
-    
+
     /* Check if decompressed size exceeds decompression budget (decompressed size budget enforcement) */
     if (total_decompressed > conf->decompress.max_size) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
@@ -1699,10 +1699,10 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
         ngx_free(output_data);
         return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
-    
+
     /* total_decompressed was saved before inflateEnd releases the stream. */
     inflateEnd(&stream);
-    
+
     /* Build the output chain wrapping the decompressed data directly
      * (avoids a second allocation + memcpy). Shared with the brotli path
      * via ngx_http_markdown_decomp_build_output_chain so the two backends
@@ -1714,7 +1714,7 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
         ngx_free(output_data);
         return NGX_ERROR;
     }
-    
+
     ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown: decompression succeeded, "
                   "compressed=%uz bytes, decompressed=%uz bytes, ratio=%.1f",
@@ -1724,7 +1724,7 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
 
     /* Suppress -Wunused-but-set-variable when NGX_DEBUG is not enabled */
     (void) total_decompressed;
-    
+
     return NGX_OK;
 }
 
@@ -1782,7 +1782,7 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t    *conf;
     ngx_http_markdown_full_brotli_alloc_ctx_t  alloc_ctx;
     ngx_int_t                   rc;
-    
+
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
     if (conf == NULL) {
         return NGX_ERROR;
@@ -1846,10 +1846,10 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
             decoder, output.data,
             NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED);
     }
-    
+
     /* Clean up decoder instance (brotli decoder cleanup) */
     BrotliDecoderDestroyInstance(decoder);
-    
+
     /* Build the output chain wrapping the decompressed data directly
      * (avoids a second allocation + memcpy). Shared with the zlib path
      * via ngx_http_markdown_decomp_build_output_chain so the two backends
@@ -1860,16 +1860,16 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
         ngx_free(output.data);
         return NGX_ERROR;
     }
-    
+
     ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown: brotli decompression succeeded, "
                   "compressed=%uz bytes, decompressed=%uz bytes, ratio=%.1f",
                   input_size, output.total_out,
                   input_size > 0
                       ? (float) output.total_out / input_size : 0.0f);
-    
+
     return NGX_OK;
-    
+
 #else
     (void) in;
     (void) out;
@@ -1878,7 +1878,7 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
     ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                  "markdown: brotli not supported, "
                  "brotli module not compiled in");
-    
+
     return NGX_DECLINED;
 #endif
 }
@@ -1914,7 +1914,7 @@ ngx_http_markdown_decompress(ngx_http_request_t *r,
                               ngx_chain_t **out)
 {
     ngx_int_t  rc;
-    
+
     /* Route to appropriate decompression function based on type */
     switch (type) {
         case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
@@ -1929,11 +1929,11 @@ ngx_http_markdown_decompress(ngx_http_request_t *r,
             }
 
             return rc;
-            
+
         case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
             /* Use brotli library for brotli decompression (brotli library for brotli decompression) */
             rc = ngx_http_markdown_decompress_brotli(r, in, out);
-            
+
             /* Handle NGX_DECLINED from brotli function (when brotli not available) */
             if (rc == NGX_DECLINED) {
                 ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
@@ -1946,23 +1946,23 @@ ngx_http_markdown_decompress(ngx_http_request_t *r,
                              "markdown: brotli decompressed "
                              "size exceeds budget, category=resource_limit");
             }
-            
+
             return rc;
-            
+
         case NGX_HTTP_MARKDOWN_COMPRESSION_NONE:
             /* No compression, should not reach here */
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                          "markdown: decompress called with COMPRESSION_NONE, "
                          "category=system");
             return NGX_ERROR;
-            
+
         case NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN:
             /* Unknown/unsupported compression format */
             ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                          "markdown: unsupported compression format, "
                          "returning original content");
             return NGX_DECLINED;
-            
+
         default:
             /* Invalid compression type */
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,

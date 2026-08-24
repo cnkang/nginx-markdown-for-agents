@@ -258,7 +258,7 @@ if test -n "$ngx_module_link"; then
                      $ngx_addon_dir/src/ngx_http_markdown_stream_replay.h \
                      $ngx_addon_dir/src/ngx_http_markdown_stream_commit.h \
                      $ngx_addon_dir/src/ngx_http_markdown_stream_postcommit.h"
-    
+
     . auto/module
 else
     # Static module

@@ -28,7 +28,7 @@ flowchart TD
     IncreaseLimit --> Verify
     DisableStream --> Verify
     Verify --> Monitor["Monitor metrics<br/>and error logs"]
-    
+
     style Trigger fill:#c00,color:#fff
     style Verify fill:#090,color:#fff
 ```

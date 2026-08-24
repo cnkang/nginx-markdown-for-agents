@@ -130,7 +130,7 @@ def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
 def _is_table_header_or_separator(nginx: str) -> bool:
     """
     Determine whether a markdown table cell in the "nginx" column is a header or a separator row.
-    
+
     Returns:
         `true` if the cell equals "nginx version" (case-insensitive), contains only dashes, or starts with "-", `false` otherwise.
     """
@@ -144,7 +144,7 @@ def _is_table_header_or_separator(nginx: str) -> bool:
 def _parse_table_row(line: str) -> tuple[str, str, str, str] | None:
     """
     Parse a markdown table row into a 4-tuple of its cells.
-    
+
     Returns:
         tuple[str, str, str, str] | None: A 4-tuple (nginx, os_type, arch, tier) of trimmed cell strings if `line` is a markdown table row with exactly four non-empty cells (must start and end with `|`); `None` otherwise.
     """
@@ -233,11 +233,11 @@ def compare_matrices(
 ) -> list[str]:
     """
     Compare release matrix entries from the canonical JSON and the documentation and report any discrepancies.
-    
+
     Parameters:
         json_entries (list[tuple[str, str, str, str]]): Entries loaded from release-matrix.json as (nginx, os_type, arch, tier).
         doc_entries (list[tuple[str, str, str, str]]): Entries parsed from the documentation as (nginx, os_type, arch, tier).
-    
+
     Returns:
         diffs (list[str]): A list of human-readable difference messages. Each message describes either an entry present only in JSON, an entry present only in the docs, or a tier mismatch for an entry present in both (formats include:
           - "In JSON but missing from doc: nginx=... os_type=... arch=... tier=..."
@@ -290,9 +290,9 @@ def compare_matrices(
 def main() -> int:
     """
     Validate that INSTALLATION.md's "Platform Compatibility Matrix" matches release-matrix.json.
-    
+
     Reads the canonical matrix and the documentation matrix, prints errors or a list of differences to stderr when mismatches or file/parse problems occur, and prints a success summary when they match.
-    
+
     Returns:
         int: `0` if the matrices are in sync, `1` if they are out of sync or a required file/parse error occurred.
     """

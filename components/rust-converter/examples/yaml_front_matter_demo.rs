@@ -22,10 +22,10 @@ fn main() {
     <body>
         <h1>Understanding YAML Front Matter</h1>
         <p>YAML front matter is a powerful feature for adding metadata to Markdown documents.</p>
-        
+
         <h2>What is YAML Front Matter?</h2>
         <p>It's a block of YAML at the beginning of a file, enclosed in triple dashes.</p>
-        
+
         <h2>Why Use It?</h2>
         <ul>
             <li>Provides structured metadata</li>

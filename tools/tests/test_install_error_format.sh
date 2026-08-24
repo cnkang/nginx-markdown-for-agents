@@ -143,7 +143,7 @@ build_path_hiding() {
 # Captures stderr and validates [ERROR]/[SUGGEST] format.
 # run_hiding_nginx runs the install.sh script with `nginx` hidden from PATH and validates that stderr contains the required `[ERROR] <category>: <message>` and `[SUGGEST] <suggestion>` formats.
 # Usage: run_hiding_nginx <test_name> [extra_args...]
-# 
+#
 # This function captures stdout and stderr from install.sh (with SKIP_ROOT_CHECK=1 and a PATH that hides `nginx`), verifies stderr is non-empty and contains both the `[ERROR]` and `[SUGGEST]` formats, and reports results using the pass/fail helpers.
 # run_hiding_nginx runs install.sh with nginx hidden from PATH, captures stdout and stderr, validates that stderr contains a structured "[ERROR] <category>: <message>" line and a "[SUGGEST]" line, sets `_LAST_STDOUT` and `_LAST_STDERR` with the captured outputs, cleans temporary files and the shim directory, and returns 0 on success (non-zero on failure).
 run_hiding_nginx() {

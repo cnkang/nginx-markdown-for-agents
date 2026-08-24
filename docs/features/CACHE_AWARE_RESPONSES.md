@@ -10,7 +10,7 @@ flowchart LR
     Compare -->|no match| Convert["Convert & Return Markdown"]
     ETag -->|no| Convert
     Convert --> SetHeaders["Set Vary: Accept<br/>Set ETag<br/>Set Content-Type"]
-    
+
     style NotModified fill:#090,color:#fff
     style Convert fill:#009639,color:#fff
 ```
@@ -225,10 +225,10 @@ CDNs must respect the `Vary: Accept` header to cache variants correctly:
 ```nginx
 location /docs/ {
     markdown_filter on;
-    
+
     # CDN-friendly caching
     add_header Cache-Control "public, max-age=3600";
-    
+
     proxy_pass http://backend;
 }
 ```
@@ -249,11 +249,11 @@ proxy_cache_path /var/cache/nginx levels=1:2 keys_zone=my_cache:10m;
 server {
     location /docs/ {
         markdown_filter on;
-        
+
         proxy_cache my_cache;
         proxy_cache_key "$scheme$request_method$host$request_uri$http_accept";
         proxy_cache_valid 200 10m;
-        
+
         proxy_pass http://backend;
     }
 }
@@ -270,7 +270,7 @@ location /private/ {
     markdown_filter on;
     markdown_auth_policy deny;
     markdown_auth_cookies "session_id auth_token";
-    
+
     proxy_pass http://backend;
 }
 ```

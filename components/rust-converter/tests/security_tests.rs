@@ -498,7 +498,7 @@ fn test_doctype_standard_html5() {
 /// **Validates: Requirements NFR-03.4 (XXE Prevention)**
 #[test]
 fn test_doctype_public_identifier() {
-    let html = r#"<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" 
+    let html = r#"<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
         "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
     <html><body><p>Content</p></body></html>"#;
 

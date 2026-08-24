@@ -69,13 +69,13 @@ def test_property0_zero_baseline_special_case(current):
 def test_property1_lower_is_better_classification(baseline, current, warning_pct, blocking_pct_extra):
     """
     Property test that verifies classification logic for "lower_is_better" metrics.
-    
+
     Asserts that the computed deviation is classified as:
     - pass when deviation <= warning,
     - warn when warning < deviation <= blocking,
     - fail when deviation > blocking.
     The blocking threshold is computed as `warning_pct + blocking_pct_extra` to ensure blocking > warning.
-    
+
     Parameters:
         baseline (float): Baseline value for deviation calculation.
         current (float): Current value to compare against the baseline.
@@ -104,12 +104,12 @@ def test_property1_lower_is_better_classification(baseline, current, warning_pct
 def test_property1_higher_is_better_classification(baseline, current, warning_abs, blocking_extra):
     """
     Classifies a deviation for metrics where higher values are better using negative thresholds and asserts the expected verdict.
-    
+
     Constructs negative thresholds from `warning_abs` and `blocking_extra` (warning_pct = -warning_abs; blocking_pct = -(warning_abs + blocking_extra)) and checks that:
     - deviation < blocking_pct -> verdict is "fail"
     - blocking_pct <= deviation < warning_pct -> verdict is "warn"
     - deviation >= warning_pct -> verdict is "pass"
-    
+
     Parameters:
         baseline (float): Reference baseline value for deviation calculation.
         current (float): Current measured value to compare against the baseline.
@@ -259,7 +259,7 @@ def test_property11_median_within_range(values):
 def test_property11_median_of_identical_values(value, n):
     """
     Assert that the median of a list containing only identical elements equals that element.
-    
+
     Parameters:
         value (float): The value to repeat in the list.
         n (int): The number of times `value` is repeated (list length; expected to be a positive integer).

@@ -94,16 +94,16 @@ def check_changelog_exists(project_root: Path) -> List[str]:
     changelog = project_root / 'CHANGELOG.md'
     if not changelog.exists():
         return ["CHANGELOG.md not found"]
-    
+
     try:
         content = changelog.read_text(encoding='utf-8')
     except (OSError, UnicodeError) as exc:
         return [f"CHANGELOG.md exists but is unreadable: {exc}"]
-    
+
     # Check if it has at least one version entry
     if not re.search(r'##\s+\[\d+\.\d+\.\d+\]', content):
         return ["CHANGELOG.md has no version entries"]
-    
+
     return []
 
 
@@ -139,11 +139,11 @@ def check_readme_mentions_key_features(project_root: Path) -> List[str]:
 def check_installation_guide_current(project_root: Path) -> List[str]:
     """Check that installation guide references current version patterns."""
     warnings = []
-    
+
     install_guide = project_root / 'docs' / 'guides' / 'INSTALLATION.md'
     if not install_guide.exists():
         return warnings
-    
+
     try:
         content = install_guide.read_text(encoding='utf-8')
     except (OSError, UnicodeError) as exc:
@@ -693,17 +693,17 @@ def main():
         project_root = Path(validate_read_path(sys.argv[1]))
     else:
         project_root = Path(__file__).parent.parent.parent
-    
+
     if not project_root.exists():
         print(f"Project directory not found: {project_root}", file=sys.stderr)
         sys.exit(1)
-    
+
     all_errors = []
     all_errors.extend(check_changelog_exists(project_root))
     all_errors.extend(check_readme_mentions_key_features(project_root))
     all_errors.extend(check_installation_guide_current(project_root))
     all_errors.extend(check_public_config_contract(project_root))
-    
+
     if all_errors:
         print(
             f"Documentation sync check failed ({len(all_errors)} violation(s)):",

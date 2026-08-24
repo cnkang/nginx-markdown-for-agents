@@ -50,11 +50,11 @@ from evidence_pack_generator import (  # noqa: E402
 def _write_tmp_json(data: dict, suffix: str = ".json") -> str:
     """
     Write a dictionary as JSON to a temporary file and return the file path.
-    
+
     Parameters:
         data (dict): JSON-serializable mapping to write to the temporary file.
         suffix (str): Filename suffix for the temporary file (defaults to ".json").
-    
+
     Returns:
         path (str): Filesystem path to the created temporary file.
     """
@@ -67,10 +67,10 @@ def _write_tmp_json(data: dict, suffix: str = ".json") -> str:
 def _make_fullbuffer_report(tiers: dict | None = None) -> dict:
     """
     Create a minimal full-buffer measurement report, optionally overriding the default tiers.
-    
+
     Parameters:
     	tiers (dict | None): Optional mapping of tier names to metric dicts; when provided, this value is used as the report's `tiers` field. If `None`, a default set of small/medium/large tiers with example latency and input sizes is returned.
-    
+
     Returns:
     	report (dict): A report containing `schema_version`, `timestamp`, `git_commit`, `platform`, and `tiers`.
     """
@@ -112,12 +112,12 @@ def _make_fullbuffer_report(tiers: dict | None = None) -> dict:
 def _make_streaming_report(tiers: dict | None = None) -> dict:
     """
     Create a minimal streaming measurement report for tests.
-    
+
     Parameters:
         tiers (dict | None): Optional dictionary of tier measurements to include; if omitted, a default set of tiers
             ("small", "medium", "large-100k", "large-1m") with representative latency, TTFB, input size, and peak memory
             values is used.
-    
+
     Returns:
         dict: A report dictionary containing `schema_version`, `timestamp`, `git_commit`, `platform`, and `tiers`.
     """
@@ -167,10 +167,10 @@ def _make_streaming_report(tiers: dict | None = None) -> dict:
 def _make_evidence_targets(overrides: dict | None = None) -> dict:
     """
     Create a default evidence targets configuration, optionally merged with user overrides.
-    
+
     Parameters:
         overrides (dict | None): Optional mapping whose keys will replace or extend the default targets.
-    
+
     Returns:
         dict: Evidence targets including:
             - "bounded_memory": {"max_slope": float, "min_data_points": int}
@@ -203,11 +203,11 @@ def _make_parity_report(
 ) -> dict:
     """
     Constructs a minimal parity report dictionary with the specified pass and correctness rates.
-    
+
     Parameters:
         pass_rate (float): Pass rate in the range 0.0–1.0 (default 1.0).
         correctness_rate (float): Correctness rate in the range 0.0–1.0 (default 1.0).
-    
+
     Returns:
         dict: Parity report containing `schema_version`, `timestamp`, a `summary` with
         `pass_rate` and `correctness_rate`, and an empty `tiers` mapping.

@@ -52,11 +52,11 @@ DIRECTION_MAP = build_direction_map(METRICS_SCHEMA)
 def _write_tmp_json(data, suffix=".json"):
     """
     Write the given JSON-serializable data to a temporary file and return its path.
-    
+
     Parameters:
         data: JSON-serializable value to write to the file.
         suffix (str): Filename suffix (for example, ".json") to use for the temporary file.
-    
+
     Returns:
         str: Filesystem path of the created temporary file.
     """
@@ -69,11 +69,11 @@ def _write_tmp_json(data, suffix=".json"):
 def _make_baseline(tiers=None):
     """
     Create a baseline metrics payload for tests, using provided tiers or a default "small" tier.
-    
+
     Parameters:
         tiers (dict | None): Optional mapping of tier names to metric values; if omitted, a default
             "small" tier with predefined metrics is used.
-    
+
     Returns:
         dict: A baseline dictionary containing keys:
             - "schema_version": schema version string
@@ -104,10 +104,10 @@ def _make_baseline(tiers=None):
 def _make_current(tiers=None):
     """
     Create a current measurement report dictionary for use in tests.
-    
+
     Parameters:
         tiers (dict, optional): Mapping of tier names to their metric values to override the default tier. If omitted, a default "small" tier is used with p50_ms, p95_ms, p99_ms, peak_memory_bytes, req_per_s, and input_mb_per_s set to representative values.
-    
+
     Returns:
         dict: A measurement report containing keys:
             - schema_version: API schema version string.

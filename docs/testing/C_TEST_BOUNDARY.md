@@ -1,7 +1,7 @@
 # C Test Boundary
 
-**Status:** Phase 1 deliverable — authoritative boundary definition  
-**Spec:** 0.6.3 Rust-first test migration requirements/design/tasks package  
+**Status:** Phase 1 deliverable — authoritative boundary definition
+**Spec:** 0.6.3 Rust-first test migration requirements/design/tasks package
 **Requirements:** 5.1, 5.2, 5.3, 5.4, 5.5
 
 ---

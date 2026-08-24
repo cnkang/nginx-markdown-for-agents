@@ -44,11 +44,11 @@ def _normalize_arch(arch: str) -> str:
 def _require_entry_keys(entry: dict, *, context: str) -> None:
     """
     Ensure a matrix entry contains all required keys.
-    
+
     Parameters:
         entry (dict): Matrix entry to validate.
         context (str): Context label included in the KeyError message when keys are missing.
-    
+
     Raises:
         KeyError: If any required keys are missing; the message includes the provided context and the missing key names.
     """
@@ -61,11 +61,11 @@ def _require_entry_keys(entry: dict, *, context: str) -> None:
 def load_matrix(matrix_path: str) -> List[dict]:
     """
     Load release-binary entries from a release matrix JSON file.
-    
+
     Parameters:
         matrix_path (str): Filesystem path to release-matrix.json. The current
             schema uses top-level "entries"; the legacy schema used "matrix".
-    
+
     Returns:
         List[dict]: Normalized entries with "nginx", "os_type", and "arch"
         keys matching release binary artifact filenames.
@@ -103,13 +103,13 @@ def load_matrix(matrix_path: str) -> List[dict]:
 def expected_artifact_name(entry: dict) -> str:
     """
     Compute the expected artifact filename for a release matrix entry.
-    
+
     Parameters:
         entry (dict): A matrix entry mapping that must contain the keys `nginx`, `os_type`, and `arch`.
-    
+
     Returns:
         str: The expected artifact filename, e.g. "ngx_http_markdown_filter_module-{nginx}-{os_type}-{arch}.tar.gz".
-    
+
     Raises:
         KeyError: If any of `nginx`, `os_type`, or `arch` are missing from `entry`.
     """
@@ -124,15 +124,15 @@ def expected_artifact_name(entry: dict) -> str:
 def collect_artifacts(artifacts_path: str) -> Set[str]:
     """
     Gather artifact filenames from a directory or a newline-separated file list.
-    
+
     If `artifacts_path` is a directory, returns the non-recursive set of filenames
     inside that end with `.tar.gz`. If it is a file, reads it as a UTF-8,
     newline-separated list; lines are trimmed and empty lines are ignored.
-    
+
     Parameters:
         artifacts_path (str): Path to a directory containing `.tar.gz` files or to a
             text file listing artifact filenames, one per line.
-    
+
     Returns:
         Set[str]: A set of artifact filenames found.
     """
@@ -158,11 +158,11 @@ def check_completeness(
 ) -> List[Tuple[dict, str]]:
     """
     Identify which matrix entries do not have corresponding artifact files.
-    
+
     Parameters:
         matrix_entries (List[dict]): Matrix entries to validate; each entry must contain the keys required by expected_artifact_name().
         actual_artifacts (Set[str]): Set of artifact filenames that are present.
-    
+
     Returns:
         missing (List[Tuple[dict, str]]): List of (entry, expected_filename) pairs for entries whose expected artifact name is not found in `actual_artifacts`.
     """
@@ -177,11 +177,11 @@ def check_completeness(
 def format_missing(missing: List[Tuple[dict, str]]) -> str:
     """
     Create a human-readable report of missing artifacts.
-    
+
     Parameters:
         missing (List[Tuple[dict, str]]): List of (matrix_entry, expected_filename) pairs where
             matrix_entry contains at least the keys `nginx`, `os_type`, and `arch`.
-    
+
     Returns:
         report (str): Multi-line string that begins with "Missing N artifact(s):" and includes one
         line per missing artifact formatted as:
@@ -198,12 +198,12 @@ def format_missing(missing: List[Tuple[dict, str]]) -> str:
 def main(argv: List[str] | None = None) -> int:
     """
     Run the completeness check using the provided command-line arguments and return a process-style exit code.
-    
+
     Parses --matrix and --artifacts from argv, loads the matrix entries with support_tier "full", compares expected artifact filenames against the actual artifacts found, and returns an exit code reflecting the result.
-    
+
     Parameters:
         argv (List[str] | None): Command-line arguments to parse; if None, sys.argv[1:] is used.
-    
+
     Returns:
         int: 0 if all expected artifacts are present, 1 if any artifacts are missing or if no qualifying matrix entries are found.
     """

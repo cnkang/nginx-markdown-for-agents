@@ -869,10 +869,10 @@ def check_test_matrix(result: ValidationResult) -> None:
 
 def check_non_goals(result: ValidationResult) -> None:
     """Verify non-goals list exists in release gates document.
-    
+
     This function validates that the release gates document includes
     references to all key non-goals for the 0.5.0 release.
-    
+
     Args:
         result: ValidationResult object to record results
     """
@@ -901,10 +901,10 @@ def check_non_goals(result: ValidationResult) -> None:
 
 def check_naming_conventions_doc(result: ValidationResult) -> None:
     """Verify naming conventions document defines all three categories.
-    
+
     This function validates that the naming conventions document includes
     definitions for all required naming categories.
-    
+
     Args:
         result: ValidationResult object to record results
     """

@@ -62,10 +62,10 @@ def load_json(path):
 def build_direction_map(metrics_schema):
     """
     Build a mapping of metric names to their direction from a metrics schema.
-    
+
     Parameters:
         metrics_schema (dict): Schema containing a "metrics" list of objects, each with at least "name" and "direction" keys.
-    
+
     Returns:
         dict: A mapping where keys are metric names (str) and values are their directions (str).
     """
@@ -75,9 +75,9 @@ def build_direction_map(metrics_schema):
 def get_threshold(thresholds_cfg, platform, tier, metric):
     """
     Retrieve threshold settings for a metric within a specified tier and platform.
-    
+
     Looks up the threshold configuration for `metric` under `tier` for `platform`; if not found it falls back to the `"default"` platform entry and then to the built-in `DEFAULT_THRESHOLDS`.
-    
+
     Returns:
         dict: A mapping containing `warning_pct` and `blocking_pct` for the metric.
     """
@@ -94,12 +94,12 @@ def get_threshold(thresholds_cfg, platform, tier, metric):
 def compute_deviation(current, baseline):
     """
     Compute the percentage deviation between current and baseline for threshold comparisons.
-    
+
     The deviation is (current - baseline) / baseline * 100. If baseline is zero, returns sentinel values to avoid infinite results:
     - baseline == 0 and current == 0 -> 0.0
     - baseline == 0 and current > 0 -> 100.0
     - baseline == 0 and current < 0 -> -100.0
-    
+
     Returns:
         deviation_pct (float): Percentage difference of current relative to baseline.
     """
@@ -113,15 +113,15 @@ def compute_deviation(current, baseline):
 def judge_metric(deviation_pct, direction, warning_pct, blocking_pct):
     """
     Determine the verdict ('pass', 'warn', or 'fail') for a metric deviation against configured thresholds.
-    
+
     For direction "lower_is_better", positive deviation percentages indicate regressions. For direction "higher_is_better", thresholds are expressed as negative numbers and negative deviation percentages indicate regressions. Any other direction is treated as informational and results in "pass".
-    
+
     Parameters:
         deviation_pct (float): Deviation percentage of current vs baseline.
         direction (str): Metric direction, e.g. "lower_is_better" or "higher_is_better".
         warning_pct (float): Warning threshold percentage.
         blocking_pct (float): Blocking threshold percentage.
-    
+
     Returns:
         str: `'pass'`, `'warn'`, or `'fail'` indicating the metric verdict.
     """
@@ -151,7 +151,7 @@ def judge_metric(deviation_pct, direction, warning_pct, blocking_pct):
 def build_skipped_verdict(reason, platform):
     """
     Emit a "skipped" verdict report and its reason.
-    
+
     Parameters:
         reason (str): Human-readable explanation for skipping; written to stderr.
         platform (str): Platform name to include in the report.
@@ -180,7 +180,7 @@ def build_skipped_verdict(reason, platform):
 def _metric_comparison(cur_tier, base_tier, metric, direction_map, thresholds_cfg, platform, tier_name):
     """
     Compare a single metric between a current and baseline tier and produce a verdict payload.
-    
+
     Parameters:
         cur_tier (dict): Measurement values for the current tier.
         base_tier (dict): Measurement values for the baseline tier.
@@ -189,7 +189,7 @@ def _metric_comparison(cur_tier, base_tier, metric, direction_map, thresholds_cf
         thresholds_cfg (dict): Thresholds configuration used to look up warning and blocking percentages.
         platform (str): Platform name for threshold lookup.
         tier_name (str): Tier identifier used for threshold lookup.
-    
+
     Returns:
         dict or None: A dict with keys:
             - "name" (str): the metric name.
@@ -233,7 +233,7 @@ def _metric_comparison(cur_tier, base_tier, metric, direction_map, thresholds_cf
 def _compare_tier_metrics(base_tier, cur_tier, direction_map, thresholds_cfg, platform, tier_name):
     """
     Compare comparable metrics between a baseline tier and a current tier and aggregate per-metric verdicts.
-    
+
     Returns:
         tier_comparison (dict): Mapping of metric name to payload with keys including baseline, current, deviation, and verdict.
         has_warning (bool): `True` if any metric verdict is "warn", `False` otherwise.
@@ -268,7 +268,7 @@ def _compare_tier_metrics(base_tier, cur_tier, direction_map, thresholds_cfg, pl
 def _overall_verdict(has_warning, has_failure):
     """
     Determine the overall report verdict from aggregated tier results.
-    
+
     Returns:
         str: `"fail"` if has_failure is True, `"warn"` if has_warning is True (and no failures), `"pass"` otherwise.
     """
@@ -284,9 +284,9 @@ def build_verdict_report(
 ):
     """
     Builds a verdict report comparing current measurements to a baseline.
-    
+
     Writes report JSON to stdout and a human-readable summary to stderr.
-    
+
     Returns:
         tuple: (report, has_failure) where `report` is the verdict report dictionary and
         `has_failure` is True if any metric exceeded a blocking threshold, False otherwise.
@@ -355,7 +355,7 @@ def _emit_json(data):
 def _stderr(msg):
     """
     Write a message to the process's standard error stream.
-    
+
     Parameters:
         msg (str): Text to write to stderr.
     """
@@ -365,7 +365,7 @@ def _stderr(msg):
 def _print_text_summary(comparison_tiers, overall):
     """
     Print a concise, human-readable performance comparison summary to standard error.
-    
+
     Parameters:
     	comparison_tiers (dict): Mapping of tier name to a mapping of metric name to metric entry.
     		Each metric entry is a dict containing at least:
@@ -407,10 +407,10 @@ def _print_text_summary(comparison_tiers, overall):
 def parse_args(argv=None):
     """
     Parse CLI arguments for the performance threshold engine.
-    
+
     Parameters:
         argv (list[str] | None): Optional list of argument strings to parse. If None, the system command-line arguments are used.
-    
+
     Returns:
         argparse.Namespace: Parsed arguments with the attributes:
             - baseline: path to the baseline JSON
@@ -454,10 +454,10 @@ def parse_args(argv=None):
 def main(argv=None):
     """
     Run the threshold engine CLI flow and emit verdict JSON to stdout.
-    
+
     Parameters:
         argv (list[str] | None): Optional list of command-line arguments to parse; if None, uses sys.argv.
-    
+
     Returns:
         int: Exit code — 0 when the run is skipped or no blocking failures are found, 1 on any error or when any metric exceeds a blocking threshold.
     """

@@ -198,7 +198,7 @@ Required:
      producer has finalized it, and assigns to the metrics struct.
   4. **All output formats**: JSON, plain-text, and Prometheus renderers
      emit the metric with consistent naming.
-  
+
   If any link is missing, **defer the metric** to the release that
   completes the chain. Shipping a metric with an incomplete data source
   creates a permanently-zero gauge that misleads operators and violates
@@ -210,7 +210,7 @@ Required:
   - FFI structs (`MarkdownResult`, `StreamingStats`, converter options)
   - Test helper type definitions that mirror production structs
   - Documentation and spec files that describe the interface contract
-  
+
   Before merging, grep for all references to the modified type across
   the language boundary and confirm each one compiles and stays
   semantically consistent. Do not assume "the other side will get

@@ -8,7 +8,7 @@
  * Task: 17.5 Implement authenticated content cache control
  *
  * Security Rationale:
- * 
+ *
  * Authenticated and personalized content must not be cached publicly to prevent
  * exposure of sensitive information. This module detects authenticated requests
  * through:
