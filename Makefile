@@ -524,12 +524,18 @@ security-actionlint:
 security-shellcheck:
 	@command -v shellcheck >/dev/null 2>&1 || { echo "ERROR: shellcheck not found. Install from https://www.shellcheck.net/ or your package manager." >&2; exit 127; }
 	@tmp_files=$$(mktemp); \
-	trap 'rm -f "$$tmp_files"' EXIT; \
+	existing_files=$$(mktemp); \
+	trap 'rm -f "$$tmp_files" "$$existing_files"' EXIT; \
 	git ls-files -z -- ":(glob)*.sh" ":(glob)tools/**/*.sh" ":(glob)packaging/**/*.sh" ":(glob).clusterfuzzlite/*.sh" ":(glob)examples/**/*.sh" > "$$tmp_files"; \
-	if [ ! -s "$$tmp_files" ]; then \
+	while IFS= read -r -d '' shell_file; do \
+		if [ -f "$$shell_file" ]; then \
+			printf '%s\0' "$$shell_file" >> "$$existing_files"; \
+		fi; \
+	done < "$$tmp_files"; \
+	if [ ! -s "$$existing_files" ]; then \
 		echo "No tracked shell scripts matched the security-static scope."; \
 	else \
-		xargs -0 shellcheck --severity=error -x -P tools/e2e -P tools/lib < "$$tmp_files"; \
+		xargs -0 shellcheck --severity=error -x -P tools/e2e -P tools/lib < "$$existing_files"; \
 	fi
 
 security-gitleaks:

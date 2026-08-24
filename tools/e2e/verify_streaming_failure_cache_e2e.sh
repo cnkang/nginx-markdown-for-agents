@@ -16,7 +16,8 @@ set -euo pipefail
 #   10.9  error_policy independence (pass vs fail_closed for streaming pre-commit)
 #   10.10 HEAD request does not enter streaming path
 #   10.11 304 response does not enter streaming path
-#   10.12 Fail-open preserves Cache-Control and ETag (authenticated request)
+#   10.12 Fail-open applies authenticated Cache-Control policy
+#   10.12b Unauthenticated fail-open keeps the upstream public policy
 #   10.13 no-cache="public" quoted directive not treated as bare public
 #
 # When NGINX_BIN is not set, exits with code 1 unless --plan is specified.
@@ -99,7 +100,8 @@ Test cases:
   10.9  Directive independence
   10.10 HEAD request does not enter streaming path
   10.11 304 response does not enter streaming path
-  10.12 Fail-open preserves Cache-Control and ETag (authenticated)
+  10.12 Fail-open applies authenticated Cache-Control policy
+  10.12b Unauthenticated fail-open keeps upstream public policy
   10.13 no-cache="public" quoted directive not treated as bare public
 EOF
     return 0
@@ -457,12 +459,17 @@ echo "10.11 304 response does not enter streaming path"
 echo "  - Capture ETag from full-buffer location"
 echo "  - Re-request with If-None-Match and verify HTTP 304 + empty body"
 echo ""
-echo "10.12 Fail-open preserves Cache-Control and ETag (authenticated)"
+echo "10.12 Fail-open applies authenticated Cache-Control policy"
 echo "  - markdown_streaming force, error_policy pass, auth_policy allow"
 echo "  - Trigger pre-commit failure (budget exceeded) with authenticated request"
-echo "  - Verify: Cache-Control preserved as 'public, max-age=600' (not rewritten to private)"
+echo "  - Verify: Cache-Control has no bare 'public' directive and includes 'private'"
 echo "  - Verify: ETag preserved as upstream value"
+echo "  - Verify: Set-Cookie is preserved"
 echo "  - Verify: decision log contains STREAMING_PRECOMMIT_FAILOPEN (terminal fail-open outcome)"
+echo ""
+echo "10.12b Unauthenticated fail-open keeps upstream public policy"
+echo "  - Repeat the same real streaming pre-commit failure without a Cookie header"
+echo "  - Verify: Cache-Control remains public and is not rewritten to private"
 echo ""
 echo "10.13 no-cache=\"public\" quoted directive not treated as bare public"
 echo "  - auth_policy allow, authenticated request with Cookie header"
@@ -640,8 +647,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/failopen-headers":
             # Oversize HTML with Cache-Control, ETag, and Set-Cookie.
-            # Used by test 10.12 to verify fail-open preserves upstream
-            # headers without auth rewrite.
+            # Used by test 10.12 to verify fail-open applies the authenticated
+            # Cache-Control policy while preserving the other upstream headers.
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(OVERSIZE_BODY)))
@@ -1007,13 +1014,13 @@ http {
             proxy_pass http://127.0.0.1:${UPSTREAM_PORT}/;
         }
 
-        # 10.12: Fail-open preserves Cache-Control and ETag (authenticated)
+        # 10.12: Authenticated fail-open still applies Cache-Control policy
         # Uses auth_policy allow so the request enters conversion/streaming,
         # then streaming_buffer=64k triggers pre-commit failure for the
         # 12MB fixture -> fail-open.
         # With auth_policy allow + auth_cookies "session*" + Cookie header,
-        # the normal (non-fail-open) path would rewrite Cache-Control to
-        # private.  Fail-open must bypass that rewrite.
+        # the final header path must rewrite public caching to private even
+        # when streaming has failed before conversion can commit.
         location /t12/ {
             markdown_filter on;
             markdown_accept wildcard;
@@ -1458,7 +1465,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 10.12 Fail-open preserves Cache-Control and ETag (authenticated request)
+# 10.12 Authenticated fail-open applies Cache-Control policy
 # ---------------------------------------------------------------------------
 # This test exercises the PRODUCTION fail-open path end-to-end:
 #   - Upstream returns HTML with Cache-Control: public, max-age=600,
@@ -1467,10 +1474,11 @@ fi
 #     means the request is authenticated and would normally get
 #     Cache-Control rewritten to private on the success path.
 #   - markdown_limits streaming_buffer=64k triggers pre-commit failure
-#   - Fail-open MUST bypass the auth Cache-Control rewrite.
-#   - We assert: Cache-Control preserved, ETag preserved, and the
+#   - Fail-open MUST still apply the auth Cache-Control rewrite.
+#   - We assert: no bare public directive, private is present, ETag and
+#     Set-Cookie are preserved, and the
 #     decision log contains a streaming fail-open reason code.
-echo "==> 10.12 Fail-open preserves Cache-Control and ETag (authenticated)"
+echo "==> 10.12 Authenticated fail-open applies Cache-Control policy"
 
 # Record error log offset before the 10.12 request so we only inspect
 # newly appended log lines (earlier cases like 10.2/10.9b also emit
@@ -1494,17 +1502,20 @@ assert_http_200 "${RAW_DIR}/t12.hdr" "10.12" t12_pass \
 assert_has_header "${RAW_DIR}/t12.hdr" "${PATTERN_CT_HTML}" "10.12" t12_pass \
     "expected Content-Type text/html for fail-open"
 
-# Cache-Control must be preserved as "public, max-age=600" (not rewritten to private)
+# Authenticated fail-open must not leave a shared-cache public directive.
 t12_cache_control=$(cache_control_value "${RAW_DIR}/t12.hdr")
-if ! cache_control_has_token "${t12_cache_control}" "public" \
-    || ! cache_control_has_token "${t12_cache_control}" "max-age=600"; then
-    mark_case_fail "10.12" "Cache-Control not preserved as exact tokens 'public' and 'max-age=600' (auth rewrite may have occurred on fail-open path)" t12_pass
+if cache_control_has_token "${t12_cache_control}" "public" \
+    || ! cache_control_has_token "${t12_cache_control}" "private"; then
+    mark_case_fail "10.12" "authenticated fail-open Cache-Control must remove bare public and include private" t12_pass
 fi
 
 # ETag must be preserved as the upstream value
 t12_etag=$(header_value "${RAW_DIR}/t12.hdr" 'ETag')
 if [[ "${t12_etag}" != '"upstream-failopen-etag"' ]]; then
     mark_case_fail "10.12" "ETag not preserved as upstream value on fail-open path (got: ${t12_etag})" t12_pass
+fi
+if ! grep -qi '^Set-Cookie:' "${RAW_DIR}/t12.hdr"; then
+    mark_case_fail "10.12" "Set-Cookie header was not preserved on fail-open path" t12_pass
 fi
 
 # Body must contain the oversize end token (complete HTML, not truncated)
@@ -1536,9 +1547,39 @@ else
 fi
 
 if [[ ${t12_pass} -eq 1 ]]; then
-    report_case "10.12" "PASS" "Fail-open preserves Cache-Control and ETag with authenticated request"
+    report_case "10.12" "PASS" "Authenticated fail-open applies Cache-Control policy"
 else
-    report_case "10.12" "FAIL" "Fail-open preserves Cache-Control and ETag with authenticated request"
+    report_case "10.12" "FAIL" "Authenticated fail-open applies Cache-Control policy"
+fi
+
+# ---------------------------------------------------------------------------
+# 10.12b Unauthenticated fail-open keeps the upstream public policy
+# ---------------------------------------------------------------------------
+echo "==> 10.12b Unauthenticated fail-open keeps upstream public policy"
+curl -sS -D "${RAW_DIR}/t12b.hdr" -o "${RAW_DIR}/t12b.body" \
+    -H "${ACCEPT_MARKDOWN_HEADER}" \
+    --max-time 60 \
+    "http://127.0.0.1:${PORT}/t12/failopen-headers"
+
+t12b_pass=1
+
+assert_http_200 "${RAW_DIR}/t12b.hdr" "10.12b" t12b_pass \
+    "expected HTTP 200 for unauthenticated fail-open"
+assert_has_header "${RAW_DIR}/t12b.hdr" "${PATTERN_CT_HTML}" "10.12b" \
+    t12b_pass "expected Content-Type text/html for unauthenticated fail-open"
+t12b_cache_control=$(cache_control_value "${RAW_DIR}/t12b.hdr")
+if ! cache_control_has_token "${t12b_cache_control}" "public" \
+    || ! cache_control_has_token "${t12b_cache_control}" "max-age=600" \
+    || cache_control_has_token "${t12b_cache_control}" "private"; then
+    mark_case_fail "10.12b" "unauthenticated fail-open must preserve public caching" t12b_pass
+fi
+assert_body_contains "${RAW_DIR}/t12b.body" "${OVERSIZE_END_TOKEN}" "10.12b" \
+    t12b_pass "missing end token (possible truncation)"
+
+if [[ ${t12b_pass} -eq 1 ]]; then
+    report_case "10.12b" "PASS" "Unauthenticated fail-open keeps upstream public policy"
+else
+    report_case "10.12b" "FAIL" "Unauthenticated fail-open keeps upstream public policy"
 fi
 
 # ---------------------------------------------------------------------------

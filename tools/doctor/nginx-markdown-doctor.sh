@@ -563,7 +563,7 @@ check_rust_toolchain() {
         if (( symlink_hops > max_symlink_hops )); then
             emit_check "rust_toolchain" "fail" \
                 "doctor script symlink chain exceeds ${max_symlink_hops} hops" \
-                '{"rustc_version":null,"msrv":"'"$expected_msrv"'","msrv_ok":null,"repository_checkout":false,"symlink_chain_bounded":false,"pinned_channel":null}'
+                '{"rustc_version":"'"$(json_escape "$rustc_version")"'","msrv":"'"$msrv_floor"'","msrv_ok":null,"repository_checkout":false,"symlink_chain_bounded":false,"pinned_channel":null,"pinned_channel_expected":"'"$expected_msrv"'"}'
             return 0
         fi
         doctor_dir=$(cd -P "$(dirname "$doctor_source")" \

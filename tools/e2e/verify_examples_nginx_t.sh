@@ -460,7 +460,10 @@ PY
     while IFS=$'\t' read -r block_name expect label; do
       PREPARED_CONF="${RUNTIME_DIR}/migration_${block_name}"
       PREPARED_HANDLE=0
-      if grep -Eq '^[[:space:]]*http[[:space:]]*\{' \
+      if grep -Eq '^[[:space:]]*load_module[[:space:]]+' \
+          "${BLOCK_DIR}/${block_name}"; then
+        BLOCK_CONTEXT="top"
+      elif grep -Eq '^[[:space:]]*http[[:space:]]*\{' \
           "${BLOCK_DIR}/${block_name}"; then
         BLOCK_CONTEXT="top"
       elif grep -Eq '^[[:space:]]*server[[:space:]]*\{' \
