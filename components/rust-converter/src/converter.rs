@@ -169,6 +169,16 @@ pub struct ConversionOptions {
     pub prune_config: pruning::PruneConfig,
 }
 
+impl ConversionOptions {
+    /// Estimate the physical heap retained by converter-owned options.
+    pub(crate) fn resident_bytes(&self) -> usize {
+        self.base_url
+            .as_ref()
+            .map_or(0, String::capacity)
+            .saturating_add(self.prune_config.resident_bytes())
+    }
+}
+
 impl Default for ConversionOptions {
     /// Return conservative conversion defaults used by the top-level converter.
     fn default() -> Self {
@@ -762,6 +772,22 @@ mod tests {
     /// Normalize whitespace for robust text-only expectations.
     fn normalize_expected_text(text: &str) -> String {
         text.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    #[test]
+    fn options_resident_bytes_include_base_url_and_pruning_selectors() {
+        let base_url = "https://example.test/".to_owned() + &"u".repeat(8192);
+        let selectors = "nav-".to_owned() + &"s".repeat(4096);
+        let options = ConversionOptions {
+            base_url: Some(base_url.clone()),
+            prune_config: pruning::PruneConfig::from_ffi(true, Some(selectors.as_str()), None),
+            ..ConversionOptions::default()
+        };
+
+        assert!(
+            options.resident_bytes() >= base_url.capacity() + options.prune_config.resident_bytes()
+        );
+        assert!(options.resident_bytes() >= 8192);
     }
 
     /// Escape characters that would otherwise be interpreted as HTML markup.

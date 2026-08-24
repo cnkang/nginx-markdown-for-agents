@@ -227,6 +227,7 @@ impl StreamingSanitizer {
             .as_ref()
             .map_or(0, String::capacity)
             .saturating_add(self.prune_element.as_ref().map_or(0, String::capacity))
+            .saturating_add(self.prune_config.resident_bytes())
             .saturating_add(stack_entry_bytes(&self.strip_stack))
             .saturating_add(stack_entry_bytes(&self.nesting_stack))
             .saturating_add(stack_entry_bytes(&self.implied_closures))
@@ -1803,6 +1804,19 @@ mod tests {
     }
 
     #[test]
+    fn test_resident_bytes_includes_prune_config() {
+        let selector = "nav-".to_owned() + &"x".repeat(4096);
+        let config = PruneConfig::from_ffi(true, Some(selector.as_str()), None);
+        let config_bytes = config.resident_bytes();
+        let san = StreamingSanitizer::with_prune_config(config);
+
+        assert!(
+            san.resident_bytes() >= config_bytes,
+            "sanitizer accounting must include cloned prune configuration"
+        );
+    }
+
+    #[test]
     fn test_resident_bytes_grows_with_retained_state_and_never_shrinks_below_capacity() {
         let mut san = StreamingSanitizer::new();
 
@@ -1850,7 +1864,7 @@ mod tests {
     }
 
     // =========================================================================
-    // Task 13.4 — accounting test for deep nesting + skip/strip/prune
+    // Resident-memory accounting test for deep nesting and pruning states
     // =========================================================================
 
     /// Test 7: resident_bytes grows with deeply nested skip/strip/nesting.

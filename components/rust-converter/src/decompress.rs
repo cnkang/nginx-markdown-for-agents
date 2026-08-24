@@ -171,16 +171,16 @@ fn read_bounded<R: Read>(
                 if output.len().saturating_add(n) > budget {
                     return Err(DecompError::BudgetExceeded);
                 }
-                /* Ratio ceiling: a high-expansion bomb is reported as a
-                 * ratio violation before the absolute budget fires, keeping
-                 * the operator-configured limit meaningful on single-layer
-                 * paths. */
+                /* Keep the absolute budget as the first classification. */
                 if output.len().saturating_add(n) > ratio_cap {
                     return Err(DecompError::RatioExceeded);
                 }
                 /* Reserve exactly the needed capacity to prevent Vec
                  * growth strategy from allocating beyond the budget. */
-                let needed = output.len() + n;
+                let needed = output
+                    .len()
+                    .checked_add(n)
+                    .ok_or(DecompError::BudgetExceeded)?;
                 if output.capacity() < needed {
                     let additional = needed - output.len();
                     let max_reserve = budget.saturating_sub(output.len());

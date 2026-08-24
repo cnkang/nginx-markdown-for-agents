@@ -275,6 +275,51 @@ impl MarkdownConverter {
         total
     }
 
+    /// Return a constant-time upper bound for a partially rendered item.
+    ///
+    /// The exact formatter has to inspect every line.  During child traversal
+    /// that would make the budget check quadratic, so use the content length
+    /// and a worst-case per-line prefix instead.  The exact length is checked
+    /// once after traversal, before the output buffer is mutated.
+    fn format_list_item_upper_bound(
+        content_len: usize,
+        depth: usize,
+        ordered: bool,
+    ) -> Result<usize, ConversionError> {
+        let base_indent_len = depth.checked_mul(2).ok_or_else(|| {
+            ConversionError::MemoryLimit("generated Markdown list indentation overflow".to_string())
+        })?;
+        let marker_len = if ordered { 3 } else { 2 };
+        let prefix_len = base_indent_len.checked_add(marker_len).ok_or_else(|| {
+            ConversionError::MemoryLimit(
+                "generated Markdown list marker length overflow".to_string(),
+            )
+        })?;
+        let line_count = content_len.checked_add(1).ok_or_else(|| {
+            ConversionError::MemoryLimit("generated Markdown list line count overflow".to_string())
+        })?;
+        let per_line_overhead = prefix_len
+            .checked_mul(2)
+            .and_then(|value| value.checked_add(2))
+            .ok_or_else(|| {
+                ConversionError::MemoryLimit(
+                    "generated Markdown list overhead overflow".to_string(),
+                )
+            })?;
+
+        content_len
+            .checked_add(line_count.checked_mul(per_line_overhead).ok_or_else(|| {
+                ConversionError::MemoryLimit(
+                    "generated Markdown list output length overflow".to_string(),
+                )
+            })?)
+            .ok_or_else(|| {
+                ConversionError::MemoryLimit(
+                    "generated Markdown list output length overflow".to_string(),
+                )
+            })
+    }
+
     /// Handle list elements (ul/ol) with optional timeout context.
     pub(super) fn handle_list_with_context(
         &self,
@@ -394,15 +439,25 @@ impl MarkdownConverter {
             }
 
             if let Some(context) = ctx.as_deref_mut() {
-                let rendered_len =
-                    Self::format_list_item_rendered_len(&item_output, depth, ordered);
-                let projected_len = output.len().checked_add(rendered_len).ok_or_else(|| {
+                let upper_bound =
+                    Self::format_list_item_upper_bound(item_output.len(), depth, ordered)?;
+                let projected_len = output.len().checked_add(upper_bound).ok_or_else(|| {
                     ConversionError::MemoryLimit(
                         "generated Markdown list output length overflow".to_string(),
                     )
                 })?;
                 context.check_output_budget(projected_len)?;
             }
+        }
+
+        if let Some(context) = ctx.as_deref_mut() {
+            let rendered_len = Self::format_list_item_rendered_len(&item_output, depth, ordered);
+            let projected_len = output.len().checked_add(rendered_len).ok_or_else(|| {
+                ConversionError::MemoryLimit(
+                    "generated Markdown list output length overflow".to_string(),
+                )
+            })?;
+            context.check_output_budget(projected_len)?;
         }
 
         self.format_list_item_lines(output, &item_output, depth, ordered);

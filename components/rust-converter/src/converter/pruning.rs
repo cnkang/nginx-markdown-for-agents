@@ -50,6 +50,24 @@ pub struct PruneConfig {
 }
 
 impl PruneConfig {
+    /// Estimate the physical heap retained by selector storage.
+    pub(crate) fn resident_bytes(&self) -> usize {
+        fn string_vec_bytes(values: &[String], capacity: usize) -> usize {
+            values
+                .iter()
+                .map(String::capacity)
+                .fold(0usize, usize::saturating_add)
+                .saturating_add(capacity.saturating_mul(std::mem::size_of::<String>()))
+        }
+
+        string_vec_bytes(&self.selectors, self.selectors.capacity()).saturating_add(
+            string_vec_bytes(
+                &self.protection_selectors,
+                self.protection_selectors.capacity(),
+            ),
+        )
+    }
+
     /// Create a default PruneConfig with pruning enabled and default selectors.
     pub fn default_enabled() -> Self {
         Self {
@@ -290,6 +308,42 @@ mod tests {
             should_prune_with_config("nav", &config),
             PruneDecision::Traverse
         );
+    }
+
+    #[test]
+    fn resident_bytes_counts_selector_storage() {
+        let selector = "selector-".to_owned() + &"x".repeat(4096);
+        let protection = "protected-".to_owned() + &"y".repeat(2048);
+        let config =
+            PruneConfig::from_ffi(true, Some(selector.as_str()), Some(protection.as_str()));
+
+        let expected = config
+            .selectors
+            .iter()
+            .map(String::capacity)
+            .fold(0usize, usize::saturating_add)
+            .saturating_add(
+                config
+                    .selectors
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<String>()),
+            )
+            .saturating_add(
+                config
+                    .protection_selectors
+                    .iter()
+                    .map(String::capacity)
+                    .fold(0usize, usize::saturating_add),
+            )
+            .saturating_add(
+                config
+                    .protection_selectors
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<String>()),
+            );
+
+        assert_eq!(config.resident_bytes(), expected);
+        assert!(config.resident_bytes() >= 6144);
     }
 
     #[test]
