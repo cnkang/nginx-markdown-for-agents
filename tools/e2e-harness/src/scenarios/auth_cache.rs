@@ -6,7 +6,7 @@
 //! 2. Non-auth request retains upstream Cache-Control: public
 //! 3. markdown_auth_policy deny rejects conversion for auth requests
 //! 4. markdown_auth_cookies pattern matching (session_* regex)
-//! 5. Auth fail-open preserves Cache-Control from upstream
+//! 5. Authenticated normal response has Cache-Control
 //! 6. Non-auth ETag replacement
 //! 7. Vary: Cookie in auth response
 

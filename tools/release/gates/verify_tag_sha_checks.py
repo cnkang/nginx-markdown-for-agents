@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from lib.path_validation import (  # noqa: E402,E0401,C0413
     validate_read_path,
+    validate_write_path_within_root,
 )
 
 # GitHub treats these check-run conclusions as satisfying a required
@@ -492,10 +493,11 @@ def _write_required_checks(path: Path, checks: list[RequiredCheck], *, branch: s
     if path.is_absolute() or ".." in path.parts:
         raise ValueError("output paths must be relative and cannot contain '..'")
 
-    repository_root = Path.cwd().resolve()
-    safe_path = (repository_root / path).resolve()
-    if not safe_path.is_relative_to(repository_root):
-        raise ValueError("output path must remain within the repository checkout")
+    safe_path = validate_write_path_within_root(
+        path,
+        Path.cwd(),
+        purpose="required-checks output",
+    )
     if not safe_path.parent.is_dir():
         raise ValueError("output path parent must already exist")
 
