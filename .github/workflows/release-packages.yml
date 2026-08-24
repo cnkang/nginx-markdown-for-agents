@@ -306,9 +306,11 @@ jobs:
         shell: bash
 
       - name: Install Rust toolchain
+        env:
+          MATRIX_ARCH: ${{ matrix.arch }}
         run: |
           bash ./packaging/scripts/install-verified-rustup.sh \
-            --arch "${{ matrix.arch }}" \
+            --arch "${MATRIX_ARCH}" \
             --toolchain "${RUST_TOOLCHAIN}"
           echo "${HOME}/.cargo/bin" >> "$GITHUB_PATH"
           "${HOME}/.cargo/bin/rustc" --version
@@ -316,12 +318,14 @@ jobs:
         shell: bash
 
       - name: Determine Rust target triple
+        env:
+          MATRIX_ARCH: ${{ matrix.arch }}
         run: |
-          case "${{ matrix.arch }}" in
+          case "${MATRIX_ARCH}" in
             amd64) RUST_TARGET="x86_64-unknown-linux-gnu" ;;
             arm64) RUST_TARGET="aarch64-unknown-linux-gnu" ;;
             *)
-              echo "ERROR: unsupported arch: ${{ matrix.arch }}" >&2
+              echo "ERROR: unsupported arch: ${MATRIX_ARCH}" >&2
               exit 1
               ;;
           esac
@@ -537,9 +541,12 @@ jobs:
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Build musl module tarball
+        env:
+          NGINX_VERSION: ${{ matrix.nginx_version }}
+          MATRIX_ARCH: ${{ matrix.arch }}
         run: |
-          ./tools/build_release.sh "${{ matrix.nginx_version }}" musl \
-            "${{ matrix.arch }}"
+          ./tools/build_release.sh "${NGINX_VERSION}" musl \
+            "${MATRIX_ARCH}"
 
       - name: Upload musl module tarball
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -798,10 +805,11 @@ jobs:
       - name: Run smoke test
         env:
           NGINX_VERSION: ${{ matrix.nginx_version }}
+          PACKAGE_FORMAT: ${{ matrix.format }}
         run: |
-          PKG_FILE="$(find dist/ -name '*.${{ matrix.format }}' -print -quit)"
+          PKG_FILE="$(find dist/ -name "*.${PACKAGE_FORMAT}" -print -quit)"
           if [[ -z "${PKG_FILE}" ]]; then
-            echo "ERROR: No .${{ matrix.format }} file found in dist/" >&2
+            echo "ERROR: No .${PACKAGE_FORMAT} file found in dist/" >&2
             exit 1
           fi
           chmod +x packaging/scripts/smoke-test-basic.sh
@@ -864,17 +872,24 @@ jobs:
             exit 1
           fi
 
-          approved_sha="$(gh api "repos/${REPOSITORY}/commits/${DEFAULT_BRANCH}" --jq '.sha')"
-          if [[ -z "${approved_sha}" ]] || [[ "${TAG_SHA}" != "${approved_sha}" ]]; then
-            echo "ERROR: Tag SHA ${TAG_SHA} is not the exact approved ${DEFAULT_BRANCH} tip (${approved_sha:-missing})." >&2
-            exit 1
-          fi
+          branch_relation="$(gh api \
+            "repos/${REPOSITORY}/compare/${TAG_SHA}...${DEFAULT_BRANCH}" \
+            --jq '.status')"
+          case "${branch_relation}" in
+            ahead|identical)
+              ;;
+            *)
+              echo "ERROR: Tag SHA ${TAG_SHA} is not an ancestor of ${DEFAULT_BRANCH} (comparison status: ${branch_relation:-missing})." >&2
+              exit 1
+              ;;
+          esac
 
           input_dir="$(mktemp -d .tag-sha-checks.XXXXXX)"
           branch_rules="${input_dir}/branch-rules.json"
           check_runs="${input_dir}/check-runs.json"
           statuses="${input_dir}/statuses.json"
-          trap 'rm -f "${branch_rules}" "${check_runs}" "${statuses}"; rmdir "${input_dir}"' EXIT
+          required_checks="${input_dir}/effective-required-checks.json"
+          trap 'rm -f "${branch_rules}" "${check_runs}" "${statuses}" "${required_checks}"; rmdir "${input_dir}"' EXIT
 
           # This endpoint returns the active rules that actually apply to the
           # branch, including organization-level rules, and needs only
@@ -898,7 +913,13 @@ jobs:
             --check-runs-file "${check_runs}" \
             --statuses-file "${statuses}" \
             --tag-sha "${TAG_SHA}" \
-            --branch "${DEFAULT_BRANCH}"
+            --branch "${DEFAULT_BRANCH}" \
+            --required-checks-output "${required_checks}"
+
+          {
+            echo "### Effective required checks"
+            sed 's/^/    /' "${required_checks}"
+          } >> "${GITHUB_STEP_SUMMARY}"
         shell: bash
 
       # Candidate-bound gate inputs (gitignored working-tree state) are
@@ -1150,9 +1171,10 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   integrity-checksums:
     name: Integrity - SHA256SUMS
-    needs: [smoke-test, integrity-signing, official-docker-release-gate]
+    needs: [smoke-test, musl-build, integrity-signing, official-docker-release-gate]
     if: >-
       always()
+      && needs.musl-build.result == 'success'
       && needs.smoke-test.result == 'success'
       && needs.official-docker-release-gate.result == 'success'
       && (needs.integrity-signing.result == 'success'
@@ -1503,11 +1525,12 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   publish:
     name: Publish
-    needs: [release-gate, integrity-checksums, integrity-signature, official-docker-release-gate]
+    needs: [release-gate, musl-build, integrity-checksums, integrity-signature, official-docker-release-gate]
     # Tag releases: signing always runs, so signing must succeed for publish.
     # workflow_dispatch: signing is skipped, publish proceeds without it.
     if: >-
       always()
+      && needs.musl-build.result == 'success'
       && needs.integrity-checksums.result == 'success'
       && needs.release-gate.result == 'success'
       && needs.official-docker-release-gate.result == 'success'

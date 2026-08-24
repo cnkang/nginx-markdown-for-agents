@@ -184,6 +184,7 @@ jobs:
           set -euo pipefail
           probe_dir="$(mktemp -d)"
           trap 'rm -rf "${probe_dir}"' EXIT
+          mkdir -p "${probe_dir}/logs"
           printf 'load_module %s;\nevents {}\nhttp {}\n' \
             "${MODULE_SO}" > "${probe_dir}/nginx.conf"
           "${NGINX_BIN}" -t -q -p "${probe_dir}" -c nginx.conf

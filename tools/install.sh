@@ -8,7 +8,7 @@ set -euo pipefail
 #     https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${VERSION}/nginx-markdown-for-agents-installer-${VERSION}.sh
 #   sudo env VERSION="${VERSION}" bash /tmp/nginx-markdown-installer.sh
 # OR (if using specific release version):
-#   VERSION=v0.9.2 sudo -E bash /tmp/nginx-markdown-install.sh
+#   VERSION=v0.9.2 sudo -E bash /tmp/nginx-markdown-installer.sh
 # OR (in Docker, skip root check):
 # SKIP_ROOT_CHECK=1 bash /path/to/install.sh
 # OR (auto-disable stale load_module snippets on ABI mismatch):
@@ -345,8 +345,10 @@ readonly TRUSTED_NGINX_DESTINATION_ROOTS=(
   /usr/share/nginx
   /usr/local/nginx
   /usr/local/opt/nginx
+  /usr/local/etc/nginx
   /opt/nginx
   /opt/homebrew/opt/nginx
+  /opt/homebrew/etc/nginx
   /opt/homebrew/Cellar/nginx
 )
 
@@ -536,6 +538,59 @@ is_secure_root_path() {
   return 0
 }
 
+# is_secure_trusted_path accepts the root-owned system layout and the
+# user-owned Homebrew layout used by macOS package installations. SUDO_UID is
+# the installing user's identity when the script is invoked through sudo; a
+# direct root invocation does not receive this exception.
+is_secure_trusted_path() {
+  local path="$1"
+  local root=""
+  local current="/"
+  local remainder=""
+  local component=""
+  local owner=""
+  local mode=""
+  local installing_uid="${SUDO_UID:-}"
+  local user_root=0
+
+  is_secure_root_path "$path" && return 0
+  [[ "$EUID" -eq 0 ]] || return 1
+  [[ "$installing_uid" =~ ^[0-9]+$ ]] || return 1
+
+  for root in \
+    /opt/homebrew /opt/homebrew/etc/nginx \
+    /usr/local/opt /usr/local/Cellar /usr/local/etc/nginx; do
+    case "$path" in
+      "$root"|"$root"/*)
+        user_root=1
+        break
+        ;;
+      *)
+        ;;
+    esac
+  done
+  [[ "$user_root" -eq 1 ]] || return 1
+
+  remainder="${path#/}"
+  while [[ -n "$remainder" ]]; do
+    component="${remainder%%/*}"
+    if [[ "$remainder" == */* ]]; then
+      remainder="${remainder#*/}"
+    else
+      remainder=""
+    fi
+    [[ -n "$component" ]] || continue
+    current="${current%/}/${component}"
+    [[ -e "$current" ]] || return 1
+    owner="$(stat_owner "$current" 2>/dev/null)" || return 1
+    [[ "$owner" == "0" || "$owner" == "$installing_uid" ]] || return 1
+    mode="$(stat_mode "$current" 2>/dev/null)" || return 1
+    [[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
+    (( (8#$mode & 8#22) == 0 )) || return 1
+  done
+  return 0
+}
+
 # bootstrap_readlink selects a fixed system readlink before canonicalize_path
 # is used.  It intentionally does not consult PATH: canonicalization is part
 # of the trust boundary for every later executable and destination check.
@@ -651,13 +706,13 @@ validate_privileged_destination() {
   [[ -d "$existing" ]] || die_with_error "$CATEGORY_CONFIG" \
     "Refusing to write ${label}: existing parent is not a directory: ${existing}" \
     "$MSG_CHECK_PERMS_DISK"
-  is_secure_root_path "$existing" || die_with_error "$CATEGORY_CONFIG" \
+  is_secure_trusted_path "$existing" || die_with_error "$CATEGORY_CONFIG" \
     "Refusing to write ${label}: parent is not root-owned and non-writable by group/other: ${existing}" \
     "$MSG_CHECK_PERMS_DISK"
   canonical="$(canonicalize_path "$existing")" || die_with_error "$CATEGORY_CONFIG" \
     "Refusing to write ${label}: destination canonicalization failed: ${existing}" \
     "Use a complete, accessible NGINX installation path."
-  is_secure_root_path "$canonical" || die_with_error "$CATEGORY_CONFIG" \
+  is_secure_trusted_path "$canonical" || die_with_error "$CATEGORY_CONFIG" \
     "Refusing to write ${label}: canonical parent is not secure: ${canonical}" \
     "$MSG_CHECK_PERMS_DISK"
 
@@ -665,8 +720,8 @@ validate_privileged_destination() {
     [[ -f "$path" || -d "$path" ]] || die_with_error "$CATEGORY_CONFIG" \
       "Refusing to write ${label}: destination is not a regular file or directory: ${path}" \
       "$MSG_CHECK_PERMS_DISK"
-    is_secure_root_file "$path" || die_with_error "$CATEGORY_CONFIG" \
-      "Refusing to write ${label}: existing destination is not root-owned and non-writable by group/other: ${path}" \
+    is_secure_trusted_path "$path" || die_with_error "$CATEGORY_CONFIG" \
+      "Refusing to write ${label}: existing destination is not trusted and non-writable by group/other: ${path}" \
       "$MSG_CHECK_PERMS_DISK"
   fi
   return 0
@@ -698,8 +753,8 @@ resolve_trusted_executable() {
   is_trusted_command_path "$resolved" || return 1
 
   if [[ "$EUID" -eq 0 ]]; then
-    is_secure_root_path "$candidate" || return 1
-    is_secure_root_path "$resolved" || return 1
+    is_secure_trusted_path "$candidate" || return 1
+    is_secure_trusted_path "$resolved" || return 1
   fi
 
   printf '%s\n' "$resolved"
@@ -782,9 +837,9 @@ cache_trusted_executables() {
 #
 # When NGINX_BIN is set it must be an absolute path to an executable file whose
 # literal location and resolved target are under the trusted roots.  Otherwise
-# PATH discovery is used with the same checks.  When running as root the final
-# target must additionally be owned by root and not writable by group or other
-# users.
+# PATH discovery is used with the same checks.  When running as root, system
+# paths must be root-owned and non-writable by group/other; trusted Homebrew
+# paths may be owned by the installing user.
 #
 # Returns:
 #   0 on success with NGINX_BIN set; exits with a structured error otherwise.
@@ -811,8 +866,8 @@ resolve_nginx_binary() {
         "Set NGINX_BIN to the absolute path of a trusted nginx executable."
     fi
     if [[ "$EUID" -eq 0 ]]; then
-      if ! is_secure_root_path "$candidate" \
-        || ! is_secure_root_path "$resolved"; then
+      if ! is_secure_trusted_path "$candidate" \
+        || ! is_secure_trusted_path "$resolved"; then
         die_with_error "$CATEGORY_CONFIG" \
           "NGINX_BIN is not root-owned and non-writable by group/other: ${resolved}" \
           "Set NGINX_BIN to the absolute path of a trusted nginx executable."
@@ -842,8 +897,8 @@ resolve_nginx_binary() {
   fi
 
   if [[ "$EUID" -eq 0 ]]; then
-    if ! is_secure_root_path "$candidate" \
-      || ! is_secure_root_path "$resolved"; then
+    if ! is_secure_trusted_path "$candidate" \
+      || ! is_secure_trusted_path "$resolved"; then
       die_with_error "$CATEGORY_CONFIG" \
         "Resolved nginx binary is not root-owned and non-writable by group/other: ${resolved}" \
         "Set NGINX_BIN to the absolute path of a trusted nginx executable."

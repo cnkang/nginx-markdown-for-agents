@@ -62,8 +62,17 @@ py_lizard_count=0
 # ── Shell scripts ───────────────────────────────────────────────────
 # Discover tracked shell scripts (same scope as security-shellcheck)
 SHELL_FILES="$(mktemp)"
-trap 'rm -f "$SHELL_FILES"' EXIT
+SHELL_EXISTING_FILES="$(mktemp)"
+trap 'rm -f "$SHELL_FILES" "$SHELL_EXISTING_FILES"' EXIT
 git ls-files -z -- ":(glob)*.sh" ":(glob)tools/**/*.sh" ":(glob)packaging/**/*.sh" ":(glob).clusterfuzzlite/*.sh" ":(glob)examples/**/*.sh" > "$SHELL_FILES" 2>/dev/null || true
+
+# A deleted-but-still-indexed path can appear in a dirty worktree.  ShellCheck
+# must inspect the current filesystem, not a stale index entry.
+while IFS= read -r -d '' shell_file; do
+    if [[ -f "$shell_file" ]]; then
+        printf '%s\0' "$shell_file" >> "$SHELL_EXISTING_FILES"
+    fi
+done < "$SHELL_FILES"
 
 # ── Tool checks ─────────────────────────────────────────────────────
 MISSING_TOOLS=()
@@ -230,9 +239,9 @@ echo ""
 # ── Shell: shellcheck ───────────────────────────────────────────────
 SHELLCHECK_OUT="$OUTDIR/shellcheck.txt"
 echo "--- Shell (shellcheck) ---"
-if [[ -s "$SHELL_FILES" ]]; then
+if [[ -s "$SHELL_EXISTING_FILES" ]]; then
     set +e
-    xargs -0 shellcheck --severity=error -x -P tools/e2e -P tools/lib < "$SHELL_FILES" > "$SHELLCHECK_OUT" 2>&1
+    xargs -0 shellcheck --severity=error -x -P tools/e2e -P tools/lib < "$SHELL_EXISTING_FILES" > "$SHELLCHECK_OUT" 2>&1
     shellcheck_rc=$?
     set -e
     if [[ $shellcheck_rc -eq 0 ]]; then

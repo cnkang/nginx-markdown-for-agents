@@ -27,7 +27,7 @@
         "gpg --verify SHA256SUMS.asc SHA256SUMS",
         "sha256sum --check SHA256SUMS"
       ],
-      "release_pipeline": "packaging/scripts/generate-checksums.sh (producer) -> packaging/scripts/gpg-sign-checksums.sh (signer) -> integrity-signing job in .github/workflows/release-binaries.yml"
+      "release_pipeline": "canonical tag path: musl-build and package jobs in .github/workflows/release-packages.yml -> integrity-checksums -> integrity-signature; manual rebuild path: .github/workflows/release-binaries.yml"
     },
     "deb": {
       "signing_mechanism": "GPG (dpkg-sig builder signature) using the repository signing key",
