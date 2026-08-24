@@ -2,7 +2,7 @@
   "schema_version": 1,
   "generated_from": {
     "path": "tools/release-matrix.json",
-    "sha256": "sha256:3cafb674ef6d78b1a311e6ea5122b1719217e545c0ad40df196c6baa44eb75bd"
+    "sha256": "sha256:88941ce4bee589c9e3abe9de857318ef41e7df992502b39cfd8cb776ad2a22fb"
   },
   "entries": [
     {
@@ -348,7 +348,7 @@
       "abi_version": 2
     },
     {
-      "nginx_version": "1.31.3",
+      "nginx_version": "1.31.4",
       "os": "debian12",
       "libc": "glibc",
       "target": "aarch64-unknown-linux-gnu",
@@ -357,7 +357,7 @@
       "abi_version": 2
     },
     {
-      "nginx_version": "1.31.3",
+      "nginx_version": "1.31.4",
       "os": "debian12",
       "libc": "glibc",
       "target": "aarch64-unknown-linux-gnu",
@@ -366,7 +366,7 @@
       "abi_version": 2
     },
     {
-      "nginx_version": "1.31.3",
+      "nginx_version": "1.31.4",
       "os": "linux",
       "libc": "glibc",
       "target": "aarch64-unknown-linux-gnu",
@@ -375,7 +375,7 @@
       "abi_version": 2
     },
     {
-      "nginx_version": "1.31.3",
+      "nginx_version": "1.31.4",
       "os": "almalinux9",
       "libc": "glibc",
       "target": "aarch64-unknown-linux-gnu",
@@ -384,7 +384,7 @@
       "abi_version": 2
     },
     {
-      "nginx_version": "1.31.3",
+      "nginx_version": "1.31.4",
       "os": "alpine3.20",
       "libc": "musl",
       "target": "aarch64-unknown-linux-musl",
@@ -393,7 +393,7 @@
       "abi_version": 2
     },
     {
-      "nginx_version": "1.31.3",
+      "nginx_version": "1.31.4",
       "os": "linux",
       "libc": "musl",
       "target": "aarch64-unknown-linux-musl",
@@ -402,7 +402,7 @@
       "abi_version": 2
     },
     {
-      "nginx_version": "1.31.3",
+      "nginx_version": "1.31.4",
       "os": "debian12",
       "libc": "glibc",
       "target": "x86_64-unknown-linux-gnu",
@@ -411,7 +411,7 @@
       "abi_version": 2
     },
     {
-      "nginx_version": "1.31.3",
+      "nginx_version": "1.31.4",
       "os": "debian12",
       "libc": "glibc",
       "target": "x86_64-unknown-linux-gnu",
@@ -420,7 +420,7 @@
       "abi_version": 2
     },
     {
-      "nginx_version": "1.31.3",
+      "nginx_version": "1.31.4",
       "os": "linux",
       "libc": "glibc",
       "target": "x86_64-unknown-linux-gnu",
@@ -429,7 +429,7 @@
       "abi_version": 2
     },
     {
-      "nginx_version": "1.31.3",
+      "nginx_version": "1.31.4",
       "os": "almalinux9",
       "libc": "glibc",
       "target": "x86_64-unknown-linux-gnu",
@@ -438,7 +438,7 @@
       "abi_version": 2
     },
     {
-      "nginx_version": "1.31.3",
+      "nginx_version": "1.31.4",
       "os": "alpine3.20",
       "libc": "musl",
       "target": "x86_64-unknown-linux-musl",
@@ -447,7 +447,7 @@
       "abi_version": 2
     },
     {
-      "nginx_version": "1.31.3",
+      "nginx_version": "1.31.4",
       "os": "linux",
       "libc": "musl",
       "target": "x86_64-unknown-linux-musl",
