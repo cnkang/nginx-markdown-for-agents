@@ -236,7 +236,7 @@ def test_required_checks_output_rejects_paths_outside_the_checkout(
     outside_dir = tmp_path / "outside-dir"
     outside_dir.mkdir()
     (repository / "evidence").symlink_to(outside_dir, target_is_directory=True)
-    with pytest.raises(ValueError, match="within the repository"):
+    with pytest.raises(ValueError, match="escapes root"):
         _write_required_checks(
             Path("evidence/required-checks.json"),
             [],

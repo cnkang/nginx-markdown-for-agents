@@ -1225,14 +1225,15 @@ ngx_http_markdown_scan_cache_control_headers(ngx_list_t *headers,
     for (/* void */; part != NULL; part = part->next) {
         elts = part->elts;
         for (size_t i = 0; i < part->nelts; i++) {
-            if (ngx_http_markdown_is_cache_control_header(&elts[i])) {
-                if (scan->header_count == (size_t) -1) {
-                    scan->malformed = 1;
-                    continue;
-                }
-                scan->header_count++;
-                ngx_http_markdown_scan_cc_header(&elts[i], scan);
+            if (!ngx_http_markdown_is_cache_control_header(&elts[i])) {
+                continue;
             }
+            if (scan->header_count == (size_t) -1) {
+                scan->malformed = 1;
+                continue;
+            }
+            scan->header_count++;
+            ngx_http_markdown_scan_cc_header(&elts[i], scan);
         }
     }
 }
