@@ -9,6 +9,9 @@ when the schema structure itself is valid).
 from __future__ import annotations
 
 import copy
+from types import SimpleNamespace
+
+import pytest
 
 from tools.release.gates import validate_release_evidence_manifest as gate
 
@@ -138,3 +141,15 @@ def test_verify_head_reports_unresolvable_head(monkeypatch) -> None:
     gate._verify_head_matches("a" * 40, reasons)
     assert any("verify-head" in r for r in reasons)
     assert any("test cause" in r for r in reasons)
+
+
+def test_resolve_expected_sha_rejects_missing_candidate_sha(tmp_path) -> None:
+    """A release-candidate manifest without a usable SHA fails closed."""
+    final_manifest = tmp_path / "final-evidence.json"
+    final_manifest.write_text("{}", encoding="utf-8")
+    candidate_manifest = tmp_path / "release-candidate-sha-manifest.json"
+    candidate_manifest.write_text("{}", encoding="utf-8")
+
+    args = SimpleNamespace(expected_sha=None, manifest=str(final_manifest))
+    with pytest.raises(ValueError, match="candidate_sha"):
+        gate._resolve_expected_sha(args)

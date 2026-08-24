@@ -299,9 +299,10 @@ def build_artifact_index(candidate_sha: str, created_at: str, artifact_root: Pat
             )
         relative = resolved.relative_to(REPO_ROOT).as_posix()
         artifact_type = path.suffix[1:]
+        relative_id = relative.replace("/", "__")
         artifacts.append({
             "artifact_type": artifact_type,
-            "release_matrix_row_id": f"downloaded-{artifact_type}-{path.name}",
+            "release_matrix_row_id": f"downloaded-{artifact_type}-{relative_id}",
             "artifact_id": relative,
             "candidate_sha": candidate_sha,
             "artifact_sha256": _sha256_file(resolved),

@@ -33,6 +33,8 @@ on:
       - "packaging/checksums.sha256"
       - "packaging/scripts/install-verified-rustup.sh"
       - "packaging/scripts/verify-checksum.sh"
+      - "tools/release-matrix.json"
+      - "tools/release/matrix/official_docker_matrix.py"
       - "tools/ci/verify_official_nginx_docker.sh"
       - ".github/workflows/official-nginx-docker.yml"
   pull_request:
@@ -55,62 +57,56 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  prepare:
+    name: Resolve official Docker matrix
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.resolve.outputs.matrix }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+
+      - name: Resolve release-blocking Docker rows
+        id: resolve
+        run: |
+          # official_docker_matrix.py selects artifact_type == "docker-image"
+          # and release_blocking is True, then emits one matrix_row_id for
+          # every version/os/libc/arch execution row.
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import sys
+
+          sys.path.insert(0, "tools/release/matrix")
+          from official_docker_matrix import load_official_docker_entries
+
+          rows = load_official_docker_entries(Path("tools/release-matrix.json"))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"matrix={json.dumps(rows, separators=(',', ':'))}\n")
+          print(f"Resolved {len(rows)} official Docker execution rows")
+          for row in rows:
+              print(
+                  f"  {row['matrix_row_id']}: {row['image_ref']}@"
+                  f"{row['image_digest']}"
+              )
+          PY
+
   build-and-verify:
-    name: Build + Functional Check (${{ matrix.nginx_tag }} / ${{ matrix.arch }})
-    runs-on: ${{ matrix.runner }}
+    name: Build + Functional Check (${{ matrix.matrix_row_id }})
+    needs: prepare
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     timeout-minutes: 75
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # nginx_image_digest pins each base image to a byte-identical
-          # artifact: the release_blocking gate must test what will actually
-          # ship, and a floating tag can move between gate and publish.
-          # Digests resolved from registry-1.docker.io (multi-arch index) at the
-          # 0.9.2 freeze (2026-08-22); refresh them when intentionally
-          # tracking a new upstream base.
-          - nginx_tag: mainline
-            nginx_image_digest: sha256:8f029c543423e3eac6b08254718bc31eb75633b1e448026b6616927baa7d4bfe
-            arch: amd64
-            runner: ubuntu-latest
-            port: 18080
-          - nginx_tag: mainline
-            nginx_image_digest: sha256:8f029c543423e3eac6b08254718bc31eb75633b1e448026b6616927baa7d4bfe
-            arch: arm64
-            runner: ubuntu-24.04-arm
-            port: 18080
-          - nginx_tag: mainline-alpine
-            nginx_image_digest: sha256:db35bfc6b2951e7f8a72db5db120288c127ffaeeb4a6d4b95a26fead017d5913
-            arch: amd64
-            runner: ubuntu-latest
-            port: 18081
-          - nginx_tag: mainline-alpine
-            nginx_image_digest: sha256:db35bfc6b2951e7f8a72db5db120288c127ffaeeb4a6d4b95a26fead017d5913
-            arch: arm64
-            runner: ubuntu-24.04-arm
-            port: 18081
-          - nginx_tag: stable
-            nginx_image_digest: sha256:46ccc48fbb1f5a43167f2ee2c279c122b96eec5d976e7f4e1e0780f59a51b4d6
-            arch: amd64
-            runner: ubuntu-latest
-            port: 18082
-          - nginx_tag: stable
-            nginx_image_digest: sha256:46ccc48fbb1f5a43167f2ee2c279c122b96eec5d976e7f4e1e0780f59a51b4d6
-            arch: arm64
-            runner: ubuntu-24.04-arm
-            port: 18082
-          - nginx_tag: stable-alpine
-            nginx_image_digest: sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46
-            arch: amd64
-            runner: ubuntu-latest
-            port: 18083
-          - nginx_tag: stable-alpine
-            nginx_image_digest: sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46
-            arch: arm64
-            runner: ubuntu-24.04-arm
-            port: 18083
+        include: ${{ fromJson(needs.prepare.outputs.matrix) }}
 
     steps:
       - name: Checkout repository
@@ -163,29 +159,42 @@ jobs:
           context: .
           file: ./examples/docker/Dockerfile.official-nginx-source-build
           load: true
-          tags: nginx-markdown-official-check:${{ matrix.nginx_tag }}-${{ matrix.arch }}
+          tags: nginx-markdown-official-check:${{ matrix.matrix_row_id }}
           build-args: |
-            NGINX_IMAGE=nginx@${{ matrix.nginx_image_digest }}
+            NGINX_IMAGE=${{ matrix.image_ref }}@${{ matrix.image_digest }}
             MODULE_REPO=${{ steps.source.outputs.repo }}
             MODULE_REF=${{ steps.source.outputs.ref }}
             MODULE_SHA=${{ steps.source.outputs.sha }}
-          cache-from: type=gha,scope=official-nginx-docker-${{ matrix.nginx_tag }}-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=official-nginx-docker-${{ matrix.nginx_tag }}-${{ matrix.arch }}
+          cache-from: type=gha,scope=official-nginx-docker-${{ matrix.matrix_row_id }}
+          cache-to: type=gha,mode=max,scope=official-nginx-docker-${{ matrix.matrix_row_id }}
 
       - name: Verify runtime behavior
         env:
-          IMAGE_NAME: nginx-markdown-official-check:${{ matrix.nginx_tag }}-${{ matrix.arch }}
-          JOB_NGINX_TAG: ${{ matrix.nginx_tag }}
+          IMAGE_NAME: nginx-markdown-official-check:${{ matrix.matrix_row_id }}
+          JOB_NGINX_TAG: ${{ matrix.image_ref }}
+          EXPECTED_NGINX_VERSION: ${{ matrix.nginx_version }}
+          IMAGE_REFERENCE: ${{ matrix.image_ref }}
+          IMAGE_DIGEST: ${{ matrix.image_digest }}
+          MATRIX_ROW_ID: ${{ matrix.matrix_row_id }}
+          MATRIX_OS: ${{ matrix.os }}
+          MATRIX_LIBC: ${{ matrix.libc }}
+          MATRIX_ARCH: ${{ matrix.arch }}
           MODULE_REPO: ${{ steps.source.outputs.repo }}
           MODULE_REF: ${{ steps.source.outputs.ref }}
           MODULE_SHA: ${{ steps.source.outputs.sha }}
-          ARTIFACT_DIR: ${{ runner.temp }}/official-nginx-docker/${{ matrix.nginx_tag }}-${{ matrix.arch }}
-          JOB_PORT: ${{ matrix.port }}
+          ARTIFACT_DIR: ${{ runner.temp }}/official-nginx-docker/${{ matrix.matrix_row_id }}
+          JOB_PORT: 18080
         run: |
           bash ./tools/ci/verify_official_nginx_docker.sh \
             --skip-build \
             --image-name "${IMAGE_NAME}" \
             --nginx-tag "${JOB_NGINX_TAG}" \
+            --expected-nginx-version "${EXPECTED_NGINX_VERSION}" \
+            --image-reference "${IMAGE_REFERENCE}" \
+            --image-digest "${IMAGE_DIGEST}" \
+            --matrix-row-id "${MATRIX_ROW_ID}" \
+            --arch "${MATRIX_ARCH}" \
+            --libc "${MATRIX_LIBC}" \
             --module-repo "${MODULE_REPO}" \
             --module-ref "${MODULE_REF}" \
             --module-sha "${MODULE_SHA}" \
@@ -196,6 +205,6 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: official-nginx-docker-${{ matrix.nginx_tag }}-${{ matrix.arch }}-failure
-          path: ${{ runner.temp }}/official-nginx-docker/${{ matrix.nginx_tag }}-${{ matrix.arch }}
+          name: official-nginx-docker-${{ matrix.matrix_row_id }}-failure
+          path: ${{ runner.temp }}/official-nginx-docker/${{ matrix.matrix_row_id }}
           if-no-files-found: ignore

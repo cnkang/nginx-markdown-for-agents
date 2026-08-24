@@ -28,6 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from lib.path_validation import validate_read_path
+from official_docker_matrix import load_official_docker_entries
 
 # Paths relative to the repository root
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -51,6 +52,7 @@ LEGACY_WORKFLOWS = {
 
 RELEASE_PACKAGES_WORKFLOW = "release-packages.yml"
 OFFICIAL_DOCKER_WORKFLOW = ".github/workflows/official-nginx-docker.yml"
+OFFICIAL_DOCKER_WORKFLOW_REF = "./.github/workflows/official-nginx-docker.yml"
 
 # Candidate semantic versions are classified as NGINX versions only when the
 # same workflow line explicitly associates them with NGINX. This avoids numeric
@@ -78,20 +80,39 @@ EXCLUDE_CONTEXT_PATTERNS = [
 ]
 
 
+def _canonical_entries(data: object) -> tuple[list[dict], str | None]:
+    """Return the canonical entries list or a fail-closed validation error."""
+    if not isinstance(data, dict):
+        return [], "Matrix document root must be an object"
+    aliases = [key for key in ("matrix", "additional_artifacts") if key in data]
+    if aliases:
+        return [], (
+            "Matrix document must carry the canonical 'entries' list; "
+            "legacy keys are not accepted: "
+            + ", ".join(aliases)
+        )
+    entries = data.get("entries")
+    if not isinstance(entries, list) or not entries:
+        return [], "Matrix file must carry a non-empty canonical 'entries' list"
+    if not all(isinstance(entry, dict) for entry in entries):
+        return [], "Matrix canonical 'entries' must contain only objects"
+    return entries, None
+
+
 def load_matrix_versions(path: Path) -> set[str]:
     """Load all NGINX versions from release-matrix.json.
 
-    Returns the set of all nginx version strings across both the main matrix
-    and additional_artifacts entries.
+    Returns the set of all NGINX version strings in canonical ``entries``.
     """
     validated = validate_read_path(path, purpose="workflow matrix validation")
     with open(validated, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    versions: set[str] = set()
+    entries, error = _canonical_entries(data)
+    if error is not None:
+        raise ValueError(error)
 
-    # Support both canonical 'entries' (release matrix canonical format) and legacy 'matrix' arrays
-    entries = data.get("entries", []) or data.get("matrix", [])
+    versions: set[str] = set()
     for entry in entries:
         if v := entry.get("nginx"):
             versions.add(v)
@@ -267,18 +288,9 @@ def validate_owner_workflow_refs(matrix_path: Path) -> list[str]:
     with open(validated, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    # Rule 62: consumers must read ONLY the canonical 'entries' key.
-    # The legacy 'matrix'/'additional_artifacts' aliases are fail-closed in
-    # the normalizer; a validator accepting them would be more permissive
-    # than the contract it defends.  Missing/empty entries is an error here.
-    all_entries = data.get("entries")
-    if not isinstance(all_entries, list) or not all(
-        isinstance(entry, dict) for entry in all_entries
-    ):
-        errors.append(
-            "Matrix file must carry the canonical 'entries' list of objects "
-            "(legacy 'matrix'/'additional_artifacts' keys are not accepted)"
-        )
+    all_entries, error = _canonical_entries(data)
+    if error is not None:
+        errors.append(error)
         return errors
 
     for i, entry in enumerate(all_entries):
@@ -305,14 +317,9 @@ def validate_release_blocking_publish_dag(matrix_path: Path) -> list[str]:
     with open(validated, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    entries = data.get("entries")
-    if not isinstance(entries, list) or not all(
-        isinstance(entry, dict) for entry in entries
-    ):
-        errors.append(
-            "Matrix file must carry the canonical 'entries' list of objects "
-            "(legacy 'matrix'/'additional_artifacts' keys are not accepted)"
-        )
+    entries, error = _canonical_entries(data)
+    if error is not None:
+        errors.append(error)
         return errors
 
     docker_owners = {
@@ -334,16 +341,21 @@ def validate_release_blocking_publish_dag(matrix_path: Path) -> list[str]:
     canonical_content = canonical_path.read_text(encoding="utf-8")
     publish_needs = _publish_job_needs(canonical_content)
 
-    if "official-docker-release-gate:" not in canonical_content:
+    official_job = _workflow_job_block(
+        canonical_content, "official-docker-release-gate"
+    )
+    if official_job is None:
         errors.append(
             "release-packages.yml does not define "
             "official-docker-release-gate for release-blocking Docker artifacts"
         )
-    if "./" + OFFICIAL_DOCKER_WORKFLOW not in canonical_content:
-        errors.append(
-            "release-packages.yml does not call the official Docker workflow "
-            "as a reusable release gate"
-        )
+    else:
+        actual_uses = _job_uses(official_job)
+        if actual_uses != OFFICIAL_DOCKER_WORKFLOW_REF:
+            errors.append(
+                "release-packages.yml official-docker-release-gate must use "
+                f"{OFFICIAL_DOCKER_WORKFLOW_REF!r}, got {actual_uses!r}"
+            )
     if "official-docker-release-gate" not in publish_needs:
         errors.append(
             "release-packages.yml publish job does not depend on "
@@ -361,6 +373,79 @@ def validate_release_blocking_publish_dag(matrix_path: Path) -> list[str]:
                 "release-blocking reusable Docker gate"
             )
 
+    return errors
+
+
+def _workflow_job_block(content: str, job_name: str) -> list[str] | None:
+    """Return one top-level job block using bounded indentation parsing."""
+    lines = content.splitlines()
+    start = None
+    for index, line in enumerate(lines):
+        if len(line) - len(line.lstrip(" ")) == 2 and line.strip() == f"{job_name}:":
+            start = index
+            break
+    if start is None:
+        return None
+
+    block = [lines[start]]
+    for line in lines[start + 1 :]:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            indent = len(line) - len(line.lstrip(" "))
+            if indent <= 2:
+                break
+        block.append(line)
+    return block
+
+
+def _job_uses(job_block: list[str]) -> str | None:
+    """Return the exact reusable-workflow reference from a job block."""
+    for line in job_block[1:]:
+        if len(line) - len(line.lstrip(" ")) != 4:
+            continue
+        key, separator, value = line.strip().partition(":")
+        if key == "uses" and separator:
+            return value.strip().strip("'\"")
+    return None
+
+
+def validate_official_docker_matrix_coverage(matrix_path: Path) -> list[str]:
+    """Ensure the official workflow executes the complete Docker row contract."""
+    errors: list[str] = []
+    try:
+        entries = load_official_docker_entries(matrix_path)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return [f"official Docker matrix cannot be resolved: {exc}"]
+
+    workflow_path = WORKFLOWS_DIR / Path(OFFICIAL_DOCKER_WORKFLOW).name
+    if not workflow_path.exists():
+        return [f"official Docker workflow is missing: {workflow_path}"]
+    content = workflow_path.read_text(encoding="utf-8")
+    required_contract = (
+        "official_docker_matrix.py",
+        "load_official_docker_entries",
+        'artifact_type == "docker-image"',
+        'release_blocking is True',
+        "matrix_row_id",
+        "fromJson(needs.prepare.outputs.matrix)",
+        "matrix.nginx_version",
+        "matrix.os",
+        "matrix.libc",
+        "matrix.arch",
+        "matrix.image_ref",
+        "matrix.image_digest",
+    )
+    for marker in required_contract:
+        if marker not in content:
+            errors.append(
+                f"official Docker workflow is missing matrix contract marker: {marker}"
+            )
+
+    expected_ids = {entry["matrix_row_id"] for entry in entries}
+    if len(expected_ids) != len(entries):
+        errors.append("official Docker matrix contains duplicate execution rows")
+    if not expected_ids:
+        errors.append("official Docker matrix contains no release-blocking rows")
     return errors
 
 
@@ -484,7 +569,11 @@ def main() -> int:
         )
         return 1
 
-    matrix_versions = load_matrix_versions(MATRIX_PATH)
+    try:
+        matrix_versions = load_matrix_versions(MATRIX_PATH)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"ERROR: Invalid release-matrix.json: {exc}", file=sys.stderr)
+        return 1
     if not matrix_versions:
         print(
             "ERROR: No NGINX versions found in release-matrix.json",
@@ -517,6 +606,11 @@ def main() -> int:
     # 5. release-blocking Docker artifacts must be in the publish DAG
     docker_dag_errors = validate_release_blocking_publish_dag(MATRIX_PATH)
     all_errors.extend(docker_dag_errors)
+
+    # 6. Every blocking Docker row must be represented by the reusable gate's
+    # generated execution contract.
+    docker_matrix_errors = validate_official_docker_matrix_coverage(MATRIX_PATH)
+    all_errors.extend(docker_matrix_errors)
 
     # Report results
     if all_warnings:

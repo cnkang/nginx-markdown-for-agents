@@ -144,7 +144,7 @@ def project_entry(entry: dict[str, Any]) -> dict[str, Any]:
     if missing:
         raise ValueError(f"policy matrix row is missing required keys: {missing}")
 
-    return {
+    projected = {
         "nginx_version": entry["nginx_version"],
         "os": _project_os(entry),
         "libc": _project_libc(entry),
@@ -153,6 +153,10 @@ def project_entry(entry: dict[str, Any]) -> dict[str, Any]:
         "feature_manifest_digest": entry["feature_manifest_digest"],
         "abi_version": entry["abi_version"],
     }
+    for key in ("image_ref", "image_digest"):
+        if key in entry:
+            projected[key] = entry[key]
+    return projected
 
 
 def build_projection(source: dict[str, Any]) -> dict[str, Any]:

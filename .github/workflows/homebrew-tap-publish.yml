@@ -102,7 +102,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          artifact_url="https://github.com/${RELEASE_OWNER}/${RELEASE_REPO}/archive/refs/tags/${RELEASE_TAG}.tar.gz"
+          artifact_url="https://github.com/${RELEASE_OWNER}/${RELEASE_REPO}/archive/${TAG_COMMIT}.tar.gz"
           archive_path="${RUNNER_TEMP}/nginx-markdown-${RELEASE_TAG}.tar.gz"
           reference_archive="${RUNNER_TEMP}/nginx-markdown-${RELEASE_TAG}.git.tar"
           tag_formula="${RUNNER_TEMP}/nginx-markdown-tag-formula.rb"

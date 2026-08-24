@@ -62,7 +62,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
 .PHONY: all build rust-lib rust-lib-debug copy-headers check-headers \
         install \
         test test-rust rust-fmt-check test-rust-doc test-nginx-unit test-c-unit-gcc test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
-        test-nginx-integration test-e2e test-e2e-rust test-e2e-contract-scripts test-all test-property test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
+        test-nginx-integration test-e2e test-e2e-canonical test-e2e-rust test-e2e-contract-scripts test-all test-property test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
         test-corpus-determinism reason-codegen-generate reason-codegen-check \
         official-feature-manifest-generate \
@@ -70,7 +70,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         security-static security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny \
         supply-chain supply-chain-trivy supply-chain-sbom \
         complexity-check \
-	docs-check docs-style-check docs-style-check-strict docs-style-check-regression docs-style-check-baseline license-check release-notes release-gates-check release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x         release-gates-check-090 release-gates-check-091 release-gates-check-092-canonical release-gates-check-092 release-gates-check-all release-gates-check-legacy release-gates-check-strict \
+        docs-check docs-style-check docs-style-check-strict docs-style-check-regression docs-style-check-baseline decompression-metric-contract-check license-check release-notes release-gates-check release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x         release-gates-check-090 release-gates-check-091 release-gates-check-092-canonical release-gates-check-092 release-gates-check-all release-gates-check-legacy release-gates-check-strict \
         release-matrix-check \
         release-candidate-evidence-check artifact-registry-check release-evidence-manifest-check \
         test-rust-fuzz-qualification test-e2e-rust-soak \
@@ -213,6 +213,11 @@ test-nginx-integration:
 test-e2e:
 	$(MAKE) -C $(NGINX_TEST_DIR) e2e
 
+# Canonical shell qualification suite, including strict filter-ordering and
+# auth-subrequest checks when a running fixture is supplied.
+test-e2e-canonical:
+	bash tools/e2e/run_e2e_suite.sh
+
 E2E_HARNESS_DIR := tools/e2e-harness
 
 test-e2e-rust:
@@ -302,6 +307,7 @@ docs-check-base:
 	python3 tools/docs/check_docs.py
 	python3 tools/docs/check_packaging_docs.py
 	python3 tools/docs/check_packaging_consistency.py
+	$(MAKE) decompression-metric-contract-check
 	python3 tools/docs/validate_packaging_matrix.py
 	python3 tools/release/matrix/generate_release_contract_matrix.py --check
 	python3 tools/render_release_matrix_docs.py --check
@@ -340,6 +346,9 @@ docs-style-check-baseline:
 
 kb-contract-check:
 	python3 tools/docs/check_kb_contract.py
+
+decompression-metric-contract-check:
+	python3 tools/docs/check_decompression_metric_labels.py
 
 release-notes:
 	python3 tools/render_release_matrix_docs.py --release-notes
@@ -678,10 +687,14 @@ release-gates-check-070:
 				esac; \
 				echo "  [install-layout] No packages found; building local $$nfpm_arch DEB/RPM with nFPM..."; \
 				mkdir -p dist; \
-				PKG_VERSION=$${PKG_VERSION:-0.9.2} NGINX_VERSION=$${NGINX_VERSION:-1.26.3} NFPM_ARCH=$$nfpm_arch \
+				PKG_VERSION=$${PKG_VERSION:-0.9.2} NGINX_VERSION=$${NGINX_VERSION:-1.26.3} \
+					DEB_NGINX_VERSION=$${DEB_NGINX_VERSION:-$${NGINX_VERSION:-1.26.3}} \
+					RPM_NGINX_EVR=$${RPM_NGINX_EVR:-1:$${NGINX_VERSION:-1.26.3}} NFPM_ARCH=$$nfpm_arch \
 					nfpm package --config packaging/nfpm/nfpm.yaml --packager deb \
 					--target dist/nginx-module-markdown-for-agents_$${PKG_VERSION:-0.9.2}_nginx-$${NGINX_VERSION:-1.26.3}_$${nfpm_arch}.deb; \
-				PKG_VERSION=$${PKG_VERSION:-0.9.2} NGINX_VERSION=$${NGINX_VERSION:-1.26.3} NFPM_ARCH=$$nfpm_arch \
+				PKG_VERSION=$${PKG_VERSION:-0.9.2} NGINX_VERSION=$${NGINX_VERSION:-1.26.3} \
+					DEB_NGINX_VERSION=$${DEB_NGINX_VERSION:-$${NGINX_VERSION:-1.26.3}} \
+					RPM_NGINX_EVR=$${RPM_NGINX_EVR:-1:$${NGINX_VERSION:-1.26.3}} NFPM_ARCH=$$nfpm_arch \
 					nfpm package --config packaging/nfpm/nfpm.yaml --packager rpm \
 					--target dist/nginx-module-markdown-for-agents-$${PKG_VERSION:-0.9.2}-nginx$${NGINX_VERSION:-1.26.3}-1.$${rpm_arch}.rpm; \
 			else \

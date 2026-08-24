@@ -94,6 +94,15 @@
           "type": "integer",
           "minimum": 1,
           "description": "Frozen ABI version this row's artifacts are bound to (canonical release matrix contract)."
+        },
+        "image_ref": {
+          "type": "string",
+          "description": "Container image reference for a Docker artifact row."
+        },
+        "image_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "Content digest bound to the image_ref for a Docker artifact row."
         }
       }
     }

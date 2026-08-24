@@ -2,7 +2,7 @@
   "schema_version": 1,
   "generated_from": {
     "path": "tools/release-matrix.json",
-    "sha256": "sha256:88941ce4bee589c9e3abe9de857318ef41e7df992502b39cfd8cb776ad2a22fb"
+    "sha256": "sha256:261c1b4b551dad83f7eae103213e1060d12b47b0542d62d2b2ac3deb45ef1797"
   },
   "entries": [
     {
@@ -102,7 +102,9 @@
       "target": "aarch64-unknown-linux-gnu",
       "artifact_type": "docker-image",
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
-      "abi_version": 2
+      "abi_version": 2,
+      "image_ref": "nginx:1.26.3",
+      "image_digest": "sha256:46ccc48fbb1f5a43167f2ee2c279c122b96eec5d976e7f4e1e0780f59a51b4d6"
     },
     {
       "nginx_version": "1.26.3",
@@ -129,7 +131,9 @@
       "target": "aarch64-unknown-linux-musl",
       "artifact_type": "docker-image",
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
-      "abi_version": 2
+      "abi_version": 2,
+      "image_ref": "nginx:1.26.3-alpine",
+      "image_digest": "sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46"
     },
     {
       "nginx_version": "1.26.3",
@@ -165,7 +169,9 @@
       "target": "x86_64-unknown-linux-gnu",
       "artifact_type": "docker-image",
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
-      "abi_version": 2
+      "abi_version": 2,
+      "image_ref": "nginx:1.26.3",
+      "image_digest": "sha256:46ccc48fbb1f5a43167f2ee2c279c122b96eec5d976e7f4e1e0780f59a51b4d6"
     },
     {
       "nginx_version": "1.26.3",
@@ -192,7 +198,9 @@
       "target": "x86_64-unknown-linux-musl",
       "artifact_type": "docker-image",
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
-      "abi_version": 2
+      "abi_version": 2,
+      "image_ref": "nginx:1.26.3-alpine",
+      "image_digest": "sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46"
     },
     {
       "nginx_version": "1.26.3",
@@ -363,7 +371,9 @@
       "target": "aarch64-unknown-linux-gnu",
       "artifact_type": "docker-image",
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
-      "abi_version": 2
+      "abi_version": 2,
+      "image_ref": "nginx:1.31.4",
+      "image_digest": "sha256:8f029c543423e3eac6b08254718bc31eb75633b1e448026b6616927baa7d4bfe"
     },
     {
       "nginx_version": "1.31.4",
@@ -390,7 +400,9 @@
       "target": "aarch64-unknown-linux-musl",
       "artifact_type": "docker-image",
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
-      "abi_version": 2
+      "abi_version": 2,
+      "image_ref": "nginx:1.31.4-alpine",
+      "image_digest": "sha256:db35bfc6b2951e7f8a72db5db120288c127ffaeeb4a6d4b95a26fead017d5913"
     },
     {
       "nginx_version": "1.31.4",
@@ -417,7 +429,9 @@
       "target": "x86_64-unknown-linux-gnu",
       "artifact_type": "docker-image",
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
-      "abi_version": 2
+      "abi_version": 2,
+      "image_ref": "nginx:1.31.4",
+      "image_digest": "sha256:8f029c543423e3eac6b08254718bc31eb75633b1e448026b6616927baa7d4bfe"
     },
     {
       "nginx_version": "1.31.4",
@@ -444,7 +458,9 @@
       "target": "x86_64-unknown-linux-musl",
       "artifact_type": "docker-image",
       "feature_manifest_digest": "sha256:9dde88ca1d2f0148867f7738a1e127dab59bb584af9bf0a47f4eab4380b7ef5c",
-      "abi_version": 2
+      "abi_version": 2,
+      "image_ref": "nginx:1.31.4-alpine",
+      "image_digest": "sha256:db35bfc6b2951e7f8a72db5db120288c127ffaeeb4a6d4b95a26fead017d5913"
     },
     {
       "nginx_version": "1.31.4",

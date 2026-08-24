@@ -293,7 +293,7 @@ validate_helm_template() {
         checks_failed=$((checks_failed + 1))
     fi
 
-    if printf '%s' "$rendered" | grep -q "image: nginx:1.26.3"; then
+    if printf '%s' "$rendered" | grep -Eq "image:[[:space:]]*[\"']?nginx:1\\.26\\.3[\"']?"; then
         checks_passed=$((checks_passed + 1))
     else
         fail "Rendered template missing explicit image nginx:1.26.3"

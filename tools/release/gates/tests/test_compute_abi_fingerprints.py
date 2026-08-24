@@ -22,7 +22,13 @@ def test_symbol_hash_covers_every_ffi_export() -> None:
 
 def test_header_hash_pattern_matches_generated_literal() -> None:
     raw = HEADER_PATH.read_bytes()
-    canonical = HEADER_HASH_DEFINE.sub(rb"\g<1>0ull", raw, count=1)
+    match = HEADER_HASH_DEFINE.search(raw)
+    assert match is not None
+    assert match.group(1) == b"#define MARKDOWN_HEADER_HASH "
+    canonical, replacements = HEADER_HASH_DEFINE.subn(
+        rb"\g<1>0ull", raw, count=1
+    )
+    assert replacements == 1
     assert canonical != raw
 
 

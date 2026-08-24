@@ -647,6 +647,8 @@ jobs:
           esac
 
           # Artifact filenames per 0.8.x release package naming and layout conventions
+          DEB_NGINX_VERSION="${NGINX_VERSION}"
+          RPM_NGINX_EVR="1:${NGINX_VERSION}"
           DEB_FILENAME="nginx-module-markdown-for-agents_${PKG_VERSION}_nginx-${NGINX_VERSION}_${NFPM_ARCH}.deb"
           RPM_FILENAME="nginx-module-markdown-for-agents-${PKG_VERSION}-nginx${NGINX_VERSION}-1.${RPM_ARCH}.rpm"
 
@@ -654,6 +656,8 @@ jobs:
           {
             echo "PKG_VERSION=${PKG_VERSION}"
             echo "NGINX_VERSION=${NGINX_VERSION}"
+            echo "DEB_NGINX_VERSION=${DEB_NGINX_VERSION}"
+            echo "RPM_NGINX_EVR=${RPM_NGINX_EVR}"
             echo "NFPM_ARCH=${NFPM_ARCH}"
             echo "RPM_ARCH=${RPM_ARCH}"
             echo "DEB_FILENAME=${DEB_FILENAME}"
@@ -669,6 +673,8 @@ jobs:
 
           echo "PKG_VERSION=${PKG_VERSION}" >&2
           echo "NGINX_VERSION=${NGINX_VERSION}" >&2
+          echo "DEB_NGINX_VERSION=${DEB_NGINX_VERSION}" >&2
+          echo "RPM_NGINX_EVR=${RPM_NGINX_EVR}" >&2
           echo "NFPM_ARCH=${NFPM_ARCH}" >&2
           echo "DEB_FILENAME=${DEB_FILENAME}" >&2
           echo "RPM_FILENAME=${RPM_FILENAME}" >&2

@@ -1228,7 +1228,7 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             return fixture_main(args)
         return real_main(args)
-    except (FileNotFoundError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 

@@ -25,7 +25,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.lib.path_validation import validate_read_path  # noqa: E402
-from tools.lib.reason_code import REASON_C_ACCESSOR_ALIASES
+from tools.lib.reason_code import REASON_C_ACCESSOR_ALIASES  # noqa: E402
 
 EXPECTED_VERSION = "0.9.2"
 EXPECTED_REASON_CODE_COUNT = 27
