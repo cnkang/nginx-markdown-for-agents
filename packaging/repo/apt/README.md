@@ -163,17 +163,21 @@ list the exact names with `gh release view v0.9.1 --json assets`:
 ```bash
 VERSION=v0.9.1
 BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${VERSION}"
-curl -fSLo SHA256SUMS "${BASE_URL}/SHA256SUMS"
-curl -fSLo SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
-curl -fSLO "${BASE_URL}/nginx-module-markdown-for-agents_0.9.1_nginx-1.30.4_amd64.deb"
+curl -fsSLo SHA256SUMS "${BASE_URL}/SHA256SUMS"
+curl -fsSLo SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
+curl -fsSLo nginx-module-markdown-for-agents_0.9.1_nginx-1.30.4_amd64.deb \
+  "${BASE_URL}/nginx-module-markdown-for-agents_0.9.1_nginx-1.30.4_amd64.deb"
 # Verify the signature AND the signer identity.  `gpg --verify` alone only
-# proves the file was signed by *some* key.  Import the checked-in project
-# public key (packaging/nginx-markdown-for-agents-release.asc) into an
-# isolated keyring and verify the signing-subkey fingerprint
-# 15C792438EAA762B421E60D21E8D41E7D19A8A75 before trusting the signature.
+# proves the file was signed by *some* key.  Download the checked-in project
+# public key into this working directory first (run from a repository clone),
+# then import it into an isolated keyring and verify the signing-subkey
+# fingerprint 15C792438EAA762B421E60D21E8D41E7D19A8A75 before trusting the
+# signature.
+curl -fsSLo nginx-markdown-for-agents-release.asc \
+  "${REPO_ROOT:-.}/packaging/nginx-markdown-for-agents-release.asc"
 KEYRING="$(mktemp -d)/keyring.gpg"
 gpg --no-default-keyring --keyring "$KEYRING" \
-    --import packaging/nginx-markdown-for-agents-release.asc
+    --import nginx-markdown-for-agents-release.asc
 gpg --no-default-keyring --keyring "$KEYRING" --fingerprint
 gpg --no-default-keyring --keyring "$KEYRING" --verify SHA256SUMS.asc SHA256SUMS
 # Every file listed in SHA256SUMS must be present before `sha256sum -c`
@@ -284,8 +288,10 @@ in the project repository.
 
 ## Security
 
-- GPG signs all packages
-- The repository signs metadata (Release) with Release.gpg + InRelease
+- GPG signs the `SHA256SUMS` checksum manifest for each release
+- The APT repository signs metadata (Release) with Release.gpg + InRelease
+- Individual `.deb` signatures are conditional: the signed checksum manifest
+  is the guaranteed integrity surface for every package
 - The system distributes the signing key over HTTPS only
 - Report security issues via the project's security policy
 

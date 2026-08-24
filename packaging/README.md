@@ -14,7 +14,6 @@ packaging/
 │       ├── postinstall.sh     #   Runs after package installation
 │       └── preremove.sh       #   Runs before package removal
 ├── scripts/
-│   ├── build-deb.sh           # DEB build helper
 │   ├── generate-checksums.sh  # SHA256SUMS generation
 │   ├── gpg-sign-checksums.sh  # GPG detached signature for SHA256SUMS
 │   ├── smoke-test-basic.sh    # Basic installation + module load test
