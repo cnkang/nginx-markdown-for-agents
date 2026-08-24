@@ -13,7 +13,10 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from lib.path_validation import validate_read_path  # noqa: E402,E0401,C0413
+from lib.path_validation import (  # noqa: E402,E0401,C0413
+    validate_read_path,
+    validate_write_path_within_root,
+)
 
 # GitHub treats these check-run conclusions as satisfying a required
 # status check; see
@@ -501,7 +504,13 @@ def _load_json(path: Path) -> Any:
 def _write_required_checks(path: Path, checks: list[RequiredCheck], *, branch: str,
                            tag_sha: str) -> None:
     """Write the effective required-check enumeration for release records."""
-    safe_path = _resolve_repository_output(path)
+    safe_path = validate_write_path_within_root(
+        path,
+        Path.cwd().resolve(),
+        purpose="required-checks output",
+    )
+    if not safe_path.parent.is_dir():
+        raise ValueError("output path parent must already exist")
     payload = {
         "schema_version": "release.required-checks.v1",
         "branch": branch,
