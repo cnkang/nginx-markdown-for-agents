@@ -14,6 +14,7 @@ from tools.release.gates.verify_tag_sha_checks import (
     _load_json,
     _status_errors,
     _status_state_errors,
+    _write_required_checks,
     main,
     required_checks,
     validate_required_checks,
@@ -212,6 +213,36 @@ def test_main_writes_effective_required_check_enumeration(
         "tag_sha": "a" * 40,
     }
     assert "Effective required checks:" in capsys.readouterr().out
+
+
+def test_required_checks_output_rejects_paths_outside_the_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Generated release evidence must stay inside the checkout."""
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    monkeypatch.chdir(repository)
+
+    with pytest.raises(ValueError, match="relative"):
+        _write_required_checks(
+            Path("../outside.json"), [], branch="main", tag_sha="a" * 40
+        )
+
+    with pytest.raises(ValueError, match="relative"):
+        _write_required_checks(
+            tmp_path / "outside.json", [], branch="main", tag_sha="a" * 40
+        )
+
+    outside_dir = tmp_path / "outside-dir"
+    outside_dir.mkdir()
+    (repository / "evidence").symlink_to(outside_dir, target_is_directory=True)
+    with pytest.raises(ValueError, match="within the repository"):
+        _write_required_checks(
+            Path("evidence/required-checks.json"),
+            [],
+            branch="main",
+            tag_sha="a" * 40,
+        )
 
 
 def test_main_rejects_an_absolute_input_path(

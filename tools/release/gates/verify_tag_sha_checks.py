@@ -15,7 +15,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from lib.path_validation import (  # noqa: E402,E0401,C0413
     validate_read_path,
-    validate_write_path_within_root,
 )
 
 # GitHub treats these check-run conclusions as satisfying a required
@@ -477,20 +476,6 @@ def _resolve_repository_input(path: Path) -> Path:
     return resolved
 
 
-def _resolve_repository_output(path: Path) -> Path:
-    """Resolve an output file without allowing it to escape the checkout."""
-    if path.is_absolute() or ".." in path.parts:
-        raise ValueError("output paths must be relative and cannot contain '..'")
-
-    repository_root = Path.cwd().resolve()
-    resolved = (repository_root / path).resolve()
-    if not resolved.is_relative_to(repository_root):
-        raise ValueError("output path must remain within the repository checkout")
-    if not resolved.parent.is_dir():
-        raise ValueError("output path parent must already exist")
-    return resolved
-
-
 def _load_json(path: Path) -> Any:
     """Load a JSON API response from a workflow temporary file."""
     safe_path = validate_read_path(
@@ -504,13 +489,16 @@ def _load_json(path: Path) -> Any:
 def _write_required_checks(path: Path, checks: list[RequiredCheck], *, branch: str,
                            tag_sha: str) -> None:
     """Write the effective required-check enumeration for release records."""
-    safe_path = validate_write_path_within_root(
-        path,
-        Path.cwd().resolve(),
-        purpose="required-checks output",
-    )
+    if path.is_absolute() or ".." in path.parts:
+        raise ValueError("output paths must be relative and cannot contain '..'")
+
+    repository_root = Path.cwd().resolve()
+    safe_path = (repository_root / path).resolve()
+    if not safe_path.is_relative_to(repository_root):
+        raise ValueError("output path must remain within the repository checkout")
     if not safe_path.parent.is_dir():
         raise ValueError("output path parent must already exist")
+
     payload = {
         "schema_version": "release.required-checks.v1",
         "branch": branch,
