@@ -6,33 +6,33 @@ The Rust converter C ABI is a **bundled internal boundary** between the Rust
 static library and the NGINX module built from the same source tree. The
 project does not publish a standalone converter shared library, header SDK, or
 third-party ABI compatibility promise. Release artifacts contain the linked
-NGINX module; source builds generate the header and link the matching Rust
+NGINX module. Source builds generate the header and link the matching Rust
 archive as one coordinated build.
 
 The generated `markdown_converter.h` is public source only so the bundled C
 module can compile. Its presence in the repository does not make arbitrary
 third-party C consumers a supported product surface.
 
-## v0.9.1 baseline reset
+## v0.9.2 bundled boundary
 
-v0.9.1 is the final coordinated pre-v1 reset. ABI version **1** is the new
-baseline. This reset:
+v0.9.1's ABI version **1** is historical. The 0.9.2 breaking surface update
+advances the bundled boundary to ABI version **2**. The earlier reset:
 
-- removes the unimplemented MDX and Org-mode flavor discriminants;
-- removes the unused Rust streaming-decision FFI model;
+- removes the unimplemented MDX and Org-mode flavor discriminants,
+- removes the unused Rust streaming-decision FFI model,
 - removes `FFIConditionalResult`, its reserved `matched_etag_len` field, and
-  the superseded `markdown_check_conditional` API;
-- removes the superseded `markdown_build_base_url` helper; and
+  the superseded `markdown_check_conditional` API,
+- removes the superseded `markdown_build_base_url` helper, and
 - removes 15 zero-production-consumer exports: the accept/decision init
   helpers, Rust decision/error-policy wrappers, standalone URL checks,
   diagnostics-schema accessors, convenience constructors, and redundant
-  streaming finish/free/reason helpers; and
+  streaming finish/free/reason helpers, and
 - retains `markdown_decide_conditional` and `markdown_decide_base_url` as the
   complete production decision interfaces.
 
-These changes are intentionally breaking at the internal FFI boundary. Both
-bundled sides are updated atomically, so operators do not migrate C calls.
-Operators must install or build the complete v0.9.1 module rather than mixing
+These changes are intentionally breaking at the internal FFI boundary. The
+release updates both bundled sides atomically, so operators do not migrate C calls.
+Operators must install or build the complete v0.9.2 module rather than mixing
 an older Rust archive or header with the new C module.
 
 ## Explicit ABI alignment
@@ -40,23 +40,37 @@ an older Rust archive or header with the new C module.
 Rust owns:
 
 ```text
-MARKDOWN_ABI_VERSION = 1
-markdown_abi_version() -> 1
+MARKDOWN_ABI_VERSION = 2
+MARKDOWN_HEADER_HASH = 0x083d81372b053be2
+MARKDOWN_SYMBOL_SET_HASH = 0x0492468d15617cc7
+MARKDOWN_LAYOUT_FINGERPRINT = 0x5082868a7afe5890
+
+markdown_abi_version() -> 2
+markdown_abi_header_hash() -> 0x083d81372b053be2
+markdown_abi_symbol_set_hash() -> 0x0492468d15617cc7
+markdown_abi_layout_fingerprint() -> 0x5082868a7afe5890
 ```
 
-`cbindgen` emits both declarations into the generated header. During NGINX
-preconfiguration, the C module calls `markdown_abi_version()` and compares the
-result with its generated-header `MARKDOWN_ABI_VERSION`. A mismatch logs a
-critical configuration error and makes `nginx -t`/startup fail. This check runs
-before the module installs its header and body filters.
+`cbindgen` emits all declarations into the generated header. During NGINX
+preconfiguration, the C module calls all four accessors and compares each
+result with its generated-header constant. Each independent mismatch logs a
+critical configuration error. If any tuple element mismatches, startup fails
+with `NGX_ERROR`. This 4-tuple handshake runs before the module installs its
+header and body filters or invokes any business FFI call.
+
+The three fingerprint values detect drift even when the numeric ABI version
+stays unchanged:
+- **header hash**: detects header regeneration or content changes
+- **symbol set hash**: detects export additions, removals, or renames
+- **layout fingerprint**: detects struct size changes, alignment changes, field offset changes, field reordering, field type changes, enum representation changes, or struct set changes
 
 `nginx-markdown-doctor` also checks that the module contains the
-`markdown_abi_version` symbol. The doctor symbol check is diagnostic; the
+`markdown_abi_version` symbol. The doctor symbol check is diagnostic. The
 NGINX startup comparison is the authoritative value enforcement.
 
 Increment `MARKDOWN_ABI_VERSION` whenever a shared struct changes size or
-layout (including a tail-field append), a field is removed/reordered or changes
-type, an enum representation changes, an export is removed/changed, or any
+layout (including a tail-field append), a field gets removed/reordered or changes
+type, an enum representation changes, an export gets removed/changed, or any
 other change makes a C object built against the previous header unsafe or
 semantically invalid.
 
@@ -64,7 +78,7 @@ semantically invalid.
 
 ### Before v1.0
 
-v0.9.1 is the last planned coordinated reset. Any further pre-v1 incompatible
+0.9.2 is the final planned pre-v1 breaking boundary. Any further incompatible
 change must be release-noted, increment `MARKDOWN_ABI_VERSION`, and update all
 Rust definitions, C consumers, headers, layout assertions, tests, and operator
 diagnostics in one change.
@@ -74,14 +88,14 @@ diagnostics in one change.
 The bundled ABI becomes a frozen internal contract:
 
 - every shared-struct size/layout change, including a tail-field append,
-  requires an ABI version increment;
-- new structs and exports are preferred to changing existing layouts;
+  requires an ABI version increment,
+- the project prefers new structs and exports to changing existing layouts,
 - field removal, reordering, type changes, or signature changes require an ABI
   version increment and a release whose compatibility policy explicitly
-  permits that break;
-- Cargo package version is not the ABI identifier; `MARKDOWN_ABI_VERSION` is;
+  permits that break,
+- Cargo package version is not the ABI identifier, `MARKDOWN_ABI_VERSION` is,
   and
-- no external third-party ABI support is implied without a separate published
+- the project implies no external third-party ABI support without a separate published
   SDK policy, artifact, support matrix, and conformance suite.
 
 An append-only exception is possible only after the boundary adopts and
@@ -93,7 +107,7 @@ object sizes interoperable.
 
 All shared structs use `#[repr(C)]`. All FFI enums use an explicit integer
 representation. Raw strings use pointer-plus-length pairs, not implicit
-NUL-termination. Opaque handles are owned by Rust and never dereferenced by C.
+NUL-termination. Rust owns opaque handles and C never dereferences them.
 
 The production module and checked layout assertions target LP64 platforms:
 
@@ -112,14 +126,13 @@ combination.
 ## Ownership rules
 
 - C borrows input pointers only for the documented call duration.
-- Rust-owned result buffers are released only through their matching Rust free
-  function.
+- The matching Rust free function releases Rust-owned result buffers.
 - A finalize, abort, free, or safe-finish operation that consumes a handle
   makes that handle invalid immediately.
 - Empty Rust output buffers cross the boundary as `NULL` plus length zero.
-- Slice ownership transfer uses a thin data pointer plus explicit length; it
+- Slice ownership transfer uses a thin data pointer plus explicit length, it
   never exposes a Rust fat pointer.
-- Output structs are initialized to a safe state before fallible work and are
+- Output structs initialize to a safe state before fallible work and are
   written only after `catch_unwind` succeeds.
 
 ## Header synchronization
@@ -142,13 +155,13 @@ make test-nginx-unit
 
 For every ABI change:
 
-1. update Rust definitions, exports, defaults, cleanup, and panic fallbacks;
-2. update all C call sites and init sites;
-3. regenerate and copy both headers;
-4. update Rust layout tests and C static assertions;
-5. update x86_64/aarch64 and feature-combination coverage;
-6. update doctor/alignment checks when the ABI version changes;
-7. update this document, the migration contract, changelog, and release notes;
+1. update Rust definitions, exports, defaults, cleanup, and panic fallbacks,
+2. update all C call sites and init sites,
+3. regenerate and copy both headers,
+4. update Rust layout tests and C static assertions,
+5. update x86_64/aarch64 and feature-combination coverage,
+6. update doctor/alignment checks when the ABI version changes,
+7. update this document, the migration contract, changelog, and release notes,
 8. run header, Rust, C, harness, and documentation gates.
 
 Never suppress an ABI mismatch or bypass the startup comparison. Rebuild both

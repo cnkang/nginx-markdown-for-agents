@@ -4,7 +4,7 @@
 #
 # Scans C source files in the request path for direct reads of
 # dynconf-mutable fields (enabled, enabled_source, prune_noise,
-# log_verbosity, memory_budget, streaming_budget) from live conf->
+# log_verbosity, error_policy, error_status, streaming_buffer) from live conf->
 # instead of through effective_conf helpers.
 #
 # Per AGENTS.md Rule 34, request-path code must read these fields
@@ -17,8 +17,8 @@
 #   - config_core_impl.h, config_handlers_impl.h: config init/merge
 #   - config_impl.h: config merge helpers
 #   - exports.h: public API wrappers
-#   - log_decision_debug: fixed in v0.6.2 (reported as ERROR)
-#   - is_enabled: fixed in v0.6.2 (reported as ERROR)
+#   - log_decision_debug / is_enabled: migrated to effective_conf reads;
+#     if direct live conf reads reappear they are reported as ERROR
 #
 # Usage: bash tools/harness/detect_live_conf_reads.sh [directory]
 #   directory defaults to components/nginx-module/src
@@ -34,8 +34,8 @@ readonly SRC_DIR="${1:-components/nginx-module/src}"
 
 # Dynconf-mutable fields that must be read through effective_conf
 # in request-path code.
-readonly MUTABLE_FIELDS="enabled|enabled_source|prune_noise|log_verbosity|memory_budget|streaming_budget"
-readonly MUTABLE_FIELDS_EXACT="^(enabled|enabled_source|prune_noise|log_verbosity|memory_budget|streaming_budget)$"
+readonly MUTABLE_FIELDS="enabled|enabled_source|prune_noise|log_verbosity|error_policy|error_status|streaming_buffer"
+readonly MUTABLE_FIELDS_EXACT="^(enabled|enabled_source|prune_noise|log_verbosity|error_policy|error_status|streaming_buffer)$"
 
 # Files where direct conf-> reads of mutable fields are allowed
 # (configuration/initialization/snapshot code).
@@ -53,12 +53,122 @@ readonly ALLOWED_FILES=(
     "ngx_http_markdown_config_core_impl.h"
     "ngx_http_markdown_config_handlers_impl.h"
     "ngx_http_markdown_config_impl.h"
+    "ngx_http_markdown_config_merge_impl.h"
     "ngx_http_markdown_exports.h"
     "ngx_http_markdown_filter_module.c"
 )
 
 errors=0
 warnings=0
+
+function_contains_line() {
+    local file="$1" target_line="$2" name_pattern="$3"
+    local start end candidate candidate_text probe offset
+
+    start=""
+    while IFS=: read -r candidate candidate_text; do
+        if [[ -z "${candidate}" || "${candidate}" -gt "${target_line}" ||
+              "${candidate_text}" == *";"* ]]; then
+            continue
+        fi
+        # Control-flow call sites (if/while/for/switch/return, including
+        # else if and `return fn(...)` direct calls) are never definitions:
+        # the leading keyword is a control expression, not a return type.
+        # Accept a candidate only when the target name starts the line or
+        # no leading keyword precedes it.
+        if [[ "${candidate_text}" =~ ^[[:space:]]*(else[[:space:]]+)?(if|while|for|switch|return)[[:space:]]*\( ]] \
+           || [[ "${candidate_text}" =~ ^[[:space:]]*return[[:space:]]+[A-Za-z_][A-Za-z0-9_]*\( ]]; then
+            continue
+        fi
+        # A C definition may put the return type, name, parameters, and
+        # opening brace on separate lines. Walk forward until the first
+        # statement terminator or opening brace so multiline definitions are
+        # recognized while ordinary call sites are not.  `start` is changed
+        # only by a successful definition scan; candidates that are call
+        # sites or declarations leave the last found definition intact.
+        for ((offset = 0; offset <= 64; offset++)); do
+            probe="$(sed -n "$((candidate + offset))p" "${file}" \
+                2>/dev/null || true)"
+            if [[ "${probe}" == *";"* ]]; then
+                break
+            fi
+            if [[ "${probe}" == *"{"* ]]; then
+                start="${candidate}"
+                break
+            fi
+        done
+    done < <(grep -nE "^[[:space:]]*(static[[:space:]]+)?[^;]*${name_pattern}[[:space:]]*\\(" "${file}" 2>/dev/null || true)
+    if [[ -z "${start}" ]]; then
+        return 1
+    fi
+
+    end="$(awk -v start="${start}" '
+        NR < start { next }
+        {
+            line = $0
+            # Ignore braces inside line comments, block comments,
+            # string literals, and character literals so a brace in
+            # prose or a quoted value cannot close the function early.
+            # Each matched token is replaced in place with same-length
+            # spaces so offsets stay aligned across iterations.
+            while (match(line, /\/\/.*|\/\*.*\*\/|"(\\\\.|[^"\\\\])*"|'"'"'.'"'"'/)) {
+                token = substr(line, RSTART, RLENGTH)
+                gsub(/./, " ", token)
+                line = substr(line, 1, RSTART - 1) token substr(line, RSTART + RLENGTH)
+            }
+            opens += gsub(/\{/, "{", line)
+            closes += gsub(/\}/, "}", line)
+            if (NR > start && opens > 0 && opens == closes) {
+                print NR
+                exit
+            }
+        }
+    ' "${file}")"
+    if [[ -z "${end}" ]]; then
+        return 1
+    fi
+
+    [[ "${target_line}" -ge "${start}" && "${target_line}" -le "${end}" ]]
+    return $?
+}
+
+comment_free_line() {
+    local file="$1" target_line="$2"
+    awk -v target="${target_line}" '
+        function strip_comments(text, start, stop, line_comment) {
+            while (1) {
+                if (in_block) {
+                    stop = index(text, "*/")
+                    if (!stop) {
+                        return ""
+                    }
+                    text = substr(text, stop + 2)
+                    in_block = 0
+                    continue
+                }
+                start = index(text, "/*")
+                line_comment = index(text, "//")
+                if (line_comment > 0 \
+                    && (start == 0 || line_comment < start)) {
+                    return substr(text, 1, line_comment - 1)
+                }
+                if (!start) {
+                    return text
+                }
+                text = substr(text, 1, start - 1) \
+                    substr(text, start + 2)
+                in_block = 1
+            }
+        }
+        {
+            cleaned = strip_comments($0)
+            if (NR == target) {
+                print cleaned
+                exit
+            }
+        }
+    ' "${file}"
+}
 
 echo "=== Effective-Config Live Conf Read Detection ===" >&2
 echo "Scanning: ${SRC_DIR}" >&2
@@ -79,6 +189,10 @@ while IFS= read -r match; do
     file="$(echo "$match" | cut -d: -f1)"
     line="$(echo "$match" | cut -d: -f2)"
     content="$(echo "$match" | cut -d: -f3-)"
+    content="$(comment_free_line "$file" "$line")"
+    if ! echo "$content" | grep -qE "conf->(${MUTABLE_FIELDS})[^_a-zA-Z]"; then
+        continue
+    fi
     basename="$(basename "$file")"
 
     # Skip allowlisted files
@@ -89,15 +203,27 @@ while IFS= read -r match; do
     done
 
     # Skip lines that are inside effective_* helper definitions
-    # (these are the fallback paths when eff is NULL, which is allowed)
+    # (these are the fallback paths when eff is NULL, which is allowed).
+    # The content check catches lines that mention effective_ directly
+    # (for example the ternary fallback ": conf->enabled_source" lines
+    # inside is_enabled, which are already allowlisted).  The
+    # enclosing-function check catches the body of
+    # ngx_http_markdown_effective_*() helpers whose return statement
+    # reads conf-><mutable_field> as the NULL-eff fallback without
+    # spelling effective_ on that line.
     if echo "$content" | grep -qE 'effective_'; then
         echo "  OK      ${file}:${line} — inside effective_* helper: ${content}" >&2
         hits=$((hits + 1))
         continue
     fi
+    if function_contains_line "$file" "$line" 'ngx_http_markdown_effective_[a-z_]+'; then
+        echo "  OK      ${file}:${line} — inside effective_* helper fallback: ${content}" >&2
+        hits=$((hits + 1))
+        continue
+    fi
 
     # Skip lines that are comments
-    if echo "$content" | grep -qE '^\s*/\*|^\s*\*|^\s*//'; then
+    if echo "$content" | grep -qE '^[[:space:]]*/\*|^[[:space:]]*\*|^[[:space:]]*//'; then
         continue
     fi
 
@@ -110,6 +236,51 @@ while IFS= read -r match; do
         func_start=1
     fi
     context_lines="$(sed -n "${func_start},${line}p" "$file" 2>/dev/null)"
+
+    # The diagnostics static_config_manifest_v1 digest is intentionally
+    # computed from the compiled location configuration, including fields
+    # that are also dynconf-mutable.  This is the frozen static identity
+    # contract, not a request conversion decision; its source symbol is
+    # checked explicitly so the exception cannot broaden to other paths.
+    manifest_start="$(grep -n '^ngx_http_markdown_manifest_digest(' "$file" \
+        2>/dev/null | head -1 | cut -d: -f1 || true)"
+    manifest_end=""
+    if [[ -n "$manifest_start" ]]; then
+        manifest_end_offset="$(sed -n "$((manifest_start + 1)),\$p" "$file" \
+            2>/dev/null | grep -n '^}' | head -1 | cut -d: -f1 || true)"
+        if [[ -n "$manifest_end_offset" ]]; then
+            manifest_end=$((manifest_start + manifest_end_offset))
+        fi
+    fi
+    if [[ -n "$manifest_start" && -n "$manifest_end"
+          && "$line" -ge "$manifest_start"
+          && "$line" -le "$manifest_end" ]]; then
+        echo "  OK      ${file}:${line} — static_config_manifest_v1 reads compiled static conf: ${content}" >&2
+        hits=$((hits + 1))
+        continue
+    fi
+
+    # The digest serializer is split into helpers to keep the production
+    # function below the complexity gate.  These helpers are still part of
+    # the static_config_manifest_v1 call chain and must not be mistaken for
+    # request conversion code.
+    if function_contains_line "$file" "$line" \
+        '(ngx_http_markdown_manifest_append_(policy|runtime|limit|prune|trusted_proxies)_fields|ngx_http_markdown_manifest_append_trusted_proxies)'; then
+        echo "  OK      ${file}:${line} — static_config_manifest_v1 helper reads compiled static conf: ${content}" >&2
+        hits=$((hits + 1))
+        continue
+    fi
+
+    # Value-formatting helpers called only by static_config_manifest_v1 also
+    # serialize compiled static configuration.  They are not request-path
+    # conversion reads and must remain independent of the effective snapshot.
+    if function_contains_line "$file" "$line" \
+        'ngx_http_markdown_manifest_(error_value|dynamic_value|filter_value|flavor_value)'; then
+        echo "  OK      ${file}:${line} — static_config_manifest_v1 value helper reads compiled static conf: ${content}" >&2
+        hits=$((hits + 1))
+        continue
+    fi
+
     if echo "$context_lines" | grep -q 'ngx_http_markdown_is_enabled'; then
         echo "  ERROR   ${file}:${line} — is_enabled() regression: reads live conf->: ${content}" >&2
         errors=$((errors + 1))
@@ -139,7 +310,7 @@ while IFS= read -r match; do
     echo "  ERROR   ${file}:${line} — request-path reads live conf->: ${content}" >&2
     errors=$((errors + 1))
     hits=$((hits + 1))
-done < <(grep -rnE "conf->(enabled|enabled_source|prune_noise|log_verbosity|memory_budget|streaming_budget)[^_a-zA-Z]" "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
+done < <(grep -rnE "conf->(${MUTABLE_FIELDS})[^_a-zA-Z]" "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
 
 if [[ "$hits" -eq 0 ]]; then
     echo "  (none found)" >&2
@@ -173,7 +344,7 @@ if [[ -f "$is_enabled_file" ]]; then
                 iline="$(echo "$match" | cut -d: -f1)"
                 icontent="$(echo "$match" | cut -d: -f2-)"
                 # Allow the ternary fallback pattern ": conf->..."
-                if echo "$icontent" | grep -qE '^\s*:\s*conf->'; then
+                if echo "$icontent" | grep -qE '^[[:space:]]*:[[:space:]]*conf->'; then
                     echo "  OK      ${is_enabled_file}:${iline} — ternary fallback in eff check: ${icontent}" >&2
                     continue
                 fi
@@ -221,7 +392,7 @@ if [[ -f "$request_impl" ]]; then
             hf_end=$((hf_start + hf_end))
             # Count active_snapshot reads (excluding comments) in the function body
             snap_reads="$(sed -n "${hf_start},${hf_end}p" "$request_impl" 2>/dev/null \
-                | grep -vE '^\s*/\*|^\s*\*' \
+                | grep -vE '^[[:space:]]*/\*|^[[:space:]]*\*' \
                 | grep -c 'ngx_http_markdown_dynconf_watcher\.active_snapshot' || true)"
             if [[ "$snap_reads" -eq 1 ]]; then
                 echo "  OK      single active_snapshot read in header_filter (correct)" >&2
@@ -263,15 +434,16 @@ if [[ -f "$request_impl" ]]; then
         call_content="$(echo "$call_match" | cut -d: -f2-)"
         # Check if the call passes NULL as the eff argument
         # Pattern: handle_ctx_alloc_failure(r, conf, NULL) or handle_ctx_alloc_failure(r, conf) (2-arg old form)
-        if echo "$call_content" | grep -qE 'handle_ctx_alloc_failure\([^)]*,\s*NULL\s*\)' \
-            || echo "$call_content" | grep -qE 'handle_ctx_alloc_failure\([^)]*,\s*conf\s*\)$'; then
+        # Arguments may contain nested parentheses before the final argument.
+        if echo "$call_content" | grep -qE 'handle_ctx_alloc_failure\(.*,[[:space:]]*NULL[[:space:]]*\);[[:space:]]*$' \
+            || echo "$call_content" | grep -qE 'handle_ctx_alloc_failure\(.*,[[:space:]]*conf[[:space:]]*\);[[:space:]]*$'; then
             echo "  ERROR   ${request_impl}:${call_line} — handle_ctx_alloc_failure called with NULL/missing eff: ${call_content}" >&2
             errors=$((errors + 1))
         else
             echo "  OK      ${request_impl}:${call_line} — handle_ctx_alloc_failure receives eff: ${call_content}" >&2
         fi
     done < <(awk '
-        /ngx_http_markdown_handle_ctx_alloc_failure/ && !/^\s*\/\*/ && !/^\s*\*/ && !/static.*ngx_int_t/ {
+        /ngx_http_markdown_handle_ctx_alloc_failure/ && !/^[[:space:]]*\/\*/ && !/^[[:space:]]*\*/ && !/static.*ngx_int_t/ {
             line = NR
             text = $0
             depth = 0

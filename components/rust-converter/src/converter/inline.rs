@@ -100,7 +100,7 @@ impl MarkdownConverter {
                 output.push_str(&Self::escape_link_label(&normalized_text));
             }
         } else if !normalized_text.is_empty() {
-            output.push_str(&normalized_text);
+            output.push_str(&crate::security::escape_markdown_text(&normalized_text));
         }
 
         Ok(())

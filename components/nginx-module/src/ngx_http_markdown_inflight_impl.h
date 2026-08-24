@@ -7,8 +7,11 @@
  * policy (spec 51).
  *
  * WARNING: This header is an implementation detail of the main
- * translation unit (ngx_http_markdown_filter_module.c).  It must NOT
- * be included from any other .c file or used as a standalone
+ * translation unit (ngx_http_markdown_filter_module.c) and its
+ * streaming post-commit sibling
+ * (ngx_http_markdown_stream_postcommit.c, which shares the module's
+ * inflight lifecycle for the subrequest release path).  It must NOT be
+ * included from any other .c file or used as a standalone
  * compilation unit.
  *
  * Design decisions:
@@ -50,7 +53,7 @@ typedef struct {
  * to the handler (which should not happen but is defended against)
  * will not produce a double decrement.
  */
-typedef struct {
+typedef struct ngx_http_markdown_inflight_cleanup_s {
     ngx_http_markdown_inflight_t  *counter;
     ngx_flag_t                     decremented;
 } ngx_http_markdown_inflight_cleanup_t;
@@ -58,7 +61,7 @@ typedef struct {
 /* Per-worker global counter instance. */
 static ngx_http_markdown_inflight_t  ngx_http_markdown_g_inflight;
 
-static void
+static ngx_inline void
 ngx_http_markdown_inflight_update_high_watermark(ngx_atomic_int_t new_val)
 {
     for ( ;; ) {
@@ -90,7 +93,7 @@ ngx_http_markdown_inflight_update_high_watermark(ngx_atomic_int_t new_val)
  * Parameters:
  *   data - pointer to ngx_http_markdown_inflight_cleanup_t
  */
-static void
+static ngx_inline void
 ngx_http_markdown_inflight_cleanup_handler(void *data)
 {
     ngx_http_markdown_inflight_cleanup_t  *cd = data;
@@ -117,24 +120,30 @@ ngx_http_markdown_inflight_cleanup_handler(void *data)
  *   - counter.current is incremented
  *   - high_watermark is updated if new peak
  *   - cleanup handler registered on r->pool
+ *   - ctx->lifecycle.inflight_cleanup points at the cleanup data, enabling
+ *     active release at conversion terminal (subrequest subrequest
+ *     lifecycle)
  *
  * On overload (NGX_DECLINED):
  *   - counter.overload_total is incremented
  *   - counter.current is NOT incremented
  *   - no cleanup handler registered
+ *   - ctx->lifecycle.inflight_cleanup stays NULL
  *
  * Parameters:
  *   r    - NGINX request (for pool and logging)
  *   conf - module config (for max_inflight)
+ *   ctx  - request context (receives inflight_cleanup on success)
  *
  * Returns:
  *   NGX_OK       - allowed, counter incremented
  *   NGX_DECLINED - overloaded, counter not incremented
  *   NGX_ERROR    - pool cleanup allocation failed (treat as error)
  */
-static ngx_int_t
+static ngx_inline ngx_int_t
 ngx_http_markdown_inflight_try_increment(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf)
+    const ngx_http_markdown_conf_t *conf,
+    ngx_http_markdown_ctx_t *ctx)
 {
     ngx_atomic_int_t                        cur;
     ngx_atomic_int_t                        new_val;
@@ -143,10 +152,12 @@ ngx_http_markdown_inflight_try_increment(ngx_http_request_t *r,
 
     cur = ngx_http_markdown_g_inflight.current;
 
-    /* max_inflight == 0 means unlimited (no enforcement) */
-    if (conf->routing.max_inflight == 0) {
-        /* Fall through to CAS increment without limit check */
-    } else if ((ngx_uint_t) cur >= conf->routing.max_inflight) {
+    /*
+     * max_inflight is validated > 0 at config parse time
+     * (markdown_limits rejects zero), so the limit check below is
+     * always reachable with a positive bound.
+     */
+    if ((ngx_uint_t) cur >= conf->routing.max_inflight) {
         /* Overload: reject */
         (void) ngx_atomic_fetch_add(
             &ngx_http_markdown_g_inflight.overload_total, 1);
@@ -184,12 +195,50 @@ ngx_http_markdown_inflight_try_increment(ngx_http_request_t *r,
     cd->decremented = 0;
     cln->handler = ngx_http_markdown_inflight_cleanup_handler;
 
+    /* subrequest: hand the cleanup data to the request context so conversion
+     * terminal paths can actively release the slot (subrequests share
+     * the parent pool and must not hold the slot until pool destroy). */
+    ctx->lifecycle.inflight_cleanup = cd;
+
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "markdown: inflight increment "
                    "(current=%d, max=%ui)",
                    (int) new_val, conf->routing.max_inflight);
 
     return NGX_OK;
+}
+
+/*
+ * Actively release the inflight slot for one request (subrequest).
+ *
+ * Conversion terminal paths call this once the conversion result has
+ * been delivered downstream, so the worker slot is freed before the
+ * request pool is destroyed.  This matters for subrequests: they share
+ * the parent request's pool, and pool-cleanup alone would hold the
+ * slot until the whole main request completes (delayed release, and
+ * with many subrequests an artificial inflight ceiling).
+ *
+ * The release is idempotent: it routes through the same cleanup
+ * handler used at pool destruction, and the decremented flag prevents
+ * a double decrement.  After a successful release, the later pool
+ * cleanup is a no-op.
+ *
+ * Parameters:
+ *   ctx - request context; the inflight_cleanup pointer is consumed
+ *         (set to NULL) after release so a second call is a no-op.
+ */
+static ngx_inline void
+ngx_http_markdown_inflight_release(ngx_http_markdown_ctx_t *ctx)
+{
+    ngx_http_markdown_inflight_cleanup_t  *cd;
+
+    cd = ctx->lifecycle.inflight_cleanup;
+    if (cd == NULL) {
+        return;
+    }
+
+    ngx_http_markdown_inflight_cleanup_handler(cd);
+    ctx->lifecycle.inflight_cleanup = NULL;
 }
 
 /*

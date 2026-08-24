@@ -13,6 +13,9 @@
  * evolve without expanding the header/body filter flow itself.
  */
 
+static ngx_int_t ngx_http_markdown_next_header_filter_with_auth(
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf);
+
 static ngx_int_t ngx_http_markdown_forward_headers(ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx);
 static ngx_int_t ngx_http_markdown_send_buffered_original_response(
@@ -57,6 +60,7 @@ static void ngx_http_markdown_log_decision_with_category(
     const ngx_http_markdown_effective_conf_t *eff,
     const ngx_str_t *reason_code, const ngx_str_t *error_category);
 static void ngx_http_markdown_metric_inc_failopen(
+    const ngx_http_markdown_effective_conf_t *eff,
     const ngx_http_markdown_conf_t *conf);
 static const ngx_str_t *ngx_http_markdown_compression_name(
     ngx_http_markdown_compression_type_e compression_type);
@@ -96,6 +100,8 @@ ngx_http_markdown_fail_open_buffered_response(ngx_http_request_t *r,
                                               ngx_http_markdown_ctx_t *ctx,
                                               const char *debug_message)
 {
+    ngx_int_t  rc;
+
     if (debug_message != NULL) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, debug_message);
     }
@@ -103,13 +109,27 @@ ngx_http_markdown_fail_open_buffered_response(ngx_http_request_t *r,
     ngx_http_markdown_reclassify_fail_open_path(ctx);
     ctx->eligible = 0;
 
-    if (ngx_http_markdown_forward_headers(r, ctx) != NGX_OK) {
-        return NGX_ERROR;
+    rc = ngx_http_markdown_forward_headers(r, ctx);
+    if (rc != NGX_OK && rc != NGX_AGAIN) {
+        return rc;
     }
+    /* Header-chain NGX_AGAIN = headers queued by the write filter (NGINX
+     * core model).  Proceed so the buffered original body is always
+     * emitted; returning early here makes fail-open send headers only
+     * under backpressure. */
 
     r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
 
-    return ngx_http_markdown_send_buffered_original_response(r, ctx);
+    rc = ngx_http_markdown_send_buffered_original_response(r, ctx);
+
+    if (rc == NGX_AGAIN) {
+        /* Downstream backpressure: the recovery pass-through (body
+         * filter with !eligible) counts failopen_count after the
+         * downstream filter confirms delivery (Rule 38). */
+        ctx->fullbuffer.failopen_delivery_pending = 1;
+    }
+
+    return rc;
 }
 
 /* Apply error strategy: reject (return error) or fail-open (return original). */
@@ -122,7 +142,9 @@ ngx_http_markdown_reject_or_fail_open_buffered_response(
 {
     ngx_int_t  rc;
 
-    if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
+    if (ngx_http_markdown_effective_error_policy(
+            ctx->effective_conf, conf)
+        == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
         /*
          * Use ngx_http_filter_finalize_request to send the configured
          * error status (429/503/502).  In the body filter, returning a
@@ -134,7 +156,8 @@ ngx_http_markdown_reject_or_fail_open_buffered_response(
          */
         return ngx_http_filter_finalize_request(r,
             &ngx_http_markdown_filter_module,
-            (ngx_int_t) conf->error_status);
+            (ngx_int_t) ngx_http_markdown_effective_error_status(
+                ctx->effective_conf, conf));
     }
 
     rc = ngx_http_markdown_fail_open_buffered_response(
@@ -210,7 +233,8 @@ ngx_http_markdown_handle_decompression_alloc_error(
         break;
     }
 
-    reason = (conf->on_error
+    reason = (ngx_http_markdown_effective_error_policy(
+                  ctx->effective_conf, conf)
               == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
         ? ngx_http_markdown_reason_failed_closed()
         : ngx_http_markdown_reason_failed_open();
@@ -370,7 +394,7 @@ ngx_http_markdown_apply_decompressed_payload(ngx_http_request_t *r,
 
     /*
      * Phase 1: Budget check — verify the decompressor output does
-     * not exceed markdown_decompress_max_size before swapping.
+     * not exceed the configured decompressed-size budget before swapping.
      * On failure, free the decompressor output and trigger
      * fail-open with the original compressed ctx->buffer.data
      * intact (Requirement 5.4).
@@ -429,20 +453,7 @@ ngx_http_markdown_record_decompression_success(ngx_http_request_t *r,
 {
     float ratio;
 
-    NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.succeeded);
-    switch (ctx->decompression.type) {
-        case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
-            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.gzip);
-            break;
-        case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
-            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.deflate);
-            break;
-        case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
-            NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.brotli);
-            break;
-        default:
-            break;
-    }
+    ngx_http_markdown_record_decompression_success_metrics(ctx);
 
     ratio = (ctx->decompression.compressed_size != 0)
         ? (float) ctx->decompression.decompressed_size / (float) ctx->decompression.compressed_size
@@ -482,15 +493,15 @@ ngx_http_markdown_emit_failure_decision(ngx_http_request_t *r,
     const ngx_str_t  *reason;
     const ngx_str_t  *fail_category;
 
-    reason = (conf->on_error
+    reason = (ngx_http_markdown_effective_error_policy(
+                  ctx->effective_conf, conf)
               == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
         ? ngx_http_markdown_reason_failed_closed()
         : ngx_http_markdown_reason_failed_open();
 
     fail_category = ctx->error.has_category
         ? ngx_http_markdown_reason_from_error_category(
-              ctx->error.last_category,
-              r->connection->log)
+              ctx->error.last_category, r->connection->log)
         : NULL;
 
     ngx_http_markdown_log_decision_with_category(
@@ -516,7 +527,9 @@ ngx_http_markdown_handle_buffer_init_failure(ngx_http_request_t *r,
 
     ngx_http_markdown_emit_failure_decision(r, ctx, conf);
 
-    if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
+    if (ngx_http_markdown_effective_error_policy(
+            ctx->effective_conf, conf)
+        == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
         return NGX_ERROR;
     }
 
@@ -525,9 +538,13 @@ ngx_http_markdown_handle_buffer_init_failure(ngx_http_request_t *r,
     ngx_http_markdown_reclassify_fail_open_path(ctx);
     ctx->eligible = 0;
     r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
-    if (ngx_http_markdown_forward_headers(r, ctx) != NGX_OK) {
-        return NGX_ERROR;
+    rc = ngx_http_markdown_forward_headers(r, ctx);
+    if (rc != NGX_OK && rc != NGX_AGAIN) {
+        return rc;
     }
+    /* Header-chain NGX_AGAIN = headers queued by the write filter; the
+     * body below is still emitted so fail-open delivers the original
+     * response instead of headers only. */
 
     rc = ngx_http_next_body_filter(r, in);
 
@@ -539,7 +556,12 @@ ngx_http_markdown_handle_buffer_init_failure(ngx_http_request_t *r,
      * failure, or NGX_AGAIN that never resumes successfully).
      */
     if (rc == NGX_OK || rc == NGX_DONE) {
-        ngx_http_markdown_metric_inc_failopen(conf);
+        ngx_http_markdown_metric_inc_failopen(
+            ctx->effective_conf, conf);
+    } else if (rc == NGX_AGAIN) {
+        /* Downstream backpressure: defer counting to the recovery
+         * pass-through (Rule 38). */
+        ctx->fullbuffer.failopen_delivery_pending = 1;
     }
 
     /*
@@ -587,7 +609,9 @@ ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
 
     ngx_http_markdown_emit_failure_decision(r, ctx, conf);
 
-    if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
+    if (ngx_http_markdown_effective_error_policy(
+            ctx->effective_conf, conf)
+        == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
         return NGX_ERROR;
     }
 
@@ -595,9 +619,14 @@ ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
                   "markdown: fail-open strategy - returning original HTML");
     ctx->eligible = 0;
     r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
-    if (ngx_http_markdown_forward_headers(r, ctx) != NGX_OK) {
-        return NGX_ERROR;
+    rc = ngx_http_markdown_forward_headers(r, ctx);
+    if (rc != NGX_OK && rc != NGX_AGAIN) {
+        return rc;
     }
+    /* Header-chain NGX_AGAIN = headers queued by the write filter (NGINX
+     * core model).  Proceed so the buffered prefix and the original body
+     * are always emitted; returning early here sends headers only under
+     * backpressure and truncates the fail-open response. */
 
     rc = ngx_http_markdown_fail_open_with_buffered_prefix(r, ctx, cl);
 
@@ -608,7 +637,12 @@ ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
      * replay send later fails.
      */
     if (rc == NGX_OK || rc == NGX_DONE) {
-        ngx_http_markdown_metric_inc_failopen(conf);
+        ngx_http_markdown_metric_inc_failopen(
+            ctx->effective_conf, conf);
+    } else if (rc == NGX_AGAIN) {
+        /* Downstream backpressure: defer counting to the recovery
+         * pass-through (Rule 38). */
+        ctx->fullbuffer.failopen_delivery_pending = 1;
     }
 
     /*
@@ -756,9 +790,10 @@ ngx_http_markdown_handle_decompression_conversion_error(
 /*
  * Linearize a buffer chain into a single contiguous allocation.
  *
- * Validates each buffer's pos/last pointers (non-NULL, well-ordered via
- * uintptr_t comparison) and accumulates total size with overflow checking.
- * On success, allocates a pool buffer and copies all chain data into it.
+ * Validates each buffer's pos/last pointers (or an explicit empty buffer
+ * with both pointers NULL), keeps pointer ordering checks in integer space,
+ * and accumulates total size with overflow checking. On success, allocates a
+ * pool buffer and copies all chain data into it unless the chain is empty.
  *
  * Parameters:
  *   r        - NGINX request (pool allocation and logging)
@@ -767,10 +802,9 @@ ngx_http_markdown_handle_decompression_conversion_error(
  *   out_size - output: total byte count
  *
  * Returns:
- *   NGX_OK                                  - success
+ *   NGX_OK                                  - success, including empty input
  *   NGX_ERROR                               - invalid pointers or alloc failure
  *   NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED - size overflow
- *   NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT - empty input
  */
 #ifndef NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS
 static ngx_int_t
@@ -789,7 +823,7 @@ ngx_http_markdown_linearize_chain(ngx_http_request_t *r,
             continue;
         }
 
-        if (src->buf->pos == NULL || src->buf->last == NULL) {
+        if ((src->buf->pos == NULL) != (src->buf->last == NULL)) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                          "markdown: linearize chain "
                          "invalid buffer pointers, "
@@ -816,10 +850,9 @@ ngx_http_markdown_linearize_chain(ngx_http_request_t *r,
     }
 
     if (total == 0) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown: linearize chain "
-                     "called with empty input");
-        return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
+        *out_buf = NULL;
+        *out_size = 0;
+        return NGX_OK;
     }
 
     buf = ngx_palloc(r->pool, total);
@@ -876,20 +909,17 @@ ngx_http_markdown_decompression_input(
 {
     if (compressed_chain->next == NULL
         && compressed_chain->buf != NULL
-        && compressed_chain->buf->pos != NULL
-        && compressed_chain->buf->last != NULL
-        && (uintptr_t) compressed_chain->buf->last
-           >= (uintptr_t) compressed_chain->buf->pos)
+        && ((compressed_chain->buf->pos == NULL
+             && compressed_chain->buf->last == NULL)
+            || (compressed_chain->buf->pos != NULL
+                && compressed_chain->buf->last != NULL
+                && (uintptr_t) compressed_chain->buf->last
+                   >= (uintptr_t) compressed_chain->buf->pos)))
     {
         *input_buf = compressed_chain->buf->pos;
-        *input_size = compressed_chain->buf->last
-                      - compressed_chain->buf->pos;
-        if (*input_size == 0) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                "markdown: contiguous chain has zero-length buffer");
-            return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
-        }
-
+        *input_size = (compressed_chain->buf->pos == NULL)
+            ? 0
+            : compressed_chain->buf->last - compressed_chain->buf->pos;
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
             "markdown: skipping linearize copy, buffer contiguous, "
             "size=%uz", *input_size);
@@ -904,6 +934,8 @@ ngx_http_markdown_decompression_input(
 static ngx_int_t
 ngx_http_markdown_decompression_error(uint32_t ffi_rc)
 {
+    /* Invalid arguments and unknown FFI categories intentionally share the
+     * legacy I/O error path; no distinct local return code exists. */
     switch (ffi_rc) {
     case 101:
         return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
@@ -911,6 +943,8 @@ ngx_http_markdown_decompression_error(uint32_t ffi_rc)
         return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
     case 103:
         return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
+    case 106:
+        return NGX_HTTP_MARKDOWN_DECOMP_RATIO_EXCEEDED;
     case 104:
     case 105:
     default:
@@ -1011,7 +1045,101 @@ ngx_http_markdown_wrap_decompression_output(
                   output_len);
     return NGX_OK;
 }
+
+static ngx_int_t
+ngx_http_markdown_wrap_empty_chain_decompression(
+    ngx_http_request_t *r,
+    FFIChainDecodeResult *result,
+    ngx_chain_t **decompressed_chain)
+{
+    ngx_buf_t      *b;
+    ngx_chain_t    *cl;
+
+    markdown_chain_decode_free(result);
+    b = ngx_calloc_buf(r->pool);
+    if (b == NULL) {
+        return NGX_ERROR;
+    }
+    b->pos = NULL;
+    b->last = NULL;
+    b->memory = 1;
+    b->last_buf = 1;
+
+    cl = ngx_alloc_chain_link(r->pool);
+    if (cl == NULL) {
+        return NGX_ERROR;
+    }
+    cl->buf = b;
+    cl->next = NULL;
+    *decompressed_chain = cl;
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                  "markdown: rust chain decode succeeded with empty output");
+    return NGX_OK;
+}
+
+static ngx_int_t
+ngx_http_markdown_wrap_chain_decompression_output(
+    ngx_http_request_t *r,
+    FFIChainDecodeResult *result,
+    ngx_chain_t **decompressed_chain)
+{
+    size_t          output_len;
+    u_char         *output_buf;
+    ngx_buf_t      *b;
+    ngx_chain_t    *cl;
+
+    output_len = (size_t) result->output_len;
+    output_buf = ngx_alloc(output_len, r->connection->log);
+    if (output_buf == NULL) {
+        markdown_chain_decode_free(result);
+        return NGX_ERROR;
+    }
+    ngx_memcpy(output_buf, result->output, output_len);
+    markdown_chain_decode_free(result);
+
+    b = ngx_calloc_buf(r->pool);
+    if (b == NULL) {
+        ngx_free(output_buf);
+        return NGX_ERROR;
+    }
+    b->pos = output_buf;
+    b->last = output_buf + output_len;
+    b->memory = 1;
+    b->last_buf = 1;
+
+    cl = ngx_alloc_chain_link(r->pool);
+    if (cl == NULL) {
+        ngx_free(output_buf);
+        return NGX_ERROR;
+    }
+    cl->buf = b;
+    cl->next = NULL;
+    *decompressed_chain = cl;
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                  "markdown: rust chain decode succeeded, output=%uz",
+                  output_len);
+    return NGX_OK;
+}
 #endif /* !NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS */
+
+#ifdef NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS
+static ngx_int_t
+ngx_http_markdown_decompress_without_rust(
+    ngx_http_request_t *r, const ngx_http_markdown_ctx_t *ctx,
+    const ngx_chain_t *compressed_chain, ngx_chain_t **decompressed_chain)
+{
+    if (ctx->decompression.layer_count > 1) {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                      "markdown: multi-layer Content-Encoding requires "
+                      "Rust decompression support");
+        return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+    }
+
+    return ngx_http_markdown_decompress(
+        r, ctx->decompression.type,
+        compressed_chain, decompressed_chain);
+}
+#endif
 
 static ngx_int_t
 ngx_http_markdown_decompress_via_rust(
@@ -1022,10 +1150,8 @@ ngx_http_markdown_decompress_via_rust(
     ngx_chain_t **decompressed_chain)
 {
 #ifdef NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS
-    /* Fallback: use the C decompressor when Rust is unavailable. */
-    return ngx_http_markdown_decompress(
-        r, ctx->decompression.type,
-        compressed_chain, decompressed_chain);
+    return ngx_http_markdown_decompress_without_rust(
+        r, ctx, compressed_chain, decompressed_chain);
 #else
     FFIDecompResult        result;
     uint32_t               ffi_rc;
@@ -1033,6 +1159,77 @@ ngx_http_markdown_decompress_via_rust(
     size_t                 input_size;
     u_char                *input_buf;
     ngx_int_t              rc;
+    ngx_uint_t             ratio;
+
+    ratio = conf->limits.decompression_ratio;
+    if (ratio == NGX_CONF_UNSET_UINT) {
+        ratio = NGX_HTTP_MARKDOWN_LIMITS_DECOMPRESSION_RATIO_DEFAULT;
+    }
+
+    /*
+     * Multi-layer chains (2 or 3 non-identity layers) decode via the
+     * bounded full-buffer chain decoder in reverse application order
+     * (Requirement 12.6).  The cumulative output budget and per-layer
+     * expansion ratio are enforced inside Rust.
+     */
+    if (ctx->decompression.layer_count > 1) {
+        FFIChainDecodeResult  chain_result;
+
+        rc = ngx_http_markdown_decompression_input(
+            r, compressed_chain, &input_buf, &input_size);
+        if (rc != NGX_OK) {
+            return rc;
+        }
+
+        markdown_chain_decode_result_init(&chain_result);
+
+        ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                      "markdown: calling rust multi-layer "
+                      "decode, layers=%ui, input=%uz, "
+                      "budget=%uz",
+                      ctx->decompression.layer_count, input_size,
+                      conf->decompress.max_size);
+
+        ffi_rc = markdown_decode_encoding_chain(
+            (const uint8_t *) input_buf,
+            (uintptr_t) input_size,
+            (const uint8_t *) ctx->decompression.layers,
+            (uint32_t) ctx->decompression.layer_count,
+            (uintptr_t) conf->decompress.max_size,
+            (uint64_t) ratio,
+            &chain_result);
+
+        if (ffi_rc != 0) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                         "markdown: rust multi-layer decode "
+                         "failed, rc=%ud, error_category=%ud",
+                         ffi_rc, chain_result.error_category);
+
+            markdown_chain_decode_free(&chain_result);
+            return ngx_http_markdown_decompression_error(ffi_rc);
+        }
+
+        if (chain_result.output == NULL && chain_result.output_len > 0) {
+            size_t  saved_len;
+
+            saved_len = (size_t) chain_result.output_len;
+            markdown_chain_decode_free(&chain_result);
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                         "markdown: rust multi-layer decode "
+                         "returned NULL output with "
+                         "non-zero length=%uz",
+                         saved_len);
+            return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
+        }
+
+        if (chain_result.output_len == 0) {
+            return ngx_http_markdown_wrap_empty_chain_decompression(
+                r, &chain_result, decompressed_chain);
+        }
+
+        return ngx_http_markdown_wrap_chain_decompression_output(
+            r, &chain_result, decompressed_chain);
+    }
 
     /*
      * Map NGINX compression type to Rust format code:
@@ -1071,6 +1268,7 @@ ngx_http_markdown_decompress_via_rust(
         (uintptr_t) input_size,
         format,
         (uintptr_t) conf->decompress.max_size,
+        (uint64_t) ratio,
         &result);
 
     if (ffi_rc != 0) {
@@ -1130,13 +1328,15 @@ ngx_http_markdown_decompress_via_rust(
  *   2. Invoke the Rust FFI bounded decompressor (or C fallback).
  *   3. Apply the decompressed output back into ctx->buffer.
  *
- * On every failure class the function follows a fail-open strategy:
- * it logs the error, increments the appropriate metrics, and returns
- * the original (still-compressed) content to the downstream filter
- * chain rather than rejecting the request.  This is intentional --
- * the caller (body filter) must not block or abort the request when
- * decompression is unavailable or fails; the content is forwarded
- * as-is so the client can still receive a response.
+ * Failure handling is routed by the error policy:
+ *   - on_error == PASS: fail-open — the function logs the error,
+ *     increments the appropriate metrics, and returns the original
+ *     (still-compressed) content to the downstream filter chain
+ *     rather than rejecting the request; the content is forwarded
+ *     as-is so the client can still receive a response.
+ *   - on_error == REJECT: fail-closed — the function returns the
+ *     the effective configured error status instead of
+ *     forwarding the compressed content.
  *
  * Parameters:
  *   r    - NGINX request (used for pool allocation and logging)
@@ -1182,6 +1382,8 @@ ngx_http_markdown_handle_decompress_result(ngx_http_request_t *r,
      */
     if (decompress_rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total);
+        ngx_http_markdown_record_decompression_failure_budget(
+            ctx->decompression.type);
         NGX_HTTP_MARKDOWN_METRIC_INC(
             perf.decompression_budget_exceeded_total);
         return ngx_http_markdown_handle_decompression_alloc_error(
@@ -1192,8 +1394,30 @@ ngx_http_markdown_handle_decompress_result(ngx_http_request_t *r,
             "decompression budget exceeded");
     }
 
+    /*
+     * Ratio exceeded: a non-identity layer decoded to more than
+     * decompression_ratio times its compressed input.  Same
+     * resource-limit category and policy routing as budget exceeded
+     * (Requirement 12.4/12.10).
+     */
+    if (decompress_rc == NGX_HTTP_MARKDOWN_DECOMP_RATIO_EXCEEDED) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total);
+        ngx_http_markdown_record_decompression_failure_budget(
+            ctx->decompression.type);
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            perf.decompression_budget_exceeded_total);
+        return ngx_http_markdown_handle_decompression_alloc_error(
+            r, ctx, conf,
+            NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT,
+            "markdown: fail-open strategy "
+            "- returning original content after "
+            "decompression ratio exceeded");
+    }
+
     if (decompress_rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.format_error_total);
+        ngx_http_markdown_record_decompression_failure_format(
+            ctx->decompression.type);
         return ngx_http_markdown_handle_decompression_conversion_error(
             r, ctx, conf,
             "markdown: fail-open strategy "
@@ -1204,6 +1428,8 @@ ngx_http_markdown_handle_decompress_result(ngx_http_request_t *r,
     if (decompress_rc == NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT) {
         NGX_HTTP_MARKDOWN_METRIC_INC(
             decompressions.truncated_input_total);
+        ngx_http_markdown_record_decompression_failure_truncated(
+            ctx->decompression.type);
         return ngx_http_markdown_handle_decompression_conversion_error(
             r, ctx, conf,
             "markdown: fail-open strategy "
@@ -1213,6 +1439,8 @@ ngx_http_markdown_handle_decompress_result(ngx_http_request_t *r,
 
     if (decompress_rc == NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.io_error_total);
+        ngx_http_markdown_record_decompression_failure_io(
+            ctx->decompression.type);
         return ngx_http_markdown_handle_decompression_conversion_error(
             r, ctx, conf,
             "markdown: fail-open strategy "
@@ -1247,6 +1475,8 @@ ngx_http_markdown_handle_decompress_result(ngx_http_request_t *r,
             ngx_http_markdown_compression_name(
                 ctx->decompression.type);
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.io_error_total);
+        ngx_http_markdown_record_decompression_failure_io(
+            ctx->decompression.type);
         ngx_log_error(NGX_LOG_ERR,
                      r->connection->log, 0,
                      "markdown: decompression "
@@ -1372,11 +1602,26 @@ ngx_http_markdown_forward_headers(ngx_http_request_t *r, ngx_http_markdown_ctx_t
         return NGX_OK;
     }
 
-    if (ctx->last_modified.has_last_modified_time) {
-        r->headers_out.last_modified_time = ctx->last_modified.source_last_modified_time;
+    if (ctx->lifecycle.last_modified.has_last_modified_time) {
+        r->headers_out.last_modified_time =
+            ctx->lifecycle.last_modified.source_last_modified_time;
     }
 
-    rc = ngx_http_next_header_filter(r);
+    rc = ngx_http_markdown_next_header_filter_with_auth(
+        r, ngx_http_get_module_loc_conf(r,
+            ngx_http_markdown_filter_module));
+    /*
+     * Canonical NGINX model: header-chain NGX_AGAIN means the write filter
+     * queued the header block — the headers are ACCEPTED and the header
+     * chain must not be re-invoked (intermediate filters are not
+     * idempotent).  Publish the delivery latch on NGX_AGAIN too, so a
+     * body-filter re-entry forwards the body without re-entering the
+     * header chain; only definitive errors leave the latch clear.
+     */
+    if (rc == NGX_AGAIN) {
+        ctx->headers_forwarded = 1;
+        return rc;
+    }
     if (rc == NGX_ERROR || rc > NGX_OK) {
         return rc;
     }

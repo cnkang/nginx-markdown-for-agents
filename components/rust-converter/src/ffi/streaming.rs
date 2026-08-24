@@ -97,6 +97,10 @@ fn effective_flush_threshold(raw: u32) -> usize {
 
 /// Configuration options for the streaming converter, passed from C to Rust.
 ///
+/// **Legacy type.** Superseded by `MarkdownOptions`; not consumed by any
+/// exported FFI function in the frozen 0.9.2 ABI. Retained for
+/// layout-stability tests only.
+///
 /// This `#[repr(C)]` struct is the purpose-built configuration interface for
 /// the streaming (incremental) conversion path. C callers populate this struct
 /// and pass a pointer to [`markdown_streaming_new_with_code`] (or a future overload that
@@ -242,25 +246,6 @@ pub struct StreamingOptions {
 
     /// Length in bytes of the `prune_protection_selectors` field.
     pub prune_protection_selector_len: usize,
-
-    /// LLM provider for token estimation.
-    ///
-    /// - `0` = default (4.0 chars/token)
-    /// - `1` = OpenAI GPT
-    /// - `2` = Anthropic Claude
-    /// - `3` = Google Gemini
-    /// - `4` = Meta Llama
-    ///
-    /// Overridden by `chars_per_token_fixed` when that field is non-zero.
-    pub llm_provider: u8,
-
-    /// Explicit chars-per-token ratio (fixed-point: raw = value / 10.0).
-    ///
-    /// When non-zero, overrides both the default 4.0 and the provider-specific
-    /// ratio. Non-zero `u8` values represent raw ratios 0.1-25.5 chars/token;
-    /// decoded values below 1.0 are clamped to the effective minimum 1.0.
-    /// Value `0` means "use default or provider ratio".
-    pub chars_per_token_fixed: u8,
 }
 
 /// Opaque handle wrapping a [`StreamingConverter`] for the C ABI.
@@ -270,12 +255,24 @@ pub struct StreamingConverterHandle {
     estimate_tokens: bool,
 }
 
-fn budget_from_streaming_total(streaming_budget: u64) -> MemoryBudget {
-    if streaming_budget > 0 {
+fn budget_from_streaming_total(streaming_budget: u64, memory_budget: u64) -> MemoryBudget {
+    /* Unified memory budget (conversion_memory) is the documented upper
+     * bound for the whole conversion working set.  When both are set,
+     * the streaming working set must not exceed the conversion_memory
+     * cap even if the operator configured a larger streaming_buffer. */
+    let effective_total = if memory_budget > 0 && streaming_budget > 0 {
+        memory_budget.min(streaming_budget)
+    } else if memory_budget > 0 {
+        memory_budget
+    } else {
+        streaming_budget
+    };
+
+    if effective_total > 0 {
         // Saturate rather than wrap when usize is narrower than u64 (e.g. on
         // 32-bit targets); on 64-bit targets this is an identity conversion.
         // Wrapping here would silently shrink the configured budget.
-        let total = usize::try_from(streaming_budget).unwrap_or(usize::MAX);
+        let total = usize::try_from(effective_total).unwrap_or(usize::MAX);
         MemoryBudget::for_total(total)
     } else {
         MemoryBudget::default()
@@ -293,7 +290,7 @@ fn markdown_streaming_new_impl(
     let opts_ref = unsafe { &*options };
     let decoded = decode_options(opts_ref).map_err(|err| err.code())?;
 
-    let budget = budget_from_streaming_total(decoded.streaming_budget);
+    let budget = budget_from_streaming_total(decoded.streaming_budget, decoded.memory_budget);
 
     let mut converter = StreamingConverter::with_chars_per_token(
         decoded.conversion,
@@ -303,6 +300,9 @@ fn markdown_streaming_new_impl(
     converter.set_content_type(decoded.content_type.map(ToOwned::to_owned));
     if !decoded.timeout.is_zero() {
         converter.set_timeout(decoded.timeout);
+    }
+    if !decoded.parse_timeout.is_zero() {
+        converter.set_parser_timeout(decoded.parse_timeout);
     }
     if decoded.parser_memory_budget > 0 {
         converter.set_parser_budget(decoded.parser_memory_budget);
@@ -714,7 +714,13 @@ pub unsafe extern "C" fn markdown_streaming_safe_finish(
 ///   dereferenced.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn markdown_streaming_output_free(data: *mut u8, len: usize) {
-    if data.is_null() {
+    /* Defensive guard mirrors free_buffer: a zero-length slice with a
+     * non-NULL pointer would otherwise reach Box::from_raw on a
+     * slice_from_raw_parts_mut(data, 0) — if that pointer is not
+     * allocator-owned the free is UB.  The C caller always passes a
+     * valid (data, len) pair, but the guard keeps the defensive
+     * posture consistent with the other FFI free entry points. */
+    if data.is_null() || len == 0 {
         return;
     }
     let _ = panic::catch_unwind(AssertUnwindSafe(|| {
@@ -756,8 +762,6 @@ mod tests {
             prune_protection_selectors: ptr::null(),
             prune_protection_selector_len: 0,
             memory_budget: 0,
-            llm_provider: 0,
-            chars_per_token_fixed: 0,
             parse_timeout_ms: 0,
             parser_memory_budget: 0,
             flush_threshold: 0,
@@ -1177,12 +1181,22 @@ mod tests {
 
     #[test]
     fn test_budget_from_streaming_total_scales_down() {
-        let budget = budget_from_streaming_total(64 * 1024);
+        // With no unified memory budget set, the streaming budget alone
+        // drives the working-set caps.
+        let budget = budget_from_streaming_total(64 * 1024, 0);
         let sum =
             budget.state_stack + budget.output_buffer + budget.charset_sniff + budget.lookahead;
 
         assert_eq!(budget.total, 64 * 1024);
         assert_eq!(sum, budget.total);
+    }
+
+    #[test]
+    fn test_unified_memory_budget_caps_streaming() {
+        // The unified conversion_memory budget must cap the streaming
+        // working set even when streaming_buffer is configured larger.
+        let budget = budget_from_streaming_total(64 * 1024 * 1024, 16 * 1024 * 1024);
+        assert_eq!(budget.total, 16 * 1024 * 1024);
     }
 
     // ================================================================
@@ -1226,16 +1240,15 @@ mod tests {
             offset_of!(StreamingOptions, prune_protection_selector_len),
             80
         );
-        assert_eq!(offset_of!(StreamingOptions, llm_provider), 88);
-        assert_eq!(offset_of!(StreamingOptions, chars_per_token_fixed), 89);
     }
 
     #[test]
     fn test_streaming_options_size() {
         use std::mem::size_of;
 
-        /* 96 bytes: 4+4+8+4+(1*4)+ptr+usize+ptr+usize+ptr+usize+ptr+usize+1+1+padding */
-        assert_eq!(size_of::<StreamingOptions>(), 96);
+        /* 88 bytes after the current FFI freeze removed the temporary
+         * token-estimation override fields. */
+        assert_eq!(size_of::<StreamingOptions>(), 88);
     }
 
     #[test]
@@ -1258,8 +1271,6 @@ mod tests {
         assert_eq!(opts.prune_selector_len, 0);
         assert!(opts.prune_protection_selectors.is_null());
         assert_eq!(opts.prune_protection_selector_len, 0);
-        assert_eq!(opts.llm_provider, 0); /* default */
-        assert_eq!(opts.chars_per_token_fixed, 0); /* use default */
     }
 
     #[test]

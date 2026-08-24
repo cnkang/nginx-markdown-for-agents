@@ -1,0 +1,57 @@
+{
+  "schema_version": "release.scope.sanitizer-support-matrix.v1",
+  "scope_revision": "1",
+  "note": "Unbound scope definition; carries no candidate SHA and is not runtime evidence. The release workflow creates candidate-bound immutable copies.",
+  "rows": [
+    {
+      "row_id": "asan-ubsan",
+      "sanitizer": ["address", "undefined"],
+      "platform": "linux",
+      "compiler": "clang",
+      "blocking": true,
+      "ci": {
+        "workflow": ".github/workflows/nightly-observation.yml",
+        "job": "sanitizer",
+        "matrix_key": "row_id"
+      },
+      "command": "make test-nginx-unit-sanitize-smoke",
+      "policy_reference": "Requirement 18 criterion 6: nightly CI runs the sanitizer smoke suite with ASan, UBSan, and LSan where supported; supported rows are blocking"
+    },
+    {
+      "row_id": "lsan",
+      "sanitizer": ["leak"],
+      "platform": "linux",
+      "compiler": "clang",
+      "blocking": true,
+      "ci": {
+        "workflow": ".github/workflows/nightly-observation.yml",
+        "job": "sanitizer",
+        "matrix_key": "row_id"
+      },
+      "command": "ASAN_OPTIONS=detect_leaks=1 make test-nginx-unit-sanitize-smoke",
+      "policy_reference": "Requirement 18 criterion 6: LSan where supported; supported rows are blocking"
+    },
+    {
+      "row_id": "msan",
+      "sanitizer": ["memory"],
+      "platform": "linux",
+      "compiler": "clang",
+      "blocking": false,
+      "ci": null,
+      "command": null,
+      "skip_reason": "MSan requires a fully instrumented dependency stack (libc, NGINX, and all libraries compiled with -fsanitize=memory); research/best-effort only, not a release blocker.",
+      "policy_reference": "Requirement 14 criterion 5: MSan SHALL be best-effort research only and SHALL NOT block a release"
+    },
+    {
+      "row_id": "asan-macos",
+      "sanitizer": ["address"],
+      "platform": "macos",
+      "compiler": "clang",
+      "blocking": false,
+      "ci": null,
+      "command": null,
+      "skip_reason": "macOS smoke runs are non-canonical development environments; the canonical sanitizer matrix runs on the Linux CI runner.",
+      "policy_reference": "Requirement 14 criterion 5 / canonical-performance-environment"
+    }
+  ]
+}

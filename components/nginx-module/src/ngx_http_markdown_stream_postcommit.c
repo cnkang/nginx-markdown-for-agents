@@ -19,6 +19,9 @@
 #ifdef MARKDOWN_STREAMING_ENABLED
 #include "markdown_converter.h"
 #endif
+/* subrequest: shares the module's inflight lifecycle (release at conversion
+ * terminal).  Allowed includer per the header's own warning comment. */
+#include "ngx_http_markdown_inflight_impl.h"
 
 
 /* Function prototypes */
@@ -36,6 +39,28 @@ ngx_http_markdown_stream_postcommit_send_closing(
 static ngx_int_t
 ngx_http_markdown_stream_postcommit_finish_via_rust(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx);
+
+/* Postcommit metric helpers are defined in
+ * ngx_http_markdown_postcommit_metrics_impl.h, included by
+ * ngx_http_markdown_filter_module.c.  Forward-declared here so this
+ * translation unit does not rely on implicit declarations under
+ * strict C99 (-Wimplicit-function-declaration).  The definitions are
+ * compiled only when MARKDOWN_STREAMING_ENABLED is defined, so the
+ * prototypes share the same guard. */
+void
+ngx_http_markdown_metrics_record_postcommit_pending(size_t bytes);
+
+void
+ngx_http_markdown_metrics_record_postcommit_copied_delivery(size_t bytes);
+
+void
+ngx_http_markdown_metrics_record_postcommit_abort(void);
+
+void
+ngx_http_markdown_metrics_record_postcommit_safe_finish(void);
+
+void
+ngx_http_markdown_metrics_record_terminal_abort(void);
 #endif
 
 static ngx_flag_t
@@ -91,15 +116,21 @@ ngx_http_markdown_stream_postcommit_safe_finish(
            != NGX_HTTP_MD_STATE_POST_COMMIT_SAFE_FINISH)
     {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown postcommit safe_finish: "
+                      "markdown: postcommit safe_finish: "
                       "invalid state %ui, expected COMMITTED "
                       "or POST_COMMIT_SAFE_FINISH",
                       (ngx_uint_t) ctx->stream_sm.state);
         return NGX_ERROR;
     }
 
+#ifdef MARKDOWN_STREAMING_ENABLED
+    if (ctx->stream_sm.state == NGX_HTTP_MD_STATE_COMMITTED) {
+        ngx_http_markdown_metrics_record_postcommit_safe_finish();
+    }
+#endif
+
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "markdown postcommit safe_finish: "
+                   "markdown: postcommit safe_finish: "
                    "initiating graceful close");
 
     /* Transition to POST_COMMIT_SAFE_FINISH */
@@ -120,13 +151,13 @@ ngx_http_markdown_stream_postcommit_safe_finish(
         && !ctx->streaming.completion.failure_recorded)
     {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                      "markdown postcommit safe_finish: "
+                      "markdown: postcommit safe_finish: "
                       "no Rust handle in COMMITTED state "
                       "(possible logic error), "
                       "falling back to empty terminal");
     } else {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                       "markdown postcommit safe_finish: "
+                       "markdown: postcommit safe_finish: "
                        "no Rust handle (legitimate, "
                        "handle already consumed), "
                        "sending empty terminal");
@@ -151,7 +182,7 @@ ngx_http_markdown_stream_postcommit_safe_finish(
         "safe_finish", NGX_HTTP_MD_REASON_POST_COMMIT_ERROR);
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "markdown postcommit safe_finish: "
+                   "markdown: postcommit safe_finish: "
                    "response closed gracefully");
 
     return NGX_OK;
@@ -191,7 +222,7 @@ ngx_http_markdown_stream_postcommit_finish_via_rust(
 
     if (finish_rc == POST_COMMIT_ABORT) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                      "markdown postcommit safe_finish: "
+                      "markdown: postcommit safe_finish: "
                       "Rust could not safely close structures, "
                       "falling through to abort");
         return NGX_ERROR;
@@ -199,7 +230,7 @@ ngx_http_markdown_stream_postcommit_finish_via_rust(
 
     if (finish_rc != POST_COMMIT_SAFE_FINISH) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                      "markdown postcommit safe_finish: "
+                      "markdown: postcommit safe_finish: "
                       "unexpected return code %ui from Rust, "
                       "falling through to abort",
                       (ngx_uint_t) finish_rc);
@@ -223,7 +254,7 @@ ngx_http_markdown_stream_postcommit_finish_via_rust(
         }
 
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                       "markdown postcommit safe_finish: "
+                       "markdown: postcommit safe_finish: "
                        "sent %uz closing bytes", close_len);
         return NGX_OK;
     }
@@ -247,7 +278,7 @@ ngx_http_markdown_stream_postcommit_finish_via_rust(
     }
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "markdown postcommit safe_finish: "
+                   "markdown: postcommit safe_finish: "
                    "no closing bytes required");
     return NGX_OK;
 }
@@ -277,7 +308,10 @@ ngx_http_markdown_stream_postcommit_abort(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx)
 {
-    ngx_int_t  rc;
+    ngx_int_t   rc;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    ngx_flag_t  terminal_already_sent;
+#endif
 
     if (r == NULL || ctx == NULL) {
         return NGX_ERROR;
@@ -295,14 +329,14 @@ ngx_http_markdown_stream_postcommit_abort(
            != NGX_HTTP_MD_STATE_POST_COMMIT_ABORT)
     {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown postcommit abort: "
+                      "markdown: postcommit abort: "
                       "invalid state %ui, expected post-commit",
                       (ngx_uint_t) ctx->stream_sm.state);
         return NGX_ERROR;
     }
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "markdown postcommit abort: "
+                   "markdown: postcommit abort: "
                    "initiating protocol-safe abort");
 
 #ifdef MARKDOWN_STREAMING_ENABLED
@@ -316,14 +350,12 @@ ngx_http_markdown_stream_postcommit_abort(
          *   1. Abort metric already recorded (independent latch)
          *   2. Terminal output already delivered for this request type
          *
-         * The latch is independent of stream_sm.state because callers
-         * (stream_on_error) may pre-transition the state to
+         * The latch is independent of stream_sm.state because callers in
+         * the post-commit error path may pre-transition the state to
          * POST_COMMIT_ABORT before invoking this function.  Using
          * state as the guard would cause the first real abort to be
          * missed (Rule 23: delivery ≠ decision counters).
          */
-        ngx_flag_t  terminal_already_sent;
-
         terminal_already_sent = (r == r->main)
             ? ctx->streaming.main_terminal_sent
             : ctx->streaming.subrequest_terminal_sent;
@@ -350,16 +382,33 @@ ngx_http_markdown_stream_postcommit_abort(
     rc = ngx_http_markdown_stream_postcommit_send_terminal(r, ctx);
     rc = ngx_http_markdown_stream_postcommit_handle_send_result(
         r, rc, "abort");
+#ifdef MARKDOWN_STREAMING_ENABLED
+    if (rc == NGX_AGAIN && !terminal_already_sent) {
+        ctx->streaming.pending_meta.pending_abort_terminal = 1;
+    }
+#endif
     if (rc != NGX_OK && rc != NGX_DONE) {
         return rc;
     }
+
+    /* Record terminal abort outcome (delivery confirmed).
+     * One-shot: the postcommit_abort_recorded latch already prevents
+     * a second attempt metric; this latch prevents a second outcome. */
+#ifdef MARKDOWN_STREAMING_ENABLED
+    if (!terminal_already_sent
+        && !ctx->streaming.completion.terminal_aborted_recorded)
+    {
+        ngx_http_markdown_metrics_record_terminal_abort();
+        ctx->streaming.completion.terminal_aborted_recorded = 1;
+    }
+#endif
 
     /* Log the abort event */
     ngx_http_markdown_stream_postcommit_log(r, ctx,
         "abort", NGX_HTTP_MD_REASON_POST_COMMIT_ERROR);
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "markdown postcommit abort: "
+                   "markdown: postcommit abort: "
                    "response terminated");
 
     return NGX_OK;
@@ -373,8 +422,7 @@ ngx_http_markdown_stream_postcommit_abort(
  * HTML content signatures are present in the output chain.
  *
  * Current implementation validates state preconditions and performs
- * a basic scan for HTML doctype/tag signatures.  Detailed HTML
- * detection will be enhanced when the body filter is wired.
+ * a basic scan for HTML doctype/tag signatures.
  *
  * Returns:
  *   NGX_OK    - Guard passes, output is safe to send
@@ -443,7 +491,7 @@ ngx_http_markdown_stream_postcommit_guard(
                 buf->pos, len))
         {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                          "markdown postcommit guard: "
+                          "markdown: postcommit guard: "
                           "HTML signature detected post-commit");
             return NGX_ERROR;
         }
@@ -475,7 +523,7 @@ ngx_http_markdown_stream_postcommit_log(
     }
 
     ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                  "markdown stream: "
+                  "markdown: stream: "
                   "phase=postcommit action=%s committed=1 "
                   "reason=%ui state=%ui",
                   action,
@@ -490,9 +538,11 @@ ngx_http_markdown_stream_postcommit_log(
  * bookkeeping shared by both the empty-terminal and closing-bytes paths.
  *
  * The caller is responsible for allocating `b` from r->pool and setting
- * its content/flags (only `b->last_buf` is read here to decide whether
- * `main_terminal_sent` may be latched, per Rule 47: the latch is set only
- * after a successful downstream return, never on NGX_AGAIN).
+ * its content/flags.  Only `b->last_buf` and `b->last_in_chain` are read
+ * here: `last_buf` decides whether `main_terminal_sent` may be latched
+ * and `last_in_chain` whether `subrequest_terminal_sent` may be latched
+ * (per Rule 47, latches are set only after a successful downstream
+ * return, never on NGX_AGAIN).
  *
  * Parameters:
  *   r   - current HTTP request
@@ -515,14 +565,15 @@ ngx_http_markdown_stream_postcommit_capture_pending(
     ngx_flag_t has_data,
     size_t output_bytes)
 {
-    ctx->streaming.pending_output = out;
+    ngx_http_markdown_pending_output_set(
+        &ctx->streaming.pending_output, out);
     ctx->streaming.pending_meta.has_data = has_data;
     ctx->streaming.pending_meta.bytes = output_bytes;
-    ctx->streaming.pending_meta.zero_copy = 0;
     ctx->streaming.pending_meta.main_terminal =
         (r == r->main && out->buf->last_buf);
     ctx->streaming.pending_meta.subrequest_terminal =
         (r != r->main && out->buf->last_in_chain);
+    ctx->streaming.pending_meta.pending_abort_terminal = 0;
     ngx_http_markdown_metrics_record_postcommit_pending(output_bytes);
     r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
 }
@@ -540,9 +591,15 @@ ngx_http_markdown_stream_postcommit_latch_terminal(
     }
     if (r == r->main && buf->last_buf) {
         ctx->streaming.main_terminal_sent = 1;
+        /* Main-request streaming conversion terminal delivered — release the
+         * inflight slot now; pool cleanup remains the idempotent backstop. */
+        ngx_http_markdown_inflight_release(ctx);
     }
     if (r != r->main && buf->last_in_chain) {
         ctx->streaming.subrequest_terminal_sent = 1;
+        /* subrequest: subrequest streaming terminal delivered — release the
+         * inflight slot (idempotent). */
+        ngx_http_markdown_inflight_release(ctx);
     }
 }
 #endif
@@ -568,7 +625,7 @@ ngx_http_markdown_stream_postcommit_send_chain(
 
     if (ctx->streaming.pending_output != NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown postcommit: "
+                      "markdown: postcommit: "
                       "pending output re-entry detected");
         ctx->streaming.classify.last_send_failure_origin =
             NGX_HTTP_MD_SEND_ORIGIN_INVARIANT;
@@ -604,10 +661,12 @@ ngx_http_markdown_stream_postcommit_send_chain(
 #endif
     }
 
+#ifdef MARKDOWN_STREAMING_ENABLED
     if ((rc == NGX_OK || rc == NGX_DONE) && pending_output_bytes > 0) {
         ngx_http_markdown_metrics_record_postcommit_copied_delivery(
             pending_output_bytes);
     }
+#endif
 
     /* Rule 47: only latch terminal-delivered state after a successful
      * downstream return, never on NGX_AGAIN.
@@ -693,8 +752,8 @@ ngx_http_markdown_stream_postcommit_send_terminal(
     ngx_buf_t   *b;
     ngx_int_t    acquired;
 
-    /* send_terminal is the only path allowed when ctx is NULL: guard
-     * before acquiring so the acquire helper never sees a NULL ctx. */
+    /* send_terminal is the only caller that may receive a NULL ctx:
+     * guard here so the acquire helper never sees a NULL ctx. */
     if (ctx == NULL) {
         return NGX_ERROR;
     }
@@ -789,14 +848,14 @@ ngx_http_markdown_stream_postcommit_handle_send_result(
 {
     if (rc == NGX_AGAIN) {
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                       "markdown postcommit %s: downstream backpressure",
+                       "markdown: postcommit %s: downstream backpressure",
                        action);
         return NGX_AGAIN;
     }
 
     if (rc != NGX_OK && rc != NGX_DONE) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown postcommit %s: failed to send terminal chain",
+                      "markdown: postcommit %s: failed to send terminal chain",
                       action);
         return NGX_ERROR;
     }

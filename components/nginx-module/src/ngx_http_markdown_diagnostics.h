@@ -52,10 +52,9 @@ struct ngx_cycle_s;
  * function (or these constants) to compute expected buffer sizes.
  *
  * NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE:
- *   Covers the fixed-size JSON envelope: config_snapshot (dynconf
- *   snapshot serialization), metrics_snapshot (6 counters), dynconf_state
- *   (4 fields), streaming_config (7 fields), streaming_metrics
- *   (8 counters), section keys, braces, commas, and whitespace.
+ *   Covers the fixed-size JSON envelope: schema_version, product_version,
+ *   worker, build, configuration, runtime, recent_decisions, section keys,
+ *   braces, commas, and whitespace.
  *   Must be >= the maximum rendered size of all non-decision sections
  *   combined.
  *
@@ -68,19 +67,31 @@ struct ngx_cycle_s;
  * must be updated.  Truncation is detected at runtime by build_json and
  * returns NGX_ERROR (500) rather than serving incomplete JSON.
  */
-#define NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE    34392
+#define NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE    34736
 #define NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE 192
+
+/* Dynconf fields reported when a candidate key is masked by static config. */
+#define NGX_HTTP_MARKDOWN_DIAG_MASK_FILTER            (1U << 0)
+#define NGX_HTTP_MARKDOWN_DIAG_MASK_PRUNE_NOISE       (1U << 1)
+#define NGX_HTTP_MARKDOWN_DIAG_MASK_LOG_VERBOSITY     (1U << 2)
+#define NGX_HTTP_MARKDOWN_DIAG_MASK_ERROR_POLICY      (1U << 3)
+#define NGX_HTTP_MARKDOWN_DIAG_MASK_STREAMING_BUFFER  (1U << 4)
 
 
 /*
  * Single decision record stored in the ring buffer.
  *
- * Captures the outcome of one request's conversion decision
- * for diagnostic introspection.
+ * Captures the classified outcome of one request's conversion decision
+ * for diagnostic introspection. Classification is stored at record time so
+ * JSON rendering does not reconstruct it from the reason code.
  */
 typedef struct {
-    ngx_msec_t    timestamp;       /* Decision time (monotonic ms) */
+    /* Decision time (wall-clock seconds, cast to ngx_msec_t). */
+    ngx_msec_t    timestamp;
+    const char   *outcome;         /* converted/skipped/failed/aborted */
+    const char   *stage;           /* decision stage */
     ngx_int_t     reason_code;     /* Reason code enum value */
+    const char   *error_origin;    /* bounded taxonomy value or NULL */
     ngx_msec_t    duration_ms;     /* Processing duration in ms */
 } ngx_http_markdown_diag_decision_t;
 
@@ -151,24 +162,50 @@ void ngx_http_markdown_diagnostics_record(
     ngx_int_t reason_code,
     ngx_msec_t duration_ms);
 
+/* Record a decision with its already-classified diagnostic dimensions. */
+void ngx_http_markdown_diagnostics_record_classified(
+    ngx_http_markdown_diag_state_t *state,
+    const char *outcome,
+    const char *stage,
+    ngx_int_t reason_code,
+    const char *error_origin,
+    ngx_msec_t duration_ms);
+
+/* Record a length-bounded reason with explicit error provenance. */
+void ngx_http_markdown_diagnostics_record_reason(
+    ngx_http_markdown_diag_state_t *state,
+    const u_char *reason,
+    size_t reason_len,
+    const char *error_category,
+    ngx_msec_t duration_ms);
+
+/*
+ * Record a length-bounded reason with explicit stage and error provenance.
+ *
+ * error_category is retained only for ABI stability: the emitted
+ * error_origin value is derived from the resolved reason code, not from
+ * this parameter.
+ */
+void ngx_http_markdown_diagnostics_record_reason_at_stage(
+    ngx_http_markdown_diag_state_t *state,
+    const u_char *reason,
+    size_t reason_len,
+    const char *stage,
+    const char *error_category,
+    ngx_msec_t duration_ms);
+
 
 /*
  * HTTP content handler for the diagnostics endpoint.
  *
- * Responds with a JSON document containing:
- *   - config_snapshot: active directive-shaped location values; unified
- *     Config V2 limits are represented under effective_config
- *   - recent_decisions: ring buffer contents (newest first)
- *   - metrics_snapshot: current metrics counters
- *   - dynconf_state: dynamic configuration watcher state
- *   - streaming_config: streaming policy configuration
+ * Responds with the Diagnostics Schema v2 JSON document containing the
+ * worker-local worker/runtime state, build identity, configuration snapshot,
+ * and recent decision ring buffer.
  *
- * Access control: by default (no markdown_diagnostics_allow directives),
- * only loopback clients (127.0.0.1 or ::1) are permitted.  When one or more
- * markdown_diagnostics_allow CIDR entries are configured, access is granted
- * to clients whose address matches the allow-list; non-matching clients
- * receive NGX_HTTP_FORBIDDEN.  Requests with no/unknown peer address are
- * denied.  Only GET and HEAD are accepted.
+ * Access control: the handler enforces a loopback-only peer boundary before
+ * rendering. Native NGINX allow/deny/auth_basic/satisfy directives in the
+ * location block may restrict that boundary further. Requests with
+ * no/unknown peer address are denied. Only GET and HEAD are accepted.
  *
  * Parameters:
  *   r - HTTP request
@@ -225,15 +262,19 @@ ngx_int_t ngx_http_markdown_diagnostics_recording_active(void);
 
 /*
  * Map a decision-path reason code string to its canonical numeric
- * ReasonCode discriminant (decision/reason_code.rs is the source of truth).
+ * ReasonCode discriminant (reason_registry.toml is the source; the generated
+ * Rust enum and C metadata provide its projections).
  *
  * Parameters:
- *   reason - NUL-terminated reason code string (may be NULL)
+ *   reason - reason code bytes (may be NULL when reason_len is zero)
+ *   reason_len - exact byte length; the input need not be NUL-terminated
  *
  * Returns:
- *   Canonical discriminant (0..24), or -1 for NULL/unknown strings.
+ *   Canonical discriminant (reason_registry.toml range), or -1 for
+ *   NULL/unknown strings.
  */
-ngx_int_t ngx_http_markdown_diagnostics_reason_to_code(const char *reason);
+ngx_int_t ngx_http_markdown_diagnostics_reason_to_code(
+    const u_char *reason, size_t reason_len);
 
 
 /*
@@ -276,9 +317,13 @@ typedef struct {
     ngx_atomic_uint_t  failopen_total;
     ngx_atomic_uint_t  overload_total;
     ngx_atomic_uint_t  backpressure_total;
+    ngx_atomic_uint_t  inflight;
+    ngx_atomic_uint_t  pending_output;
+    ngx_atomic_uint_t  streaming_requests_total;
+    ngx_atomic_uint_t  precommit_failopen_total;
+    ngx_atomic_uint_t  copied_output_total;
 #ifdef MARKDOWN_STREAMING_ENABLED
     /* Streaming metrics (streaming observability) */
-    ngx_atomic_uint_t  streaming_requests_total;
     ngx_atomic_uint_t  streaming_succeeded_total;
     ngx_atomic_uint_t  streaming_failed_total;
     ngx_atomic_uint_t  streaming_fallback_total;
@@ -311,11 +356,28 @@ void ngx_http_markdown_diagnostics_collect_metrics(
  * response.  Populated by ngx_http_markdown_diagnostics_get_dynconf_state().
  */
 typedef struct {
+#define NGX_HTTP_MARKDOWN_DIAG_DIGEST_LEN  72
+    ngx_uint_t  state;
+    ngx_uint_t  generation;
+    u_char      source_digest[NGX_HTTP_MARKDOWN_DIAG_DIGEST_LEN];
+    u_char      active_digest[NGX_HTTP_MARKDOWN_DIAG_DIGEST_LEN];
+    u_char      lkg_digest[NGX_HTTP_MARKDOWN_DIAG_DIGEST_LEN];
+    time_t      last_success;
+    ngx_flag_t  has_last_success;
+    u_char      last_error[513];
+    size_t      last_error_len;
     time_t      active_mtime;
     ngx_uint_t  config_version;
     time_t      last_known_good_mtime;
     ngx_flag_t  lkg_valid;
+    ngx_uint_t  masked_fields;
 } ngx_http_markdown_diag_dynconf_t;
+
+#define NGX_HTTP_MARKDOWN_DIAG_DYNCONF_DISABLED          0
+#define NGX_HTTP_MARKDOWN_DIAG_DYNCONF_NO_FILE           1
+#define NGX_HTTP_MARKDOWN_DIAG_DYNCONF_INVALID_NO_LKG    2
+#define NGX_HTTP_MARKDOWN_DIAG_DYNCONF_ACTIVE            3
+#define NGX_HTTP_MARKDOWN_DIAG_DYNCONF_LKG_PRESERVED     4
 
 
 /*
@@ -331,6 +393,31 @@ typedef struct {
 void ngx_http_markdown_diagnostics_get_dynconf_state(
     ngx_http_markdown_diag_dynconf_t *out);
 
+typedef struct {
+    ngx_flag_t  filter;
+    ngx_flag_t  prune_noise;
+    ngx_uint_t  log_verbosity;
+    ngx_uint_t  error_policy;
+    ngx_uint_t  error_status;
+    size_t      streaming_buffer;
+    ngx_uint_t  filter_source;
+    ngx_uint_t  prune_noise_source;
+    ngx_uint_t  log_verbosity_source;
+    ngx_uint_t  error_policy_source;
+    ngx_uint_t  streaming_buffer_source;
+} ngx_http_markdown_diag_effective_t;
+
+void ngx_http_markdown_diagnostics_get_effective(
+    const void *conf,
+    ngx_http_markdown_diag_effective_t *out);
+
+/*
+ * Compute the location-specific SHA-256 over static_config_manifest_v1.
+ * The request pointer lets the production accessor read the merged location
+ * and http-level configuration without exposing NGINX internals here.
+ */
+ngx_int_t ngx_http_markdown_diagnostics_get_static_digest(
+    const void *request, ngx_pool_t *pool, u_char *out, size_t out_len);
 
 /*
  * Decision path component string constants.
@@ -371,6 +458,8 @@ typedef struct {
     const char   *conditional_result; /* NOT_MODIFIED/PROCEED/SKIPPED */
     const char   *conversion_status;  /* SUCCESS/FAILED/SKIPPED */
     const char   *reason_code;        /* Final reason code string */
+    const char   *stage;              /* Explicit terminal decision stage */
+    const char   *error_category;     /* Explicit conversion/resource/system */
     ngx_msec_t    duration_ms;        /* Processing duration in ms */
 } ngx_http_markdown_decision_path_t;
 

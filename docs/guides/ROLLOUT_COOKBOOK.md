@@ -39,12 +39,12 @@ This cookbook walks you through enabling the Markdown filter module in a "start 
 
 The recommended approach:
 
-1. Pick a single, low-traffic, static-content path (e.g., `/docs` or `/help`).
+1. Pick a single, low-traffic, static-content path (for example `/docs` or `/help`).
 2. Enable on an internal or staging host first.
 3. Observe for at least one full traffic cycle before expanding.
 4. Expand gradually — more paths, then more hosts.
 
-All patterns in this cookbook use existing NGINX configuration primitives (`map`, `geo`, `split_clients`, `location` blocks) combined with the module's `markdown_filter $variable` capability. No new directives are required.
+All patterns in this cookbook use existing NGINX configuration primitives (`map`, `geo`, `split_clients`, `location` blocks) combined with the module's `markdown_filter $variable` capability. You need no new directives.
 
 ### Target Audience
 
@@ -78,7 +78,8 @@ sudo tail -20 /var/log/nginx/error.log | grep markdown
 Confirm the metrics endpoint responds:
 
 ```bash
-curl -s -H "Accept: text/plain" http://localhost/markdown-metrics | head -5
+curl -s -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics | head -5
 ```
 
 ### Record Baseline Metrics
@@ -86,8 +87,8 @@ curl -s -H "Accept: text/plain" http://localhost/markdown-metrics | head -5
 Capture current metrics before enabling conversion:
 
 ```bash
-curl -s -H "Accept: application/json" \
-  http://localhost/markdown-metrics > /tmp/baseline-metrics.json
+curl -s -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics > /tmp/baseline-metrics.prom
 ```
 
 ### Back Up Configuration
@@ -130,8 +131,8 @@ http {
     markdown_error_policy pass;
     markdown_accept strict;
     markdown_log_verbosity info;
-    markdown_limits memory=10m;
-    markdown_limits timeout=5s;
+    markdown_limits conversion_memory=10m;
+    markdown_limits conversion_timeout=5s parser_timeout=5s;
 
     server {
         listen 80;
@@ -161,8 +162,9 @@ Wait at least 30 minutes, then verify:
 
 ```bash
 # Check for conversion activity
-curl -s -H "Accept: text/plain" http://localhost/markdown-metrics | \
-  grep -E "conversions_(succeeded|failed|bypassed)"
+curl -s -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics | \
+  grep -E "nginx_markdown_(requests_total|conversion_attempts_total|conversion_deliveries_total)"
 
 # Check decision log entries
 grep "markdown decision:" /var/log/nginx/error.log | tail -10
@@ -180,8 +182,8 @@ curl -sD - -o /dev/null \
 
 #### Safe to Continue
 
-- Conversion success rate > 95% (few or no `failed_open` / `failed_closed` entries)
-- No `FAIL_SYSTEM` category codes in logs
+- Conversion success rate > 95% (few or no `failed_open` / `failed_closed` request outcomes)
+- No decision-log failure categories (`ffi_panic`, `memory_budget_exceeded`, `timeout`, or `conversion_error`). Inspect the `category=` field in decision-log entries
 - Conversion latency within the configured `markdown_limits`
 - No upstream error rate increase
 - No `not_eligible` reason codes for requests you expect to convert
@@ -189,7 +191,7 @@ curl -sD - -o /dev/null \
 #### Stop and Investigate
 
 - Sudden increase in `failed_open` or `failed_closed` counts
-- Any `FAIL_SYSTEM` category codes
+- Any `ffi_panic`, `memory_budget_exceeded`, `timeout`, or `conversion_error` reason codes
 - Conversion latency exceeding `markdown_limits`
 - Upstream error rate increase correlated with module enablement
 - Unexpected `Content-Type` in converted responses
@@ -208,8 +210,8 @@ http {
     markdown_error_policy pass;
     markdown_accept strict;
     markdown_log_verbosity info;
-    markdown_limits memory=10m;
-    markdown_limits timeout=5s;
+    markdown_limits conversion_memory=10m;
+    markdown_limits conversion_timeout=5s parser_timeout=5s;
 
     server {
         listen 80;
@@ -254,8 +256,9 @@ Wait at least 1 hour, then verify:
 
 ```bash
 # Check overall conversion metrics
-curl -s -H "Accept: application/json" \
-  http://localhost/markdown-metrics
+curl -s -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics | \
+  grep -E "nginx_markdown_(requests_total|conversion_attempts_total|conversion_deliveries_total)"
 
 # Check reason code distribution
 grep "markdown decision:" /var/log/nginx/error.log | \
@@ -271,7 +274,7 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 
 - Same criteria as Stage 1, applied across all enabled paths
 - No path-specific failure patterns (one path failing more than others)
-- Stable or decreasing `conversions_failed` count over the observation period
+- Stable or decreasing `failed_open` / `failed_closed` counts over the observation period
 
 #### Stop and Investigate
 
@@ -293,8 +296,8 @@ http {
     markdown_error_policy pass;
     markdown_accept strict;
     markdown_log_verbosity info;
-    markdown_limits memory=10m;
-    markdown_limits timeout=5s;
+    markdown_limits conversion_memory=10m;
+    markdown_limits conversion_timeout=5s parser_timeout=5s;
 
     # Staging server (already enabled from Stage 2)
     server {
@@ -350,8 +353,9 @@ Wait at least 24 hours to cover a full traffic cycle, then verify:
 
 ```bash
 # Check production conversion metrics
-curl -s -H "Accept: text/plain" http://localhost/markdown-metrics | \
-  grep -E "conversions_(succeeded|failed|bypassed)"
+curl -s -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics | \
+  grep -E "nginx_markdown_(requests_total|conversion_attempts_total|conversion_deliveries_total)"
 
 # Check for failure reason codes in the last 24 hours
 grep "markdown decision:" /var/log/nginx/error.log | \
@@ -361,27 +365,17 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 grep "markdown decision:" /var/log/nginx/error.log | \
   grep -oP 'reason=\K[a-z_]+' | sort | uniq -c
 
-# Verify conversion latency is within bounds
-curl -s -H "Accept: application/json" \
+# Verify conversion latency samples are present; use histogram_quantile in PromQL
+curl -s -H "Accept: text/plain; version=0.0.4" \
   http://localhost/markdown-metrics | \
-  python3 -c "
-import sys, json
-m = json.load(sys.stdin)
-b = m.get('conversion_latency_buckets', {})
-total = sum(b.values()) if b else 0
-if total > 0:
-    for k, v in b.items():
-        print(f'{k}: {v} ({v*100//total}%)')
-else:
-    print('No conversions recorded yet')
-"
+  grep 'nginx_markdown_conversion_duration_seconds_bucket'
 ```
 
 #### Safe to Continue
 
 - All Stage 1 criteria hold over a full 24-hour period
 - No increase in `failed_open` or `failed_closed` counts relative to conversion volume
-- No `FAIL_SYSTEM` category codes
+- No `ffi_panic`, `memory_budget_exceeded`, `timeout`, or `conversion_error` reason codes
 - Conversion latency within configured `markdown_limits`
 - Stable or decreasing failure count over the 24-hour observation period
 - No upstream error rate increase correlated with module enablement
@@ -416,8 +410,8 @@ http {
     markdown_error_policy pass;
     markdown_accept strict;
     markdown_log_verbosity info;
-    markdown_limits memory=10m;
-    markdown_limits timeout=5s;
+    markdown_limits conversion_memory=10m;
+    markdown_limits conversion_timeout=5s parser_timeout=5s;
 
     server {
         listen 80;
@@ -454,7 +448,7 @@ Wait at least 24 hours per expansion step, then verify:
 
 ```bash
 # Full metrics snapshot
-curl -s -H "Accept: application/json" \
+curl -s -H "Accept: text/plain; version=0.0.4" \
   http://localhost/markdown-metrics
 
 # Reason code distribution
@@ -570,7 +564,7 @@ http {
 }
 ```
 
-Start with a single low-traffic static-content path (e.g., `/docs` or `/help`) before expanding the `map` to broader patterns.
+Start with a single low-traffic static-content path (for example `/docs` or `/help`) before expanding the `map` to broader patterns.
 
 ---
 
@@ -674,7 +668,7 @@ http {
 
 Keep `markdown_accept strict` (the default) during initial rollout. With `strict`, only explicit `text/markdown` in the Accept header triggers conversion. Clients sending `Accept: */*` or `Accept: text/*` receive HTML unchanged.
 
-If you later want wildcard Accept values (e.g., `text/*`) to trigger conversion, set `markdown_accept wildcard` and expand the `map`:
+If you later want wildcard Accept values (for example `text/*`) to trigger conversion, set `markdown_accept wildcard` and expand the `map`:
 
 ```nginx
     map $http_accept $markdown_by_accept {
@@ -699,7 +693,7 @@ If you later want wildcard Accept values (e.g., `text/*`) to trigger conversion,
 
 ### Bot / User-Agent-Based Enablement
 
-Enable conversion for specific AI bots or crawlers identified by User-Agent. Combine UA detection with an Accept header override so bots that do not send `Accept: text/markdown` still receive Markdown.
+Enable conversion for specific AI bots or crawlers identified by User-Agent. Combine UA detection with the module's `markdown_accept force` policy so bots that do not send `Accept: text/markdown` still receive Markdown.
 
 #### Configuration
 
@@ -713,22 +707,7 @@ http {
         "~*Googlebot"   on;
     }
 
-    # Override Accept header for detected bots
-    map $http_user_agent $bot_accept_override {
-        default         "";
-        "~*ClaudeBot"   "text/markdown, text/html;q=0.9";
-        "~*GPTBot"      "text/markdown, text/html;q=0.9";
-        "~*Googlebot"   "text/markdown, text/html;q=0.9";
-    }
-
-    # Use the override when present, otherwise keep original Accept
-    map $bot_accept_override $final_accept {
-        ""      $http_accept;
-        default $bot_accept_override;
-    }
-
     markdown_error_policy pass;
-    markdown_accept strict;
 
     server {
         listen 80;
@@ -736,8 +715,7 @@ http {
 
         location / {
             markdown_filter $is_ai_bot;
-            markdown_accept wildcard;
-            proxy_set_header Accept $final_accept;
+            markdown_accept force;
             proxy_pass http://backend;
         }
 
@@ -751,7 +729,7 @@ http {
 
 UA-based targeting depends on clients sending accurate User-Agent strings. It is not a security boundary — any client can spoof a User-Agent. Use this pattern for convenience, not access control.
 
-Note: `proxy_set_header Accept` only modifies the header sent upstream to the backend — it does not change the incoming request header that the module evaluates. The `markdown_accept wildcard` directive is required here so that bots whose original `Accept` header does not include `text/markdown` are still eligible for conversion when the filter is enabled by `$is_ai_bot`.
+Note: the module evaluates the incoming request header itself. `proxy_set_header Accept` only modifies the header sent upstream. The `markdown_accept force` directive in this pattern is therefore the part that lets matching bots through when their original `Accept` header does not include `text/markdown`.
 
 #### Verification
 
@@ -849,7 +827,7 @@ http {
 }
 ```
 
-Adjust the percentage as confidence grows (e.g., 5% → 25% → 50% → 100%). Each increase should be followed by a 24-hour observation period.
+Adjust the percentage as confidence grows (for example 5% → 25% → 50% → 100%). Follow each increase with a 24-hour observation period. Observe metrics between each step.
 
 Trade-offs: broader coverage than internal-only, provides statistical sampling of real traffic. However, the same client may see different behavior across requests (conversion is not sticky per client). Use `$remote_addr` for rough client-level consistency, or `$request_id` for per-request randomization.
 
@@ -938,7 +916,7 @@ These page types share common traits that make them ideal first candidates:
 - Content-Type is consistently `text/html`
 - Response sizes are within typical `markdown_limits` limits
 
-Once these paths are stable (conversion success rate > 95%, no `FAIL_SYSTEM` codes, latency within `markdown_limits`), expand to additional content paths following the [Rollout Stages](#rollout-stages) sequence.
+Once these paths are stable (conversion success rate > 95%, latency within `markdown_limits`), expand to additional content paths. Follow the [Rollout Stages](#rollout-stages) sequence for each expansion.
 
 ### Excluding Page Types from Conversion Scope
 
@@ -946,7 +924,7 @@ Use `location` blocks or `map` directives to keep risky page types out of your c
 
 #### Using Location Blocks for Explicit Exclusions
 
-The most direct approach — set `markdown_filter off` in `location` blocks for paths you want to exclude, and enable conversion only in specific content paths:
+The most direct approach: set `markdown_filter off` in `location` blocks for paths you want to exclude. Then enable conversion only in specific content paths:
 
 ```nginx
 http {
@@ -1066,9 +1044,9 @@ http {
 }
 ```
 
-The `map` approach is easier to maintain as your rollout scope grows — add or remove paths in the `map` block without creating new `location` blocks. Combine it with explicit `location` overrides for critical exclusions (like `/api`) as a safety net.
+The `map` approach is easier to maintain as your rollout scope grows. You add or remove paths in the `map` block without creating new `location` blocks. Combine it with explicit `location` overrides for critical exclusions (like `/api`) as a safety net. NGINX `map` evaluation is not simple declaration order. Exact matches and masked prefixes or suffixes take precedence over regular expressions, and competing regular expressions apply in declaration order. Place critical map exclusions so they win under those rules. A specific exclusion that appears after a broad regex that matches it never reaches its branch.
 
-Note: Even if a risky page type is accidentally included in your conversion scope, the module's eligibility checks provide a safety net. API endpoints are skipped via `not_eligible`, streaming endpoints via `not_eligible`. However, relying on eligibility checks alone adds noise to your decision logs and metrics. Explicit exclusions keep your rollout scope clean and your observation data meaningful.
+Note: Even if a risky page type is accidentally included in your conversion scope, the module's eligibility checks provide a safety net. The module skips unsupported or unbounded response types via `not_eligible` (for example non-HTML content types, error statuses, or responses the module cannot convert). Large or chunked responses are a separate case: they may enter `markdown_streaming` and produce `STREAMING_*` outcomes rather than `not_eligible`. However, relying on eligibility checks alone adds noise to your decision logs and metrics. Explicit exclusions keep your rollout scope clean and your observation data meaningful. The safety net catches accidental scope mistakes. It does not replace explicit scope control.
 
 ---
 
@@ -1088,21 +1066,40 @@ This is the most important default: it means a module upgrade or installation ne
 
 #### `markdown_error_policy pass`
 
-When conversion fails (HTML parse error, timeout, memory limit), the module serves the original HTML response unchanged. The client never sees a 502 or broken response due to a conversion problem.
+When conversion fails before the module commits the response headers — the
+pre-commit and full-buffer paths — the module serves the original HTML
+response unchanged. The client never sees a 502 or broken response due to a
+conversion problem in those paths.
 
-Fail-open (`pass`) is the safe choice for production because conversion is an enhancement, not a requirement. If the converter encounters HTML it cannot handle, the worst outcome is that the client receives the same HTML it would have received without the module. Metrics and decision logs still record the failure (as `failed_open`) so you can investigate, but client experience is unaffected.
+Fail-open (`pass`) is the safe choice for production because conversion is an
+enhancement, not a requirement. If the converter encounters HTML it cannot
+handle before commit, the worst outcome is that the client receives the same
+HTML. This equals the response without the module. Metrics and decision logs
+still record the failure (as `failed_open`) so you can investigate. Client
+experience stays unaffected. This makes `pass` the safe default. The module
+never breaks responses on conversion errors before commit. It degrades to the
+original HTML. The worst case equals no module at all. After the module commits the response headers (streaming post-commit),
+`pass` cannot replay the original HTML: the module safe-finishes or aborts
+the Markdown output instead.
 
 #### `markdown_accept strict`
 
-With `off`, only requests containing an explicit `Accept: text/markdown` media type trigger conversion. Wildcard Accept values like `Accept: */*` or `Accept: text/*` — which browsers and many HTTP clients send by default — do not trigger conversion.
+With `strict`, only requests containing an explicit `Accept: text/markdown`
+media type trigger conversion. Wildcard Accept values like `Accept: */*` or
+`Accept: text/*` — which browsers and many HTTP clients send by default — do
+not trigger conversion. An explicit rejection (`Accept: text/markdown;q=0`,
+or a wildcard with `q=0`) produces the `skipped_accept_reject` outcome.
 
-This prevents accidental conversion of browser traffic. Without this default, a standard browser request (`Accept: text/html, */*`) could match the wildcard and receive Markdown instead of HTML, breaking the page rendering. Keeping `off` during rollout ensures only clients that specifically request Markdown receive it.
+This prevents accidental conversion of browser traffic. A standard browser
+request (`Accept: text/html, */*`) does not match the strict policy and keeps
+HTML. Use `markdown_accept wildcard` only for a scope where wildcard clients
+are intentionally meant to receive Markdown.
 
 #### `markdown_log_verbosity info`
 
-At `info` level, the module emits a decision log entry for every request that enters the decision chain — conversions, skips, and failures alike. This gives you full visibility into module behavior without requiring `debug` level, which adds extended fields (filter value, Accept header, upstream status) and increases log volume.
+At `info` level, the module emits a decision log entry for every request that enters the decision chain. This covers conversions, skips, and failures alike. This gives you full visibility into module behavior without requiring `debug` level. The `debug` level adds extended fields (filter value, Accept header, upstream status) and increases log volume. Choose `info` for rollout monitoring.
 
-During rollout, `info` is the right level: you can see every decision the module makes, correlate with metrics, and diagnose unexpected behavior. After rollout stabilizes, you may raise verbosity to `warn` to reduce log volume — at that level, only failure outcomes (`failed_open`, `failed_closed`) are logged.
+During rollout, `info` is the right level. You can see every decision the module makes, correlate with metrics, and diagnose unexpected behavior. After rollout stabilizes, you may raise verbosity to `warn` to reduce log volume. At that level, the module logs only failure outcomes (`failed_open`, `failed_closed`). The `warn` level logs failures only. Rollout uses `info` for full visibility. Steady state can drop to `warn`.
 
 ### Changing Defaults During Rollout
 
@@ -1123,8 +1120,8 @@ Keep `markdown_error_policy pass` until:
 
 1. Your rollout has been stable for multiple traffic cycles (at least 48 hours in production).
 2. Your `failed_open` count is zero or near-zero for all enabled scopes.
-3. You have reviewed the failure reason codes (`FAIL_CONVERSION`, `FAIL_RESOURCE_LIMIT`, `FAIL_SYSTEM`) and resolved any underlying issues.
-4. You have a specific operational reason to reject failed conversions (e.g., you need to guarantee Markdown-only responses for a downstream consumer).
+3. You have reviewed the failure reason codes (`conversion_error`, `memory_budget_exceeded`, `timeout`, `ffi_panic`) and resolved any underlying issues.
+4. You have a specific operational reason to reject failed conversions. For example, you need to guarantee Markdown-only responses for a downstream consumer.
 
 Even then, consider enabling `fail_closed` only in narrow scopes (specific `location` blocks) rather than globally, and monitor closely after the change. If failures appear, switch back to `pass` immediately by setting `markdown_error_policy pass` and running `nginx -s reload`.
 
@@ -1133,39 +1130,42 @@ Even then, consider enabling `fail_closed` only in narrow scopes (specific `loca
 
 ## Observation Guidance
 
-This section is the comprehensive reference for monitoring module behavior during rollout. The [Rollout Stages](#rollout-stages) observation checkpoints provide stage-specific commands — this section explains what to monitor, why, and how to interpret the results.
+This section is the comprehensive reference for monitoring module behavior during rollout. The [Rollout Stages](#rollout-stages) observation checkpoints provide stage-specific commands. This section explains what to monitor, why, and how to interpret the results.
 
 Use this guidance at every observation checkpoint and whenever you need to assess whether the module is behaving as expected.
 
 ### Metrics to Monitor
 
-The module exposes metrics at the `/markdown-metrics` endpoint in JSON (when `Accept: application/json` is sent) or plain-text format. The endpoint is restricted to localhost access.
+The module exposes `/markdown-metrics` as a localhost-only Prometheus text
+0.0.4 endpoint. It always emits the exact twelve families listed in the
+[Prometheus Metrics Guide](prometheus-metrics.md). The `Accept` header cannot
+select a legacy JSON or human-readable representation.
 
-> **Note on metric names:** The metrics endpoint uses flat counter names (e.g., `conversions_succeeded`). The table below shows the actual endpoint field names.
-
-| Endpoint Field | Latency bucket | Type | What It Tells You |
-|---------------|----------------|------|-------------------|
-| `conversions_succeeded` | N/A | Counter | Successful HTML-to-Markdown conversions |
-| `conversions_failed` | N/A | Counter | Conversion attempts that failed |
-| `conversions_bypassed` | N/A | Counter | Requests that intentionally bypassed conversion (ineligible or explicit skip after context creation); does not include fail-open errors, which are recorded under `conversions_failed` |
-| `failures_conversion` | N/A | Counter | HTML parse or conversion errors |
-| `failures_resource_limit` | N/A | Counter | Timeout or memory limit failures |
-| `failures_system` | N/A | Counter | Internal or system errors |
-| `conversion_latency_le_10ms` | ≤ 10ms | Counter | Conversions completing in ≤ 10ms |
-| `conversion_latency_le_100ms` | 10–100ms | Counter | Conversions completing in 10–100ms |
-| `conversion_latency_le_1000ms` | 100–1000ms | Counter | Conversions completing in 100–1000ms |
-| `conversion_latency_gt_1000ms` | > 1000ms | Counter | Conversions completing in > 1000ms |
-
-> **Skip reason codes** (`not_eligible`, etc.) are not currently exposed as individual metric counters. Use decision log entries (`grep "reason=not_eligible"`) to determine skip reason distribution. Failure sub-classification is available via the `failures_conversion`, `failures_resource_limit`, and `failures_system` counters.
-
-The key ratio to track is the conversion success rate:
+The primary rollout ratios come from the frozen families. Distinguish the
+request-based failure rate from the conversion-attempt-based failure rate:
 
 ```text
-success_rate = conversions_succeeded /
-               (conversions_succeeded + conversions_failed)
+# clamp_min(..., 1e-9) is a divide-by-zero guard only; it does not change
+# the rate units, so low-traffic ratios keep their true magnitude.
+conversion_delivery_rate = sum(rate(nginx_markdown_conversion_deliveries_total[5m]))
+                            / clamp_min(sum(rate(nginx_markdown_conversion_attempts_total[5m])), 1e-9)
+# Conversion-attempt-based failure rate: failed outcomes per conversion attempt.
+conversion_failure_rate = sum(rate(nginx_markdown_requests_total{outcome=~"failed_.*"}[5m]))
+                          / clamp_min(sum(rate(nginx_markdown_conversion_attempts_total[5m])), 1e-9)
+# Request-based failure rate: failed outcomes per request that entered the
+# decision chain (includes skipped and disabled requests in the denominator).
+request_failure_rate = sum(rate(nginx_markdown_requests_total{outcome=~"failed_.*"}[5m]))
+                       / clamp_min(sum(rate(nginx_markdown_requests_total[5m])), 1e-9)
 ```
 
-A healthy rollout maintains a success rate above 95%.
+A healthy rollout keeps `conversion_failure_rate` within the pre-rollout
+baseline and keeps the delivery rate stable. The request-based
+`request_failure_rate` is always less than or equal to the
+conversion-attempt-based rate, because its denominator includes skipped and
+disabled requests. Equality occurs exactly when every request is a
+conversion attempt. Use it only when you want the share of failed requests
+over all requests, and do not compare it against the conversion-attempt-based
+rate. Use decision logs for reason distributions.
 
 ### Log Patterns to Check
 
@@ -1241,34 +1241,33 @@ Use these `curl` commands to query the metrics endpoint directly. These are copy
 #### Quick health check
 
 ```bash
-# Fetch metrics in JSON format for easy parsing
-curl -s -H "Accept: application/json" \
-  http://localhost/markdown-metrics | python3 -m json.tool
+# Fetch the frozen Prometheus text format
+curl -s -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics
 ```
 
-#### Full metrics snapshot (JSON)
+#### Full metrics snapshot
 
 ```bash
 # Save a full snapshot for comparison
-curl -s -H "Accept: application/json" \
-  http://localhost/markdown-metrics > /tmp/metrics-$(date +%s).json
+curl -s -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics > /tmp/metrics-$(date +%s).prom
 ```
 
 #### Compare metrics over time
 
 ```bash
 # Take a before snapshot
-curl -s -H "Accept: application/json" \
-  http://localhost/markdown-metrics > /tmp/metrics-before.json
+curl -s -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics > /tmp/metrics-before.prom
 
 # ... wait for observation period ...
 
 # Take an after snapshot and compare
-curl -s -H "Accept: application/json" \
-  http://localhost/markdown-metrics > /tmp/metrics-after.json
+curl -s -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics > /tmp/metrics-after.prom
 
-diff <(python3 -m json.tool /tmp/metrics-before.json) \
-     <(python3 -m json.tool /tmp/metrics-after.json)
+diff -u /tmp/metrics-before.prom /tmp/metrics-after.prom
 ```
 
 #### Check skip reason distribution from metrics
@@ -1285,37 +1284,37 @@ grep "markdown decision:" /var/log/nginx/error.log | \
 #### Check failure stage distribution from metrics
 
 ```bash
-# Show failure counters from the metrics endpoint
-curl -s -H "Accept: text/plain" http://localhost/markdown-metrics | \
-  grep -E "failures_(conversion|resource_limit|system)"
+# Show failure outcomes from the metrics endpoint
+curl -s -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics | \
+  grep -E 'nginx_markdown_requests_total\{[^}]*outcome="failed_[^"}]*"'
 ```
 
-#### Check conversion latency buckets
+#### Check latency histogram samples
 
 ```bash
-# Show latency distribution from the metrics endpoint
-curl -s -H "Accept: text/plain" http://localhost/markdown-metrics | \
-  grep "conversion_latency"
+# Show histogram samples from the metrics endpoint
+curl -s -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics | \
+  grep 'nginx_markdown_conversion_duration_seconds_'
 ```
 
 #### Check latency with human-readable summary
 
 ```bash
-# Parse latency buckets and show percentages
-curl -s -H "Accept: application/json" \
+# Fetch the frozen histogram buckets:
+curl -s -H "Accept: text/plain; version=0.0.4" \
   http://localhost/markdown-metrics | \
-  python3 -c "
-import sys, json
-m = json.load(sys.stdin)
-b = m.get('conversion_latency_buckets', {})
-total = sum(b.values()) if b else 0
-if total > 0:
-    for k, v in sorted(b.items(), key=lambda x: int(''.join(c for c in x[0] if c.isdigit()) or '9999')):
-        print(f'  {k}: {v} ({v*100//total}%)')
-    print(f'  total: {total}')
-else:
-    print('  No conversions recorded yet')
-"
+  grep 'nginx_markdown_conversion_duration_seconds_bucket'
+
+# Compute p95 from the buckets (requires promtool; the finite buckets stop
+# at 5s, so p95 is only meaningful below that bound):
+curl -s -H "Accept: text/plain; version=0.0.4" \
+  http://localhost/markdown-metrics > /tmp/markdown-metrics.txt
+promtool query instant http://localhost:9090 \
+  'histogram_quantile(0.95, sum by (le) (rate(nginx_markdown_conversion_duration_seconds_bucket[5m])))' \
+  2>/dev/null \
+  || echo "promtool/Prometheus not available — inspect the bucket output above for the distribution"
 ```
 
 #### Verify a test request converts successfully
@@ -1334,10 +1333,10 @@ A rollout is healthy when all of the following hold true during the observation 
 
 | Indicator | Threshold | How to Check |
 |-----------|-----------|--------------|
-| Conversion success rate | > 95% | `conversions_succeeded / (conversions_succeeded + conversions_failed)` from metrics endpoint |
-| `FAIL_SYSTEM` count | 0 | `grep -c "category=FAIL_SYSTEM"` in logs, or `failures_system` in metrics |
+| Conversion delivery rate | Stable vs baseline | `sum(rate(nginx_markdown_conversion_deliveries_total[5m])) / clamp_min(sum(rate(nginx_markdown_conversion_attempts_total[5m])), 1e-9)` from Prometheus |
+| Failed request rate | Within baseline | `sum(rate(nginx_markdown_requests_total{outcome=~"failed_.*"}[5m])) / clamp_min(sum(rate(nginx_markdown_requests_total[5m])), 1e-9)` from Prometheus |
 | Conversion latency | Within configured `markdown_limits` | Latency buckets show the vast majority of conversions completing before the timeout threshold |
-| `conversions_failed` trend | Stable or decreasing | Compare metrics snapshots over the observation period — failure count should not be climbing |
+| Failed request trend | Stable or decreasing | Compare `requests_total{outcome=~"failed_.*"}` snapshots over the observation period |
 | Upstream error rate | No increase correlated with enablement | Compare upstream 5xx rates before and after enabling the module |
 | Unexpected skip reasons | None for traffic you expect to convert | Check decision log `reason=not_eligible` — no unexpected `not_eligible` (content-type/size) for enabled paths |
 
@@ -1349,8 +1348,8 @@ Stop expanding rollout scope and investigate if any of the following occur:
 
 | Trigger | What It Means | How to Detect |
 |---------|---------------|---------------|
-| Sudden increase in failure category codes | Conversion failures are spiking — may indicate upstream HTML changes, resource pressure, or a converter bug | `grep "reason=failed_open\|reason=failed_closed" /var/log/nginx/error.log \| tail -20` or watch `conversions_failed` in metrics |
-| Any `FAIL_SYSTEM` category codes | Internal/system error — this should never happen in normal operation and indicates a bug or severe resource issue | `grep -c "category=FAIL_SYSTEM" /var/log/nginx/error.log` |
+| Sudden increase in failed outcomes | Conversion failures are spiking — may indicate upstream HTML changes, resource pressure, or a converter bug | `grep -E "reason=(failed_open|failed_closed)" /var/log/nginx/error.log \| tail -20` or watch the failed `requests_total` series |
+| Repeated internal failure reasons | Internal failure categories appear repeatedly, for example `memory_budget_exceeded` or `ffi_panic` — check the decision logs | Inspect the `category=` field in decision log entries and the NGINX logs; these categories do not appear as `requests_total` reason labels |
 | Conversion latency exceeding `markdown_limits` | Conversions are taking too long — may indicate large pages, resource contention, or converter performance issues | Check latency buckets; look for conversions in the highest `le` bucket or timeouts in logs |
 | Upstream error rate increase | The module may be causing upstream issues (unlikely but possible with decompression or buffering interactions) | Compare upstream 5xx rates before and after enablement |
 | Unexpected `Content-Type` in responses | Converted responses have wrong Content-Type, or non-HTML responses are being processed | `curl -sD - -H "Accept: text/markdown" http://localhost/your-path/ \| grep Content-Type` |
@@ -1361,7 +1360,7 @@ When a trigger fires:
 
 1. Do not expand to the next rollout stage.
 2. Check the decision logs and metrics to understand the scope of the issue.
-3. If the issue is isolated to a single path, consider narrowing your rollout scope to exclude that path.
+3. If the issue appears on a single path only, consider narrowing your rollout scope to exclude that path. Isolated issues point to path-specific causes. Scope narrowing targets the affected path only. A single-path issue usually has a single cause. Exclude the path and observe.
 4. If the issue is widespread, consider rolling back — see the Rollback Guide (`ROLLBACK_GUIDE.md`) for procedures.
 5. Resolve the underlying issue before resuming rollout expansion.
 
@@ -1370,6 +1369,8 @@ When a trigger fires:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Kang | Failure-rate formulas split conversion-attempt vs request based; error-policy pass scoped to pre-commit |
+| 0.9.2 | 2026-08-15 | Hermes | Update failure reason values and point internal-failure triggers to decision logs |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

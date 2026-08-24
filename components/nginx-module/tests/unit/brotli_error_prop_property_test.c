@@ -86,6 +86,9 @@ main(void)
 
 static ngx_log_t test_log;
 
+/* The production allocator requires a logger for Brotli workspace memory. */
+#define NGX_HTTP_MARKDOWN_STREAMING_DECOMP_DEFAULT_LOG (&test_log)
+
 /* Allocation failure injection flags */
 static ngx_uint_t g_palloc_fail_once = 0;
 static ngx_uint_t g_pcalloc_fail_once = 0;
@@ -321,6 +324,32 @@ test_inflateReset(z_streamp strm)
 #define inflateInit2 test_inflateInit2
 #define inflateEnd test_inflateEnd
 #define inflateReset test_inflateReset
+
+#ifdef NGX_HTTP_BROTLI
+static ngx_uint_t
+test_atomic_cmp_set(ngx_atomic_uint_t *lock, ngx_atomic_uint_t old,
+                    ngx_atomic_uint_t set)
+{
+    if (*lock == old) {
+        *lock = set;
+        return 1;
+    }
+    return 0;
+}
+
+static ngx_atomic_uint_t
+test_atomic_fetch_add(ngx_atomic_uint_t *value, ngx_atomic_int_t add)
+{
+    ngx_atomic_uint_t old;
+
+    old = *value;
+    *value = (ngx_atomic_uint_t) ((ngx_atomic_int_t) *value + add);
+    return old;
+}
+
+#define ngx_atomic_cmp_set test_atomic_cmp_set
+#define ngx_atomic_fetch_add test_atomic_fetch_add
+#endif
 
 /* Include the production streaming decompression implementation */
 #include "../src/ngx_http_markdown_streaming_decomp_impl.h"
@@ -774,6 +803,34 @@ test_property9_part_c_truncated_input_propagation(void)
         "truncated -> TRUNCATED_INPUT (never NGX_ERROR)");
 }
 
+static void
+test_brotli_error_classification_ranges(void)
+{
+    int  code;
+
+    TEST_SUBSECTION("Brotli error classification ranges");
+
+    for (code = -30; code <= -21; code++) {
+        TEST_ASSERT(
+            ngx_http_markdown_brotli_error_classify(code)
+                == NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION,
+            "allocation codes must remain allocation-classified");
+    }
+
+    for (code = -17; code <= -1; code++) {
+        TEST_ASSERT(
+            ngx_http_markdown_brotli_error_classify(code)
+                == NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT,
+            "format codes must remain format-classified");
+    }
+
+    TEST_ASSERT(
+        ngx_http_markdown_brotli_error_classify(-18)
+            == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
+        "internal codes must remain system-classified");
+    TEST_PASS("Brotli error classification ranges are stable");
+}
+
 /* ----------------------------------------------------------------
  * Main
  * ---------------------------------------------------------------- */
@@ -794,6 +851,8 @@ main(void)
 
     /* Part C: TRUNCATED_INPUT propagation */
     test_property9_part_c_truncated_input_propagation();
+
+    test_brotli_error_classification_ranges();
 
     printf("\n");
     TEST_PASS(

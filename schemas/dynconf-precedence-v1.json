@@ -1,0 +1,89 @@
+{
+  "title": "nginx-markdown-for-agents Dynamic Configuration Precedence v1 Contract",
+  "description": "Canonical precedence and provenance contract for dynconf-mutable fields.",
+  "schema_version": 1,
+  "allowed_provenance": [
+    "request_variable",
+    "static",
+    "dynconf",
+    "http_baseline",
+    "default"
+  ],
+  "five_tier_precedence_hierarchy": [
+    {
+      "tier": 1,
+      "source": "request_variable",
+      "scope": "filter only",
+      "description": "NGINX request variable evaluation (e.g., markdown_filter $var)"
+    },
+    {
+      "tier": 2,
+      "source": "static",
+      "scope": "server/location explicit",
+      "description": "Server/location explicit static configuration (block bit set)"
+    },
+    {
+      "tier": 3,
+      "source": "dynconf",
+      "scope": "where block bit NOT set",
+      "description": "Dynconf runtime override (block bit NOT set)"
+    },
+    {
+      "tier": 4,
+      "source": "http_baseline",
+      "scope": "http block",
+      "description": "Inherited http baseline (http-block merged value)"
+    },
+    {
+      "tier": 5,
+      "source": "default",
+      "scope": "compile-time",
+      "description": "Built-in default (compile-time default)"
+    }
+  ],
+  "field_specific_provenance_rules": {
+    "fields": {
+      "error_policy": {
+        "allowed_provenance": [
+          "static",
+          "dynconf",
+          "http_baseline",
+          "default"
+        ]
+      },
+      "filter": {
+        "allowed_provenance": [
+          "request_variable",
+          "static",
+          "dynconf",
+          "http_baseline",
+          "default"
+        ]
+      },
+      "log_verbosity": {
+        "allowed_provenance": [
+          "static",
+          "dynconf",
+          "http_baseline",
+          "default"
+        ]
+      },
+      "prune_noise": {
+        "allowed_provenance": [
+          "static",
+          "dynconf",
+          "http_baseline",
+          "default"
+        ]
+      },
+      "streaming_buffer": {
+        "allowed_provenance": [
+          "static",
+          "dynconf",
+          "http_baseline",
+          "default"
+        ]
+      }
+    }
+  }
+}

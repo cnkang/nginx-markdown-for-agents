@@ -5,7 +5,7 @@
 #   generate-checksums.sh [-d DIR] [-o OUTPUT] [-h]
 #
 # Options:
-#   -d DIR      Directory containing .deb and .rpm artifacts (required)
+#   -d DIR      Directory containing release artifacts (required)
 #   -o OUTPUT   Output filename (default: SHA256SUMS)
 #   -h          Show this help message
 #
@@ -17,6 +17,7 @@
 #   1  Error (missing directory, no artifacts, format validation failure)
 
 set -euo pipefail
+export LC_ALL=C
 
 ##############################################################################
 # Helpers
@@ -70,39 +71,95 @@ if [[ ! -d "$ARTIFACT_DIR" ]]; then
     die "Artifact directory '$ARTIFACT_DIR' does not exist."
 fi
 
+if [[ -z "$OUTPUT_FILE" || "$OUTPUT_FILE" != "${OUTPUT_FILE##*/}" \
+    || "$OUTPUT_FILE" == *..* ]]; then
+    die "Output must be a safe filename within the artifact directory."
+fi
+
 ##############################################################################
 # Collect artifacts
 ##############################################################################
 
 cd "$ARTIFACT_DIR"
 
-# Gather .deb, .rpm, and release-manifest.json files; handle cases where
-# one type may be absent.
-DEB_FILES=()
-RPM_FILES=()
+# Gather package/archive artifacts and release-manifest.json; handle cases
+# where one type may be absent.
+DEB_COUNT=0
+RPM_COUNT=0
+TARBALL_COUNT=0
+INSTALLER_COUNT=0
+RELEASE_KEY_COUNT=0
 MANIFEST_FILE=""
+ALL_FILES=()
 
-for f in *.deb; do
-    [[ -e "$f" ]] || continue
-    DEB_FILES+=("$f")
-done
+# Keep traversal NUL-safe and sort explicitly without relying on GNU sort -z.
+# The artifact directory is flat by contract; nested files are ignored.
+append_sorted_file() {
+    local value="$1"
+    local index=${#ALL_FILES[@]}
 
-for f in *.rpm; do
-    [[ -e "$f" ]] || continue
-    RPM_FILES+=("$f")
-done
+    while (( index > 0 )); do
+        if [[ "${ALL_FILES[index - 1]}" < "$value" ]]; then
+            break
+        fi
+        ALL_FILES[index]="${ALL_FILES[index - 1]}"
+        index=$((index - 1))
+    done
+    ALL_FILES[index]="$value"
+    return 0
+}
 
-if [[ -e "release-manifest.json" ]]; then
-    MANIFEST_FILE="release-manifest.json"
-fi
-
-ALL_FILES=(${DEB_FILES[@]+"${DEB_FILES[@]}"} ${RPM_FILES[@]+"${RPM_FILES[@]}"} ${MANIFEST_FILE:+"${MANIFEST_FILE}"})
+while IFS= read -r -d '' f; do
+    name="${f#./}"
+    case "$name" in
+        */*)
+            continue
+            ;;
+        *.deb)
+            DEB_COUNT=$((DEB_COUNT + 1))
+            ;;
+        *.rpm)
+            RPM_COUNT=$((RPM_COUNT + 1))
+            ;;
+        *.tar.gz)
+            TARBALL_COUNT=$((TARBALL_COUNT + 1))
+            ;;
+        nginx-markdown-for-agents-installer-*.sh)
+            INSTALLER_COUNT=$((INSTALLER_COUNT + 1))
+            ;;
+        nginx-markdown-for-agents-release.asc)
+            RELEASE_KEY_COUNT=$((RELEASE_KEY_COUNT + 1))
+            ;;
+        release-manifest.json)
+            MANIFEST_FILE="$name"
+            ;;
+        *)
+            continue
+            ;;
+    esac
+    append_sorted_file "$name"
+done < <(find . -type f \( \
+    -name '*.deb' -o -name '*.rpm' -o -name '*.tar.gz' \
+    -o -name 'nginx-markdown-for-agents-installer-*.sh' \
+    -o -name 'nginx-markdown-for-agents-release.asc' \
+    -o -name 'release-manifest.json' \
+    \) -print0)
 
 if [[ ${#ALL_FILES[@]} -eq 0 ]]; then
-    die "No .deb, .rpm, or release-manifest.json files found in '$ARTIFACT_DIR'."
+    die "No release artifacts found in '$ARTIFACT_DIR'."
 fi
 
-info "Found ${#DEB_FILES[@]} .deb, ${#RPM_FILES[@]} .rpm, and manifest=${MANIFEST_FILE:-none}"
+if [[ "$DEB_COUNT" -eq 0 && "$RPM_COUNT" -eq 0 && "$TARBALL_COUNT" -eq 0 ]]; then
+    die "No package artifacts (.deb/.rpm/.tar.gz) found in '$ARTIFACT_DIR'; refusing to generate checksums for release-manifest.json alone."
+fi
+
+for artifact in "${ALL_FILES[@]}"; do
+    if [[ "$OUTPUT_FILE" == "$artifact" ]]; then
+        die "Output filename '$OUTPUT_FILE' would overwrite an artifact."
+    fi
+done
+
+info "Found ${DEB_COUNT} .deb, ${RPM_COUNT} .rpm, ${TARBALL_COUNT} .tar.gz, ${INSTALLER_COUNT} installer, ${RELEASE_KEY_COUNT} release key, and manifest=${MANIFEST_FILE:-none}"
 
 ##############################################################################
 # Generate SHA256SUMS

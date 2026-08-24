@@ -23,6 +23,7 @@ static struct MarkdownConverterHandle *ngx_http_markdown_converter = NULL;
 /* Global pointer to shared metrics state, resolved during worker init. */
 static ngx_http_markdown_metrics_t *ngx_http_markdown_metrics = NULL;
 static ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
+static ngx_atomic_uint_t ngx_http_markdown_pending_output_requests;
 /*
  * Keep the metrics SHM zone name layout-versioned.
  *
@@ -41,32 +42,55 @@ static u_char ngx_http_markdown_empty_string[] = "";
 /* Global dynamic config watcher for this worker process.
  * active_snapshot holds the currently effective configuration;
  * staging_snapshot is used during two-phase reload;
- * last_known_good holds the previous active snapshot for rollback. */
-static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher = {
-    .path            = { 0, NULL },
-    .last_mtime      = 0,
-    .applied_mtime   = 0,
-    .timer           = NULL,
-    .active          = 0,
-    .active_snapshot = { 0, 0, NULL, 0, 0,
-#ifdef MARKDOWN_STREAMING_ENABLED
-                         0,
-#endif
-                         0, 0 },
-    .staging_snapshot = { 0, 0, NULL, 0, 0,
-#ifdef MARKDOWN_STREAMING_ENABLED
-                          0,
-#endif
-                          0, 0 },
-    .last_known_good = { 0, 0, NULL, 0, 0,
-#ifdef MARKDOWN_STREAMING_ENABLED
-                         0,
-#endif
-                         0, 0 },
-    .lkg_valid       = 0,
-    .version         = 0,
-    .conf            = NULL
-};
+ * last_known_good holds the previous active snapshot for diagnostics and
+ * failed-reload protection. */
+static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher = { 0 };
+
+static void
+ngx_http_markdown_pending_output_increment(void)
+{
+    ngx_atomic_fetch_add(&ngx_http_markdown_pending_output_requests, 1);
+}
+
+static void
+ngx_http_markdown_pending_output_decrement(void)
+{
+    ngx_atomic_uint_t  current;
+
+    for ( ;; ) {
+        current = ngx_http_markdown_pending_output_requests;
+        if (current == 0) {
+            return;
+        }
+        if (ngx_atomic_cmp_set(&ngx_http_markdown_pending_output_requests,
+                               current, current - 1))
+        {
+            return;
+        }
+    }
+}
+
+void
+ngx_http_markdown_pending_output_set(ngx_chain_t **slot,
+    ngx_chain_t *value)
+{
+    if (slot == NULL) {
+        return;
+    }
+
+    if (*slot == NULL && value != NULL) {
+        ngx_http_markdown_pending_output_increment();
+    } else if (*slot != NULL && value == NULL) {
+        ngx_http_markdown_pending_output_decrement();
+    }
+    *slot = value;
+}
+
+ngx_atomic_uint_t
+ngx_http_markdown_pending_output_current(void)
+{
+    return ngx_http_markdown_pending_output_requests;
+}
 
 #define NGX_HTTP_MARKDOWN_METRIC_ADD(field, value)                                  \
     do {                                                                            \
@@ -78,6 +102,108 @@ static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher = {
 
 #define NGX_HTTP_MARKDOWN_METRIC_INC(field)                                         \
     NGX_HTTP_MARKDOWN_METRIC_ADD(field, 1)
+
+/* Record one successfully finalized decompression for the public v1 family. */
+static void
+ngx_http_markdown_record_decompression_success_metrics(
+    const ngx_http_markdown_ctx_t *ctx)
+{
+    if (ctx == NULL) {
+        return;
+    }
+
+    NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.succeeded);
+    switch (ctx->decompression.type) {
+    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.gzip);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.deflate);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.brotli);
+        break;
+    default:
+        break;
+    }
+}
+
+/* Keep decompression failure reasons split by codec for the frozen v1 family. */
+static void
+ngx_http_markdown_record_decompression_failure_budget(
+    ngx_http_markdown_compression_type_e type)
+{
+    switch (type) {
+    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.gzip_failures.budget);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.deflate_failures.budget);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.brotli_failures.budget);
+        break;
+    default:
+        break;
+    }
+}
+
+static void
+ngx_http_markdown_record_decompression_failure_format(
+    ngx_http_markdown_compression_type_e type)
+{
+    switch (type) {
+    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.gzip_failures.format);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.deflate_failures.format);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.brotli_failures.format);
+        break;
+    default:
+        break;
+    }
+}
+
+static void
+ngx_http_markdown_record_decompression_failure_truncated(
+    ngx_http_markdown_compression_type_e type)
+{
+    switch (type) {
+    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.gzip_failures.truncated);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.deflate_failures.truncated);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.brotli_failures.truncated);
+        break;
+    default:
+        break;
+    }
+}
+
+static void
+ngx_http_markdown_record_decompression_failure_io(
+    ngx_http_markdown_compression_type_e type)
+{
+    switch (type) {
+    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.gzip_failures.io);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.deflate_failures.io);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.brotli_failures.io);
+        break;
+    default:
+        break;
+    }
+}
 
 #define NGX_HTTP_MARKDOWN_METRIC_DEC(field)                                         \
     NGX_HTTP_MARKDOWN_METRIC_ADD(field, -1)
@@ -125,6 +251,61 @@ static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher = {
             }                                                                       \
         }                                                                           \
     } while (0)
+
+void
+ngx_http_markdown_record_dynconf_reload(ngx_uint_t error_code)
+{
+    if (ngx_http_markdown_metrics == NULL) {
+        return;
+    }
+
+    switch (error_code) {
+    case DYNCONF_OK:
+        NGX_HTTP_MARKDOWN_METRIC_INC(results.dynconf_reloads.success);
+        break;
+    case DYNCONF_ERR_MISSING_SCHEMA_VERSION:
+    case DYNCONF_ERR_INVALID_SCHEMA_VERSION:
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            results.dynconf_reloads.failure_schema_version);
+        break;
+    case DYNCONF_ERR_UNKNOWN_KEY:
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            results.dynconf_reloads.failure_unknown_key);
+        break;
+    case DYNCONF_ERR_DUPLICATE_KEY:
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            results.dynconf_reloads.failure_duplicate_key);
+        break;
+    case DYNCONF_ERR_INVALID_TYPE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            results.dynconf_reloads.failure_invalid_type);
+        break;
+    case NGX_HTTP_MARKDOWN_DYNCONF_ERR_IO:
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            results.dynconf_reloads.failure_file_error);
+        break;
+    case DYNCONF_ERR_VALUE_OUT_OF_RANGE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            results.dynconf_reloads.failure_out_of_range);
+        break;
+    case DYNCONF_ERR_TOO_LARGE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            results.dynconf_reloads.failure_size_exceeded);
+        break;
+    case DYNCONF_ERR_INVALID_JSON:
+    case DYNCONF_ERR_TOKEN_BUDGET:
+    case DYNCONF_ERR_NESTING_DEPTH:
+    case DYNCONF_ERR_INVALID_UTF8:
+    case DYNCONF_ERR_INTERNAL:
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            results.dynconf_reloads.failure_parse_error);
+        break;
+    default:
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            results.dynconf_reloads.failure_parse_error);
+        break;
+    }
+}
 
 /*
  * Increment the skip counter for the given eligibility result.
@@ -203,17 +384,19 @@ ngx_http_markdown_metric_inc_skip(
  * the same check and future fail-open paths cannot drift.
  *
  * Parameters:
- *   conf - module location configuration
+ *   eff  - request-bound effective configuration snapshot
+ *   conf - module location configuration fallback
  */
 static void
 ngx_http_markdown_metric_inc_failopen(
+    const ngx_http_markdown_effective_conf_t *eff,
     const ngx_http_markdown_conf_t *conf)
 {
-    if (conf == NULL) {
+    if (eff == NULL && conf == NULL) {
         return;
     }
 
-    if (conf->on_error
+    if (ngx_http_markdown_effective_error_policy(eff, conf)
         == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)
     {
         NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);

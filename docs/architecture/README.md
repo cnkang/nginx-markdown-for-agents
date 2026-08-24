@@ -22,6 +22,24 @@ Use it when you need more than deployment guidance but less than source-level im
 | Why 0.6.3 E2E testing moved to a Rust-first hybrid architecture | [ADR/0009-rust-first-e2e-test-architecture.md](ADR/0009-rust-first-e2e-test-architecture.md) |
 | The full ADR index | [ADR/README.md](ADR/README.md) |
 
+## Design Deep Dives
+
+| Topic | Read |
+|-------|------|
+| Large response incremental path (retired) and active bounded streaming engine | [LARGE_RESPONSE_DESIGN.md](LARGE_RESPONSE_DESIGN.md) |
+| Error policy contract | [error-policy.md](error-policy.md) |
+| Filter chain ordering | [filter-ordering.md](filter-ordering.md) |
+| Header mutation inventory | [header-mutation-inventory.md](header-mutation-inventory.md) |
+| Inflight guard | [inflight-guard.md](inflight-guard.md) |
+| Observability schema v2 | [observability-schema-v2.md](observability-schema-v2.md) |
+| FFI ABI compatibility | [FFI_ABI_COMPATIBILITY.md](FFI_ABI_COMPATIBILITY.md) |
+| FFI migration contract | [FFI_MIGRATION_CONTRACT.md](FFI_MIGRATION_CONTRACT.md) |
+| FFI zero-initialization strategy | [FFI_ZERO_INIT_STRATEGY.md](FFI_ZERO_INIT_STRATEGY.md) |
+| Streaming security check order (0.7.x verification) | [streaming-check-order.md](streaming-check-order.md) |
+| Streaming eligibility audit (0.9.2) | [streaming-eligibility-audit.md](streaming-eligibility-audit.md) |
+| Profile field map (archived, removed in 0.9.2) | [profile-inventory.md](profile-inventory.md) |
+| Profile system design (retired) | [profiles.md](profiles.md) |
+
 ## RFCs
 
 | RFC | Title | Status | Target Version |
@@ -35,7 +53,7 @@ Use it when you need more than deployment guidance but less than source-level im
 - `CONFIG_BEHAVIOR_MAP.md` maps public directives to runtime behavior.
 - `PUBLIC_SURFACE_INVENTORY.md` records the evidence-backed 1.0 freeze
   classification for directives, wire schemas, observability, and FFI.
-- `REPOSITORY_STRUCTURE.md` explains how the repository is organized.
+- `REPOSITORY_STRUCTURE.md` explains how the repository organizes itself.
 - `HARNESS_ARCHITECTURE.md` explains the repo-owned harness, its truth surfaces,
   and its relationship to local-only inputs.
 - `docs/harness/` describes task-routing overlays and check orchestration without

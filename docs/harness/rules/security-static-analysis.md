@@ -33,32 +33,31 @@ Required:
   shell, Python tooling, secret, Semgrep, and Rust dependency/license policy
   changes.
 - `actionlint` is mandatory for GitHub Actions workflow edits.
-- `shellcheck` is mandatory for shell script edits unless a finding is
+- `shellcheck` is mandatory for shell script edits unless a finding gets
   suppressed narrowly with a local justification.
 - `gitleaks` must fail on real secrets, private keys, signing material, API
   keys, tokens, and passwords. Allowlist only test fixtures or placeholders
   with narrow path or regex scope.
-- Workflow secrets must be assigned only in the minimal step that consumes
+- Workflow secrets must assign only in the minimal step that consumes
   them. Job- or workflow-level secret expressions are forbidden when setup,
   checkout, repository build, test, or coverage steps do not need the
   credential. Enforce this with
   `tools/harness/detect_workflow_secret_scope.py`.
 - Local `gitleaks` execution must scan exactly Git-tracked worktree content so
-  tracked edits are covered while ignored local adapters, caches, and build
+  the rule covers tracked edits while ignored local adapters, caches, and build
   state cannot create findings for files absent from a clean checkout. Any
-  tracked-file materialization must omit tracked paths that are absent because
-  they were deleted in the worktree and preserve unusual filenames with
-  NUL-safe traversal.
+  tracked-file materialization must omit tracked paths that the worktree no
+  longer contains and preserve unusual filenames with NUL-safe traversal.
 - Semgrep CE rules must stay high-confidence and repo-specific. Focus them on
   repository workflow, shell, Python tooling, and C module patterns. This
   includes direct CLI-derived path I/O before harness validation helpers,
   obvious subprocess misuse, unsafe libc APIs in the NGINX C module, and
   exported Rust FFI functions that still contain panic/unwrap/expect paths.
   Dockerfile rustup bootstrap paths that download and execute unverified
-  installers should also be covered.
+  installers should also get covered.
   Test-only panic injection blocks under `#[cfg(test)]` are not considered
   production findings. Avoid broad noisy packs as PR-blocking checks until
-  findings are triaged and documented.
+  the team triages and documents findings.
 - `cargo-deny` must check Rust advisories, license policy, bans, and sources for
   every checked-in Rust manifest. Do not allow GPL, AGPL, LGPL, SSPL, Commons
   Clause, or unknown licenses by default.
@@ -68,7 +67,7 @@ Required:
   gate unless the project adopts explicit threshold semantics.
 - Local Trivy filesystem scans exclude Git-ignored adapters, caches, build
   output, and prior reports. At minimum `.kiro/`, `.codeartsdoer/`, and
-  `build/` stay out of scope; clean CI checkouts remain fully scanned.
+  `build/` stay out of scope. Clean CI checkouts remain fully scanned.
 - Tracked runnable Dockerfiles must end with a non-root `USER`. NGINX runtime
   images must pair that user with an unprivileged listener and writable PID and
   temporary paths. ClusterFuzzLite images must keep the toolchain readable and
@@ -85,12 +84,12 @@ Required:
   or bind the cleartext backend to loopback behind a documented mandatory
   co-located TLS terminator. Authenticated client commands must use HTTPS.
 - Release-capable builders, verified source/tool downloads, and tag-derived
-  Homebrew publication are checked by
+  checks for Homebrew publication run via
   `tools/harness/detect_release_supply_chain.py`.
-- Third-party actions in these workflows must be pinned to immutable commit
+- Third-party actions in these workflows must pin to immutable commit
   SHAs with human-readable version comments.
 - Generated scan output, SBOM files, tool caches, and vulnerability databases
-  must not be committed.
+  must not commit.
 
 Verification:
 - `make security-static`

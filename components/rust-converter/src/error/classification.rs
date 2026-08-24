@@ -55,6 +55,10 @@ pub enum ErrorClass {
     /// Rust FFI panic caught by catch_unwind.
     FfiPanic = 3,
     /// Decompression of upstream response failed.
+    ///
+    /// FFI classification maps header decompression error codes 12/13/14 to
+    /// `ConversionError`; this variant is a semantic placeholder retained for
+    /// reason-code mapping.
     DecompressionError = 4,
     /// Worker inflight limit exceeded (detected by spec 52).
     Overload = 5,
@@ -62,7 +66,7 @@ pub enum ErrorClass {
     InvalidDynconf = 6,
     /// Running with a degraded (last-known-good) snapshot.
     DegradedSnapshot = 7,
-    /// HeaderPlan apply failed after headers were committed.
+    /// HeaderPlan apply failed before headers were committed.
     HeaderPlanApplyError = 8,
     /// Streaming conversion failed mid-flight (body partially sent).
     StreamingMidFlightError = 9,
@@ -96,14 +100,11 @@ impl ErrorClass {
     /// use nginx_markdown_converter::error::classification::ErrorClass;
     ///
     /// assert!(!ErrorClass::ConversionError.is_post_commit());
-    /// assert!(ErrorClass::HeaderPlanApplyError.is_post_commit());
+    /// assert!(!ErrorClass::HeaderPlanApplyError.is_post_commit());
     /// assert!(ErrorClass::StreamingMidFlightError.is_post_commit());
     /// ```
     pub fn is_post_commit(self) -> bool {
-        matches!(
-            self,
-            ErrorClass::HeaderPlanApplyError | ErrorClass::StreamingMidFlightError
-        )
+        matches!(self, ErrorClass::StreamingMidFlightError)
     }
 
     /// Return the lowercase snake_case string representation.
@@ -184,14 +185,14 @@ impl ErrorPolicy {
     /// use nginx_markdown_converter::error::classification::ErrorPolicy;
     ///
     /// assert_eq!(ErrorPolicy::Pass.as_str(), "pass");
-    /// assert_eq!(ErrorPolicy::Status(503).as_str(), "status");
+    /// assert_eq!(ErrorPolicy::Status(503).as_str(), "status_503");
     /// assert_eq!(ErrorPolicy::FailClosed.as_str(), "fail_closed");
     /// ```
-    pub fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> String {
         match self {
-            ErrorPolicy::Pass => "pass",
-            ErrorPolicy::Status(_) => "status",
-            ErrorPolicy::FailClosed => "fail_closed",
+            ErrorPolicy::Pass => "pass".to_string(),
+            ErrorPolicy::Status(code) => format!("status_{}", code),
+            ErrorPolicy::FailClosed => "fail_closed".to_string(),
         }
     }
 }
@@ -252,7 +253,7 @@ impl ErrorBehavior {
 ///
 /// # Rules
 ///
-/// 1. **Post-commit errors** (`HeaderPlanApplyError`, `StreamingMidFlightError`)
+/// 1. **Post-commit errors** (`StreamingMidFlightError`)
 ///    **always** return `TerminateConnection`, regardless of the configured
 ///    policy. Headers have been sent; the status line cannot be rewritten.
 ///
@@ -334,7 +335,7 @@ pub fn classify_error_code(error_code: u32) -> ErrorClass {
         3 | 10 => ErrorClass::Timeout,
 
         /* Memory/budget exceeded: memory_limit, budget_exceeded,
-         * decompression_budget, parse_budget */
+         * decompression_budget_exceeded, parse_budget_exceeded */
         4 | 6 | 9 | 11 => ErrorClass::MemoryBudgetExceeded,
 
         /* Streaming fallback: engine downgrade (pre-commit).
@@ -395,7 +396,7 @@ mod tests {
     use super::*;
 
     /* ====================================================================
-     * Task 2.8: 10 error class variants tests
+     * Error class variant tests
      * ==================================================================== */
 
     #[test]
@@ -448,7 +449,7 @@ mod tests {
     }
 
     /* ====================================================================
-     * Task 2.3: is_post_commit tests
+     * is_post_commit tests
      * ==================================================================== */
 
     #[test]
@@ -462,6 +463,7 @@ mod tests {
             ErrorClass::Overload,
             ErrorClass::InvalidDynconf,
             ErrorClass::DegradedSnapshot,
+            ErrorClass::HeaderPlanApplyError,
         ];
         for class in &pre_commit {
             assert!(!class.is_post_commit(), "{:?} should be pre-commit", class);
@@ -470,12 +472,12 @@ mod tests {
 
     #[test]
     fn test_post_commit_classes() {
-        assert!(ErrorClass::HeaderPlanApplyError.is_post_commit());
         assert!(ErrorClass::StreamingMidFlightError.is_post_commit());
+        assert!(!ErrorClass::HeaderPlanApplyError.is_post_commit());
     }
 
     /* ====================================================================
-     * Task 2.9: Pre-commit error behavior tests (pass / status / fail_closed)
+     * Pre-commit error behavior tests (pass / status / fail_closed)
      * ==================================================================== */
 
     #[test]
@@ -489,6 +491,7 @@ mod tests {
             ErrorClass::Overload,
             ErrorClass::InvalidDynconf,
             ErrorClass::DegradedSnapshot,
+            ErrorClass::HeaderPlanApplyError,
         ];
         for class in &pre_commit_classes {
             let behavior = decide_error_behavior(*class, ErrorPolicy::Pass);
@@ -512,6 +515,7 @@ mod tests {
             ErrorClass::Overload,
             ErrorClass::InvalidDynconf,
             ErrorClass::DegradedSnapshot,
+            ErrorClass::HeaderPlanApplyError,
         ];
         for code in [429u16, 502, 503] {
             for class in &pre_commit_classes {
@@ -539,6 +543,7 @@ mod tests {
             ErrorClass::Overload,
             ErrorClass::InvalidDynconf,
             ErrorClass::DegradedSnapshot,
+            ErrorClass::HeaderPlanApplyError,
         ];
         for class in &pre_commit_classes {
             let behavior = decide_error_behavior(*class, ErrorPolicy::FailClosed);
@@ -552,15 +557,12 @@ mod tests {
     }
 
     /* ====================================================================
-     * Task 2.10: Post-commit forced TerminateConnection tests
+     * Post-commit forced TerminateConnection tests
      * ==================================================================== */
 
     #[test]
     fn test_postcommit_forces_terminate_regardless_of_policy() {
-        let post_commit_classes = [
-            ErrorClass::HeaderPlanApplyError,
-            ErrorClass::StreamingMidFlightError,
-        ];
+        let post_commit_classes = [ErrorClass::StreamingMidFlightError];
         let policies = [
             ErrorPolicy::Pass,
             ErrorPolicy::Status(429),
@@ -583,7 +585,7 @@ mod tests {
     }
 
     /* ====================================================================
-     * Task 2.11: error_to_reason_code mapping tests
+     * error_to_reason_code mapping tests
      * ==================================================================== */
 
     #[test]
@@ -662,12 +664,18 @@ mod tests {
     #[test]
     fn test_policy_as_str() {
         assert_eq!(ErrorPolicy::Pass.as_str(), "pass");
-        assert_eq!(ErrorPolicy::Status(429).as_str(), "status");
+        assert_eq!(ErrorPolicy::Status(429).as_str(), "status_429");
+        assert_eq!(ErrorPolicy::Status(503).as_str(), "status_503");
         assert_eq!(ErrorPolicy::FailClosed.as_str(), "fail_closed");
+        /* Distinct status codes must produce distinct strings. */
+        assert_ne!(
+            ErrorPolicy::Status(429).as_str(),
+            ErrorPolicy::Status(503).as_str()
+        );
     }
 
     /* ====================================================================
-     * Task 5.5: classify_error_code tests
+     * classify_error_code tests
      * ==================================================================== */
 
     #[test]

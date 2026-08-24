@@ -28,10 +28,18 @@ Gate 6: Fuzz & Packaging Infrastructure (depends on Gate 1; validates specs 29-3
 ```
 
 **Release-blocking scope**: Gates 1 through 6 are blocking for 0.7.0 GA as
-defined in this document. Gate 3 is satisfied by the tag package workflow's
-build, install-layout, checksum, and smoke-test chain. Gate 4 is satisfied by
-chart lint/render validation, with live cluster smoke recorded when promoted
-for a tag.
+defined in this document. The tag package workflow satisfies Gate 3 via its
+build, install-layout, checksum, package-signature, and smoke-test chain, but
+the release record must also attach upgrade/rollback evidence that is
+INDEPENDENT of the Gate 3.5 version-switch test: it must come from a separate
+environment, runner, or actor — or carry distinct artifact provenance — and
+the release record must state which of these establishes the independence.
+Reusing the same environment run for both tests without a recorded
+distinction is an incomplete release record.
+Gate 4 passes via chart lint/render validation, promoted cluster smoke, and F5
+assessment evidence. Final Go requires the package-signature and
+upgrade/rollback records in addition to the Gate 4 records. Missing records
+remain blocking even when the workflow itself is green.
 
 ---
 
@@ -73,13 +81,14 @@ for a tag.
 
 | # | Check Item | Verification Command | Pass Criteria |
 |---|-----------|---------------------|---------------|
-| 3.1 | DEB build (full matrix) | CI workflow `release-deb.yml` | All matrix entries build successfully |
+| 3.1 | nFPM DEB build (full matrix) | CI workflow `release-packages.yml` | All matrix entries build successfully |
 | 3.2 | RPM build (full matrix) | CI workflow `release-rpm.yml` | All matrix entries build successfully |
 | 3.3 | Package signature verification | `gpg --verify` / `rpm -K` | Valid signatures |
 | 3.4 | Install smoke tests | `dpkg -i` + `rpm -i` + `nginx -V` + `curl` | Module loads and converts |
 | 3.5 | Upgrade/rollback tests | Version switch test | Upgrade and rollback succeed without service interruption |
+| 3.6 | Independent upgrade/rollback evidence | Release record review | Independent upgrade/rollback evidence is attached to the release record (missing evidence is release-blocking) |
 
-**Fail action**: Block release. Resolve package build, install-layout, checksum, smoke-test, or signature gaps before proceeding.
+**Fail action**: Block release. Resolve package build, install-layout, checksum, smoke-test, signature, or missing upgrade/rollback-evidence gaps before proceeding.
 
 ---
 
@@ -90,10 +99,11 @@ for a tag.
 | # | Check Item | Verification Command | Pass Criteria |
 |---|-----------|---------------------|---------------|
 | 4.1 | Helm chart lint | `helm lint charts/nginx-markdown` | Exit 0, no errors |
-| 4.2 | K8s smoke tests | Smoke script execution | Conversion, Accept negotiation, /metrics all pass |
-| 4.3 | F5 feasibility assessment | Documentation review | Assessment document complete with conclusions |
+| 4.2 | Helm chart render | `CANDIDATE_SHA="<candidate-sha>" && mkdir -p "release-evidence/gate4/${CANDIDATE_SHA}/rendered-manifests" && helm template gate4-test charts/nginx-markdown --namespace gate4-smoke > "release-evidence/gate4/${CANDIDATE_SHA}/rendered-manifests/rendered.yaml" && python3 tools/release/gates/validate_k8s_manifests.py "release-evidence/gate4/${CANDIDATE_SHA}/rendered-manifests/rendered.yaml"` | Exit 0. Assert that the rendered output at `release-evidence/gate4/${CANDIDATE_SHA}/rendered-manifests/rendered.yaml` contains the Deployment `metadata.name`, the container `image`, and the `nginx-markdown` ConfigMap |
+| 4.3 | Promoted cluster smoke | `tools/release/gates/gate4_local_k8s_smoke.sh` or the promoted-cluster equivalent | Evidence at `release-evidence/gate4/<candidate-sha>/cluster-smoke.json`; conversion, Accept, and metrics checks pass |
+| 4.4 | F5 feasibility assessment | Review `docs/guides/F5_INGRESS_FEASIBILITY.md` and record assessment | Evidence at `release-evidence/gate4/<candidate-sha>/f5-assessment.md` is complete |
 
-**Fail action**: Block release. Resolve chart lint/render validation gaps before proceeding; record live cluster smoke when promoted for a tag.
+**Fail action**: Block release. Resolve any lint, render, cluster-smoke, or F5 evidence gap before proceeding.
 
 ---
 
@@ -110,7 +120,7 @@ for a tag.
 | 5.5 | All new metrics have validator | Validator coverage check | No unvalidated metric |
 | 5.6 | All new configs have validator | Validator coverage check | No unvalidated config directive |
 
-**Fail action**: Block release. Docs/harness/validator gaps must be resolved.
+**Fail action**: Block release. The team must resolve docs/harness/validator gaps.
 
 ---
 
@@ -123,12 +133,12 @@ for a tag.
 | `markdown_parser_budget` config | config validator | `validate_config_directives.py` | Gate 5 |
 | `markdown_diagnostics` config | config validator | `validate_config_directives.py` | Gate 5 |
 | `markdown_dynconf_dry_run` config | config validator | `validate_config_directives.py` | Gate 5 |
-| `decompression_*_total` metrics | metric validator | `validate_metrics.py` | Gate 5 |
-| `parse_*_total` metrics | metric validator | `validate_metrics.py` | Gate 5 |
-| `replay_buffer_errors_total` metric | metric validator | `validate_metrics.py` | Gate 5 |
-| `DECOMP_*` reason codes | reason-code validator | `validate_reason_codes.py` | Gate 5 |
-| `PARSE_*` reason codes | reason-code validator | `validate_reason_codes.py` | Gate 5 |
-| `REPLAY_BUFFER_ERROR` reason code | reason-code validator | `validate_reason_codes.py` | Gate 5 |
+| `decompression_*_total` metrics (0.7.0-era names; retired by the 0.9.2 twelve-family freeze) | metric validator | `validate_metrics.py` | Gate 5 |
+| `parse_*_total` metrics (0.7.0-era name; retired by the 0.9.2 freeze) | metric validator | `validate_metrics.py` | Gate 5 |
+| `replay_buffer_errors_total` metric (0.7.0-era name; retired by the 0.9.2 freeze) | metric validator | `validate_metrics.py` | Gate 5 |
+| `DECOMP_*` reason codes (0.7.0-era uppercase; superseded by lowercase snake_case) | reason-code validator | `validate_reason_codes.py` | Gate 5 |
+| `PARSE_*` reason codes (0.7.0-era uppercase; superseded by lowercase snake_case) | reason-code validator | `validate_reason_codes.py` | Gate 5 |
+| `REPLAY_BUFFER_ERROR` reason code (0.7.0-era uppercase; superseded by lowercase snake_case) | reason-code validator | `validate_reason_codes.py` | Gate 5 |
 | DEB package metadata | package validator | `validate_package_metadata.py` | Gate 3/6 |
 | RPM package metadata | package validator | `validate_package_metadata.py` | Gate 3/6 |
 | Helm chart values | helm lint + values schema | `validate_k8s_manifests.py` | Gate 4 |
@@ -197,5 +207,7 @@ make release-gates-check-070
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | Gate 3.6 upgrade/rollback evidence independence defined (separate environment, runner, actor, or provenance); validator matrix rows annotated as 0.7.0-era names retired by the twelve-family freeze |
+| 0.9.2 | 2026-08-15 | Kang | Helm chart render gate uses validate_k8s_manifests.py and defines the required rendered fields |
 | 0.7.0-int | 2026-05-20 | Kang | Add Gate 6 (Fuzz & Packaging Infrastructure) with validate_fuzz_packaging.py checks |
 | 0.7.0-draft | 2026-05-17 | spec-agent | Initial v0.7.0 gate definitions from design.md §14.0 |

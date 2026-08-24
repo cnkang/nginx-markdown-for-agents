@@ -87,15 +87,21 @@ def test_compare_matrices_reports_missing_and_tier_mismatches():
     assert set(diffs) == expected_diffs, f"Unexpected diffs: {diffs}"
 
 
-def test_tier_normalization_source_only_variants(tmp_path):
-    """Regression: 'Source Only' (docs) and 'source_only' (JSON) must be treated as equal."""
+def test_tier_normalization_supported_display_label(tmp_path):
+    """Regression: the legacy "Full" table label maps to canonical supported."""
     matrix_path = tmp_path / "release-matrix.json"
     matrix_path.write_text(
         json.dumps(
             {
-                "matrix": [
-                    {"nginx": "1.26.3", "os_type": "musl", "arch": "aarch64", "support_tier": "source_only"},
-                ]
+                "entries": [
+                    {
+                        "nginx_version": "1.26.3",
+                        "libc": "musl",
+                        "arch": "arm64",
+                        "artifact_type": "dynamic-module",
+                        "support_tier": "supported",
+                    },
+                ],
             }
         ),
         encoding="utf-8",
@@ -103,7 +109,7 @@ def test_tier_normalization_source_only_variants(tmp_path):
 
     json_entries = load_matrix_entries(matrix_path)
 
-    # Exercise parse_doc_matrix with the human-facing "Source Only" tier
+    # Exercise parse_doc_matrix with the historical human-facing "Full" tier.
     doc_path = tmp_path / "INSTALLATION.md"
     doc_path.write_text(
         "\n".join(
@@ -111,7 +117,7 @@ def test_tier_normalization_source_only_variants(tmp_path):
                 "## Platform Compatibility Matrix",
                 "| NGINX Version | OS Type | Architecture | Support Tier |",
                 "|---------------|---------|--------------|--------------|",
-                "| 1.26.3 | musl | aarch64 | Source Only |",
+                "| 1.26.3 | musl | aarch64 | Full |",
             ]
         ),
         encoding="utf-8",
@@ -120,3 +126,60 @@ def test_tier_normalization_source_only_variants(tmp_path):
 
     diffs = compare_matrices(json_entries, doc_entries)
     assert not diffs, f"Expected no differences but got: {diffs}"
+
+
+def test_load_matrix_entries_retains_source_only_row(tmp_path):
+    """Best-effort source support remains comparable with Source Only docs."""
+    matrix_path = tmp_path / "release-matrix.json"
+    matrix_path.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "nginx_version": "1.26.3",
+                        "libc": "n/a",
+                        "arch": "any",
+                        "artifact_type": "source",
+                        "support_tier": "best-effort",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert load_matrix_entries(matrix_path) == [
+        ("1.26.3", "n/a", "any", "source_only"),
+    ]
+
+
+def test_load_matrix_entries_omits_redundant_source_only_row(tmp_path):
+    """A source fallback row is hidden when binary coverage exists."""
+    matrix_path = tmp_path / "release-matrix.json"
+    matrix_path.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "nginx_version": "1.26.3",
+                        "libc": "glibc",
+                        "arch": "amd64",
+                        "artifact_type": "dynamic-module",
+                        "support_tier": "supported",
+                    },
+                    {
+                        "nginx_version": "1.26.3",
+                        "libc": "n/a",
+                        "arch": "any",
+                        "artifact_type": "source",
+                        "support_tier": "best-effort",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert load_matrix_entries(matrix_path) == [
+        ("1.26.3", "glibc", "x86_64", "full"),
+    ]

@@ -14,9 +14,9 @@
 //!
 //! # Wildcard Behavior
 //!
-//! `*/*` in the Accept header is treated as `q=1.0` for both text/markdown
-//! and text/html, unless `on_wildcard` is false (in which case `*/*` does
-//! not imply markdown preference).
+//! `*/*` in the Accept header is treated with its own q-value (default 1.0)
+//! for both text/markdown and text/html, unless `on_wildcard` is false (in
+//! which case `*/*` does not imply markdown preference).
 //!
 //! # Examples
 //!
@@ -30,14 +30,18 @@
 //! assert!(matches!(result, NegotiationResult::Passthrough { .. }));
 //! ```
 
-/// Maximum number of Accept header entries to parse.
-/// Prevents DoS from unreasonably long headers.
+/// Maximum number of Accept header entries to parse (an entry count, not a
+/// header byte length). Prevents DoS from headers carrying too many entries.
+/// This is a fixed parser-safety bound, not a public directive: the frozen
+/// 0.9.2 surface has no negotiation limit setting to keep synchronized with it.
 const MAX_ACCEPT_ENTRIES: usize = 64;
 
 /// Maximum length of a single MIME type string.
 const MAX_MIME_LEN: usize = 128;
 
 /// Maximum length of the entire Accept header we will parse.
+/// This fixed DoS-defense bound is intentionally not configurable; changing it
+/// would change the frozen public contract and its validation/test surface.
 const MAX_HEADER_LEN: usize = 4096;
 
 /// Result of Accept header negotiation.

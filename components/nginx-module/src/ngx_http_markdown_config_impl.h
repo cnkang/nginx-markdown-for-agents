@@ -51,23 +51,12 @@ static char *ngx_http_markdown_cache_validation(ngx_conf_t *cf, ngx_command_t *c
 static char *ngx_http_markdown_streaming(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse module log verbosity mapping to nginx log levels. */
 static char *ngx_http_markdown_log_verbosity(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
-/* Parse streaming content types excluded from buffering/conversion. */
-static char *ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse content types eligible for Markdown conversion (positive allowlist). */
 static char *ngx_http_markdown_content_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
-/* Reject removed markdown_streaming_engine with a value-specific hint. */
-static char *ngx_http_markdown_reject_streaming_engine(ngx_conf_t *cf,
-    ngx_command_t *cmd, void *conf);
-/* Parse v0.8.0 markdown_stream_threshold with zero-rejection. */
-static char *ngx_http_markdown_stream_threshold_handler(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
-/* Parse markdown_stream_precommit_buffer with zero-rejection. */
-static char *ngx_http_markdown_stream_precommit_buffer_handler(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
-/* Parse v0.8.0 markdown_stream_flush_min with zero-rejection. */
-static char *ngx_http_markdown_stream_flush_min_handler(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+/* Parse markdown_limits multi-key block (Config V2, 0.9.2). */
+static char *ngx_http_markdown_limits(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse v0.8.0 markdown_stream_excluded_types MIME list. */
 static char *ngx_http_markdown_stream_excluded_types_handler(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
-/* Parse markdown_limits multi-key block (Config V2). */
-static char *ngx_http_markdown_limits(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse metrics endpoint enablement and URI settings. */
 static char *ngx_http_markdown_metrics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Map module verbosity enum to nginx native log level constants. */

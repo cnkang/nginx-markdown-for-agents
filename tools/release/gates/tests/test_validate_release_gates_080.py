@@ -6,6 +6,7 @@ from pathlib import Path
 from tools.release.gates.validate_release_gates_080 import (
     RELEASE_PACKAGES_WORKFLOW,
     ValidationResult,
+    check_new_directives,
     validate_all,
 )
 
@@ -75,3 +76,19 @@ def test_release_gate_downloads_canonical_amd64_module_artifact():
         "name: module-so-${{ steps.bench-nginx.outputs.bench_nginx_version }}-x86_64"
         not in workflow
     )
+
+
+def test_new_directive_gate_skips_directives_retired_before_current_release():
+    """The 0.9 release must not require retired 0.8 directive names."""
+    result = ValidationResult()
+
+    check_new_directives(result, active_version="0.9.2")
+
+    statuses = {
+        check_id: status
+        for status, check_id, _ in result.results
+    }
+    assert statuses["new:directive:markdown_stream_threshold"] == "SKIP"
+    assert statuses["new:directive:markdown_stream_precommit_buffer"] == "SKIP"
+    assert statuses["new:directive:markdown_stream_flush_min"] == "SKIP"
+    assert statuses["new:directive:markdown_stream_excluded_types"] == "PASS"

@@ -1,4 +1,4 @@
-# Parser Interrupt Feasibility (v0.7.0)
+# Parser Interrupt Feasibility (current contract)
 
 > **Canonical reference**: See [PARSER_BUDGET.md](./PARSER_BUDGET.md) for the
 > comprehensive parser budget documentation including implementation status,
@@ -6,8 +6,8 @@
 
 ## Question
 
-Can the HTML parser be safely interrupted mid-parse when a timeout or
-memory budget is exceeded?
+Can the HTML parser be safely interrupted mid-parse when a timeout occurs
+or the memory budget gets exceeded?
 
 ## Short Answer
 
@@ -39,18 +39,19 @@ The Rust conversion engine uses html5ever 0.38 in two modes:
 | Memory budget via allocation hook | Partial | Rust global allocator hooks can track but not interrupt |
 | Bound input size pre-parse | **Yes** (implemented) | Limits worst-case parse time indirectly |
 
-### v0.7.0 Approach
+### v0.9.2 Approach
 
-Since mid-parse interruption is not feasible, v0.7.0 uses:
+Since mid-parse interruption is not feasible, the current implementation uses:
 
-1. **Input size bounding** (`markdown_limits memory=<size>`): Prevents unbounded input
+1. **Input size bounding** (`markdown_limits conversion_memory=<size>`): Prevents unbounded input
    from reaching the parser.
-2. **Cooperative timeout** (`markdown_parse_timeout`, default 30s): Checked
+2. **Cooperative timeout** (`markdown_limits parser_timeout=<time>`, default 10s): Checked
    at checkpoints during DOM traversal (every 100 nodes) and at pipeline
-   boundaries. The uninterruptible parse phase is bounded by input size.
-3. **Memory budget** (`markdown_parser_budget`, default 64m): Enforced via
-   `MemoryBudget` stage checks in the streaming path; input-size proxy in
-   the full-buffer path.
+   boundaries. Input size bounds the uninterruptible parse phase.
+3. **Streaming-path memory enforcement** (`markdown_limits parser_memory=<size>`,
+   default 32m): Enforced via `MemoryBudget` stage checks in the **streaming
+   path only**. The full-buffer path performs no input-size cap from this
+   setting. It is not a memory budget for full-buffer allocations.
 4. **Implicit depth limit**: State stack budget (64 KiB) bounds nesting to
    ~1000 levels in the streaming path.
 

@@ -1,0 +1,20 @@
+{
+  "schema_version": "release.scope.short-soak.v1",
+  "scope_revision": "1",
+  "note": "Unbound scope definition; carries no candidate SHA. Candidate-bound scenario identities are fixed by the release workflow in artifacts/release/0.9.2/short-soak-scenario-manifest.json.",
+  "duration_minutes": 30,
+  "concurrency": 16,
+  "corpus": ["small HTML", "medium HTML", "large HTML"],
+  "scenario_memory_bytes": {
+    "small": 33554432,
+    "medium": 67108864,
+    "large": 100663296
+  },
+  "requirements": [
+    "zero errors",
+    "no crash/leak",
+    "no monotonic worker-RSS growth after drain",
+    "module-managed per-request peak memory <= scenario effective conversion_memory"
+  ],
+  "threshold_reference": "Requirement 18 qualification thresholds (not observation evidence; criterion 6 thresholds are not restated here)"
+}

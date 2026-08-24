@@ -59,6 +59,14 @@ class TLSBackendHandler(socketserver.StreamRequestHandler):
             self._send_html(200, SIMPLE_HTML, method)
             return
 
+        if path == "/trailer":
+            # Chunked response with a representation trailer: simulates an
+            # upstream that sends Content-Digest as a real response trailer
+            # (HTTP/1.1 chunked).  The markdown module must suppress the
+            # trailer after converting the HTML body to Markdown.
+            self._send_chunked_with_trailer(200, SIMPLE_HTML)
+            return
+
         if path == "/error":
             self._send_html(500, ERROR_HTML, method)
             return
@@ -93,6 +101,31 @@ class TLSBackendHandler(socketserver.StreamRequestHandler):
         self._send_headers(status, headers)
         if method != "HEAD":
             self.wfile.write(payload)
+
+    def _send_chunked_with_trailer(self, status: int, body: str) -> None:
+        """Send a chunked response whose trailer carries a representation digest.
+
+        The trailer list is emitted after the final chunk, mirroring an
+        upstream that attaches Content-Digest to the HTML representation.
+        A converting proxy must not propagate this trailer to the client.
+        """
+        payload = body.encode("utf-8")
+        headers = {
+            "Content-Type": "text/html; charset=utf-8",
+            "Transfer-Encoding": "chunked",
+            "Cache-Control": "public, max-age=3600",
+            "Trailer": "Content-Digest",
+            "Connection": "close",
+        }
+        self._send_headers(status, headers)
+        # Single chunk covering the whole body.
+        self.wfile.write(f"{len(payload):x}\r\n".encode("ascii"))
+        self.wfile.write(payload)
+        self.wfile.write(b"\r\n")
+        # Terminal chunk + trailer.
+        self.wfile.write(b"0\r\n")
+        self.wfile.write(b"Content-Digest: sha-256=:upstream-html-digest:\r\n")
+        self.wfile.write(b"\r\n")
 
 
 class ThreadingTLSServer(socketserver.ThreadingMixIn, socketserver.TCPServer):

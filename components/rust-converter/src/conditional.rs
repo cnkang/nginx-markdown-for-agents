@@ -168,82 +168,86 @@ fn is_modified_since(if_modified_since: &str, last_modified: &str) -> bool {
 fn parse_http_date(date: &str) -> Option<i64> {
     let date = date.trim();
 
-    // Quick validation: must end with "GMT" and have the expected length.
     if !date.ends_with("GMT") {
         return None;
     }
 
-    // Expected format: "Day, DD Mon YYYY HH:MM:SS GMT"
-    // Total length: 29 bytes. Because the format is pure ASCII, all field
-    // slicing below operates on bytes; we must therefore reject any input
-    // that is not entirely ASCII before indexing, otherwise byte-offset
-    // slicing could split a multi-byte UTF-8 scalar and panic. The length
-    // check alone is insufficient: a 29-byte string may contain multi-byte
-    // characters (e.g. a 4-byte emoji counts as 4 bytes but one char).
     let bytes = date.as_bytes();
     if bytes.len() != 29 || !date.is_ascii() {
         return None;
     }
 
-    // Helper: parse an ASCII byte range as an i64 (digits only). Returns None
-    // if any byte is a non-digit, avoiding str slicing entirely.
-    let parse_range = |start: usize, end: usize| -> Option<i64> {
-        let mut value: i64 = 0;
-        for &b in &bytes[start..end] {
-            if !b.is_ascii_digit() {
-                return None;
-            }
-            value = value * 10 + i64::from(b - b'0');
+    if !is_valid_weekday(bytes) {
+        return None;
+    }
+
+    if !validate_http_date_separators(bytes) {
+        return None;
+    }
+
+    let day: i64 = parse_ascii_range(bytes, 5, 7)?;
+    let year: i64 = parse_ascii_range(bytes, 12, 16)?;
+    let hour: i64 = parse_ascii_range(bytes, 17, 19)?;
+    let min: i64 = parse_ascii_range(bytes, 20, 22)?;
+    let sec: i64 = parse_ascii_range(bytes, 23, 25)?;
+
+    let month: i64 = parse_month_name(&bytes[8..11])?;
+
+    if !validate_date_ranges(year, month, day, hour, min, sec) {
+        return None;
+    }
+
+    Some(compute_unix_timestamp(year, month, day, hour, min, sec))
+}
+
+fn is_valid_weekday(bytes: &[u8]) -> bool {
+    matches!(
+        &bytes[0..3],
+        b"Mon" | b"Tue" | b"Wed" | b"Thu" | b"Fri" | b"Sat" | b"Sun"
+    )
+}
+
+fn validate_http_date_separators(bytes: &[u8]) -> bool {
+    bytes[3] == b','
+        && bytes[4] == b' '
+        && bytes[7] == b' '
+        && bytes[11] == b' '
+        && bytes[16] == b' '
+        && bytes[19] == b':'
+        && bytes[22] == b':'
+        && bytes[25] == b' '
+}
+
+fn parse_ascii_range(bytes: &[u8], start: usize, end: usize) -> Option<i64> {
+    let mut value: i64 = 0;
+    for &b in &bytes[start..end] {
+        if !b.is_ascii_digit() {
+            return None;
         }
-        Some(value)
-    };
-
-    // Validate weekday (bytes 0..3).
-    match &bytes[0..3] {
-        b"Mon" | b"Tue" | b"Wed" | b"Thu" | b"Fri" | b"Sat" | b"Sun" => {}
-        _ => return None,
+        value = value * 10 + i64::from(b - b'0');
     }
+    Some(value)
+}
 
-    // Validate fixed separators: ", " at 3..5, spaces at 7,11,16, colons at
-    // 19,22, and the space before "GMT" at 25.
-    if bytes[3] != b',' || bytes[4] != b' ' {
-        return None;
+fn parse_month_name(bytes: &[u8]) -> Option<i64> {
+    match bytes {
+        b"Jan" => Some(1),
+        b"Feb" => Some(2),
+        b"Mar" => Some(3),
+        b"Apr" => Some(4),
+        b"May" => Some(5),
+        b"Jun" => Some(6),
+        b"Jul" => Some(7),
+        b"Aug" => Some(8),
+        b"Sep" => Some(9),
+        b"Oct" => Some(10),
+        b"Nov" => Some(11),
+        b"Dec" => Some(12),
+        _ => None,
     }
-    if bytes[7] != b' ' || bytes[11] != b' ' || bytes[16] != b' ' {
-        return None;
-    }
-    if bytes[19] != b':' || bytes[22] != b':' {
-        return None;
-    }
-    if bytes[25] != b' ' {
-        return None;
-    }
+}
 
-    // Extract numeric components (byte ranges, ASCII-validated above).
-    let day: i64 = parse_range(5, 7)?;
-    let year: i64 = parse_range(12, 16)?;
-    let hour: i64 = parse_range(17, 19)?;
-    let min: i64 = parse_range(20, 22)?;
-    let sec: i64 = parse_range(23, 25)?;
-
-    let month: i64 = match &bytes[8..11] {
-        b"Jan" => 1,
-        b"Feb" => 2,
-        b"Mar" => 3,
-        b"Apr" => 4,
-        b"May" => 5,
-        b"Jun" => 6,
-        b"Jul" => 7,
-        b"Aug" => 8,
-        b"Sep" => 9,
-        b"Oct" => 10,
-        b"Nov" => 11,
-        b"Dec" => 12,
-        _ => return None,
-    };
-
-    // Convert to Unix timestamp using simplified formula
-    // (valid for 1970-2100, sufficient for HTTP date ranges)
+fn validate_date_ranges(year: i64, month: i64, day: i64, hour: i64, min: i64, sec: i64) -> bool {
     if !(1970..=2100).contains(&year)
         || !(1..=12).contains(&month)
         || day < 1
@@ -251,42 +255,51 @@ fn parse_http_date(date: &str) -> Option<i64> {
         || min > 59
         || sec > 59
     {
-        return None;
+        return false;
     }
+    day <= max_days_in_month(year, month)
+}
 
-    // Per-month day validation
-    let max_day = match month {
+fn max_days_in_month(year: i64, month: i64) -> i64 {
+    match month {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
         2 => {
-            let leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
-            if leap { 29 } else { 28 }
+            if is_leap_year(year) {
+                29
+            } else {
+                28
+            }
         }
-        _ => return None,
-    };
-    if day > max_day {
-        return None;
+        _ => 0,
     }
+}
 
-    // Days from 1970-01-01 to start of given year
+fn compute_unix_timestamp(year: i64, month: i64, day: i64, hour: i64, min: i64, sec: i64) -> i64 {
+    let days_from_year = days_from_epoch_to_year(year);
+    let days_from_month = days_from_year_start_to_month(year, month);
+    let days = days_from_year + days_from_month + day - 1;
+    days * 86400 + hour * 3600 + min * 60 + sec
+}
+
+fn days_from_epoch_to_year(year: i64) -> i64 {
     let mut days: i64 = 0;
     for y in 1970..year {
         days += if is_leap_year(y) { 366 } else { 365 };
     }
+    days
+}
 
-    // Days from start of year to start of given month
+fn days_from_year_start_to_month(year: i64, month: i64) -> i64 {
     let days_in_months = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut days: i64 = 0;
     for m in 1..month {
         days += days_in_months[m as usize];
         if m == 2 && is_leap_year(year) {
             days += 1;
         }
     }
-
-    // Days from start of month to given day (1-indexed)
-    days += day - 1;
-
-    Some(days * 86400 + hour * 3600 + min * 60 + sec)
+    days
 }
 
 fn is_leap_year(year: i64) -> bool {

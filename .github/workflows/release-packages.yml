@@ -12,7 +12,8 @@
 #   - Workflow-level permissions: {} (no permissions by default)
 #   - Each job grants only the minimum permissions it needs
 #   - All third-party actions MUST be pinned to full SHA commit hashes (Req 9.6)
-#   - GPG signing runs in a Protected Environment with required reviewers
+#   - Release promotion and GPG signing run in the Protected Environment
+#     "release-signing" with required reviewers
 #   - workflow_dispatch input is validated before use (Req 9.7)
 #
 # Matrix generation:
@@ -32,6 +33,8 @@
 #     architectures, not container image names.
 #   - Enable GPG signing: configure GPG_PRIVATE_KEY, GPG_PASSPHRASE, GPG_KEY_ID secrets
 #     in the Protected Environment "release-signing" with required reviewers.
+#   - Enable tag promotion: configure RELEASE_APPROVED_CANDIDATE_SHA in the same
+#     environment to the exact 40-character SHA approved by the release owner.
 #     Tag releases ALWAYS run the signing job; no repository variable needed.
 #
 # GPG Signing Policy (0.8.x release line):
@@ -77,7 +80,7 @@ permissions: {}
 #   - build:               Compile Rust library + NGINX dynamic module (matrix)
 #   - package:             Generate .deb/.rpm via nFPM (matrix)
 #   - smoke-test:          Container install + module load verification (matrix)
-#   - release-gate:        Tag-only release governance and artifact layout gate
+#   - release-gate:        Release governance and artifact layout gate
 #   - integrity-checksums: SHA256SUMS + release-manifest.json generation
 #   - integrity-signing:   Optional GPG signing (protected environment, tag only)
 #   - publish:             Upload to GitHub Release (tag) or workflow artifacts (dispatch)
@@ -88,8 +91,8 @@ permissions: {}
 # release-packages.yml is the canonical release package workflow and official release path.
 
 env:
-  RUST_TOOLCHAIN: 1.97.0
-  RUST_FEATURES: streaming,incremental
+  RUST_TOOLCHAIN: 1.97.1
+  RUST_FEATURES: streaming,incremental,prune_noise_regions
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
@@ -106,6 +109,7 @@ jobs:
       nginx_versions: ${{ steps.resolve.outputs.nginx_versions }}
       package_matrix: ${{ steps.resolve.outputs.package_matrix }}
       smoke_matrix: ${{ steps.resolve.outputs.smoke_matrix }}
+      musl_matrix: ${{ steps.resolve.outputs.musl_matrix }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -191,9 +195,46 @@ jobs:
               out.write(f"package_matrix={json.dumps(package_matrix)}\n")
               out.write(f"smoke_matrix={json.dumps(smoke_matrix)}\n")
 
+              # Musl dynamic-module matrix: entries owned by
+              # release-binaries.yml (musl only).  Built in this workflow so
+              # all supported artifacts are produced BEFORE the release is
+              # published (the previous post-publication musl build could
+              # never block a release).
+              # Canonical Rule 62 source keys only: nginx_version + the
+              # matrix's own 'arch' value.  The previous legacy aliases
+              # (nginx/os_type) rebuilt the retired contract shape here;
+              # os_type was dead downstream (musl is hardcoded for this
+              # job family).  'arch' passes through unchanged so the runner
+              # expression and build_release.sh (which accepts amd64/arm64)
+              # keep working without a second aliasing layer.
+              musl_entries = [
+                  {
+                      "nginx_version": e["nginx_version"],
+                      "arch": e["arch"],
+                  }
+                  for e in data.get("entries", [])
+                  if e.get("owner_workflow") == ".github/workflows/release-binaries.yml"
+                  and e.get("support_tier") == "supported"
+                  and e.get("artifact_type") == "dynamic-module"
+                  and e.get("libc") == "musl"
+              ]
+              musl_entries.sort(
+                  key=lambda e: (
+                      tuple(int(p) for p in e["nginx_version"].split(".")),
+                      e["arch"],
+                  )
+              )
+              if musl_entries:
+                  out.write(f"musl_matrix={json.dumps(musl_entries)}\n")
+              else:
+                  out.write("musl_matrix=[]\n")
+                  print("ERROR: No musl dynamic-module entries found in tools/release-matrix.json for release-binaries.yml ownership")
+                  raise SystemExit(1)
+
           print(f"Resolved {len(versions)} NGINX versions: {versions}")
           print(f"Package matrix: {len(package_matrix)} entries")
           print(f"Smoke test matrix: {len(smoke_matrix)} entries")
+          print(f"Musl dynamic-module matrix: {len(musl_entries)} entries")
           PY
         shell: bash
 
@@ -221,6 +262,7 @@ jobs:
             pcre2-devel \
             zlib-devel \
             brotli-devel \
+            pkg-config \
             openssl-devel \
             tar \
             gzip \
@@ -267,9 +309,11 @@ jobs:
         shell: bash
 
       - name: Install Rust toolchain
+        env:
+          MATRIX_ARCH: ${{ matrix.arch }}
         run: |
           bash ./packaging/scripts/install-verified-rustup.sh \
-            --arch "${{ matrix.arch }}" \
+            --arch "${MATRIX_ARCH}" \
             --toolchain "${RUST_TOOLCHAIN}"
           echo "${HOME}/.cargo/bin" >> "$GITHUB_PATH"
           "${HOME}/.cargo/bin/rustc" --version
@@ -277,12 +321,14 @@ jobs:
         shell: bash
 
       - name: Determine Rust target triple
+        env:
+          MATRIX_ARCH: ${{ matrix.arch }}
         run: |
-          case "${{ matrix.arch }}" in
+          case "${MATRIX_ARCH}" in
             amd64) RUST_TARGET="x86_64-unknown-linux-gnu" ;;
             arm64) RUST_TARGET="aarch64-unknown-linux-gnu" ;;
             *)
-              echo "ERROR: unsupported arch: ${{ matrix.arch }}" >&2
+              echo "ERROR: unsupported arch: ${MATRIX_ARCH}" >&2
               exit 1
               ;;
           esac
@@ -469,6 +515,51 @@ jobs:
           if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────────────────────
+  # Musl Build Job: Build musl dynamic-module tarballs BEFORE publication.
+  # Previously release-binaries.yml built musl artifacts only after the
+  # release was published (trigger: release: [published]) — a failed musl
+  # build could never block the public release (F-01).  This job builds the
+  # same matrix in the tag pipeline so every supported artifact exists before
+  # the publish job runs.  release-binaries.yml keeps workflow_dispatch for
+  # manual rebuilds of existing releases.
+  # ─────────────────────────────────────────────────────────────────────────────
+  musl-build:
+    name: Musl Build - NGINX ${{ matrix.nginx_version }} - ${{ matrix.arch }}
+    needs: prepare
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.prepare.outputs.musl_matrix) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build musl module tarball
+        env:
+          NGINX_VERSION: ${{ matrix.nginx_version }}
+          MATRIX_ARCH: ${{ matrix.arch }}
+        run: |
+          ./tools/build_release.sh "${NGINX_VERSION}" musl \
+            "${MATRIX_ARCH}"
+
+      - name: Upload musl module tarball
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pkg-musl-module-${{ matrix.nginx_version }}-${{ matrix.arch }}
+          path: dist/${{ matrix.nginx_version }}-musl-${{ matrix.arch }}/*.tar.gz
+          if-no-files-found: error
+          retention-days: 5
+
+  # ─────────────────────────────────────────────────────────────────────────────
   # Package Job: Generate .deb/.rpm via nFPM (matrix)
   # Consumes the compiled .so from the build job and produces distribution
   # packages following 0.8.x release package naming and layout conventions.
@@ -559,19 +650,10 @@ jobs:
           DEB_FILENAME="nginx-module-markdown-for-agents_${PKG_VERSION}_nginx-${NGINX_VERSION}_${NFPM_ARCH}.deb"
           RPM_FILENAME="nginx-module-markdown-for-agents-${PKG_VERSION}-nginx${NGINX_VERSION}-1.${RPM_ARCH}.rpm"
 
-          # Compute NGINX version branch bounds for ABI-safe dependency constraints.
-          # Floor = major.minor.0, Ceiling = major.(minor+1).0 (exclusive upper bound).
-          # Example: NGINX 1.26.3 → floor=1.26.0, ceil=1.27.0
-          IFS='.' read -r MAJOR MINOR _PATCH <<< "${NGINX_VERSION}"
-          NGINX_VERSION_FLOOR="${MAJOR}.${MINOR}.0"
-          NGINX_VERSION_CEIL="${MAJOR}.$((MINOR + 1)).0"
-
           # Export to GITHUB_ENV for subsequent steps
           {
             echo "PKG_VERSION=${PKG_VERSION}"
             echo "NGINX_VERSION=${NGINX_VERSION}"
-            echo "NGINX_VERSION_FLOOR=${NGINX_VERSION_FLOOR}"
-            echo "NGINX_VERSION_CEIL=${NGINX_VERSION_CEIL}"
             echo "NFPM_ARCH=${NFPM_ARCH}"
             echo "RPM_ARCH=${RPM_ARCH}"
             echo "DEB_FILENAME=${DEB_FILENAME}"
@@ -610,31 +692,38 @@ jobs:
         shell: bash
 
       - name: Generate DEB package
+        env:
+          DEB_FILENAME: ${{ steps.pkg-env.outputs.deb_filename }}
         run: |
           mkdir -p dist
           nfpm package \
             --config "${NFPM_TMP}/nfpm.yaml" \
             --packager deb \
-            --target "dist/${{ steps.pkg-env.outputs.deb_filename }}"
-          echo "Generated: dist/${{ steps.pkg-env.outputs.deb_filename }}" >&2
-          ls -la "dist/${{ steps.pkg-env.outputs.deb_filename }}"
+            --target "dist/${DEB_FILENAME}"
+          echo "Generated: dist/${DEB_FILENAME}" >&2
+          ls -la "dist/${DEB_FILENAME}"
         shell: bash
 
       - name: Generate RPM package
+        env:
+          RPM_FILENAME: ${{ steps.pkg-env.outputs.rpm_filename }}
         run: |
           nfpm package \
             --config "${NFPM_TMP}/nfpm.yaml" \
             --packager rpm \
-            --target "dist/${{ steps.pkg-env.outputs.rpm_filename }}"
-          echo "Generated: dist/${{ steps.pkg-env.outputs.rpm_filename }}" >&2
-          ls -la "dist/${{ steps.pkg-env.outputs.rpm_filename }}"
+            --target "dist/${RPM_FILENAME}"
+          echo "Generated: dist/${RPM_FILENAME}" >&2
+          ls -la "dist/${RPM_FILENAME}"
         shell: bash
 
       - name: Validate install layout
+        env:
+          DEB_FILENAME: ${{ steps.pkg-env.outputs.deb_filename }}
+          RPM_FILENAME: ${{ steps.pkg-env.outputs.rpm_filename }}
         run: |
           bash tools/release/gates/check_install_layout.sh \
-            "dist/${{ steps.pkg-env.outputs.deb_filename }}" \
-            "dist/${{ steps.pkg-env.outputs.rpm_filename }}"
+            "dist/${DEB_FILENAME}" \
+            "dist/${RPM_FILENAME}"
         shell: bash
 
       - name: Upload DEB artifact
@@ -650,6 +739,39 @@ jobs:
         with:
           name: pkg-rpm-${{ matrix.nginx_version }}-${{ matrix.arch }}
           path: dist/${{ steps.pkg-env.outputs.rpm_filename }}
+          if-no-files-found: error
+          retention-days: 5
+
+      - name: Package glibc module tarball
+        run: |
+          # Produce the glibc dynamic-module tarball that the release matrix
+          # declares as supported/release-blocking but release-binaries.yml
+          # (musl-only) never builds.  Naming matches tools/build_release.sh:
+          #   ngx_http_markdown_filter_module-<version>-glibc-<arch>.tar.gz
+          # The .so is already in build/ from the build job (downloaded via
+          # module-so artifact at the top of this job).
+          SO="$(find build/ -name 'ngx_http_markdown_filter_module.so' -print -quit)"
+          if [[ -z "${SO}" ]]; then
+            echo "ERROR: module .so not found in build/" >&2
+            exit 1
+          fi
+
+          # Reuse the RPM arch mapping already exported to GITHUB_ENV by the
+          # pkg-env step (amd64→x86_64, arm64→aarch64); do not re-derive it.
+          TARBALL_NAME="ngx_http_markdown_filter_module-${NGINX_VERSION}-glibc-${RPM_ARCH}.tar.gz"
+          mkdir -p dist/tarball
+          cp "${SO}" "dist/tarball/ngx_http_markdown_filter_module.so"
+          tar -C dist/tarball -czf "dist/${TARBALL_NAME}" ngx_http_markdown_filter_module.so
+          rm -rf dist/tarball
+          echo "Generated: dist/${TARBALL_NAME}" >&2
+          ls -la "dist/${TARBALL_NAME}"
+        shell: bash
+
+      - name: Upload glibc module tarball
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pkg-glibc-module-${{ matrix.nginx_version }}-${{ matrix.arch }}
+          path: dist/ngx_http_markdown_filter_module-*-glibc-*.tar.gz
           if-no-files-found: error
           retention-days: 5
 
@@ -686,10 +808,11 @@ jobs:
       - name: Run smoke test
         env:
           NGINX_VERSION: ${{ matrix.nginx_version }}
+          PACKAGE_FORMAT: ${{ matrix.format }}
         run: |
-          PKG_FILE="$(find dist/ -name '*.${{ matrix.format }}' -print -quit)"
+          PKG_FILE="$(find dist/ -name "*.${PACKAGE_FORMAT}" -print -quit)"
           if [[ -z "${PKG_FILE}" ]]; then
-            echo "ERROR: No .${{ matrix.format }} file found in dist/" >&2
+            echo "ERROR: No .${PACKAGE_FORMAT} file found in dist/" >&2
             exit 1
           fi
           chmod +x packaging/scripts/smoke-test-basic.sh
@@ -706,15 +829,24 @@ jobs:
         shell: bash
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # Release Gate Job: tag-only release governance gate
+  # Release Gate Job: release governance gate
   # Runs after package smoke tests and before publication. Pull requests and
-  # branch CI deliberately do not run release gates.
+  # branch CI deliberately do not run release gates; tag and manual package
+  # publications must both pass the same release qualification checks.
   # ─────────────────────────────────────────────────────────────────────────────
   release-gate:
-    name: Release Gate (tag only)
+    name: Release Gate
     needs: [prepare, smoke-test]
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
+    # This environment supplies the independent candidate promotion anchor and
+    # requires the same human approval that protects release signing.
+    environment: release-signing
+    # 14 blocking fuzz targets (15 min each) + short-soak + 091/092 perf
+    # gates + toolchain install ≈ 4.5-5.5 h.  GitHub-hosted ubuntu-24.04
+    # jobs are capped at 360 minutes, so set the maximum allowed value
+    # (tools fuzz-matrix); if the gate outgrows the cap, split the fuzz matrix.
+    timeout-minutes: 360
     permissions:
       contents: read
       checks: read
@@ -732,11 +864,15 @@ jobs:
           python-version: '3.14.6'
 
       - name: Verify tag SHA is main CI-approved
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           TAG_SHA: ${{ github.sha }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          APPROVED_CANDIDATE_SHA: ${{ secrets.RELEASE_APPROVED_CANDIDATE_SHA }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
 
@@ -745,17 +881,38 @@ jobs:
             exit 1
           fi
 
-          containment_status="$(gh api "repos/${REPOSITORY}/compare/${TAG_SHA}...${DEFAULT_BRANCH}" --jq '.status')"
-          if [[ "${containment_status}" != "ahead" && "${containment_status}" != "identical" ]]; then
-            echo "ERROR: Tag SHA ${TAG_SHA} is not contained in ${DEFAULT_BRANCH}." >&2
+          branch_relation="$(gh api \
+            "repos/${REPOSITORY}/compare/${TAG_SHA}...${DEFAULT_BRANCH}" \
+            --jq '.status')"
+          case "${branch_relation}" in
+            ahead|identical)
+              ;;
+            *)
+              echo "ERROR: Tag SHA ${TAG_SHA} is not an ancestor of ${DEFAULT_BRANCH} (comparison status: ${branch_relation:-missing})." >&2
+              exit 1
+              ;;
+          esac
+
+          if [[ -z "${APPROVED_CANDIDATE_SHA}"
+                || "${TAG_SHA}" != "${APPROVED_CANDIDATE_SHA}" ]]
+          then
+            echo "ERROR: Tag SHA does not match the protected approved release candidate." >&2
             exit 1
           fi
+
+          python3 tools/release/gates/verify_tag_candidate.py \
+            --tag-sha "${TAG_SHA}" \
+            --ref-type "${REF_TYPE}" \
+            --ref-name "${REF_NAME}" \
+            --default-branch "${DEFAULT_BRANCH}" \
+            --branch-relation "${branch_relation}"
 
           input_dir="$(mktemp -d .tag-sha-checks.XXXXXX)"
           branch_rules="${input_dir}/branch-rules.json"
           check_runs="${input_dir}/check-runs.json"
           statuses="${input_dir}/statuses.json"
-          trap 'rm -f "${branch_rules}" "${check_runs}" "${statuses}"; rmdir "${input_dir}"' EXIT
+          required_checks="${input_dir}/effective-required-checks.json"
+          trap 'rm -f "${branch_rules}" "${check_runs}" "${statuses}" "${required_checks}"; rmdir "${input_dir}"' EXIT
 
           # This endpoint returns the active rules that actually apply to the
           # branch, including organization-level rules, and needs only
@@ -779,7 +936,23 @@ jobs:
             --check-runs-file "${check_runs}" \
             --statuses-file "${statuses}" \
             --tag-sha "${TAG_SHA}" \
-            --branch "${DEFAULT_BRANCH}"
+            --branch "${DEFAULT_BRANCH}" \
+            --required-checks-output "${required_checks}"
+
+          {
+            echo "### Effective required checks"
+            sed 's/^/    /' "${required_checks}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+        shell: bash
+
+      # Candidate-bound gate inputs (gitignored working-tree state) are
+      # generated here — AFTER the tag-SHA governance check above, so no
+      # repository code from the checkout executes before governance.
+      - name: Generate candidate-bound release gate inputs
+        run: |
+          python3 tools/release/gates/generate_release_gate_manifests.py \
+            --phase inputs \
+            --candidate-sha "$(git rev-parse HEAD)"
         shell: bash
 
       - name: Install release gate dependencies
@@ -787,11 +960,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             apache2-utils \
+            build-essential \
             dpkg-dev \
             file \
             gzip \
+            libbrotli-dev \
+            pkg-config \
             rpm \
-            tar
+            tar \
+            zlib1g-dev
           python3 -m pip install --requirement requirements-release.txt
         shell: bash
 
@@ -807,6 +984,12 @@ jobs:
         shell: bash
 
       - name: Download all DEB artifacts
+        # The release gate validates the UNSIGNED package artifacts on BOTH
+        # tag and workflow_dispatch triggers. Signed packages are produced
+        # only after the gate passes (integrity-signing job), so the gate
+        # must never try to consume `signed-packages` — that artifact does
+        # not exist yet when this job runs and the layout/artifact checks
+        # below consume dist/.
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-deb-*
@@ -854,9 +1037,23 @@ jobs:
           name: module-so-${{ steps.bench-nginx.outputs.bench_nginx_version }}-amd64
           path: module-runtime
 
-      - name: Run tag release gates
+      - name: Generate candidate-bound artifact index
+        run: |
+          python3 tools/release/gates/generate_release_gate_manifests.py \
+            --phase artifact \
+            --candidate-sha "$(git rev-parse HEAD)" \
+            --artifact-root dist
+        shell: bash
+
+      - name: Install nightly Rust toolchain for fuzz qualification
+        run: |
+          rustup toolchain install nightly --profile minimal --no-self-update
+          cargo install cargo-fuzz --version 0.13.1 --locked
+        shell: bash
+
+      - name: Run release gates
         env:
-          RELEASE_GATE_EXPECTED_CARGO_VERSION: "0.9.1"
+          RELEASE_GATE_EXPECTED_CARGO_VERSION: "0.9.2"
           NGINX_BIN: ${{ github.workspace }}/module-runtime/nginx
           MODULE_SO: ${{ github.workspace }}/module-runtime/ngx_http_markdown_filter_module.so
           BENCHMARK_NGINX_VERSION: ${{ steps.bench-nginx.outputs.bench_nginx_version }}
@@ -871,7 +1068,8 @@ jobs:
           # include user-local Kiro spec directories.
           python3 tools/release/gates/validate_naming.py
           python3 tools/release/gates/validate_release_gates_090.py
-          python3 tools/release/gates/validate_release_gates_080.py
+          python3 tools/release/gates/validate_release_gates_080.py \
+            --active-version "${RELEASE_GATE_EXPECTED_CARGO_VERSION}"
           python3 tools/release/gates/validate_config_directives.py
           python3 tools/release/gates/validate_release_gates_070.py --mode strict
           python3 tools/release/gates/validate_metrics.py
@@ -881,6 +1079,18 @@ jobs:
           python3 tools/release/gates/validate_fuzz_packaging.py
           python3 tools/release/gates/validate_release_metadata.py \
             --version "${RELEASE_GATE_EXPECTED_CARGO_VERSION}"
+          # Run the 0.9.2-specific blocking checks that are not part of the
+          # legacy validator chain above.
+          python3 tools/harness/detect_public_surface_drift.py
+          PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
+          # 0.9.2 blocking qualification mirroring Makefile
+          # `release-gates-check-092` stages [8/13]-[12/13].  The tag release
+          # path MUST run the same candidate-bound qualification the local
+          # gate enforces; publish hard-depends on this job's success.
+          python3 tools/release/gates/validate_release_candidate_evidence.py --mode real --git-head
+          python3 tools/release/gates/validate_artifact_registry.py --mode real
+          python3 tools/release/gates/validate_fuzz_qualification.py --mode real --git-head
+          make -C components/nginx-module/tests unit-streaming_impl
           make docs-check
           bash tools/harness/detect_version_consistency.sh
           bash tools/release/gates/check_install_layout.sh dist/*.deb dist/*.rpm
@@ -894,6 +1104,9 @@ jobs:
             --workdir /workspace \
             --env GITHUB_REF \
             --env GITHUB_SHA \
+            --env GITHUB_REPOSITORY \
+            --env GITHUB_RUN_ID \
+            --env GITHUB_RUN_ATTEMPT \
             --env NGINX_BIN=/workspace/module-runtime/nginx \
             --env MODULE_SO=/workspace/module-runtime/ngx_http_markdown_filter_module.so \
             --env BENCHMARK_NGINX_VERSION \
@@ -909,6 +1122,7 @@ jobs:
             gawk \
             gzip \
             httpd-tools \
+            make \
             libxcrypt \
             procps-ng \
             python3 \
@@ -920,9 +1134,58 @@ jobs:
           echo "Benchmark NGINX version: ${BENCHMARK_NGINX_VERSION}"
           echo "Architecture: $(uname -m)"
           "${NGINX_BIN}" -V 2>&1 | head -3
-          python3 tools/perf/evidence_gate.py --mode blocking
+          # Produce the 0.9.2 baseline from this exact release candidate and
+          # this module-enabled runtime before the blocking gate consumes it.
+          # The checked-in copy is audit context; candidate evidence must be
+          # generated after checkout so both provenance fields bind to HEAD.
+          CANDIDATE_SHA="$(git rev-parse HEAD)"
+          CANDIDATE_RUN="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}"
+          tools/perf/run_module_benchmark.sh \
+            --output perf/baselines/module-baseline-092-raw.json
+          python3 tools/perf/validate_module_probe_artifacts.py \
+            --probe-dir perf/baselines/module-baseline-092-raw-probes
+          python3 tools/perf/finalize_module_baseline.py \
+            --raw-input perf/baselines/module-baseline-092-raw.json \
+            --output perf/baselines/module-baseline-092.json \
+            --source-git-commit "${CANDIDATE_SHA}" \
+            --source-run "${CANDIDATE_RUN}"
+          python3 tools/perf/validate_module_probe_artifacts.py \
+            --probe-dir perf/baselines/module-baseline-092-raw-probes \
+            --baseline perf/baselines/module-baseline-092.json
+          # The raw report is the candidate's authoritative measurement and
+          # its probes were validated above.  Re-running ApacheBench here
+          # would compare two integer-millisecond p50 samples and can turn
+          # one timing bucket into a false regression.
+          # Keep the tag contract additive with the local 0.9.2 gate:
+          # historical 0.9.1 evidence must pass before candidate 0.9.2
+          # evidence.  NGINX_BIN is module-enabled and the helper refuses
+          # to skip module evidence when it is present.
+          make release-perf-evidence-blocking BASELINE_VERSION=091
+          EVIDENCE_GATE_BENCHMARK_REPORT=perf/baselines/module-baseline-092-raw.json \
+            make release-perf-evidence-blocking BASELINE_VERSION=092
+          # Short-soak qualification (Makefile stage [12/13]) against the
+          # module-enabled EL9 nginx binary.
+          python3 tools/release/gates/validate_soak_qualification.py --mode real --git-head
           CONTAINER_SCRIPT
+          python3 tools/release/gates/generate_release_gate_manifests.py \
+            --phase final \
+            --candidate-sha "$(git rev-parse HEAD)"
+          python3 tools/release/gates/validate_release_evidence_manifest.py --mode real
         shell: bash
+
+  # The official Docker matrix is release-blocking for Docker artifacts in
+  # tools/release-matrix.json. Call the reusable workflow with this exact
+  # candidate SHA so publish cannot proceed on an independently triggered,
+  # stale, or merely related Docker validation run.
+  official-docker-release-gate:
+    name: Official NGINX Docker Release Gate
+    needs: [release-gate]
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/official-nginx-docker.yml
+    with:
+      module_repo: ${{ github.server_url }}/${{ github.repository }}.git
+      module_ref: ${{ github.ref_name }}
+      module_sha: ${{ github.sha }}
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Integrity Checksums Job: SHA256SUMS generation (no protected environment)
@@ -931,7 +1194,15 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   integrity-checksums:
     name: Integrity - SHA256SUMS
-    needs: smoke-test
+    needs: [smoke-test, musl-build, integrity-signing, official-docker-release-gate]
+    if: >-
+      always()
+      && needs.musl-build.result == 'success'
+      && needs.smoke-test.result == 'success'
+      && needs.official-docker-release-gate.result == 'success'
+      && (needs.integrity-signing.result == 'success'
+          || (needs.integrity-signing.result == 'skipped'
+              && github.ref_type != 'tag'))
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -942,17 +1213,42 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Download all DEB artifacts
+      - name: Download signed package artifacts (tag)
+        if: github.ref_type == 'tag'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: signed-packages
+          path: artifacts/
+
+      - name: Download all DEB artifacts (workflow dispatch)
+        if: github.ref_type != 'tag'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-deb-*
           path: artifacts/
           merge-multiple: true
 
-      - name: Download all RPM artifacts
+      - name: Download all RPM artifacts (workflow dispatch)
+        if: github.ref_type != 'tag'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-rpm-*
+          path: artifacts/
+          merge-multiple: true
+
+      - name: Download all glibc module tarballs (workflow dispatch)
+        if: github.ref_type != 'tag'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: pkg-glibc-module-*
+          path: artifacts/
+          merge-multiple: true
+
+      - name: Download all musl module tarballs (workflow dispatch)
+        if: github.ref_type != 'tag'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: pkg-musl-module-*
           path: artifacts/
           merge-multiple: true
 
@@ -960,6 +1256,21 @@ jobs:
         run: |
           echo "=== Downloaded artifacts ===" >&2
           ls -la artifacts/
+        shell: bash
+
+      - name: Add authenticated installer bootstrap assets (tag)
+        if: github.ref_type == 'tag'
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          installer="nginx-markdown-for-agents-installer-${RELEASE_TAG}.sh"
+          cp tools/install.sh "artifacts/${installer}"
+          cp packaging/nginx-markdown-for-agents-release.asc \
+            artifacts/nginx-markdown-for-agents-release.asc
+          chmod 0755 "artifacts/${installer}"
+          test -s "artifacts/${installer}"
+          test -s artifacts/nginx-markdown-for-agents-release.asc
         shell: bash
 
       - name: Generate release manifest
@@ -1037,6 +1348,17 @@ jobs:
           if-no-files-found: error
           retention-days: 5
 
+      - name: Upload installer bootstrap assets (tag)
+        if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-bootstrap
+          path: |
+            artifacts/nginx-markdown-for-agents-installer-${{ github.ref_name }}.sh
+            artifacts/nginx-markdown-for-agents-release.asc
+          if-no-files-found: error
+          retention-days: 5
+
   # ─────────────────────────────────────────────────────────────────────────────
   # Integrity Signing Job: Mandatory GPG signing for tag releases
   # Always runs for tag pushes; skipped for workflow_dispatch.
@@ -1049,7 +1371,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   integrity-signing:
     name: Integrity - GPG Sign
-    needs: [integrity-checksums, release-gate]
+    needs: [smoke-test, release-gate, musl-build, official-docker-release-gate]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     permissions:
@@ -1076,6 +1398,114 @@ jobs:
             exit 1
           fi
           echo "Preflight OK: all GPG secrets present in release-signing environment." >&2
+        shell: bash
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+
+      - name: Download package artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: pkg-*
+          path: artifacts/
+          merge-multiple: true
+
+      - name: Install package signing tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dpkg-sig rpm gnupg-utils
+        shell: bash
+
+      - name: Sign DEB and RPM packages
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+        run: |
+          set -euo pipefail
+          export GNUPGHOME="${RUNNER_TEMP}/package-signing-gnupg"
+          mkdir -p "${GNUPGHOME}"
+          chmod 700 "${GNUPGHOME}"
+          # Terminate the gpg-agent (which caches the preset passphrase)
+          # before removing GNUPGHOME so the cached secret is not left
+          # behind for other steps on the same runner.
+          trap 'gpgconf --kill gpg-agent >/dev/null 2>&1 || true; rm -rf "${GNUPGHOME}"' EXIT
+          printf '%s' "${GPG_PRIVATE_KEY}" | gpg --batch --yes --import >/dev/null 2>&1
+          key_fp="$(gpg --list-keys --with-colons "${GPG_KEY_ID}" \
+            | awk -F: '$1 == "fpr" {print $10; exit}')"
+          [[ -n "${key_fp}" ]] || {
+            echo "ERROR: GPG_KEY_ID does not resolve to an imported key" >&2
+            exit 1
+          }
+          printf '%s:6:\n' "${key_fp}" | gpg --import-ownertrust >/dev/null 2>&1
+          printf 'allow-preset-passphrase\n' > "${GNUPGHOME}/gpg-agent.conf"
+          gpgconf --kill gpg-agent
+          gpgconf --launch gpg-agent
+          # Collect every matching keygrip (a key may have multiple
+          # subkeys, each with its own grip) and preset the passphrase
+          # for each one so signing works for any subkey.
+          keygrips="$(gpg --list-keys --with-colons --with-keygrip "${GPG_KEY_ID}" \
+            | awk -F: '$1 == "grp" {print $10}')"
+          preset_passphrase="$(command -v gpg-preset-passphrase || true)"
+          if [[ -z "${preset_passphrase}" ]] \
+              && [[ -x /usr/lib/gnupg/gpg-preset-passphrase ]]; then
+            preset_passphrase=/usr/lib/gnupg/gpg-preset-passphrase
+          fi
+          if [[ -n "${keygrips}" ]] && [[ -n "${preset_passphrase}" ]]; then
+            while IFS= read -r keygrip; do
+              [[ -n "${keygrip}" ]] || continue
+              printf '%s' "${GPG_PASSPHRASE}" \
+                | "${preset_passphrase}" --preset "${keygrip}"
+            done <<< "${keygrips}"
+          else
+            echo "ERROR: gpg-preset-passphrase is required for non-interactive package signing" >&2
+            exit 1
+          fi
+          GPG_KEY_ID="${GPG_KEY_ID}" \
+            packaging/scripts/sign-packages.sh --require-packages -d artifacts
+        shell: bash
+
+      - name: Upload signed packages
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signed-packages
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 5
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Integrity Signature Job: Sign the checksum file after package signing.
+  # Package signatures change package bytes, so SHA256SUMS is generated by the
+  # preceding integrity-checksums job from the signed package artifact.
+  # ─────────────────────────────────────────────────────────────────────────────
+  integrity-signature:
+    name: Integrity - Sign SHA256SUMS
+    needs: [integrity-checksums, release-gate, official-docker-release-gate]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    environment: release-signing
+
+    steps:
+      - name: Preflight - validate GPG secrets
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+        run: |
+          set -euo pipefail
+          MISSING=()
+          [[ -z "${GPG_PRIVATE_KEY}" ]] && MISSING+=(GPG_PRIVATE_KEY)
+          [[ -z "${GPG_PASSPHRASE}" ]] && MISSING+=(GPG_PASSPHRASE)
+          [[ -z "${GPG_KEY_ID}" ]] && MISSING+=(GPG_KEY_ID)
+          if [[ ${#MISSING[@]} -gt 0 ]]; then
+            echo "ERROR: Missing required GPG secrets in release-signing:" >&2
+            printf '  - %s\n' "${MISSING[@]}" >&2
+            exit 1
+          fi
         shell: bash
 
       - name: Checkout
@@ -1118,23 +1548,40 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   publish:
     name: Publish
-    needs: [release-gate, integrity-checksums, integrity-signing]
+    needs: [release-gate, musl-build, integrity-checksums, integrity-signature, official-docker-release-gate]
     # Tag releases: signing always runs, so signing must succeed for publish.
     # workflow_dispatch: signing is skipped, publish proceeds without it.
     if: >-
       always()
+      && needs.musl-build.result == 'success'
       && needs.integrity-checksums.result == 'success'
-      && (needs.release-gate.result == 'success'
-          || needs.release-gate.result == 'skipped')
-      && (needs.integrity-signing.result == 'success'
-          || (needs.integrity-signing.result == 'skipped'
+      && needs.release-gate.result == 'success'
+      && needs.official-docker-release-gate.result == 'success'
+      && (needs.integrity-signature.result == 'success'
+          || (needs.integrity-signature.result == 'skipped'
               && github.ref_type != 'tag'))
     runs-on: ubuntu-24.04
     permissions:
       contents: write
 
     steps:
+      - name: Download signed package artifacts (tag)
+        if: github.ref_type == 'tag'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: signed-packages
+          path: release-assets/
+          merge-multiple: true
+
+      - name: Download installer bootstrap assets (tag)
+        if: github.ref_type == 'tag'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-bootstrap
+          path: release-assets/
+
       - name: Download all DEB artifacts
+        if: github.ref_type != 'tag'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-deb-*
@@ -1142,9 +1589,26 @@ jobs:
           merge-multiple: true
 
       - name: Download all RPM artifacts
+        if: github.ref_type != 'tag'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-rpm-*
+          path: release-assets/
+          merge-multiple: true
+
+      - name: Download all glibc module tarballs
+        if: github.ref_type != 'tag'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: pkg-glibc-module-*
+          path: release-assets/
+          merge-multiple: true
+
+      - name: Download all musl module tarballs
+        if: github.ref_type != 'tag'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: pkg-musl-module-*
           path: release-assets/
           merge-multiple: true
 

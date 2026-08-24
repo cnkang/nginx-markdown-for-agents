@@ -24,7 +24,8 @@
 enum {
     NGX_OK    =  0,
     NGX_ERROR = -1,
-    NGX_AGAIN = -2
+    NGX_AGAIN = -2,
+    NGX_DONE  = -4
 };
 
 typedef enum {
@@ -219,6 +220,88 @@ test_failopen_completed_idempotent(void)
 }
 
 
+/* ── Test: buffered fail-open NGX_AGAIN defers counting to recovery ──
+ *
+ * Mirrors the Rule 38 delivery-latch contract added for the buffered
+ * (full-buffer) fail-open paths: when the initial send hits downstream
+ * backpressure (NGX_AGAIN), failopen_count is NOT incremented at the
+ * decision point; the recovery pass-through increments it only after
+ * the downstream filter confirms delivery.  This is the buffered
+ * counterpart of the streaming pending_failopen_delivery latch.
+ */
+
+typedef struct {
+    unsigned int  failopen_count;
+    unsigned int  latch;
+    unsigned int  completed;
+} buffered_failopen_ctx_t;
+
+static void
+buffered_failopen_send(buffered_failopen_ctx_t *ctx, int downstream_rc)
+{
+    if (downstream_rc == NGX_AGAIN) {
+        ctx->latch = 1;
+        return;
+    }
+    if ((downstream_rc == NGX_OK || downstream_rc == NGX_DONE)
+        && ctx->latch && !ctx->completed)
+    {
+        ctx->failopen_count++;
+        ctx->completed = 1;
+        ctx->latch = 0;
+    }
+}
+
+static void
+test_buffered_failopen_again_defers_count(void)
+{
+    buffered_failopen_ctx_t ctx;
+
+    TEST_SUBSECTION("Buffered fail-open NGX_AGAIN defers failopen_count");
+
+    memset(&ctx, 0, sizeof(ctx));
+
+    /* Initial send hits backpressure: latch set, counter untouched. */
+    buffered_failopen_send(&ctx, NGX_AGAIN);
+    TEST_ASSERT(ctx.latch == 1, "latch set on NGX_AGAIN");
+    TEST_ASSERT(ctx.failopen_count == 0,
+        "failopen_count NOT incremented on NGX_AGAIN (Rule 38)");
+
+    /* Recovery pass-through confirms delivery: count published once. */
+    buffered_failopen_send(&ctx, NGX_OK);
+    TEST_ASSERT(ctx.failopen_count == 1,
+        "failopen_count incremented after recovery delivery");
+    TEST_ASSERT(ctx.completed == 1, "completed set");
+    TEST_ASSERT(ctx.latch == 0, "latch cleared");
+
+    /* Idempotent: later OK does not double count. */
+    buffered_failopen_send(&ctx, NGX_OK);
+    TEST_ASSERT(ctx.failopen_count == 1,
+        "no double count on repeated recovery OK");
+
+    TEST_PASS("buffered fail-open NGX_AGAIN defers count");
+}
+
+static void
+test_buffered_failopen_error_never_counts(void)
+{
+    buffered_failopen_ctx_t ctx;
+
+    TEST_SUBSECTION("Buffered fail-open error never counts");
+
+    memset(&ctx, 0, sizeof(ctx));
+
+    buffered_failopen_send(&ctx, NGX_AGAIN);
+    buffered_failopen_send(&ctx, NGX_ERROR);
+    TEST_ASSERT(ctx.failopen_count == 0,
+        "failopen_count stays 0 when recovery errors");
+    TEST_ASSERT(ctx.latch == 1,
+        "latch stays set when recovery errors (no delivery)");
+
+    TEST_PASS("buffered fail-open error never counts");
+}
+
+
 int
 main(void)
 {
@@ -229,6 +312,8 @@ main(void)
     test_failopen_error_no_delivery();
     test_multiple_failopen_divergence();
     test_failopen_completed_idempotent();
+    test_buffered_failopen_again_defers_count();
+    test_buffered_failopen_error_never_counts();
 
     TEST_PASS("delivery_decision_failopen: all tests passed");
     return 0;

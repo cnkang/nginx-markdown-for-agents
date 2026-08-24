@@ -6,11 +6,17 @@
 
 ## Context
 
-v0.5.x ships noise pruning as an opt-in Cargo feature (`prune_noise_regions`). When enabled, it removes structural HTML regions (nav, footer, aside, ad slots, cookie banners) that have no value for AI agent consumption. This typically reduces output volume by 15–60% depending on page noise ratio.
+v0.5.x ships noise pruning as an opt-in Cargo feature (`prune_noise_regions`).
+When enabled, it removes the built-in structural selectors `nav`, `footer`,
+and `aside`, which have little value for AI-agent consumption. This typically
+reduces output volume by 15–60% depending on page noise ratio. Because
+tag-name matching also removes meaningful content inside those regions (for
+example a navigation block that contains inline text), pruning is **not**
+guaranteed to touch only non-content regions.
 
 Current limitations:
 1. Pruning is opt-in at compile time — operators must rebuild with `--features prune_noise_regions`
-2. No runtime configuration — selectors are hardcoded defaults
+2. No runtime configuration — selectors stay hardcoded defaults
 3. No protection mechanism — operators cannot exclude specific subtrees from pruning
 4. No empty-output fallback — if pruning removes everything, the result is an empty Markdown string
 
@@ -38,12 +44,14 @@ nav, footer, aside
 ```
 
 > **v0.6.0 scope**: Pruning matches by HTML tag name only. CSS
-> selector syntax (`.class`, `#id`, `[role="..."]`) is deferred to a
+> selector syntax (`.class`, `#id`, `[role="..."]`) defers to a
 > future release. Operators should use tag-name selectors.
 
 ### Protection Selectors
 
-When an element matches both a prune selector and a protection selector, protection wins. This allows operators to keep specific nav/footer instances while pruning others.
+When an element matches both a prune selector and a protection selector, protection wins. This allows operators to keep entire tag-name families (for example all `nav` elements) while pruning others.
+
+Tag-name-only selectors apply to **all** elements matching the selected tag names. A protection selector such as `nav` protects every `nav` element, not a specific instance. Tag-name selectors alone cannot protect individual nav or footer instances. Class/id-based protection (`.class`, `#id`) defers to a future release.
 
 ### Empty-Output Fallback
 
@@ -113,7 +121,7 @@ pub struct PruneConfig {
 
 ## Relationship to Other ADRs
 
-- [ADR-0007](0007-streaming-default.md): pruning applies in both streaming and full-buffer paths. In streaming, pruned subtrees are skipped at tokenizer level; in full-buffer, pruned nodes are excluded during DOM traversal.
+- [ADR-0007](0007-streaming-default.md): pruning applies in both streaming and full-buffer paths. In streaming, pruned subtrees skip at tokenizer level. In full-buffer, pruned nodes drop out during DOM traversal.
 - [ADR-0004](0004-streaming-bounded-memory-conversion.md): pruning reduces output volume, which helps streaming stay within memory budget.
 
 ## References

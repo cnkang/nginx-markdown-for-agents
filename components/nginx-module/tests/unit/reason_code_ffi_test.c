@@ -8,7 +8,7 @@
  * the Rust library, this file provides stub implementations of the
  * Rust FFI functions to verify the C wrapper logic.
  *
- * Updated for schema v1 (26 reason codes, lowercase snake_case).
+ * Updated for schema v1 (27 reason codes, lowercase snake_case).
  */
 
 #include "../include/test_common.h"
@@ -19,6 +19,9 @@
 #define NGX_OK        0
 #define NGX_ERROR    -1
 #define NGX_DECLINED -5
+
+ngx_int_t ngx_http_markdown_diagnostics_reason_to_code(
+    const u_char *reason, size_t reason_len);
 
 /*
  * Stub implementations of the Rust FFI functions.
@@ -54,6 +57,7 @@ static const char *stub_reason_strs[] = {
     "header_plan_apply_error",       /* 23 */
     "streaming_mid_flight_error",    /* 24 */
     "bypass_no_transform",           /* 25 */
+    "encoding_header_invalid",        /* 26 */
 };
 
 static const char *stub_metric_keys[] = {
@@ -83,9 +87,10 @@ static const char *stub_metric_keys[] = {
     "markdown_errors_total",         /* 23 */
     "markdown_errors_total",         /* 24 */
     "markdown_skipped_total",        /* 25 — bypass_no_transform */
+    "markdown_errors_total",         /* 26 — encoding_header_invalid */
 };
 
-#define STUB_REASON_CODE_COUNT 26
+#define STUB_REASON_CODE_COUNT 27
 
 const uint8_t *
 markdown_reason_code_str(uint32_t code, uintptr_t *out_len)
@@ -184,6 +189,65 @@ test_get_reason_code_str_valid(void)
 
 
 /*
+ * Test: lowercase and legacy reason names map to BYPASS_NO_TRANSFORM (25)
+ */
+static void
+test_bypass_no_transform_reverse_mapping(void)
+{
+    ngx_int_t  code;
+
+    TEST_SUBSECTION("bypass_no_transform reverse mapping");
+
+    code = ngx_http_markdown_diagnostics_reason_to_code(
+        (const u_char *) "bypass_no_transform",
+        sizeof("bypass_no_transform") - 1);
+    TEST_ASSERT(code == 25,
+                "bypass_no_transform should map to code 25");
+
+    code = ngx_http_markdown_diagnostics_reason_to_code(
+        (const u_char *) "BYPASS_NO_TRANSFORM",
+        sizeof("BYPASS_NO_TRANSFORM") - 1);
+    TEST_ASSERT(code == 25,
+                "BYPASS_NO_TRANSFORM alias should map to code 25");
+
+    TEST_PASS("BYPASS_NO_TRANSFORM reverse mappings are compatible");
+}
+
+
+/* Test: encoding_header_invalid maps to its canonical code (26). */
+static void
+test_encoding_header_invalid_reverse_mapping(void)
+{
+    ngx_int_t  code;
+
+    TEST_SUBSECTION("encoding_header_invalid reverse mapping");
+
+    code = ngx_http_markdown_diagnostics_reason_to_code(
+        (const u_char *) "encoding_header_invalid",
+        sizeof("encoding_header_invalid") - 1);
+    TEST_ASSERT(code == 26,
+                "encoding_header_invalid should map to code 26");
+
+    {
+        const u_char non_terminated[] = {
+            'c', 'o', 'n', 'v', 'e', 'r', 't', 'e', 'd', 'X'
+        };
+
+        code = ngx_http_markdown_diagnostics_reason_to_code(
+            non_terminated, sizeof(non_terminated) - 1);
+        TEST_ASSERT(code == 0,
+                    "length-bounded mapper accepts non-NUL converted");
+        code = ngx_http_markdown_diagnostics_reason_to_code(
+            non_terminated, sizeof(non_terminated));
+        TEST_ASSERT(code == -1,
+                    "length-bounded mapper rejects trailing bytes");
+    }
+
+    TEST_PASS("encoding_header_invalid reverse mapping is correct");
+}
+
+
+/*
  * Test: invalid reason code returns NGX_DECLINED and zeroes ngx_str_t
  */
 static void
@@ -201,9 +265,9 @@ test_get_reason_code_str_invalid(void)
     TEST_ASSERT(str.len == 0, "invalid code should zero len");
     TEST_ASSERT(str.data == NULL, "invalid code should NULL data");
 
-    rc = ngx_http_markdown_get_reason_code_str(26, &str);
+    rc = ngx_http_markdown_get_reason_code_str(27, &str);
     TEST_ASSERT(rc == NGX_DECLINED,
-                "code 26 (one past last) should return NGX_DECLINED");
+                "code 27 (one past last) should return NGX_DECLINED");
 
     TEST_PASS("Invalid reason codes handled correctly");
 }
@@ -288,7 +352,7 @@ test_get_reason_code_metric_key_invalid(void)
 
 
 /*
- * Test: total count accessor returns expected value (26)
+ * Test: total count accessor returns expected value (27)
  */
 static void
 test_reason_code_total_count(void)
@@ -300,7 +364,7 @@ test_reason_code_total_count(void)
     count = ngx_http_markdown_reason_code_total_count();
     TEST_ASSERT(count == STUB_REASON_CODE_COUNT,
                 "total count should match REASON_CODE_COUNT");
-    TEST_ASSERT(count == 26, "total count should be 26");
+    TEST_ASSERT(count == 27, "total count should be 27");
 
     TEST_PASS("Total count accessor correct");
 }
@@ -379,6 +443,8 @@ main(void)
     printf("========================================\n");
 
     test_get_reason_code_str_valid();
+    test_bypass_no_transform_reverse_mapping();
+    test_encoding_header_invalid_reverse_mapping();
     test_get_reason_code_str_invalid();
     test_get_reason_code_str_null_output();
     test_get_reason_code_metric_key_valid();

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import unittest.mock
 from pathlib import Path
 
 # Add tools/ to path so we can import the module
@@ -345,6 +346,69 @@ def test_normalize_macos_uses_darwin_libc():
     assert entry["arch"] == "arm64"
 
 
+def test_normalize_legacy_arch_only_entry():
+    """Legacy rows that carry only ``arch`` still normalize deterministically."""
+    entry = rmd.normalize_entry(
+        {
+            "nginx": "1.26.3",
+            "os_type": "glibc",
+            "arch": "aarch64",
+            "artifact_type": "dynamic-module",
+            "support_tier": "full",
+        }
+    )
+    assert entry["nginx_version"] == "1.26.3"
+    assert entry["libc"] == "glibc"
+    assert entry["arch"] == "arm64"
+
+
+def test_validate_schema_rejects_malformed_entry():
+    """Malformed matrix rows must fail validation rather than render partial docs."""
+    errors = rmd.validate_schema(
+        {
+            "schema_version": "1.0",
+            "matrix": [{"nginx": "1.26.3", "os_type": "glibc"}],
+        }
+    )
+    assert errors
+    # The schema validator (or the structural fallback) must report the
+    # row-level error prefix naming the offending entry, so a malformed
+    # row cannot slip through as a generic non-empty error list.
+    assert any("Entry 0:" in error or "row" in error.lower() for error in errors), (
+        f"expected a row-level error prefix, got {errors}"
+    )
+
+
+def test_check_file_reports_missing_registered_target():
+    """A registered but absent target is a check failure."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # unittest.mock.patch.object instead of the pytest-only monkeypatch
+        # fixture so the custom no-argument runner executes identically to
+        # pytest.
+        with (
+            unittest.mock.patch.object(rmd, "ROOT", Path(temp_dir)),
+            unittest.mock.patch.object(
+                rmd, "SECTION_REGISTRY", {"missing.md": ["support-matrix"]}
+            ),
+        ):
+            errors = rmd.check_file("missing.md", [], MINIMAL_MATRIX)
+            assert errors == ["missing.md: target file not found"]
+
+
+def test_check_file_reports_target_without_markers():
+    """A registered target without markers cannot be considered synchronized."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        with (
+            unittest.mock.patch.object(rmd, "ROOT", Path(temp_dir)),
+            unittest.mock.patch.object(
+                rmd, "SECTION_REGISTRY", {"plain.md": ["support-matrix"]}
+            ),
+        ):
+            Path(temp_dir, "plain.md").write_text("# no generated section\n")
+            errors = rmd.check_file("plain.md", [], MINIMAL_MATRIX)
+            assert errors == ["plain.md: no release-matrix markers"]
+
+
 # ---------------------------------------------------------------------------
 # Section registry tests
 # ---------------------------------------------------------------------------
@@ -368,7 +432,7 @@ def test_known_sections_complete():
 
 
 def test_section_registry_matches_task_spec():
-    """Verify the section registry matches task 2.5 spec requirements."""
+    """Verify the section registry matches the documented requirements."""
     assert rmd.SECTION_REGISTRY["README.md"] == ["support-matrix"]
     assert rmd.SECTION_REGISTRY["docs/COMPATIBILITY.md"] == ["compatibility-matrix"]
     assert rmd.SECTION_REGISTRY["docs/guides/INSTALLATION.md"] == ["installation-matrix"]
@@ -483,18 +547,18 @@ def test_write_file_rejects_unregistered_target():
 
 def test_main_reports_matrix_validation_error():
     """CLI matrix path validation failures return a controlled exit code."""
-    old_argv = sys.argv[:]
     suspicious_matrix = rmd.ROOT / "tools" / ".." / "tools" / "release-matrix.json"
-    try:
-        sys.argv = [
+    with unittest.mock.patch.object(
+        sys,
+        "argv",
+        [
             "render_release_matrix_docs.py",
             "--check",
             "--matrix",
             str(suspicious_matrix),
-        ]
+        ],
+    ):
         assert rmd.main() == 2
-    finally:
-        sys.argv = old_argv
 
 
 # ---------------------------------------------------------------------------
@@ -539,6 +603,10 @@ def run_tests():
         test_tier_mapping_resolved,
         test_tier_mapping_passthrough,
         test_normalize_macos_uses_darwin_libc,
+        test_normalize_legacy_arch_only_entry,
+        test_validate_schema_rejects_malformed_entry,
+        test_check_file_reports_missing_registered_target,
+        test_check_file_reports_target_without_markers,
         test_section_registry_coverage,
         test_known_sections_complete,
         test_section_registry_matches_task_spec,

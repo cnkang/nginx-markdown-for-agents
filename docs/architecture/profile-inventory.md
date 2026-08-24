@@ -1,31 +1,37 @@
-# Profile Inventory — Config V2 Field Mapping (Profiles, Wave 0)
+# Profile Inventory — Historical Config V2 Field Mapping (archive)
 
 | Field | Value |
 |-------|-------|
-| Version | 0.9.1 |
-| Feature | Profiles Production Defaults |
-| Status | Inventory |
+| Version | 0.9.1 (historical input) |
+| Feature | Retired profile bundles |
+| Status | Archive; not an active 0.9.2 contract |
 | Created | 2026-06-28 |
 
 ---
 
-This file is a profile-field map, not the 1.0 compatibility inventory. For
-active versus reject-only command-table state and evidence-backed stability
-classification, use
+This file preserves the pre-freeze profile-field map as historical evidence. The
+0.9.2 release removed the `markdown_profile` directive and every opaque
+profile bundle described below. They must not appear in an active
+configuration. For the
+current command-table state and evidence-backed stability classification, use
 [PUBLIC_SURFACE_INVENTORY.md](PUBLIC_SURFACE_INVENTORY.md). In particular,
-parser-stored OTel placeholders are not proof of production behavior.
+parser-stored OTel placeholders are not proof of production behavior. For
+current explicit replacement snippets, use the
+[configuration guide](../guides/CONFIGURATION.md#minimal-configuration)
+and [migration guide](../guides/MIGRATION-0.9.2.md).
 
-## 1. Active Config V2 Directives with Defaults
+## 1. Historical Config V2 Directives with Defaults
 
-Directives below are the **active** Config V2 directives registered in
+Directives below were the **active** Config V2 directives registered in
 `ngx_http_markdown_config_directives_impl.h`. Legacy reject-only stubs
 (markdown_max_size, markdown_timeout, markdown_streaming_budget,
 markdown_on_error, markdown_streaming_on_error, markdown_etag,
 markdown_etag_policy, markdown_conditional_requests, markdown_on_wildcard,
 markdown_trust_forwarded_headers, markdown_forwarded_headers,
 markdown_large_body_threshold, markdown_streaming_engine,
-markdown_memory_budget) are excluded — they emit
-`NGX_CONF_ERROR` with a migration hint and execute no behavior.
+markdown_memory_budget) get excluded. This historical list predates the
+0.9.2 removal of all migration stubs. The 0.9.2 binary emits NGINX's standard
+unknown-directive error for removed names.
 
 ### Core Conversion Directives
 
@@ -75,7 +81,7 @@ Maps to two struct fields:
 | `markdown_stream_flush_min` | 16k | http, server, location | Min batch before flush |
 | `markdown_stream_excluded_types` | (none) | http, server, location | Additive to built-in exclusions |
 | `markdown_streaming_shadow` | off | http, server, location | Shadow mode |
-| `markdown_streaming_zero_copy` | off | http, server, location | Opt-in Rust-owned output buffers |
+| `markdown_streaming_zero_copy` | off | http, server, location | Opt-in Rust-owned output buffers (removed in 0.9.2) |
 
 ### Error Policy (Config V2)
 
@@ -88,7 +94,7 @@ Maps to two struct fields:
 | Directive | Default | Context | Notes |
 |-----------|---------|---------|-------|
 | `markdown_auth_policy` | allow | http, server, location | allow\|deny |
-| `markdown_auth_cookies` | (none) | http, server, location | Pattern list |
+| `markdown_auth_cookies` | built-in `session*`, `auth*`, `PHPSESSID`, `wordpress_logged_in_*` | http, server, location | Pattern list (explicit directive replaces built-ins) |
 
 ### Trusted Proxies (Config V2, CIDR trust model)
 
@@ -98,8 +104,9 @@ Maps to two struct fields:
 
 ### Observability / Operations
 
-The implemented OTel tracing pair is experimental. Duplicate or unimplemented
-OTel controls are reject-only and therefore are not active profile fields.
+The OTel entries below describe the historical configuration surface. The
+0.9.2 production contract removed OTel, so these names are not active
+profile fields in the current module.
 
 | Directive | Default | Context | Notes |
 |-----------|---------|---------|-------|
@@ -110,7 +117,6 @@ OTel controls are reject-only and therefore are not active profile fields.
 | `markdown_metrics_per_path_cardinality` | 100 | http | Global |
 | `markdown_metrics_shm_size` | 8×pagesize | http | Global |
 | `markdown_diagnostics` | off | http, server, location | on\|off |
-| `markdown_diagnostics_allow` | (loopback only) | http, server, location | CIDR |
 | `markdown_otel` | off | http, server, location | on\|off |
 | `markdown_otel_endpoint` | (empty) | http, server, location | Internal URI |
 
@@ -148,8 +154,13 @@ Reject-only OTel names (not active profile fields):
 
 | Directive | Default | Context | Notes |
 |-----------|---------|---------|-------|
-| `markdown_llm_provider` | default | http, server, location | Provider enum |
-| `markdown_chars_per_token` | 0 (use provider default) | http, server, location | Fixed-point ×10 |
+| `markdown_token_estimate` | off | http, server, location | on\|off; emits `X-Markdown-Tokens` (decimal integer token count) |
+
+the release removed `markdown_llm_provider` and `markdown_chars_per_token` in
+0.9.2: token estimation uses a fixed deterministic heuristic with a
+built-in 4.0 chars/token default, no provider brands.  The matching FFI
+fields (`llm_provider`, `chars_per_token_fixed`) stay retained temporarily
+for ABI stability until the final FFI freeze.
 
 ---
 
@@ -186,7 +197,9 @@ profile):
 - `metrics_*`, `otel_*` — observability plumbing
 - `prune_*` — content surgery, site-specific
 - `dynconf_*` — operational plumbing
-- `llm_provider`, `chars_per_token` — estimation tuning
+- `llm_provider`, `chars_per_token` — historical estimation tuning (directives
+  removed in 0.9.2. The final 1.0 compatibility freeze governs the retained
+  FFI fields)
 - `decompress.*`, `parse_timeout`, `parser_budget` — hard safety caps
 - `log_verbosity` — debugging
 
@@ -202,7 +215,7 @@ Implemented in `ngx_http_markdown_merge_conf()` at
 ```
 merge_conf(cf, parent, child):
   1. merge_enabled(child, parent)           — enabled/complex inheritance
-  2. Save explicit-set flags (max_size_set, stream_threshold_set, etc.)
+  2. Save explicit-set flags (max_size_set, stream_threshold_set, and similar)
   3. merge_core_values(child, parent)       — standard ngx_conf_merge_*
      a. merge_core_base_values  — max_size, timeout, on_error, flavor,
                                   accept_policy, auth, generate_etag,
@@ -216,13 +229,13 @@ merge_conf(cf, parent, child):
   7. apply_memory_budget_override           — budget → max_size when not explicit
   8. Resolve decompress.max_size default    — inherits max_size if still unset
   9. Validate decompress.max_size ≠ 0 when auto_decompress
-  10. Validate streaming vs cache_validation conflicts (spec 49)
+  10. Validate streaming vs cache-validation conflicts
   11. Log merged configuration
 ```
 
 Merge semantics: standard NGINX `ngx_conf_merge_*` — child value wins if
-set (≠ UNSET sentinel); otherwise parent value; otherwise compile-time
-default.
+set (≠ UNSET sentinel). Otherwise parent value wins. Otherwise compile-time
+default applies.
 
 ### 3.2 Effective-Config View (request time)
 
@@ -238,15 +251,18 @@ build_effective_conf(eff, snapshot, conf):
 ```
 
 Dynconf-mutable fields (the only fields in the effective-conf view today):
-- `enabled`, `enabled_source`
+- `enabled` / `enabled_source` (the `filter` field)
 - `prune_noise`
 - `log_verbosity`
-- `memory_budget`
-- `streaming_budget` (when streaming enabled)
+- `error_policy`
+- `streaming_buffer` (the `streaming_budget` storage field when the build enables streaming)
 
-### 3.3 Profile Integration Point (to implement)
+`memory_budget` is a static safety limit in 0.9.2 and is not a dynconf
+override. This list is the source used by the request-lifecycle documentation.
 
-The planned merge order is:
+### 3.3 Profile Integration Point (not implemented — feature removed)
+
+*Historical context only.* The pre-freeze design planned this merge order.
 
 ```
 effective = builtin_defaults
@@ -255,9 +271,12 @@ if profile != NONE:
 effective.apply(explicit_directives)        ← explicit overrides profile
 ```
 
-This maps to using `ngx_http_markdown_profile_defaults_t` values as the
-"default" argument in `ngx_conf_merge_*` calls, replacing the hard-coded
-compile-time defaults when a profile is active.
+This would have mapped to using `ngx_http_markdown_profile_defaults_t` values
+as the "default" argument in `ngx_conf_merge_*` calls. It was never
+implemented. The 0.9.2 release removed profiles entirely. We retain this
+section solely as historical evidence. It is **not** active guidance. Do
+not implement profile defaults or a `detect_conflicts` step. See
+`docs/guides/0.9.2-breaking-changes.md`.
 
 ---
 
@@ -365,18 +384,24 @@ streaming, no caching overhead, wildcard Accept.
 
 ---
 
-## 7. Implementation Notes
+## 7. Implementation Notes (Historical — profiles removed in 0.9.2)
+
+> ⚠️ **HISTORICAL** — 0.9.2 removed profiles. The following describes the pre-removal implementation approach for reference only.
 
 - The `ngx_http_markdown_profile_defaults_t` struct is already defined in
   the header (`ngx_http_markdown_filter_module.h`). Profile constants
   (`NGX_HTTP_MARKDOWN_PROFILE_*`) and the `conf.profile.name` / `.set`
   fields are also already present.
-- The `merge_conf` implementation needs to resolve profile defaults BEFORE
+- The `merge_conf` implementation resolved profile defaults BEFORE
   the standard `ngx_conf_merge_*` calls, substituting profile values as
-  the "default" argument when a profile is active.
-- Forced-field conflict detection belongs in `merge_conf` (or a post-merge
+  the "default" argument when a profile was active.
+- Forced-field conflict detection belonged in `merge_conf` (or a post-merge
   validation step) and in the Rust `detect_conflicts` FFI for dynconf
   dry-run.
-- The effective-conf view (`ngx_http_markdown_effective_conf_t`) does not
-  need profile awareness — profiles are resolved entirely at config parse
-  time and cached in the merged `ngx_http_markdown_conf_t`.
+- The effective-conf view (`ngx_http_markdown_effective_conf_t`) did not
+  need profile awareness — profiles resolved entirely at config parse
+  time and the parser cached them in the merged `ngx_http_markdown_conf_t`.
+
+For the current 0.9.2 contract, profiles do not exist. Use explicit
+directives (`markdown_limits`, `markdown_streaming`, `markdown_cache_validation`,
+`markdown_error_policy`, `markdown_accept`, and similar) for all configuration.

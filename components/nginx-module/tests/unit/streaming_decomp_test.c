@@ -513,12 +513,11 @@ test_inflate(z_streamp strm, int flush)
             strm->avail_in = 1;
             return Z_OK;
         }
-        if (strm->avail_out > 128) {
-            strm->avail_out -= 128;
-        } else {
-            strm->avail_out = 0;
-        }
-        strm->avail_in = 0;
+        strm->avail_out = 0;
+        /* Keep input pending and report progress so the step function
+         * takes the avail_out==0 branch into grow_output_buf — the code
+         * path whose budget guard this case exercises. */
+        strm->avail_in = 1;
         return Z_OK;
 
     case TEST_INFLATE_MODE_FEED_EXPAND_THEN_DONE:
@@ -628,6 +627,40 @@ test_inflate(z_streamp strm, int flush)
 #define inflateInit2 test_inflateInit2
 #define inflateEnd test_inflateEnd
 #define inflateReset test_inflateReset
+
+#ifdef NGX_HTTP_BROTLI
+static ngx_uint_t
+test_atomic_cmp_set(ngx_atomic_uint_t *lock, ngx_atomic_uint_t old,
+                    ngx_atomic_uint_t set)
+{
+    if (*lock == old) {
+        *lock = set;
+        return 1;
+    }
+    return 0;
+}
+
+static ngx_atomic_int_t
+test_atomic_fetch_add(ngx_atomic_uint_t *value, ngx_atomic_int_t add)
+{
+    ngx_atomic_uint_t old;
+
+    old = *value;
+    /* Unsigned arithmetic: the stored counter is unsigned; the addend
+     * is sign-extended through the unsigned domain so a negative addend
+     * (rollback) wraps correctly without casting the stored value to a
+     * signed type (GCC -Werror compatible). */
+    *value = old + (ngx_atomic_uint_t) add;
+    return (ngx_atomic_int_t) old;
+}
+
+#define ngx_atomic_cmp_set test_atomic_cmp_set
+#define ngx_atomic_fetch_add test_atomic_fetch_add
+#endif
+
+/* The production allocator rejects a missing logger before calling
+ * ngx_alloc(); provide the test logger to the convenience create wrapper. */
+#define NGX_HTTP_MARKDOWN_STREAMING_DECOMP_DEFAULT_LOG (&test_log)
 
 /* Include the production streaming decompression implementation so that
  * its functions are compiled against the stubs defined above. */
@@ -802,6 +835,111 @@ test_tiny_chunks_do_not_amplify_request_pool(void)
 }
 
 
+/*
+ * Regression: the configured expansion ratio applies to small compressed
+ * inputs and is accumulated across the complete response rather than reset
+ * for each feed call.  The fixture is intentionally described by its size
+ * and compression type; no attack payload is embedded in the test output.
+ */
+static void
+test_ratio_limit_applies_to_small_stream(void)
+{
+    u_char                              *compressed;
+    size_t                               compressed_len;
+    test_pool_t                          tp;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+    ngx_http_markdown_decomp_failure_origin_e origin;
+    u_char                              *out;
+    size_t                               out_len;
+    ngx_int_t                            rc;
+    u_char                              text[8192];
+
+    TEST_SUBSECTION("small streaming inputs enforce decompression ratio");
+
+    compressed = NULL;
+    test_pool_reset(&tp);
+    memset(text, 'A', sizeof(text));
+    rc = compress_payload(text, sizeof(text),
+                          NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
+                          &compressed, &compressed_len);
+    TEST_ASSERT(rc == NGX_OK, "ratio fixture compression should succeed");
+    TEST_ASSERT(compressed_len < 256,
+        "ratio fixture should remain below the historical threshold");
+
+    origin = NGX_HTTP_MD_DECOMP_ORIGIN_NONE;
+    decomp = ngx_http_markdown_streaming_decomp_create_with_origin(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
+        sizeof(text) * 10, 1, NULL, &test_log, &origin);
+    TEST_ASSERT(decomp != NULL, "ratio decompressor should be created");
+
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, compressed, compressed_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_RATIO_EXCEEDED,
+        "small stream must return the ratio-exceeded classification");
+    TEST_ASSERT(out == NULL && out_len == 0,
+        "ratio-exceeded feed must not expose partial output");
+    TEST_ASSERT(decomp->total_compressed == compressed_len,
+        "raw compressed bytes must be counted before decoding");
+    TEST_ASSERT(decomp->total_decompressed == 0,
+        "rejected output must not advance decompressed accounting");
+
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+    free(compressed);
+    TEST_PASS("small streaming input enforces ratio limit");
+}
+
+
+/* A small streaming prefix is not representative of the final response
+ * ratio.  Defer the ratio check below the absolute output floor, but keep the
+ * check strict once the floor is reached and when the stream is complete. */
+static void
+test_ratio_limit_defers_small_prefix(void)
+{
+    ngx_http_markdown_streaming_decomp_t  decomp;
+    ngx_int_t                             rc;
+    u_char                               *buf;
+    size_t                                small_output;
+
+    TEST_SUBSECTION("streaming ratio defers a small prefix");
+
+    memset(&decomp, 0, sizeof(decomp));
+    decomp.decompression_ratio = 1;
+    decomp.total_compressed = 1;
+    decomp.max_decompressed_size = 8192;
+    buf = NULL;
+    small_output =
+        NGX_HTTP_MARKDOWN_STREAMING_DECOMP_RATIO_MIN_OUTPUT - 1;
+
+    rc = ngx_http_markdown_streaming_decomp_apply_limits(
+        &decomp, small_output, &buf, &test_log);
+    TEST_ASSERT(rc == NGX_OK,
+        "small streaming prefixes must defer the cumulative ratio check");
+    TEST_ASSERT(decomp.total_decompressed == small_output,
+        "deferred ratio check must retain decompressed accounting");
+
+    rc = ngx_http_markdown_streaming_decomp_apply_limits(
+        &decomp, 1, &buf, &test_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_RATIO_EXCEEDED,
+        "ratio must be enforced once the output floor is reached");
+    TEST_ASSERT(decomp.total_decompressed == small_output,
+        "ratio rejection must not advance cumulative output accounting");
+
+    memset(&decomp, 0, sizeof(decomp));
+    decomp.decompression_ratio = 1;
+    decomp.total_compressed = 1;
+    decomp.finished = 1;
+    rc = ngx_http_markdown_streaming_decomp_apply_limits(
+        &decomp, small_output, &buf, &test_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_RATIO_EXCEEDED,
+        "completed streams must enforce ratio below the output floor");
+    TEST_PASS("streaming ratio defers unrepresentative prefixes");
+}
+
+
 /* Forward declaration: defined after the #ifdef NGX_HTTP_BROTLI block. */
 static void test_pool_run_cleanups(test_pool_t *tp);
 
@@ -881,79 +1019,79 @@ test_brotli_error_classification(void)
     TEST_SUBSECTION("brotli error classification: frozen three-way");
 
     /* FORMAT boundary: -1 (first FORMAT code) */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-1));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT,
         "code -1 should classify as FORMAT");
 
     /* FORMAT boundary: -17 (last FORMAT code) */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-17));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT,
         "code -17 should classify as FORMAT");
 
     /* FORMAT mid-range: -10 */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-10));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT,
         "code -10 should classify as FORMAT");
 
     /* ALLOCATION boundary: -21 (first ALLOCATION code) */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-21));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION,
         "code -21 should classify as ALLOCATION");
 
     /* ALLOCATION boundary: -30 (last ALLOCATION code) */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-30));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION,
         "code -30 should classify as ALLOCATION");
 
     /* ALLOCATION mid-range: -25 */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-25));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION,
         "code -25 should classify as ALLOCATION");
 
     /* INTERNAL: -18 (COMPOUND_DICTIONARY) */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-18));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
         "code -18 should classify as INTERNAL");
 
     /* INTERNAL: -19 (DICTIONARY_NOT_SET) */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-19));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
         "code -19 should classify as INTERNAL");
 
     /* INTERNAL: -20 (INVALID_ARGUMENTS) */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-20));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
         "code -20 should classify as INTERNAL");
 
     /* INTERNAL: -31 (UNREACHABLE) */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-31));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
         "code -31 should classify as INTERNAL");
 
     /* Unknown out-of-range: -99 classifies as INTERNAL (not FORMAT) */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-99));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
         "unknown code -99 should classify as INTERNAL");
 
     /* Unknown out-of-range: -32 classifies as INTERNAL */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(-32));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
         "unknown code -32 should classify as INTERNAL");
 
     /* Unknown out-of-range: 0 (not negative) classifies as INTERNAL */
-    cls = ngx_http_markdown_brotli_classify_error(
+    cls = ngx_http_markdown_brotli_error_classify(
         (BrotliDecoderErrorCode)(0));
     TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
         "code 0 should classify as INTERNAL");
@@ -3007,6 +3145,312 @@ compress_payload(const u_char *in, size_t in_len,
         in, in_len, window_bits, out, out_len);
 }
 
+
+/*
+ * test_sync_flush_bursts - Verify that a compressed stream remains complete
+ * when its producer emits one Z_SYNC_FLUSH burst per input chunk.
+ *
+ * This mirrors the chunking used by the non-buffered upstream benchmark.  A
+ * burst can consume all compressed input while the inflater still has output
+ * pending in a full workspace, so the decoder must grow before treating the
+ * input call as complete.
+ */
+static void
+test_sync_flush_bursts(void)
+{
+    const size_t                       source_len = 1024 * 1024;
+    const size_t                       source_chunk = 16 * 1024;
+    static const int                   window_bits[2] = {
+        MAX_WBITS + 16, MAX_WBITS
+    };
+    static const ngx_http_markdown_compression_type_e  types[2] = {
+        NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
+        NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
+    };
+    test_pool_t                          tp;
+    u_char                              *source;
+    u_char                              *actual;
+    size_t                               emitted;
+
+    TEST_SUBSECTION("compressed sync-flush bursts remain complete");
+
+    source = malloc(source_len);
+    actual = malloc(source_len);
+    TEST_ASSERT(source != NULL && actual != NULL,
+        "sync-flush regression buffers should allocate");
+
+    for (size_t type_index = 0; type_index < ARRAY_SIZE(types);
+         type_index++)
+    {
+        z_stream                            stream;
+        ngx_http_markdown_streaming_decomp_t *decomp;
+        size_t                              offset;
+
+        for (size_t i = 0; i < source_len; i++) {
+            source[i] = (u_char) ('A' + (i % 26));
+        }
+
+        memset(&stream, 0, sizeof(stream));
+        TEST_ASSERT(
+            deflateInit2(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED,
+                         window_bits[type_index], 8,
+                         Z_DEFAULT_STRATEGY) == Z_OK,
+            "sync-flush compressor should initialize");
+
+        test_pool_reset(&tp);
+        decomp = ngx_http_markdown_streaming_decomp_create(
+            &tp.pool, types[type_index], 0);
+        TEST_ASSERT(decomp != NULL,
+            "sync-flush decompressor should be created");
+        emitted = 0;
+
+        for (offset = 0; offset < source_len; offset += source_chunk) {
+            u_char  compressed[32768];
+            size_t  chunk_len;
+            size_t  compressed_len;
+            int     zrc;
+
+            chunk_len = source_len - offset;
+            if (chunk_len > source_chunk) {
+                chunk_len = source_chunk;
+            }
+
+            stream.next_in = source + offset;
+            stream.avail_in = (uInt) chunk_len;
+            stream.next_out = compressed;
+            stream.avail_out = sizeof(compressed);
+            zrc = deflate(&stream, Z_SYNC_FLUSH);
+            TEST_ASSERT(zrc == Z_OK && stream.avail_in == 0,
+                "sync-flush compressor should consume each source burst");
+            TEST_ASSERT(stream.avail_out > 0,
+                "sync-flush burst buffer should not fill");
+            compressed_len = sizeof(compressed) - stream.avail_out;
+
+            {
+                u_char  *out;
+                size_t  out_len;
+                ngx_int_t  rc;
+
+                out = NULL;
+                out_len = 0;
+                rc = ngx_http_markdown_streaming_decomp_feed(
+                    decomp, compressed, compressed_len,
+                    &out, &out_len, &tp.pool, &test_log);
+                TEST_ASSERT(rc == NGX_OK,
+                    "sync-flush burst should decompress successfully");
+                TEST_ASSERT(emitted + out_len <= source_len,
+                    "sync-flush output should stay within source size");
+                if (out_len > 0) {
+                    memcpy(actual + emitted, out, out_len);
+                    emitted += out_len;
+                }
+            }
+        }
+
+        {
+            u_char  compressed[1024];
+            size_t  compressed_len;
+            int     zrc;
+
+            stream.next_in = Z_NULL;
+            stream.avail_in = 0;
+            stream.next_out = compressed;
+            stream.avail_out = sizeof(compressed);
+            zrc = deflate(&stream, Z_FINISH);
+            TEST_ASSERT(zrc == Z_STREAM_END,
+                "sync-flush compressor should finish");
+            TEST_ASSERT(stream.avail_out > 0,
+                "sync-flush final buffer should not fill");
+            compressed_len = sizeof(compressed) - stream.avail_out;
+
+            {
+                u_char  *out;
+                size_t  out_len;
+                ngx_int_t  rc;
+
+                out = NULL;
+                out_len = 0;
+                rc = ngx_http_markdown_streaming_decomp_feed(
+                    decomp, compressed, compressed_len,
+                    &out, &out_len, &tp.pool, &test_log);
+                TEST_ASSERT(rc == NGX_OK,
+                    "sync-flush final burst should decompress");
+                TEST_ASSERT(emitted + out_len <= source_len,
+                    "final burst output should stay within source size");
+                if (out_len > 0) {
+                    memcpy(actual + emitted, out, out_len);
+                    emitted += out_len;
+                }
+            }
+        }
+
+        TEST_ASSERT(emitted == source_len,
+            "sync-flush bursts should emit the complete source");
+        TEST_ASSERT(MEM_EQ(actual, source, source_len),
+            "sync-flush bursts should preserve source bytes");
+
+        deflateEnd(&stream);
+        ngx_http_markdown_streaming_decomp_cleanup(decomp);
+        free(decomp);
+    }
+
+    free(actual);
+    free(source);
+    TEST_PASS("compressed sync-flush bursts remain complete");
+}
+
+#ifdef NGX_HTTP_BROTLI
+/*
+ * test_brotli_flush_bursts - Verify Brotli input produced by repeated
+ * process/flush operations, matching the non-buffered upstream benchmark.
+ *
+ * A one-shot Brotli encoder test does not exercise the decoder's handling of
+ * a stream whose flush boundaries are delivered as separate HTTP chunks.
+ */
+static void
+test_brotli_flush_bursts(void)
+{
+    const size_t                       source_len = 1024 * 1024;
+    const size_t                       source_chunk = 16 * 1024;
+    test_pool_t                          tp;
+    u_char                              *source;
+    u_char                              *actual;
+    size_t                               emitted;
+    BrotliEncoderState                  *encoder;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+
+    TEST_SUBSECTION("brotli process/flush bursts remain complete");
+
+    source = malloc(source_len);
+    actual = malloc(source_len);
+    TEST_ASSERT(source != NULL && actual != NULL,
+        "brotli flush regression buffers should allocate");
+
+    for (size_t i = 0; i < source_len; i++) {
+        source[i] = (u_char) ('A' + (i % 26));
+    }
+
+    encoder = BrotliEncoderCreateInstance(NULL, NULL, NULL);
+    TEST_ASSERT(encoder != NULL,
+        "brotli flush regression encoder should be created");
+
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, 0);
+    TEST_ASSERT(decomp != NULL,
+        "brotli flush regression decompressor should be created");
+    emitted = 0;
+
+    for (size_t offset = 0; offset < source_len;
+         offset += source_chunk)
+    {
+        u_char              compressed[65536];
+        const uint8_t      *next_in;
+        uint8_t            *next_out;
+        size_t               available_in;
+        size_t               available_out;
+        size_t               chunk_len;
+        size_t               compressed_len;
+        size_t               total_out;
+        u_char              *out;
+        size_t               out_len;
+        ngx_int_t            rc;
+
+        chunk_len = source_len - offset;
+        if (chunk_len > source_chunk) {
+            chunk_len = source_chunk;
+        }
+        next_in = source + offset;
+        available_in = chunk_len;
+        next_out = compressed;
+        available_out = sizeof(compressed);
+        total_out = 0;
+        TEST_ASSERT(BrotliEncoderCompressStream(
+                        encoder, BROTLI_OPERATION_FLUSH,
+                        &available_in, &next_in,
+                        &available_out, &next_out, &total_out)
+                    == BROTLI_TRUE,
+            "brotli flush encoder should accept each source burst");
+        TEST_ASSERT(available_in == 0 && !BrotliEncoderHasMoreOutput(encoder),
+            "brotli flush encoder should drain each burst");
+        compressed_len = sizeof(compressed) - available_out;
+
+        out = NULL;
+        out_len = 0;
+        rc = ngx_http_markdown_streaming_decomp_feed(
+            decomp, compressed, compressed_len,
+            &out, &out_len, &tp.pool, &test_log);
+        TEST_ASSERT(rc == NGX_OK,
+            "brotli flush burst should decompress successfully");
+        TEST_ASSERT(emitted + out_len <= source_len,
+            "brotli flush output should stay within source size");
+        if (out_len > 0) {
+            memcpy(actual + emitted, out, out_len);
+            emitted += out_len;
+        }
+        test_pool_free_tracked_allocations();
+    }
+
+    {
+        u_char          compressed[65536];
+        const uint8_t  *next_in;
+        uint8_t        *next_out;
+        size_t           available_in;
+        size_t           available_out;
+        size_t           compressed_len;
+        size_t           total_out;
+        u_char          *out;
+        size_t           out_len;
+        ngx_int_t        rc;
+
+        next_in = NULL;
+        available_in = 0;
+        next_out = compressed;
+        available_out = sizeof(compressed);
+        total_out = 0;
+        TEST_ASSERT(BrotliEncoderCompressStream(
+                        encoder, BROTLI_OPERATION_FINISH,
+                        &available_in, &next_in,
+                        &available_out, &next_out, &total_out)
+                    == BROTLI_TRUE,
+            "brotli finish encoder should succeed");
+        TEST_ASSERT(BrotliEncoderIsFinished(encoder),
+            "brotli finish encoder should reach finished state");
+        compressed_len = sizeof(compressed) - available_out;
+
+        out = NULL;
+        out_len = 0;
+        rc = ngx_http_markdown_streaming_decomp_feed(
+            decomp, compressed, compressed_len,
+            &out, &out_len, &tp.pool, &test_log);
+        TEST_ASSERT(rc == NGX_OK,
+            "brotli final flush burst should decompress");
+        TEST_ASSERT(emitted + out_len <= source_len,
+            "brotli final output should stay within source size");
+        if (out_len > 0) {
+            memcpy(actual + emitted, out, out_len);
+            emitted += out_len;
+        }
+    }
+
+    TEST_ASSERT(emitted == source_len,
+        "brotli process/flush bursts should emit the complete source");
+    TEST_ASSERT(MEM_EQ(actual, source, source_len),
+        "brotli process/flush bursts should preserve source bytes");
+
+    BrotliEncoderDestroyInstance(encoder);
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+    free(actual);
+    free(source);
+    TEST_ASSERT(g_free_on_palloc_violation == 0,
+        "brotli flush test must not free pool memory");
+    TEST_ASSERT(g_free_on_static_pool_violation == 0,
+        "brotli flush test must not free static pool memory");
+    TEST_PASS("brotli process/flush bursts remain complete");
+}
+#endif
+
 /*
  * Join two compressed byte ranges into one test-owned allocation.
  * Returns NULL when the inputs are invalid, the combined size overflows,
@@ -3290,6 +3734,88 @@ test_roundtrip_and_empty_feed(void)
 
     TEST_PASS("feed round-trip and empty-input branches covered");
 }
+
+/*
+ * test_deflate_exact_budget_round_trip - Regression: a deflate response
+ * whose decompressed size lands EXACTLY on the configured budget must
+ * decompress successfully.  The workspace probe-byte reservation now
+ * covers deflate (like gzip/brotli), so the inflate loop can fill the
+ * final byte and observe Z_STREAM_END instead of tripping the grow
+ * path's `>= remaining` guard before check_limit()'s strict `>` runs.
+ */
+static void
+test_deflate_exact_budget_round_trip(void)
+{
+    const char  *text;
+    size_t       text_len;
+    u_char      *compressed;
+    size_t       compressed_len;
+    test_pool_t  tp;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+    u_char      *out;
+    size_t       out_len;
+    ngx_int_t    rc;
+
+    TEST_SUBSECTION("deflate exact-budget round trip");
+
+    /*
+     * The initial workspace is max(in_len * 4, 4096); the probe path only
+     * engages when the workspace equals the remaining budget, so the
+     * payload must exceed the 4096 minimum for the budget to be the
+     * binding constraint.  Build a >4096-byte body.
+     */
+    text = "Exact-budget deflate payload. ";
+    text_len = test_cstrnlen(text, 1024);
+    while (text_len < 5000) {
+        text_len += test_cstrnlen(text, 1024);
+    }
+
+    {
+        char  *body;
+
+        body = malloc(text_len + 1);
+        TEST_ASSERT(body != NULL, "body allocation should succeed");
+        for (size_t off = 0; off < text_len; off += test_cstrnlen(text, 1024)) {
+            size_t seg = test_cstrnlen(text, 1024);
+            if (off + seg > text_len) {
+                seg = text_len - off;
+            }
+            memcpy(body + off, text, seg);
+        }
+        body[text_len] = '\0';
+
+        rc = compress_payload((const u_char *) body, text_len,
+                              NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE,
+                              &compressed, &compressed_len);
+        TEST_ASSERT(rc == NGX_OK, "deflate compression should succeed");
+
+        test_pool_reset(&tp);
+        decomp = ngx_http_markdown_streaming_decomp_create(
+            &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE, text_len);
+        TEST_ASSERT(decomp != NULL,
+            "bounded deflate decompressor should exist");
+
+        out = NULL;
+        out_len = 0;
+        rc = ngx_http_markdown_streaming_decomp_feed(
+            decomp, compressed, compressed_len, &out, &out_len,
+            &tp.pool, &test_log);
+        TEST_ASSERT(rc == NGX_OK,
+            "a deflate stream landing exactly on the budget must succeed "
+            "(not BUDGET_EXCEEDED)");
+        TEST_ASSERT(out != NULL && out_len == text_len,
+            "exact-budget output length must match the source");
+        TEST_ASSERT(MEM_EQ(out, body, out_len),
+            "exact-budget output must round-trip byte-exactly");
+
+        free(body);
+        free(compressed);
+        ngx_http_markdown_streaming_decomp_cleanup(decomp);
+        free(decomp);
+        TEST_PASS("deflate exact-budget round trip verified");
+    }
+}
+
 
 /*
  * test_budget_and_invalid_type_branches - Verify budget-exceeded detection
@@ -4258,6 +4784,15 @@ test_create_helper_and_limit_branches(void)
         ngx_http_markdown_streaming_decomp_check_limit(&local, 7) == 0,
         "check_limit should pass on boundary");
 
+    local.total_decompressed = 8;
+    local.max_decompressed_size = 10;
+    rc = ngx_http_markdown_streaming_decomp_apply_limits(
+        &local, 3, NULL, &test_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
+        "apply_limits should reject an over-budget produced chunk");
+    TEST_ASSERT(local.total_decompressed == 8,
+        "over-budget apply_limits must not inflate cumulative total");
+
     heap_buf = malloc(8);
     TEST_ASSERT(heap_buf != NULL, "heap allocation should succeed");
     memcpy(heap_buf, "1234567", 8);
@@ -4569,6 +5104,8 @@ test_feed_mocked_inflate_paths(void)
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
         "feed should classify mocked oversized output as budget exceeded");
     free(decomp);
+
+
 
     test_pool_reset(&tp);
     decomp = ngx_http_markdown_streaming_decomp_create(
@@ -5314,7 +5851,9 @@ main(void)
     test_create_and_cleanup();
     test_create_failure_paths_and_cleanup_default();
     test_roundtrip_and_empty_feed();
+    test_sync_flush_bursts();
 #ifdef NGX_HTTP_BROTLI
+    test_brotli_flush_bursts();
     test_truncated_brotli_finish_errors();
     test_brotli_error_classification();
     test_brotli_exact_budget_probe();
@@ -5330,12 +5869,15 @@ main(void)
     test_brotli_truncation_detection_property();
 #endif
     test_tiny_chunks_do_not_amplify_request_pool();
+    test_ratio_limit_applies_to_small_stream();
+    test_ratio_limit_defers_small_prefix();
     test_budget_and_invalid_type_branches();
     test_truncated_finish_errors();
     test_malformed_zlib_formats_are_classified();
     test_truncated_deflate_formats_are_classified_at_finish();
     test_gzip_members_in_one_feed();
     test_gzip_empty_member_after_exact_budget();
+    test_deflate_exact_budget_round_trip();
     test_gzip_member_boundary_between_feeds();
     test_gzip_member_boundary_inside_feed();
     test_gzip_truncated_second_member();

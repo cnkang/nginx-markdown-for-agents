@@ -5,7 +5,7 @@
  * streaming_config and streaming_metrics sections with the correct
  * field names when MARKDOWN_STREAMING_ENABLED is defined.
  *
- * Corresponds to streaming observability, task 6.2.
+ * Covers the streaming observability response contract.
  *
  * Rules: 8 (metric names match emitted keys), 9 (field names match).
  */
@@ -80,10 +80,6 @@ typedef struct {
     const char  *policy;
     const char  *policy_source;
     const char  *on_error;
-    size_t       threshold;
-    size_t       precommit_buffer;
-    size_t       flush_min;
-    int          threshold_explicit;
 } streaming_config_snapshot_t;
 
 
@@ -165,16 +161,8 @@ build_diagnostics_json_with_streaming(output_ctx_t *out,
         stream_config->policy);
     output_append(out, "    \"policy_source\": \"%s\",\n",
         stream_config->policy_source);
-    output_append(out, "    \"on_error\": \"%s\",\n",
+    output_append(out, "    \"on_error\": \"%s\"\n",
         stream_config->on_error);
-    output_append(out, "    \"threshold\": %zu,\n",
-        stream_config->threshold);
-    output_append(out, "    \"precommit_buffer\": %zu,\n",
-        stream_config->precommit_buffer);
-    output_append(out, "    \"flush_min\": %zu,\n",
-        stream_config->flush_min);
-    output_append(out, "    \"threshold_explicit\": %s\n",
-        stream_config->threshold_explicit ? "true" : "false");
     output_append(out, "  }\n");
 #else
     /* dynconf_state section (abbreviated) */
@@ -237,10 +225,6 @@ test_streaming_metrics_section_present(void)
     stream_config.policy = "auto";
     stream_config.policy_source = "default";
     stream_config.on_error = "pass";
-    stream_config.threshold = 1048576;
-    stream_config.precommit_buffer = 262144;
-    stream_config.flush_min = 16384;
-    stream_config.threshold_explicit = 0;
 
     output_init(&out, buf, sizeof(buf));
     rc = build_diagnostics_json_with_streaming(&out, &base,
@@ -282,10 +266,6 @@ test_streaming_metrics_field_names(void)
     stream_config.policy = "auto";
     stream_config.policy_source = "default";
     stream_config.on_error = "pass";
-    stream_config.threshold = 0;
-    stream_config.precommit_buffer = 0;
-    stream_config.flush_min = 0;
-    stream_config.threshold_explicit = 0;
 
     output_init(&out, buf, sizeof(buf));
     rc = build_diagnostics_json_with_streaming(&out, &base,
@@ -344,10 +324,6 @@ test_streaming_metrics_values(void)
     stream_config.policy = "force";
     stream_config.policy_source = "configured";
     stream_config.on_error = "fail_closed";
-    stream_config.threshold = 1048576;
-    stream_config.precommit_buffer = 262144;
-    stream_config.flush_min = 16384;
-    stream_config.threshold_explicit = 0;
 
     output_init(&out, buf, sizeof(buf));
     rc = build_diagnostics_json_with_streaming(&out, &base,
@@ -395,10 +371,6 @@ test_streaming_config_section_present(void)
     stream_config.policy = "auto";
     stream_config.policy_source = "default";
     stream_config.on_error = "pass";
-    stream_config.threshold = 65536;
-    stream_config.precommit_buffer = 262144;
-    stream_config.flush_min = 16384;
-    stream_config.threshold_explicit = 0;
 
     output_init(&out, buf, sizeof(buf));
     rc = build_diagnostics_json_with_streaming(&out, &base,
@@ -432,10 +404,6 @@ test_streaming_config_field_names(void)
     stream_config.policy = "auto";
     stream_config.policy_source = "default";
     stream_config.on_error = "pass";
-    stream_config.threshold = 32768;
-    stream_config.precommit_buffer = 262144;
-    stream_config.flush_min = 16384;
-    stream_config.threshold_explicit = 0;
 
     output_init(&out, buf, sizeof(buf));
     rc = build_diagnostics_json_with_streaming(&out, &base,
@@ -443,23 +411,22 @@ test_streaming_config_field_names(void)
 
     TEST_ASSERT(rc == NGX_OK, "JSON build succeeds");
 
-    /* Verify all expected field names */
+    /* Verify all expected field names (0.9.2: policy, policy_source, on_error only) */
     TEST_ASSERT(json_contains(buf, "\"policy\":"),
         "policy field present");
     TEST_ASSERT(json_contains(buf, "\"policy_source\":"),
         "policy_source field present");
     TEST_ASSERT(json_contains(buf, "\"on_error\":"),
         "on_error field present");
-    TEST_ASSERT(json_contains(buf, "\"threshold\":"),
-        "threshold field present");
-    TEST_ASSERT(json_contains(buf, "\"precommit_buffer\":"),
-        "precommit_buffer field present");
-    TEST_ASSERT(json_contains(buf, "\"flush_min\":"),
-        "flush_min field present");
-    TEST_ASSERT(json_contains(buf, "\"threshold\":"),
-        "threshold field present");
-    TEST_ASSERT(json_contains(buf, "\"threshold_explicit\":"),
-        "threshold_explicit field present");
+    /* threshold, flush_min, precommit_buffer, threshold_explicit removed in 0.9.2 */
+    TEST_ASSERT(!json_contains(buf, "\"threshold\":"),
+        "threshold field absent (internalized)");
+    TEST_ASSERT(!json_contains(buf, "\"flush_min\":"),
+        "flush_min field absent (internalized)");
+    TEST_ASSERT(!json_contains(buf, "\"precommit_buffer\":"),
+        "precommit_buffer field absent (internalized)");
+    TEST_ASSERT(!json_contains(buf, "\"threshold_explicit\":"),
+        "threshold_explicit field absent (internalized)");
 
     TEST_PASS("streaming_config field names match spec");
 }
@@ -485,10 +452,6 @@ test_streaming_config_values(void)
     stream_config.policy = "force";
     stream_config.policy_source = "configured";
     stream_config.on_error = "fail_closed";
-    stream_config.threshold = 1048576;
-    stream_config.precommit_buffer = 262144;
-    stream_config.flush_min = 16384;
-    stream_config.threshold_explicit = 1;
 
     output_init(&out, buf, sizeof(buf));
     rc = build_diagnostics_json_with_streaming(&out, &base,
@@ -502,17 +465,6 @@ test_streaming_config_values(void)
         "policy_source value is configured");
     TEST_ASSERT(json_contains(buf, "\"on_error\": \"fail_closed\""),
         "on_error value is fail_closed");
-    TEST_ASSERT(json_contains(buf, "\"threshold\": 1048576"),
-        "threshold value is 1048576");
-    TEST_ASSERT(json_contains(buf, "\"precommit_buffer\": 262144"),
-        "precommit_buffer value is 262144");
-    TEST_ASSERT(json_contains(buf, "\"flush_min\": 16384"),
-        "flush_min value is 16384");
-    TEST_ASSERT(json_contains(buf, "\"threshold\": 1048576"),
-        "threshold value is 1048576");
-    TEST_ASSERT(json_contains(buf,
-        "\"threshold_explicit\": true"),
-        "threshold_explicit value is true");
 
     TEST_PASS("streaming_config values rendered correctly");
 }
@@ -538,10 +490,6 @@ test_streaming_config_auto_policy(void)
     stream_config.policy = "auto";
     stream_config.policy_source = "default";
     stream_config.on_error = "pass";
-    stream_config.threshold = 0;
-    stream_config.precommit_buffer = 0;
-    stream_config.flush_min = 0;
-    stream_config.threshold_explicit = 0;
 
     output_init(&out, buf, sizeof(buf));
     rc = build_diagnostics_json_with_streaming(&out, &base,
@@ -554,17 +502,6 @@ test_streaming_config_auto_policy(void)
         "policy_source value is default");
     TEST_ASSERT(json_contains(buf, "\"on_error\": \"pass\""),
         "on_error value is pass");
-    TEST_ASSERT(json_contains(buf, "\"threshold\": 0"),
-        "threshold value is 0");
-    TEST_ASSERT(json_contains(buf, "\"precommit_buffer\": 0"),
-        "precommit_buffer value is 0");
-    TEST_ASSERT(json_contains(buf, "\"flush_min\": 0"),
-        "flush_min value is 0");
-    TEST_ASSERT(json_contains(buf, "\"threshold\": 0"),
-        "threshold value is 0");
-    TEST_ASSERT(json_contains(buf,
-        "\"threshold_explicit\": false"),
-        "threshold_explicit value is false");
 
     TEST_PASS("streaming_config auto policy values correct");
 }
@@ -590,10 +527,6 @@ test_streaming_metrics_all_zero(void)
     stream_config.policy = "auto";
     stream_config.policy_source = "default";
     stream_config.on_error = "pass";
-    stream_config.threshold = 65536;
-    stream_config.precommit_buffer = 262144;
-    stream_config.flush_min = 16384;
-    stream_config.threshold_explicit = 0;
 
     output_init(&out, buf, sizeof(buf));
     rc = build_diagnostics_json_with_streaming(&out, &base,

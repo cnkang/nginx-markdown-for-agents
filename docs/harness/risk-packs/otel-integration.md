@@ -1,8 +1,18 @@
 # OTel Integration Pack
 
-## Triggers
+> **ARCHIVED.** The 0.9.2 release removed the OTel subsystem
+> (`markdown_otel`, `markdown_otel_endpoint`, and the
+> `ngx_http_markdown_otel*` sources). This pack stays as a historical
+> record of the pre-0.9.2 risk surface. It has no active triggers. See
+> [ADR-0027](../../architecture/ADR/0027-otel-removal-reintroduction-conditions.md)
+> for the reintroduction conditions.
 
-Changes to `ngx_http_markdown_otel*`, OTel configuration directives, OTLP export logic, or span attribute definitions.
+## Historical scope
+
+There are no active triggers or source paths for this pack. The entries below
+describe the risks behind subsystem removal. They are not
+requirements of the 0.9.2 production contract. A future implementation must
+first satisfy ADR-0027 and create a new routing entry as part of its review.
 
 ## Risks
 
@@ -17,16 +27,12 @@ Changes to `ngx_http_markdown_otel*`, OTel configuration directives, OTLP export
 - `observability-metrics` when OTel changes affect metrics export surface
 - `nginx-protocol-safety` when OTel interacts with filter chain lifecycle
 
-## Sync Points
+## Historical sync points
 
-- C header `ngx_http_markdown_otel.h` must define all span attribute constants
-- `docs/features/otel-tracing.md` must document all configuration directives
-- ADR or operator examples must stay aligned with the actual directive names
-  and internal URI/subrequest contract.
-- W3C trace-context extraction must traverse all NGINX header list parts and
-  handle absent/malformed values without affecting conversion behavior.
-- AGENTS.md Rule 23 (observability contract) applies to all new OTel metrics
-- SHM zone layout version must bump when OTel state struct changes
+The former C header, tracing feature document, directive names, superseded
+ADRs, and migration material are historical sync points for the removed
+trace-context behavior. Do not cite any of them as current source or
+configuration contracts.
 
 ## Minimum Verification
 
@@ -40,6 +46,7 @@ make docs-check
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | Marked pack archived (OTel subsystem removed in 0.9.2) |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.6.0 | 2026-05-03 | Codex | Covered implementation-header and config/doc routing for OTel changes |
 | 0.6.0 | 2026-05-03 | Codex | Added trace-context header-list traversal sync point |

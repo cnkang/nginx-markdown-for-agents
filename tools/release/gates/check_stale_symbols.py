@@ -28,7 +28,7 @@ STALE_SYMBOLS = [
     "markdown_large_body_threshold",
 ]
 
-# ponytail: check naked fields in harness docs, but exclude risk-packs to avoid noise
+# check naked fields in harness docs, but exclude risk-packs to avoid noise
 STALE_FIELDS = {
     "docs/harness/rules/": ["memory_budget", "streaming_budget"],
 }
@@ -36,6 +36,7 @@ STALE_FIELDS = {
 # Paths allowed to contain stale symbols (migration docs, changelogs, ADRs, and rollout guides)
 WHITELIST_PATH_PREFIXES = (
     "docs/guides/MIGRATION-",
+    "docs/guides/0.9.2-breaking-changes.md",
     "docs/guides/CONFIGURATION.md",
     "docs/guides/ROLLOUT_COOKBOOK.md",
     "docs/guides/LARGE_RESPONSE_ROLLOUT.md",
@@ -45,6 +46,8 @@ WHITELIST_PATH_PREFIXES = (
     "docs/guides/ROLLBACK_GUIDE.md",
     "docs/guides/prometheus-metrics.md",
     "docs/guides/streaming-troubleshooting.md",
+    # The public-surface inventory records retired directives as migration data.
+    "docs/harness/public-surface-inventory.json",
     "CHANGELOG.md",
     "docs/architecture/ADR/",
 )
@@ -52,7 +55,7 @@ WHITELIST_PATH_PREFIXES = (
 SCAN_PATH_PREFIXES = (
     ".github/workflows/",
     "docs/harness/",
-    "docs/release/",
+    "docs/releases/",
     "docs/guides/",
     "docs/operations/",
     "examples/production/",
@@ -60,7 +63,7 @@ SCAN_PATH_PREFIXES = (
     "tools/e2e/",
     "tests/e2e/",
 )
-# ponytail: exclude script itself from scanning
+# exclude script itself from scanning
 # (implicitly handled by SCAN_PATH_PREFIXES not including tools/)
 
 GIT_TIMEOUT_SECONDS = 15

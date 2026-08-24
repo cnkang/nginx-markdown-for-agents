@@ -3,6 +3,7 @@
  */
 
 #include "../include/test_common.h"
+#include "../../rust-converter/include/markdown_converter.h"
 
 #include <ctype.h>
 #include <stdarg.h>
@@ -22,6 +23,15 @@
 #endif
 #ifndef NGX_DECLINED
 #define NGX_DECLINED -2
+#endif
+#ifndef NGX_HTTP_TOO_MANY_REQUESTS
+#define NGX_HTTP_TOO_MANY_REQUESTS 429
+#endif
+#ifndef NGX_HTTP_SERVICE_UNAVAILABLE
+#define NGX_HTTP_SERVICE_UNAVAILABLE 503
+#endif
+#ifndef NGX_HTTP_BAD_GATEWAY
+#define NGX_HTTP_BAD_GATEWAY 502
 #endif
 
 #ifndef NGX_LOG_ERR
@@ -80,6 +90,7 @@ ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
 #define ngx_memzero(p, n)   memset((p), 0, (n))
 #define ngx_memcpy(dst, src, n) memcpy((dst), (src), (n))
 #define ngx_memmove(dst, src, n) memmove((dst), (src), (n))
+#define ngx_strlen(s)       strlen((const char *) (s))
 
 static ngx_int_t
 ngx_strncasecmp(u_char *s1, u_char *s2, size_t n)
@@ -117,6 +128,7 @@ typedef time_t ngx_mtime_t;
 
 #define ngx_file_info_t       struct stat
 #define ngx_file_info(name, fi) stat((const char *)(name), (fi))
+#define ngx_fd_info(fd, fi)   fstat((fd), (fi))
 #define ngx_file_mtime(fi)    ((fi)->st_mtime)
 #define NGX_FILE_ERROR        (-1)
 
@@ -156,6 +168,21 @@ ngx_pnalloc(ngx_pool_t *pool, size_t size)
     UNUSED(pool);
     return malloc(size);
 }
+
+static void *
+ngx_alloc(size_t size, ngx_log_t *log)
+{
+    UNUSED(log);
+    return malloc(size);
+}
+
+static void
+ngx_free(void *ptr)
+{
+    free(ptr);
+}
+
+#define ngx_time() ((time_t) 1700000000)
 
 static ssize_t
 ngx_parse_size(ngx_str_t *line)
@@ -212,6 +239,39 @@ ngx_del_timer(ngx_event_t *ev)
 #define NGX_HTTP_MARKDOWN_LOG_INFO   2
 #define NGX_HTTP_MARKDOWN_LOG_DEBUG  3
 
+void
+markdown_dynconf_result_init(FFIDynconfResult *result)
+{
+    memset(result, 0, sizeof(*result));
+    result->error_code = DYNCONF_ERR_INTERNAL;
+    result->filter = DYNCONF_NOT_SET_U8;
+    result->prune_noise = DYNCONF_NOT_SET_U8;
+    result->log_verbosity = DYNCONF_NOT_SET_U8;
+    result->error_policy = DYNCONF_NOT_SET_U8;
+    result->streaming_buffer = DYNCONF_NOT_SET_U64;
+}
+
+void
+markdown_dynconf_parse(const uint8_t *data, uintptr_t data_len,
+    FFIDynconfResult *result)
+{
+    UNUSED(data);
+    UNUSED(data_len);
+    markdown_dynconf_result_init(result);
+}
+
+void
+markdown_dynconf_result_free(FFIDynconfResult *result)
+{
+    UNUSED(result);
+}
+
+void
+ngx_http_markdown_record_dynconf_reload(ngx_uint_t error_code)
+{
+    UNUSED(error_code);
+}
+
 #include "../../src/ngx_http_markdown_dynconf_impl.h"
 
 static ngx_pool_t  g_pool;
@@ -235,7 +295,7 @@ test_build_effective_conf_from_valid_snapshot(void)
     conf.enabled_source = 2;
     conf.advanced.prune_noise = 1;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
-    conf.advanced.memory_budget = 4 * 1024 * 1024;
+    conf.limits.conversion_memory = 4 * 1024 * 1024;
     conf.stream.budget = 2 * 1024 * 1024;
 
     ngx_http_markdown_dynconf_snapshot_from_conf(&snap, &conf);
@@ -274,7 +334,7 @@ test_build_effective_conf_null_snapshot_falls_back_to_conf(void)
     conf.enabled_source = 3;
     conf.advanced.prune_noise = 0;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
-    conf.advanced.memory_budget = 8 * 1024 * 1024;
+    conf.limits.conversion_memory = 8 * 1024 * 1024;
     conf.stream.budget = 4 * 1024 * 1024;
 
     ngx_http_markdown_build_effective_conf(&eff, NULL, &conf);
@@ -311,7 +371,7 @@ test_build_effective_conf_invalid_snapshot_falls_back(void)
 
     conf.enabled = 1;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
-    conf.advanced.memory_budget = 16 * 1024 * 1024;
+    conf.limits.conversion_memory = 16 * 1024 * 1024;
     conf.stream.budget = 8 * 1024 * 1024;
 
     snap.valid = 0;
@@ -342,7 +402,7 @@ test_effective_helpers_read_from_eff_when_present(void)
 
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
     conf.advanced.prune_noise = 0;
-    conf.advanced.memory_budget = 1024;
+    conf.limits.conversion_memory = 1024;
     conf.stream.budget = 512;
 
     eff.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
@@ -388,7 +448,7 @@ test_effective_helpers_fall_back_when_eff_null(void)
     conf.enabled_source = 5;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
     conf.advanced.prune_noise = 1;
-    conf.advanced.memory_budget = 4096;
+    conf.limits.conversion_memory = 4096;
     conf.stream.budget = 2048;
 
     TEST_ASSERT(
@@ -416,6 +476,39 @@ test_effective_helpers_fall_back_when_eff_null(void)
 
 
 static void
+test_effective_error_policy_and_status_read_from_eff(void)
+{
+    ngx_http_markdown_conf_t          conf;
+    ngx_http_markdown_effective_conf_t eff;
+
+    TEST_SUBSECTION("effective error policy and status helpers");
+
+    ngx_memzero(&conf, sizeof(conf));
+    ngx_memzero(&eff, sizeof(eff));
+
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.error_status = NGX_HTTP_BAD_GATEWAY;
+    eff.error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    eff.error_status = NGX_HTTP_SERVICE_UNAVAILABLE;
+
+    TEST_ASSERT(ngx_http_markdown_effective_error_policy(&eff, &conf)
+                    == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT,
+                "effective error policy must override static policy");
+    TEST_ASSERT(ngx_http_markdown_effective_error_status(&eff, &conf)
+                    == NGX_HTTP_SERVICE_UNAVAILABLE,
+                "effective error status must override static status");
+    TEST_ASSERT(ngx_http_markdown_effective_error_policy(NULL, &conf)
+                    == NGX_HTTP_MARKDOWN_ON_ERROR_PASS,
+                "error policy falls back when effective view is unavailable");
+    TEST_ASSERT(ngx_http_markdown_effective_error_status(NULL, &conf)
+                    == NGX_HTTP_BAD_GATEWAY,
+                "error status falls back when effective view is unavailable");
+
+    TEST_PASS("effective error policy and status helpers");
+}
+
+
+static void
 test_request_snapshot_consistency_after_conf_change(void)
 {
     ngx_http_markdown_conf_t conf;
@@ -431,7 +524,7 @@ test_request_snapshot_consistency_after_conf_change(void)
     conf.enabled = 1;
     conf.advanced.prune_noise = 1;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
-    conf.advanced.memory_budget = 4 * 1024 * 1024;
+    conf.limits.conversion_memory = 4 * 1024 * 1024;
     conf.stream.budget = 2 * 1024 * 1024;
 
     ngx_http_markdown_dynconf_snapshot_from_conf(&snap_at_request_start, &conf);
@@ -450,7 +543,7 @@ test_request_snapshot_consistency_after_conf_change(void)
 
     conf.advanced.prune_noise = 0;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
-    conf.advanced.memory_budget = 16 * 1024 * 1024;
+    conf.limits.conversion_memory = 16 * 1024 * 1024;
     conf.stream.budget = 8 * 1024 * 1024;
 
     TEST_ASSERT(eff.prune_noise == 1,
@@ -500,7 +593,7 @@ test_request_snapshot_consistency_with_dynconf_apply_snapshot(void)
     conf.enabled = 1;
     conf.advanced.prune_noise = 1;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
-    conf.advanced.memory_budget = 4 * 1024 * 1024;
+    conf.limits.conversion_memory = 4 * 1024 * 1024;
     conf.stream.budget = 2 * 1024 * 1024;
 
     ngx_http_markdown_dynconf_snapshot_from_conf(&snap_at_request_start, &conf);
@@ -511,7 +604,7 @@ test_request_snapshot_consistency_with_dynconf_apply_snapshot(void)
     reload_snapshot.enabled = 1;
     reload_snapshot.prune_noise = 0;
     reload_snapshot.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
-    reload_snapshot.memory_budget = 32 * 1024 * 1024;
+    reload_snapshot.conversion_memory = 32 * 1024 * 1024;
     reload_snapshot.streaming_budget = 16 * 1024 * 1024;
     reload_snapshot.valid = 1;
 
@@ -521,7 +614,7 @@ test_request_snapshot_consistency_with_dynconf_apply_snapshot(void)
                 "live conf prune_noise changed by apply_snapshot");
     TEST_ASSERT(conf.policy.log_verbosity == NGX_HTTP_MARKDOWN_LOG_ERROR,
                 "live conf log_verbosity changed by apply_snapshot");
-    TEST_ASSERT(conf.advanced.memory_budget == 32 * 1024 * 1024,
+    TEST_ASSERT(conf.limits.conversion_memory == 32 * 1024 * 1024,
                 "live conf memory_budget changed by apply_snapshot");
 
     TEST_ASSERT(
@@ -575,7 +668,7 @@ test_effective_helpers_edge_values(void)
     ngx_memzero(&eff, sizeof(eff));
 
     conf.policy.log_verbosity = 0;
-    conf.advanced.memory_budget = 0;
+    conf.limits.conversion_memory = 0;
     conf.stream.budget = 0;
 
     eff.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
@@ -604,66 +697,12 @@ test_effective_helpers_edge_values(void)
 }
 
 
-/*
- * Simulated request context for bind_request_snapshot test.
- * Only the fields exercised by bind_request_snapshot are included.
- * Field order and types must match ngx_http_markdown_ctx_t so that
- * casting to (ngx_http_markdown_ctx_t*) for bind_request_snapshot
- * is layout-compatible.
- */
+/* Simulated request context slots used by the shared production binder. */
 typedef struct {
     ngx_http_markdown_dynconf_snapshot_t *dynconf_snapshot;
     ngx_http_markdown_effective_conf_t   *effective_conf;
+    ngx_http_markdown_effective_conf_t    effective_conf_storage;
 } test_ctx_t;
-
-
-/*
- * Test helper that mirrors the production ngx_http_markdown_bind_request_snapshot
- * logic.  Kept in sync with ngx_http_markdown_request_impl.h — any change
- * to the production function must be reflected here.
- *
- * DIVERGENCE RISK: This is a mirror, not a direct call.  If the production
- * bind_request_snapshot logic changes (e.g. new allocation, different gating
- * condition), this helper must be updated in the same changeset or the test
- * will pass while behavior drifts.  The ideal fix is to extract the core
- * bind/copy logic into a shared helper that both production and test code
- * can include without pulling in the full NGINX request-path dependency set.
- * That refactoring is deferred pending a seam in request_impl.h.
- *
- * This helper exists because the production function is a static inline
- * in request_impl.h, which has NGINX-internal dependencies not available
- * in the unit test compilation environment.
- */
-static void
-test_bind_request_snapshot(
-    ngx_http_request_t *r,
-    test_ctx_t *ctx,
-    const ngx_http_markdown_dynconf_snapshot_t *snap_copy,
-    const ngx_http_markdown_effective_conf_t *early_eff,
-    const ngx_http_markdown_conf_t *conf)
-{
-    if (conf->advanced.dynconf_enabled) {
-        ctx->dynconf_snapshot =
-            ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_dynconf_snapshot_t));
-        if (ctx->dynconf_snapshot != NULL && snap_copy != NULL) {
-            *ctx->dynconf_snapshot = *snap_copy;
-        } else if (ctx->dynconf_snapshot == NULL) {
-            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                          "markdown filter: failed to allocate dynconf snapshot "
-                          "from request pool; request will use live conf values");
-        }
-    }
-
-    ctx->effective_conf =
-        ngx_pcalloc(r->pool, sizeof(ngx_http_markdown_effective_conf_t));
-    if (ctx->effective_conf != NULL) {
-        *ctx->effective_conf = *early_eff;
-    } else {
-        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                      "markdown filter: failed to allocate effective conf "
-                      "from request pool; request will use live conf values");
-    }
-}
 
 
 static void
@@ -692,14 +731,14 @@ test_bind_request_snapshot_preserves_captured_snapshot(void)
     ngx_memzero(&conn, sizeof(conn));
     ngx_memzero(&log, sizeof(log));
 
-    r.pool = NULL;
+    r.pool = &g_pool;
     r.connection = &conn;
     conn.log = &log;
 
     conf.enabled = 1;
     conf.advanced.prune_noise = 1;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
-    conf.advanced.memory_budget = 4 * 1024 * 1024;
+    conf.limits.conversion_memory = 4 * 1024 * 1024;
     conf.stream.budget = 2 * 1024 * 1024;
     conf.advanced.dynconf_enabled = 1;
 
@@ -709,15 +748,17 @@ test_bind_request_snapshot_preserves_captured_snapshot(void)
     snap_b.enabled = 1;
     snap_b.prune_noise = 0;
     snap_b.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
-    snap_b.memory_budget = 32 * 1024 * 1024;
+    snap_b.conversion_memory = 32 * 1024 * 1024;
     snap_b.streaming_budget = 16 * 1024 * 1024;
     snap_b.valid = 1;
 
     ngx_http_markdown_build_effective_conf(
         &eff_b_ignore, &snap_b, &conf);
 
-    /* Call bind_request_snapshot with snapshot A (mirrors production code) */
-    test_bind_request_snapshot(&r, &tctx, &snap_a, &early_eff_a, &conf);
+    ngx_http_markdown_bind_request_snapshot(
+        &r, &conf, &snap_a, &early_eff_a,
+        &tctx.effective_conf_storage,
+        &tctx.dynconf_snapshot, &tctx.effective_conf);
 
     TEST_ASSERT(tctx.dynconf_snapshot != NULL,
                 "ctx dynconf_snapshot allocated (dynconf_enabled=1)");
@@ -729,7 +770,7 @@ test_bind_request_snapshot_preserves_captured_snapshot(void)
     TEST_ASSERT(tctx.dynconf_snapshot->log_verbosity
                     == NGX_HTTP_MARKDOWN_LOG_INFO,
                 "ctx snapshot log_verbosity is from A (INFO)");
-    TEST_ASSERT(tctx.dynconf_snapshot->memory_budget == 4 * 1024 * 1024,
+    TEST_ASSERT(tctx.dynconf_snapshot->conversion_memory == 4 * 1024 * 1024,
                 "ctx snapshot memory_budget is from A (4M)");
     TEST_ASSERT(tctx.dynconf_snapshot->streaming_budget == 2 * 1024 * 1024,
                 "ctx snapshot streaming_budget is from A (2M)");
@@ -750,7 +791,6 @@ test_bind_request_snapshot_preserves_captured_snapshot(void)
                 "global snapshot B log_verbosity is ERROR (different)");
 
     free(tctx.dynconf_snapshot);
-    free(tctx.effective_conf);
 
     TEST_PASS("bind_request_snapshot preserves captured snapshot A "
               "even after global snapshot becomes B");
@@ -786,7 +826,7 @@ test_dynconf_snapshot_not_consumed_when_dynconf_disabled(void)
     ngx_memzero(&conn, sizeof(conn));
     ngx_memzero(&log, sizeof(log));
 
-    r.pool = NULL;
+    r.pool = &g_pool;
     r.connection = &conn;
     conn.log = &log;
 
@@ -794,7 +834,7 @@ test_dynconf_snapshot_not_consumed_when_dynconf_disabled(void)
     conf.enabled = 1;
     conf.advanced.prune_noise = 0;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
-    conf.advanced.memory_budget = 1 * 1024 * 1024;
+    conf.limits.conversion_memory = 1 * 1024 * 1024;
     conf.stream.budget = 512 * 1024;
     conf.advanced.dynconf_enabled = 0;
 
@@ -802,7 +842,7 @@ test_dynconf_snapshot_not_consumed_when_dynconf_disabled(void)
     global_snap.enabled = 1;
     global_snap.prune_noise = 1;
     global_snap.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
-    global_snap.memory_budget = 32 * 1024 * 1024;
+    global_snap.conversion_memory = 32 * 1024 * 1024;
     global_snap.streaming_budget = 16 * 1024 * 1024;
     global_snap.valid = 1;
 
@@ -813,7 +853,10 @@ test_dynconf_snapshot_not_consumed_when_dynconf_disabled(void)
     ngx_http_markdown_build_effective_conf(&early_eff, NULL, &conf);
 
     /* Bind: with dynconf_enabled=0, dynconf_snapshot must NOT be allocated */
-    test_bind_request_snapshot(&r, &tctx, &global_snap, &early_eff, &conf);
+    ngx_http_markdown_bind_request_snapshot(
+        &r, &conf, &global_snap, &early_eff,
+        &tctx.effective_conf_storage,
+        &tctx.dynconf_snapshot, &tctx.effective_conf);
 
     TEST_ASSERT(tctx.dynconf_snapshot == NULL,
                 "ctx dynconf_snapshot is NULL when dynconf_enabled=0");
@@ -831,8 +874,6 @@ test_dynconf_snapshot_not_consumed_when_dynconf_disabled(void)
                 "effective memory_budget from conf (1M), not snapshot (32M)");
     TEST_ASSERT(tctx.effective_conf->streaming_budget == 512 * 1024,
                 "effective streaming_budget from conf (512K), not snapshot (16M)");
-
-    free(tctx.effective_conf);
 
     TEST_PASS("dynconf snapshot not consumed when dynconf_enabled=0");
 }
@@ -872,6 +913,7 @@ main(void)
     test_build_effective_conf_invalid_snapshot_falls_back();
     test_effective_helpers_read_from_eff_when_present();
     test_effective_helpers_fall_back_when_eff_null();
+    test_effective_error_policy_and_status_read_from_eff();
     test_request_snapshot_consistency_after_conf_change();
     test_request_snapshot_consistency_with_dynconf_apply_snapshot();
     test_build_effective_conf_null_inputs();

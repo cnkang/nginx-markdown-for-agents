@@ -265,25 +265,21 @@ test_default_config_all_keys_present(void)
     conf.token_estimate = 0;
     conf.front_matter = 0;
     conf.accept_policy = NGX_HTTP_MARKDOWN_ACCEPT_STRICT;
-    conf.buffer_chunked = 1;
     conf.decompress.auto_decompress = 1;
     conf.decompress.max_size = 10 * 1024 * 1024;
     conf.decompress.parse_timeout = 30000;
     conf.decompress.parser_budget = 64 * 1024 * 1024;
     conf.routing.large_body_threshold = 0;
     conf.advanced.prune_noise = 1;
-    conf.advanced.memory_budget = 0;
+    conf.limits.conversion_memory = 0;
     conf.advanced.dynconf_enabled = 0;
     conf.advanced.dynconf_dry_run = 0;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
     conf.policy.generate_etag = 1;
     conf.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
-    conf.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO;
     conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
     conf.stream.budget = 2 * 1024 * 1024;
     conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
-    conf.stream.shadow = 0;
-    conf.stream.threshold = 32 * 1024;
 
     rc = ngx_http_markdown_dynconf_snapshot_to_json(&pool, &conf,
         &out_buf, &out_len);
@@ -308,17 +304,15 @@ test_default_config_all_keys_present(void)
         "should contain markdown_front_matter key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_accept"),
         "should contain markdown_accept key");
-    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_buffer_chunked"),
-        "should contain markdown_buffer_chunked key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_auto_decompress"),
         "should contain markdown_auto_decompress key");
     TEST_ASSERT(!output_contains_key(out_buf, out_len,
         "markdown_decompression_budget"),
         "non-directive markdown_decompression_budget key should not be exposed");
-    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_parse_timeout"),
-        "should contain markdown_parse_timeout key");
-    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_parser_budget"),
-        "should contain markdown_parser_budget key");
+    TEST_ASSERT(!output_contains_key(out_buf, out_len, "markdown_parse_timeout"),
+        "removed markdown_parse_timeout key should not be exposed");
+    TEST_ASSERT(!output_contains_key(out_buf, out_len, "markdown_parser_budget"),
+        "removed markdown_parser_budget key should not be exposed");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_prune_noise"),
         "should contain markdown_prune_noise key");
     TEST_ASSERT(!output_contains_key(out_buf, out_len, "markdown_memory_budget"),
@@ -331,8 +325,6 @@ test_default_config_all_keys_present(void)
         "should contain markdown_log_verbosity key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_cache_validation"),
         "should contain markdown_cache_validation key");
-    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_metrics_format"),
-        "should contain markdown_metrics_format key");
     TEST_ASSERT(!output_contains_key(out_buf, out_len,
         "markdown_trust_forwarded_headers"),
         "removed trust-forwarded-headers key should not be exposed");
@@ -344,11 +336,9 @@ test_default_config_all_keys_present(void)
     TEST_ASSERT(!output_contains_key(out_buf, out_len,
         "markdown_streaming_budget"),
         "removed markdown_streaming_budget key should not be exposed");
-    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_streaming_shadow"),
-        "should contain markdown_streaming_shadow key");
-    TEST_ASSERT(output_contains_key(out_buf, out_len,
+    TEST_ASSERT(!output_contains_key(out_buf, out_len,
         "markdown_stream_threshold"),
-        "should contain markdown_stream_threshold key");
+        "removed markdown_stream_threshold key should not be exposed");
 
     /* Verify default values match expected */
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
@@ -366,9 +356,6 @@ test_default_config_all_keys_present(void)
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_front_matter", "off"),
         "markdown_front_matter should be 'off'");
-    TEST_ASSERT(output_contains_key_value(out_buf, out_len,
-        "markdown_buffer_chunked", "on"),
-        "markdown_buffer_chunked should be 'on'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_auto_decompress", "on"),
         "markdown_auto_decompress should be 'on'");
@@ -388,14 +375,8 @@ test_default_config_all_keys_present(void)
         "markdown_cache_validation", "full"),
         "markdown_cache_validation should be 'full'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
-        "markdown_metrics_format", "auto"),
-        "markdown_metrics_format should be 'auto'");
-    TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_streaming", "auto"),
         "markdown_streaming should be 'auto'");
-    TEST_ASSERT(output_contains_key_value(out_buf, out_len,
-        "markdown_streaming_shadow", "off"),
-        "markdown_streaming_shadow should be 'off'");
 
     TEST_PASS("Default config: active keys have correct default values");
 
@@ -428,25 +409,21 @@ test_custom_config_values_reflected(void)
     conf.token_estimate = 1;
     conf.front_matter = 1;
     conf.accept_policy = NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD;
-    conf.buffer_chunked = 0;
     conf.decompress.auto_decompress = 0;
     conf.decompress.max_size = 5 * 1024 * 1024;
     conf.decompress.parse_timeout = 15000;
     conf.decompress.parser_budget = 32 * 1024 * 1024;
     conf.routing.large_body_threshold = 1024;
     conf.advanced.prune_noise = 0;
-    conf.advanced.memory_budget = 16 * 1024 * 1024;
+    conf.limits.conversion_memory = 16 * 1024 * 1024;
     conf.advanced.dynconf_enabled = 1;
     conf.advanced.dynconf_dry_run = 1;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
     conf.policy.generate_etag = 0;
     conf.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
-    conf.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS;
     conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
     conf.stream.budget = 4 * 1024 * 1024;
     conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
-    conf.stream.shadow = 1;
-    conf.stream.threshold = 64 * 1024;
 
     rc = ngx_http_markdown_dynconf_snapshot_to_json(&pool, &conf,
         &out_buf, &out_len);
@@ -474,9 +451,6 @@ test_custom_config_values_reflected(void)
         "markdown_accept", "wildcard"),
         "markdown_accept should be 'wildcard'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
-        "markdown_buffer_chunked", "off"),
-        "markdown_buffer_chunked should be 'off'");
-    TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_auto_decompress", "off"),
         "markdown_auto_decompress should be 'off'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
@@ -494,15 +468,9 @@ test_custom_config_values_reflected(void)
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_cache_validation", "off"),
         "markdown_cache_validation should be 'off'");
-    TEST_ASSERT(output_contains_key_value(out_buf, out_len,
-        "markdown_metrics_format", "prometheus"),
-        "markdown_metrics_format should be 'prometheus'");
     TEST_ASSERT(!output_contains_key(out_buf, out_len,
         "markdown_trust_forwarded_headers"),
         "removed trust-forwarded-headers key should stay absent");
-    TEST_ASSERT(output_contains_key_value(out_buf, out_len,
-        "markdown_streaming_shadow", "on"),
-        "markdown_streaming_shadow should be 'on'");
 
     TEST_PASS("Custom config: active custom values correctly reflected");
 

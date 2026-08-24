@@ -56,7 +56,7 @@ http {
         location /cache-full/ {
             markdown_filter on;
             markdown_cache_validation full;
-            markdown_limits memory=10m timeout=120s;
+            markdown_limits conversion_memory=10m conversion_timeout=120s;
         }
     }
 }
@@ -91,7 +91,7 @@ http {
         location /broken/ {
             markdown_filter on;
             markdown_cache_validation full;
-            markdown_limits memory=10m timeout=120s;
+            markdown_limits conversion_memory=10m conversion_timeout=120s;
         }
     }
 }
@@ -119,7 +119,7 @@ http {
             markdown_filter on;
             # markdown_streaming off;
             markdown_cache_validation full;
-            markdown_limits memory=10m timeout=120s;
+            markdown_limits conversion_memory=10m conversion_timeout=120s;
         }
     }
 }
@@ -150,7 +150,7 @@ http {
             markdown_filter on;
             markdown_streaming off;
             markdown_cache_validation full;
-            markdown_limits memory=10m timeout=120s;
+            markdown_limits conversion_memory=10m conversion_timeout=120s;
         }
     }
 }
@@ -181,7 +181,7 @@ http {
             markdown_filter on;
             markdown_cache_validation full;
             markdown_streaming auto;
-            markdown_limits memory=10m timeout=120s;
+            markdown_limits conversion_memory=10m conversion_timeout=120s;
         }
     }
 }
@@ -211,7 +211,7 @@ http {
             markdown_filter on;
             markdown_cache_validation full;
             markdown_streaming auto;  # intentional: validates runtime-block mechanism
-            markdown_limits memory=10m timeout=120s;
+            markdown_limits conversion_memory=10m conversion_timeout=120s;
         }
     }
 }
@@ -242,7 +242,7 @@ http {
             markdown_filter on;
             markdown_cache_validation full;
             markdown_streaming auto;
-            markdown_limits memory=10m timeout=120s;
+            markdown_limits conversion_memory=10m conversion_timeout=120s;
         }
     }
 }
@@ -271,7 +271,7 @@ fn build_config() -> String {
                 location /cache-full/ {\n\
                     markdown_filter on;\n\
                     markdown_cache_validation full;\n\
-                    markdown_limits memory=10m timeout=120s;\n\
+                    markdown_limits conversion_memory=10m conversion_timeout=120s;\n\
                 }\n\
             }\n\
         }\n\
@@ -301,7 +301,7 @@ fn build_config() -> String {
                     markdown_filter on;\n\
                     markdown_streaming off;\n\
                     markdown_cache_validation full;\n\
-                    markdown_limits memory=10m timeout=120s;\n\
+                    markdown_limits conversion_memory=10m conversion_timeout=120s;\n\
                 }\n\
             }\n\
         }\n\
@@ -393,7 +393,7 @@ http {
             markdown_filter on;
             markdown_streaming auto;
             markdown_cache_validation full;
-            markdown_limits memory=10m timeout=120s;
+            markdown_limits conversion_memory=10m conversion_timeout=120s;
         }
     }
 }

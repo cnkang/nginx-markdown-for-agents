@@ -24,7 +24,8 @@ PROPERTIES = REPO_ROOT / ".sonarcloud.properties"
 def load_checker_module():
     """Load the checker directly so tmp_path cases do not touch repository data."""
     spec = importlib.util.spec_from_file_location("encoding_checker_test", CHECKER)
-    assert spec and spec.loader
+    assert spec is not None
+    assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -65,7 +66,9 @@ class TestExceptionManifest:
     def test_latin1_has_reason(self) -> None:
         manifest = self._load()
         info = manifest["tests/corpus/encoding/latin1.html"]
-        assert isinstance(info.get("reason"), str) and len(info["reason"]) > 0
+        reason = info.get("reason")
+        assert isinstance(reason, str)
+        assert len(reason) > 0
 
     def test_latin1_is_not_valid_utf8(self) -> None:
         path = REPO_ROOT / "tests" / "corpus" / "encoding" / "latin1.html"
@@ -208,6 +211,25 @@ class TestCheckerAdversarialInputs:
         rc, count = checker._audit_generated({})
         assert rc == 1
         assert count == 1
+
+    def test_binary_multilayer_fuzz_seed_is_excluded(self) -> None:
+        checker = load_checker_module()
+        seed_path = Path(
+            "components/rust-converter/fuzz/corpus/"
+            "fuzz_multilayer_decode/seed-minimum-valid.txt"
+        )
+        # Resolve the existence assertion through REPO_ROOT so the test does
+        # not depend on the process working directory.
+        assert (REPO_ROOT / seed_path).exists(), (
+            "fuzz seed must exist; the exclusion must cover the real seed"
+        )
+        assert checker._should_skip_path(seed_path)
+        # Exercise the audit entry point with the real seed path under a
+        # Sonar root: the binary seed must be skipped, producing no finding.
+        checker.SONAR_ROOTS = [Path("components/rust-converter/fuzz/corpus")]
+        rc, count = checker._audit_generated({})
+        assert rc == 0, "binary fuzz seed must be excluded from the audit"
+        assert count >= 1, "audit must have scanned the corpus directory"
 
 
 class TestSonarConfiguration:

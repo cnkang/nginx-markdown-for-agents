@@ -31,7 +31,6 @@ typedef struct {
     ngx_atomic_uint_t decompression_streaming_total;
     ngx_atomic_uint_t decompression_fullbuffer_total;
     ngx_atomic_uint_t decompression_budget_exceeded_total;
-    ngx_atomic_uint_t zero_copy_output_total;
     ngx_atomic_uint_t copied_output_total;
     struct {
         ngx_atomic_uint_t current;
@@ -118,6 +117,7 @@ typedef struct { /* SONAR_NOTE: mirrors production snapshot */
         ngx_atomic_t  no_accept;
         ngx_atomic_t  conditional;
         ngx_atomic_t  compression_passthrough;
+        ngx_atomic_t  no_transform;
     } skips;
     struct {
         ngx_atomic_t  failopen_count;
@@ -293,6 +293,7 @@ static ngx_shm_zone_t  g_shm_zone;
 ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = &g_shm_zone;
 
 #define MARKDOWN_STREAMING_ENABLED 1
+#define MARKDOWN_METRICS_PER_PATH_DEBUG 1
 #define NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED 1
 
 #include "../../src/ngx_http_markdown_prometheus_impl.h" /* SONAR_NOTE */

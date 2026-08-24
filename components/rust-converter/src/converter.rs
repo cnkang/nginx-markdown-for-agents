@@ -100,7 +100,8 @@
 //! - String concatenation uses a pre-allocated buffer to minimize allocations
 //! - DOM traversal is single-pass with no backtracking
 //! - Text normalization is performed inline during traversal
-//! - Memory usage is proportional to output size, not input DOM size
+//! - Memory usage in the traversal output buffer grows proportionally to
+//!   output size; full DOM materialization is proportional to input
 
 use crate::error::ConversionError;
 use html5ever::Attribute;
@@ -125,9 +126,9 @@ mod traversal;
 /// The threshold is checked against the traversal output length *after*
 /// `traverse_node_with_context` completes — not against the input HTML size,
 /// which is unavailable without an additional DOM walk. 256 KB is chosen to
-/// match the order of magnitude of the `markdown_stream_threshold` NGINX
-/// directive default, though the two values measure different things (input
-/// HTML vs. intermediate Markdown output).
+/// match the order of magnitude of the fixed internal streaming threshold
+/// (1 MiB), though the two values measure different things (input HTML
+/// vs. intermediate Markdown output).
 const LARGE_BODY_THRESHOLD: usize = 256 * 1024; // 256 KB
 
 /// Markdown flavor selection
@@ -166,6 +167,16 @@ pub struct ConversionOptions {
     pub resolve_relative_urls: bool,
     /// Runtime noise pruning configuration
     pub prune_config: pruning::PruneConfig,
+}
+
+impl ConversionOptions {
+    /// Estimate the physical heap retained by converter-owned options.
+    pub(crate) fn resident_bytes(&self) -> usize {
+        self.base_url
+            .as_ref()
+            .map_or(0, String::capacity)
+            .saturating_add(self.prune_config.resident_bytes())
+    }
 }
 
 impl Default for ConversionOptions {
@@ -211,6 +222,7 @@ impl Default for ConversionOptions {
 /// 1. After metadata extraction (if enabled)
 /// 2. Every 100 DOM nodes during traversal
 /// 3. Before output normalization
+/// 4. After output normalization
 ///
 /// # Example
 ///
@@ -249,7 +261,15 @@ pub struct ConversionContext {
     /// reallocations during DOM traversal. Callers that know the input size
     /// (e.g., the FFI layer) should set this via [`set_input_size_hint`].
     input_size_hint: usize,
+    /// Maximum generated Markdown size for the full-buffer path.
+    output_budget: usize,
 }
+
+/// Fallback full-buffer output cap used only when the FFI caller leaves the
+/// conversion-memory budget at zero. The production NGINX default is
+/// `markdown_limits conversion_memory=64m`, which is passed through the FFI;
+/// this constant is not a second replacement for that configured budget.
+const DEFAULT_FULL_BUFFER_OUTPUT_BUDGET: usize = 64 * 1024 * 1024;
 
 impl ConversionContext {
     /// Create a new conversion context with the specified timeout
@@ -277,6 +297,7 @@ impl ConversionContext {
             node_count: 0,
             is_fast_path: false,
             input_size_hint: 0,
+            output_budget: DEFAULT_FULL_BUFFER_OUTPUT_BUDGET,
         }
     }
 
@@ -292,6 +313,30 @@ impl ConversionContext {
     /// * `size` - Input HTML size in bytes (0 means unknown)
     pub(crate) fn set_input_size_hint(&mut self, size: usize) {
         self.input_size_hint = size;
+    }
+
+    /// Set the maximum generated Markdown size for this conversion.
+    ///
+    /// A zero FFI budget selects the same 64 MiB default used by the NGINX
+    /// conversion-memory limit. Values that do not fit in `usize` saturate
+    /// at the platform maximum.
+    pub(crate) fn set_output_budget(&mut self, budget: u64) {
+        self.output_budget = if budget == 0 {
+            DEFAULT_FULL_BUFFER_OUTPUT_BUDGET
+        } else {
+            usize::try_from(budget).unwrap_or(usize::MAX)
+        };
+    }
+
+    /// Reject generated output that exceeds the configured full-buffer cap.
+    pub(crate) fn check_output_budget(&self, output_len: usize) -> Result<(), ConversionError> {
+        if output_len > self.output_budget {
+            return Err(ConversionError::MemoryLimit(format!(
+                "generated Markdown output {} bytes exceeds budget {} bytes",
+                output_len, self.output_budget
+            )));
+        }
+        Ok(())
     }
 
     /// Check if timeout has been exceeded
@@ -586,6 +631,7 @@ impl MarkdownConverter {
             self.maybe_write_front_matter_from_dom(dom, &mut output, ctx)?;
             // Check timeout after metadata extraction
             ctx.check_timeout()?;
+            ctx.check_output_budget(output.len())?;
         }
 
         // Start traversal from document root
@@ -611,6 +657,8 @@ impl MarkdownConverter {
         } else {
             self.normalize_output(output)
         };
+
+        ctx.check_output_budget(markdown.len())?;
 
         // Final timeout check after normalization
         ctx.check_timeout()?;
@@ -646,19 +694,27 @@ impl MarkdownConverter {
         }
 
         if url.starts_with('/') {
-            let after_scheme = base
-                .strip_prefix("https://")
-                .or_else(|| base.strip_prefix("http://"))
-                .unwrap_or(base);
-            let origin = if let Some(pos) = after_scheme.find('/') {
-                let scheme_len = if base.starts_with("https://") { 8 } else { 7 };
-                &base[..scheme_len + pos]
-            } else {
-                base.as_str()
-            };
-            return format!("{}{}", origin, url);
+            return Self::resolve_origin_relative(base, url);
         }
 
+        Self::resolve_path_relative(base, url)
+    }
+
+    fn resolve_origin_relative(base: &str, url: &str) -> String {
+        let after_scheme = base
+            .strip_prefix("https://")
+            .or_else(|| base.strip_prefix("http://"))
+            .unwrap_or(base);
+        let origin = if let Some(pos) = after_scheme.find('/') {
+            let scheme_len = if base.starts_with("https://") { 8 } else { 7 };
+            &base[..scheme_len + pos]
+        } else {
+            base
+        };
+        format!("{}{}", origin, url)
+    }
+
+    fn resolve_path_relative(base: &str, url: &str) -> String {
         if base.ends_with('/') {
             return format!("{}{}", base, url);
         }
@@ -716,6 +772,22 @@ mod tests {
     /// Normalize whitespace for robust text-only expectations.
     fn normalize_expected_text(text: &str) -> String {
         text.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    #[test]
+    fn options_resident_bytes_include_base_url_and_pruning_selectors() {
+        let base_url = "https://example.test/".to_owned() + &"u".repeat(8192);
+        let selectors = "nav-".to_owned() + &"s".repeat(4096);
+        let options = ConversionOptions {
+            base_url: Some(base_url.clone()),
+            prune_config: pruning::PruneConfig::from_ffi(true, Some(selectors.as_str()), None),
+            ..ConversionOptions::default()
+        };
+
+        assert!(
+            options.resident_bytes() >= base_url.capacity() + options.prune_config.resident_bytes()
+        );
+        assert!(options.resident_bytes() >= 8192);
     }
 
     /// Escape characters that would otherwise be interpreted as HTML markup.
@@ -1631,11 +1703,24 @@ mod tests {
         let converter = MarkdownConverter::new();
         let result = converter.convert(&dom).expect("Conversion failed");
 
-        // Should preserve special characters (they're in plain text context)
-        assert!(result.contains("*"));
-        assert!(result.contains("_"));
-        assert!(result.contains("["));
-        assert!(result.contains("]"));
+        // Preserve the characters as text without allowing them to become
+        // emphasis or link syntax in a downstream Markdown renderer.
+        assert!(result.contains(r"\*"));
+        assert!(result.contains(r"\_"));
+        assert!(result.contains(r"\["));
+        assert!(result.contains(r"\]"));
+    }
+
+    #[test]
+    fn test_plain_text_markdown_injection_is_escaped() {
+        let html = b"<p>[click](javascript:alert(1)) &lt;img src=x onerror=1&gt;</p>";
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(!result.contains("[click](javascript:"));
+        assert!(result.contains(r"\[click\]"));
+        assert!(result.contains(r"\<img src=x onerror=1\>"));
     }
 
     /// Test normalization with mixed line endings
@@ -2305,6 +2390,28 @@ mod tests {
         assert!(result.contains("    - L3"));
     }
 
+    #[test]
+    fn test_deeply_nested_list_is_rejected_before_stack_exhaustion() {
+        let html = b"<ul><li>outer<ul><li>inner<ul><li>bounded</li></ul></li></ul></li></ul>";
+        let dom = parse_html(html).expect("Parse failed");
+        let mut converter = MarkdownConverter::new();
+        converter.security_validator = crate::security::SecurityValidator::with_max_depth(1);
+        let result = converter.convert(&dom);
+
+        assert!(matches!(result, Err(ConversionError::InvalidInput(_))));
+    }
+
+    #[test]
+    fn test_full_buffer_output_budget_is_enforced() {
+        let dom = parse_html(b"<p>generated output</p>").expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let mut ctx = ConversionContext::new(std::time::Duration::ZERO);
+        ctx.set_output_budget(8);
+
+        let result = converter.convert_with_context(&dom, &mut ctx);
+        assert!(matches!(result, Err(ConversionError::MemoryLimit(_))));
+    }
+
     // Tests for combined elements
     #[test]
     fn test_link_in_list() {
@@ -2931,7 +3038,7 @@ mod tests {
 
         // html5ever decodes entities automatically
         assert!(
-            result.contains("& < > \" '"),
+            result.contains("& \\< \\> \" '"),
             "Common named entities should be decoded"
         );
     }
@@ -3015,7 +3122,7 @@ mod tests {
         let result = converter.convert(&dom).expect("Conversion failed");
 
         assert!(
-            result.contains("# <Title> & Subtitle"),
+            result.contains("# \\<Title\\> & Subtitle"),
             "Entities in h1 should be decoded"
         );
         assert!(
@@ -3038,7 +3145,7 @@ mod tests {
 
         // Entities in link text should be decoded
         assert!(
-            result.contains("Link <text>"),
+            result.contains("Link \\<text\\>"),
             "Entities in link text should be decoded"
         );
         // Entities in href should also be decoded by html5ever
@@ -3093,7 +3200,7 @@ mod tests {
 
         // All entity types should be decoded
         assert!(
-            result.contains("Named: & < >"),
+            result.contains("Named: & \\< \\>"),
             "Named entities should be decoded"
         );
         assert!(
@@ -3123,7 +3230,7 @@ mod tests {
         let result = converter.convert(&dom).expect("Conversion failed");
 
         assert!(
-            result.contains("- <item> one"),
+            result.contains("- \\<item\\> one"),
             "Entities in list items should be decoded"
         );
         assert!(

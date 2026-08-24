@@ -1,5 +1,10 @@
 # Streaming Security Check Order Verification
 
+> **Historical verification (0.7.x).** The current 0.9.2 eligibility audit
+> lives in
+> [streaming-eligibility-audit.md](streaming-eligibility-audit.md).
+> This file records the 0.7.x-era check-order verification.
+
 | Field | Value |
 |-------|-------|
 | Scope | Streaming Security, Resource Limits, and Compression |
@@ -39,7 +44,7 @@ header_filter entry
   |      +-- range header
   |      +-- unbounded streaming (text/event-stream + stream_types)
   |      +-- content_type (allowlist check)
-  |      +-- size_limit (Content-Length vs max_size)
+  |      +-- size_limit (Content-Length vs conversion_memory)
   +-- 5. auth_policy check -> passthrough if deny+authenticated
   +-- 6. Accept negotiation (ngx_http_markdown_should_convert) -> passthrough if no MD preference
   +-- 7. Context allocation
@@ -102,7 +107,7 @@ the request passes through without ever reaching the streaming path selector.
 
 ### Hard exclusions -- application/x-ndjson, application/stream+json (Requirement 4) -- PASS
 
-- **Location**: These types are excluded by the content_type allowlist check
+- **Location**: The content_type allowlist check excludes these types
   (step 4) since only `text/html` (or user-configured types) passes.
 - **Defense-in-depth**: `ngx_http_markdown_stream_type_excluded()` provides an
   explicit hard-exclusion function covering all three types. The streaming
@@ -114,7 +119,7 @@ the request passes through without ever reaching the streaming path selector.
   user-configured `stream_types`, and the streaming engine selector
   (step 9, Rule 7) provides a final defense layer.
 - **Verdict**: CONFIRMED -- implicitly excluded by content_type allowlist
-  before streaming; explicitly excluded by `stream_type_excluded()` for
+  before streaming, explicitly excluded by `stream_type_excluded()` for
   defense-in-depth.
 
 ### Resource limits -- size_limit (Requirement 1) -- PASS
@@ -122,24 +127,29 @@ the request passes through without ever reaching the streaming path selector.
 - **Location**: `ngx_http_markdown_eligibility.c`, inside
   `ngx_http_markdown_check_eligibility()`.
 - **Code**: `ngx_http_markdown_check_size_limit(r, conf)` -- checks
-  Content-Length against `markdown_limits memory=<size>`.
+  Content-Length against the configured conversion-memory limit.
 - **Ordering**: Executes at step 4, inside eligibility check.
-- **Note**: When Content-Length is absent (chunked), the check passes and size
-  enforcement is deferred to the body filter (budget tracking during streaming
-  feed calls -- covered by Requirement 1 / Task 2).
-- **Verdict**: CONFIRMED -- static limit checked before streaming; dynamic
+- **Note**: When Content-Length is absent (chunked), the check passes and the
+  module defers enforcement to the body filter. The streaming input contract
+  covers budget tracking during feed calls.
+- **Verdict**: CONFIRMED -- static limit checked before streaming, dynamic
   budget enforced during streaming (separate concern).
 
 ### Compression handling (Requirement 3) -- PASS
 
-- **Location**: `ngx_http_markdown_request_impl.h`, header_filter, step 8
-  (after Accept negotiation, before streaming candidate).
-- **Code**: `ngx_http_markdown_detect_compression(r)` -- detects Content-Encoding.
-  If UNKNOWN format -> fail-open passthrough immediately (never reaches
-  streaming). If supported -> sets `decompression.needed` flag for body filter.
-- **Ordering**: Executes at step 8, before streaming candidate (step 9).
-- **Verdict**: CONFIRMED -- unsupported compression rejected before streaming;
-  supported compression flagged for controlled decompression in body filter.
+- **Location**: `ngx_http_markdown_request_impl.h`, header-filter precommit
+  routing, after Accept negotiation and before the streaming candidate.
+- **Code**: `ngx_http_markdown_collect_content_encoding()` combines all
+  `Content-Encoding` fields, then
+  `ngx_http_markdown_parse_encoding_chain_ffi()` validates the complete chain.
+  Malformed, unknown-token, and depth-exceeded results enter the configured
+  error-policy handler without starting a decoder. Valid single-layer chains
+  can use controlled streaming decode; the module routes valid multi-layer
+  chains to bounded full-buffer decoding.
+- **Ordering**: Collection and chain parsing execute before
+  `ngx_http_markdown_select_processing_path()`.
+- **Verdict**: CONFIRMED -- the streaming path cannot bypass encoding policy
+  or decoder selection.
 
 ---
 
@@ -178,7 +188,7 @@ practice: avoid header/body phase inconsistency for dynamic variables).
 
 ## Conclusion
 
-**Property 1 (No Bypass) is satisfied.** The code structure guarantees that:
+**Property 1 (No Bypass) holds.** The code structure guarantees that:
 
 1. All security checks execute in `ngx_http_markdown_header_filter` BEFORE
    the streaming candidate evaluation point.
@@ -187,20 +197,20 @@ practice: avoid header/body phase inconsistency for dynamic variables).
    eligibility gate, auth policy check, and Accept negotiation.
 4. Hard-excluded types are doubly guarded: by the content-type allowlist AND
    by explicit streaming exclusion checks.
-5. Compression is handled before path selection -- unsupported formats never
+5. The module handles compression before path selection -- unsupported formats never
    reach streaming.
 
 No gaps found. No remediation needed for this property.
 
 ---
 
-## Task 1.3 Remediation Assessment
+## Remediation Assessment
 
 | Field | Value |
 |-------|-------|
 | Date | 2026-06-05 |
 | Result | **No code changes needed** |
-| Reviewer | Agent (streaming security enforcement task 1.3) |
+| Reviewer | Streaming security enforcement review |
 
 ### Function: `ngx_http_markdown_stream_type_excluded()`
 
@@ -216,11 +226,11 @@ Verified in `components/nginx-module/src/ngx_http_markdown_eligibility.c` (lines
 
 ### AGENTS.md Rule Compliance
 
-- **Rule 12 (security)**: Function is read-only comparison; no interpolation
+- **Rule 12 (security)**: Function is read-only comparison, no interpolation
   of untrusted values.
-- **Rule 27 (sanitization)**: No output emission; purely boolean gate.
+- **Rule 27 (sanitization)**: No output emission, purely boolean gate.
 - **Rule 30 (NUL-terminate)**: Uses `ngx_strncasecmp` (length-bounded) and
-  `ngx_strlchr` (pointer-bounded); no C standard library string calls that
+  `ngx_strlchr` (pointer-bounded), no C standard library string calls that
   require NUL termination.
 
 ### Existing Test Coverage

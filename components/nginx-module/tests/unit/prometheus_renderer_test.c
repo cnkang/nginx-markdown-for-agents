@@ -30,7 +30,6 @@ typedef struct {
     ngx_atomic_uint_t decompression_streaming_total;
     ngx_atomic_uint_t decompression_fullbuffer_total;
     ngx_atomic_uint_t decompression_budget_exceeded_total;
-    ngx_atomic_uint_t zero_copy_output_total;
     ngx_atomic_uint_t copied_output_total;
     struct {
         ngx_atomic_uint_t current;
@@ -130,6 +129,7 @@ typedef struct { /* SONAR_NOTE */
         ngx_atomic_t  no_accept;
         ngx_atomic_t  conditional;
         ngx_atomic_t  compression_passthrough;
+        ngx_atomic_t  no_transform;
     } skips;
     struct {
         ngx_atomic_t  failopen_count;
@@ -374,7 +374,6 @@ test_known_values(void)
     s.perf.decompression_streaming_total = 12;
     s.perf.decompression_fullbuffer_total = 8;
     s.perf.decompression_budget_exceeded_total = 2;
-    s.perf.zero_copy_output_total = 50;
     s.perf.copied_output_total = 30;
 
     p = ngx_http_markdown_metrics_write_prometheus(
@@ -402,13 +401,12 @@ test_known_values(void)
             "nginx_markdown_streaming_budget_exceeded_total 2"),
         "streaming budget exceeded should be 2");
     TEST_ASSERT(
-        contains((char *) buf,
-            "nginx_markdown_streaming_shadow_total 10"),
-        "streaming shadow total should be 10");
+        !contains((char *) buf, "nginx_markdown_streaming_shadow_total"),
+        "streaming shadow total must stay out of the default renderer");
     TEST_ASSERT(
-        contains((char *) buf,
-            "nginx_markdown_streaming_shadow_diff_total 1"),
-        "streaming shadow diff should be 1");
+        !contains((char *) buf,
+            "nginx_markdown_streaming_shadow_diff_total"),
+        "streaming shadow diff total must stay out of the default renderer");
     /* TTFB: 1234ms = 1.234s */
     TEST_ASSERT(
         contains((char *) buf,
@@ -450,9 +448,6 @@ test_known_values(void)
         contains((char *) buf,
             "nginx_markdown_perf_decompression_budget_exceeded_total 2"),
         "perf decompression budget exceeded should be 2");
-    TEST_ASSERT(
-        contains((char *) buf, "nginx_markdown_zero_copy_output_total 50"),
-        "zero-copy output total should be 50");
     TEST_ASSERT(
         contains((char *) buf, "nginx_markdown_copied_output_total 30"),
         "copied output total should be 30");
@@ -532,8 +527,6 @@ test_help_and_type_lines(void)
         "nginx_markdown_streaming_total",
         "nginx_markdown_streaming_failures_total",
         "nginx_markdown_streaming_budget_exceeded_total",
-        "nginx_markdown_streaming_shadow_total",
-        "nginx_markdown_streaming_shadow_diff_total",
         "nginx_markdown_streaming_ttfb_seconds",
         "nginx_markdown_streaming_peak_memory_bytes",
         "nginx_markdown_input_bytes_total",
@@ -542,8 +535,6 @@ test_help_and_type_lines(void)
         "nginx_markdown_decompressions_total",
         "nginx_markdown_decompression_failures_total",
         "nginx_markdown_conversion_latency_bucket_total",
-        "nginx_markdown_per_path_conversion_time_ms_total",
-        "nginx_markdown_per_path_overflow_total",
         "nginx_markdown_inflight_current",
         "nginx_markdown_inflight_high_watermark",
         "nginx_markdown_overload_total",
@@ -553,7 +544,6 @@ test_help_and_type_lines(void)
         "nginx_markdown_decompression_streaming_total",
         "nginx_markdown_decompression_fullbuffer_total",
         "nginx_markdown_perf_decompression_budget_exceeded_total",
-        "nginx_markdown_zero_copy_output_total",
         "nginx_markdown_copied_output_total",
     };
 

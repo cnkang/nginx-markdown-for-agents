@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # detect_workflow_input_injection.sh — Detect GitHub Actions workflow input injection
 #
-# Rule (security-cwe, ci-gating): Direct interpolation of GitHub Actions inputs/outputs
-# into shell run blocks allows command injection via crafted input values.
+# Rule (security-cwe, ci-gating): Direct interpolation of GitHub Actions inputs or
+# command-bearing step outputs into shell run blocks allows command injection via
+# crafted values.
 # Inputs must be routed through environment variables and referenced only as
 # env vars in shell scripts, never via ${{ inputs.* }} or ${{ github.event.* }}
 # direct interpolation in run blocks.
@@ -10,6 +11,7 @@
 # This detector flags:
 #   - ${{ inputs.* }} used directly inside run: blocks without env routing
 #   - ${{ github.event.* }} used directly inside run: blocks without env routing
+#   - ${{ steps.*.outputs.command }} used directly inside run: blocks
 #
 # Allowlist: ${{ inputs.* }} used inside env: blocks is safe and not flagged.
 #   ${{ github.sha }}, ${{ github.ref }}, and ${{ github.event_name }} are
@@ -60,21 +62,37 @@ while IFS= read -r -d '' file; do
     rel_path="${file#${REPO_ROOT}/}"
     in_run_block=0
     in_env_block=0
+    inline_run_command=0
     line_num=0
 
     while IFS= read -r line || [[ -n "$line" ]]; do
         line_num=$((line_num + 1))
+        inline_run_command=0
 
         # Detect start/end of run: blocks (line starts with "run:" or contains "run: |")
         # YAML structure: we look for lines with "run:" that start a multiline block
-        # or inline run: command
+        # or inline run: command.  Recognize all YAML block scalar indicators:
+        # |, |-, |+, >, >-, >+, plus YAML indentation indicators in
+        # either order (|2, |2-, |-2) and trailing comments.
+        block_scalar_re='^[[:space:]]*(-[[:space:]]*)?run:[[:space:]]*[|>][-+]?([0-9][-+]?)?([[:space:]]*#.*)?$'
         if [[ "$line" =~ ^[[:space:]]*run:[[:space:]]*$ ]] || \
-           [[ "$line" =~ ^[[:space:]]*run:[[:space:]]*\|[[:space:]]*$ ]] || \
            [[ "$line" =~ ^[[:space:]]*-[[:space:]]*run:[[:space:]]*$ ]] || \
-           [[ "$line" =~ ^[[:space:]]*-[[:space:]]*run:[[:space:]]*\|[[:space:]]*$ ]]; then
+           [[ "$line" =~ $block_scalar_re ]]; then
             in_run_block=1
             in_env_block=0
             continue
+        fi
+
+        # An inline run command is also shell source and needs the same
+        # interpolation checks as a multiline run block.  Exclude YAML block
+        # scalar indicators (|, |-, |+, >, >-) which are handled above as
+        # block starts, not inline commands.
+        inline_run_re='^[[:space:]]*run:[[:space:]]+[^|>]'
+        inline_run_dash_re='^[[:space:]]*-[[:space:]]*run:[[:space:]]+[^|>]'
+        if [[ "$line" =~ $inline_run_re ]] || \
+           [[ "$line" =~ $inline_run_dash_re ]]; then
+            inline_run_command=1
+            in_env_block=0
         fi
 
         # Detect env: blocks (which are safe for input interpolation)
@@ -96,8 +114,19 @@ while IFS= read -r -d '' file; do
             continue
         fi
 
+        # A reusable-workflow job uses a plain `uses:` key (without the
+        # step-list dash).  It ends any preceding step run block; its `with:`
+        # values are workflow wiring, not shell source.  Without this boundary
+        # the scanner can carry a prior step's run state into the next job and
+        # report safe module_ref/module_sha wiring as shell interpolation.
+        if [[ "$line" =~ ^[[:space:]]*uses:[[:space:]]+ ]]; then
+            in_run_block=0
+            in_env_block=0
+            continue
+        fi
+
         # Check for input interpolation inside run blocks
-        if [[ $in_run_block -eq 1 ]]; then
+        if [[ $in_run_block -eq 1 || $inline_run_command -eq 1 ]]; then
             # Flag ${{ inputs.* }} inside run blocks
             if [[ "$line" =~ \$\{\{[[:space:]]*inputs\.[a-zA-Z_]+[[:space:]]*\}\} ]]; then
                 echo "ERROR: ${rel_path}:${line_num}: inputs.* directly interpolated in run block" >&2
@@ -112,6 +141,67 @@ while IFS= read -r -d '' file; do
                 echo "ERROR: ${rel_path}:${line_num}: github.event.inputs.* directly interpolated in run block" >&2
                 echo "  ${line}" >&2
                 echo "  Fix: route through env: INPUT_VAR: \${{ github.event.inputs.var }} and use \${INPUT_VAR}" >&2
+                findings=$((findings + 1))
+            fi
+
+            # Step outputs are executable data unless the selector names a
+            # documented benign data value (version, sha, path, name, ...);
+            # anything else is treated as command-bearing and flagged.
+            # Accept either dot or index syntax for both the step selector
+            # and the output selector, including mixed forms such as
+            # steps.build.outputs['command'] and steps['build'].outputs.command.
+            # Benign selectors such as steps.meta.outputs.version are not
+            # command-bearing inputs and are not flagged; unknown selectors
+            # fail closed so a new command-shaped output cannot slip through.
+            if [[ "$line" =~ \$(\{\{[[:space:]]*steps(\.[a-zA-Z_][a-zA-Z0-9_-]*|\[[^]]*\])\.[[:space:]]*outputs(\.[a-zA-Z_][a-zA-Z0-9_-]*|\[[^]]*\])[[:space:]]*\}\}) ]]; then
+                output_selector="${BASH_REMATCH[3]}"
+                # Normalize the index form (steps['build'].outputs['version'])
+                # to the dot form before the allowlist match: strip the
+                # surrounding brackets AND any single/double quotes so both
+                # forms become the same bare identifier the case patterns
+                # compare against.
+                if [[ "$output_selector" == \[*\] ]]; then
+                    output_selector="${output_selector#[}"
+                    output_selector="${output_selector%\]}"
+                    output_selector="${output_selector//\'/}"
+                    output_selector="${output_selector//\"/}"
+                fi
+                benign_data_selector="${output_selector#.}"
+                case "${benign_data_selector}" in
+                    sha|version|raw_version|bench_nginx_version|nginx_version|path|name|ref|commit|repo|title|body|buildroot|nginx_bin|checkout_ref|deb_filename|rpm_filename|tap_name|pull-request-number|enabled|supported|blocking|changed|has_changes|install_exit|nginx_test_exit|module_found|skip_reason|package_matrix|matrix_entries|smoke_matrix|musl_matrix|nginx_versions|targets|policy_reference)
+                        ;;
+                    *)
+                        echo "ERROR: ${rel_path}:${line_num}: step output directly interpolated in run block" >&2
+                        echo "  ${line}" >&2
+                        echo "  Fix: map a fixed identifier through env and a shell case statement" >&2
+                        findings=$((findings + 1))
+                        ;;
+                esac
+            fi
+
+            # External event data (PR head ref/title/body, release tag name,
+            # issue fields, head_ref, ref_name) is attacker-influenced for
+            # pull_request/release/issue events and must never be interpolated
+            # into run-block shell source.  Route through env with explicit
+            # validation instead.
+            # Both selector forms are matched: dot form
+            # (github.event.pull_request.head.ref) and index form
+            # (github.event['pull_request'].head.ref /
+            #  github.event.pull_request['head']['ref']) — the index form
+            # bypasses a dot-only pattern while carrying the same
+            # attacker-controlled data.
+            # Dot-form selector (github.event.pull_request.head.ref),
+            # index-form selector (github.event['pull_request'].head.ref /
+            # github.event.pull_request['head']['ref']), and the head_ref /
+            # ref_name aliases.  Three separate patterns avoid embedding a
+            # double-quote literal inside [[ =~ ]] (which would terminate
+            # the quoted regex) while still matching both selector forms.
+            if [[ "$line" =~ \$\{\{[[:space:]]*github\.event\.(pull_request|release|issue|comment|inputs)((\.[a-zA-Z_.]+|\[[^]]*\])+)[[:space:]]*\}\} ]] || \
+               [[ "$line" =~ \$\{\{[[:space:]]*github\.event\[[^]]*\](\.[a-zA-Z_.]+|\[[^]]*\])+[[:space:]]*\}\} ]] || \
+               [[ "$line" =~ \$\{\{[[:space:]]*(github\.head_ref|github\.ref_name)[[:space:]]*\}\} ]]; then
+                echo "ERROR: ${rel_path}:${line_num}: external event data directly interpolated in run block" >&2
+                echo "  ${line}" >&2
+                echo "  Fix: route through env and validate the value (e.g. against ^[0-9]+$ for refs)" >&2
                 findings=$((findings + 1))
             fi
         fi

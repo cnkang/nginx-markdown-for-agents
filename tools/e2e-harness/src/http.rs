@@ -30,20 +30,6 @@ fn shared_client() -> &'static reqwest::blocking::Client {
     })
 }
 
-/// Send a GET request and return the response.
-///
-/// # Arguments
-///
-/// * `url` - Fully qualified URL.
-///
-/// # Returns
-///
-/// An `HttpResponse` on success.
-pub fn get(url: &str) -> Result<HttpResponse> {
-    let resp = shared_client().get(url).send()?;
-    to_http_response(resp)
-}
-
 /// Send a HEAD request and return the response.
 ///
 /// # Arguments
@@ -55,6 +41,25 @@ pub fn get(url: &str) -> Result<HttpResponse> {
 /// An `HttpResponse` with an empty body on success.
 pub fn head(url: &str) -> Result<HttpResponse> {
     let resp = shared_client().head(url).send()?;
+    to_http_response(resp)
+}
+
+/// Send a HEAD request with custom headers and return the response.
+///
+/// # Arguments
+///
+/// * `url` - Fully qualified URL.
+/// * `headers` - Header name-value pairs to include.
+///
+/// # Returns
+///
+/// An `HttpResponse` with an empty body on success.
+pub fn head_with_headers(url: &str, headers: &HashMap<String, String>) -> Result<HttpResponse> {
+    let mut req = shared_client().head(url);
+    for (key, value) in headers {
+        req = req.header(key.as_str(), value.as_str());
+    }
+    let resp = req.send()?;
     to_http_response(resp)
 }
 

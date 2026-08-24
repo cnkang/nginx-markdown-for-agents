@@ -187,12 +187,12 @@ def check_operator_verification(text: str) -> list[str]:
 
 
 def check_compatibility_matrix(text: str) -> list[str]:
-    """Check 6: Compatibility matrix exists and references release-matrix.json."""
+    """Check 6: Matrix references the canonical tools/release-matrix.json."""
     section = _section_text(text, r"7\.\s+Compatibility Matrix")
     if not section:
         return ["Cannot locate '## 7. Compatibility Matrix' section"]
     errors: list[str] = []
-    if "release-matrix.json" not in section:
+    if "tools/release-matrix.json" not in section:
         errors.append(
             "Compatibility Matrix section does not reference "
             "'tools/release-matrix.json'"

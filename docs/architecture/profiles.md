@@ -1,11 +1,20 @@
-# Profile System Design
+# Profile System Design (Retired)
+
+> **Archived**: The `markdown_profile` directive and the profile system
+> described below were **removed in 0.9.2** (see
+> [MIGRATION-0.9.2.md](../guides/MIGRATION-0.9.2.md) and
+> [0.9.2-breaking-changes.md](../guides/0.9.2-breaking-changes.md)). This
+> document stays as a historical design record of the pre-0.9.2
+> surface. It does not describe any active 0.9.2 behavior. The named profile
+> directive appears here only as an archived reference.
 
 | Field | Value |
 |-------|-------|
-| Version | 0.9.1 |
+| Version | 0.9.1 (historical) |
 | Feature | Profiles Production Defaults |
-| Status | Implemented |
+| Status | Retired in 0.9.2 |
 | Created | 2026-06-28 |
+| Retired | 2026-08-05 |
 
 ---
 
@@ -25,11 +34,11 @@ Design constraints:
 
 - Profiles are **additive defaults**, not opaque presets — operators retain full
   visibility into what each profile sets and can override most fields.
-- Profiles do not introduce new runtime behavior; they only set existing
+- Profiles do not introduce new runtime behavior. They only set existing
   Config V2 directive defaults.
-- The profile set is small (three profiles) and frozen at 1.0.0. New profiles
-  may be added after 1.0 (additive-only), but existing profile semantics must
-  not change.
+- The profile set is small (three profiles) and frozen at 1.0.0. The project
+  may add new profiles after 1.0 (additive-only), but existing profile
+  semantics must not change.
 
 ---
 
@@ -55,7 +64,7 @@ Key characteristics:
 - `markdown_cache_validation ims_only` — avoids ETag computation overhead
   while still supporting `If-Modified-Since` via the upstream's
   `Last-Modified`.
-- `markdown_streaming auto` — large responses stream; small ones buffer.
+- `markdown_streaming auto` — large responses stream. Small ones buffer.
 - No forced fields — all defaults can be overridden.
 - Values are intentionally close to Config V2 built-in defaults to minimize
   migration surprise.
@@ -67,7 +76,7 @@ low memory usage are the priority.
 
 Key characteristics:
 - `markdown_streaming force` (**forced**) — all eligible responses stream.
-- `markdown_cache_validation off` (**forced**) — no caching overhead; streaming
+- `markdown_cache_validation off` (**forced**) — no caching overhead. Streaming
   responses cannot carry an ETag.
 - `markdown_accept wildcard` — converts on `*/*` and `text/*` Accept headers,
   which many AI crawlers send.
@@ -88,7 +97,7 @@ Priority (highest first):
 2. Profile defaults from the active `markdown_profile`.
 3. Config V2 built-in defaults (compile-time constants).
 
-When no `markdown_profile` is declared, only built-in defaults apply (no
+When no `markdown_profile` appears in config, only built-in defaults apply (no
 implicit profile). This is intentional — 0.9.0 is a breaking release and does
 not default to any profile.
 
@@ -120,40 +129,24 @@ These apply regardless of whether a profile is active:
 | Duplicate `markdown_profile` in same context | error | Only one profile per block |
 | Unknown profile name | error | Directive parse failure |
 
-### Conflict Detection Timing
+### Conflict Detection Timing (historical)
 
-- **`nginx -t`**: all conflicts are detected at configuration test time.
-- **Dynconf dry-run**: conflict detection also runs during dynamic
-  configuration validation.
+When this profile design was active, profile expansion and conflict detection
+occurred during configuration parsing for normal startup and reload. `nginx -t`
+was one invocation of that same parser, not a separate production-only phase.
 
 ---
 
-## FFI Boundary Design
+## Former FFI Boundary Design (historical)
 
-Profile logic is implemented entirely in Rust. The C module handles only:
-1. Parsing the `markdown_profile` directive (enum value storage).
-2. Calling the Rust merge/conflict FFI during config merge.
-3. Applying the resulting effective values to the C config struct.
+The profile merge/conflict FFI described in earlier revisions was never a
+production NGINX consumer. The project removed it before the 0.9.2 pre-v1 freeze
+along
+with the `markdown_profile` directive. The active generated header therefore
+contains no `FFIProfile`, conflict-list, or profile snapshot types/functions.
 
-### FFI Types
-
-```text
-FFIProfile          — enum: None, StrictCache, Balanced, StreamingFirst
-FFIProfileDefaults  — struct: all profile-relevant field values
-FFIConflict         — struct: level (error/warning) + message
-FFIConflictLevel    — enum: Error, Warning
-```
-
-### FFI Functions
-
-```text
-markdown_profile_get_defaults(profile) → FFIProfileDefaults
-markdown_detect_conflicts(profile, explicit_flags, effective) → FFIConflict[]
-```
-
-Profile expansion happens at config parse time. There is no runtime overhead —
-the effective config is computed once during `nginx -t` and cached in the
-merged `ngx_http_markdown_conf_t` struct.
+The profile tables and merge rules above remain as historical design context.
+They are not an implementation or compatibility promise.
 
 ---
 
@@ -172,8 +165,9 @@ merged `ngx_http_markdown_conf_t` struct.
 
 ### Adding New Profiles (post-1.0)
 
-New profiles can be added following these rules:
-1. Add a variant to `Profile` enum (Rust) and `FFIProfile` (C header).
+The project can add new profiles following these rules:
+1. Reopen the archived design and add a new, explicitly reviewed production
+   contract. The former FFI types are not an extension point.
 2. Implement `defaults()` for the new profile.
 3. Declare any forced fields.
 4. Update documentation.
@@ -184,18 +178,21 @@ New profiles can be added following these rules:
 If a future directive should be profile-controlled, add it to
 `ProfileDefaults` and update all three profile `defaults()` implementations.
 The merge logic handles new fields automatically via the "profile value as
-default argument" pattern.
+default argument" pattern. The removed `FFIProfile`, conflict-list, and
+profile snapshot types are not a future extension point. They remain as
+historical context only (see the Former FFI Boundary Design section above).
 
 ---
 
 ## Related Documents
 
-- [Configuration Guide — Profiles section](../guides/CONFIGURATION.md#profiles)
-- [Deployment Examples — Profile-Based Deployments](../guides/DEPLOYMENT_EXAMPLES.md#profile-based-deployments-v090)
-- [Profile Inventory (field mapping)](profile-inventory.md)
+- [Profile Inventory (historical field mapping)](profile-inventory.md)
+- [MIGRATION-0.9.2.md](../guides/MIGRATION-0.9.2.md) — removed surface and replacement directives
+- [0.9.2-breaking-changes.md](../guides/0.9.2-breaking-changes.md) — breaking-change reference
 
 ## Document Updates
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-06 | Kang | Archived: the profile system (including the markdown_profile directive) was removed in 0.9.2. The document remains a historical record |
 | 0.9.0 | 2026-06-28 | Kang | Initial creation |

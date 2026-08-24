@@ -94,6 +94,25 @@ pub struct StreamingConverter {
     commit_state: CommitState,
     /// Cooperative timeout deadline.
     deadline: Option<Instant>,
+    /// Cooperative parser-phase deadline (html5ever tokenization).
+    ///
+    /// Distinct from `deadline` (the overall conversion timeout): the
+    /// parser deadline bounds only the tokenizer phase, matching the
+    /// full-buffer path where `parse_timeout` limits parsing while
+    /// `conversion_timeout` bounds the whole pipeline.
+    ///
+    /// The deadline is evaluated against ACCUMULATED TOKENIZER WORK, not
+    /// total wall-clock time: each bounded html5ever slice's measured
+    /// duration is added to `parser_work_elapsed`, and the deadline fires
+    /// when that accumulation crosses the configured parse_timeout.  This
+    /// keeps an upstream that trickles chunks over a long period from
+    /// consuming the parser budget while it sits idle between feeds.
+    parser_deadline: Option<Instant>,
+    /// Configured parser-phase allowance (the parse_timeout duration).
+    parser_work_allowance: Duration,
+    /// Accumulated html5ever tokenization work (measured per bounded
+    /// slice).  Compared against the parse_timeout duration.
+    parser_work_elapsed: Duration,
     /// Conversion statistics.
     stats: StreamingStats,
     /// Total bytes of Markdown emitted so far (for PostCommitError reporting).
@@ -123,17 +142,14 @@ pub struct StreamingConverter {
     /// an explicit fallback on budget exhaustion.
     head_bytes_seen: usize,
     /// Trailing bytes from the previous chunk that form an incomplete UTF-8
-    /// sequence. Prepended to the next chunk before `String::from_utf8_lossy`
-    /// so multibyte characters split across chunk boundaries are preserved.
+    /// sequence. Prepended to the next chunk before UTF-8 validation so
+    /// multibyte characters split across chunk boundaries are preserved.
     utf8_tail: Vec<u8>,
     /// Parser memory budget in bytes (0 = unlimited).
-    /// Tracks cumulative input bytes fed to the converter and rejects when
-    /// the total exceeds this limit. Uses input size as a proxy for parser
-    /// memory pressure (matching the full-buffer path). Populated from the
-    /// `markdown_parser_budget` NGINX directive via FFI.
+    /// Limits the conservative resident working-set estimate used by the
+    /// streaming parser. Populated from the `markdown_limits parser_memory=`
+    /// limit via FFI.
     parser_budget: u64,
-    /// Cumulative input bytes fed to the converter (for parser budget enforcement).
-    cumulative_input_bytes: u64,
     /// Whether a leading UTF-8 BOM (U+FEFF) has been checked/stripped from the
     /// first chunk.  The full-buffer path uses html5ever's `discard_bom: true`
     /// to strip a BOM at stream start; the streaming path sets `discard_bom:
@@ -239,6 +255,9 @@ impl StreamingConverter {
             chars_per_token: clamp_chars_per_token(chars_per_token),
             commit_state: CommitState::PreCommit,
             deadline: None,
+            parser_deadline: None,
+            parser_work_allowance: Duration::ZERO,
+            parser_work_elapsed: Duration::ZERO,
             stats: StreamingStats::default(),
             bytes_emitted: 0,
             metadata: PageMetadata::new(),
@@ -250,7 +269,6 @@ impl StreamingConverter {
             head_bytes_seen: 0,
             utf8_tail: Vec::new(),
             parser_budget: 0,
-            cumulative_input_bytes: 0,
             bom_stripped: false,
             charset_transcoded_bytes: 0,
             charset_preflight_error: None,
@@ -303,6 +321,32 @@ impl StreamingConverter {
         self.deadline = Instant::now().checked_add(timeout);
     }
 
+    /// Set a cooperative parser-phase deadline.
+    ///
+    /// Bounds only the html5ever tokenization phase with `parse_timeout`,
+    /// distinct from the overall conversion `deadline`.  The converter
+    /// checks this deadline at the start of each tokenizer slice in
+    /// `feed_chunk` and at `finalize`; if the deadline has passed those
+    /// calls return [`ConversionError::ParseTimeout`]. An overflow of
+    /// `Instant::now() + timeout` leaves the deadline unset (no limit),
+    /// matching `set_timeout`.
+    pub fn set_parser_timeout(&mut self, timeout: Duration) {
+        // `Duration::ZERO` disables the parse-phase sub-deadline, matching
+        // `set_timeout`'s zero-means-unconfigured convention.  Storing a
+        // deadline with a zero allowance would make the first
+        // check_parser_timeout call report ParseTimeout for work that has
+        // not happened yet.
+        self.parser_deadline = if timeout.is_zero() {
+            None
+        } else {
+            Instant::now().checked_add(timeout)
+        };
+        self.parser_work_allowance = timeout;
+        // The deadline is interpreted against accumulated tokenizer work;
+        // a fresh configuration restarts the measurement window.
+        self.parser_work_elapsed = Duration::ZERO;
+    }
+
     /// Set the flush threshold for the emitter.
     ///
     /// Controls the minimum number of accumulated Markdown bytes before the
@@ -326,20 +370,24 @@ impl StreamingConverter {
         self.emitter.set_flush_threshold(threshold);
     }
 
-    /// Set the parser memory budget (cumulative input byte ceiling).
+    /// Set the parser memory budget (modeled resident working-set ceiling).
     ///
-    /// When non-zero, the converter tracks cumulative input bytes across all
-    /// `feed_chunk` calls. If the total exceeds this budget, `feed_chunk`
-    /// returns [`ConversionError::ParseBudgetExceeded`]. A value of 0 (the
-    /// default) disables this enforcement.
+    /// When non-zero, the converter checks its conservative resident working
+    /// set at allocation preflight and parser checkpoints. If the estimate
+    /// exceeds this budget, `feed_chunk` or `finalize` returns
+    /// [`ConversionError::ParseBudgetExceeded`]. A value of 0 (the default)
+    /// disables this enforcement.
     ///
-    /// This mirrors the full-buffer path's pre-check where input size is used
-    /// as a proxy for parser memory pressure (html5ever does not expose
-    /// internal memory tracking).
+    /// The estimate charges retained capacities and reservations for the
+    /// tokenizer, state machine, emitter, metadata, charset buffers, and
+    /// incomplete UTF-8 tails. It is a conservative contract estimate, not a
+    /// claim about exact process RSS; html5ever does not expose allocator
+    /// accounting.
     ///
     /// # Arguments
     ///
-    /// * `budget` - Maximum cumulative input bytes allowed, or 0 for unlimited.
+    /// * `budget` - Maximum modeled working-set bytes allowed, or 0 for
+    ///   unlimited.
     ///
     /// # Examples
     ///
@@ -390,23 +438,6 @@ impl StreamingConverter {
             return Err(self.wrap_error(error));
         }
 
-        // 1b. Parser budget enforcement (cumulative input size limit).
-        // Track cumulative input bytes and reject when the total exceeds
-        // the configured parser_budget. Uses input size as a proxy for
-        // parser memory pressure (matching the full-buffer path).
-        if self.parser_budget > 0 {
-            self.cumulative_input_bytes = self
-                .cumulative_input_bytes
-                .saturating_add(data.len() as u64);
-            if self.cumulative_input_bytes > self.parser_budget {
-                let err = ConversionError::ParseBudgetExceeded {
-                    used: self.cumulative_input_bytes as usize,
-                    limit: self.parser_budget as usize,
-                };
-                return Err(self.wrap_error(err));
-            }
-        }
-
         // Noise-region pruning is supported at the
         // streaming tokenizer level via should_prune_with_config().
         // The pre-commit fallback is no longer needed when pruning
@@ -435,6 +466,14 @@ impl StreamingConverter {
                 self.charset_preflight_error = Some(error.clone());
                 return Err(self.wrap_error(error));
             }
+            if let Err(error) =
+                self.check_parser_budget(current_working_set.saturating_add(charset_allocation))
+            {
+                self.charset_preflight_error = Some(error.clone());
+                return Err(self.wrap_error(error));
+            }
+        } else if let Err(error) = self.check_parser_budget(self.estimate_working_set()) {
+            return Err(self.wrap_error(error));
         }
 
         let transcoded = self
@@ -450,6 +489,9 @@ impl StreamingConverter {
             std::borrow::Cow::Borrowed(_) => 0,
             std::borrow::Cow::Owned(v) => v.capacity(),
         };
+
+        self.check_parser_budget(self.estimate_working_set())
+            .map_err(|error| self.wrap_error(error))?;
 
         // If charset is still pending (accumulating sniff buffer), no tokens yet
         if transcoded.is_empty() {
@@ -550,6 +592,12 @@ impl StreamingConverter {
                 self.charset_preflight_error = Some(error.clone());
                 return Err(self.wrap_error(error));
             }
+            if let Err(error) =
+                self.check_parser_budget(current_working_set.saturating_add(flush_allocation))
+            {
+                self.charset_preflight_error = Some(error.clone());
+                return Err(self.wrap_error(error));
+            }
         }
 
         let remaining_charset = self.charset_state.flush().map_err(|e| self.wrap_error(e))?;
@@ -565,8 +613,17 @@ impl StreamingConverter {
         self.charset_transcoded_bytes = 0;
 
         // 3. Finish tokenizer (signal end-of-input)
+        self.check_parser_timeout()?;
         self.update_peak_memory().map_err(|e| self.wrap_error(e))?;
+        // The EOF flush is tokenizer work too: a costly final parse must be
+        // charged against the parse budget and re-checked before its batch
+        // is processed, or finalize() could exceed parse_timeout silently.
+        let finish_start = Instant::now();
         let final_batch = self.tokenizer.finish().map_err(|e| self.wrap_error(e))?;
+        self.parser_work_elapsed = self
+            .parser_work_elapsed
+            .saturating_add(finish_start.elapsed());
+        self.check_parser_timeout()?;
 
         // 4. Process remaining tokens
         self.process_tokenizer_batch(final_batch)?;
@@ -689,12 +746,20 @@ impl StreamingConverter {
         let mut offset = 0usize;
         while offset < input.len() {
             // Charge the full conservative tokenizer envelope before the next
-            // bounded slice is handed to html5ever.
+            // bounded slice is handed to html5ever.  The parser deadline is
+            // evaluated against ACCUMULATED tokenizer work (measured below),
+            // not wall-clock since request start: upstream stalls between
+            // chunks must not consume the parse budget.
+            self.check_parser_timeout()?;
             self.update_peak_memory().map_err(|e| self.wrap_error(e))?;
+            let slice_start = Instant::now();
             let step = self
                 .tokenizer
                 .feed_next(&input[offset..])
                 .map_err(|e| self.wrap_error(e))?;
+            self.parser_work_elapsed = self
+                .parser_work_elapsed
+                .saturating_add(slice_start.elapsed());
             if step.consumed == 0 && step.batch.is_none() {
                 return Err(self.wrap_error(ConversionError::InternalError(
                     "budgeted tokenizer made no progress".to_string(),
@@ -781,17 +846,19 @@ impl StreamingConverter {
         let utf8_str = match std::str::from_utf8(valid) {
             Ok(s) => std::borrow::Cow::Borrowed(s),
             Err(_) => {
-                let lossy_upper_bound = valid.len().checked_mul(3).ok_or_else(|| {
-                    self.wrap_error(ConversionError::BudgetExceeded {
-                        stage: "lossy_utf8 (integer overflow)".to_string(),
-                        used: usize::MAX,
-                        limit: self.budget.total,
-                    })
-                })?;
-                self.budget
-                    .check_total(self.estimate_working_set(), lossy_upper_bound)
-                    .map_err(|e| self.wrap_error(e))?;
-                String::from_utf8_lossy(valid)
+                /* Divergence fix: the full-buffer path rejects invalid
+                 * UTF-8 with EncodingError (parser.rs decode_html_to_utf8);
+                 * streaming previously replaced it with U+FFFD, silently
+                 * corrupting the content.  Unify on the fail-closed
+                 * behavior.  split_utf8_tail already removed a trailing
+                 * incomplete code point from mid-stream slices, so a
+                 * from_utf8 failure here is a genuinely invalid byte
+                 * sequence regardless of chunk boundaries — reject it
+                 * consistently instead of applying lossy replacement
+                 * mid-stream and failing only at EOF. */
+                return Err(self.wrap_error(ConversionError::EncodingError(
+                    "Invalid UTF-8 in HTML input (no declared charset)".to_string(),
+                )));
             }
         };
         let saved_transcoded = self.charset_transcoded_bytes;
@@ -957,8 +1024,11 @@ impl StreamingConverter {
         // content).
         self.process_implied_closures()?;
 
+        let generated_markdown = matches!(&decision, SanitizeDecision::PassGenerated(_));
         let sanitized_event = match decision {
-            SanitizeDecision::Pass(ev) | SanitizeDecision::PassModified(ev) => ev,
+            SanitizeDecision::Pass(ev)
+            | SanitizeDecision::PassModified(ev)
+            | SanitizeDecision::PassGenerated(ev) => ev,
             SanitizeDecision::Skip => return Ok(()),
             SanitizeDecision::DepthExceeded => {
                 return Err(self.wrap_error(ConversionError::MemoryLimit(
@@ -979,9 +1049,21 @@ impl StreamingConverter {
         }
 
         // Emitter
-        self.emitter
-            .process_action(&action, &mut self.state_machine)
-            .map_err(|e| self.wrap_error(e))?;
+        if generated_markdown {
+            if let StateMachineAction::Text(text) = &action {
+                self.emitter
+                    .process_trusted_text(text)
+                    .map_err(|e| self.wrap_error(e))?;
+            } else {
+                self.emitter
+                    .process_action(&action, &mut self.state_machine)
+                    .map_err(|e| self.wrap_error(e))?;
+            }
+        } else {
+            self.emitter
+                .process_action(&action, &mut self.state_machine)
+                .map_err(|e| self.wrap_error(e))?;
+        }
 
         // Track peak working set after emitter processes the event,
         // when the pending buffer is at its largest.
@@ -1016,6 +1098,32 @@ impl StreamingConverter {
                 });
             }
             return Err(ConversionError::Timeout);
+        }
+        Ok(())
+    }
+
+    /// Checks whether the converter's parser-phase deadline has expired.
+    ///
+    /// Bounds only the html5ever tokenization phase (`parse_timeout`),
+    /// distinct from the overall conversion `deadline`.  Called at the
+    /// start of each tokenizer slice; a parser overrun reports
+    /// [`ConversionError::ParseTimeout`] with post-commit wrapping when
+    /// headers are already committed.
+    fn check_parser_timeout(&self) -> Result<(), ConversionError> {
+        if self.parser_deadline.is_some() {
+            // Bound html5ever TOKENIZER WORK, not wall-clock time: the
+            // configured duration is the work allowance, measured as the
+            // accumulated duration of bounded tokenizer slices.
+            if self.parser_work_elapsed >= self.parser_work_allowance {
+                if matches!(self.commit_state, CommitState::PostCommit) {
+                    return Err(ConversionError::PostCommitError {
+                        reason: "parser timeout exceeded".to_string(),
+                        bytes_emitted: self.bytes_emitted,
+                        original_code: ConversionError::ParseTimeout.code(),
+                    });
+                }
+                return Err(ConversionError::ParseTimeout);
+            }
         }
         Ok(())
     }
@@ -1083,35 +1191,79 @@ impl StreamingConverter {
         let working_set = self.estimate_working_set();
         self.stats.peak_memory_estimate = self.stats.peak_memory_estimate.max(working_set);
 
+        self.check_parser_budget(working_set)?;
+
         // Enforce budget.total: the working set must not exceed the
         // declared total-memory cap.
         self.budget.check_total(0, working_set)?;
         Ok(())
     }
 
+    /// Enforce the configured parser-memory contract against the modeled
+    /// resident working set.
+    fn check_parser_budget(&self, working_set: usize) -> Result<(), ConversionError> {
+        if self.parser_budget == 0 {
+            return Ok(());
+        }
+
+        let limit = usize::try_from(self.parser_budget).unwrap_or(usize::MAX);
+        if working_set > limit {
+            return Err(ConversionError::ParseBudgetExceeded {
+                used: working_set,
+                limit,
+            });
+        }
+
+        Ok(())
+    }
+
     /// Compute the current estimated resident working-set size.
+    /// Estimate the current in-memory working set of this converter.
     ///
-    /// Includes all heap allocations that are alive right now:
-    /// - emitter pending/flushed buffers and collectors
-    /// - state machine stack
-    /// - metadata from `<head>` region
-    /// - html_title_buf
-    /// - tokenizer conservative reservation
-    /// - charset sniff buffer (in Pending state)
-    /// - charset transcoded output (Cow::Owned during processing)
-    /// - utf8_tail (incomplete UTF-8 bytes from previous chunk)
+    /// # Accounting contract
+    ///
+    /// - Only counts heap allocations owned by this converter and its components.
+    /// - Uses capacity(), not len(), for all growable buffers — reflects physical
+    ///   retained memory, not logical content length.
+    /// - Includes nested owned allocations (e.g., Strings inside Vec elements).
+    /// - Does not count stack-resident struct sizes (only heap backing).
+    /// - Does not count allocations owned by other components.
+    /// - Uses saturating arithmetic throughout.
+    /// - Each heap allocation belongs to exactly one component's resident_bytes();
+    ///   double counting is forbidden.
+    /// - When adding a new owned heap field to any component, update that
+    ///   component's resident_bytes() and add a corresponding test.
+    ///
+    /// # Components
+    ///
+    /// Compositional sum of:
+    /// - emitter: pending buffer + flushed buffer + collectors (link_text,
+    ///   code_block_buffer, inline_code_buffer, code_fence_lang)
+    /// - state_machine: stack Vec capacity + per-element String heap +
+    ///   ordered_list_counters
+    /// - sanitizer: skip/prune/strip/nesting/implied_closures stacks
+    /// - metadata: collected metadata strings
+    /// - tokenizer: reserved internal buffers
+    /// - charset_state: charset detection/transcoding buffers
+    /// - converter-owned: options, html_title_buf, utf8_tail,
+    ///   charset_transcoded_bytes, and a retained preflight error message
     fn estimate_working_set(&self) -> usize {
-        self.emitter
-            .pending_bytes()
-            .saturating_add(self.emitter.flushed_bytes())
-            .saturating_add(self.emitter.resident_collector_bytes())
-            .saturating_add(self.state_machine.stack_bytes_estimate())
+        self.options
+            .resident_bytes()
+            .saturating_add(self.emitter.resident_bytes())
+            .saturating_add(self.state_machine.resident_bytes())
+            .saturating_add(self.sanitizer.resident_bytes())
             .saturating_add(self.metadata.bytes_estimate())
             .saturating_add(self.html_title_buf.capacity())
             .saturating_add(self.tokenizer.reserved_bytes())
             .saturating_add(self.charset_state.resident_bytes())
             .saturating_add(self.charset_transcoded_bytes)
             .saturating_add(self.utf8_tail.capacity())
+            .saturating_add(
+                self.charset_preflight_error
+                    .as_ref()
+                    .map_or(0, conversion_error_resident_bytes),
+            )
     }
 
     /// Extract metadata from events occurring in the `<head>` region.
@@ -1416,9 +1568,10 @@ impl StreamingConverter {
 
     /// Selects the final metadata URL, preferring a discovered canonical over the base URL.
     ///
-    /// If `canonical_found` is `true`, returns `current_url.clone()` (the canonical URL previously
-    /// recorded during head processing). If `canonical_found` is `false`, returns `base_url.clone()`,
-    /// which may be `None` to clear any previously observed `og:url`.
+    /// If `canonical_found` is `true`, returns the re-sanitized canonical URL,
+    /// or `None` if it fails validation. If `canonical_found` is `false`,
+    /// returns `base_url.clone()`, which may be `None` to clear any previously
+    /// observed `og:url`.
     ///
     /// # Examples
     ///
@@ -1523,7 +1676,7 @@ impl StreamingConverter {
     ///   - The state machine has not entered any dangerous/skip regions
     ///   - The nesting depth has remained within fast-path limits
     ///   - No fallback has been triggered
-    ///   - At least one block-level element has been processed
+    ///   - At least one chunk has been fed
     ///
     /// Returns `true` if the document qualifies for fast-path, `false`
     /// otherwise.  For documents where the full structure is not yet
@@ -1542,6 +1695,32 @@ impl StreamingConverter {
         }
 
         self.stats.chunks_processed > 0
+    }
+}
+
+/// Return the heap capacity retained by the owned strings inside an error.
+///
+/// `charset_preflight_error` remains attached to a converter after a failed
+/// preflight so a later `finalize` call can report the original error. Its
+/// message or stage is therefore part of the converter's resident working
+/// set and must be included in parser-budget accounting.
+fn conversion_error_resident_bytes(error: &ConversionError) -> usize {
+    match error {
+        ConversionError::ParseError(message)
+        | ConversionError::EncodingError(message)
+        | ConversionError::MemoryLimit(message)
+        | ConversionError::InvalidInput(message)
+        | ConversionError::InternalError(message) => message.capacity(),
+        #[cfg(feature = "streaming")]
+        ConversionError::BudgetExceeded { stage, .. } => stage.capacity(),
+        #[cfg(feature = "streaming")]
+        ConversionError::PostCommitError { reason, .. } => reason.capacity(),
+        ConversionError::Timeout
+        | ConversionError::DecompressionBudgetExceeded { .. }
+        | ConversionError::ParseTimeout
+        | ConversionError::ParseBudgetExceeded { .. } => 0,
+        #[cfg(feature = "streaming")]
+        ConversionError::StreamingFallback { .. } => 0,
     }
 }
 
@@ -1655,6 +1834,29 @@ mod tests {
         let result = conv.finalize().unwrap();
         out.extend_from_slice(&result.final_markdown);
         out
+    }
+
+    /// Like `convert_with_splits`, but returns the error code instead of
+    /// panicking, for fixtures that are invalid UTF-8 under the strict
+    /// (fail-closed) contract.
+    fn convert_with_splits_result(html: &[u8], split_sizes: &[usize]) -> Result<(), u32> {
+        let mut conv = make_converter();
+        let mut cursor = 0;
+
+        for &size in split_sizes {
+            if cursor >= html.len() {
+                break;
+            }
+            let end = cursor.saturating_add(size).min(html.len());
+            conv.feed_chunk(&html[cursor..end]).map_err(|e| e.code())?;
+            cursor = end;
+        }
+
+        if cursor < html.len() {
+            conv.feed_chunk(&html[cursor..]).map_err(|e| e.code())?;
+        }
+
+        conv.finalize().map(|_| ()).map_err(|e| e.code())
     }
 
     #[test]
@@ -1887,7 +2089,6 @@ mod tests {
         .unwrap();
         let _result = conv.finalize().unwrap();
 
-        // Metadata is consumed during finalize, check before
         // Actually we need to check before finalize consumes self
         let mut conv2 = make_converter_with_metadata();
         conv2.feed_chunk(b"<html><head><title>My Page Title</title></head><body><p>Content</p></body></html>").unwrap();
@@ -1951,11 +2152,19 @@ mod tests {
         // than triggering full-buffer fallback. This verifies no error is
         // returned — the form tags are stripped and content is preserved.
         let mut conv = make_converter();
-        let result = conv.feed_chunk(b"<form action='/submit'><input type='text'/></form>");
+        let result = conv
+            .feed_chunk(b"<form action='/submit'><input type='text' placeholder='Search'/></form>");
         assert!(
             result.is_ok(),
             "Form should be handled by stripping, not fallback"
         );
+        let chunk = result.unwrap();
+        let final_result = conv.finalize().expect("form conversion should finalize");
+        let mut output = chunk.markdown;
+        output.extend_from_slice(&final_result.final_markdown);
+        let output = String::from_utf8(output).expect("streaming output should be UTF-8");
+        assert!(output.contains("Search"));
+        assert!(!output.contains("<input"));
     }
 
     #[test]
@@ -1967,6 +2176,14 @@ mod tests {
         assert!(
             result.is_ok(),
             "Iframe should be handled by stripping, not fallback"
+        );
+        let final_result = conv.finalize().expect("iframe conversion should finalize");
+        let mut output = result.unwrap().markdown;
+        output.extend_from_slice(&final_result.final_markdown);
+        let output = String::from_utf8(output).expect("streaming output should be UTF-8");
+        assert!(
+            output.contains("[iframe](https://example.com)"),
+            "sanitizer-generated safe link should remain active: {output}"
         );
     }
 
@@ -2247,6 +2464,82 @@ mod tests {
         let result = conv.feed_chunk(b"<p>more</p>");
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code(), 8); // PostCommitError
+    }
+
+    #[test]
+    fn test_parser_timeout_precommit() {
+        let mut conv = make_converter();
+        // A zero-duration parser deadline is already expired: the
+        // tokenizer slice must report ParseTimeout, distinct from the
+        // overall conversion Timeout.
+        conv.parser_deadline = Some(
+            Instant::now()
+                .checked_sub(Duration::from_secs(1))
+                .unwrap_or_else(Instant::now),
+        );
+        let result = conv.feed_chunk(b"<p>test</p>");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), 10); // ParseTimeout
+    }
+
+    #[test]
+    fn test_parser_timeout_postcommit() {
+        let mut conv = make_converter();
+        // Transition to PostCommit with output, then expire the parser
+        // deadline: the error must surface as PostCommitError (8) with
+        // the parse-timeout original code, not a bare ParseTimeout.
+        let output = conv.feed_chunk(b"<h1>Title</h1>").unwrap();
+        assert!(!output.markdown.is_empty() || matches!(conv.commit_state, CommitState::PreCommit));
+        conv.commit_state = CommitState::PostCommit;
+        conv.bytes_emitted = 10;
+        conv.parser_deadline = Some(
+            Instant::now()
+                .checked_sub(Duration::from_secs(1))
+                .unwrap_or_else(Instant::now),
+        );
+        let result = conv.feed_chunk(b"<p>more</p>");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), 8); // PostCommitError wrapping ParseTimeout
+    }
+
+    #[test]
+    fn test_parser_timeout_zero_disabled() {
+        // No parser deadline set: feed succeeds normally.
+        let mut conv = make_converter();
+        let result = conv.feed_chunk(b"<p>ok</p>");
+        assert!(result.is_ok(), "no parser deadline must not time out");
+    }
+
+    #[test]
+    fn test_set_parser_timeout_zero_disables_deadline() {
+        // set_parser_timeout(ZERO) follows the zero-means-unconfigured
+        // convention: the deadline must be cleared so the very next
+        // tokenizer slice does not report ParseTimeout for work that has
+        // not happened yet.
+        let mut conv = make_converter();
+        conv.set_parser_timeout(Duration::ZERO);
+        assert!(
+            conv.parser_deadline.is_none(),
+            "zero parser timeout must disable the deadline, got {:?}",
+            conv.parser_deadline
+        );
+        let result = conv.feed_chunk(b"<p>ok</p>");
+        assert!(
+            result.is_ok(),
+            "zero-configured parser timeout must not time out immediately"
+        );
+    }
+
+    #[test]
+    fn test_set_parser_timeout_nonzero_arms_deadline() {
+        // A non-zero configuration must arm the deadline (regression
+        // guard for the zero-disabling branch above).
+        let mut conv = make_converter();
+        conv.set_parser_timeout(Duration::from_secs(60));
+        assert!(conv.parser_deadline.is_some());
+        assert_eq!(conv.parser_work_allowance, Duration::from_secs(60));
+        let result = conv.feed_chunk(b"<p>ok</p>");
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -3302,26 +3595,24 @@ mod tests {
             0x3E, 0x3E, 0x3E, 0x81, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0x7B,
             0x7B, 0x7B, 0x7B,
         ];
-        let single = convert_with_splits(html, &[html.len()]);
-        let chunked = convert_with_splits(html, &[1, 24, 28, 5, 5, 1, 1, 5, 88]);
-
-        if single != chunked {
-            let first_diff = single
-                .iter()
-                .zip(chunked.iter())
-                .position(|(left, right)| left != right)
-                .unwrap_or_else(|| single.len().min(chunked.len()));
-            let start = first_diff.saturating_sub(16);
-            let single_end = first_diff.saturating_add(48).min(single.len());
-            let chunked_end = first_diff.saturating_add(48).min(chunked.len());
-            panic!(
-                "first_diff={first_diff}, single_len={}, chunked_len={}, single={:?}, chunked={:?}",
-                single.len(),
-                chunked.len(),
-                String::from_utf8_lossy(&single[start..single_end]),
-                String::from_utf8_lossy(&chunked[start..chunked_end])
-            );
-        }
+        // The fixture contains genuinely invalid UTF-8 bytes (0xFF, 0x81,
+        // 0xA5).  Under the fail-closed contract the outcome must be the
+        // same EncodingError regardless of how the input is chunked.
+        let single_err = convert_with_splits_result(html, &[html.len()]);
+        let chunked_err = convert_with_splits_result(html, &[1, 24, 28, 5, 5, 1, 1, 5, 88]);
+        assert!(
+            single_err.is_err(),
+            "invalid UTF-8 must fail closed on single-pass conversion"
+        );
+        assert_eq!(
+            single_err, chunked_err,
+            "invalid UTF-8 rejection must not depend on chunk boundaries"
+        );
+        assert_eq!(
+            single_err.unwrap_err(),
+            ConversionError::EncodingError("".to_string()).code(),
+            "invalid UTF-8 must surface as EncodingError"
+        );
     }
 
     #[test]
@@ -3332,12 +3623,15 @@ mod tests {
             .expect("one-byte UTF-8 tail should be retained");
         assert_eq!(conv.utf8_tail, [0xE2]);
 
-        conv.process_utf8_bytes(&[0x00, 0x00, 0xE2, 0xF0, 0x80], false)
+        // Complete the 3-byte sequence (é = 0xE2 0x82 0xAC) and start a
+        // new 4-byte sequence (💀 = 0xF0 0x9F 0x92 0x80): the pending tail
+        // recovery must not append a second tail.
+        conv.process_utf8_bytes(&[0x82, 0xAC, 0xF0, 0x9F], false)
             .expect("pending tail recovery must not append a second tail");
-        assert!(conv.utf8_tail.len() <= 3);
-        assert_eq!(conv.utf8_tail, [0xF0, 0x80]);
+        assert_eq!(conv.utf8_tail, [0xF0, 0x9F]);
 
-        conv.process_utf8_bytes(&[0x80, 0x80, b'<'], false)
+        // Complete the 4-byte sequence; no stale continuation remains.
+        conv.process_utf8_bytes(&[0x92, 0x80, b'<'], false)
             .expect("completed tail should not leave a stale continuation");
         assert!(conv.utf8_tail.is_empty());
     }
@@ -3352,9 +3646,16 @@ mod tests {
             assert_eq!(conv.utf8_tail, tail);
             assert!(conv.utf8_tail.len() <= 3);
 
-            conv.process_utf8_bytes(&[], true)
-                .expect("EOF must flush the final incomplete sequence");
-            assert!(conv.utf8_tail.is_empty());
+            /* A multi-byte sequence truncated at EOF is invalid UTF-8 for
+             * the document as a whole; the strict (fail-closed) contract
+             * matches the full-buffer path (decode_html_to_utf8 returns
+             * EncodingError on invalid UTF-8 with a UTF-8 declaration). */
+            let rc = conv.process_utf8_bytes(&[], true);
+            assert!(rc.is_err(), "truncated code point at EOF must fail");
+            assert_eq!(
+                rc.unwrap_err().code(),
+                ConversionError::EncodingError("".to_string()).code()
+            );
         }
     }
 
@@ -3410,9 +3711,11 @@ mod tests {
             let _ = conv.feed_chunk(&input[cursor..]);
             assert!(conv.utf8_tail.len() <= 3);
         }
-        conv.process_utf8_bytes(&[], true)
-            .expect("EOF must flush the minimized regression tail");
-        assert!(conv.utf8_tail.is_empty());
+        /* A truncated code point at EOF (or invalid UTF-8) is now a
+         * fail-closed EncodingError, matching the full-buffer path.  The
+         * regression's point is that the converter must not panic or
+         * loop; an error return is the correct, graceful outcome. */
+        let _ = conv.process_utf8_bytes(&[], true);
         let _ = conv.finalize();
     }
 
@@ -3443,9 +3746,10 @@ mod tests {
                     .expect("boundary split must not fail precommit");
                 assert!(conv.utf8_tail.len() <= 3);
             }
-            conv.process_utf8_bytes(&[], true)
-                .expect("EOF must flush every final UTF-8 tail");
-            assert!(conv.utf8_tail.is_empty());
+            /* Trailing truncated code point: fail-closed at EOF, matching
+             * the full-buffer EncodingError contract. */
+            let rc = conv.process_utf8_bytes(&[], true);
+            assert!(rc.is_err(), "truncated code point at EOF must fail");
         }
     }
 
@@ -3499,25 +3803,63 @@ mod tests {
         assert!(matches!(err, ConversionError::PostCommitError { .. }));
     }
 
-    /// Parser budget enforcement: when the cumulative input bytes exceed
+    /// Parser budget enforcement: when the modeled working set exceeds
     /// parser_budget, feed_chunk must return ParseBudgetExceeded (code 11).
     #[test]
     fn test_parser_budget_exceeded() {
         let mut conv = make_converter();
-        conv.set_parser_budget(50); // very small budget
+        let working_set = conv.estimate_working_set();
+        assert!(working_set > 0);
+        conv.set_parser_budget((working_set - 1) as u64);
 
-        // Feed more than 50 bytes total
-        let chunk = b"<p>Hello world, this is a paragraph that exceeds the parser budget.</p>";
+        let chunk = b"<p>small input</p>";
         let result = conv.feed_chunk(chunk);
         assert!(
             result.is_err(),
-            "feed_chunk should fail when parser budget exceeded"
+            "feed_chunk should fail when the resident working set exceeds the parser budget"
         );
         let err = result.unwrap_err();
         assert_eq!(
             err.code(),
             11,
             "Error code should be ERROR_PARSE_BUDGET_EXCEEDED (11)"
+        );
+    }
+
+    #[test]
+    fn test_parser_budget_boundary_includes_option_storage() {
+        let options = ConversionOptions {
+            base_url: Some("https://example.test/".to_owned() + &"u".repeat(8192)),
+            prune_config: crate::converter::pruning::PruneConfig::from_ffi(
+                true,
+                Some(&("selector-".to_owned() + &"x".repeat(4096))),
+                None,
+            ),
+            ..ConversionOptions::default()
+        };
+        let mut conv = StreamingConverter::new(options, MemoryBudget::default());
+        let working_set = conv.estimate_working_set();
+        assert!(working_set >= 8192);
+        conv.set_parser_budget(working_set as u64);
+        assert!(conv.check_parser_budget(working_set).is_ok());
+        assert!(
+            conv.check_parser_budget(working_set.saturating_add(1))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_parser_budget_accounts_preflight_error_storage() {
+        let mut conv = make_converter();
+        let baseline = conv.estimate_working_set();
+        let message = "preflight failure".repeat(512);
+        let message_capacity = message.capacity();
+        conv.charset_preflight_error = Some(ConversionError::InternalError(message));
+
+        let with_error = conv.estimate_working_set();
+        assert!(
+            with_error >= baseline.saturating_add(message_capacity),
+            "resident working set must include retained preflight error capacity"
         );
     }
 
@@ -3533,29 +3875,36 @@ mod tests {
         assert!(result.is_ok(), "parser_budget=0 should not limit input");
     }
 
-    /// Parser budget enforcement: cumulative tracking across multiple
-    /// feed_chunk calls.
+    /// Parser budget enforcement: cumulative input is not itself a parser
+    /// memory breach when the modeled resident working set remains bounded.
     #[test]
-    fn test_parser_budget_cumulative_across_chunks() {
+    fn test_parser_budget_allows_bounded_cumulative_input() {
         let mut conv = make_converter();
-        conv.set_parser_budget(100); // 100 byte budget
+        // Headroom 128 KiB: accommodates the flushed buffer's capacity growth
+        // (Vec doubles to next power-of-2) under capacity-based accounting.
+        // Data points: EC6 recorded estimate_working_set() ~ 1,572,960 after
+        // 2000 chunks with len-based accounting; post-fix with capacity-based
+        // accounting the peak is bounded by flushed.capacity() ≈ next-power-of-2
+        // above accumulated output length.
+        let budget = conv.estimate_working_set().saturating_add(128 * 1024);
+        conv.set_parser_budget(budget as u64);
 
-        // First chunk: within budget (must not produce output to stay pre-commit)
-        let chunk1 = b"<head><title>Small</title></head>";
-        let r1 = conv.feed_chunk(chunk1);
-        assert!(r1.is_ok(), "First chunk within budget should succeed");
+        for _ in 0..2_000 {
+            conv.feed_chunk(b"<p>bounded chunk</p>")
+                .expect("bounded working set should not charge cumulative input");
+        }
 
-        // Second chunk: pushes total over 100 bytes (still pre-commit)
-        let chunk2 =
-            b"<body><p>Second chunk of data that exceeds the cumulative budget limit here.</p>";
-        let r2 = conv.feed_chunk(chunk2);
+        // Explicit upper bound: the final working set must be within the
+        // budget. This turns "constant is sufficient" from an implicit
+        // assumption into an explicit check.
+        let final_working_set = conv.estimate_working_set();
         assert!(
-            r2.is_err(),
-            "Second chunk should exceed cumulative parser budget"
+            final_working_set <= budget,
+            "final estimate_working_set() ({}) must be <= budget ({}) — \
+             bounded cumulative input must not trigger budget enforcement",
+            final_working_set,
+            budget
         );
-        let err = r2.unwrap_err();
-        // In pre-commit state, the raw ParseBudgetExceeded error is returned
-        assert_eq!(err.code(), 11);
     }
 
     /// Parser budget enforcement: when exceeded post-commit, the error is
@@ -3563,18 +3912,19 @@ mod tests {
     #[test]
     fn test_parser_budget_exceeded_post_commit() {
         let mut conv = make_converter();
-        conv.set_parser_budget(200); // budget large enough for first chunks
+        let budget = conv.estimate_working_set().saturating_add(1024);
+        conv.set_parser_budget(budget as u64);
 
         // Feed enough to produce output (transition to post-commit)
-        let chunk1 = b"<h1>Title</h1><p>Paragraph one.</p>";
-        let r1 = conv.feed_chunk(chunk1);
+        let chunk1 = "<h1>Title</h1><p>Paragraph one.</p>";
+        let r1 = conv.feed_chunk(chunk1.as_bytes());
         assert!(r1.is_ok(), "First chunk should succeed");
 
-        // Feed more to push past budget in post-commit state
-        let chunk2_data = vec![b'x'; 200];
-        let mut chunk2 = b"<p>".to_vec();
+        // Keep an unclosed block resident until the modeled working set
+        // exceeds the parser budget. This must be reported post-commit.
+        let chunk2_data = vec![0x78u8; 16 * 1024];
+        let mut chunk2 = "<p>".as_bytes().to_vec();
         chunk2.extend_from_slice(&chunk2_data);
-        chunk2.extend_from_slice(b"</p>");
         let r2 = conv.feed_chunk(&chunk2);
         assert!(
             r2.is_err(),
@@ -3597,6 +3947,10 @@ mod tests {
     #[test]
     fn test_bom_split_across_chunk_boundary() {
         // Input contains a BOM (0xEF 0xBB 0xBF) at byte 79, split at 80.
+        // The trailing bytes are invalid UTF-8 (a truncated code point),
+        // so under the fail-closed contract both paths must reject the
+        // document with the same EncodingError — the invariant is that
+        // chunk-boundary splitting never changes the outcome.
         let data: &[u8] = &[
             0x0a, 0x0a, 0x05, 0x0a, 0x0a, 0x55, 0xbd, 0x21, 0x0a, 0x0a, 0x13, 0x0a, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x2c, 0xbf, 0xbd, 0x00, 0xbe, 0xbe, 0xbe, 0xbe, 0xbe, 0xbe, 0xbe,
@@ -3607,11 +3961,15 @@ mod tests {
             0x0a, 0xed,
         ];
         let html = &data[1..]; // skip seed byte
-        let single = convert_with_splits(html, &[html.len()]);
-        let chunked = convert_with_splits(html, &[80, 5]);
+        let single_err = convert_with_splits_result(html, &[html.len()]);
+        let chunked_err = convert_with_splits_result(html, &[80, 5]);
         assert_eq!(
-            single, chunked,
-            "BOM split across chunk boundary must not change output"
+            single_err, chunked_err,
+            "BOM split across chunk boundary must not change the outcome"
+        );
+        assert!(
+            single_err.is_err(),
+            "trailing truncated UTF-8 must fail closed on both paths"
         );
     }
 
@@ -3639,6 +3997,586 @@ mod tests {
         assert_eq!(
             single, chunked,
             "Leading BOM split across chunks must be stripped consistently"
+        );
+    }
+
+    // =========================================================================
+    // Memory-accounting regression tests. They assert that the working-set
+    // estimate includes retained vector and string capacities.
+    // =========================================================================
+
+    /// The working-set estimate accounts for buffer capacity, not just length.
+    ///
+    /// After feeding non-code HTML that triggers a flush, the pending buffer
+    /// is cleared (len=0) but retains its grown capacity. The emitter's
+    /// resident_bytes() must include buffer.capacity().
+    /// PASSES on fixed code because resident_bytes() reports capacity().
+    #[test]
+    fn test_accounting_buffer_capacity_not_length() {
+        let mut conv = make_converter();
+
+        // Feed enough content to grow the pending buffer, then trigger a
+        // flush via a closing block tag. After the flush, buffer.len()==0
+        // but buffer.capacity() remains large (Vec::clear does not dealloc).
+        let large_paragraph = format!("<p>{}</p>", "x".repeat(4096));
+        let _output = conv.feed_chunk(large_paragraph.as_bytes()).unwrap();
+
+        // After feed_chunk, the buffer was cleared by flush_to_ready (non-code
+        // path calls buffer.clear()). Capacity is retained.
+        let buf_cap = conv.emitter.buffer_capacity();
+
+        // The capacity should be large from the growth during processing
+        assert!(
+            buf_cap >= 4096,
+            "buffer capacity should be at least 4096 after processing 4 KiB paragraph, got {}",
+            buf_cap
+        );
+
+        // The fix: resident_bytes() includes buffer.capacity(), not buffer.len().
+        // estimate_working_set() uses resident_bytes() so it correctly accounts
+        // for the retained physical memory even when buffer is logically empty.
+        let resident = conv.emitter.resident_bytes();
+        assert!(
+            resident >= buf_cap,
+            "emitter.resident_bytes() ({}) must include buffer capacity ({}) — \
+             physical retention is correctly accounted",
+            resident,
+            buf_cap
+        );
+
+        // Also verify estimate_working_set includes this contribution
+        let working_set = conv.estimate_working_set();
+        assert!(
+            working_set >= buf_cap,
+            "estimate_working_set() ({}) must be >= buffer capacity ({}) — \
+             compositional accounting includes emitter.resident_bytes()",
+            working_set,
+            buf_cap
+        );
+    }
+
+    /// The collector estimate includes code-fence language capacity.
+    ///
+    /// When the emitter enters a code block with a language identifier via
+    /// Enter(CodeBlock(Some("rust"))), the emitter's code_fence_lang field
+    /// holds a String whose capacity must be part of the working set.
+    /// FAILS on unfixed code because resident_collector_bytes() only sums
+    /// link_text + code_block_buffer + inline_code_buffer.
+    ///
+    /// Note: In the standard <pre><code class="language-rust"> flow, the
+    /// language lives on the state machine stack (counted by stack_bytes_estimate
+    /// via retained_heap_bytes). code_fence_lang in the emitter is only set when
+    /// the Enter action directly carries the language. We test that scenario here.
+    #[test]
+    fn test_accounting_code_fence_lang_capacity() {
+        use crate::streaming::state_machine::StructuralContext;
+
+        let mut conv = make_converter();
+
+        // Directly push a CodeBlock with language onto the state machine and
+        // have the emitter process it. We do this by feeding HTML that triggers
+        // the code_fence_lang path. Actually, in the standard flow,
+        // <pre> always pushes CodeBlock(None). To set code_fence_lang, we need
+        // to use the emitter's process_action directly.
+        //
+        // Since we can access conv.emitter from the test module (same module),
+        // we can call process_action with Enter(CodeBlock(Some("rust"))).
+        let action =
+            StateMachineAction::Enter(StructuralContext::CodeBlock(Some("rust".to_owned())));
+        conv.emitter
+            .process_action(&action, &mut conv.state_machine)
+            .unwrap();
+
+        // The emitter should now have code_fence_lang = Some("rust")
+        let lang_cap = conv.emitter.code_fence_lang_capacity();
+        assert!(
+            lang_cap >= 4,
+            "code_fence_lang should have capacity >= 4 for 'rust', got {}",
+            lang_cap
+        );
+
+        // The bug: resident_collector_bytes() does not include code_fence_lang
+        let collector_bytes = conv.emitter.resident_collector_bytes();
+        assert!(
+            collector_bytes >= lang_cap,
+            "resident_collector_bytes() must include code_fence_lang capacity ({}), \
+             but reports only {} — code_fence_lang contribution missing",
+            lang_cap,
+            collector_bytes
+        );
+    }
+
+    /// The state-machine estimate reflects retained stack capacity.
+    ///
+    /// Push 128 contexts onto the state machine stack then pop all. After
+    /// popping, stack.len()==0 but stack.capacity()==128 (Vec does not dealloc
+    /// on pop/clear). resident_bytes() should still report the retained
+    /// capacity.
+    /// PASSES on fixed code because resident_bytes() reports capacity * size_of.
+    #[test]
+    fn test_accounting_stack_capacity_after_pop() {
+        use crate::streaming::state_machine::StructuralContext;
+
+        let mut conv = make_converter();
+
+        // Push many nested elements to grow the stack
+        let mut html = String::new();
+        for _ in 0..128 {
+            html.push_str("<blockquote>");
+        }
+        html.push_str("<p>deep</p>");
+        // Close them all
+        for _ in 0..128 {
+            html.push_str("</blockquote>");
+        }
+        let _output = conv.feed_chunk(html.as_bytes()).unwrap();
+
+        // After all closures, stack should be empty but capacity retained
+        assert_eq!(
+            conv.state_machine.depth(),
+            0,
+            "Stack should be empty after closing all elements"
+        );
+        let stack_cap = conv.state_machine.stack_capacity();
+        assert!(
+            stack_cap >= 64,
+            "Stack Vec capacity should be at least 64 after growing to 128+, got {}",
+            stack_cap
+        );
+
+        // The fix: resident_bytes() includes stack.capacity() * size_of.
+        // Even with len==0, the physical capacity is accounted.
+        let resident = conv.state_machine.resident_bytes();
+        let expected_minimum = stack_cap.saturating_mul(std::mem::size_of::<StructuralContext>());
+        assert!(
+            resident >= expected_minimum,
+            "state_machine.resident_bytes() should report at least {} bytes \
+             (capacity {} * size_of StructuralContext {}), but reports {} — \
+             Vec capacity correctly accounted when empty",
+            expected_minimum,
+            stack_cap,
+            std::mem::size_of::<StructuralContext>(),
+            resident
+        );
+    }
+
+    /// The working-set estimate includes ordered-list counter capacity.
+    ///
+    /// 8 nested `<ol>` elements push 8 entries into ordered_list_counters.
+    /// That Vec's capacity * size_of::<u32>() must appear in the working set
+    /// via state_machine.resident_bytes().
+    /// PASSES on fixed code because resident_bytes() includes olc contribution.
+    #[test]
+    fn test_accounting_ordered_list_counter_capacity() {
+        use crate::streaming::state_machine::StructuralContext;
+
+        let mut conv = make_converter();
+
+        // Build 8 nested ordered lists
+        let mut html = String::new();
+        for _ in 0..8 {
+            html.push_str("<ol><li>");
+        }
+        html.push_str("deep item");
+        // Don't close them — keep the counters alive
+
+        let _output = conv.feed_chunk(html.as_bytes()).unwrap();
+
+        // ordered_list_counters should have capacity >= 8
+        let olc_cap = conv.state_machine.ordered_list_counters_capacity();
+        assert!(
+            olc_cap >= 8,
+            "ordered_list_counters capacity should be >= 8 after 8 nested <ol>, got {}",
+            olc_cap
+        );
+
+        let olc_bytes = olc_cap.saturating_mul(std::mem::size_of::<u32>());
+
+        // The fix: state_machine.resident_bytes() includes olc contribution.
+        // Verify that resident_bytes() is at least olc_bytes + stack capacity.
+        let sm_resident = conv.state_machine.resident_bytes();
+        let stack_cap_bytes = conv
+            .state_machine
+            .stack_capacity()
+            .saturating_mul(std::mem::size_of::<StructuralContext>());
+        assert!(
+            sm_resident >= stack_cap_bytes.saturating_add(olc_bytes),
+            "state_machine.resident_bytes() ({}) must include both \
+             stack capacity ({}) and ordered_list_counters heap ({} = cap {} * {})",
+            sm_resident,
+            stack_cap_bytes,
+            olc_bytes,
+            olc_cap,
+            std::mem::size_of::<u32>()
+        );
+
+        // Also verify estimate_working_set includes sm_resident
+        let working_set = conv.estimate_working_set();
+        assert!(
+            working_set >= sm_resident,
+            "estimate_working_set() ({}) must be >= state_machine.resident_bytes() ({})",
+            working_set,
+            sm_resident
+        );
+    }
+
+    /// Record working set after bounded cumulative input.
+    ///
+    /// This records the actual estimate_working_set() value after the same
+    /// 2000-chunk loop used in test_parser_budget_allows_bounded_cumulative_input,
+    /// providing a concrete observation for the bounded-input regression.
+    #[test]
+    fn test_accounting_record_cumulative_working_set() {
+        let mut conv = make_converter();
+
+        for _ in 0..2_000 {
+            conv.feed_chunk(b"<p>bounded chunk</p>")
+                .expect("bounded working set should not charge cumulative input");
+        }
+
+        let final_working_set = conv.estimate_working_set();
+        let buf_cap = conv.emitter.buffer_capacity();
+        let flushed_cap = conv.emitter.flushed_capacity();
+
+        // These values are printed so the test runner captures the evidence.
+        eprintln!(
+            "[working-set data point] After 2000 chunks: \
+             estimate_working_set={}, buffer_capacity={}, flushed_capacity={}",
+            final_working_set, buf_cap, flushed_cap
+        );
+
+        // The estimate must remain positive after bounded cumulative input.
+        assert!(
+            final_working_set > 0,
+            "Working set after 2000 chunks must be positive"
+        );
+    }
+
+    // =========================================================================
+    // Preservation property test: pending_bytes()/flushed_bytes() retain
+    // their logical length semantics while physical capacity is accounted
+    // separately.
+    // =========================================================================
+
+    /// Generate a random HTML snippet from a fixed set of structural elements.
+    ///
+    /// The strategy produces a sequence of HTML fragment strings that exercise
+    /// various emitter paths (paragraphs, headings, lists, links, code blocks,
+    /// text content) without generating invalid UTF-8.
+    fn arb_html_chunks() -> impl Strategy<Value = Vec<String>> {
+        let element = prop_oneof![
+            Just("<p>text content here</p>".to_owned()),
+            Just("<h1>heading</h1>".to_owned()),
+            Just("<h2>sub heading</h2>".to_owned()),
+            Just("<strong>bold</strong>".to_owned()),
+            Just("<em>italic</em>".to_owned()),
+            Just("<ol><li>item one</li><li>item two</li></ol>".to_owned()),
+            Just("<ul><li>bullet</li></ul>".to_owned()),
+            Just("<a href=\"https://example.com\">link</a>".to_owned()),
+            Just("<blockquote><p>quoted</p></blockquote>".to_owned()),
+            Just("<pre><code>code block</code></pre>".to_owned()),
+            Just("<img src=\"img.png\" alt=\"image\"/>".to_owned()),
+            Just("plain text between elements ".to_owned()),
+            Just(
+                "<p>paragraph with <strong>nested <em>inline</em></strong> content</p>".to_owned()
+            ),
+            Just("<div>container</div>".to_owned()),
+        ];
+        proptest::collection::vec(element, 1..20)
+    }
+
+    proptest! {
+        /// pending_bytes() == buffer.len() and flushed_bytes() == flushed.len()
+        /// must ALWAYS hold regardless of what HTML chunks are fed.
+        ///
+        /// These functions are used for flush-timing logic and continue to
+        /// return len() (not capacity). The fix will add NEW functions for
+        /// physical accounting without changing these.
+        #[test]
+        fn prop_preservation_pending_flushed_len_semantics(
+            chunks in arb_html_chunks()
+        ) {
+            let mut conv = make_converter();
+
+            // Check invariant before any input
+            prop_assert_eq!(
+                conv.emitter.pending_bytes(),
+                conv.emitter.buffer_capacity().min(conv.emitter.pending_bytes()),
+                "pending_bytes must be <= buffer capacity (it reports len, which is <= capacity)"
+            );
+
+            for chunk in &chunks {
+                // Feed chunk — may succeed or fail (budget, fallback, etc.)
+                let _ = conv.feed_chunk(chunk.as_bytes());
+
+                // Invariant: pending_bytes() returns buffer.len()
+                // Since buffer.len() <= buffer.capacity(), pending <= capacity always.
+                // More precisely, pending_bytes IS buffer.len().
+                let pending = conv.emitter.pending_bytes();
+                let buf_cap = conv.emitter.buffer_capacity();
+                prop_assert!(
+                    pending <= buf_cap,
+                    "pending_bytes() ({}) must be <= buffer.capacity() ({}) \
+                     because it returns len()",
+                    pending,
+                    buf_cap
+                );
+
+                // Invariant: flushed_bytes() returns flushed.len()
+                let flushed = conv.emitter.flushed_bytes();
+                let flushed_cap = conv.emitter.flushed_capacity();
+                prop_assert!(
+                    flushed <= flushed_cap,
+                    "flushed_bytes() ({}) must be <= flushed.capacity() ({}) \
+                     because it returns len()",
+                    flushed,
+                    flushed_cap
+                );
+            }
+        }
+
+        /// estimate_working_set() is a consistent sum of component accessors.
+        ///
+        /// The upper bound assertion: estimate_working_set() must equal exactly
+        /// the sum of its component parts as currently implemented. If any
+        /// allocation is counted twice, the estimate will exceed the independent
+        /// recomputation, breaking this assertion.
+        ///
+        /// The equality check prevents double counting or omitted components.
+        #[test]
+        fn prop_preservation_working_set_consistent_sum(
+            chunks in arb_html_chunks()
+        ) {
+            let mut conv = make_converter();
+
+            for chunk in &chunks {
+                let _ = conv.feed_chunk(chunk.as_bytes());
+
+                // Independently recompute the sum of all component accessors
+                // that estimate_working_set() uses.
+                let independent_sum = conv.options.resident_bytes()
+                    .saturating_add(conv.emitter.resident_bytes())
+                    .saturating_add(conv.state_machine.resident_bytes())
+                    .saturating_add(conv.sanitizer.resident_bytes())
+                    .saturating_add(conv.metadata.bytes_estimate())
+                    .saturating_add(conv.html_title_buf.capacity())
+                    .saturating_add(conv.tokenizer.reserved_bytes())
+                    .saturating_add(conv.charset_state.resident_bytes())
+                    .saturating_add(conv.charset_transcoded_bytes)
+                    .saturating_add(conv.utf8_tail.capacity());
+
+                let estimate = conv.estimate_working_set();
+
+                // On fixed code, estimate == independent_sum because
+                // both read the same component resident_bytes() accessors.
+                // This holds as an upper bound: no allocation is counted twice.
+                prop_assert_eq!(
+                    estimate,
+                    independent_sum,
+                    "estimate_working_set() ({}) must equal the independent sum \
+                     of its components ({}). A difference means double counting \
+                     or a missed component.",
+                    estimate,
+                    independent_sum
+                );
+            }
+        }
+    }
+
+    // =========================================================================
+    // Preservation: stack_bytes_estimate() numeric values for budget
+    // enforcement remain unchanged by physical-capacity accounting.
+    //
+    // These tests record the exact values that drive check_state_stack budget
+    // decisions. The fix adds resident_bytes() but does NOT change
+    // stack_bytes_estimate().
+    // =========================================================================
+
+    /// Preservation: stack_bytes_estimate() on empty stack returns 0.
+    ///
+    /// The state-stack budget charges per-element; an empty stack has zero charge.
+    #[test]
+    fn test_preservation_stack_estimate_empty() {
+        let sm = StructuralStateMachine::new(&MemoryBudget::default());
+        let estimate = sm.stack_bytes_estimate();
+        assert_eq!(
+            estimate, 0,
+            "Empty stack must have stack_bytes_estimate() == 0, got {}",
+            estimate
+        );
+    }
+
+    /// Preservation: stack_bytes_estimate() for 1 Bold context == 64.
+    ///
+    /// Bold has no retained_heap_bytes (returns 0), so charge is 64 per slot.
+    #[test]
+    fn test_preservation_stack_estimate_one_bold() {
+        let mut conv = make_converter();
+        conv.feed_chunk(b"<strong>").unwrap();
+
+        // Bold is on the stack
+        assert_eq!(conv.state_machine.depth(), 1);
+        let estimate = conv.state_machine.stack_bytes_estimate();
+        // Each slot contributes 64 + retained_heap_bytes (0 for Bold)
+        assert_eq!(
+            estimate, 64,
+            "1 Bold context: stack_bytes_estimate must be 64, got {}",
+            estimate
+        );
+    }
+
+    /// Preservation: stack_bytes_estimate() for 16 alternating strong+em == 16 * 64 == 1024.
+    ///
+    /// Both Bold and Italic have zero retained_heap_bytes.
+    #[test]
+    fn test_preservation_stack_estimate_16_alternating() {
+        let mut conv = make_converter();
+
+        let mut html = String::new();
+        for _ in 0..8 {
+            html.push_str("<strong><em>");
+        }
+        conv.feed_chunk(html.as_bytes()).unwrap();
+
+        assert_eq!(conv.state_machine.depth(), 16);
+        let estimate = conv.state_machine.stack_bytes_estimate();
+        // 16 slots * 64 bytes each, no retained heap
+        assert_eq!(
+            estimate,
+            16 * 64,
+            "16 alternating strong+em: stack_bytes_estimate must be 1024, got {}",
+            estimate
+        );
+    }
+
+    /// Preservation: stack_bytes_estimate() for 1 Link with 16 KiB href.
+    ///
+    /// Link(href) contributes 64 + href.capacity(). A 16 KiB href has
+    /// capacity >= 16384.
+    ///
+    /// Uses the state machine directly (not through the converter/tokenizer)
+    /// because the tokenizer has per-token size limits that reject 16 KiB
+    /// attribute values. This matches the approach used by the existing
+    /// test_link_href_retained_bytes_count_against_state_stack.
+    #[test]
+    fn test_preservation_stack_estimate_link_16kib_href() {
+        let budget = MemoryBudget {
+            state_stack: 64 * 1024,
+            ..MemoryBudget::default()
+        };
+        let mut sm = StructuralStateMachine::new(&budget);
+
+        let big_href = "x".repeat(16 * 1024);
+        let event = StreamEvent::StartTag {
+            name: "a".to_string(),
+            attrs: vec![("href".to_string(), big_href)],
+            self_closing: false,
+        };
+        sm.process_event(&event).unwrap();
+
+        assert_eq!(sm.depth(), 1);
+        let estimate = sm.stack_bytes_estimate();
+        // 64 (slot) + href.capacity() (>= 16384)
+        let expected_min = 64 + 16 * 1024;
+        assert!(
+            estimate >= expected_min,
+            "1 Link with 16 KiB href: stack_bytes_estimate must be >= {}, got {}",
+            expected_min,
+            estimate
+        );
+        // Upper bound: capacity is typically exactly 16384 for a 16384-byte string
+        // (allocator may round up, so use a generous upper bound)
+        let expected_max = 64 + 32 * 1024;
+        assert!(
+            estimate <= expected_max,
+            "1 Link with 16 KiB href: stack_bytes_estimate should be <= {}, got {} \
+             (unexpected extra allocation)",
+            expected_max,
+            estimate
+        );
+    }
+
+    /// `estimate_working_set` equals the sum of all component terms.
+    ///
+    /// If any allocation is double-counted or missed, this test breaks.
+    /// The compositional sum must exactly equal estimate_working_set() because
+    /// the implementation IS this sum (no rounding, no overhead term).
+    #[test]
+    fn test_accounting_compositional_equality() {
+        let mut conv = make_converter();
+
+        // Feed diverse HTML to exercise multiple components:
+        // paragraphs (emitter buffer), nested lists (olc), links (stack strings),
+        // code blocks (code_fence_lang), and nesting (sanitizer).
+        let html = concat!(
+            "<div><ol><li><a href=\"https://example.com\">link</a></li>",
+            "<li><pre><code class=\"language-rust\">fn main() {}</code></pre></li>",
+            "<li>text</li></ol>",
+            "<p>paragraph content with some length to grow the buffer</p>",
+            "<script>skipped content</script>",
+            "</div>"
+        );
+        let _output = conv.feed_chunk(html.as_bytes()).unwrap();
+
+        // Compute each component independently.
+        let options_resident = conv.options.resident_bytes();
+        let emitter_resident = conv.emitter.resident_bytes();
+        let sm_resident = conv.state_machine.resident_bytes();
+        let sanitizer_resident = conv.sanitizer.resident_bytes();
+        let metadata_estimate = conv.metadata.bytes_estimate();
+        let html_title_cap = conv.html_title_buf.capacity();
+        let tokenizer_reserved = conv.tokenizer.reserved_bytes();
+        let charset_resident = conv.charset_state.resident_bytes();
+        let charset_transcoded = conv.charset_transcoded_bytes;
+        let utf8_tail_cap = conv.utf8_tail.capacity();
+
+        // Manually sum all component terms.
+        let manual_sum = options_resident
+            .saturating_add(emitter_resident)
+            .saturating_add(sm_resident)
+            .saturating_add(sanitizer_resident)
+            .saturating_add(metadata_estimate)
+            .saturating_add(html_title_cap)
+            .saturating_add(tokenizer_reserved)
+            .saturating_add(charset_resident)
+            .saturating_add(charset_transcoded)
+            .saturating_add(utf8_tail_cap);
+
+        let working_set = conv.estimate_working_set();
+
+        assert_eq!(
+            working_set,
+            manual_sum,
+            "estimate_working_set() ({}) must exactly equal the compositional sum ({}) \
+             of all components:\n  \
+             options.resident_bytes()={}\n  \
+             emitter.resident_bytes()={}\n  \
+             state_machine.resident_bytes()={}\n  \
+             sanitizer.resident_bytes()={}\n  \
+             metadata.bytes_estimate()={}\n  \
+             html_title_buf.capacity()={}\n  \
+             tokenizer.reserved_bytes()={}\n  \
+             charset_state.resident_bytes()={}\n  \
+             charset_transcoded_bytes={}\n  \
+             utf8_tail.capacity()={}",
+            working_set,
+            manual_sum,
+            options_resident,
+            emitter_resident,
+            sm_resident,
+            sanitizer_resident,
+            metadata_estimate,
+            html_title_cap,
+            tokenizer_reserved,
+            charset_resident,
+            charset_transcoded,
+            utf8_tail_cap
+        );
+
+        // Verify the sum is non-trivial (at least some allocations happened)
+        assert!(
+            working_set > 0,
+            "working set should be non-zero after processing HTML"
         );
     }
 }

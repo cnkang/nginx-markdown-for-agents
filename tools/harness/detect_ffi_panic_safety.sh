@@ -279,6 +279,7 @@ while IFS= read -r rs_file; do
                 has_static_read = 0
                 has_alloc = 0
                 has_deref_ffi_input = 0
+                has_panic_source = 0
                 body = ""
                 code_body = ""
                 # Track set of sibling names called in the body
@@ -326,6 +327,7 @@ while IFS= read -r rs_file; do
                 if (codeline ~ /[A-Z_][A-Z0-9_]+/) has_static_read = 1
                 if (codeline ~ /Box::new|Box::into_raw|Vec::with_capacity|Vec::new|alloc/) has_alloc = 1
                 if (codeline ~ /unsafe[[:space:]]*\{[[:space:]]*\*/) has_deref_ffi_input = 1
+                if (codeline ~ /panic!?[[:space:]]*\(|panic_any[[:space:]]*\(|unwrap[[:space:]]*\(|expect[[:space:]]*\(|assert_eq![[:space:]]*\(|assert_ne![[:space:]]*\(|assert!?[[:space:]]*\(|unreachable![[:space:]]*\(|todo![[:space:]]*\(|unimplemented![[:space:]]*\(/) has_panic_source = 1
                 # Detect calls to any other known FFI export name
                 line = codeline
                 for (sib in global_has_catch) {
@@ -354,26 +356,36 @@ while IFS= read -r rs_file; do
                     version_accessor_pattern = "^pub(unsafe)?extern\"C\"fn" func_name "\\(\\)->[A-Za-z_][A-Za-z0-9_:]*\\{(return)?([A-Za-z_][A-Za-z0-9_]*::)*[A-Z][A-Z0-9_]*;?\\}$"
                     is_exact_version_accessor = (normalized_code ~ version_accessor_pattern)
 
+                    # The 4-tuple ABI handshake accessors (numeric version,
+                    # header hash, symbol-set hash, layout fingerprint) are
+                    # panic-free constant reads and classify as
+                    # safe_static_lookup under the same exact-const-body
+                    # guard as the version accessor.
+                    is_abi_tuple_accessor = (func_name ~ /_version$|_hash$|_fingerprint$/)
+                    is_exact_const_accessor = (is_exact_version_accessor)
+
                     # Classify
                     if (has_catch) {
                         category = "direct_catch"
                     } else if (calls_sibling_with_catch) {
                         category = "delegated_catch"
-                    } else if (has_ptr_write_zeroed && !has_validate && !has_slice_from_raw && !has_alloc) {
+                    } else if ((has_ptr_write_zeroed || (code_body ~ /ptr::write[[:space:]]*\(/ && code_body ~ /FFIDynconfResult[[:space:]]*\{/)) && !has_validate && !has_slice_from_raw && !has_alloc && !has_panic_source) {
                         category = "safe_init_helper"
-                    } else if (func_name ~ /_count$/ && !has_validate && !has_alloc && !has_deref_ffi_input && has_static_read) {
+                    } else if (func_name ~ /_count$/ && !has_validate && !has_alloc && !has_deref_ffi_input && has_static_read && !has_panic_source) {
                         category = "safe_static_lookup"
-                    } else if (func_name ~ /_str$/ && !has_validate && !has_alloc && has_static_read) {
+                    } else if (func_name ~ /_str$/ && !has_validate && !has_alloc && has_static_read && !has_panic_source) {
                         category = "safe_static_lookup"
-                    } else if (func_name ~ /_metric_key$/ && !has_validate && !has_alloc && has_static_read) {
+                    } else if (func_name ~ /_metric_key$/ && !has_validate && !has_alloc && has_static_read && !has_panic_source) {
                         category = "safe_static_lookup"
-                    } else if (func_name ~ /_version$/ && is_exact_version_accessor) {
+                    } else if (is_abi_tuple_accessor && is_exact_const_accessor && !has_panic_source) {
                         category = "safe_static_lookup"
-                    } else if (has_box_from_raw && !has_validate && !has_slice_from_raw && !has_ptr_write_zeroed && !has_alloc) {
+                    } else if (func_name ~ /_version$/ && is_exact_version_accessor && !has_panic_source) {
+                        category = "safe_static_lookup"
+                    } else if (has_box_from_raw && !has_validate && !has_slice_from_raw && !has_ptr_write_zeroed && !has_alloc && !has_panic_source) {
                         category = "free_helper"
-                    } else if (func_name ~ /_free$/ && !has_validate && !has_alloc) {
+                    } else if (func_name ~ /_free$/ && !has_validate && !has_alloc && !has_panic_source) {
                         category = "free_helper"
-                    } else if (func_name ~ /_abort$/ && !has_validate && !has_alloc) {
+                    } else if (func_name ~ /_abort$/ && !has_validate && !has_alloc && !has_panic_source) {
                         # abort that only drops is a free helper
                         category = "free_helper"
                     } else if (has_validate) {

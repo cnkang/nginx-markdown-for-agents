@@ -130,6 +130,36 @@ typedef struct {
         ngx_atomic_t  gt_1000ms;
     } conversion_latency;
     struct {
+        struct {
+            ngx_atomic_t le_1ms;
+            ngx_atomic_t le_5ms;
+            ngx_atomic_t le_10ms;
+            ngx_atomic_t le_25ms;
+            ngx_atomic_t le_50ms;
+            ngx_atomic_t le_100ms;
+            ngx_atomic_t le_250ms;
+            ngx_atomic_t le_500ms;
+            ngx_atomic_t le_1000ms;
+            ngx_atomic_t le_5000ms;
+            ngx_atomic_t sum_ms;
+            ngx_atomic_t count;
+        } full_buffer;
+        struct {
+            ngx_atomic_t le_1ms;
+            ngx_atomic_t le_5ms;
+            ngx_atomic_t le_10ms;
+            ngx_atomic_t le_25ms;
+            ngx_atomic_t le_50ms;
+            ngx_atomic_t le_100ms;
+            ngx_atomic_t le_250ms;
+            ngx_atomic_t le_500ms;
+            ngx_atomic_t le_1000ms;
+            ngx_atomic_t le_5000ms;
+            ngx_atomic_t sum_ms;
+            ngx_atomic_t count;
+        } streaming;
+    } conversion_latency_v1;
+    struct {
         ngx_atomic_t  attempted;
         ngx_atomic_t  succeeded;
         ngx_atomic_t  failed;
@@ -140,6 +170,24 @@ typedef struct {
         ngx_atomic_t  format_error_total;
         ngx_atomic_t  truncated_input_total;
         ngx_atomic_t  io_error_total;
+        struct {
+            ngx_atomic_t budget;
+            ngx_atomic_t format;
+            ngx_atomic_t truncated;
+            ngx_atomic_t io;
+        } gzip_failures;
+        struct {
+            ngx_atomic_t budget;
+            ngx_atomic_t format;
+            ngx_atomic_t truncated;
+            ngx_atomic_t io;
+        } deflate_failures;
+        struct {
+            ngx_atomic_t budget;
+            ngx_atomic_t format;
+            ngx_atomic_t truncated;
+            ngx_atomic_t io;
+        } brotli_failures;
     } decompressions;
     struct {
         ngx_atomic_t  fullbuffer;
@@ -160,13 +208,26 @@ typedef struct {
         ngx_atomic_t  no_accept;
         ngx_atomic_t  conditional;
         ngx_atomic_t  compression_passthrough;
+        ngx_atomic_t  no_transform;
     } skips;
     struct {
         ngx_atomic_t  failopen_count;
         ngx_atomic_t  delivery_count;
+        ngx_atomic_t  full_buffer_delivery_count;
         ngx_atomic_t  decision_count;
         ngx_atomic_t  estimated_token_savings;
         ngx_atomic_t  replay_buffer_errors_total;
+        struct {
+            ngx_atomic_t success;
+            ngx_atomic_t failure_schema_version;
+            ngx_atomic_t failure_unknown_key;
+            ngx_atomic_t failure_duplicate_key;
+            ngx_atomic_t failure_invalid_type;
+            ngx_atomic_t failure_out_of_range;
+            ngx_atomic_t failure_size_exceeded;
+            ngx_atomic_t failure_parse_error;
+            ngx_atomic_t failure_file_error;
+        } dynconf_reloads;
         struct {
             ngx_atomic_t  parse_timeouts_total;
             ngx_atomic_t  parse_budget_exceeded_total;
@@ -176,6 +237,7 @@ typedef struct {
         ngx_atomic_t  requests_total;
         ngx_atomic_t  fallback_total;
         ngx_atomic_t  succeeded_total;
+        ngx_atomic_t  commit_total;
         ngx_atomic_t  failed_total;
         ngx_atomic_t  postcommit_error_total;
         ngx_atomic_t  precommit_failopen_total;
@@ -189,6 +251,7 @@ typedef struct {
         ngx_atomic_t  streaming_fallback_precommit_reject;
         ngx_atomic_t  streaming_failure_postcommit_abort;
         ngx_atomic_t  streaming_failure_postcommit_safe_finish;
+        ngx_atomic_t  terminal_aborted_total;
         struct {
             ngx_atomic_t  streaming;
             ngx_atomic_t  full_buffer;
@@ -205,11 +268,11 @@ typedef struct {
     struct {
         ngx_atomic_t  backpressure_total;
         ngx_atomic_t  backpressure_resume_total;
+        ngx_atomic_t  backpressure_resume_failure_total;
         ngx_atomic_t  pending_output_high_watermark_bytes;
         ngx_atomic_t  decompression_streaming_total;
         ngx_atomic_t  decompression_fullbuffer_total;
         ngx_atomic_t  decompression_budget_exceeded_total;
-        ngx_atomic_t  zero_copy_output_total;
         ngx_atomic_t  copied_output_total;
     } perf;
 } ngx_http_markdown_metrics_t;
@@ -312,6 +375,7 @@ static ngx_shm_zone_t  g_shm_zone;
 ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = &g_shm_zone;
 
 #define MARKDOWN_STREAMING_ENABLED 1
+#define MARKDOWN_METRICS_PER_PATH_DEBUG 1
 #define NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED 1
 
 /*
@@ -475,10 +539,13 @@ ngx_create_temp_buf(void *pool, size_t size)
 
 #define NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS  1
 #define NGX_HTTP_HEADERS 1
+#define NGINX_VERSION "1.26.3"
+#define NGX_HTTP_MARKDOWN_PRODUCT_VERSION "0.9.2"
 
 /* Keep the overflow injection local to this translation unit. */
 #define NGX_MAX_SIZE_T_VALUE ((size_t) 4096)
 
+#include "../../src/ngx_http_markdown_metrics_v1_renderer.h"
 #include "../../src/ngx_http_markdown_metrics_impl.h"
 #include "../../src/ngx_http_markdown_prometheus_impl.h"
 
@@ -665,7 +732,7 @@ test_malformed_path_outer_renderers_return_null(void)
 }
 
 static void
-test_malformed_path_handler_returns_500_without_headers(void)
+test_metrics_handler_uses_frozen_v1_surface(void)
 {
     u_char                                      path[] = "/malformed";
     struct sockaddr_in                          address;
@@ -676,7 +743,7 @@ test_malformed_path_handler_returns_500_without_headers(void)
     ngx_slab_pool_t                              shpool;
     ngx_int_t                                    rc;
 
-    TEST_SUBSECTION("malformed path handler returns 500 before headers");
+    TEST_SUBSECTION("metrics handler uses frozen v1 surface");
 
     memset(&live, 0, sizeof(live));
     memset(&shpool, 0, sizeof(shpool));
@@ -702,16 +769,250 @@ test_malformed_path_handler_returns_500_without_headers(void)
 
     rc = ngx_http_markdown_metrics_handler(&request);
 
-    TEST_ASSERT(rc == NGX_HTTP_INTERNAL_SERVER_ERROR,
-                "malformed metrics path must return HTTP 500");
-    TEST_ASSERT(request.headers_out.status != NGX_HTTP_OK,
-                "render failure must not commit HTTP 200 headers");
-    TEST_ASSERT(g_send_header_calls == 0,
-                "render failure must not send response headers");
-    TEST_ASSERT(g_output_filter_calls == 0,
-                "render failure must not send a partial response body");
+    TEST_ASSERT(rc == NGX_OK,
+                "metrics handler should render the frozen v1 response");
+    TEST_ASSERT(request.headers_out.status == NGX_HTTP_OK,
+                "metrics handler should commit HTTP 200 headers");
+    TEST_ASSERT(request.headers_out.content_type.len
+                == strlen("text/plain; version=0.0.4; charset=utf-8"),
+                "metrics handler should use Prometheus content type");
+    TEST_ASSERT(g_send_header_calls == 1,
+                "metrics handler should send response headers once");
+    TEST_ASSERT(g_output_filter_calls == 1,
+                "metrics handler should send one complete response body");
 
-    TEST_PASS("metrics handler fails closed before HTTP 200 delivery");
+    TEST_PASS("metrics handler uses frozen Prometheus v1 surface");
+}
+
+static void
+test_v1_output_bytes_include_streaming_delivery(void)
+{
+    ngx_http_markdown_metrics_snapshot_t  snapshot;
+    ngx_http_markdown_metrics_v1_snapshot_t  v1;
+
+    TEST_SUBSECTION("v1 output bytes include streaming delivery");
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.output_bytes = 100;
+    snapshot.streaming.selection.output_bytes_total = 250;
+
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+
+    TEST_ASSERT(v1.output_bytes == 350,
+                "v1 output bytes must include full-buffer and streaming bytes");
+    TEST_PASS("v1 output bytes include streaming delivery");
+}
+
+static void
+test_v1_engine_delivery_and_event_sources(void)
+{
+    ngx_http_markdown_metrics_snapshot_t  snapshot;
+    ngx_http_markdown_metrics_v1_snapshot_t  v1;
+
+    TEST_SUBSECTION("v1 engine delivery and event sources");
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.results.delivery_count = 99;
+    snapshot.results.full_buffer_delivery_count = 4;
+    snapshot.streaming.succeeded_total = 7;
+    snapshot.streaming.commit_total = 2;
+    snapshot.perf.backpressure_resume_total = 3;
+    snapshot.streaming.failed_total = 99;
+    snapshot.perf.backpressure_resume_failure_total = 6;
+
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+
+    TEST_ASSERT(v1.deliveries.full_buffer == 4,
+                "full-buffer deliveries must use their direct counter");
+    TEST_ASSERT(v1.deliveries.streaming == 7,
+                "streaming deliveries must use streaming success counter");
+    TEST_ASSERT(v1.streaming_events.commit == 2,
+                "commit events must use successful header commits");
+    TEST_ASSERT(v1.streaming_events.resume_success == 3,
+                "resume successes must use downstream resume counter");
+    TEST_ASSERT(v1.streaming_events.resume_failure == 6,
+                "resume failures must use the downstream resume-failure counter");
+    TEST_PASS("v1 engine delivery and event sources");
+}
+
+
+static void
+test_v1_outcome_formula_clamps_underflow(void)
+{
+    ngx_http_markdown_metrics_snapshot_t  snapshot;
+    ngx_http_markdown_metrics_v1_snapshot_t  v1;
+
+    TEST_SUBSECTION("v1 outcome formula underflow boundary");
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.results.failopen_count = 4;
+    snapshot.streaming.terminal_aborted_total = 3;
+
+    snapshot.conversions_failed = 6;
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+    TEST_ASSERT(v1.requests.failed_closed == 0
+                && v1.requests.aborted == 3,
+        "failed_closed must clamp when failures are below deductions");
+
+    snapshot.conversions_failed = 7;
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+    TEST_ASSERT(v1.requests.failed_closed == 0,
+        "failed_closed must remain zero at the subtraction boundary");
+
+    snapshot.conversions_failed = 8;
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+    TEST_ASSERT(v1.requests.failed_closed == 1,
+        "failed_closed must preserve the positive residual");
+
+    snapshot.results.failopen_count = (ngx_atomic_uint_t) -1;
+    snapshot.streaming.terminal_aborted_total = 1;
+    snapshot.conversions_failed = (ngx_atomic_uint_t) -1;
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+    TEST_ASSERT(v1.requests.failed_closed == 0,
+        "failed_closed must not wrap when deduction counters overflow");
+
+    TEST_PASS("v1 outcome formula clamps underflow");
+}
+
+static void
+test_v1_latency_mapping_uses_all_frozen_boundaries(void)
+{
+    static const ngx_atomic_uint_t expected_full[] =
+        { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+    static const ngx_atomic_uint_t expected_streaming[] =
+        { 11, 12, 13, 14, 15, 16, 17, 18, 19, 20 };
+    ngx_http_markdown_metrics_snapshot_t  snapshot;
+    ngx_http_markdown_metrics_v1_snapshot_t  v1;
+    ngx_uint_t                              i;
+
+    TEST_SUBSECTION("v1 latency mapping uses all frozen boundaries");
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.conversion_latency_v1.full_buffer.le_1ms = 1;
+    snapshot.conversion_latency_v1.full_buffer.le_5ms = 2;
+    snapshot.conversion_latency_v1.full_buffer.le_10ms = 3;
+    snapshot.conversion_latency_v1.full_buffer.le_25ms = 4;
+    snapshot.conversion_latency_v1.full_buffer.le_50ms = 5;
+    snapshot.conversion_latency_v1.full_buffer.le_100ms = 6;
+    snapshot.conversion_latency_v1.full_buffer.le_250ms = 7;
+    snapshot.conversion_latency_v1.full_buffer.le_500ms = 8;
+    snapshot.conversion_latency_v1.full_buffer.le_1000ms = 9;
+    snapshot.conversion_latency_v1.full_buffer.le_5000ms = 10;
+    snapshot.conversion_latency_v1.full_buffer.count = 60;
+    snapshot.conversion_latency_v1.streaming.le_1ms = 11;
+    snapshot.conversion_latency_v1.streaming.le_5ms = 12;
+    snapshot.conversion_latency_v1.streaming.le_10ms = 13;
+    snapshot.conversion_latency_v1.streaming.le_25ms = 14;
+    snapshot.conversion_latency_v1.streaming.le_50ms = 15;
+    snapshot.conversion_latency_v1.streaming.le_100ms = 16;
+    snapshot.conversion_latency_v1.streaming.le_250ms = 17;
+    snapshot.conversion_latency_v1.streaming.le_500ms = 18;
+    snapshot.conversion_latency_v1.streaming.le_1000ms = 19;
+    snapshot.conversion_latency_v1.streaming.le_5000ms = 20;
+    snapshot.conversion_latency_v1.streaming.count = 200;
+
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+
+    for (i = 0; i < 10; i++) {
+        TEST_ASSERT(v1.duration_full_buffer.buckets[i] == expected_full[i],
+                    "full-buffer finite buckets must preserve source bands");
+        TEST_ASSERT(v1.duration_streaming.buckets[i] == expected_streaming[i],
+                    "streaming finite buckets must preserve source bands");
+    }
+    TEST_ASSERT(v1.duration_full_buffer.buckets[9] == 10
+                && v1.duration_full_buffer.count == 60,
+                "full-buffer values above 5s must remain only in +Inf");
+    TEST_ASSERT(v1.duration_streaming.buckets[9] == 20
+                && v1.duration_streaming.count == 200,
+                "streaming values above 5s must remain only in +Inf");
+
+    TEST_PASS("All ten v1 latency boundaries map to production buckets");
+}
+
+static void
+test_v1_latency_sum_conversion_is_bounded(void)
+{
+    ngx_http_markdown_metrics_snapshot_t  snapshot;
+    ngx_http_markdown_metrics_v1_snapshot_t v1;
+    ngx_atomic_uint_t                      maximum;
+
+    TEST_SUBSECTION("v1 latency sum conversion is bounded");
+
+    maximum = (ngx_atomic_uint_t) -1;
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.conversion_latency_v1.full_buffer.count = 1;
+    snapshot.conversion_latency_v1.full_buffer.sum_ms = maximum / 1000 + 1;
+
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+    TEST_ASSERT(v1.duration_full_buffer.sum_us == maximum,
+                "full-buffer millisecond conversion must saturate");
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.conversion_latency_v1.streaming.count = 1;
+    snapshot.conversion_latency_v1.streaming.sum_ms = 1234;
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+    TEST_ASSERT(v1.duration_streaming.sum_us == 1234000,
+                "streaming millisecond conversion must preserve precision");
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.conversion_time_sum_ms = maximum / 1000 + 1;
+    ngx_http_markdown_metrics_to_v1(&snapshot, &v1);
+    TEST_ASSERT(v1.duration_full_buffer.sum_us == maximum,
+                "aggregate millisecond conversion must saturate");
+
+    TEST_PASS("v1 latency sum conversion is bounded");
+}
+
+static void
+test_v1_renderer_emits_frozen_families_and_fails_on_truncation(void)
+{
+    u_char                                      buf[32768];
+    u_char                                     *p;
+    ngx_http_markdown_metrics_v1_snapshot_t     snapshot;
+
+    TEST_SUBSECTION("v1 renderer emits frozen families and truncates safely");
+
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.requests.converted = 3;
+    snapshot.attempts.full_buffer = 4;
+    snapshot.deliveries.streaming = 5;
+    snapshot.duration_full_buffer.buckets[0] = 6;
+    snapshot.duration_full_buffer.count = 6;
+    snapshot.input_bytes = 7;
+    snapshot.output_bytes = 8;
+    snapshot.streaming_events.resume_failure = 9;
+    snapshot.decompression.gzip_failure_format = 10;
+    snapshot.dynconf_reloads.failure_file_error = 11;
+    snapshot.build_info.version = (const u_char *) "0.9.2";
+    snapshot.build_info.nginx_version_text = (const u_char *) "1.26.3";
+    snapshot.build_info.features = (const u_char *) "streaming";
+
+    p = ngx_http_markdown_metrics_v1_render(
+        buf, buf + sizeof(buf), &snapshot);
+    TEST_ASSERT(p != NULL && p < buf + sizeof(buf),
+                "v1 renderer should fit the bounded test buffer");
+    *p = '\0';
+    TEST_ASSERT(contains((char *) buf,
+                         "# TYPE nginx_markdown_requests_total counter"),
+                "v1 renderer must emit the requests family");
+    TEST_ASSERT(contains((char *) buf,
+                         "# TYPE nginx_markdown_conversion_duration_seconds histogram"),
+                "v1 renderer must emit the histogram family");
+    TEST_ASSERT(contains((char *) buf,
+                         "{engine=\"full_buffer\",le=\"0.001\"} 6"),
+                "v1 renderer must emit finite histogram buckets and labels");
+    TEST_ASSERT(contains((char *) buf,
+                         "{transition=\"resume_failure\",reason=\"streaming_mid_flight_error\"} 9"),
+                "v1 renderer must emit bounded streaming event labels");
+    TEST_ASSERT(contains((char *) buf,
+                         "# TYPE nginx_markdown_build_info gauge"),
+                "v1 renderer must emit build-info family");
+
+    TEST_ASSERT(ngx_http_markdown_metrics_v1_render(
+                    buf, buf + 64, &snapshot) == NULL,
+                "v1 renderer must return NULL on truncation");
+
+    TEST_PASS("v1 renderer emits frozen families and fails closed on truncation");
 }
 
 static void
@@ -1622,7 +1923,13 @@ main(void)
     test_malformed_path_len_sets_failed_and_stops_right_walk();
     test_malformed_path_detail_writers_return_null();
     test_malformed_path_outer_renderers_return_null();
-    test_malformed_path_handler_returns_500_without_headers();
+    test_metrics_handler_uses_frozen_v1_surface();
+    test_v1_output_bytes_include_streaming_delivery();
+    test_v1_engine_delivery_and_event_sources();
+    test_v1_outcome_formula_clamps_underflow();
+    test_v1_latency_mapping_uses_all_frozen_boundaries();
+    test_v1_latency_sum_conversion_is_bounded();
+    test_v1_renderer_emits_frozen_families_and_fails_on_truncation();
     test_json_single_path_fits();
     test_json_zero_paths();
     test_json_overflow_produces_other();

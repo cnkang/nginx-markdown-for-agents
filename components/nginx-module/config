@@ -10,6 +10,13 @@ ngx_markdown_rust_lib=
 
 if [ -n "$RUST_TARGET" ]; then
     ngx_markdown_rust_lib="$ngx_addon_dir/../rust-converter/target/$RUST_TARGET/release/libnginx_markdown_converter.a"
+    if [ ! -f "$ngx_markdown_rust_lib" ]; then
+        echo "configuration error: RUST_TARGET=$RUST_TARGET was set explicitly but" >&2
+        echo "  $ngx_markdown_rust_lib does not exist." >&2
+        echo "  Refusing to fall back to a host-platform archive that does not" >&2
+        echo "  match the requested target." >&2
+        exit 1
+    fi
 fi
 
 if [ -z "$ngx_markdown_rust_lib" ] || [ ! -f "$ngx_markdown_rust_lib" ]; then
@@ -51,18 +58,42 @@ if [ -z "$ngx_markdown_rust_lib" ] || [ ! -f "$ngx_markdown_rust_lib" ]; then
 
     if [ -n "$ngx_markdown_target" ]; then
         ngx_markdown_rust_lib="$ngx_addon_dir/../rust-converter/target/$ngx_markdown_target/release/libnginx_markdown_converter.a"
-    else
-        ngx_markdown_rust_lib="$ngx_addon_dir/../rust-converter/target/release/libnginx_markdown_converter.a"
     fi
 fi
 
 if [ ! -f "$ngx_markdown_rust_lib" ]; then
-    for candidate in "$ngx_addon_dir"/../rust-converter/target/*/release/libnginx_markdown_converter.a; do
-        if [ -f "$candidate" ]; then
-            ngx_markdown_rust_lib="$candidate"
-            break
-        fi
-    done
+    # Fall back to an existing release archive only when its target triple
+    # matches the current platform: a shared repo checkout (e.g. a mounted
+    # volume in a container, or a multi-arch local build) may contain
+    # archives for other platforms, and the first glob hit could otherwise
+    # select a foreign archive (macOS .a inside a Linux build, etc.).
+    ngx_markdown_uname_s=$(uname -s 2>/dev/null || echo unknown)
+    ngx_markdown_uname_m=$(uname -m 2>/dev/null || echo unknown)
+    case "$ngx_markdown_uname_s:$ngx_markdown_uname_m" in
+        Linux:aarch64)   ngx_markdown_platform_glob="aarch64-unknown-linux-$ngx_markdown_libc" ;;
+        Linux:x86_64)    ngx_markdown_platform_glob="x86_64-unknown-linux-$ngx_markdown_libc" ;;
+        Darwin:arm64)    ngx_markdown_platform_glob="aarch64-apple-darwin" ;;
+        Darwin:x86_64)   ngx_markdown_platform_glob="x86_64-apple-darwin" ;;
+        *)               ngx_markdown_platform_glob="" ;;
+    esac
+    if [ -n "$ngx_markdown_platform_glob" ]; then
+        for candidate in "$ngx_addon_dir"/../rust-converter/target/$ngx_markdown_platform_glob/release/libnginx_markdown_converter.a; do
+            if [ -f "$candidate" ]; then
+                ngx_markdown_rust_lib="$candidate"
+                break
+            fi
+        done
+    fi
+fi
+
+if [ -z "$ngx_markdown_rust_lib" ] || [ ! -f "$ngx_markdown_rust_lib" ]; then
+    echo "configuration error: cannot locate the Rust converter static library" >&2
+    echo "  (libnginx_markdown_converter.a) for platform: $(uname -s 2>/dev/null || echo unknown)/$(uname -m 2>/dev/null || echo unknown)" >&2
+    echo "  Build the Rust library first: cargo build --release (in rust-converter/)" >&2
+    echo "  or set RUST_TARGET=<triple> to select an existing archive explicitly." >&2
+    echo "  Refusing to fall back to an arbitrary target/release archive that may" >&2
+    echo "  belong to a different platform." >&2
+    exit 1
 fi
 
 # Libraries required by the Rust FFI converter.
@@ -88,7 +119,8 @@ fi
 # NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off (default: auto)
 # When on/auto, probe for <brotli/decode.h> and libbrotlidec; on success
 # define NGX_HTTP_BROTLI and link the decoder library.
-# On auto failure, silently fall back to bounded full-buffer decompression.
+# On-mode probe failure is a configuration error; auto-mode probe failure falls
+# back to bounded full-buffer decompression.
 ngx_markdown_brotli_mode=${NGX_MARKDOWN_BROTLI_STREAMING:-auto}
 
 case "$ngx_markdown_brotli_mode" in
@@ -211,13 +243,13 @@ if test -n "$ngx_module_link"; then
                      $ngx_addon_dir/src/ngx_http_markdown_decompression.c \
                      $ngx_addon_dir/src/ngx_http_markdown_reason.c \
                      $ngx_addon_dir/src/ngx_http_markdown_reason_ffi.c \
+                     $ngx_addon_dir/src/ngx_http_markdown_diagnostics_reason.c \
                      $ngx_addon_dir/src/ngx_http_markdown_diagnostics.c \
                      $ngx_addon_dir/src/ngx_http_markdown_dynconf_snapshot.c \
                      $ngx_addon_dir/src/ngx_http_markdown_stream_state.c \
                      $ngx_addon_dir/src/ngx_http_markdown_stream_replay.c \
                      $ngx_addon_dir/src/ngx_http_markdown_stream_commit.c \
-                     $ngx_addon_dir/src/ngx_http_markdown_stream_postcommit.c \
-                     $ngx_addon_dir/src/ngx_http_markdown_stream_error.c"
+                     $ngx_addon_dir/src/ngx_http_markdown_stream_postcommit.c"
     ngx_module_deps="$ngx_addon_dir/src/ngx_http_markdown_filter_module.h \
                      $ngx_addon_dir/src/ngx_http_markdown_header_plan.h \
                      $ngx_addon_dir/src/ngx_http_markdown_diagnostics.h \
@@ -225,8 +257,7 @@ if test -n "$ngx_module_link"; then
                      $ngx_addon_dir/src/ngx_http_markdown_stream_state.h \
                      $ngx_addon_dir/src/ngx_http_markdown_stream_replay.h \
                      $ngx_addon_dir/src/ngx_http_markdown_stream_commit.h \
-                     $ngx_addon_dir/src/ngx_http_markdown_stream_postcommit.h \
-                     $ngx_addon_dir/src/ngx_http_markdown_stream_error.h"
+                     $ngx_addon_dir/src/ngx_http_markdown_stream_postcommit.h"
     
     . auto/module
 else
@@ -245,20 +276,19 @@ else
                     $ngx_addon_dir/src/ngx_http_markdown_decompression.c \
                     $ngx_addon_dir/src/ngx_http_markdown_reason.c \
                     $ngx_addon_dir/src/ngx_http_markdown_reason_ffi.c \
+                    $ngx_addon_dir/src/ngx_http_markdown_diagnostics_reason.c \
                     $ngx_addon_dir/src/ngx_http_markdown_diagnostics.c \
                     $ngx_addon_dir/src/ngx_http_markdown_dynconf_snapshot.c \
                     $ngx_addon_dir/src/ngx_http_markdown_stream_state.c \
                     $ngx_addon_dir/src/ngx_http_markdown_stream_replay.c \
                     $ngx_addon_dir/src/ngx_http_markdown_stream_commit.c \
-                    $ngx_addon_dir/src/ngx_http_markdown_stream_postcommit.c \
-                    $ngx_addon_dir/src/ngx_http_markdown_stream_error.c"
+                    $ngx_addon_dir/src/ngx_http_markdown_stream_postcommit.c"
     NGX_ADDON_DEPS="$NGX_ADDON_DEPS $ngx_addon_dir/src/ngx_http_markdown_filter_module.h \
                     $ngx_addon_dir/src/ngx_http_markdown_header_plan.h \
                     $ngx_addon_dir/src/ngx_http_markdown_stream_state.h \
                     $ngx_addon_dir/src/ngx_http_markdown_stream_replay.h \
                     $ngx_addon_dir/src/ngx_http_markdown_stream_commit.h \
-                    $ngx_addon_dir/src/ngx_http_markdown_stream_postcommit.h \
-                    $ngx_addon_dir/src/ngx_http_markdown_stream_error.h"
+                    $ngx_addon_dir/src/ngx_http_markdown_stream_postcommit.h"
 fi
 
 # Note: ngx_module_libs is consumed by NGINX's auto/module logic for both

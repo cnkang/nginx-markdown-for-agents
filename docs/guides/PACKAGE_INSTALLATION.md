@@ -8,18 +8,23 @@ official NGINX repository packages.
 
 GitHub Releases are the current distribution channel for DEB and RPM package
 artifacts, but asset availability is tag-specific.
-Public APT/YUM repositories are planned but not available yet.
+The project plans public APT/YUM repositories but has not launched them yet.
 They are not part of the current GA channel.
 
 Bare package-manager installation commands only work after an operator
 publishes and configures a real APT or YUM repository. Until then, download the
-matching package artifact and its `SHA256SUMS` file from the same GitHub
-Release.
+matching package artifact, `SHA256SUMS`, and `SHA256SUMS.asc` from the same
+GitHub Release. `SHA256SUMS` detects transfer corruption. It is not an
+authenticated trust anchor.
 
 > **Availability check:** A release candidate and its compatibility-matrix
 > entry do not make a DEB or RPM package downloadable. Before using the
 > commands below, confirm that the selected GitHub Release contains the exact
-> package and `SHA256SUMS`; otherwise use the
+> package, `SHA256SUMS`, and `SHA256SUMS.asc`. The current repository does not
+> publish an independently authenticated release-key fingerprint. Do not
+> treat a same-release key file, key ID, or checksum as project authenticity.
+> Obtain the complete fingerprint through an independently authenticated
+> operator/project channel before proceeding. Otherwise use the
 > [Manual Source Build](./INSTALLATION.md#6-secondary-manual-source-build).
 
 ## Select the Matching Artifact
@@ -36,7 +41,7 @@ architecture. The target NGINX version must match the installed NGINX ABI.
 
 DEB and RPM packages are built on glibc-based build images and target
 glibc-based distributions only. For musl-based environments (Alpine Linux,
-etc.), use the pre-built binary tarball from the Release Binaries workflow or
+and so on), use the pre-built binary tarball from the Release Binaries workflow or
 build from source.
 
 DEB format:
@@ -64,14 +69,29 @@ Replace `VERSION` below with a published release version. `NGINX_VERSION` must
 match the NGINX ABI you run.
 
 ```bash
+set -euo pipefail
 VERSION="<published-version>"
 NGINX_VERSION=1.26.3
 ARCH=amd64
 BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}"
 PKG="nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VERSION}_${ARCH}.deb"
 
-curl -fSLO "${BASE_URL}/SHA256SUMS"
-curl -fSLO "${BASE_URL}/${PKG}"
+curl -fsSLo SHA256SUMS "${BASE_URL}/SHA256SUMS"
+curl -fsSLo SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
+curl -fsSLo "${PKG}" "${BASE_URL}/${PKG}"
+# Set TRUSTED_FINGERPRINT only from an independently authenticated channel.
+: "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated}"
+[[ "${TRUSTED_FINGERPRINT}" =~ ^[A-Fa-f0-9]{40}$ ]] || exit 1
+# Import the checked-in project public key into an isolated keyring first,
+# so gpg verifies the signature against the project key only.
+GNUPGDIR="$(mktemp -d)"
+trap 'rm -rf "${GNUPGDIR}"' EXIT
+gpg --batch --homedir "${GNUPGDIR}" --import packaging/nginx-markdown-for-agents-release.asc
+VALIDSIG="$(gpg --batch --homedir "${GNUPGDIR}" --status-fd=1 \
+    --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
+    | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
+EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
+[[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1
 grep " ${PKG}$" SHA256SUMS | sha256sum -c -
 sudo apt install "./${PKG}"
 ```
@@ -82,14 +102,29 @@ Replace `VERSION` below with a published release version. `NGINX_VERSION` must
 match the NGINX ABI you run.
 
 ```bash
+set -euo pipefail
 VERSION="<published-version>"
 NGINX_VERSION=1.26.3
 ARCH=x86_64
 BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}"
 PKG="nginx-module-markdown-for-agents-${VERSION}-nginx${NGINX_VERSION}-1.${ARCH}.rpm"
 
-curl -fSLO "${BASE_URL}/SHA256SUMS"
-curl -fSLO "${BASE_URL}/${PKG}"
+curl -fsSLo SHA256SUMS "${BASE_URL}/SHA256SUMS"
+curl -fsSLo SHA256SUMS.asc "${BASE_URL}/SHA256SUMS.asc"
+curl -fsSLo "${PKG}" "${BASE_URL}/${PKG}"
+# Set TRUSTED_FINGERPRINT only from an independently authenticated channel.
+: "${TRUSTED_FINGERPRINT:?withhold installation until the release fingerprint is independently authenticated}"
+[[ "${TRUSTED_FINGERPRINT}" =~ ^[A-Fa-f0-9]{40}$ ]] || exit 1
+# Import the checked-in project public key into an isolated keyring first,
+# so gpg verifies the signature against the project key only.
+GNUPGDIR="$(mktemp -d)"
+trap 'rm -rf "${GNUPGDIR}"' EXIT
+gpg --batch --homedir "${GNUPGDIR}" --import packaging/nginx-markdown-for-agents-release.asc
+VALIDSIG="$(gpg --batch --homedir "${GNUPGDIR}" --status-fd=1 \
+    --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
+    | awk '$2 == "VALIDSIG" { print toupper($3); exit }')"
+EXPECTED_FINGERPRINT="$(printf '%s' "${TRUSTED_FINGERPRINT}" | tr '[:lower:]' '[:upper:]')"
+[[ "${VALIDSIG}" == "${EXPECTED_FINGERPRINT}" ]] || exit 1
 grep " ${PKG}$" SHA256SUMS | sha256sum -c -
 sudo rpm -Uvh "./${PKG}"
 ```
@@ -101,14 +136,14 @@ nginx -V 2>&1 | grep markdown
 nginx -t
 ```
 
-The module binary is installed using the canonical NGINX dynamic-module name:
+Install the module binary using the canonical NGINX dynamic-module name:
 
 ```text
 ngx_http_markdown_filter_module.so
 ```
 
-Package names and artifact filenames use `nginx-module-markdown-for-agents`;
-the module filename remains `ngx_http_markdown_filter_module.so`.
+Package names and artifact filenames use `nginx-module-markdown-for-agents`.
+The module filename remains `ngx_http_markdown_filter_module.so`.
 
 ## Enable Module
 

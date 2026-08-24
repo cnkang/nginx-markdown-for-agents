@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Fuzz and packaging infrastructure validator for v0.7.0 release gates.
+Fuzz and packaging infrastructure validator for v0.7.0 release gates. 由 0.7.0 引入，被 0.8.0+ 门禁复用
 
 Validates the 11-item checklist from v0.7.0 fuzz and packaging infrastructure requirements (Requirement 2):
 
@@ -104,7 +104,9 @@ class ValidationResult:
 def read_safe(path: Path) -> str:
     """Read file content safely, returning empty string if missing."""
     resolved = path.resolve()
-    if not str(resolved).startswith(str(PROJECT_ROOT)):
+    try:
+        resolved.relative_to(PROJECT_ROOT.resolve())
+    except ValueError:
         return ""
     return resolved.read_text(encoding="utf-8") if resolved.is_file() else ""
 

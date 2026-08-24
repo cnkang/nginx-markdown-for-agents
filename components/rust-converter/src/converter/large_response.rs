@@ -93,17 +93,30 @@ impl FusedNormalizer {
         let line = line.strip_suffix('\r').unwrap_or(line);
 
         let trimmed_start = line.trim_start();
-        let fence_len = trimmed_start.bytes().take_while(|&b| b == b'`').count();
+        let fence_len = super::normalize::measure_fence_len(line);
         let is_opening_fence = self.active_fence_len.is_none() && fence_len >= 3;
         let is_closing_fence = self
             .active_fence_len
             .map(|len| fence_len >= len && trimmed_start[fence_len..].trim().is_empty())
             .unwrap_or(false);
 
-        if is_opening_fence {
-            self.active_fence_len = Some(fence_len);
-        } else if is_closing_fence {
-            self.active_fence_len = None;
+        if is_opening_fence || is_closing_fence {
+            if is_opening_fence {
+                self.active_fence_len = Some(fence_len);
+            } else {
+                self.active_fence_len = None;
+            }
+            self.output.push_str(line.trim_end());
+            self.output.push('\n');
+            self.prev_blank = false;
+            return;
+        }
+
+        if self.active_fence_len.is_some() {
+            self.output.push_str(line);
+            self.output.push('\n');
+            self.prev_blank = false;
+            return;
         }
 
         let trimmed = line.trim_end();
@@ -114,12 +127,8 @@ impl FusedNormalizer {
                 self.prev_blank = true;
             }
         } else {
-            if self.active_fence_len.is_some() {
-                self.output.push_str(trimmed);
-            } else {
-                let normalized = super::normalize::normalize_line_whitespace(trimmed);
-                self.output.push_str(&normalized);
-            }
+            let normalized = super::normalize::normalize_line_whitespace(trimmed);
+            self.output.push_str(&normalized);
             self.output.push('\n');
             self.prev_blank = false;
         }
@@ -227,16 +236,29 @@ mod tests {
 
         for line in output.lines() {
             let trimmed_start = line.trim_start();
-            let fence_len = trimmed_start.bytes().take_while(|&b| b == b'`').count();
+            let fence_len = crate::converter::normalize::measure_fence_len(line);
             let is_opening_fence = active_fence_len.is_none() && fence_len >= 3;
             let is_closing_fence = active_fence_len
                 .map(|len| fence_len >= len && trimmed_start[fence_len..].trim().is_empty())
                 .unwrap_or(false);
 
-            if is_opening_fence {
-                active_fence_len = Some(fence_len);
-            } else if is_closing_fence {
-                active_fence_len = None;
+            if is_opening_fence || is_closing_fence {
+                if is_opening_fence {
+                    active_fence_len = Some(fence_len);
+                } else {
+                    active_fence_len = None;
+                }
+                result.push_str(line.trim_end());
+                result.push('\n');
+                prev_blank = false;
+                continue;
+            }
+
+            if active_fence_len.is_some() {
+                result.push_str(line);
+                result.push('\n');
+                prev_blank = false;
+                continue;
             }
 
             let trimmed = line.trim_end();
@@ -246,16 +268,16 @@ mod tests {
                     prev_blank = true;
                 }
             } else {
-                if active_fence_len.is_some() || is_closing_fence {
-                    result.push_str(trimmed);
-                } else {
-                    result.push_str(&normalize_line_whitespace(trimmed));
-                }
+                result.push_str(&normalize_line_whitespace(trimmed));
                 result.push('\n');
                 prev_blank = false;
             }
         }
 
+        fix_reference_trailing_newlines(result)
+    }
+
+    fn fix_reference_trailing_newlines(mut result: String) -> String {
         if !result.ends_with('\n') {
             result.push('\n');
         } else if result.ends_with("\n\n") {

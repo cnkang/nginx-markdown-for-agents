@@ -25,6 +25,12 @@ fi
 
 # shellcheck source=/dev/null
 source "${TMP_DIR}/config-search-function.sh"
+# The extracted helper normally runs after cache_trusted_executables in the
+# installer. Recreate its explicit executable dependencies in this isolated
+# fixture instead of weakening the helper's nounset or trust guarantees.
+FIND_BIN="$(command -v find)"
+GREP_BIN="$(command -v grep)"
+SH_BIN="$(command -v sh)"
 mkdir -p "${TMP_DIR}/conf.d"
 printf '%s\n' 'load_module modules/example.so;' \
   > "${TMP_DIR}/conf.d/example.conf"

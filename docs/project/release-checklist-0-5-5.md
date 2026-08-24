@@ -4,7 +4,7 @@
 
 This checklist aggregates all release gate verification steps for the `0.5.5`
 stabilization and correctness release. Each gate has a verification command,
-expected output format, and pass/fail criterion. Gates are organized by phase:
+expected output format, and pass/fail criterion. Gates follow phases:
 cheap blockers first, focused semantic checks second, umbrella checks third.
 
 This checklist covers verification families touched by the stabilization
@@ -21,7 +21,6 @@ These gates catch obvious failures fast and must pass before deeper checks.
 | CB-01 | `harness-sync` | `make harness-check` | All checks PASS | Exit code 0, all items PASS |
 | CB-02 | `docs-tooling` | `make docs-check` | All checks PASS | Exit code 0, no failures in operator-facing docs |
 | CB-03 | naming-consistency | `make release-gates-check` (naming) | All names conform | Exit code 0, PASS message |
-| CB-04 | 0.5.5-gates | _(removed — 0.5.5 validator deleted, see commit history)_ | N/A | Historical reference |
 
 ## Phase 2: Focused Semantic Checks
 
@@ -79,7 +78,7 @@ waived before the release proceeds.
 
 | Criterion | Gate(s) | Threshold | Blocking |
 |-----------|---------|-----------|----------|
-| Cheap blockers pass | CB-01, CB-02, CB-03, CB-04 | All PASS | Yes |
+| Cheap blockers pass | CB-01, CB-02, CB-03 | All PASS | Yes |
 | Focused semantic checks pass | FS-01 through FS-14 | All PASS for touched surfaces | Yes |
 | Runtime evidence exists | UB-02, UB-03 | At least one runtime target per runtime-sensitive workstream | Yes |
 | C module coverage | UB-04 | ≥ 80% aggregate | Yes |
@@ -97,13 +96,13 @@ waived before the release proceeds.
 
 `make release-gates-check` and `make release-gates-check-strict` validate
 0.5.0 release gate surfaces (the 0.5.0 workstreams), not 0.5.5-specific surfaces.
-The 0.5.5-specific validator (`validate_release_gates_055.py`) has been
-removed; the 0.5.0 targets serve as a non-regression baseline for 0.5.5.
+The release removed the 0.5.5-specific validator (`validate_release_gates_055.py`). The 0.5.0 targets serve as a non-regression baseline for 0.5.5.
 
 ## Waiver Process
 
-If any go/no-go criterion cannot be met, a waiver may be recorded. Each waiver
-entry MUST contain all four required fields:
+If any go/no-go criterion cannot be met, the team must record and approve a
+waiver before release proceeds. Each waiver entry MUST
+contain all six required fields:
 
 | Field | Format | Description |
 |-------|--------|-------------|
@@ -111,14 +110,16 @@ entry MUST contain all four required fields:
 | `approver` | Identity string | Person approving the waiver |
 | `date` | ISO 8601 | Date of waiver approval |
 | `justification` | Non-empty string | Rationale for the waiver |
+| `risk_assessment` | Non-empty string | Description of the risk introduced by the waiver |
+| `mitigation_strategy` | Non-empty string | Plan to mitigate the risk described in `risk_assessment` |
 
 Waiver entries missing any field or with a duplicate `waiver_id` are invalid.
 
 ### Active Waivers
 
-| waiver_id | approver | date | justification |
-|-----------|----------|------|---------------|
-| WAIVER-0.5.5-001 | release-owner | 2026-04-24 | `docs-check` baseline failures in `0.5.5-release-spec.md` are pre-existing internal references in the release-level specification, not operator-facing documentation drift. These do not affect operator docs accuracy. |
+| waiver_id | approver | date | justification | risk_assessment | mitigation_strategy |
+|-----------|----------|------|---------------|-----------------|---------------------|
+| WAIVER-0.5.5-001 | release-owner | 2026-04-24 | `docs-check` baseline failures in `0.5.5-release-spec.md` are pre-existing internal references in the release-level specification, not operator-facing documentation drift. These do not affect operator docs accuracy. | The `docs-check` gate reports failures on the release-spec document, so the gate cannot go fully green until the pre-existing internal references are removed; the risk is limited to release-process documentation, not operator-facing surfaces. | Remove the pre-existing internal references from `0.5.5-release-spec.md` before the next release so the `docs-check` gate returns to fully green, and track the cleanup in the release follow-up checklist. |
 
 ## Docs Sync Trigger Rules Reference
 
@@ -140,4 +141,5 @@ The following change types trigger mandatory documentation synchronization
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Kang | Waiver schema requires six fields; Active Waivers table filled |
 | 0.5.5 | 2026-04-24 | Release gate sync | Initial 0.5.5 release checklist |

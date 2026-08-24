@@ -34,7 +34,9 @@
         "test_level",
         "support_tier",
         "release_blocking",
-        "owner_workflow"
+        "owner_workflow",
+        "feature_manifest_digest",
+        "abi_version"
       ],
       "additionalProperties": false,
       "properties": {
@@ -81,7 +83,17 @@
         },
         "owner_workflow": {
           "type": "string",
-          "description": "GitHub Actions workflow file responsible for this entry (e.g. \"release-deb.yml\")."
+          "description": "GitHub Actions workflow file responsible for this entry (e.g. \"release-packages.yml\")."
+        },
+        "feature_manifest_digest": {
+          "type": "string",
+          "description": "SHA-256 digest of the official build feature manifest this row's artifacts are bound to (canonical release matrix contract).",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "abi_version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Frozen ABI version this row's artifacts are bound to (canonical release matrix contract)."
         }
       }
     }

@@ -60,7 +60,7 @@ case "${1:-}" in
         ;;
 esac
 
-if [ ! -f "$RPM_FILE" ]; then
+if [[ ! -f "$RPM_FILE" ]]; then
     echo "Error: file not found: $RPM_FILE" >&2
     exit 2
 fi
@@ -94,7 +94,7 @@ fi
 
 echo "Step 3: Installing package..." >&2
 
-if [ "$(id -u)" -ne 0 ]; then
+if [[ "$(id -u)" -ne 0 ]]; then
     echo "Error: root access required for rpm -i" >&2
     echo "Run with: sudo $0 $RPM_FILE" >&2
     exit 2
@@ -117,7 +117,7 @@ INSTALL_OUTPUT=$(rpm -i "$RPM_FILE" 2>&1) || {
     fi
 }
 
-if [ $? -eq 0 ] 2>/dev/null; then
+if [[ $? -eq 0 ]] 2>/dev/null; then
     pass "rpm -i succeeded"
 fi
 
@@ -141,19 +141,19 @@ MODULE_PATHS="/usr/lib64/nginx/modules /usr/lib/nginx/modules /usr/local/nginx/m
 MODULE_FOUND=0
 
 for dir in $MODULE_PATHS; do
-    if [ -f "${dir}/ngx_http_markdown_filter_module.so" ]; then
+    if [[ -f "${dir}/ngx_http_markdown_filter_module.so" ]]; then
         pass "module .so found at ${dir}/ngx_http_markdown_filter_module.so"
         MODULE_FOUND=1
         break
     fi
 done
 
-if [ "$MODULE_FOUND" -eq 0 ]; then
+if [[ "$MODULE_FOUND" -eq 0 ]]; then
     # Check rpm file list for the actual path
     PKG_NAME=$(rpm -qp "$RPM_FILE" 2>/dev/null) || PKG_NAME=""
-    if [ -n "$PKG_NAME" ]; then
+    if [[ -n "$PKG_NAME" ]]; then
         SO_PATH=$(rpm -ql "$PKG_NAME" 2>/dev/null | grep '\.so$' | head -1) || SO_PATH=""
-        if [ -n "$SO_PATH" ] && [ -f "$SO_PATH" ]; then
+        if [[ -n "$SO_PATH" ]] && [ -f "$SO_PATH" ]; then
             pass "module .so found at $SO_PATH"
         else
             fail "module .so not found in expected paths"
@@ -186,7 +186,7 @@ echo "" >&2
 echo "=== RPM Install Test Results ===" >&2
 echo "Results: $PASS_COUNT passed, $FAIL_COUNT failed" >&2
 
-if [ "$FAIL_COUNT" -gt 0 ]; then
+if [[ "$FAIL_COUNT" -gt 0 ]]; then
     echo "FAIL" >&2
     exit 1
 fi

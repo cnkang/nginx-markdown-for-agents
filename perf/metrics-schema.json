@@ -341,7 +341,7 @@
             },
             "git_commit": {
               "type": "string",
-              "description": "Short git commit SHA of the tested code"
+              "description": "Full 40-character git commit SHA of the tested code"
             },
             "platform": {
               "type": "string",
@@ -363,14 +363,14 @@
                     "enum": ["plain-small", "chunked-medium", "gzip-large", "large-body", "streaming-first", "gzip-streaming-first", "deflate-streaming-first", "brotli-streaming-first"],
                     "description": "Scenario identifier"
                   },
-                  "profile": {
+                  "scenario_config": {
                     "type": "string",
-                    "enum": ["balanced", "streaming_first", "strict_cache"],
-                    "description": "NGINX module profile"
+                    "enum": ["explicit-defaults", "explicit-streaming", "explicit-strict-cache"],
+                    "description": "Benchmark-only scenario configuration identity"
                   },
                   "compression": {
                     "type": "string",
-                    "enum": ["none", "gzip", "deflate"],
+                    "enum": ["none", "gzip", "deflate", "brotli"],
                     "description": "Upstream compression type"
                   },
                   "transfer_encoding": {
@@ -425,7 +425,7 @@
                         "minimum": 0,
                         "description": "Requests per second"
                       },
-                      "throughput_mbps": {
+                      "throughput_mbytes_per_sec": {
                         "type": "number",
                         "minimum": 0,
                         "description": "Throughput in MB/s"

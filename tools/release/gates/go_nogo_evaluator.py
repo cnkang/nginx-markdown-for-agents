@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Go/No-Go decision evaluator and scope assessment for 0.5.0 release gates.
+Referenced only by tests and retained for historical reference.
 
 Implements:
 - Go/No-Go decision function (Property 13, 14)

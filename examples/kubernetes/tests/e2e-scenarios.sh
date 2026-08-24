@@ -288,7 +288,7 @@ scenario_config_update() {
         -n "$NAMESPACE" \
         --from-literal=markdown_filter="on" \
         --from-literal=markdown_streaming="auto" \
-        --from-literal=markdown_max_size="10485760" \
+        --from-literal=markdown_limits="conversion_memory=10m" \
         --dry-run=client -o yaml \
         | kubectl apply -f - >&2 2>&1 || {
         log_error "Failed to apply ConfigMap"

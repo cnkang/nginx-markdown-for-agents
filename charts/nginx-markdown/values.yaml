@@ -2,8 +2,15 @@
 
 replicaCount: 1
 
+# The runtime image is intentionally NOT defaulted: this chart has no
+# stock-runtime contract (the documented "installable with a stock nginx
+# image" applies only to local smoke with explicit overrides).  Helm
+# refuses to render the Deployment until BOTH image.repository and
+# image.tag are set explicitly, e.g.:
+#   --set image.repository=nginx --set image.tag=1.26.3
+# or the markdown-enabled image your release provides.
 image:
-  repository: nginx-markdown
+  repository: ""
   pullPolicy: IfNotPresent
   tag: ""
 
@@ -93,7 +100,6 @@ markdown:
   # Cache validation mode: off | ims_only | full
   conditionalRequests: "ims_only"
   logVerbosity: "info"
-  bufferChunked: true
   autoDecompress: true
 
   # Absolute load_module path inside the container, for example:
@@ -105,8 +111,6 @@ markdown:
     # Processing-path policy: off | auto | force
     mode: "auto"
     budget: "2m"
-    threshold: "1m"
-    shadow: false
 
   # Noise pruning
   prune:
@@ -117,10 +121,17 @@ markdown:
   # Content-type routing
   contentTypes: []
 
-  # LLM adapter
-  llm:
-    provider: "default"
-    charsPerToken: 0
+  # markdown_limits keys (all optional; omitted keys keep module defaults)
+  limits:
+    # conversionMemory: "10m"
+    # conversionTimeout: "5s"
+    # parserMemory: "32m"
+    # parserTimeout: "10s"
+    # streamingBuffer: "2m"
+    # decompressedSize: "64m"
+    # decompressionRatio: 100
+    # maxInflight: 64
+    {}
 
 # Metrics endpoint
 metrics:
@@ -128,5 +139,19 @@ metrics:
   # provided by the markdown module.
   enabled: false
   uri: "/_markdown_metrics"
-  format: "auto"
   shmSize: "8m"
+  # When sidecar.enabled=true the chart adds a metrics-scraper sidecar
+  # container that fetches the loopback-only metrics endpoint and serves it
+  # on a separate port, so Prometheus scraping does not require the module
+  # to accept non-loopback connections (Rule 13: loopback-only module).
+  sidecar:
+    enabled: false
+    image:
+      # No mutable image default. Set digest (preferred) or an explicit tag
+      # when the sidecar is enabled.
+      repository: ""
+      tag: ""
+      digest: ""
+      pullPolicy: IfNotPresent
+    port: 9113
+    resources: {}

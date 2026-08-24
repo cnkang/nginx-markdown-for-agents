@@ -21,6 +21,10 @@ The repository now follows a **single-source documentation policy**.
 - Feature docs: `docs/features/`
 - Testing docs: `docs/testing/`
 - Project status: `docs/project/`
+- Release notes, release checklists, and release matrices: `docs/releases/`
+- In-flight implementation plans: `docs/development/`
+- Machine-readable evidence artifacts: `docs/evidence/`
+- Deployment and operational reference: `docs/operations/`
 - Repository structure: `docs/architecture/REPOSITORY_STRUCTURE.md`
 
 ## Validation Commands
@@ -32,7 +36,7 @@ python3 tools/docs/check_docs.py
 
 ## Archive Rule
 
-`docs/archive/` is not source-of-truth for active behavior and should not be referenced as current guidance.
+`docs/archive/` is not source-of-truth for active behavior and must not serve as current guidance.
 
 
 ## Document Updates

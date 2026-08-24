@@ -360,7 +360,7 @@ http {
         location /md/reject/ {
             markdown_filter on;
             markdown_error_policy fail_closed;
-            markdown_limits memory=1k timeout=120s;
+            markdown_limits conversion_memory=64k parser_memory=64k streaming_buffer=64k conversion_timeout=120s;
 
             proxy_http_version 1.1;
             proxy_set_header Connection "";
@@ -370,7 +370,7 @@ http {
         # Case 1b: location inherits error_policy pass from http level
         location /md/pass/ {
             markdown_filter on;
-            markdown_limits memory=10m timeout=120s;
+            markdown_limits conversion_memory=10m parser_memory=10m conversion_timeout=120s;
 
             proxy_http_version 1.1;
             proxy_set_header Connection "";
@@ -390,7 +390,7 @@ http {
         location /no-wildcard/ {
             markdown_filter on;
             markdown_accept strict;
-            markdown_limits memory=10m timeout=120s;
+            markdown_limits conversion_memory=10m parser_memory=10m conversion_timeout=120s;
 
             proxy_http_version 1.1;
             proxy_set_header Connection "";
@@ -402,7 +402,7 @@ http {
             markdown_filter on;
             markdown_streaming off;
             markdown_cache_validation full;
-            markdown_limits memory=10m timeout=120s;
+            markdown_limits conversion_memory=10m parser_memory=10m conversion_timeout=120s;
 
             proxy_http_version 1.1;
             proxy_set_header Connection "";
@@ -413,7 +413,7 @@ http {
         location /cond-ims/ {
             markdown_filter on;
             markdown_cache_validation ims_only;
-            markdown_limits memory=10m timeout=120s;
+            markdown_limits conversion_memory=10m parser_memory=10m conversion_timeout=120s;
 
             proxy_http_version 1.1;
             proxy_set_header Connection "";
@@ -424,7 +424,7 @@ http {
         location /flavor/ {
             markdown_filter on;
             markdown_flavor gfm;
-            markdown_limits memory=10m timeout=120s;
+            markdown_limits conversion_memory=10m parser_memory=10m conversion_timeout=120s;
 
             proxy_http_version 1.1;
             proxy_set_header Connection "";

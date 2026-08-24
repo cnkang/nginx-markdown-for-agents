@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime
@@ -13,7 +14,10 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from lib.path_validation import validate_read_path  # noqa: E402,E0401,C0413
+from lib.path_validation import (  # noqa: E402,E0401,C0413
+    validate_read_path,
+    validate_write_path_within_root,
+)
 
 # GitHub treats these check-run conclusions as satisfying a required
 # status check; see
@@ -484,6 +488,51 @@ def _load_json(path: Path) -> Any:
         return json.load(stream)
 
 
+def _write_required_checks(path: Path, checks: list[RequiredCheck], *, branch: str,
+                           tag_sha: str) -> None:
+    """Write the effective required-check enumeration for release records."""
+    if path.is_absolute() or ".." in path.parts:
+        raise ValueError("output paths must be relative and cannot contain '..'")
+
+    safe_path = validate_write_path_within_root(
+        path,
+        Path.cwd(),
+        purpose="required-checks output",
+    )
+    payload = {
+        "schema_version": "release.required-checks.v1",
+        "branch": branch,
+        "tag_sha": tag_sha,
+        "required_checks": [
+            {
+                "context": check.context,
+                "integration_id": check.integration_id,
+            }
+            for check in checks
+        ],
+    }
+    serialized_payload = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+
+    # Anchor the final open to the validated parent directory instead of
+    # passing a user-derived path to a convenience helper.
+    parent_fd = os.open(safe_path.parent, os.O_RDONLY)
+    file_fd = -1
+    try:
+        file_fd = os.open(
+            safe_path.name,
+            os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=parent_fd,
+        )
+        with os.fdopen(file_fd, "w", encoding="utf-8") as stream:
+            file_fd = -1
+            stream.write(serialized_payload)
+    finally:
+        if file_fd != -1:
+            os.close(file_fd)
+        os.close(parent_fd)
+
+
 def main() -> int:
     """Parse workflow inputs and verify the tag commit's required checks."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -499,11 +548,20 @@ def main() -> int:
     )
     parser.add_argument("--tag-sha", required=True)
     parser.add_argument("--branch", required=True)
+    parser.add_argument(
+        "--required-checks-output",
+        type=Path,
+        default=None,
+        help="Optional repository-relative JSON file receiving the effective "
+        "required-check enumeration for release records.",
+    )
     args = parser.parse_args()
 
     try:
+        rules = _load_json(args.rules_file)
+        checks = required_checks(rules)
         errors = validate_required_checks(
-            _load_json(args.rules_file),
+            rules,
             _load_json(args.check_runs_file),
             _load_json(args.statuses_file) if args.statuses_file else None,
             branch=args.branch,
@@ -517,10 +575,33 @@ def main() -> int:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
 
+    if args.required_checks_output is not None:
+        try:
+            _write_required_checks(
+                args.required_checks_output,
+                checks,
+                branch=args.branch,
+                tag_sha=args.tag_sha,
+            )
+        except (OSError, ValueError) as error:
+            print(
+                f"ERROR: Unable to write effective required checks: {error}",
+                file=sys.stderr,
+            )
+            return 1
+
     print(
         f"Tag SHA {args.tag_sha} is contained in protected {args.branch} "
         "and passed all required checks."
     )
+    print("Effective required checks:")
+    for check in checks:
+        source = (
+            f"integration_id={check.integration_id}"
+            if check.integration_id is not None
+            else "integration_id=any"
+        )
+        print(f"- {check.context} ({source})")
     return 0
 
 

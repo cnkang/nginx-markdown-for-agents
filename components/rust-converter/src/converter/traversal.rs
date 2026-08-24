@@ -43,7 +43,12 @@ impl MarkdownConverter {
     /// HTML parsing can split adjacent text and whitespace into multiple nodes.
     /// This helper normalizes node-local content and then reconstructs inter-node
     /// spacing so Markdown tokens are not accidentally concatenated.
-    pub(super) fn write_normalized_text_node(&self, text: &str, output: &mut String) {
+    pub(super) fn write_normalized_text_node(
+        &self,
+        text: &str,
+        output: &mut String,
+        ctx: Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
         let normalized = self.normalize_text(text);
         if normalized.is_empty() {
             if text.chars().all(char::is_whitespace)
@@ -52,7 +57,7 @@ impl MarkdownConverter {
             {
                 output.push(' ');
             }
-            return;
+            return Ok(());
         }
 
         if text.starts_with(char::is_whitespace)
@@ -62,11 +67,16 @@ impl MarkdownConverter {
             output.push(' ');
         }
 
-        output.push_str(&normalized);
+        let escaped = crate::security::escape_markdown_text(&normalized);
+        if let Some(ctx) = ctx {
+            ctx.check_output_budget(output.len() + escaped.len())?;
+        }
+        output.push_str(&escaped);
 
         if text.ends_with(char::is_whitespace) {
             output.push(' ');
         }
+        Ok(())
     }
 
     /// Traverse all child nodes in source order.
@@ -98,12 +108,25 @@ impl MarkdownConverter {
         // Dispatch traversal through the timeout-aware path only when context
         // is present, keeping the no-timeout path allocation-free.
         match ctx {
-            Some(ctx) => self.traverse_node_with_context(node, output, depth, ctx),
+            Some(ctx) => {
+                self.traverse_node_with_context(node, output, depth, ctx)?;
+                ctx.check_output_budget(output.len())
+            }
             None => self.traverse_node(node, output, depth),
         }
     }
 
     /// Internal element dispatcher shared by context and non-context entry points.
+    fn append_escaped_control_text(output: &mut String, text: Option<String>) {
+        if let Some(text) = text {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                output.push_str(&crate::security::escape_markdown_text(trimmed));
+                output.push(' ');
+            }
+        }
+    }
+
     fn handle_void_form_control(&self, node: &Handle, output: &mut String) {
         if let NodeData::Element { ref attrs, .. } = node.data {
             let attrs_borrowed = attrs.borrow();
@@ -121,11 +144,7 @@ impl MarkdownConverter {
                         .find(|a| a.name.local.as_ref() == "value")
                         .map(|a| a.value.to_string())
                 {
-                    let trimmed = value.trim();
-                    if !trimmed.is_empty() {
-                        output.push_str(trimmed);
-                        output.push(' ');
-                    }
+                    Self::append_escaped_control_text(output, Some(value));
                 }
                 return;
             }
@@ -145,13 +164,7 @@ impl MarkdownConverter {
                 })
                 .map(|a| a.value.to_string());
 
-            if let Some(text) = text {
-                let trimmed = text.trim();
-                if !trimmed.is_empty() {
-                    output.push_str(trimmed);
-                    output.push(' ');
-                }
-            }
+            Self::append_escaped_control_text(output, text);
         }
     }
 
@@ -305,7 +318,7 @@ impl MarkdownConverter {
             }
             NodeData::Text { ref contents } => {
                 let text = contents.borrow();
-                self.write_normalized_text_node(text.as_ref(), output);
+                self.write_normalized_text_node(text.as_ref(), output, None)?;
             }
             NodeData::Comment { .. }
             | NodeData::Doctype { .. }
@@ -332,14 +345,14 @@ impl MarkdownConverter {
             }
             NodeData::Text { ref contents } => {
                 let text = contents.borrow();
-                self.write_normalized_text_node(text.as_ref(), output);
+                self.write_normalized_text_node(text.as_ref(), output, Some(ctx))?;
             }
             NodeData::Comment { .. }
             | NodeData::Doctype { .. }
             | NodeData::ProcessingInstruction { .. } => {}
         }
 
-        Ok(())
+        ctx.check_output_budget(output.len())
     }
 
     /// Handle an HTML element and convert it to Markdown.
@@ -403,7 +416,7 @@ impl MarkdownConverter {
     /// [`crate::security::escape_link_label`] so all label-escaping sites
     /// share a single implementation (AGENTS.md Rule 27).
     pub(super) fn escape_link_label(label: &str) -> String {
-        crate::security::escape_link_label(label)
+        crate::security::escape_link_label(label).into_owned()
     }
 
     /// Emit a Markdown link `[label](url)\n` into `output`.
@@ -430,7 +443,7 @@ impl MarkdownConverter {
     ) {
         let label = label_candidates
             .iter()
-            .filter_map(|opt| opt.map(|s| s.trim()).filter(|s| !s.is_empty()))
+            .filter_map(|opt| opt.map(str::trim).filter(|s| !s.is_empty()))
             .next()
             .unwrap_or(fallback_label);
         let escaped_label = Self::escape_link_label(label);

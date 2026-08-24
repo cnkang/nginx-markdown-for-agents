@@ -49,6 +49,7 @@ typedef struct {
     ngx_flag_t        has_private;
     ngx_flag_t        any_public;
     ngx_flag_t        malformed;
+    size_t             header_count;
 } ngx_http_markdown_cc_scan_t;
 
 typedef struct {
@@ -58,6 +59,11 @@ typedef struct {
     const u_char  *name_end;
     ngx_flag_t     has_value;
 } ngx_http_markdown_cc_directive_t;
+
+typedef struct {
+    ngx_table_elt_t  *entry;
+    ngx_str_t         value;
+} ngx_http_markdown_cc_update_t;
 
 static ngx_int_t ngx_http_markdown_cookie_matches_pattern(
     const ngx_str_t *cookie_name,
@@ -85,12 +91,14 @@ static ngx_flag_t ngx_http_markdown_token_equals_ignore_case(
     const u_char *left, const u_char *right, size_t len);
 static ngx_flag_t ngx_http_markdown_is_cache_control_header(
     const ngx_table_elt_t *header);
+static ngx_int_t ngx_http_markdown_prepare_append_private_value(
+    ngx_http_request_t *r, const ngx_str_t *source, ngx_str_t *prepared);
+static ngx_int_t ngx_http_markdown_prepare_strip_public_value(
+    ngx_http_request_t *r, const ngx_str_t *source, ngx_str_t *prepared);
 static void ngx_http_markdown_scan_cache_control_headers(
     ngx_list_t *headers, ngx_http_markdown_cc_scan_t *scan);
 static ngx_int_t ngx_http_markdown_rewrite_public_entries(
-    ngx_http_request_t *r, ngx_list_t *headers);
-static ngx_int_t ngx_http_markdown_ensure_private_on_entry(
-    ngx_http_request_t *r, ngx_table_elt_t *entry);
+    ngx_http_request_t *r, ngx_list_t *headers, size_t header_count);
 static ngx_int_t ngx_http_markdown_replace_malformed_cache_control(
     ngx_http_request_t *r, ngx_list_t *headers,
     ngx_table_elt_t *first_entry);
@@ -130,77 +138,54 @@ ngx_http_markdown_add_private_cache_control_header(ngx_http_request_t *r)
     return NGX_OK;
 }
 
-/*
- * Append ", private" to an existing Cache-Control header value.
- *
- * Allocates a new buffer in the request pool, copies the existing value
- * plus the ", private" suffix, and updates the header's value pointer
- * and length. The old value is not freed (it remains in the pool).
- *
- * Parameters:
- *   r             - the HTTP request (pool used for allocation)
- *   cache_control - the Cache-Control header entry to modify
- *
- * Returns:
- *   NGX_OK    - directive appended successfully
- *   NGX_ERROR - allocation failed or length overflow
- */
+/* Prepare ", private" without changing the source header. */
 static ngx_int_t
-ngx_http_markdown_append_private_directive(ngx_http_request_t *r,
-                                           ngx_table_elt_t *cache_control)
+ngx_http_markdown_prepare_append_private_value(ngx_http_request_t *r,
+                                                const ngx_str_t *source,
+                                                ngx_str_t *prepared)
 {
     u_char  *new_value;
     size_t   new_len;
 
-    if (cache_control->value.len == 0) {
-        cache_control->value.data = ngx_http_markdown_cc_private;
-        cache_control->value.len = sizeof(ngx_http_markdown_cc_private) - 1;
-        return NGX_OK;
-    }
-
-    if (cache_control->value.len > ((size_t) -1) - (sizeof(ngx_http_markdown_cc_suffix_private) - 1)) {
+    if (r == NULL || source == NULL || prepared == NULL
+        || (source->len != 0 && source->data == NULL))
+    {
         return NGX_ERROR;
     }
 
-    new_len = cache_control->value.len + sizeof(ngx_http_markdown_cc_suffix_private) - 1;
+    if (source->len == 0) {
+        prepared->data = ngx_http_markdown_cc_private;
+        prepared->len = sizeof(ngx_http_markdown_cc_private) - 1;
+        return NGX_OK;
+    }
+
+    if (source->len > ((size_t) -1)
+        - (sizeof(ngx_http_markdown_cc_suffix_private) - 1))
+    {
+        return NGX_ERROR;
+    }
+
+    new_len = source->len + sizeof(ngx_http_markdown_cc_suffix_private) - 1;
     new_value = ngx_pnalloc(r->pool, new_len);
     if (new_value == NULL) {
         return NGX_ERROR;
     }
 
-    ngx_memcpy(new_value, cache_control->value.data, cache_control->value.len);
-    ngx_memcpy(new_value + cache_control->value.len,
+    ngx_memcpy(new_value, source->data, source->len);
+    ngx_memcpy(new_value + source->len,
                ngx_http_markdown_cc_suffix_private,
                sizeof(ngx_http_markdown_cc_suffix_private) - 1);
 
-    cache_control->value.data = new_value;
-    cache_control->value.len = new_len;
-
-    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown: added private to Cache-Control: \"%V\"",
-                  &cache_control->value);
-
+    prepared->data = new_value;
+    prepared->len = new_len;
     return NGX_OK;
 }
 
-/*
- * Remove "public" token from Cache-Control and append "private".
- *
- * Rebuilds the Cache-Control value by tokenizing it, skipping any
- * "public" token, copying all other tokens, and appending "private".
- * Allocates a new buffer up to 2x original length + suffix length.
- *
- * Parameters:
- *   r             - the HTTP request (pool used for allocation, logging)
- *   cache_control - the Cache-Control header entry to modify
- *
- * Returns:
- *   NGX_OK    - Cache-Control rebuilt successfully
- *   NGX_ERROR - allocation failed
- */
+/* Prepare a public-to-private rewrite without changing the source header. */
 static ngx_int_t
-ngx_http_markdown_strip_public_and_append_private(ngx_http_request_t *r,
-                                                  ngx_table_elt_t *cache_control)
+ngx_http_markdown_prepare_strip_public_value(ngx_http_request_t *r,
+                                              const ngx_str_t *source,
+                                              ngx_str_t *prepared)
 {
     u_char         *new_value;
     size_t          new_len;
@@ -212,18 +197,33 @@ ngx_http_markdown_strip_public_and_append_private(ngx_http_request_t *r,
     ngx_flag_t      wrote_token;
     ngx_int_t       rc;
 
-    if (cache_control->value.len > (((size_t) -1) - (sizeof(ngx_http_markdown_cc_suffix_private) - 1)) / 2) {
+    if (r == NULL || source == NULL || prepared == NULL
+        || (source->len != 0 && source->data == NULL))
+    {
         return NGX_ERROR;
     }
 
-    new_len = (cache_control->value.len * 2) + (sizeof(ngx_http_markdown_cc_suffix_private) - 1);
+    if (source->len == 0) {
+        prepared->data = ngx_http_markdown_cc_private;
+        prepared->len = sizeof(ngx_http_markdown_cc_private) - 1;
+        return NGX_OK;
+    }
+
+    if (source->len > (((size_t) -1)
+                       - (sizeof(ngx_http_markdown_cc_suffix_private) - 1)) / 2)
+    {
+        return NGX_ERROR;
+    }
+
+    new_len = (source->len * 2)
+              + (sizeof(ngx_http_markdown_cc_suffix_private) - 1);
     new_value = ngx_pnalloc(r->pool, new_len);
     if (new_value == NULL) {
         return NGX_ERROR;
     }
 
-    p = (const u_char *) cache_control->value.data;
-    end = p + cache_control->value.len;
+    p = source->data;
+    end = p + source->len;
     dst = new_value;
     wrote_token = 0;
 
@@ -237,13 +237,15 @@ ngx_http_markdown_strip_public_and_append_private(ngx_http_request_t *r,
             return NGX_ERROR;
         }
 
-        if (ngx_http_markdown_cache_control_token_is_public(
-                token_start, token_end))
+        if (token_start == NULL || token_end == NULL
+            || token_end <= token_start)
         {
             continue;
         }
 
-        if (token_end <= token_start) {
+        if (ngx_http_markdown_cache_control_token_is_public(
+                token_start, token_end))
+        {
             continue;
         }
 
@@ -264,11 +266,29 @@ ngx_http_markdown_strip_public_and_append_private(ngx_http_request_t *r,
                      ngx_http_markdown_cc_private,
                      sizeof(ngx_http_markdown_cc_private) - 1);
 
-    cache_control->value.data = new_value;
-    cache_control->value.len = (size_t) (dst - new_value);
+    prepared->data = new_value;
+    prepared->len = (size_t) (dst - new_value);
+    return NGX_OK;
+}
+
+/* Append a prepared private directive to one header entry. */
+static ngx_int_t
+ngx_http_markdown_append_private_directive(ngx_http_request_t *r,
+                                           ngx_table_elt_t *cache_control)
+{
+    ngx_str_t  prepared;
+
+    if (cache_control == NULL
+        || ngx_http_markdown_prepare_append_private_value(
+               r, &cache_control->value, &prepared) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    cache_control->value = prepared;
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown: upgraded Cache-Control from public to private: \"%V\"",
+                  "markdown: added private to Cache-Control: \"%V\"",
                   &cache_control->value);
 
     return NGX_OK;
@@ -1199,105 +1219,115 @@ ngx_http_markdown_scan_cache_control_headers(ngx_list_t *headers,
     scan->has_private = 0;
     scan->any_public = 0;
     scan->malformed = 0;
+    scan->header_count = 0;
 
     part = &headers->part;
     for (/* void */; part != NULL; part = part->next) {
         elts = part->elts;
         for (size_t i = 0; i < part->nelts; i++) {
-            if (ngx_http_markdown_is_cache_control_header(&elts[i])) {
-                ngx_http_markdown_scan_cc_header(&elts[i], scan);
+            if (!ngx_http_markdown_is_cache_control_header(&elts[i])) {
+                continue;
             }
+            if (scan->header_count == (size_t) -1) {
+                scan->malformed = 1;
+                continue;
+            }
+            scan->header_count++;
+            ngx_http_markdown_scan_cc_header(&elts[i], scan);
         }
     }
 }
 
 /*
- * Ensure a single Cache-Control entry has the private directive.
+ * Prepare all Cache-Control rewrites before committing any header mutation.
  *
- * If the entry contains "public", strips it and appends "private".
- * Otherwise, if it lacks "private", appends ", private".
- * Entries that already contain "private" are left unchanged.
- *
- * Parameters:
- *   r     - the HTTP request (pool used for allocation, logging)
- *   entry - the Cache-Control header entry to modify
- *
- * Returns:
- *   NGX_OK    - entry updated or already correct
- *   NGX_ERROR - allocation failed
- */
-static ngx_int_t
-ngx_http_markdown_ensure_private_on_entry(ngx_http_request_t *r,
-                                          ngx_table_elt_t *entry)
-{
-    ngx_int_t  rc;
-
-    if (ngx_http_markdown_cache_control_has_directive(
-            &entry->value, &ngx_http_markdown_public_directive))
-    {
-        rc = ngx_http_markdown_strip_public_and_append_private(r, entry);
-        return rc;
-    }
-
-    if (ngx_http_markdown_cache_control_has_directive(
-            &entry->value, &ngx_http_markdown_private_directive))
-    {
-        return NGX_OK;
-    }
-
-    rc = ngx_http_markdown_append_private_directive(r, entry);
-    return rc;
-}
-
-/*
- * Rewrite all Cache-Control entries that contain "public" to use "private".
- *
- * Iterates the NGINX header linked list.  For each Cache-Control entry
- * that contains "public", strips it and appends "private".  For entries
- * that lack both "public" and "private", appends ", private".
- *
- * Parameters:
- *   r       - the HTTP request (pool used for allocation, logging)
- *   headers - the outgoing headers list to rewrite
- *
- * Returns:
- *   NGX_OK    - all entries updated successfully
- *   NGX_ERROR - allocation failed on any entry
- */
-/*
- * Trampoline that adapts the 2-arg ensure_private_on_entry to the
- * 3-arg ngx_http_markdown_cc_visitor_t signature (ctx is unused).
- */
-static ngx_int_t
-ngx_http_markdown_ensure_private_visitor(ngx_http_request_t *r,
-    ngx_table_elt_t *entry, void *ctx)
-{
-    (void) ctx;
-    return ngx_http_markdown_ensure_private_on_entry(r, entry);
-}
-
-
-/*
- * Rewrite all Cache-Control entries that contain "public" to use "private".
- *
- * Iterates the NGINX header linked list.  For each Cache-Control entry
- * that contains "public", strips it and appends "private".  For entries
- * that lack both "public" and "private", appends ", private".
- *
- * Parameters:
- *   r       - the HTTP request (pool used for allocation, logging)
- *   headers - the outgoing headers list to rewrite
- *
- * Returns:
- *   NGX_OK    - all entries updated successfully
- *   NGX_ERROR - allocation failed on any entry
+ * A request may contain more than one Cache-Control field.  Pool allocation
+ * can fail while preparing a later field, so this function keeps the original
+ * values intact until every replacement has been allocated successfully.
  */
 static ngx_int_t
 ngx_http_markdown_rewrite_public_entries(ngx_http_request_t *r,
-                                         ngx_list_t *headers)
+                                         ngx_list_t *headers,
+                                         size_t header_count)
 {
-    return ngx_http_markdown_for_each_cache_control_header(r, headers,
-        ngx_http_markdown_ensure_private_visitor, NULL);
+    ngx_http_markdown_cc_update_t  *updates;
+    ngx_list_part_t                *part;
+    ngx_table_elt_t                *elts;
+    size_t                          visited_count;
+    size_t                          update_count;
+    size_t                          i;
+    ngx_int_t                       rc;
+
+    if (r == NULL || headers == NULL || header_count == 0
+        || header_count > ((size_t) -1)
+                          / sizeof(ngx_http_markdown_cc_update_t))
+    {
+        return NGX_ERROR;
+    }
+
+    updates = ngx_pnalloc(
+        r->pool, header_count * sizeof(ngx_http_markdown_cc_update_t));
+    if (updates == NULL) {
+        return NGX_ERROR;
+    }
+
+    visited_count = 0;
+    update_count = 0;
+
+    part = &headers->part;
+    for (/* void */; part != NULL; part = part->next) {
+        elts = part->elts;
+        for (i = 0; i < part->nelts; i++) {
+            if (!ngx_http_markdown_is_cache_control_header(&elts[i])) {
+                continue;
+            }
+
+            if (visited_count == (size_t) -1) {
+                return NGX_ERROR;
+            }
+            visited_count++;
+
+            if (update_count >= header_count) {
+                return NGX_ERROR;
+            }
+
+            if (ngx_http_markdown_cache_control_has_directive(
+                    &elts[i].value, &ngx_http_markdown_public_directive))
+            {
+                rc = ngx_http_markdown_prepare_strip_public_value(
+                    r, &elts[i].value, &updates[update_count].value);
+            } else if (ngx_http_markdown_cache_control_has_directive(
+                           &elts[i].value,
+                           &ngx_http_markdown_private_directive))
+            {
+                continue;
+            } else {
+                rc = ngx_http_markdown_prepare_append_private_value(
+                    r, &elts[i].value, &updates[update_count].value);
+            }
+
+            if (rc != NGX_OK) {
+                return rc;
+            }
+
+            updates[update_count].entry = &elts[i];
+            update_count++;
+        }
+    }
+
+    if (visited_count != header_count) {
+        return NGX_ERROR;
+    }
+
+    for (i = 0; i < update_count; i++) {
+        updates[i].entry->value = updates[i].value;
+        ngx_log_debug1(
+            NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+            "markdown: normalized public Cache-Control: \"%V\"",
+            &updates[i].entry->value);
+    }
+
+    return NGX_OK;
 }
 
 /*
@@ -1402,7 +1432,7 @@ ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
                           "while preserving no-store");
         }
         return ngx_http_markdown_rewrite_public_entries(
-                   r, &r->headers_out.headers);
+                   r, &r->headers_out.headers, scan.header_count);
     }
 
     /*

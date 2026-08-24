@@ -11,7 +11,7 @@ established in [ADR-0001](0001-use-rust-for-conversion.md). As the project
 matured through v0.5.0 and v0.6.x, the boundary remained largely static: Rust
 owned HTML→Markdown conversion while C owned everything else.
 
-In v0.7.0, several new capabilities are required—Accept negotiation, conditional
+In v0.7.0, several new capabilities become required—Accept negotiation, conditional
 request handling, URL/Host validation, a decision engine, header plan
 construction, and reason-code/metrics normalization. These are all pure logic
 with no dependency on NGINX APIs, making them natural candidates for Rust
@@ -22,14 +22,14 @@ buffer hardening, output ordering) highlighted that the FFI boundary needs
 stronger contracts: explicit struct initialization helpers, CI-enforced header
 drift checks, and layout tests.
 
-The question: should new pure logic continue to be implemented in C (closer to
-NGINX), or should the project adopt a deliberate "Rust-first" strategy for all
-new logic that does not require NGINX API access?
+The project must decide whether to continue implementing new pure logic in C
+(closer to NGINX) or adopt a deliberate "Rust-first" strategy for logic that
+does not require NGINX API access.
 
 ## Decision
 
-In v0.7.0, the project adopts a **Rust-first** strategy: all new pure logic is
-implemented in Rust and exposed to the C module via FFI. The C side retains only
+In v0.7.0, the project adopts a **Rust-first** strategy: all new pure logic
+lives in Rust and the C module consumes it via FFI. The C side retains only
 NGINX-coupled responsibilities.
 
 ### C Side Retains
@@ -84,42 +84,47 @@ NGINX-coupled responsibilities.
 6. C must not parse Rust error text
 7. Worker request path must not contain hidden blocking operations
 8. All cross-boundary structs use `repr(C)`
-9. New FFI fields are appended to struct tail (non-breaking ABI change)
+9. New FFI fields append to struct tail (non-breaking ABI change only for
+   prefix-based usage. By-value calls, caller-allocated instances, and arrays
+   are not compatible because tail appends change `sizeof`)
 
 ## Consequences
 
 ### Positive Consequences
 
 - **Testability**: Pure Rust logic is trivially unit-testable without NGINX
-  infrastructure; property-based tests cover negotiation and decision paths.
+  infrastructure, property-based tests cover negotiation and decision paths.
 - **Safety**: Memory-safe Rust eliminates classes of bugs in parsing, validation,
   and decision logic.
-- **Single source of truth**: Reason codes, error categories, and decision logic
-  have one canonical definition—no C/Rust semantic forks.
+- **Single source of truth**: At the time of this v0.7.0 decision, the Rust
+  projection owned reason codes, error categories, and decision logic. The
+  current canonical reason source is
+  `components/rust-converter/reason_registry.toml`; generated Rust and C
+  projections prevent C/Rust semantic forks (see ADR-0018).
 - **CI enforcement**: Header drift checks and layout tests catch ABI
   incompatibilities before merge.
-- **Incremental migration**: Existing stable FFI functions remain unchanged;
+- **Incremental migration**: Existing stable FFI functions remain unchanged,
   new functions are additive.
 
 ### Negative Consequences
 
-- **FFI surface growth**: More FFI functions and structs to maintain; mitigated
+- **FFI surface growth**: More FFI functions and structs to maintain, mitigated
   by helper constructors and CI drift checks.
-- **Build dependency**: All contributors need the Rust toolchain; mitigated by
+- **Build dependency**: All contributors need the Rust toolchain, mitigated by
   existing CI infrastructure.
 - **Coordination cost**: C and Rust changes for the same feature must land
-  together; mitigated by Rule 15 (FFI cross-language boundary) enforcement.
-- **Debugging complexity**: Cross-language stack traces are harder to read;
+  together, mitigated by Rule 15 (FFI cross-language boundary) enforcement.
+- **Debugging complexity**: Cross-language stack traces are harder to read,
   mitigated by structured logging at the FFI boundary.
 
 ## Alternatives Considered
 
 ### Keep Pure Logic in C
 
-**Pros:** No FFI overhead for new functions; single-language debugging.
+**Pros:** No FFI overhead for new functions, single-language debugging.
 
-**Cons:** Loses memory safety for parsing/validation; harder to test without
-NGINX; duplicates logic that Rust already handles well.
+**Cons:** Loses memory safety for parsing/validation, harder to test without
+NGINX, duplicates logic that Rust already handles well.
 
 **Why not chosen:** The v0.5.0–v0.6.x experience showed that C-side pure logic
 accumulates subtle bugs (buffer overflows, missing error paths) that Rust's type
@@ -129,8 +134,8 @@ system prevents at compile time.
 
 **Pros:** Maximizes Rust safety coverage.
 
-**Cons:** Requires unsafe Rust wrappers around all NGINX APIs; loses NGINX
-idiom familiarity; massive migration scope.
+**Cons:** Requires unsafe Rust wrappers around all NGINX APIs, loses NGINX
+idiom familiarity, massive migration scope.
 
 **Why not chosen:** NGINX API usage is inherently unsafe and C-idiomatic. The
 cost of wrapping every NGINX function in safe Rust abstractions exceeds the

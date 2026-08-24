@@ -1,0 +1,185 @@
+name: Nightly Observation
+
+on:
+  schedule:
+    - cron: '0 4 * * *'  # 04:00 UTC daily
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  full-suite:
+    name: Full Test Suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.97.1
+          components: rustfmt,clippy
+
+      - name: Set up nightly toolchain for fuzz smoke
+        run: rustup toolchain install nightly --profile minimal
+        shell: bash
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14.6'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential libbrotli-dev pkg-config zlib1g-dev clang lcov
+          python3 -m pip install -r requirements-dev.txt
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: |
+            components/rust-converter -> target
+          cache-bin: false
+
+      - name: Run Rust test suite
+        run: make test-rust
+
+      - name: Run NGINX C unit test suite
+        run: make test-nginx-unit
+
+      - name: Run coverage gates
+        run: |
+          make coverage-rust
+          make coverage-c
+
+      - name: Run fuzz smoke
+        run: make test-rust-fuzz-smoke
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nightly-coverage
+          path: |
+            coverage/rust-coverage.lcov
+            coverage/c-coverage.lcov
+          if-no-files-found: ignore
+          retention-days: 30
+
+  sanitizer:
+    name: Sanitizer ${{ matrix.row_id }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        row_id: [asan-ubsan, lsan, msan]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve sanitizer matrix row
+        id: row
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          with open("release/scope/sanitizer-support-matrix.json", encoding="utf-8") as handle:
+              matrix = json.load(handle)
+          row_id = os.environ["ROW_ID"]
+          rows = matrix.get("rows", [])
+          row = next((r for r in rows if r.get("row_id") == row_id), None)
+          if row is None:
+              raise SystemExit(f"matrix row {row_id!r} not found in release/scope/sanitizer-support-matrix.json")
+          expected_ci = {
+              "workflow": ".github/workflows/nightly-observation.yml",
+              "job": "sanitizer",
+              "matrix_key": "row_id",
+          }
+          if row.get("ci") != expected_ci:
+              raise SystemExit(f"sanitizer row {row_id!r} has invalid CI binding")
+          expected_commands = {
+              "asan-ubsan": "make test-nginx-unit-sanitize-smoke",
+              "lsan": "ASAN_OPTIONS=detect_leaks=1 make test-nginx-unit-sanitize-smoke",
+          }
+          if row.get("blocking") is True and row.get("command") != expected_commands.get(row_id):
+              raise SystemExit(f"unexpected command for blocking row {row_id!r}")
+          if not isinstance(row.get("blocking"), bool):
+              raise SystemExit(f"sanitizer row {row_id!r} blocking must be boolean")
+          def _safe_output(value: object) -> str:
+              # GITHUB_OUTPUT is a single key=value line per entry; any
+              # embedded newline would corrupt the key=value framing.
+              # Missing metadata (None) becomes an empty value so downstream
+              # -z checks still detect absent justifications.
+              if value is None:
+                  return ""
+              return str(value).replace("\n", " ").replace("\r", " ")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"blocking={'true' if row['blocking'] else 'false'}\n")
+              output.write(f"skip_reason={_safe_output(row.get('skip_reason', ''))}\n")
+              output.write(f"policy_reference={_safe_output(row.get('policy_reference', ''))}\n")
+              output.write(f"sanitize_type={','.join(row.get('sanitizer', []))}\n")
+              output.write(f"platform={row.get('platform', '')}\n")
+              output.write(f"compiler={row.get('compiler', '')}\n")
+          PY
+        env:
+          ROW_ID: ${{ matrix.row_id }}
+        shell: bash
+
+      - name: Verify non-blocking row has justified skip
+        if: steps.row.outputs.blocking == 'false'
+        env:
+          SKIP_REASON: ${{ steps.row.outputs.skip_reason }}
+          POLICY_REFERENCE: ${{ steps.row.outputs.policy_reference }}
+        run: |
+          if [[ -z "${SKIP_REASON}" ]]; then
+            echo "ERROR: non-blocking sanitizer row must carry an explicit skip_reason" >&2
+            exit 1
+          fi
+          if [[ -z "${POLICY_REFERENCE}" ]]; then
+            echo "ERROR: non-blocking sanitizer row must carry a policy_reference" >&2
+            exit 1
+          fi
+          printf 'SKIP (justified): %s\n' "${SKIP_REASON}"
+          printf 'policy_reference: %s\n' "${POLICY_REFERENCE}"
+        shell: bash
+
+      - name: Install sanitizer build dependencies
+        if: steps.row.outputs.blocking == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang libbrotli-dev pkg-config zlib1g-dev
+        shell: bash
+
+      - name: Run blocking sanitizer row
+        if: steps.row.outputs.blocking == 'true'
+        env:
+          SANITIZER_ROW_ID: ${{ matrix.row_id }}
+        run: |
+          case "${SANITIZER_ROW_ID}" in
+            asan-ubsan)
+              make test-nginx-unit-sanitize-smoke
+              ;;
+            lsan)
+              ASAN_OPTIONS=detect_leaks=1 make test-nginx-unit-sanitize-smoke
+              ;;
+            *)
+              echo "ERROR: unexpected blocking sanitizer row_id '${SANITIZER_ROW_ID}'" >&2
+              exit 1
+              ;;
+          esac
+        shell: bash

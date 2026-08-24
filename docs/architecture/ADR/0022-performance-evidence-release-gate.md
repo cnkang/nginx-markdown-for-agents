@@ -17,11 +17,13 @@ Add `evidence_gate.py` as the formal release gate for 0.9.1.
 - **Blocking mode** (`make release-gates-check-091`): Required for release tags.
 
 ### Performance Thresholds
-The gate fails if the following are exceeded compared to the 0.9.0 baseline:
+The latency, TTFB, and memory thresholds are relative to the recorded 0.9.0
+baseline. The streaming fallback rate is an absolute cap, not a percentage
+relative to a baseline:
 - **p50 latency**: ≤ +10%
 - **p95 latency**: ≤ +15%
 - **TTFB**: ≤ +10%
-- **Streaming fallback rate**: ≤ 5%
+- **Streaming fallback rate**: ≤ 5% absolute. Numerator: streaming responses that emit `fallback_to_buffered` or `fallback_to_full_buffer`. Denominator: responses that actually attempted streaming (selected the streaming engine via `markdown_streaming auto|force` and passed the pre-attempt hard gates). Excluded: responses that never attempted streaming — routed directly to full-buffer by `markdown_streaming off`, profile, decision-chain `not_eligible`, or a pre-attempt hard gate such as `markdown_cache_validation full` (which blocks streaming before any attempt). Measurement window: per benchmark scenario run. Aggregation: per streaming-attempted response (not per chunk or attempt). The window combines results by summing numerator and denominator across all iterations within a scenario before computing the rate.
 - **Memory slope**: ≤ +20%
 
 ### Tooling
@@ -38,7 +40,7 @@ The gate fails if the following are exceeded compared to the 0.9.0 baseline:
   `decompression_streaming_total > 0` per codec.  The `gzip-large` scenario
   separately verifies the full-buffer gzip decompression path
   (`decompression_fullbuffer_total > 0`).
-- **Diagnostics**: `tools/perf/doctor_advice.py` provides operator diagnostics when thresholds are breached.
+- **Diagnostics**: `tools/perf/doctor_advice.py` provides operator diagnostics when thresholds get breached.
 
 ## Consequences
 
@@ -47,9 +49,18 @@ The gate fails if the following are exceeded compared to the 0.9.0 baseline:
 - Provides an evidence pack (benchmark tiers, decompression coverage, fallback rate, memory slope) for every release.
 
 ### Negative Consequences
-- Blocking RC/release-tag mode requires a module-enabled `NGINX_BIN`; the
+- Blocking RC/release-tag mode requires a module-enabled `NGINX_BIN`. The
   development-only skip is not release evidence.
 - Increases the time required for the final release check.
+
+### Toolchain Security
+- All external helpers executed by the benchmark harness and the evidence gate
+  (`bash`, `git`, `curl`, `python3`, `ps`, `awk`, `cat`, `cp`, `cut`, `head`, `mkdir`,
+  `mktemp`, `rm`, `sleep`, `tr`, `uname`, `wc`, `date`, and the load generator)
+  pass through a trusted-root resolver that returns approved absolute paths.
+  The harness and gate never invoke a bare PATH-shadowable executable, so
+  evidence cannot come from a hijacked binary.  The toolchain paths appear in
+  the report and evidence pack.
 
 ## Alternatives Considered
 - **Microbenchmarks (Criterion/etc)**: Rejected because they fail to capture NGINX's interaction with the OS network stack and pool management.

@@ -6,7 +6,7 @@
 //! 2. Non-auth request retains upstream Cache-Control: public
 //! 3. markdown_auth_policy deny rejects conversion for auth requests
 //! 4. markdown_auth_cookies pattern matching (session_* regex)
-//! 5. Auth fail-open preserves Cache-Control from upstream
+//! 5. Authenticated normal response has Cache-Control
 //! 6. Non-auth ETag replacement
 //! 7. Vary: Cookie in auth response
 
@@ -48,7 +48,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
     case2_noauth_public(&md_url, &markdown_headers, &mut assertions);
     case3_deny_policy(&md_deny_url, &auth_headers, &mut assertions);
     case4_nonmatching_cookie(&md_url, &nonmatching_cookie_headers, &mut assertions);
-    case5_auth_fail_open_cache_control(&md_url, &auth_headers, &mut assertions);
+    case5_auth_cache_control_presence(&md_url, &auth_headers, &mut assertions);
     case6_nonauth_etag_replacement(&md_url, &markdown_headers, &mut assertions);
     case7_vary_cookie(&md_url, &auth_headers, &mut assertions);
 
@@ -167,10 +167,11 @@ fn case4_nonmatching_cookie(
     }
 }
 
-/// Case 5: auth fail-open behavior, asserting `Cache-Control` header is still present.
+/// Case 5: authenticated responses include a `Cache-Control` header.
 ///
-/// Uses `url`, `auth_headers`, and appends header-presence assertion details.
-fn case5_auth_fail_open_cache_control(
+/// This ordinary authenticated response check does not exercise conversion
+/// failure or fail-open behavior.
+fn case5_auth_cache_control_presence(
     url: &str,
     auth_headers: &HashMap<String, String>,
     assertions: &mut Vec<AssertionResult>,
@@ -179,14 +180,14 @@ fn case5_auth_fail_open_cache_control(
         url,
         auth_headers,
         assertions,
-        "case5_auth_preserves_cache_control",
+        "case5_auth_cache_control_presence",
     ) {
         let auth_cc = common::header_value(&resp.headers, "Cache-Control");
         let has_cc = !auth_cc.is_empty();
         assertions.push(AssertionResult {
-            name: "case5_auth_preserves_cache_control".to_string(),
+            name: "case5_auth_cache_control_presence".to_string(),
             passed: has_cc,
-            expected: "Cache-Control header present".to_string(),
+            expected: "Cache-Control header present for authenticated response".to_string(),
             actual: if has_cc {
                 auth_cc.clone()
             } else {

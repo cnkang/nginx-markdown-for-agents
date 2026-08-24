@@ -27,8 +27,8 @@ compiler/toolchain behavior that cannot be meaningfully expressed in Rust.
 ### 1. NGINX Module Glue and Lifecycle Hooks
 
 **Why C:** NGINX module registration, phase handler installation, filter chain
-wiring, and request lifecycle callbacks are expressed entirely through NGINX C
-APIs (`ngx_http_module_t`, `ngx_command_t`, `ngx_http_top_header_filter`,
+wiring, and request lifecycle callbacks use NGINX C
+APIs exclusively (`ngx_http_module_t`, `ngx_command_t`, `ngx_http_top_header_filter`,
 `ngx_http_top_body_filter`). These APIs have no Rust equivalent in this
 codebase. Testing them requires direct access to NGINX stub structures
 (`ngx_http_request_t`, `ngx_http_core_module`, `ngx_cycle_t`) that are only
@@ -47,7 +47,6 @@ available in C.
 | `unit/head_request_test.c` | HEAD request handling in the filter, body suppression semantics |
 | `unit/passthrough_test.c` | Pass-through (non-conversion) path, `NGX_DECLINED` semantics in the filter chain |
 | `unit/decision_log_test.c` | Decision log formatting and reason code emission via `ngx_log_error` |
-| `unit/otel_impl_test.c` | OpenTelemetry integration implementation within the NGINX module |
 | `unit/protocol_correctness_test.c` | HTTP protocol correctness in filter responses (status, headers, body ordering) |
 | `unit/reason_code_test.c` | Reason code string definitions and accessor functions used by `ngx_http_markdown_log_decision()` |
 | `integration/nginx_runtime_integration_test.c` | Module load, config apply, and request lifecycle against a real NGINX stub runtime |
@@ -56,13 +55,13 @@ available in C.
 
 ### 2. Configuration Parsing and Merge Logic
 
-**Why C:** NGINX configuration is parsed and merged through NGINX C APIs
+**Why C:** NGINX parses and merges configuration through NGINX C APIs
 (`ngx_conf_t`, `ngx_command_t`, `ngx_conf_merge_value`, `ngx_conf_set_*_slot`).
 The merge semantics — how `http {}`, `server {}`, and `location {}` blocks
 inherit and override values — are NGINX-internal behavior. Testing them requires
 constructing `ngx_conf_t` and `ngx_http_*_conf_t` structures directly in C.
 The dynconf (dynamic configuration) subsystem also operates on NGINX pool
-memory and must be tested at the C level.
+memory, so its tests must run at the C level.
 
 **Concrete examples:**
 
@@ -127,13 +126,16 @@ smoke check that the test harness itself is functional — must remain in C.
 
 ### 5. ABI and FFI Boundary Validation
 
-**Why C:** The Rust converter is linked into the NGINX module as a C-callable
+**Why C:** The Rust converter links into the NGINX module as a C-callable
 library. The ABI boundary — the `#[repr(C)]` structs, function signatures, and
-memory ownership contracts defined in `markdown_converter.h` — must be
-validated from the C side. This includes verifying that the header compiles
+memory ownership contracts defined in `markdown_converter.h` — must validate
+from the C side. This includes verifying that the header compiles
 cleanly, that struct layouts match expectations, and that the C module correctly
-handles all FFI error codes and result fields. These checks require C
-compilation and cannot be expressed in Rust without circular dependency.
+handles all FFI error codes and result fields. The C-compilation requirement
+here covers only `markdown_converter.h` compatibility and the C
+module's handling of FFI error codes and result fields — it does not require
+compiling Rust code from the C side. These checks require C
+compilation. Rust cannot express them without a circular dependency.
 
 **Concrete examples:**
 
@@ -148,11 +150,12 @@ compilation and cannot be expressed in Rust without circular dependency.
 
 **Why C:** The metrics subsystem is built on NGINX shared memory zones
 (`ngx_shm_zone_t`), NGINX atomic types (`ngx_atomic_t`), and a C struct
-(`ngx_http_markdown_metrics_t`) that is laid out in shared memory. The
-Prometheus, JSON, and plain-text renderers operate directly on this struct.
-Testing metrics correctness — counter increments, snapshot isolation, format
-rendering, SHM layout compatibility — requires direct access to these C
-structures and NGINX SHM APIs.
+(`ngx_http_markdown_metrics_t`) that is laid out in shared memory. The frozen
+metrics format selection is Prometheus-only, and the endpoint renders that
+Prometheus text directly from the C structures. Testing metrics correctness —
+counter increments, snapshot isolation, Prometheus rendering, and SHM layout
+compatibility — requires direct access to these C structures and NGINX SHM
+APIs.
 
 **Concrete examples:**
 
@@ -161,8 +164,8 @@ structures and NGINX SHM APIs.
 | `unit/metrics_collection_test.c` | Metrics counter increment paths via `NGX_HTTP_MARKDOWN_METRIC_INC` |
 | `unit/metrics_decompression_test.c` | Decompression metrics accounting in the metrics struct |
 | `unit/metrics_endpoint_test.c` | Metrics endpoint handler, response rendering, content-length correctness |
-| `unit/metrics_format_select_test.c` | Metrics format content negotiation in C (JSON vs plain-text vs Prometheus) |
-| `unit/metrics_output_test.c` | Metrics output rendering for all three formats |
+| `unit/metrics_format_select_test.c` | Frozen Prometheus-only metrics format selection |
+| `unit/metrics_output_test.c` | Bounded internal renderer output and Prometheus response rendering |
 | `unit/metrics_snapshot_new_fields_test.c` | Metrics snapshot field coverage for new fields — guards against snapshot drift |
 | `unit/prometheus_format_test.c` | Prometheus text format rendering in C |
 | `unit/prometheus_per_path_test.c` | Per-path Prometheus metric labeling |
@@ -176,7 +179,7 @@ structures and NGINX SHM APIs.
 
 **Why C:** Some behaviors are sensitive to the C compiler, optimization level,
 or sanitizer instrumentation. AddressSanitizer (ASan) and UndefinedBehaviorSanitizer
-(UBSan) operate at the C/C++ level and cannot be applied to Rust code in the
+(UBSan) operate at the C/C++ level and cannot apply to Rust code in the
 same way. The `make test-nginx-unit-sanitize-smoke` target compiles the C
 module with sanitizers enabled and runs the unit suite under them. Similarly,
 the clang smoke target (`make test-nginx-unit-clang-smoke`) validates that the
@@ -203,7 +206,7 @@ E2E harness.
 ### Tests That Belong in C
 
 A test belongs in C when it validates **NGINX C module behavior** — that is,
-behavior that is expressed through NGINX C APIs, NGINX data structures, or
+behavior that uses NGINX C APIs, NGINX data structures, or
 C-language semantics that have no equivalent in the Rust harness.
 
 Ask: does the test require any of the following?
@@ -241,14 +244,15 @@ If the answer to any of these is yes, the test belongs in C.
 
 ---
 
-### Tests That May Be Expressed in Rust E2E
+### Tests That May Use the Rust E2E Harness
 
-A test may be expressed in the Rust E2E harness when it validates
-**product/runtime behavior** — that is, observable HTTP behavior that can be
-verified through real HTTP requests and responses against a running NGINX
-instance, without needing to inspect internal C structures.
+A test may use the Rust E2E harness when it validates
+**product/runtime behavior** — that is, observable HTTP behavior that
+the test verifies through real HTTP requests and responses against a
+running NGINX instance, without needing to inspect internal C
+structures.
 
-Ask: can the test be expressed entirely as:
+Ask: can the test state entirely as:
 
 - An HTTP request (method, URL, headers, body) sent to a running NGINX
 - An assertion on the HTTP response (status code, response headers, response
@@ -264,7 +268,7 @@ If the answer is yes, the test is a candidate for the Rust E2E harness.
 - Does a `GET` request with `If-None-Match: <etag>` return `304 Not Modified`
   when the ETag matches?
 - Does the metrics endpoint return a valid Prometheus exposition format when
-  `Accept: text/plain` is sent?
+  `Accept: text/plain; version=0.0.4` is sent?
 - Does a request with an auth cookie receive a `Cache-Control: no-store`
   response header?
 - Does a `HEAD` request return the same headers as the corresponding `GET`
@@ -300,7 +304,7 @@ Note that some concerns appear in **both** layers. For example:
   correctly?) — this is a Rust E2E concern.
 
 Both tests are correct and complementary. The C test validates the internal
-implementation; the Rust E2E test validates the externally observable contract.
+implementation. The Rust E2E test validates the externally observable contract.
 They are not duplicates.
 
 ---
@@ -309,7 +313,7 @@ They are not duplicates.
 
 The `docs/project/0.6.3-test-surface-audit.md` classifies every in-scope test
 file. All files in `components/nginx-module/tests/unit/` and
-`components/nginx-module/tests/integration/` are classified **Keep as C** in
+`components/nginx-module/tests/integration/` classify as **Keep as C** in
 that audit. This document provides the authoritative rationale for that
 classification.
 

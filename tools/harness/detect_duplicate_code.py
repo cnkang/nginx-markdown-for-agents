@@ -19,10 +19,13 @@ duplicate adjacent blocks exist.  This detector automates that check.
 
 Usage:
     python3 tools/harness/detect_duplicate_code.py [directory]
+    python3 tools/harness/detect_duplicate_code.py --strict [directory]
     python3 tools/harness/detect_duplicate_code.py components/nginx-module/src
 
 Exit codes:
-    0 — always (advisory); findings are printed as WARNING/INFO
+    0 — advisory; findings are printed as WARNING/INFO
+    1 — strict mode blocking findings (direct-fix warnings or
+        adjacent merge residuals)
 """
 
 from __future__ import annotations
@@ -413,6 +416,14 @@ def check_file(filepath: Path) -> tuple[list[str], list[str]]:
         return warnings, infos
 
     if not source.strip():
+        return warnings, infos
+
+    # Generated reason tables intentionally contain adjacent repeated metric
+    # family names: several reason codes share one Prometheus family.  The
+    # reason-code generator and its --check gate are the authoritative drift
+    # protection for these files; treating those repeated literals as merge
+    # residuals makes the duplicate detector reject valid generated output.
+    if "DO NOT EDIT" in "\n".join(source.splitlines()[:12]):
         return warnings, infos
 
     lines = source.splitlines()

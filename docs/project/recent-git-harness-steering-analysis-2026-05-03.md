@@ -3,12 +3,12 @@
 Analysis window: 2026-04-19 through 2026-05-03, covering the two-week branch
 scan requested on 2026-05-03.
 
-Remote state was refreshed with `git fetch --all --prune`. Local and remote
-refs were enumerated from `refs/heads` and `refs/remotes`, excluding
-`origin/HEAD`, and commits were deduplicated by SHA.
+We refreshed remote state with `git fetch --all --prune`. We enumerated local and remote
+refs from `refs/heads` and `refs/remotes`, excluding
+`origin/HEAD`, and deduplicated commits by SHA.
 `tools/harness/resolve_spec.py --hint "review last two weeks all branch commits
-for harness rule updates"` returned `SKIP_NOT_PRESENT`, so this work is treated
-as cross-cutting harness maintenance.
+for harness rule updates"` returned `SKIP_NOT_PRESENT`, so this work counts as
+cross-cutting harness maintenance.
 
 ## Phase 1 Analysis
 

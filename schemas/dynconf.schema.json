@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dynconf.schema.json",
+  "title": "nginx-markdown-for-agents Dynamic Configuration Schema v1",
+  "description": "JSON Schema for the dynconf runtime-reloadable configuration file. Only genuinely runtime-mutable keys are accepted.",
+  "type": "object",
+  "required": ["schema_version"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version identifier. Must be exactly 1."
+    },
+    "filter": {
+      "type": "string",
+      "enum": ["on", "off"],
+      "description": "Master on/off switch for Markdown conversion."
+    },
+    "prune_noise": {
+      "type": "string",
+      "enum": ["on", "off"],
+      "description": "Noise pruning toggle."
+    },
+    "log_verbosity": {
+      "type": "string",
+      "enum": ["error", "warn", "info", "debug"],
+      "description": "Log level control."
+    },
+    "error_policy": {
+      "type": "string",
+      "enum": ["pass", "fail_closed", "status 429", "status 503"],
+      "description": "Failure behavior policy."
+    },
+    "streaming_buffer": {
+      "type": "integer",
+      "minimum": 65536,
+      "maximum": 1073741824,
+      "description": "Streaming buffer size in bytes. Must be an integer; size strings are not accepted."
+    }
+  },
+  "additionalProperties": false
+}

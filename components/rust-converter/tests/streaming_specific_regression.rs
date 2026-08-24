@@ -380,6 +380,100 @@ fn streaming_boundary_conditions() {
     );
 }
 
+#[test]
+fn large_pre_block_preserves_following_tail_marker() {
+    const END_TOKEN: &str = "SMALL_STREAM_END_TOKEN";
+    let mut html = String::from(
+        "<!doctype html><html><head><meta charset=\"UTF-8\"><title>Chunked Small</title></head>\
+         <body><h1>Chunked Small</h1><pre>\n",
+    );
+    let fill = "chunked-stream-data-0123456789abcdef\n";
+    while html.len() < 1024 * 1024 - 64 {
+        html.push_str(fill);
+    }
+    html.push_str("\n</pre><p>");
+    html.push_str(END_TOKEN);
+    html.push_str("</p></body></html>\n");
+
+    let full = convert_full_buffer(
+        html.as_bytes(),
+        Some("text/html; charset=UTF-8"),
+        default_streaming_options(),
+    )
+    .expect("large pre block should convert through the full-buffer path");
+    let escaped_end_token = END_TOKEN.replace('_', r"\_");
+    /* Character-aware suffix for diagnostics: byte-indexing a String can
+     * panic on a UTF-8 boundary, and chars().rev() must be reversed again
+     * to preserve the original tail order. */
+    let suffix: String = full
+        .chars()
+        .rev()
+        .take(256)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    assert!(
+        full.contains(&escaped_end_token),
+        "full output lost the tail marker: len={}, suffix={:?}",
+        full.len(),
+        suffix
+    );
+
+    let budget = MemoryBudget::for_total(16 * 1024 * 1024);
+    /* Split sizes derived from the final document length so every byte is
+     * covered exactly once (fixed 64 x 16 KiB chunks could fall short of
+     * the actual document size). */
+    let chunk_sizes: Vec<usize> = {
+        let n = html.len() / (16 * 1024);
+        let mut sizes = vec![16 * 1024; n];
+        let rem = html.len() - n * (16 * 1024);
+        if rem > 0 {
+            sizes.push(rem);
+        }
+        sizes
+    };
+    let streamed = convert_streaming_chunked(
+        html.as_bytes(),
+        &chunk_sizes,
+        Some("text/html; charset=UTF-8"),
+        default_streaming_options(),
+        budget,
+        None,
+    )
+    .expect("large pre block should convert through the streaming path");
+    assert!(
+        streamed.markdown.contains(&escaped_end_token),
+        "streaming output lost the tail marker"
+    );
+}
+
+#[test]
+fn streaming_chunk_boundary_preserves_line_prefix_escape() {
+    let html = format!("{}-", "\n".repeat(65));
+    let split_sizes = [1, 1, 1, 10, 10, 10, 10, 10, 13];
+
+    let single = convert_streaming_single(
+        html.as_bytes(),
+        Some("text/html; charset=UTF-8"),
+        default_streaming_options(),
+        default_streaming_budget(),
+        None,
+    )
+    .expect("single-chunk streaming conversion should succeed");
+    let chunked = convert_streaming_chunked(
+        html.as_bytes(),
+        &split_sizes,
+        Some("text/html; charset=UTF-8"),
+        default_streaming_options(),
+        default_streaming_budget(),
+        None,
+    )
+    .expect("chunked streaming conversion should succeed");
+
+    assert_eq!(single.markdown, chunked.markdown);
+}
+
 #[cfg(feature = "incremental")]
 #[test]
 fn boundary_max_size_incremental_guard() {

@@ -55,20 +55,22 @@ def validate_release_metadata(repo_root: Path, version: str) -> list[str]:
     elif not re.search(r"\bstable release\b", project_match.group("body"), re.I):
         errors.append(f"{project_status_path}: {version} is not marked stable")
 
-    notes_date_match = re.search(r"^\*\*Date\*\*:\s*(.+?)\s*$", release_notes, re.M)
+    notes_date_match = re.search(r"^\*\*Date\*\*:\s*(.+)$", release_notes, re.M)
     notes_status_match = re.search(
-        r"^\*\*Status\*\*:\s*(.+?)\s*$", release_notes, re.M
+        r"^\*\*Status\*\*:\s*(.+)$", release_notes, re.M
     )
     if notes_date_match is None:
         errors.append(f"{release_notes_path}: missing release date")
-    elif release_date is not None and notes_date_match.group(1) != release_date:
-        errors.append(
-            f"{release_notes_path}: date {notes_date_match.group(1)!r} "
-            f"does not match CHANGELOG date {release_date!r}"
-        )
+    else:
+        notes_date = notes_date_match.group(1).strip()
+        if release_date is not None and notes_date != release_date:
+            errors.append(
+                f"{release_notes_path}: date {notes_date!r} "
+                f"does not match CHANGELOG date {release_date!r}"
+            )
     if notes_status_match is None:
         errors.append(f"{release_notes_path}: missing release status")
-    elif not re.fullmatch(r"Stable release", notes_status_match.group(1), re.I):
+    elif not re.fullmatch(r"Stable release", notes_status_match.group(1).strip(), re.I):
         errors.append(f"{release_notes_path}: {version} is not marked Stable release")
 
     return errors

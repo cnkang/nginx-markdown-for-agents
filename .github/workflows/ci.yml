@@ -6,12 +6,17 @@ on:
     branches: [main, master]
     paths:
       - "AGENTS.md"
+      - "CHANGELOG.md"
       - "components/**"
+      - "schemas/**"
       - "tools/**"
+      - "tools/reason-codegen/**"
       - "tests/**"
       - "docs/**"
       - "perf/**"
       - "packaging/**"
+      - "release/**"
+      - "artifacts/release/0.9.2/**"
       - "examples/nginx-configs/**"
       - "examples/kubernetes/**"
       - "examples/production/**"
@@ -19,21 +24,30 @@ on:
       - ".sonar/**"
       - ".sonarcloud.properties"
       - "Makefile"
+      - ".gitattributes"
       - "README.md"
       - "README_zh-CN.md"
       - ".github/workflows/**"
       - "tools/ci/coverage_gate.py"
       - "rust-toolchain.toml"
+      - "requirements-perf.txt"
+      - "requirements-release.txt"
+      - "requirements-dev.txt"
   push:
     branches: [main, master]
     paths:
       - "AGENTS.md"
+      - "CHANGELOG.md"
       - "components/**"
+      - "schemas/**"
       - "tools/**"
+      - "tools/reason-codegen/**"
       - "tests/**"
       - "docs/**"
       - "perf/**"
       - "packaging/**"
+      - "release/**"
+      - "artifacts/release/0.9.2/**"
       - "examples/nginx-configs/**"
       - "examples/kubernetes/**"
       - "examples/production/**"
@@ -41,11 +55,15 @@ on:
       - ".sonar/**"
       - ".sonarcloud.properties"
       - "Makefile"
+      - ".gitattributes"
       - "README.md"
       - "README_zh-CN.md"
       - ".github/workflows/**"
       - "tools/ci/coverage_gate.py"
       - "rust-toolchain.toml"
+      - "requirements-perf.txt"
+      - "requirements-release.txt"
+      - "requirements-dev.txt"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -74,6 +92,8 @@ permissions: {}
 #   - nginx-c-sanitizers     — ASan/UBSan sanitizer smoke
 #   - matrix-release-tests   — Release-matrix Python test suite (Req 5)
 #   - brotli-build-matrix    — Brotli streaming build matrix (on/off, Ubuntu 22.04)
+#   - release-092-contract-gates — 0.9.2 source metadata, ABI, version,
+#                                  reason-code and release contract gates
 #
 # EXPERIMENTAL (non-blocking — informational, continue-on-error or nightly):
 #   - perf-artifacts         — Performance baseline collection (continue-on-error: true)
@@ -100,6 +120,7 @@ jobs:
       matrix_release: ${{ steps.filter.outputs.matrix_release }}
       corpus_tools: ${{ steps.filter.outputs.corpus_tools }}
       harness_tooling: ${{ steps.filter.outputs.harness_tooling }}
+      contract_gates: ${{ steps.filter.outputs.contract_gates }}
       workflows: ${{ steps.filter.outputs.workflows }}
     steps:
       - name: Checkout repository
@@ -114,6 +135,7 @@ jobs:
           filters: |
             docs:
               - 'AGENTS.md'
+              - 'CHANGELOG.md'
               - 'docs/**'
               - 'README.md'
               - 'README_zh-CN.md'
@@ -151,13 +173,17 @@ jobs:
             perf:
               - 'components/rust-converter/**'
               - 'perf/**'
+              - 'release/performance/**'
               - 'tools/perf/**'
               - 'requirements-perf.txt'
               - 'requirements-release.txt'
+              - 'requirements-dev.txt'
             matrix_release:
               - 'tools/release/matrix/**'
               - 'tools/release-matrix.json'
               - 'tools/release/gates/**'
+              - 'tests/fixtures/**'
+              - 'requirements-dev.txt'
             corpus_tools:
               - 'tools/corpus/**'
             harness_tooling:
@@ -170,9 +196,19 @@ jobs:
               - 'tools/e2e/**'
               - 'tools/e2e-harness/**'
               - 'tests/corpus/**'
+              - 'components/nginx-module/**'
+              - 'components/rust-converter/**'
               - 'docs/harness/**'
               - 'tools/complexity/baseline.json'
               - '.github/workflows/**'
+            contract_gates:
+              - 'schemas/**'
+              - 'release/**'
+              - 'artifacts/release/0.9.2/**'
+              - 'components/rust-converter/src/decision/reason_code.rs'
+              - 'tools/release/gates/**'
+              - 'tools/harness/**'
+              - 'tools/reason-codegen/**'
             workflows:
               - '.github/workflows/**'
 
@@ -188,6 +224,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Python
@@ -196,9 +233,11 @@ jobs:
           python-version: '3.14.6'
 
       - name: Install documentation dependencies
-        run: python3 -m pip install PyYAML==6.0.2
+        run: python3 -m pip install 'jsonschema[format]==4.23.0' PyYAML==6.0.2
 
       - name: Validate docs
+        env:
+          STYLE_BASE: ${{ github.event.pull_request.base.sha || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || github.sha }}
         run: make docs-check
 
   harness-tooling:
@@ -213,6 +252,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Rule 61 resolves every finalized baseline's source_git_commit
+          # against this checkout, which a shallow default checkout cannot
+          # do.  Full depth plus tags is the durability and speed
+          # mechanism, not the correctness guarantee: it makes each
+          # measurement commit reachable through a normal fetch and lets
+          # the anchor check take its constant-time fast path.  Correctness
+          # is carried by the "Prepare baseline measurement provenance"
+          # step below, which verifies every measurement commit explicitly
+          # and fails the job when one is still unavailable.
+          fetch-depth: 0
+          fetch-tags: true
           persist-credentials: false
 
       - name: Set up Python
@@ -221,7 +271,9 @@ jobs:
           python-version: '3.14.6'
 
       - name: Install test dependencies
-        run: python3 -m pip install --upgrade pip && python3 -m pip install pytest==8.3.5
+        run: >-
+          python3 -m pip install --upgrade pip &&
+          python3 -m pip install pytest==8.3.5 PyYAML==6.0.2
 
       - name: Run regex safety detector
         run: make regex-security-check
@@ -234,6 +286,98 @@ jobs:
 
       - name: Run auto-generated naming detector
         run: python3 tools/harness/detect_auto_generated_naming.py tools/ --strict
+
+      - name: Run Python complexity detector
+        run: PYTHONPATH=. python3 tools/harness/detect_python_complexity.py
+
+      - name: Run repository harness checks
+        run: make harness-check
+
+      - name: Prepare baseline measurement provenance
+        # make harness-security-checks runs detect_baseline_hand_edit.py
+        # (Rule 61), which resolves every finalized baseline's
+        # source_git_commit in this checkout.  A measurement commit always
+        # predates the commit that records it, so the durable
+        # perf-baseline/* anchor tags are what keep it reachable.  Fetch
+        # those first: they carry the objects and let the anchor check take
+        # its constant-time fast path, and an object-only fetch would
+        # otherwise land the commit as a second shallow root that no ref
+        # reaches.  A commit still missing afterwards is fetched by
+        # explicit SHA as a last resort, then proven present with
+        # git cat-file.  A failed fetch is reported but never decides the
+        # outcome: the cat-file check does, and it fails the job with the
+        # missing SHA and the baselines that require it, instead of letting
+        # the raw "not our ref" abort hide which evidence broke.
+        #
+        # This step only makes objects queryable.  The verdict stays with
+        # the detector, which independently re-checks presence, anchoring
+        # and artifact digests.
+        run: |
+          set -euo pipefail
+
+          git fetch --no-tags origin \
+            '+refs/tags/perf-baseline/*:refs/tags/perf-baseline/*'
+
+          manifest="$(python3 - <<'PY'
+          import json
+          import pathlib
+          import re
+
+          owners = {}
+          baselines = pathlib.Path("perf/baselines")
+          for path in sorted(baselines.glob("module-baseline-*.json")):
+              if "-raw" in path.name:
+                  continue
+              with open(path, encoding="utf-8") as handle:
+                  document = json.load(handle)
+              policy = document.get("baseline_policy")
+              if not isinstance(policy, dict):
+                  raise SystemExit("missing baseline_policy in " + path.name)
+              sha = policy.get("source_git_commit")
+              if not isinstance(sha, str) or not re.fullmatch(
+                  r"[0-9a-f]{40}", sha
+              ):
+                  raise SystemExit(
+                      "invalid baseline_policy.source_git_commit in "
+                      + path.name
+                  )
+              owners.setdefault(sha, []).append(path.name)
+          if not owners:
+              raise SystemExit("no finalized module baseline was found")
+          for sha in sorted(owners):
+              print(sha, ",".join(owners[sha]))
+          PY
+          )"
+
+          while IFS= read -r entry; do
+            [[ -n "${entry}" ]] || continue
+            sha="${entry%% *}"
+            required_by="${entry#* }"
+            if git cat-file -e "${sha}^{commit}" 2>/dev/null; then
+              echo "present ${sha} (${required_by})"
+              continue
+            fi
+            echo "fetching ${sha} (${required_by})"
+            if ! git fetch --no-tags --depth=1 origin "${sha}"; then
+              echo "fetch of measurement commit ${sha} failed" >&2
+            fi
+            if ! git cat-file -e "${sha}^{commit}" 2>/dev/null; then
+              echo "measurement commit ${sha} required by ${required_by}" \
+                "is unavailable in this checkout; anchor it with a durable" \
+                "perf-baseline tag (see perf/baselines/README.md)" >&2
+              exit 1
+            fi
+            echo "fetched ${sha} (${required_by})"
+          done <<< "${manifest}"
+
+      - name: Run repository harness security checks
+        run: make harness-security-checks
+
+      - name: Run harness detector unit tests
+        # The detector single tests (test_detect_*, test_dynconf_reload_rollback)
+        # verify the detectors themselves; without this step a detector change
+        # can break its own tests without CI noticing.
+        run: make test-harness
 
   header-sync:
     name: FFI Header Generation Smoke
@@ -252,7 +396,7 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
-          toolchain: 1.97.0
+          toolchain: 1.97.1
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -295,7 +439,7 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
-          toolchain: 1.97.0
+          toolchain: 1.97.1
           components: rustfmt,clippy
 
       - name: Cache Rust build artifacts
@@ -306,22 +450,17 @@ jobs:
           cache-bin: false
 
       - name: Check formatting
-        working-directory: components/rust-converter
-        run: cargo fmt --all -- --check
+        run: make rust-fmt-check
 
       - name: Clippy (deny warnings)
         working-directory: components/rust-converter
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Check corpus tool formatting
-        run: cargo fmt --manifest-path tools/corpus/test-corpus-conversion/Cargo.toml --all -- --check
-
       - name: Clippy corpus tool
         run: cargo clippy --manifest-path tools/corpus/test-corpus-conversion/Cargo.toml --all-targets -- -D warnings
 
       - name: Run Rust unit tests
-        # Streaming tests are included: make test-rust uses --all-features,
-        # which enables the 'streaming' feature gate (Spec 43, Req 1).
+        # Streaming tests are included by the all-features Rust test target.
         run: make test-rust
 
       - name: Run Rust doctests
@@ -331,7 +470,11 @@ jobs:
   nginx-c-tests:
     name: NGINX C Tests (Unit + Integration-C)
     needs: changes
-    if: needs.changes.outputs.nginx == 'true' || needs.changes.outputs.workflows == 'true'
+    if: >-
+      needs.changes.outputs.nginx == 'true' ||
+      needs.changes.outputs.workflows == 'true' ||
+      needs.changes.outputs.harness_tooling == 'true' ||
+      needs.changes.outputs.matrix_release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -356,6 +499,78 @@ jobs:
 
       - name: Run NGINX C integration harness
         run: make -C components/nginx-module/tests integration-c
+
+      - name: 0.9.2 streaming lifecycle unit test
+        run: make -C components/nginx-module/tests unit-streaming_impl
+
+      - name: 0.9.2 public-surface drift check
+        run: make public-surface-drift-check
+
+  release-092-contract-gates:
+    name: 0.9.2 Contract Gates
+    needs: changes
+    if: >-
+      needs.changes.outputs.docs == 'true' ||
+      needs.changes.outputs.rust == 'true' ||
+      needs.changes.outputs.nginx == 'true' ||
+      needs.changes.outputs.harness_tooling == 'true' ||
+      needs.changes.outputs.matrix_release == 'true' ||
+      needs.changes.outputs.perf == 'true' ||
+      needs.changes.outputs.contract_gates == 'true' ||
+      needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install C unit-test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            libbrotli-dev \
+            pkg-config \
+            zlib1g-dev
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14.6'
+
+      - name: Install Python test dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Set up Rust toolchain (reason-codegen needs rustfmt)
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.97.1
+          components: rustfmt
+
+      - name: Run 0.9.2 contract gates
+        run: |
+          make public-surface-drift-check
+          make schema-drift-check
+          bash tools/harness/detect_version_consistency.sh
+          make reason-codegen-check
+          PYTHONPATH=. python3 tools/release/gates/validate_official_feature_manifest.py
+          make reason-codegen-generate
+          make reason-codegen-check
+          PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
+          make -C components/nginx-module/tests unit-streaming_impl
+          make official-feature-manifest-generate
+          PYTHONPATH=. python3 tools/release/gates/validate_official_feature_manifest.py
+          git diff --exit-code -- \
+            components/rust-converter/src/decision/reason_code.rs \
+            artifacts/release/0.9.2/reason-registry-report.json \
+            artifacts/release/0.9.2/generated-reason-artifacts.json \
+            artifacts/release/0.9.2/official-build-feature-manifest.json
+          python3 tools/release/matrix/generate_release_contract_matrix.py --check
+          PYTHONPATH=. python3 tools/release/matrix/validate_release_matrix.py
 
   nginx-c-clang-smoke:
     name: NGINX C Clang Smoke
@@ -439,7 +654,7 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
-          toolchain: 1.97.0
+          toolchain: 1.97.1
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -539,7 +754,7 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
-          toolchain: 1.97.0
+          toolchain: 1.97.1
 
       - name: Build real NGINX module
         id: module
@@ -604,7 +819,7 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
-          toolchain: 1.97.0
+          toolchain: 1.97.1
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -654,7 +869,7 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
-          toolchain: 1.97.0
+          toolchain: 1.97.1
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -689,10 +904,12 @@ jobs:
           tools/perf/run_perf_baseline.sh --tier medium --json-output perf/reports/perf-measurement-medium.json
 
       - name: Merge measurement reports
+        env:
+          PLATFORM: ${{ steps.platform.outputs.name }}
         run: |
           python3 tools/perf/report_utils.py merge-measurements \
             --glob-pattern 'perf/reports/perf-measurement-*.json' \
-            --output perf/reports/perf-measurement-${{ steps.platform.outputs.name }}.json
+            --output "perf/reports/perf-measurement-${PLATFORM}.json"
 
       - name: Run perf gate Python tests
         run: python3 -m pytest tools/perf/tests/ -v
@@ -701,14 +918,16 @@ jobs:
         run: tools/perf/tests/test_local_runner_output_paths.sh
 
       - name: Run threshold engine
+        env:
+          PLATFORM: ${{ steps.platform.outputs.name }}
         run: |
           python3 tools/perf/threshold_engine.py \
-            --baseline perf/baselines/${{ steps.platform.outputs.name }}.json \
-            --current perf/reports/perf-measurement-${{ steps.platform.outputs.name }}.json \
+            --baseline "perf/baselines/${PLATFORM}.json" \
+            --current "perf/reports/perf-measurement-${PLATFORM}.json" \
             --thresholds perf/thresholds.json \
             --metrics-schema perf/metrics-schema.json \
-            --platform ${{ steps.platform.outputs.name }} \
-            > perf/reports/perf-verdict-${{ steps.platform.outputs.name }}.json
+            --platform "${PLATFORM}" \
+            > "perf/reports/perf-verdict-${PLATFORM}.json"
 
       - name: Upload measurement report
         if: always()
@@ -726,11 +945,14 @@ jobs:
 
   matrix-release-tests:
     name: Matrix Release Tests
-    # Covers Spec 43 Req 5: matrix schema valid, supported entries have CI,
-    # no artifact exceeds scope. Also runs as part of docs-check via make docs-check.
-    # validate_workflow_matrix_consumers.py consumes only repo-owned sources.
+    # Covers the release matrix schema and supported-entry CI bindings. Also
+    # runs as part of docs-check via make docs-check.
+    # validate_workflow_matrix_consumers.py consumes only repository sources.
     needs: changes
-    if: needs.changes.outputs.matrix_release == 'true' || needs.changes.outputs.workflows == 'true'
+    if: >-
+      needs.changes.outputs.matrix_release == 'true' ||
+      needs.changes.outputs.workflows == 'true' ||
+      needs.changes.outputs.docs == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -748,6 +970,12 @@ jobs:
 
       - name: Install Python test dependencies
         run: pip install -r requirements-dev.txt
+
+      - name: Generate official feature manifest
+        run: PYTHONPATH=. python3 tools/release/gates/validate_official_feature_manifest.py --write
+
+      - name: Generate schema artifacts
+        run: python3 tools/release/gates/generate_schema_artifacts.py --version 0.9.2
 
       - name: Run release-matrix Python tests
         run: PYTHONPATH=. python3 -m pytest -q tools/release/matrix/tests/
@@ -785,7 +1013,7 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
-          toolchain: 1.97.0
+          toolchain: 1.97.1
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -826,7 +1054,7 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
-          toolchain: 1.97.0
+          toolchain: 1.97.1
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -844,12 +1072,17 @@ jobs:
       - name: Run corpus benchmark
         run: make test-benchmark
 
+      - name: Run determinism corpus (Requirement 13.4)
+        run: make test-corpus-determinism
+
       - name: Detect platform
         id: platform
         run: |
           echo "name=$(python3 tools/perf/report_utils.py detect-platform)" >> "$GITHUB_OUTPUT"
 
       - name: Run corpus benchmark comparison
+        env:
+          PLATFORM: ${{ steps.platform.outputs.name }}
         run: |
           BASELINE="perf/baselines/corpus-baseline.json"
           if [ ! -f "$BASELINE" ]; then
@@ -862,7 +1095,7 @@ jobs:
             --baseline "$BASELINE" \
             --current perf/reports/corpus-report.json \
             --thresholds perf/quality-thresholds.json \
-            --output perf/reports/corpus-verdict-${{ steps.platform.outputs.name }}.json
+            --output "perf/reports/corpus-verdict-${PLATFORM}.json"
 
       - name: Generate PR benchmark summary
         run: make test-benchmark-summary
@@ -893,7 +1126,11 @@ jobs:
   # Runs validate_release_gates_090.py which covers 0.9.x deliverables including
   # production examples, doctor tool, config V2, conditional requests, and
   # observability schema.
-  # Non-blocking in CI; blocking at actual release tags via make targets.
+  # Informational only; the blocking 0.9.2 contract checks (public-surface
+  # drift, version consistency, and reason code registry) run in
+  # the independent release-092-contract-gates job.  Full module/performance
+  # blocking evidence
+  # runs at tag/RC time via release-packages.yml (baseline 092).
   release-regression-gates:
     name: "Release Gates: 0.9.x Regression Validator"
     needs: [changes, rust-quality, nginx-c-tests]

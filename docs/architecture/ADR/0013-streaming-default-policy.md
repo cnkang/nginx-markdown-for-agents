@@ -1,8 +1,9 @@
 # ADR-0013: Streaming Default Policy
 
 > Historical decision for the pre-Config-V2 selector. ADR-0023 supersedes its
-> active configuration recommendation in v0.9.1; use
-> `markdown_streaming off|auto|force`.
+> active configuration recommendation in v0.9.2. The current directive is
+> `markdown_streaming off|auto|force`. The former engine selector is not an
+> active configuration surface.
 
 **Status**: Accepted (implemented in 0.8.0)
 **Date**: 2026-06-04
@@ -34,24 +35,39 @@ Default to `auto` mode per RFC 0008 section 2.1:
    eligibility checks per RFC 0008 section 2.2).
 3. All other responses use the full-buffer path.
 
-The operator MAY override this default with explicit `markdown_streaming_engine
-off` (full-buffer only) or `markdown_streaming_engine on` (streaming for all
-responses).
+The operator may override this default with `markdown_streaming off`
+(full-buffer only) or `markdown_streaming force` (selects streaming for
+every eligible response, see ADR-0023 for the exact contract term).
+`markdown_streaming auto` retains the default policy.
+
+**`markdown_cache_validation full` interaction (0.9.2 contract, see
+ADR-0023):** `markdown_cache_validation full` combined with
+`markdown_streaming auto` disables streaming for that request and uses
+full-buffer conversion (config-time warning, runtime reason
+`streaming_block_full_cache_validation`). `markdown_streaming force`
+combined with `markdown_cache_validation full` is a configuration error
+rejected at `nginx -t`. Only `ims_only` and `off` cache-validation modes
+are streaming-compatible.
 
 The threshold increase from 32K (0.6.0 ADR-0007) to 1m (0.8.0 RFC 0008)
 reflects the goal of reducing regression risk from the new true streaming code
 path: only responses large enough to materially benefit from bounded-memory
-conversion are targeted for the streaming path in 0.8.0.
+conversion enter the streaming path targeted by the 0.8.0 release.
 
 ## Consequences
 
 ### Positive Consequences
 
-- Large responses are targeted for bounded-memory streaming automatically
+- Large responses target bounded-memory streaming automatically
   without operator intervention
-- Small responses retain the simpler full-buffer path, avoiding state machine
-  overhead for trivial conversions
-- Backward-compatible: operators who set explicit engine modes are unaffected
+- With the default profile, small responses retain the simpler full-buffer
+  path, avoiding state machine overhead for trivial conversions
+- Backward-compatible at the configuration level: the directive syntax
+  `markdown_streaming off|auto|force` accepts the same values as before.
+  Under `markdown_streaming auto`, responses with a known `Content-Length`
+  below 1m (including the former 32K-1m range) use the full-buffer path.
+  Sizes at or above 1m, chunked responses, and responses without a known
+  `Content-Length` remain streaming candidates
 - Aligns with the 0.6.0 auto-mode precedent (ADR-0007) and extends it with
   the 0.8.0 true streaming contract
 - Conservative threshold (1m) reduces risk during initial 0.8.0 development
@@ -63,7 +79,7 @@ conversion are targeted for the streaming path in 0.8.0.
 - Operators must understand the threshold semantics to debug engine selection
   in production
 - The higher threshold (1m vs 32K) means fewer responses enter the streaming
-  path compared to the 0.6.0 baseline until the threshold is tuned down in
+  path compared to the 0.6.0 baseline until the team tunes the threshold down in
   subsequent releases
 
 ## Alternatives Considered
@@ -75,11 +91,12 @@ conversion are targeted for the streaming path in 0.8.0.
   large responses would need explicit configuration, reducing out-of-the-box
   value.
 - **Retain 32K threshold from 0.6.0**: rejected for 0.8.0 because a lower
-  threshold increases risk during initial true streaming development; the
+  threshold increases risk during initial true streaming development. The
   higher 1m threshold targets only genuinely large responses while the
-  streaming path is hardened.
+  streaming path hardens.
 
 ## References
 
 - [RFC 0008 sections 2.1–2.2](../RFC-0008-streaming-conversion-support-contract.md)
 - [ADR-0007: Streaming Engine as Default (auto mode)](0007-streaming-default.md)
+- [ADR-0023: Streaming Selector Contract](0023-single-streaming-policy.md)

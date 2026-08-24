@@ -6,7 +6,9 @@ Scrapes the nginx.org download page, computes the desired matrix state
 ``tools/release-matrix.json`` and the Platform Compatibility Matrix table
 in ``docs/guides/INSTALLATION.md``.  A machine-readable diff summary is
 written to ``matrix-diff.json`` when changes are detected, for consumption
-by the GitHub Actions workflow.
+by the GitHub Actions workflow.  The workflow then regenerates the
+ABI-bound release-contract projection at
+``docs/releases/release-matrix.json`` from the policy matrix.
 
 Exit codes:
     0 — Success (no changes needed, or changes written successfully)
@@ -22,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import itertools
 import json
 import os
@@ -35,12 +38,39 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 
+try:
+    from .normalize_matrix import (
+        MatrixNormalizationError,
+        normalize_compatibility_document,
+        normalize_compatibility_entries,
+        normalize_compatibility_entry,
+        normalize_entry_aliases,
+        RELEASE_VERSION,
+    )
+except ImportError:
+    from normalize_matrix import (
+        MatrixNormalizationError,
+        normalize_compatibility_document,
+        normalize_compatibility_entries,
+        normalize_compatibility_entry,
+        normalize_entry_aliases,
+        RELEASE_VERSION,
+    )
+
 # ---------------------------------------------------------------------------
 # Path constants (same pattern as validate_doc_matrix_sync.py)
 # ---------------------------------------------------------------------------
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent.parent
 MATRIX_PATH = REPO_ROOT / "tools" / "release-matrix.json"
+FEATURE_MANIFEST_PATH = (
+    REPO_ROOT / "artifacts" / "release" / RELEASE_VERSION
+    / "official-build-feature-manifest.json"
+)
+ABI_HEADER_PATH = (
+    REPO_ROOT / "components" / "rust-converter" / "include"
+    / "markdown_converter.h"
+)
 INSTALL_SCRIPT_PATH = REPO_ROOT / "tools" / "install.sh"
 DOC_PATH = REPO_ROOT / "docs" / "guides" / "INSTALLATION.md"
 DIFF_PATH = MATRIX_PATH.parent / "matrix-diff.json"
@@ -145,6 +175,11 @@ def _missing_required_keys(entry: dict, required_keys: tuple[str, ...]) -> list[
     Handles canonical schema (nginx_version, libc) vs legacy (nginx, os_type).
     """
     return [key for key in required_keys if not _entry_has_required_key(entry, key)]
+
+
+def _is_canonical_document(data: dict) -> bool:
+    """Return whether one matrix document uses the canonical ``entries`` shape."""
+    return isinstance(data.get("entries"), list) and "matrix" not in data
 
 
 def _resolve_repo_write_path(path: Path) -> Path:
@@ -389,10 +424,7 @@ def _validate_manual_entries(manual_entries: list[dict], path: Path) -> None:
     seen_keys: dict[tuple[str, str, str], int] = {}
     duplicates: list[tuple[str, str, str]] = []
     for entry in manual_entries:
-        version = entry.get("nginx_version") or entry.get("nginx")
-        os_type = entry.get("os_type") or entry.get("os") or entry.get("libc")
-        arch = entry.get("arch")
-        key = (version, os_type, arch)
+        key = _matrix_entry_identity(entry)
         if key in seen_keys:
             duplicates.append(key)
         else:
@@ -423,15 +455,139 @@ def _read_matrix_json(path: Path) -> dict:
         _matrix_error(
             f"Invalid matrix structure in {path}: missing 'matrix' or 'entries' key"
         )
+    try:
+        if _is_canonical_document(data):
+            # Canonical documents are validated with the field-optional
+            # path so generated rows (which intentionally carry no
+            # support_tier until projection) can be read back and
+            # retained by _supported_dynamic_entry.  Legacy 'matrix'
+            # documents — and documents containing BOTH 'entries' and
+            # 'matrix' — keep the strict legacy validation path, matching
+            # the shape _matrix_entry_list uses for projection.
+            raw_entries = data["entries"]
+            if not isinstance(raw_entries, list):
+                _matrix_error(
+                    f"Invalid compatibility matrix in {path}: entries must be a list"
+                )
+            normalize_compatibility_entries(
+                raw_entries, require_fields=False
+            )
+        else:
+            normalize_compatibility_document(data)
+    except MatrixNormalizationError as exc:
+        _matrix_error(
+            f"Invalid compatibility matrix in {path}: missing required keys "
+            f"or invalid aliases ({exc})"
+        )
     return data
+
+
+def _source_only_entry(normalized: dict) -> dict | None:
+    """Project a source row for the legacy/doc-sync matrix vocabulary.
+
+    Keep source rows separate from dynamic-module handling so a future artifact
+    type cannot accidentally inherit the projection.  The merge step omits a
+    source-only row when the same NGINX version already has generated binary
+    coverage, because that row would contradict the platform table.
+    """
+    if (
+        normalized.get("artifact_type") == "source"
+        and normalized.get("support_tier") == "best-effort"
+        and normalized.get("libc") == "n/a"
+        and normalized.get("target") == "any"
+    ):
+        return {
+            "nginx": normalized["nginx_version"],
+            "os_type": normalized["libc"],
+            "arch": normalized["target"],
+            "support_tier": "source_only",
+            "artifact_type": "source",
+            "managed_by": "manual",
+        }
+    return None
+
+
+def _supported_dynamic_entry(entry: dict) -> dict | None:
+    """Project a canonical row into the updater's legacy shape.
+
+    Only ``dynamic-module`` rows are eligible for generated support entries;
+    source rows use the explicit doc-sync projection above and all other
+    artifact types are ignored.  Canonical generated rows carry no
+    ``support_tier`` (projection happens here), so the optional path keeps
+    them eligible instead of dropping them for a missing tier field.
+    """
+    normalized = normalize_compatibility_entry(entry, require_fields=False)
+    if normalized.get("artifact_type") != "dynamic-module":
+        return _source_only_entry(normalized)
+    if (
+        normalized.get("support_tier") is not None
+        and normalized.get("support_tier") != "supported"
+    ):
+        return None
+    try:
+        version, os_type, arch = _matrix_entry_identity(normalized)
+    except ValueError:
+        return None
+    if os_type not in OS_TYPES or arch not in {"x86_64", "aarch64"}:
+        return None
+    return {
+        "nginx": version,
+        "os_type": os_type,
+        "arch": arch,
+        "support_tier": "full",
+    }
 
 
 def _matrix_entry_list(data: dict, path: Path) -> list:
     """Return the matrix entry list from supported schema variants."""
-    matrix_entries = data.get("matrix") or data.get("entries")
-    if not isinstance(matrix_entries, list):
-        _matrix_error(f"Invalid matrix structure in {path}: matrix must be a list")
-    return matrix_entries
+    raw_entries = data.get("entries")
+    canonical_entries_shape = _is_canonical_document(data)
+    if not canonical_entries_shape:
+        raw_entries = data.get("matrix")
+    if not isinstance(raw_entries, list):
+        _matrix_error(
+            f"Invalid matrix structure in {path}: matrix/entries must be a list"
+        )
+
+    try:
+        normalized_entries = [
+            normalize_compatibility_entry(
+                entry, require_fields=not canonical_entries_shape
+            )
+            for entry in raw_entries
+        ]
+    except MatrixNormalizationError as exc:
+        _matrix_error(
+            f"Invalid compatibility matrix in {path}: missing required keys "
+            f"or invalid aliases ({exc})"
+        )
+
+    if canonical_entries_shape:
+        return [
+            canonical
+            for entry in normalized_entries
+            if (canonical := _supported_dynamic_entry(entry))
+        ]
+
+    # Legacy updater inputs use the historical presentation vocabulary.  The
+    # shared normalizer owns alias resolution; this projection is only for the
+    # updater's existing merge/write contract.
+    entries: list[dict] = []
+    for entry in normalized_entries:
+        projected = dict(entry)
+        projected["nginx"] = projected.pop("nginx_version")
+        projected["os_type"] = projected.pop("libc")
+        target = projected.pop("target")
+        projected["arch"] = {
+            "amd64": "x86_64",
+            "arm64": "aarch64",
+        }.get(target, target)
+        projected["support_tier"] = {
+            "supported": "full",
+            "best-effort": "source_only",
+        }.get(projected.get("support_tier"), projected.get("support_tier"))
+        entries.append(projected)
+    return entries
 
 
 def _validate_matrix_entry(entry: object, index: int, path: Path) -> dict:
@@ -501,6 +657,45 @@ def load_matrix(path: Path) -> tuple[dict, list[dict], list[dict]]:
 # ---------------------------------------------------------------------------
 
 
+def _matrix_entry_identity(entry: dict) -> tuple[str, str, str]:
+    """Resolve one matrix row to the updater's canonical identity."""
+    normalized = normalize_entry_aliases(entry)
+    version = normalized.get("nginx_version")
+    os_type = normalized.get("libc")
+    if os_type is None and normalized.get("os") in OS_TYPES:
+        os_type = normalized["os"]
+    arch = normalized.get("target")
+    arch = {
+        "amd64": "x86_64",
+        "arm64": "aarch64",
+    }.get(arch, arch)
+    if isinstance(arch, str):
+        if arch.startswith("x86_64-"):
+            arch = "x86_64"
+        elif arch.startswith("aarch64-"):
+            arch = "aarch64"
+    if not all(
+        isinstance(value, str) and value
+        for value in (version, os_type, arch)
+    ):
+        raise ValueError("matrix entry has no complete nginx/os/arch identity")
+    return version, os_type, arch
+
+
+def _assert_unique_identities(entries: list[dict], label: str) -> None:
+    """Reject duplicate release identities before metadata can be discarded."""
+    seen: dict[tuple[str, str, str], int] = {}
+    for index, entry in enumerate(entries):
+        identity = _matrix_entry_identity(entry)
+        previous = seen.get(identity)
+        if previous is not None:
+            raise ValueError(
+                f"duplicate {label} matrix identity {identity} "
+                f"at indexes {previous} and {index}"
+            )
+        seen[identity] = index
+
+
 def _entry_sort_key(entry: dict) -> tuple[tuple[int, ...], str, str]:
     """Produce a sort key for a release matrix entry.
 
@@ -511,9 +706,7 @@ def _entry_sort_key(entry: dict) -> tuple[tuple[int, ...], str, str]:
         tuple: ``(version_tuple, os_type, arch)`` where ``version_tuple``
             comes from ``entry["nginx"]``.
     """
-    version = entry.get("nginx_version") or entry.get("nginx")
-    os_type = entry.get("os_type") or entry.get("os") or entry.get("libc")
-    arch = entry.get("arch")
+    version, os_type, arch = _matrix_entry_identity(entry)
     return (version_tuple(version), os_type, arch)
 
 
@@ -555,15 +748,35 @@ def merge_matrix(auto_entries: list[dict], manual_entries: list[dict]) -> list[d
     Returns:
         list[dict]: Merged matrix entries sorted as described.
     """
-    manual_keys: set[tuple[str, str, str]] = {
-        (e["nginx"], e["os_type"], e["arch"]) for e in manual_entries
+    _assert_unique_identities(auto_entries, "auto")
+    _assert_unique_identities(manual_entries, "manual")
+    covered_versions = {
+        _matrix_entry_identity(entry)[0]
+        for entry in auto_entries
+        if entry.get("support_tier") == SUPPORT_TIER
     }
+    manual_entries = [
+        entry
+        for entry in manual_entries
+        if not (
+            entry.get("support_tier") == "source_only"
+            and (
+                entry.get("artifact_type") == "source"
+                or (
+                    entry.get("os_type") == "n/a"
+                    and entry.get("arch") == "any"
+                )
+            )
+            and _matrix_entry_identity(entry)[0] in covered_versions
+        )
+    ]
+    manual_keys = {_matrix_entry_identity(e) for e in manual_entries}
 
     # Keep only auto entries whose key does not collide with a manual entry
     merged: list[dict] = [
         e
         for e in auto_entries
-        if (e["nginx"], e["os_type"], e["arch"]) not in manual_keys
+        if _matrix_entry_identity(e) not in manual_keys
     ]
     merged.extend(manual_entries)
     merged.sort(key=_entry_sort_key)
@@ -589,17 +802,15 @@ def diff_matrix(current_auto: list[dict], desired_auto: list[dict]) -> MatrixDif
             tuple: ``(nginx, os_type, arch, support_tier)`` where missing
                 support_tier is represented as ``""``.
         """
-        version = e.get("nginx_version") or e.get("nginx")
-        os_type = e.get("os_type") or e.get("os") or e.get("libc")
-        arch = e.get("arch")
+        version, os_type, arch = _matrix_entry_identity(e)
         return (version, os_type, arch, e.get("support_tier", ""))
 
     current_set = { _entry_key(e) for e in current_auto }
     desired_set = { _entry_key(e) for e in desired_auto }
 
     # Version-level summary for PR titles
-    current_versions = { (e.get("nginx_version") or e.get("nginx")) for e in current_auto }
-    desired_versions = { (e.get("nginx_version") or e.get("nginx")) for e in desired_auto }
+    current_versions = {_matrix_entry_identity(e)[0] for e in current_auto}
+    desired_versions = {_matrix_entry_identity(e)[0] for e in desired_auto}
 
     added = sorted(desired_versions - current_versions, key=version_tuple)
     removed = sorted(current_versions - desired_versions, key=version_tuple)
@@ -641,8 +852,7 @@ def write_matrix(path: Path, data: dict) -> None:
 
     Parameters:
         path (Path): Destination path inside the repository where the matrix JSON will be written.
-        data (dict): Full matrix data to write. Callers update fields such as
-            ``updated_at`` before invoking this function.
+        data (dict): Full matrix data to write.
     """
     tmp_path = path.with_suffix(f"{path.suffix}.tmp")
     try:
@@ -702,9 +912,15 @@ def update_doc_table(doc_path: Path, matrix_entries: list[dict]) -> str:
         "|---------------|---------|--------------|--------------|",
     ]
     for entry in sorted_entries:
+        version, os_type, arch = _matrix_entry_identity(entry)
         tier = entry["support_tier"].replace("_", " ").title()
+        if entry["support_tier"] == "source_only":
+            # The source fallback is for combinations absent from the
+            # generated binary cross-product, not a second platform row.
+            os_type = "unlisted"
+            arch = "unlisted"
         lines.append(
-            f"| {entry['nginx']} | {entry['os_type']} | {entry['arch']} | {tier} |"
+            f"| {version} | {os_type} | {arch} | {tier} |"
         )
     lines.append(DOC_MARKER_END)
 
@@ -925,6 +1141,173 @@ def _update_entries_for_added_versions(data: dict, diff: MatrixDiff) -> None:
             _update_entry_version_for_track(entry, track_map)
 
 
+def _canonical_dynamic_entry(
+    legacy_entry: dict, existing: dict | None = None
+) -> dict:
+    """Project one generated install row into the canonical entry schema."""
+    version, libc, normalized_arch = _matrix_entry_identity(legacy_entry)
+    arch = {"x86_64": "amd64", "aarch64": "arm64"}.get(normalized_arch)
+    if arch is None:
+        raise ValueError(f"unsupported matrix architecture: {normalized_arch}")
+    if existing is not None:
+        entry = dict(existing)
+        # The compatibility matrix writes canonical presentation keys.
+        # Strip legacy updater aliases and dropped legacy keys; keep the
+        # canonical arch and the frozen binding keys intact.  `arch` is the
+        # compatibility document's presentation key (normalize folds it to
+        # the internal `target` identity), so it must be preserved.
+        # `support_tier` is REQUIRED by the compatibility-document schema
+        # (tools/release-matrix.schema.json entry.required), so it must be
+        # retained on existing rows rather than dropped.
+        entry.pop("nginx", None)
+        entry.pop("os_type", None)
+        entry.pop("nginx_channel", None)
+        entry.pop("test_level", None)
+        entry.pop("release_blocking", None)
+        entry.pop("owner_workflow", None)
+        entry.pop("managed_by", None)
+        entry["nginx_version"] = version
+        entry["libc"] = libc
+        if entry.get("support_tier") is None:
+            # Existing rows that predate the tier vocabulary default to
+            # full support (the canonical generated tier).
+            entry["support_tier"] = SUPPORT_TIER
+        # Refresh the binding keys with the same computed values as the
+        # new-row branch so an existing row never carries stale digests.
+        entry["feature_manifest_digest"] = _feature_manifest_digest()
+        entry["abi_version"] = _frozen_abi_version()
+        return entry
+
+    normalized = normalize_entry_aliases(legacy_entry)
+    target_env = {"glibc": "gnu", "musl": "musl"}.get(libc)
+    if target_env is None:
+        raise ValueError(f"unsupported libc for target construction: {libc}")
+    target = normalized.get("target")
+    if not target or "-unknown-" not in target:
+        # A bare arch value (for example "aarch64" via the arch alias)
+        # is not a canonical target triple; construct the full triple.
+        target = f"{normalized_arch}-unknown-linux-{target_env}"
+    return {
+        "nginx_version": version,
+        "os": "linux",
+        "libc": libc,
+        "target": target,
+        "artifact_type": "dynamic-module",
+        "support_tier": SUPPORT_TIER,
+        "feature_manifest_digest": _feature_manifest_digest(),
+        "abi_version": _frozen_abi_version(),
+    }
+
+
+def _feature_manifest_digest() -> str:
+    """Official feature-manifest digest for the canonical release matrix.
+
+    The digest convention for official artifacts is the SHA-256 of the
+    canonical UTF-8 JSON serialization of the manifest content (sorted
+    keys, compact separators).  The release-matrix validator binds the
+    same canonical-content digest.
+    """
+    if not FEATURE_MANIFEST_PATH.is_file():
+        raise FileNotFoundError(
+            f"official feature manifest missing: {FEATURE_MANIFEST_PATH}"
+        )
+    doc = json.loads(
+        FEATURE_MANIFEST_PATH.read_text(encoding="utf-8")
+    )
+    canonical = json.dumps(doc, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
+    return "sha256:" + hashlib.sha256(canonical).hexdigest()
+
+
+def _frozen_abi_version() -> int:
+    """Read the frozen ABI version from the generated header."""
+    if not ABI_HEADER_PATH.is_file():
+        raise FileNotFoundError(f"ABI header missing: {ABI_HEADER_PATH}")
+    match = re.search(
+        r"#define\s+MARKDOWN_ABI_VERSION\s+(\d+)",
+        ABI_HEADER_PATH.read_text(encoding="utf-8"),
+    )
+    if not match:
+        raise ValueError("MARKDOWN_ABI_VERSION not found in ABI header")
+    return int(match.group(1))
+
+
+def _rebind_stale_dynamic_rows(other_entries: list) -> None:
+    """Rebind surviving stale dynamic-module rows to the current digest/ABI.
+
+    Kept separate from ``_replace_canonical_dynamic_entries`` to hold the
+    function's cyclomatic complexity below the lint threshold.
+    """
+    for entry in other_entries:
+        if isinstance(entry, dict) and entry.get("artifact_type") == "dynamic-module":
+            entry["feature_manifest_digest"] = _feature_manifest_digest()
+            entry["abi_version"] = _frozen_abi_version()
+
+
+def _replace_canonical_dynamic_entries(data: dict, merged: list[dict]) -> None:
+    """Replace generated dynamic-module rows while preserving other artifacts.
+
+    Generated rows are projected through ``_canonical_dynamic_entry`` (which
+    refreshes binding keys on existing rows), and stale supported/candidate
+    dynamic rows that are no longer generated survive but are rebound to the
+    current digest/ABI, so the tool input is uniformly bound.
+    """
+    entries = data.get("entries")
+    if not isinstance(entries, list):
+        _matrix_error("Canonical release matrix is missing an entries list")
+
+    merged_dynamic = [
+        entry
+        for entry in merged
+        if isinstance(entry, dict)
+        and entry.get("artifact_type", "dynamic-module") == "dynamic-module"
+    ]
+    existing_dynamic = [
+        entry
+        for entry in entries
+        if isinstance(entry, dict)
+        and entry.get("artifact_type") == "dynamic-module"
+    ]
+    _assert_unique_identities(existing_dynamic, "existing dynamic")
+    _assert_unique_identities(merged_dynamic, "generated dynamic")
+    existing_by_key = {
+        _matrix_entry_identity(entry): entry for entry in existing_dynamic
+    }
+    dynamic_entries = [
+        _canonical_dynamic_entry(
+            legacy_entry,
+            existing_by_key.get(_matrix_entry_identity(legacy_entry)),
+        )
+        for legacy_entry in merged_dynamic
+    ]
+    generated_keys = {
+        _matrix_entry_identity(entry)
+        for entry in dynamic_entries
+    }
+    other_entries = [
+        entry
+        for entry in entries
+        if not isinstance(entry, dict)
+        or entry.get("artifact_type") != "dynamic-module"
+        or _matrix_entry_identity(entry) not in generated_keys
+    ]
+    # Stale supported/candidate rows survive (hand-maintained compatibility
+    # declarations), but they are rebound like the regenerated rows so the
+    # tool input never carries a mixed bound/unbound state.
+    _rebind_stale_dynamic_rows(other_entries)
+    dynamic_entries.sort(
+        key=lambda entry: (
+            version_tuple(_matrix_entry_identity(entry)[0]),
+            _matrix_entry_identity(entry)[1],
+            _matrix_entry_identity(entry)[2],
+        )
+    )
+    data["entries"] = dynamic_entries + other_entries
+    data.pop("updated_at", None)
+    data.pop("matrix", None)
+
+
 def _run_write_mode(
     data: dict,
     merged: list[dict],
@@ -944,12 +1327,20 @@ def _run_write_mode(
     except OSError:
         matrix_backup = None
 
-    # Update updated_at timestamp
-    data["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    data["matrix"] = merged
+    try:
+        if _is_canonical_document(data):
+            _replace_canonical_dynamic_entries(data, merged)
+        else:
+            data["updated_at"] = datetime.now(timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+            data["matrix"] = merged
 
-    # Update entries with the new version numbers if they exist
-    _update_entries_for_added_versions(data, diff)
+            # Update entries with the new version numbers if they exist
+            _update_entries_for_added_versions(data, diff)
+    except (TypeError, ValueError, OSError) as exc:
+        print(f"Error preparing matrix update: {exc}", file=sys.stderr)
+        return 1
 
     # Write matrix via crash-safe temp+rename
     try:

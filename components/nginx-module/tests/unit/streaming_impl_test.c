@@ -318,6 +318,7 @@ typedef struct {
 static body_filter_hist_entry_t g_body_filter_hist[G_BODY_FILTER_HIST_MAX];
 static ngx_uint_t g_body_filter_hist_len = 0;
 static ngx_int_t g_next_header_filter_rc = NGX_OK;
+static ngx_uint_t g_next_header_filter_calls = 0;
 static ngx_int_t g_complex_value_rc = NGX_OK;
 static ngx_int_t g_add_vary_rc = NGX_OK;
 static ngx_int_t g_set_etag_rc = NGX_OK;
@@ -339,6 +340,9 @@ static ngx_uint_t g_abort_calls = 0;
 static ngx_uint_t g_output_free_calls = 0;
 static ngx_uint_t g_safe_finish_calls = 0;
 static ngx_uint_t g_log_decision_calls = 0;
+static ngx_uint_t g_terminal_decision_calls = 0;
+static const char *g_last_terminal_reason = NULL;
+static const char *g_last_terminal_stage = NULL;
 static ngx_uint_t g_palloc_fail_once = 0;
 static ngx_uint_t g_pcalloc_fail_once = 0;
 static ngx_uint_t g_alloc_chain_fail_once = 0;
@@ -363,11 +367,6 @@ static uint32_t g_streaming_finalize_rc = ERROR_SUCCESS;
 static struct MarkdownResult g_streaming_finalize_result;
 static ngx_uint_t g_info_log_count = 0;
 static const char *g_last_info_log_fmt = NULL;
-static ngx_uint_t g_otel_span_start_calls = 0;
-static ngx_uint_t g_otel_str_attr_count = 0;
-static ngx_uint_t g_otel_uri_attr_seen = 0;
-static ngx_uint_t g_otel_uri_route_seen = 0;
-static ngx_uint_t g_otel_full_uri_seen = 0;
 
 /*
  * Production globals that must be defined for the streaming impl header to
@@ -397,6 +396,107 @@ ngx_module_t ngx_http_markdown_filter_module = { 0 };
 
 #define NGX_HTTP_MARKDOWN_METRIC_INC(field)                                          \
     NGX_HTTP_MARKDOWN_METRIC_ADD(field, 1)
+
+static void
+ngx_http_markdown_record_decompression_success_metrics(
+    const ngx_http_markdown_ctx_t *ctx)
+{
+    if (ctx == NULL) {
+        return;
+    }
+
+    NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.succeeded);
+    switch (ctx->decompression.type) {
+    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.gzip);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.deflate);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.brotli);
+        break;
+    default:
+        break;
+    }
+}
+
+static void
+ngx_http_markdown_record_decompression_failure_budget(
+    ngx_http_markdown_compression_type_e type)
+{
+    switch (type) {
+    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.gzip_failures.budget);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.deflate_failures.budget);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.brotli_failures.budget);
+        break;
+    default:
+        break;
+    }
+}
+
+static void
+ngx_http_markdown_record_decompression_failure_format(
+    ngx_http_markdown_compression_type_e type)
+{
+    switch (type) {
+    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.gzip_failures.format);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.deflate_failures.format);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.brotli_failures.format);
+        break;
+    default:
+        break;
+    }
+}
+
+static void
+ngx_http_markdown_record_decompression_failure_truncated(
+    ngx_http_markdown_compression_type_e type)
+{
+    switch (type) {
+    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.gzip_failures.truncated);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            decompressions.deflate_failures.truncated);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.brotli_failures.truncated);
+        break;
+    default:
+        break;
+    }
+}
+
+static void
+ngx_http_markdown_record_decompression_failure_io(
+    ngx_http_markdown_compression_type_e type)
+{
+    switch (type) {
+    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.gzip_failures.io);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.deflate_failures.io);
+        break;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+        NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.brotli_failures.io);
+        break;
+    default:
+        break;
+    }
+}
 
 #define NGX_HTTP_MARKDOWN_METRIC_WATERMARK(field, value)                             \
     do {                                                                             \
@@ -451,6 +551,15 @@ ngx_module_t ngx_http_markdown_filter_module = { 0 };
     do {                                                                             \
         UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt);                        \
         UNUSED(arg1); UNUSED(arg2); UNUSED(arg3);                                    \
+    } while (0)
+
+#ifdef ngx_log_debug2
+#undef ngx_log_debug2
+#endif
+#define ngx_log_debug2(level, log, err, fmt, arg1, arg2)                            \
+    do {                                                                             \
+        UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt);                        \
+        UNUSED(arg1); UNUSED(arg2);                                                  \
     } while (0)
 
 #ifdef ngx_log_debug4
@@ -527,6 +636,7 @@ static ngx_int_t
 ngx_http_next_header_filter_stub(ngx_http_request_t *r)
 {
     UNUSED(r);
+    g_next_header_filter_calls++;
     return g_next_header_filter_rc;
 }
 
@@ -952,11 +1062,12 @@ ngx_http_markdown_add_vary_accept(ngx_http_request_t *r)
  * g_remove_content_encoding_calls so tests can verify invocation.
  * Ignores the request argument.
  */
-void
+ngx_int_t
 ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r)
 {
     UNUSED(r);
     g_remove_content_encoding_calls++;
+    return NGX_OK;
 }
 
 /*
@@ -1088,8 +1199,30 @@ ngx_int_t
 ngx_http_markdown_stream_type_excluded(const ngx_str_t *content_type,
     const ngx_http_markdown_conf_t *conf)
 {
-    UNUSED(content_type);
-    UNUSED(conf);
+    const ngx_str_t  *entry;
+    ngx_uint_t        i;
+
+    if (content_type == NULL || content_type->len == 0
+        || content_type->data == NULL)
+    {
+        return 0;
+    }
+
+    if (conf == NULL || conf->stream.excluded_types == NULL) {
+        return 0;
+    }
+
+    entry = conf->stream.excluded_types->elts;
+    for (i = 0; i < conf->stream.excluded_types->nelts; i++) {
+        if (content_type->len == entry[i].len
+            && ngx_strncasecmp(content_type->data,
+                               entry[i].data,
+                               entry[i].len) == 0)
+        {
+            return 1;
+        }
+    }
+
     return 0;
 }
 
@@ -1103,6 +1236,14 @@ ngx_http_markdown_reason_streaming_convert(void)
 {
     static ngx_str_t s = { sizeof("STREAMING_CONVERT") - 1,
         (u_char *) "STREAMING_CONVERT" };
+    return &s;
+}
+
+const ngx_str_t *
+ngx_http_markdown_reason_failed_closed(void)
+{
+    static ngx_str_t s = { sizeof("failed_closed") - 1,
+        (u_char *) "failed_closed" };
     return &s;
 }
 
@@ -1196,6 +1337,31 @@ ngx_http_markdown_log_decision(ngx_http_request_t *r,
     g_log_decision_calls++;
 }
 
+/* Stub for the request-layer terminal diagnostics owner. */
+static void
+ngx_http_markdown_log_streaming_terminal_decision(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    const char *conversion_status,
+    const char *reason_code,
+    const char *stage)
+{
+    UNUSED(r);
+    UNUSED(ctx);
+    UNUSED(conf);
+    UNUSED(conversion_status);
+    g_terminal_decision_calls++;
+    g_last_terminal_reason = reason_code;
+    g_last_terminal_stage = stage;
+}
+
+#ifndef NGX_HTTP_MARKDOWN_CONV_SUCCESS
+#define NGX_HTTP_MARKDOWN_CONV_SUCCESS "SUCCESS"
+#define NGX_HTTP_MARKDOWN_CONV_FAILED  "FAILED"
+#define NGX_HTTP_MARKDOWN_CONV_SKIPPED "SKIPPED"
+#endif
+
 #ifndef NGX_CONF_UNSET_SIZE
 #define NGX_CONF_UNSET_SIZE ((size_t) -1)
 #endif
@@ -1222,69 +1388,10 @@ ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
 #define ngx_atomic_fetch_add(p, v)  (*(p) += (v), *(p))
 #endif
 
-static ngx_inline ngx_http_markdown_otel_span_t *
-ngx_http_markdown_otel_span_start(ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf)
-{
-    static ngx_http_markdown_otel_span_t span;
-
-    (void) r;
-    if (conf == NULL || conf->ops.otel_enabled == 0) {
-        return NULL;
-    }
-
-    ngx_memzero(&span, sizeof(span));
-    g_otel_span_start_calls++;
-    return &span;
-}
-
-static ngx_inline void
-ngx_http_markdown_otel_set_str_attr(ngx_http_markdown_otel_span_t *span,
-    const u_char *key, size_t key_len,
-    const u_char *val, size_t val_len)
-{
-    (void) span;
-
-    g_otel_str_attr_count++;
-    if (key_len == 3 && ngx_memcmp(key, "uri", 3) == 0) {
-        g_otel_uri_attr_seen = 1;
-    }
-    if (key_len == 9 && ngx_memcmp(key, "uri_route", 9) == 0) {
-        g_otel_uri_route_seen = 1;
-    }
-    if (val_len == sizeof("/private/customer/12345?token=secret") - 1
-        && ngx_memcmp(val, "/private/customer/12345?token=secret",
-                      val_len) == 0)
-    {
-        g_otel_full_uri_seen = 1;
-    }
-}
-
-static ngx_inline void
-ngx_http_markdown_otel_set_int_attr(ngx_http_markdown_otel_span_t *span,
-    const u_char *key, size_t key_len,
-    int64_t val)
-{
-    (void) span;
-    (void) key;
-    (void) key_len;
-    (void) val;
-}
-
-static ngx_inline void
-ngx_http_markdown_otel_span_end(ngx_http_markdown_otel_span_t *span)
-{
-    (void) span;
-}
-
-static ngx_inline void
-ngx_http_markdown_otel_span_export(ngx_http_markdown_otel_span_t *span,
-    ngx_log_t *log, ngx_http_request_t *r)
-{
-    (void) span;
-    (void) log;
-    (void) r;
-}
+#ifndef ngx_atomic_cmp_set
+#define ngx_atomic_cmp_set(lock, old, set)                                      \
+    ((*(lock) == (old)) ? (*(lock) = (set), 1) : 0)
+#endif
 
 static ngx_inline void
 ngx_http_markdown_record_per_path_metrics(
@@ -1300,6 +1407,11 @@ ngx_http_markdown_record_per_path_metrics(
 static ngx_int_t g_stream_commit_headers_rc = NGX_OK;
 static int g_stream_commit_headers_called;
 
+/* Shared counter mirroring the production pending-output request count:
+ * incremented when a NULL slot takes a non-NULL chain and decremented on
+ * the reverse transition. */
+static ngx_atomic_uint_t g_pending_output_state;
+
 /* Stub: ngx_http_markdown_stream_commit_headers */
 ngx_int_t
 ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
@@ -1309,6 +1421,26 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
     (void) r; (void) ctx; (void) conf;
     g_stream_commit_headers_called++;
     return g_stream_commit_headers_rc;
+}
+
+void
+ngx_http_markdown_pending_output_set(ngx_chain_t **slot, ngx_chain_t *value)
+{
+    if (slot == NULL) {
+        return;
+    }
+    if (*slot == NULL && value != NULL) {
+        g_pending_output_state++;
+    } else if (*slot != NULL && value == NULL) {
+        g_pending_output_state--;
+    }
+    *slot = value;
+}
+
+ngx_atomic_uint_t
+ngx_http_markdown_pending_output_current(void)
+{
+    return g_pending_output_state;
 }
 
 /*
@@ -1355,11 +1487,13 @@ reset_globals(void)
     g_body_filter_hist_len = 0;
     ngx_memzero(g_body_filter_hist, sizeof(g_body_filter_hist));
     g_next_header_filter_rc = NGX_OK;
+    g_next_header_filter_calls = 0;
     g_complex_value_rc = NGX_OK;
     g_add_vary_rc = NGX_OK;
     g_set_etag_rc = NGX_OK;
     g_stream_commit_headers_rc = NGX_OK;
     g_stream_commit_headers_called = 0;
+    g_pending_output_state = 0;
     g_buffer_init_rc = NGX_OK;
     g_buffer_init_fail_after = 0;
     g_buffer_init_call_count = 0;
@@ -1378,6 +1512,9 @@ reset_globals(void)
     g_output_free_calls = 0;
     g_safe_finish_calls = 0;
     g_log_decision_calls = 0;
+    g_terminal_decision_calls = 0;
+    g_last_terminal_reason = NULL;
+    g_last_terminal_stage = NULL;
     g_palloc_fail_once = 0;
     g_pcalloc_fail_once = 0;
     g_alloc_chain_fail_once = 0;
@@ -1404,11 +1541,6 @@ reset_globals(void)
         sizeof(g_streaming_finalize_result));
     g_info_log_count = 0;
     g_last_info_log_fmt = NULL;
-    g_otel_span_start_calls = 0;
-    g_otel_str_attr_count = 0;
-    g_otel_uri_attr_seen = 0;
-    g_otel_uri_route_seen = 0;
-    g_otel_full_uri_seen = 0;
     /*
      * Tests frequently bind ngx_http_markdown_metrics to stack-local
      * storage; always clear it here so later tests cannot read a stale
@@ -1488,7 +1620,7 @@ init_request_ctx_conf(ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
 
     ctx->request = r;
     ctx->processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
-    conf->stream.precommit_buffer = 256 * 1024;
+    conf->limits.streaming_buffer = 256 * 1024;
 }
 
 /*
@@ -1535,6 +1667,14 @@ test_cleanup_paths(void)
         "streaming_cleanup walking pending_output");
     TEST_ASSERT(b.pos != NULL && b.last != NULL,
         "cleanup must not clear/free buffer fields it does not own");
+
+    ctx.streaming.pending_meta.pending_header_output =
+        (u_char *) "deferred-output";
+    ctx.streaming.pending_meta.pending_header_output_len = 15;
+    ngx_http_markdown_streaming_cleanup(&ctx);
+    TEST_ASSERT(ctx.streaming.pending_meta.pending_header_output == NULL
+                && g_output_free_calls == 1,
+        "cleanup must release Rust output deferred behind header backpressure");
     TEST_PASS("cleanup paths covered");
 }
 
@@ -1616,7 +1756,6 @@ test_cleanup_does_not_free_shared_temporary_buffer(void)
  * - SSE content-type routes to full-buffer
  * - excluded stream_types prefix routes to full-buffer
  * - policy=force with no exclusions routes to streaming
- * - non-matching stream_types keeps streaming enabled
  * - NULL content-type data does not trigger exclusions
  * - if_modified_since_only conditional mode keeps streaming
  * - auto with small content-length routes to full-buffer
@@ -1642,7 +1781,6 @@ test_select_processing_path(void)
     init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
 
     conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
-    conf.stream.threshold = 1024;
     conf.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
     conf.routing.large_body_threshold = 1024;
     r.headers_out.content_type = (ngx_str_t) { 9, (u_char *) "text/html" };
@@ -1686,15 +1824,16 @@ test_select_processing_path(void)
         "SSE should preserve excluded_content_type reason");
 
     r.headers_out.content_type = (ngx_str_t) { 9, (u_char *) "text/html" };
-    excluded[0] = (ngx_str_t) { 4, (u_char *) "text" };
+    ngx_memzero(&arr, sizeof(arr));
+    excluded[0] = (ngx_str_t) { 9, (u_char *) "text/html" };
     arr.elts = excluded;
     arr.nelts = 1;
-    conf.routing.stream_types = &arr;
+    conf.stream.excluded_types = &arr;
     selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
     TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
         "excluded stream_types should route full-buffer");
 
-    conf.routing.stream_types = NULL;
+    conf.stream.excluded_types = NULL;
     conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
     selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
     TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
@@ -1705,21 +1844,12 @@ test_select_processing_path(void)
     /* Switch back to auto for remaining tests */
     conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
 
-    excluded[0] = (ngx_str_t) { 11, (u_char *) "application" };
-    arr.elts = excluded;
-    arr.nelts = 1;
-    conf.routing.stream_types = &arr;
-    r.headers_out.content_type = (ngx_str_t) { 9, (u_char *) "text/html" };
-    selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
-    TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
-        "non-matching stream_types should keep streaming enabled");
-
+    r.headers_out.content_length_n = -1;
     r.headers_out.content_type = (ngx_str_t) { 0, NULL };
     selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
     TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
         "NULL content-type data should not trigger exclusions");
 
-    conf.routing.stream_types = NULL;
     r.headers_out.content_type = (ngx_str_t) { 9, (u_char *) "text/html" };
     conf.policy.conditional_requests =
         NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE;
@@ -1741,8 +1871,7 @@ test_select_processing_path(void)
     TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
         "auto without content-length should route streaming");
 
-    r.headers_out.content_length_n = 2048;
-    conf.stream.threshold = 1024;
+    r.headers_out.content_length_n = 1048576;
     selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
     TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
         "auto with large CL should route streaming");
@@ -1894,6 +2023,10 @@ test_send_output_and_resume_paths(void)
     c_err.next = NULL;
     ctx.streaming.pending_output = &c_err;
     g_next_body_filter_rc = NGX_ERROR;
+    /* The success resume above latched the terminal decision; reset it so
+     * this error scenario models an independent request (a request is
+     * recorded as exactly one terminal outcome). */
+    ctx.error.terminal_decision_recorded = 0;
     rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_ERROR, "resume should propagate downstream error");
     TEST_ASSERT(ctx.streaming.pending_meta.has_data == 0,
@@ -1917,6 +2050,13 @@ test_send_output_and_resume_paths(void)
         "main-request terminal should latch main_terminal_sent");
     TEST_ASSERT(ctx.streaming.subrequest_terminal_sent == 0,
         "main-request terminal must not latch subrequest terminal state");
+    TEST_ASSERT(g_next_body_filter_last_in != NULL
+        && g_next_body_filter_last_in->buf != NULL
+        && g_next_body_filter_last_in->buf->pos
+           == (u_char *) g_next_body_filter_last_in->buf
+        && g_next_body_filter_last_in->buf->last
+           == g_next_body_filter_last_in->buf->pos,
+        "empty terminal buffers must have explicit zero-length bounds");
 
     TEST_PASS("send_output/resume_pending branches covered");
 }
@@ -2106,19 +2246,31 @@ test_postcommit_and_precommit_error_paths(void)
     rc = ngx_http_markdown_streaming_handle_postcommit_error(
         &r, &ctx, &conf, ERROR_MEMORY_LIMIT);
     TEST_ASSERT(rc == NGX_OK, "postcommit error should send terminal chunk");
-    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
-        "postcommit error should record failure once");
+    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 0,
+        "successful safe-finish must not record a failed outcome");
     TEST_ASSERT(metrics.streaming.budget_exceeded_total == 1,
         "memory-limit postcommit should classify budget exceeded");
+    TEST_ASSERT(metrics.streaming.succeeded_total == 1
+                && metrics.conversions_succeeded == 1
+                && metrics.results.delivery_count == 1,
+        "successful safe-finish must record one converted outcome");
     TEST_ASSERT(g_log_decision_calls == 2,
-        "postcommit budget failure should log classification and terminal reason");
+        "postcommit safe-finish should log classification and terminal reason");
+    TEST_ASSERT(g_terminal_decision_calls == 1
+        && g_last_terminal_reason != NULL
+        && strcmp(g_last_terminal_reason, "converted") == 0
+        && g_last_terminal_stage != NULL
+        && strcmp(g_last_terminal_stage, "postcommit") == 0,
+        "postcommit safe-finish should publish one converted terminal path");
 
-    ngx_http_markdown_streaming_record_postcommit_failure(
+    ngx_http_markdown_streaming_record_postcommit_success(
         &r, &ctx, &conf);
-    TEST_ASSERT(metrics.streaming.postcommit_error_total == 1,
-        "repeated postcommit recording must not increment metrics");
+    TEST_ASSERT(metrics.streaming.succeeded_total == 1,
+        "repeated safe-finish success must not increment metrics");
     TEST_ASSERT(g_log_decision_calls == 2,
-        "repeated postcommit recording must not duplicate terminal reason");
+        "repeated safe-finish success must not duplicate terminal reason");
+    TEST_ASSERT(g_terminal_decision_calls == 1,
+        "repeated safe-finish success must not duplicate diagnostics path");
 
     ctx.streaming.completion.failure_recorded = 0;
     ctx.streaming.handle = (struct StreamingConverterHandle *) (uintptr_t) 0x4;
@@ -2209,6 +2361,30 @@ test_abort_passthrough_and_reentry_helpers(void)
     TEST_ASSERT(rc == NGX_ERROR,
         "passthrough should fail when forwarding headers fails");
     g_forward_headers_rc = NGX_OK;
+
+    ctx.headers_forwarded = 0;
+    g_forward_headers_rc = NGX_AGAIN;
+    g_next_body_filter_rc = NGX_OK;
+    g_next_body_filter_calls = 0;
+    g_next_body_filter_last_in = NULL;
+    rc = ngx_http_markdown_streaming_passthrough(&r, &ctx, &in);
+    TEST_ASSERT(rc == NGX_OK,
+        "passthrough should submit the body chain after header backpressure");
+    TEST_ASSERT(g_next_body_filter_calls == 1 && g_next_body_filter_last_in == &in,
+        "passthrough must deliver the input chain, never drop it on header "
+        "backpressure (headers are queued by the write filter; the body is "
+        "submitted behind them)");
+
+    ctx.headers_forwarded = 0;
+    g_forward_headers_rc = NGX_AGAIN;
+    g_next_body_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_passthrough(&r, &ctx, &in);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "passthrough should propagate body backpressure after queued headers");
+    TEST_ASSERT(g_next_body_filter_last_in == &in,
+        "body backpressure return must still carry the submitted chain");
+    g_forward_headers_rc = NGX_OK;
+    g_next_body_filter_rc = NGX_OK;
 
     ctx.headers_forwarded = 1;
     g_next_body_filter_rc = NGX_DONE;
@@ -2538,26 +2714,6 @@ test_init_handle_and_chunk_result_helpers(void)
         "init_handle should mark conversion attempted");
 
     ctx.streaming.handle = NULL;
-    ctx.streaming.prebuffer_initialized = 0;
-    ctx.streaming.failopen_replay_initialized = 0;
-    ctx.conversion.attempted = 0;
-    conf.ops.otel_enabled = 1;
-    r.uri.data = (u_char *) "/private/customer/12345?token=secret";
-    r.uri.len = sizeof("/private/customer/12345?token=secret") - 1;
-    rc = ngx_http_markdown_streaming_init_handle(&r, &ctx, &conf);
-    TEST_ASSERT(rc == NGX_OK,
-        "init_handle should succeed when OTel is enabled");
-    TEST_ASSERT(g_otel_span_start_calls == 1,
-        "OTel enabled should start a span");
-    TEST_ASSERT(g_otel_uri_route_seen == 1,
-        "OTel enabled should emit the redacted URI route label");
-    TEST_ASSERT(g_otel_uri_attr_seen == 0,
-        "OTel enabled should not emit a full URI attribute");
-    TEST_ASSERT(g_otel_full_uri_seen == 0,
-        "OTel enabled should not copy the full request URI");
-    conf.ops.otel_enabled = 0;
-
-    ctx.streaming.handle = NULL;
     g_prepare_options_rc = NGX_ERROR;
     rc = ngx_http_markdown_streaming_init_handle(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_DECLINED,
@@ -2744,12 +2900,29 @@ test_commit_feed_and_finalize_core_paths(void)
     rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_ERROR,
         "commit should propagate next header filter errors");
+    TEST_ASSERT(ctx.streaming.commit_state
+        == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE
+        && ctx.headers_forwarded == 0
+        && metrics.streaming.commit_total == 0,
+        "header-filter errors must not publish commit state");
+
+    /* A definitive downstream failure latches headers_committed so the
+     * canonical header chain runs at most once per request.  Clear the
+     * latch here to open the next independent scenario (positive-rc
+     * propagation from a first, non-failed commit attempt). */
+    ctx.stream_sm.headers_committed = 0;
 
     g_next_header_filter_rc = 1;
     rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
     TEST_ASSERT(rc == 1,
         "commit should propagate positive next header filter rc");
     g_next_header_filter_rc = NGX_OK;
+
+    /* The positive-rc attempt routed through the definitive-failure
+     * branch (a bare positive rc is neither OK/DONE nor AGAIN), which
+     * latched headers_committed.  Clear it so the happy-path scenario
+     * below exercises a first, unpublish ed commit. */
+    ctx.stream_sm.headers_committed = 0;
 
     rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_OK, "commit should succeed on happy path");
@@ -2758,6 +2931,27 @@ test_commit_feed_and_finalize_core_paths(void)
         "commit should switch state to post-commit");
     TEST_ASSERT(ctx.headers_forwarded == 1,
         "commit should mark headers as forwarded");
+    TEST_ASSERT(metrics.streaming.commit_total == 1,
+        "successful commit should increment commit_total exactly once");
+
+    /* Canonical model: header NGX_AGAIN = write filter queued the header
+     * block — the full commit publishes immediately (headers accepted).
+     * Re-arm a fresh commit state for the scenario. */
+    ctx.stream_sm.headers_committed = 0;
+    ctx.headers_forwarded = 0;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+    g_next_header_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "commit should propagate downstream backpressure");
+    TEST_ASSERT(ctx.streaming.commit_state
+        == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST
+        && ctx.stream_sm.headers_committed == 1
+        && ctx.headers_forwarded == 1
+        && metrics.streaming.commit_total == 1,
+        "NGX_AGAIN publishes the full commit (headers accepted)");
 
     ctx.processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
@@ -2838,6 +3032,7 @@ test_commit_feed_and_finalize_core_paths(void)
         (uintptr_t) 0x16;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.pending_output = NULL;
+    ctx.streaming.main_terminal_sent = 0;
     g_streaming_finalize_rc = ERROR_INTERNAL;
     g_next_body_filter_rc = NGX_ERROR;
     rc = ngx_http_markdown_streaming_finalize_request(&r, &ctx, &conf);
@@ -2848,6 +3043,11 @@ test_commit_feed_and_finalize_core_paths(void)
         (uintptr_t) 0x17;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.pending_output = NULL;
+    /* The error scenario above latched the terminal decision; reset it so
+     * this success scenario models an independent request (exactly one
+     * terminal outcome per request). */
+    ctx.error.terminal_decision_recorded = 0;
+    ctx.streaming.completion.failure_recorded = 0;
     g_streaming_finalize_rc = ERROR_SUCCESS;
     g_streaming_finalize_result.markdown = out_data;
     g_streaming_finalize_result.markdown_len = 3;
@@ -2925,6 +3125,7 @@ test_commit_feed_and_finalize_core_paths(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.completion.pending_terminal_metrics = 0;
     ctx.streaming.completion.failure_recorded = 0;
+    ctx.error.terminal_decision_recorded = 0;
     ctx.streaming.pending_output = NULL;
     g_streaming_finalize_rc = ERROR_SUCCESS;
     g_streaming_finalize_result.markdown = out_data;
@@ -2942,13 +3143,230 @@ test_commit_feed_and_finalize_core_paths(void)
     TEST_PASS("commit/feed-result/finalize core branches covered");
 }
 
+
+/*
+ * Header commit follows the canonical NGINX model: a header-filter
+ * NGX_AGAIN means the write filter queued the header block — the headers
+ * are ACCEPTED.  Every commit latch and the commit metric publish
+ * immediately on NGX_AGAIN, the header chain is invoked exactly once, and
+ * the write-event resume is a pure body-filter re-entry (no header retry).
+ */
+static void
+test_header_commit_backpressure_retry_is_atomic(void)
+{
+    ngx_http_request_t       r;
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t               pool;
+    ngx_connection_t         conn;
+    ngx_log_t                log;
+    ngx_event_t              read_event;
+    ngx_http_markdown_metrics_t metrics;
+    ngx_int_t                 rc;
+
+    TEST_SUBSECTION("header commit NGX_AGAIN publishes canonically");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+
+    g_next_header_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_AGAIN,
+                "header commit propagates downstream NGX_AGAIN");
+    TEST_ASSERT(ctx.stream_sm.headers_committed == 1
+                && ctx.streaming.commit_state
+                   == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST
+                && ctx.stream_sm.state == NGX_HTTP_MD_STATE_COMMITTED
+                && ctx.headers_forwarded == 1
+                && metrics.streaming.commit_total == 1,
+                "NGX_AGAIN publishes the full commit (headers accepted)");
+    TEST_ASSERT(g_next_header_filter_calls == 1,
+                "header filter chain must be invoked exactly once");
+
+    /* A second commit call short-circuits on headers_committed: header
+     * mutations and the downstream chain are never replayed. */
+    g_stream_commit_headers_called = 0;
+    g_next_header_filter_calls = 0;
+    g_stream_commit_headers_rc = NGX_ERROR;
+    rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK,
+                "re-commit after acceptance must short-circuit");
+    TEST_ASSERT(g_stream_commit_headers_called == 0
+                && g_next_header_filter_calls == 0,
+                "re-commit must not replay mutations or the header chain");
+
+    /* Null-input resume with no deferred output is a clean no-op. */
+    rc = ngx_http_markdown_streaming_handle_null_input(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK,
+                "null-input resume with no deferred output succeeds");
+
+    TEST_PASS("header commit NGX_AGAIN publishes canonically");
+}
+
+/* Feed-path regression: after a commit-time header NGX_AGAIN the feed path
+ * must not replay the transactional header mutation nor re-invoke the
+ * header chain — the next feed cycles straight into the POST-commit body
+ * path (canonical model). */
+static void
+test_feed_path_resumes_pending_header_commit(void)
+{
+    ngx_http_request_t      r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t              pool;
+    ngx_connection_t        conn;
+    ngx_log_t               log;
+    ngx_event_t             read_event;
+    ngx_http_markdown_metrics_t metrics;
+    ngx_int_t                rc;
+
+    TEST_SUBSECTION("feed path skips header re-entry after acceptance");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+
+    g_next_header_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_AGAIN && ctx.stream_sm.headers_committed == 1,
+        "initial feed-path commit accepts the queued headers");
+
+    g_stream_commit_headers_rc = NGX_ERROR;
+    g_stream_commit_headers_called = 0;
+    g_next_header_filter_calls = 0;
+    g_next_header_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK,
+        "feed-path re-commit short-circuits on the accepted latch");
+    TEST_ASSERT(g_stream_commit_headers_called == 0
+                && g_next_header_filter_calls == 0,
+        "feed path must not replay mutations nor the header chain");
+    TEST_ASSERT(ctx.stream_sm.headers_committed == 1
+                && ctx.streaming.commit_state
+                   == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST
+                && ctx.headers_forwarded == 1
+                && metrics.streaming.commit_total == 1,
+        "feed-path commit state remains fully published");
+
+    TEST_PASS("feed path skips header re-entry after acceptance");
+}
+
+/*
+ * Regression: handle_success_output must NOT send body output
+ * when the header commit returns NGX_AGAIN.
+ *
+ * The feed path calls ngx_http_markdown_streaming_commit while still in
+ * COMMIT_PRE.  Under the canonical model the NGX_AGAIN means the write
+ * filter queued the header block — the commit latches publish immediately
+ * (headers accepted) — but the write queue is busy, so the conversion
+ * output must be retained in module state until the write event fires.
+ * The success-output handler must propagate NGX_AGAIN immediately, retain
+ * the unconsumed output, and let the null-input re-entry (a pure
+ * body-filter resume) deliver it without re-invoking the header chain.
+ *
+ * Covers: ngx_http_markdown_streaming_handle_success_output,
+ *         ngx_http_markdown_streaming_handle_feed_result
+ */
+static void
+test_success_output_defers_body_when_commit_again(void)
+{
+    ngx_http_request_t      r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t              pool;
+    ngx_connection_t        conn;
+    ngx_log_t               log;
+    ngx_event_t             read_event;
+    ngx_http_markdown_metrics_t metrics;
+    ngx_chain_t             future;
+    ngx_buf_t                future_buf;
+    u_char                  out_data[] = "body-must-wait";
+    ngx_buf_t              *sent_buf;
+    ngx_int_t               rc;
+    ngx_uint_t              free_before;
+
+    TEST_SUBSECTION("success output defers body while header commit is pending");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_memzero(&future, sizeof(future));
+    ngx_memzero(&future_buf, sizeof(future_buf));
+    ngx_http_markdown_metrics = &metrics;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+    future.buf = &future_buf;
+    future_buf.pos = (u_char *) "future";
+    future_buf.last = future_buf.pos + 6;
+
+    g_next_header_filter_rc = NGX_AGAIN;
+    free_before = g_output_free_calls;
+    rc = ngx_http_markdown_streaming_handle_feed_result(
+        &r, &ctx, &conf, ERROR_SUCCESS, out_data, sizeof(out_data) - 1);
+
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "feed path must propagate the commit NGX_AGAIN");
+    TEST_ASSERT(ctx.stream_sm.headers_committed == 1
+                && ctx.streaming.commit_state
+                   == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST
+                && ctx.headers_forwarded == 1
+                && metrics.streaming.commit_total == 1,
+        "commit latches publish immediately on header NGX_AGAIN");
+    TEST_ASSERT(g_next_header_filter_calls == 1,
+        "header chain must be invoked exactly once");
+    TEST_ASSERT(g_next_body_filter_calls == 0,
+        "body output must not run ahead of the queued header block");
+    TEST_ASSERT(ctx.streaming.pending_meta.pending_header_output == out_data
+                && ctx.streaming.pending_meta.pending_header_output_len
+                   == sizeof(out_data) - 1,
+        "conversion output must remain owned while headers are queued");
+    TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
+        "header backpressure must keep the request buffered for re-entry");
+    TEST_ASSERT(g_output_free_calls == free_before,
+        "pending conversion output must not be freed before delivery");
+
+    rc = ngx_http_markdown_streaming_handle_new_input_with_pending(
+        &r, &ctx, &conf, &future);
+    TEST_ASSERT(rc == NGX_AGAIN
+                && ctx.streaming.pending_input.head != NULL,
+        "future input must queue while header output is pending");
+    ngx_http_markdown_streaming_pending_input_clear(&ctx);
+
+    /* The write event fires: null-input re-entry resumes the deferred body.
+     * The header rc is still NGX_AGAIN and MUST stay irrelevant — the
+     * header chain is never re-invoked (canonical model). */
+    g_next_header_filter_calls = 0;
+    rc = ngx_http_markdown_streaming_handle_null_input(
+        &r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK,
+        "null-input resume must deliver the deferred body");
+    sent_buf = g_next_body_filter_last_in == NULL
+        ? NULL : g_next_body_filter_last_in->buf;
+    TEST_ASSERT(ctx.streaming.pending_meta.pending_header_output == NULL
+                && g_next_body_filter_calls == 1
+                && (r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0
+                && sent_buf != NULL
+                && (size_t) (sent_buf->last - sent_buf->pos)
+                   == sizeof(out_data) - 1
+                && ngx_memcmp(sent_buf->pos, out_data,
+                              sizeof(out_data) - 1) == 0,
+        "deferred conversion output must be delivered exactly once");
+    TEST_ASSERT(g_next_header_filter_calls == 0,
+        "header chain must not be re-invoked on write-event resume");
+    TEST_ASSERT(g_output_free_calls == free_before + 1,
+        "deferred conversion output must be freed after delivery");
+
+    TEST_PASS("success output defers body until the write event");
+}
+
 /*
  * Test post-commit C-side output construction failures.
  *
  * When FFI feed succeeds (ERROR_SUCCESS) and commit_state == POST,
  * but C-side output construction fails (ngx_calloc_buf, ngx_palloc,
- * ngx_alloc_chain_link, or zero-copy factory failure), the failure
- * must enter the unified post-commit failure lifecycle:
+ * or ngx_alloc_chain_link), the failure must enter the unified
+ * post-commit failure lifecycle:
  *   - input_disposition = TERMINAL
  *   - postcommit_error_total += 1
  *   - streaming.failed_total += 1
@@ -2961,13 +3379,9 @@ test_commit_feed_and_finalize_core_paths(void)
  *   A: pool-copy ngx_calloc_buf failure
  *   B: pool-copy ngx_palloc (data) failure
  *   C: pool-copy ngx_alloc_chain_link failure
- *   D: zero-copy factory failure before ownership transfer + fallback fail
- *   E: zero-copy factory failure after ownership transfer
- *   F: zero-copy factory succeeds, chain-link allocation fails
  *
  * Covers: ngx_http_markdown_streaming_handle_success_output,
- *         ngx_http_markdown_streaming_send_feed_output,
- *         ngx_http_markdown_streaming_send_zero_copy_feed_output
+ *         ngx_http_markdown_streaming_send_feed_output
  */
 static void
 test_postcommit_output_construction_failures(void)
@@ -2995,7 +3409,6 @@ test_postcommit_output_construction_failures(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x30;
-    conf.stream.zero_copy = 0;
     g_next_body_filter_rc = NGX_OK;
     g_calloc_buf_fail_once = 1;
     free_before = g_output_free_calls;
@@ -3030,7 +3443,6 @@ test_postcommit_output_construction_failures(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x31;
-    conf.stream.zero_copy = 0;
     g_next_body_filter_rc = NGX_OK;
     /*
      * ngx_calloc_buf succeeds but the subsequent ngx_palloc for data
@@ -3068,7 +3480,6 @@ test_postcommit_output_construction_failures(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x32;
-    conf.stream.zero_copy = 0;
     g_next_body_filter_rc = NGX_OK;
     g_alloc_chain_fail_once = 1;
     free_before = g_output_free_calls;
@@ -3091,110 +3502,6 @@ test_postcommit_output_construction_failures(void)
         "case C: conversions_failed must be 1");
     TEST_ASSERT(g_output_free_calls == free_before + 1,
         "case C: Rust buffer must be freed exactly once");
-
-    /* --- Case D: zero-copy factory fail before ownership + fallback fail --- */
-    reset_globals();
-    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
-    ngx_memzero(&metrics, sizeof(metrics));
-    ngx_http_markdown_metrics = &metrics;
-
-    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
-    ctx.streaming.handle = (struct StreamingConverterHandle *)
-        (uintptr_t) 0x33;
-    conf.stream.zero_copy = 1;
-    g_next_body_filter_rc = NGX_OK;
-    g_calloc_buf_fail_once = 1;
-    g_palloc_fail_once = 1;
-    free_before = g_output_free_calls;
-
-    rc = ngx_http_markdown_streaming_handle_feed_result(
-        &r, &ctx, &conf, ERROR_SUCCESS, out_data, 5);
-
-    TEST_ASSERT(rc == NGX_ERROR,
-        "case D: output-loss must return NGX_ERROR");
-    TEST_ASSERT(ctx.streaming.classify.input_disposition
-        == NGX_HTTP_MD_INPUT_TERMINAL,
-        "case D: input_disposition must be TERMINAL");
-    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
-        "case D: failure_recorded must be 1");
-    TEST_ASSERT(metrics.streaming.postcommit_error_total == 1,
-        "case D: postcommit_error_total must be 1");
-    TEST_ASSERT(metrics.conversions_failed == 1,
-        "case D: conversions_failed must be 1");
-    TEST_ASSERT(g_output_free_calls == free_before + 1,
-        "case D: Rust buffer freed exactly once (by fallback path)");
-
-    /* --- Case E: zero-copy factory fail after ownership transfer --- */
-    reset_globals();
-    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
-    ngx_memzero(&metrics, sizeof(metrics));
-    ngx_http_markdown_metrics = &metrics;
-    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
-    ctx.streaming.handle = (struct StreamingConverterHandle *)
-        (uintptr_t) 0x34;
-    conf.stream.zero_copy = 1;
-    g_next_body_filter_rc = NGX_OK;
-    /*
-     * Simulate factory failure after ownership transfer:
-     * ngx_calloc_buf succeeds but ngx_pool_cleanup_add fails.
-     * The factory frees the Rust buffer itself and sets
-     * owner_transferred = 1, returning NULL.
-     * No pool-copy fallback is attempted.
-     */
-    g_pool_cleanup_fail_once = 1;
-    free_before = g_output_free_calls;
-
-    rc = ngx_http_markdown_streaming_handle_feed_result(
-        &r, &ctx, &conf, ERROR_SUCCESS, out_data, 5);
-
-    TEST_ASSERT(rc == NGX_ERROR,
-        "case E: output-loss must return NGX_ERROR");
-    TEST_ASSERT(ctx.streaming.classify.input_disposition
-        == NGX_HTTP_MD_INPUT_TERMINAL,
-        "case E: input_disposition must be TERMINAL");
-    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
-        "case E: failure_recorded must be 1");
-    TEST_ASSERT(metrics.streaming.postcommit_error_total == 1,
-        "case E: postcommit_error_total must be 1");
-    TEST_ASSERT(metrics.conversions_failed == 1,
-        "case E: conversions_failed must be 1");
-    TEST_ASSERT(g_output_free_calls == free_before + 1,
-        "case E: Rust buffer freed exactly once (by factory)");
-
-    /* --- Case F: zero-copy factory succeeds, chain-link fails --- */
-    reset_globals();
-    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
-    ngx_memzero(&metrics, sizeof(metrics));
-    ngx_http_markdown_metrics = &metrics;
-    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
-    ctx.streaming.handle = (struct StreamingConverterHandle *)
-        (uintptr_t) 0x35;
-    conf.stream.zero_copy = 1;
-    g_next_body_filter_rc = NGX_OK;
-    /*
-     * Zero-copy factory succeeds (cleanup registered, ownership
-     * transferred).  The subsequent ngx_alloc_chain_link fails.
-     * Ownership is with pool cleanup — no caller-side free.
-     */
-    g_alloc_chain_fail_once = 1;
-    free_before = g_output_free_calls;
-
-    rc = ngx_http_markdown_streaming_handle_feed_result(
-        &r, &ctx, &conf, ERROR_SUCCESS, out_data, 5);
-
-    TEST_ASSERT(rc == NGX_ERROR,
-        "case F: output-loss must return NGX_ERROR");
-    TEST_ASSERT(ctx.streaming.classify.input_disposition
-        == NGX_HTTP_MD_INPUT_TERMINAL,
-        "case F: input_disposition must be TERMINAL");
-    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
-        "case F: failure_recorded must be 1");
-    TEST_ASSERT(metrics.streaming.postcommit_error_total == 1,
-        "case F: postcommit_error_total must be 1");
-    TEST_ASSERT(metrics.conversions_failed == 1,
-        "case F: conversions_failed must be 1");
-    TEST_ASSERT(metrics.perf.zero_copy_output_total == 0,
-        "case F: no delivery metrics for undelivered chunk");
 
     TEST_PASS("post-commit output construction failure lifecycle covered");
 }
@@ -3234,7 +3541,6 @@ test_postcommit_ngx_done_is_delivery_success(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x50;
-    conf.stream.zero_copy = 0;
     g_next_body_filter_rc = NGX_DONE;
 
     rc = ngx_http_markdown_streaming_handle_feed_result(
@@ -3296,7 +3602,6 @@ test_postcommit_downstream_failure_classification(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x51;
-    conf.stream.zero_copy = 0;
     /* Downstream body filter returns definitive failure */
     g_next_body_filter_rc = NGX_ERROR;
     free_before = g_output_free_calls;
@@ -3383,7 +3688,6 @@ test_postcommit_output_loss_no_safe_finish(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x52;
-    conf.stream.zero_copy = 0;
     g_next_body_filter_rc = NGX_OK;
     /* Force allocation failure so the chunk is lost */
     g_calloc_buf_fail_once = 1;
@@ -3475,7 +3779,6 @@ test_postcommit_output_loss_body_filter_reentry_is_idempotent(void)
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x53;
-    conf.stream.zero_copy = 0;
     conf.max_size = 0;
 
     first_buf.pos = first_data;
@@ -3536,184 +3839,6 @@ test_postcommit_output_loss_body_filter_reentry_is_idempotent(void)
         "body-filter re-entry must not emit a terminal chain");
 
     TEST_PASS("output-loss production body-filter re-entry is idempotent");
-}
-
-/*
- * The normal selector avoids zero-copy while output is already pending, so
- * inject the conflict at the production ownership boundary: downstream
- * returns NGX_AGAIN, then the test stub publishes an existing pending anchor
- * immediately before save_pending().  This drives the real zero-copy sender,
- * save_pending guard, hard-abort path, and pool cleanup ownership.
- */
-static void
-test_zero_copy_pending_conflict_is_invariant_output_loss(void)
-{
-    ngx_http_request_t          r;
-    ngx_http_markdown_ctx_t     ctx;
-    ngx_http_markdown_conf_t    conf;
-    ngx_pool_t                  pool;
-    ngx_connection_t            conn;
-    ngx_log_t                   log;
-    ngx_event_t                 read_event;
-    ngx_http_markdown_metrics_t metrics;
-    ngx_chain_t                 first;
-    ngx_chain_t                 retained;
-    ngx_chain_t                 reentry;
-    ngx_buf_t                   first_buf;
-    ngx_buf_t                   retained_buf;
-    ngx_buf_t                   reentry_buf;
-    u_char                      first_data[] = "first";
-    u_char                      output_data[] = "zero-copy";
-    u_char                      retained_data[] = "retained";
-    u_char                      reentry_data[] = "reentry";
-    ngx_int_t                   rc;
-
-    TEST_SUBSECTION("zero-copy pending conflict classification");
-    reset_globals();
-    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
-    ngx_memzero(&metrics, sizeof(metrics));
-    ngx_memzero(&first_buf, sizeof(first_buf));
-    ngx_memzero(&retained_buf, sizeof(retained_buf));
-    ngx_memzero(&reentry_buf, sizeof(reentry_buf));
-    ngx_http_markdown_metrics = &metrics;
-
-    ctx.eligible = 1;
-    ctx.headers_forwarded = 1;
-    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
-    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
-    ctx.streaming.handle = (struct StreamingConverterHandle *)
-        (uintptr_t) 0x54;
-    conf.stream.zero_copy = 1;
-    conf.max_size = 0;
-    g_next_body_filter_rc = NGX_AGAIN;
-    g_inject_pending_conflict_once = 1;
-
-    first_buf.pos = first_data;
-    first_buf.last = first_data + sizeof(first_data) - 1;
-    first.buf = &first_buf;
-    first.next = NULL;
-
-    retained_buf.pos = retained_data;
-    retained_buf.last = retained_data + sizeof(retained_data) - 1;
-    retained.buf = &retained_buf;
-    retained.next = NULL;
-    ctx.streaming.pending_input.head = &retained;
-    ctx.streaming.pending_input.tail = &retained;
-    ctx.streaming.pending_input.bytes = sizeof(retained_data) - 1;
-    ctx.streaming.pending_input.links = 1;
-
-    ctx.streaming.pending_meta.has_data = 1;
-    ctx.streaming.pending_meta.bytes = 17;
-    ctx.streaming.pending_meta.zero_copy = 1;
-    ctx.streaming.pending_meta.main_terminal = 1;
-    ctx.streaming.pending_meta.subrequest_terminal = 1;
-    ctx.streaming.completion.finalize_after_pending = 1;
-    ctx.streaming.completion.finalize_pending_lastbuf = 1;
-    ctx.streaming.completion.pending_terminal_metrics = 1;
-    ctx.streaming.completion.pending_failopen_delivery = 1;
-    ctx.streaming.completion.postcommit_error_after_pending = 1;
-    ctx.streaming.completion.postcommit_error_code = ERROR_INTERNAL;
-    ctx.streaming.completion.failopen_abort_after_pending = 1;
-    ctx.streaming.completion.failopen_abort_error_code = ERROR_INTERNAL;
-    ctx.streaming.completion.upstream_terminal_seen = 1;
-    r.buffered = NGX_HTTP_MARKDOWN_BUFFERED;
-
-    g_streaming_feed_rc = ERROR_SUCCESS;
-    g_streaming_feed_out_data = output_data;
-    g_streaming_feed_out_len = sizeof(output_data) - 1;
-
-    rc = ngx_http_markdown_streaming_body_filter(&r, &first);
-
-    TEST_ASSERT(rc == NGX_ERROR,
-        "zero-copy pending conflict must hard-abort");
-    TEST_ASSERT(ctx.streaming.classify.last_send_failure_origin
-        == NGX_HTTP_MD_SEND_ORIGIN_INVARIANT,
-        "zero-copy save_pending failure must be INVARIANT");
-    TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_POST_COMMIT_ABORT,
-        "zero-copy invariant must enter POST_COMMIT_ABORT");
-    TEST_ASSERT(ctx.streaming.classify.input_disposition
-        == NGX_HTTP_MD_INPUT_TERMINAL,
-        "zero-copy invariant must latch terminal input disposition");
-    TEST_ASSERT(ctx.streaming.handle == NULL && g_abort_calls == 1,
-        "zero-copy invariant must abort the Rust handle exactly once");
-    TEST_ASSERT(ctx.streaming.pending_output == NULL,
-        "fatal output loss must detach the pending output anchor");
-    TEST_ASSERT(ctx.streaming.pending_meta.has_data == 0
-        && ctx.streaming.pending_meta.bytes == 0
-        && ctx.streaming.pending_meta.zero_copy == 0
-        && ctx.streaming.pending_meta.main_terminal == 0
-        && ctx.streaming.pending_meta.subrequest_terminal == 0,
-        "fatal output loss must clear all pending output metadata");
-    TEST_ASSERT(ctx.streaming.pending_input.head == NULL
-        && ctx.streaming.pending_input.tail == NULL
-        && ctx.streaming.pending_input.bytes == 0
-        && ctx.streaming.pending_input.links == 0
-        && retained_buf.pos == retained_buf.last,
-        "fatal output loss must abandon and clear pending input");
-    TEST_ASSERT(ctx.streaming.completion.finalize_after_pending == 0
-        && ctx.streaming.completion.finalize_pending_lastbuf == 0
-        && ctx.streaming.completion.pending_terminal_metrics == 0
-        && ctx.streaming.completion.pending_failopen_delivery == 0
-        && ctx.streaming.completion.postcommit_error_after_pending == 0
-        && ctx.streaming.completion.postcommit_error_code == ERROR_SUCCESS
-        && ctx.streaming.completion.failopen_abort_after_pending == 0
-        && ctx.streaming.completion.failopen_abort_error_code == ERROR_SUCCESS
-        && ctx.streaming.completion.upstream_terminal_seen == 0,
-        "fatal output loss must clear every pending continuation latch");
-    TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0,
-        "fatal output loss must clear the module buffered bit");
-    TEST_ASSERT(ctx.streaming.reason
-        == NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_PARSE_ERROR,
-        "zero-copy invariant uses generic non-resource parse reason");
-    TEST_ASSERT(metrics.failures_conversion == 1
-        && metrics.failures_resource_limit == 0
-        && metrics.streaming.budget_exceeded_total == 0,
-        "zero-copy invariant must be conversion, not resource failure");
-    TEST_ASSERT(metrics.streaming.postcommit_error_total == 1
-        && metrics.streaming.failed_total == 1
-        && metrics.conversions_failed == 1
-        && metrics.streaming.streaming_failure_postcommit_abort == 0,
-        "zero-copy invariant failure metrics must be exactly once");
-    TEST_ASSERT(g_output_free_calls == 0,
-        "transferred zero-copy output must remain pool-cleanup owned");
-    TEST_ASSERT(pool.cleanups != NULL && pool.cleanups->handler != NULL,
-        "zero-copy output must register a pool cleanup");
-    TEST_ASSERT(g_next_body_filter_calls == 1
-        && g_safe_finish_calls == 0,
-        "zero-copy invariant must not send closing or terminal output");
-
-    rc = ngx_http_markdown_streaming_body_filter(&r, NULL);
-    TEST_ASSERT(rc == NGX_OK,
-        "NULL re-entry after hard abort must finish without resuming output");
-    TEST_ASSERT(g_next_body_filter_calls == 1
-        && metrics.perf.backpressure_resume_total == 0,
-        "NULL re-entry must not call downstream or record a resume");
-
-    reentry_buf.pos = reentry_data;
-    reentry_buf.last = reentry_data + sizeof(reentry_data) - 1;
-    reentry.buf = &reentry_buf;
-    reentry.next = NULL;
-
-    rc = ngx_http_markdown_streaming_body_filter(&r, &reentry);
-    TEST_ASSERT(rc == NGX_OK && reentry_buf.pos == reentry_buf.last,
-        "non-NULL re-entry must abandon input without NGX_AGAIN");
-    TEST_ASSERT(g_streaming_feed_calls == 1
-        && g_next_body_filter_calls == 1,
-        "non-NULL re-entry must not recreate Rust or call downstream");
-    TEST_ASSERT(metrics.streaming.postcommit_error_total == 1
-        && metrics.streaming.failed_total == 1
-        && metrics.conversions_failed == 1
-        && metrics.failures_conversion == 1
-        && metrics.failures_resource_limit == 0,
-        "re-entry must preserve exactly-once failure accounting");
-    TEST_ASSERT(g_abort_calls == 1 && g_safe_finish_calls == 0,
-        "re-entry must not repeat abort or send closing output");
-
-    pool.cleanups->handler(pool.cleanups->data);
-    TEST_ASSERT(g_output_free_calls == 1,
-        "pool cleanup must free transferred zero-copy output exactly once");
-
-    TEST_PASS("zero-copy pending conflict is invariant output loss");
 }
 
 /*
@@ -4021,7 +4146,6 @@ test_process_chain_and_body_filter_deep_paths(void)
     ctx.streaming.failopen_replay_initialized = 0;
     ctx.streaming.completion.finalize_after_pending = 0;
     ctx.failopen_completed = 0;
-    conf.stream.zero_copy = 0;
     in_buf.pos = chunk_data;
     in_buf.last = chunk_data + 5;
     in_buf.last_buf = 0;
@@ -4232,6 +4356,7 @@ test_streaming_gap_branches(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.output.bytes = NGX_MAX_SIZE_T_VALUE;
     ctx.streaming.completion.failure_recorded = 0;
+    ctx.error.terminal_decision_recorded = 0;
     ctx.streaming.pending_output = NULL;
     g_streaming_finalize_rc = ERROR_SUCCESS;
     g_streaming_finalize_result.markdown = out_data;
@@ -4330,7 +4455,7 @@ test_streaming_gap_branches(void)
     in.buf = &in_buf;
     in.next = NULL;
     ctx.eligible = 1;
-    conf.stream.precommit_buffer = 0;
+    conf.limits.streaming_buffer = 0;
     g_prepare_options_rc = NGX_OK;
     g_new_with_code_rc = ERROR_SUCCESS;
     g_new_with_code_null_handle = 0;
@@ -5115,7 +5240,7 @@ test_pending_input_production_lifecycle(void)
 }
 
 /*
- * Test: P1-1 — ensure_handle() init-failure fail-open must set
+ * Test: init-failure — ensure_handle() init-failure fail-open must set
  * failopen_active so future input bypasses Rust instead of
  * re-entering the converter with a NULL handle.
  *
@@ -5144,7 +5269,7 @@ test_failopen_init_failure_latches_mode(void)
     u_char                   future_data[] = "future";
     ngx_http_markdown_metrics_t metrics;
 
-    TEST_SUBSECTION("P1-1: init-failure fail-open latches failopen_active");
+    TEST_SUBSECTION("init-failure: init-failure fail-open latches failopen_active");
     reset_globals();
     init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
     ngx_memzero(&metrics, sizeof(metrics));
@@ -5163,7 +5288,7 @@ test_failopen_init_failure_latches_mode(void)
     /*
      * Force init_handle to decline: prepare_options failure routes
      * through precommit_error with pass policy, which sets eligible=0
-     * and (after the P1-1 fix) failopen_active=1.
+     * and (after the init-failure fix) failopen_active=1.
      */
     ctx.eligible = 1;
     ctx.streaming.handle = NULL;
@@ -5178,7 +5303,7 @@ test_failopen_init_failure_latches_mode(void)
     TEST_ASSERT(ctx.eligible == 0,
         "precommit_error pass policy must clear eligible");
     TEST_ASSERT(ctx.streaming.completion.failopen_active == 1,
-        "P1-1: init-failure fail-open must latch failopen_active at "
+        "init-failure: init-failure fail-open must latch failopen_active at "
         "the policy selection point so future input bypasses Rust");
     TEST_ASSERT(ctx.streaming.pending_output != NULL,
         "downstream NGX_AGAIN must retain pending_output");
@@ -5213,10 +5338,10 @@ test_failopen_init_failure_latches_mode(void)
     TEST_ASSERT(rc == NGX_AGAIN,
         "failopen_active future input must return NGX_AGAIN");
     TEST_ASSERT(g_streaming_feed_calls == 0,
-        "P1-1: failopen_active future input must never re-enter the "
+        "init-failure: failopen_active future input must never re-enter the "
         "Rust converter (NULL handle would be rejected)");
     TEST_ASSERT(g_next_body_filter_calls == 0,
-        "P1-2: failopen_active future input must not submit a new "
+        "subrequest: failopen_active future input must not submit a new "
         "chain while pending_output is still downstream-owned");
 
     /*
@@ -5241,11 +5366,11 @@ test_failopen_init_failure_latches_mode(void)
     TEST_ASSERT(metrics.results.failopen_count == 1,
         "fail-open delivery must count after pending output drains");
 
-    TEST_PASS("P1-1 init-failure failopen_active latch covered");
+    TEST_PASS("init-failure init-failure failopen_active latch covered");
 }
 
 /*
- * Test: P1-2 — failopen_active + pending_output + future-input enqueue
+ * Test: subrequest — failopen_active + pending_output + future-input enqueue
  * failure must not submit a new chain while the old output is still
  * downstream-owned, must not re-enter precommit_error (double-counting
  * conversions_failed), and must latch a protocol-visible abort after drain.
@@ -5285,7 +5410,7 @@ test_failopen_active_enqueue_failure_aborts_safely(void)
     ngx_uint_t               free_calls;
     ngx_http_markdown_pending_terminal_t  terminal;
 
-    TEST_SUBSECTION("P1-2: failopen_active enqueue failure aborts safely");
+    TEST_SUBSECTION("subrequest: failopen_active enqueue failure aborts safely");
     reset_globals();
     init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
 
@@ -5343,17 +5468,17 @@ test_failopen_active_enqueue_failure_aborts_safely(void)
     rc = ngx_http_markdown_streaming_handle_new_input_with_pending(
         &r, &ctx, &conf, &future);
     TEST_ASSERT(rc == NGX_AGAIN,
-        "P1-2: failopen_active enqueue failure must return NGX_AGAIN");
+        "subrequest: failopen_active enqueue failure must return NGX_AGAIN");
     TEST_ASSERT(g_streaming_feed_calls == 0,
-        "P1-2: must never re-enter the Rust converter");
+        "subrequest: must never re-enter the Rust converter");
     TEST_ASSERT(g_next_body_filter_calls == 0,
-        "P1-2: must not submit a new chain while pending_output is "
+        "subrequest: must not submit a new chain while pending_output is "
         "downstream-owned (Rule 1 backpressure ownership contract)");
     TEST_ASSERT(ctx.streaming.completion.failopen_abort_after_pending == 1,
-        "P1-2: enqueue failure in failopen_active must latch "
+        "subrequest: enqueue failure in failopen_active must latch "
         "failopen_abort_after_pending for visible abort after drain");
     TEST_ASSERT(ctx.streaming.pending_output == &pending_output,
-        "P1-2: old pending_output must remain intact (not freed/overwritten)");
+        "subrequest: old pending_output must remain intact (not freed/overwritten)");
 
     /*
      * Defense-in-depth: send_failopen_chain must refuse to submit when
@@ -5361,31 +5486,31 @@ test_failopen_active_enqueue_failure_aborts_safely(void)
      */
     rc = ngx_http_markdown_streaming_send_failopen_chain(&r, &ctx, &future);
     TEST_ASSERT(rc == NGX_ERROR,
-        "P1-2: send_failopen_chain must refuse to submit a new chain "
+        "subrequest: send_failopen_chain must refuse to submit a new chain "
         "before old pending_output drains (defense-in-depth)");
     TEST_ASSERT(g_next_body_filter_calls == 0,
-        "P1-2: send_failopen_chain guard must fire before downstream call");
+        "subrequest: send_failopen_chain guard must fire before downstream call");
     TEST_ASSERT(ctx.streaming.pending_output == &pending_output,
-        "P1-2: send_failopen_chain guard must preserve the old anchor");
+        "subrequest: send_failopen_chain guard must preserve the old anchor");
     TEST_ASSERT(pending_buf.pos == pending_pos
                 && pending_buf.last == pending_last,
-        "P1-2: send_failopen_chain guard must not mutate shared buffers");
+        "subrequest: send_failopen_chain guard must not mutate shared buffers");
     TEST_ASSERT(g_output_free_calls == 0,
-        "P1-2: guard must not free downstream-owned pending buffers");
+        "subrequest: guard must not free downstream-owned pending buffers");
 
     free_calls = g_output_free_calls;
     rc = ngx_http_markdown_streaming_save_pending(
         &r, &ctx, &future, future_buf.pos,
-        ngx_http_markdown_buf_len_safe(&future_buf), 0, terminal);
+        ngx_http_markdown_buf_len_safe(&future_buf), terminal);
     TEST_ASSERT(rc == NGX_ERROR,
-        "P1-2: save_pending must reject re-entry");
+        "subrequest: save_pending must reject re-entry");
     TEST_ASSERT(ctx.streaming.pending_output == &pending_output,
-        "P1-2: save_pending guard must preserve the old anchor");
+        "subrequest: save_pending guard must preserve the old anchor");
     TEST_ASSERT(pending_buf.pos == pending_pos
                 && pending_buf.last == pending_last,
-        "P1-2: save_pending guard must not mutate shared buffers");
+        "subrequest: save_pending guard must not mutate shared buffers");
     TEST_ASSERT(g_output_free_calls == free_calls,
-        "P1-2: save_pending guard must not free downstream-owned buffers");
+        "subrequest: save_pending guard must not free downstream-owned buffers");
 
     /*
      * A real NULL resume must drain the old pending output, consume the
@@ -5397,17 +5522,17 @@ test_failopen_active_enqueue_failure_aborts_safely(void)
     g_next_body_filter_calls = 0;
     rc = ngx_http_markdown_streaming_handle_null_input(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_ERROR,
-        "P1-2: known data loss must abort after draining old output");
+        "subrequest: known data loss must abort after draining old output");
     TEST_ASSERT(g_next_body_filter_calls == 1,
-        "P1-2: abort must not send a clean terminal after data loss");
+        "subrequest: abort must not send a clean terminal after data loss");
     TEST_ASSERT(ctx.streaming.pending_output == NULL,
-        "P1-2: old pending anchor must clear only after downstream drain");
+        "subrequest: old pending anchor must clear only after downstream drain");
     TEST_ASSERT(ctx.streaming.completion.failopen_abort_after_pending == 0,
-        "P1-2: abort latch must clear after failure continuation");
+        "subrequest: abort latch must clear after failure continuation");
     TEST_ASSERT(retained_buf.pos == retained_buf.last,
-        "P1-2: discarded retained input must consume shared buffers");
+        "subrequest: discarded retained input must consume shared buffers");
     TEST_ASSERT(ctx.streaming.classify.input_disposition == NGX_HTTP_MD_INPUT_TERMINAL,
-        "P1-2: abort continuation must reject all later input");
+        "subrequest: abort continuation must reject all later input");
 
     later.buf = &later_buf;
     later_buf.pos = later_data;
@@ -5415,13 +5540,13 @@ test_failopen_active_enqueue_failure_aborts_safely(void)
     later.next = NULL;
     rc = ngx_http_markdown_streaming_body_filter(&r, &later);
     TEST_ASSERT(rc == NGX_OK,
-        "P1-2: later input after abort must be safely abandoned");
+        "subrequest: later input after abort must be safely abandoned");
     TEST_ASSERT(later_buf.pos == later_buf.last,
-        "P1-2: later input after abort must be consumed without delivery");
+        "subrequest: later input after abort must be consumed without delivery");
     TEST_ASSERT(g_next_body_filter_calls == 1,
-        "P1-2: later input after abort must not reach downstream");
+        "subrequest: later input after abort must not reach downstream");
 
-    TEST_PASS("P1-2 failopen_active enqueue-failure safe abort covered");
+    TEST_PASS("subrequest failopen_active enqueue-failure safe abort covered");
 }
 
 /*
@@ -5885,7 +6010,7 @@ test_subrequest_failopen_pending_terminal_resumes_once(void)
      * sees it), parser budget unlimited.
      */
     conf.max_size = 0;
-    conf.advanced.memory_budget = 0;
+    conf.limits.conversion_memory = 0;
     conf.decompress.parser_budget = 0;
     conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
@@ -6097,7 +6222,6 @@ test_postcommit_existing_pending_rejects_second_submission(void)
     ctx.streaming.pending_output = &old_pending;
     ctx.streaming.pending_meta.has_data = 1;
     ctx.streaming.pending_meta.bytes = 37;
-    ctx.streaming.pending_meta.zero_copy = 1;
     ctx.streaming.pending_meta.main_terminal = 0;
     ctx.streaming.pending_meta.subrequest_terminal = 1;
     r.buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
@@ -6114,7 +6238,6 @@ test_postcommit_existing_pending_rejects_second_submission(void)
         "postcommit pending guard: old pending anchor must remain unchanged");
     TEST_ASSERT(ctx.streaming.pending_meta.has_data == 1
         && ctx.streaming.pending_meta.bytes == 37
-        && ctx.streaming.pending_meta.zero_copy == 1
         && ctx.streaming.pending_meta.main_terminal == 0
         && ctx.streaming.pending_meta.subrequest_terminal == 1,
         "postcommit pending guard: old pending metadata must remain unchanged");
@@ -6354,6 +6477,112 @@ test_postcommit_terminal_only_backpressure_metrics(void)
 }
 
 
+/*
+ * Regression: a protocol-safe abort is a request-level outcome only after
+ * its terminal chain is delivered.  NGX_AGAIN must retain abort provenance;
+ * resume success records terminal_aborted_total exactly once, while resume
+ * failure records failed_closed and leaves the abort-delivery counter at 0.
+ */
+static void
+test_postcommit_abort_outcome_across_backpressure(void)
+{
+    ngx_http_request_t      r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t              pool;
+    ngx_connection_t        conn;
+    ngx_log_t               log;
+    ngx_event_t             read_event;
+    ngx_http_markdown_metrics_t metrics;
+    ngx_int_t               rc;
+
+    TEST_SUBSECTION("postcommit abort outcome across backpressure");
+
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+    ctx.streaming.handle =
+        (struct StreamingConverterHandle *) (uintptr_t) 0xa1;
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.stream_sm.headers_committed = 1;
+    g_streaming_safe_finish_rc = POST_COMMIT_ABORT;
+    g_next_body_filter_rc = NGX_AGAIN;
+
+    rc = ngx_http_markdown_streaming_handle_postcommit_error(
+        &r, &ctx, &conf, ERROR_INTERNAL);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "abort terminal backpressure must return NGX_AGAIN");
+    TEST_ASSERT(ctx.streaming.pending_meta.pending_abort_terminal == 1,
+        "abort NGX_AGAIN must retain abort-terminal provenance");
+    TEST_ASSERT(ctx.streaming.completion.terminal_aborted_recorded == 0,
+        "abort NGX_AGAIN must not record terminal abort yet");
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 0,
+        "abort NGX_AGAIN must not latch terminal delivery");
+    TEST_ASSERT(metrics.streaming.terminal_aborted_total == 0,
+        "abort NGX_AGAIN must not increment terminal-aborted metric");
+
+    g_next_body_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_body_filter(&r, NULL);
+    TEST_ASSERT(rc == NGX_OK,
+        "successful abort resume must return NGX_OK");
+    TEST_ASSERT(ctx.streaming.completion.terminal_aborted_recorded == 1,
+        "successful abort resume must latch terminal outcome");
+    TEST_ASSERT(metrics.streaming.terminal_aborted_total == 1,
+        "successful abort resume must increment terminal-aborted once");
+    TEST_ASSERT(metrics.conversions_failed == 1
+                && metrics.streaming.failed_total == 1
+                && metrics.streaming.postcommit_error_total == 1,
+        "successful abort resume must record one aborted failure outcome");
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 1,
+        "successful abort resume must latch main terminal delivery");
+    TEST_ASSERT(g_terminal_decision_calls == 1
+                && g_last_terminal_reason != NULL
+                && strcmp(g_last_terminal_reason,
+                          "streaming_mid_flight_error") == 0,
+        "successful abort resume must publish one aborted terminal path");
+
+    rc = ngx_http_markdown_streaming_body_filter(&r, NULL);
+    TEST_ASSERT(rc == NGX_OK,
+        "repeated abort resume entry must remain stable");
+    TEST_ASSERT(metrics.streaming.terminal_aborted_total == 1
+                && g_terminal_decision_calls == 1,
+        "repeated abort resume must not duplicate outcome accounting");
+
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+    ctx.streaming.handle =
+        (struct StreamingConverterHandle *) (uintptr_t) 0xa2;
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.stream_sm.headers_committed = 1;
+    g_streaming_safe_finish_rc = POST_COMMIT_ABORT;
+    g_next_body_filter_rc = NGX_AGAIN;
+
+    rc = ngx_http_markdown_streaming_handle_postcommit_error(
+        &r, &ctx, &conf, ERROR_INTERNAL);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "failed abort resume setup must return NGX_AGAIN");
+    g_next_body_filter_rc = NGX_ERROR;
+    rc = ngx_http_markdown_streaming_body_filter(&r, NULL);
+    TEST_ASSERT(rc == NGX_ERROR,
+        "failed abort resume must propagate downstream error");
+    TEST_ASSERT(metrics.streaming.terminal_aborted_total == 0,
+        "failed abort resume must not record terminal-aborted delivery");
+    TEST_ASSERT(metrics.conversions_failed == 1
+                && metrics.streaming.failed_total == 1
+                && metrics.streaming.postcommit_error_total == 1,
+        "failed abort resume must record one failed-closed outcome");
+    TEST_ASSERT(g_terminal_decision_calls == 1
+                && g_last_terminal_reason != NULL
+                && strcmp(g_last_terminal_reason, "failed_closed") == 0,
+        "failed abort resume must publish one failed-closed path");
+
+    TEST_PASS("postcommit abort outcome is conserved across backpressure");
+}
+
+
 static void
 test_postcommit_terminal_immediate_failure_no_handle_no_retry(void)
 {
@@ -6484,6 +6713,23 @@ test_streaming_decompression_error_metric_mapping(void)
     TEST_ASSERT(metrics.decompressions.truncated_input_total == 0
                 && metrics.decompressions.io_error_total == 0,
         "feed format sentinel must not increment truncated or I/O metrics");
+
+    ngx_memzero(&metrics, sizeof(metrics));
+    error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
+        NGX_HTTP_MARKDOWN_DECOMP_RATIO_EXCEEDED, NULL, NULL);
+    TEST_ASSERT(error_code == ERROR_DECOMPRESSION_BUDGET_EXCEEDED,
+        "feed ratio sentinel should map to the budget error code");
+    TEST_ASSERT(metrics.decompressions.budget_exceeded_total == 1,
+        "feed ratio sentinel should increment budget exactly once");
+
+    ngx_memzero(&metrics, sizeof(metrics));
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+    error_code = ngx_http_markdown_streaming_map_finalize_decomp_error(
+        &ctx, NGX_HTTP_MARKDOWN_DECOMP_RATIO_EXCEEDED, NULL, NULL);
+    TEST_ASSERT(error_code == ERROR_DECOMPRESSION_BUDGET_EXCEEDED,
+        "finalize ratio sentinel should map to the budget error code");
+    TEST_ASSERT(metrics.decompressions.budget_exceeded_total == 1,
+        "finalize ratio sentinel should increment budget exactly once");
 
     ngx_memzero(&metrics, sizeof(metrics));
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
@@ -6782,6 +7028,158 @@ test_streaming_stage_handler_failure_category_routing(void)
 }
 
 /*
+ * abandon-pending: abandon_pending_after_fatal must release pending_header_output.
+ *
+ * The fatal path clears every module-owned continuation; pending_header_output
+ * is module-owned Rust memory produced before header commit, so it must be
+ * freed there too or it leaks when the request ends without a successful
+ * header delivery.
+ */
+static void
+test_abandon_pending_after_fatal_releases_pending_header_output(void)
+{
+    ngx_http_request_t       r;
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_pool_t               pool;
+    ngx_connection_t         conn;
+    ngx_log_t                log;
+    ngx_event_t              read_event;
+    ngx_http_markdown_ctx_t *saved_ctx;
+    unsigned int             saved_free_calls;
+
+    memset(&r, 0, sizeof(r));
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&pool, 0, sizeof(pool));
+    memset(&conn, 0, sizeof(conn));
+    memset(&log, 0, sizeof(log));
+    memset(&read_event, 0, sizeof(read_event));
+
+    r.pool = &pool;
+    r.connection = &conn;
+    conn.log = &log;
+    conn.read = &read_event;
+    ctx.streaming.classify.input_disposition = NGX_HTTP_MD_INPUT_TERMINAL;
+    ctx.streaming.pending_meta.pending_header_output =
+        (u_char *) "deferred-header-output";
+    ctx.streaming.pending_meta.pending_header_output_len = 21;
+
+    saved_ctx = r.ctx;
+    r.ctx = &ctx;
+    saved_free_calls = g_output_free_calls;
+
+    ngx_http_markdown_streaming_abandon_pending_after_fatal(&r, &ctx);
+
+    TEST_ASSERT(ctx.streaming.pending_meta.pending_header_output == NULL,
+        "abandon must clear pending_header_output");
+    TEST_ASSERT(ctx.streaming.pending_meta.pending_header_output_len == 0,
+        "abandon must clear pending_header_output_len");
+    TEST_ASSERT(g_output_free_calls == saved_free_calls + 1,
+        "abandon must release the Rust-owned pending header output buffer");
+
+    r.ctx = saved_ctx;
+    TEST_PASS("abandon_pending_after_fatal releases pending_header_output");
+}
+
+/*
+ * Regression: a finalize output deferred behind a commit-time header
+ * NGX_AGAIN must keep the module-owned buffered bit set.
+ *
+ * Failure chain being guarded against:
+ *   finalize produces a non-empty Markdown tail
+ *   -> commit NGX_AGAIN (header block queued by the write filter)
+ *   -> finalize_pending_result retains the tail, sync_buffered() runs
+ *   -> WITHOUT the fix the buffered bit is cleared while the tail is
+ *      still owned, so NGINX is not obligated to re-enter the filter
+ *      and the deferred tail / terminal last_buf may never be sent.
+ *
+ * Drives the production functions: ngx_http_markdown_streaming_send_markdown
+ * (the finalize-send path that allocates the deferred result) and
+ * ngx_http_markdown_streaming_sync_buffered via its callers, then the NULL
+ * body-filter re-entry resume path that delivers the deferred chunk.
+ */
+static void
+test_finalize_pending_result_keeps_buffered_liveness(void)
+{
+    ngx_http_request_t       r;
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t               pool;
+    ngx_connection_t         conn;
+    ngx_log_t                log;
+    ngx_event_t              read_event;
+    ngx_http_markdown_metrics_t metrics;
+    struct MarkdownResult    result;
+    u_char                   tail[] = "final markdown tail";
+    ngx_int_t                final_send_rc;
+    ngx_int_t                rc;
+
+    memset(&r, 0, sizeof(r));
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&pool, 0, sizeof(pool));
+    memset(&conn, 0, sizeof(conn));
+    memset(&log, 0, sizeof(log));
+    memset(&read_event, 0, sizeof(read_event));
+
+    r.pool = &pool;
+    r.connection = &conn;
+    conn.log = &log;
+    r.main = &r;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+
+    /* Step 1-2: finalize produced a non-empty tail; the header chain
+     * returns NGX_AGAIN (write filter queued the header block). */
+    memset(&result, 0, sizeof(result));
+    result.markdown = tail;
+    result.markdown_len = sizeof(tail) - 1;
+
+    g_next_header_filter_rc = NGX_AGAIN;
+    final_send_rc = NGX_OK;
+
+    rc = ngx_http_markdown_streaming_finalize_send_markdown(
+        &r, &ctx, &conf, &result, &final_send_rc);
+
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "finalize-send must propagate the commit NGX_AGAIN");
+    /* Step 3: the deferred result is retained. */
+    TEST_ASSERT(ctx.streaming.completion.finalize_pending_result != NULL,
+        "header NGX_AGAIN during finalize must retain the deferred result");
+
+    /* Step 4: the buffered bit MUST stay set — this is the regression. */
+    TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
+        "deferred finalize output must keep NGX_HTTP_MARKDOWN_BUFFERED set "
+        "so NGINX re-enters the filter to deliver it");
+
+    /* Step 5-7: write-event NULL re-entry delivers the tail exactly once,
+     * then the terminal. */
+    g_next_header_filter_calls = 0;
+    g_next_body_filter_rc = NGX_OK;
+    g_next_body_filter_calls = 0;
+    rc = ngx_http_markdown_streaming_handle_null_input(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK || rc == NGX_DONE,
+        "null-input resume must deliver the deferred tail and terminal");
+    TEST_ASSERT(g_next_header_filter_calls == 0,
+        "header chain must not be re-invoked on write-event resume");
+    TEST_ASSERT(g_next_body_filter_calls >= 2,
+        "resume must deliver the deferred tail AND the terminal last_buf");
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 1,
+        "terminal last_buf must be confirmed delivered exactly once");
+    TEST_ASSERT(ctx.streaming.completion.finalize_pending_result == NULL,
+        "delivered deferred result must be consumed exactly once");
+
+    /* Step 8: buffered bit fully cleared once nothing is pending. */
+    TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0,
+        "buffered bit must clear after all deferred work drains");
+
+    TEST_PASS("finalize_pending_result keeps buffered liveness");
+}
+
+/*
  * Test entry point.  Runs all streaming_impl unit test functions in
  * sequence.  Prints a banner before and after the test run.  Returns 0
  * on success; individual test assertions abort via TEST_ASSERT on failure.
@@ -6806,12 +7204,14 @@ main(void)
     test_null_input_tracking_and_body_filter_entry();
     test_init_handle_and_chunk_result_helpers();
     test_commit_feed_and_finalize_core_paths();
+    test_header_commit_backpressure_retry_is_atomic();
+    test_feed_path_resumes_pending_header_commit();
+    test_success_output_defers_body_when_commit_again();
     test_postcommit_output_construction_failures();
     test_postcommit_ngx_done_is_delivery_success();
     test_postcommit_downstream_failure_classification();
     test_postcommit_output_loss_no_safe_finish();
     test_postcommit_output_loss_body_filter_reentry_is_idempotent();
-    test_zero_copy_pending_conflict_is_invariant_output_loss();
     test_output_loss_unknown_origin_is_internal_failure();
     test_process_chain_and_body_filter_deep_paths();
     test_streaming_gap_branches();
@@ -6829,11 +7229,14 @@ main(void)
     test_postcommit_pending_backpressure_metrics_are_symmetric();
     test_postcommit_copied_output_accounting_matches_after_resume();
     test_postcommit_terminal_only_backpressure_metrics();
+    test_postcommit_abort_outcome_across_backpressure();
     test_postcommit_terminal_immediate_failure_no_handle_no_retry();
     test_postcommit_terminal_immediate_failure_live_handle_no_retry();
     test_streaming_decompression_error_metric_mapping();
     test_streaming_decomp_error_origin_classification();
     test_streaming_stage_handler_failure_category_routing();
+    test_abandon_pending_after_fatal_releases_pending_header_output();
+    test_finalize_pending_result_keeps_buffered_liveness();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

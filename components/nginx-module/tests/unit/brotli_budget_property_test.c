@@ -94,6 +94,9 @@ struct ngx_log_s {
 
 static ngx_log_t test_log;
 
+/* The production allocator requires a logger for Brotli workspace memory. */
+#define NGX_HTTP_MARKDOWN_STREAMING_DECOMP_DEFAULT_LOG (&test_log)
+
 /* ----------------------------------------------------------------
  * Pool allocation tracking (same pattern as streaming_decomp_test)
  * ---------------------------------------------------------------- */
@@ -242,6 +245,32 @@ int test_inflate(z_streamp strm, int flush);
 #define inflateInit2 test_inflateInit2
 #define inflateEnd test_inflateEnd
 #define inflateReset test_inflateReset
+
+#ifdef NGX_HTTP_BROTLI
+static ngx_uint_t
+test_atomic_cmp_set(ngx_atomic_uint_t *lock, ngx_atomic_uint_t old,
+                    ngx_atomic_uint_t set)
+{
+    if (*lock == old) {
+        *lock = set;
+        return 1;
+    }
+    return 0;
+}
+
+static ngx_atomic_uint_t
+test_atomic_fetch_add(ngx_atomic_uint_t *value, ngx_atomic_int_t add)
+{
+    ngx_atomic_uint_t old;
+
+    old = *value;
+    *value = (ngx_atomic_uint_t) ((ngx_atomic_int_t) *value + add);
+    return old;
+}
+
+#define ngx_atomic_cmp_set test_atomic_cmp_set
+#define ngx_atomic_fetch_add test_atomic_fetch_add
+#endif
 
 /* Include the production streaming decompression implementation */
 #include "../src/ngx_http_markdown_streaming_decomp_impl.h"

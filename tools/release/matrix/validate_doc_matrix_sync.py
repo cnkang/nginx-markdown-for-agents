@@ -12,12 +12,17 @@ Usage:
 
 from __future__ import annotations
 
-import json
 import sys
+import json
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from lib.path_validation import validate_read_path
+from lib.path_validation import validate_read_path  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from normalize_matrix import (  # noqa: E402
+    canonical_arch,
+    normalize_compatibility_document,
+)
 
 # Paths relative to the repository root
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -29,39 +34,95 @@ DOC_PATH = REPO_ROOT / "docs" / "guides" / "INSTALLATION.md"
 def _normalize_tier(tier: str) -> str:
     """
     Normalize a support tier string to a canonical form.
-    
+
+    In addition to trimming, lowercasing, and replacing spaces and
+    hyphens with underscores, this function maps the presentation labels
+    that INSTALLATION.md retains for historical reasons to their canonical
+    matrix tier: ``supported`` maps to ``full`` and ``best_effort`` maps
+    to ``source_only``.
+
     Returns:
         normalized_tier (str): The input string trimmed, lowercased, with spaces and hyphens replaced by underscores.
     """
-    return tier.strip().lower().replace(" ", "_").replace("-", "_")
+    normalized = tier.strip().lower().replace(" ", "_").replace("-", "_")
+    # INSTALLATION.md retains historical display labels while the canonical
+    # release matrix uses machine-facing tier names. Compare the vocabularies
+    # at this presentation boundary instead of reintroducing legacy matrix
+    # values into the source of truth.
+    if normalized == "supported":
+        return "full"
+    if normalized == "best_effort":
+        return "source_only"
+    return normalized
+
+
+def _normalize_target(target: str) -> str:
+    """Normalize a target to canonical architecture identity.
+
+    Delegates to the shared canonical_arch helper in normalize_matrix.py
+    so the doc-sync validator and the matrix normalizer never disagree.
+    """
+    return canonical_arch(target)
+
+
+def _is_supported_dynamic_entry(item: dict) -> bool:
+    """Return whether an entry represents a supported packaged platform."""
+    return (
+        item.get("artifact_type") == "dynamic-module"
+        and item.get("support_tier") == "supported"
+        and item.get("libc") in {"glibc", "musl"}
+        and canonical_arch(item.get("target", "")) in {"x86_64", "aarch64"}
+    )
+
+
+def _covered_versions(data: dict) -> set[str]:
+    """Return versions that already have supported packaged platforms."""
+    return {
+        item["nginx_version"]
+        for item in data.get("entries", [])
+        if _is_supported_dynamic_entry(item)
+    }
+
+
+def _is_required_source_fallback(
+    item: dict, covered_versions: set[str]
+) -> bool:
+    """Return whether an uncovered version needs its source fallback row."""
+    return (
+        item.get("artifact_type") == "source"
+        and item.get("support_tier") == "best-effort"
+        and item.get("libc") == "n/a"
+        and item.get("target") == "any"
+        and item.get("nginx_version") not in covered_versions
+    )
 
 
 def load_matrix_entries(path: Path) -> list[tuple[str, str, str, str]]:
     """
     Load matrix entries from a release-matrix JSON file and normalize their support tier.
-    
+
     Parameters:
         path (Path): Path to the release-matrix.json file.
-    
+
     Returns:
-        list[tuple[str, str, str, str]]: Sorted list of (nginx, os_type, arch, tier) tuples where `tier` has been normalized (lowercased, spaces/hyphens replaced with underscores).
+        list[tuple[str, str, str, str]]: Sorted list of (nginx, os_type, arch, tier) tuples where `tier` has been normalized: trimmed, lowercased, spaces/hyphens replaced with underscores, and the supported/full and best_effort/source_only mappings applied.
     """
     validated = validate_read_path(path, purpose="doc matrix")
     with open(validated, "r", encoding="utf-8") as f:
-        data = json.load(f)
+        data = normalize_compatibility_document(json.load(f))
 
-    if not isinstance(data, dict) or not isinstance(data.get("matrix"), list):
-        return []
-
+    covered_versions = _covered_versions(data)
     entries = []
     entries.extend(
         (
-            item["nginx"],
-            item["os_type"],
-            item["arch"],
+            item["nginx_version"],
+            item["libc"],
+            _normalize_target(item["target"]),
             _normalize_tier(item["support_tier"]),
         )
-        for item in data["matrix"]
+        for item in data.get("entries", [])
+        if _is_supported_dynamic_entry(item)
+        or _is_required_source_fallback(item, covered_versions)
     )
     return sorted(entries)
 
@@ -95,30 +156,41 @@ def _parse_table_row(line: str) -> tuple[str, str, str, str] | None:
     return None if len(cells) != 4 or "" in cells else tuple(cells)
 
 
-def parse_doc_matrix(path: Path) -> list[tuple[str, str, str, str]]:
-    """
-    Extract the Platform Compatibility Matrix entries from INSTALLATION.md.
-    
-    Parses the markdown table under the "Platform Compatibility Matrix" heading, skipping table header and separator rows, and normalizes the `tier` value to a canonical form.
-    
-    Parameters:
-        path (Path): Path to the INSTALLATION.md file to parse.
-    
-    Returns:
-        list[tuple[str, str, str, str]]: Sorted list of (nginx, os_type, arch, tier) tuples where `tier` is normalized (lowercased; spaces and hyphens replaced with underscores).
-    """
-    content = path.read_text(encoding="utf-8")
+def _normalize_doc_matrix_row(
+    row: tuple[str, str, str, str],
+) -> tuple[str, str, str, str] | None:
+    """Normalize one parsed documentation row, ignoring table scaffolding."""
+    nginx, os_type, arch, tier = row
+    if _is_table_header_or_separator(nginx):
+        return None
 
+    normalized_tier = _normalize_tier(tier)
+    if (
+        normalized_tier == "source_only"
+        and os_type.lower() == "unlisted"
+        and arch.lower() == "unlisted"
+    ):
+        # Human-facing docs avoid implying that the source fallback is a
+        # real platform. Compare its canonical n/a/any identity instead.
+        os_type, arch = "n/a", "any"
+
+    return nginx, os_type, arch, normalized_tier
+
+
+def _parse_doc_matrix_entries(
+    content: str,
+) -> list[tuple[str, str, str, str]]:
+    """Parse matrix rows from the document content."""
     entries = []
     in_matrix_section = False
 
     for line in content.splitlines():
-        # Detect the start of the Platform Compatibility Matrix section
+        # Detect the start of the Platform Compatibility Matrix section.
         if "Platform Compatibility Matrix" in line and line.strip().startswith("#"):
             in_matrix_section = True
             continue
 
-        # Stop at the next heading after the matrix section
+        # Stop at the next heading after the matrix section.
         if in_matrix_section and line.strip().startswith("#") and "Platform Compatibility Matrix" not in line:
             break
 
@@ -129,14 +201,30 @@ def parse_doc_matrix(path: Path) -> list[tuple[str, str, str, str]]:
         if row is None:
             continue
 
-        nginx, os_type, arch, tier = row
+        normalized = _normalize_doc_matrix_row(row)
+        if normalized is not None:
+            entries.append(normalized)
 
-        if _is_table_header_or_separator(nginx):
-            continue
+    return entries
 
-        entries.append((nginx, os_type, arch, _normalize_tier(tier)))
 
-    return sorted(entries)
+def parse_doc_matrix(path: Path) -> list[tuple[str, str, str, str]]:
+    """
+    Extract the Platform Compatibility Matrix entries from INSTALLATION.md.
+
+    Parses the markdown table under the "Platform Compatibility Matrix" heading,
+    skipping table header and separator rows, and normalizes the `tier` value to
+    a canonical form.
+
+    Parameters:
+        path (Path): Path to the INSTALLATION.md file to parse.
+
+    Returns:
+        list[tuple[str, str, str, str]]: Sorted list of (nginx, os_type, arch, tier) tuples where `tier` is normalized (lowercased; spaces and hyphens replaced with underscores).
+    """
+    content = path.read_text(encoding="utf-8")
+
+    return sorted(_parse_doc_matrix_entries(content))
 
 
 def compare_matrices(
@@ -216,7 +304,11 @@ def main() -> int:
         print(f"ERROR: Documentation file not found: {DOC_PATH}", file=sys.stderr)
         return 1
 
-    json_entries = load_matrix_entries(MATRIX_PATH)
+    try:
+        json_entries = load_matrix_entries(MATRIX_PATH)
+    except (OSError, ValueError) as exc:
+        print(f"ERROR: unable to load matrix {MATRIX_PATH}: {exc}", file=sys.stderr)
+        return 1
     doc_entries = parse_doc_matrix(DOC_PATH)
 
     if not doc_entries:

@@ -30,6 +30,7 @@
 //!   length to 0, preventing double-free.
 
 use std::ptr;
+use std::ptr::NonNull;
 
 use super::abi::{ConversionOutput, ERROR_SUCCESS, MarkdownResult};
 
@@ -96,12 +97,38 @@ pub(crate) fn set_success_result(result: &mut MarkdownResult, output: Conversion
 }
 
 /// Free one heap buffer previously exported through the C ABI.
+///
+/// The FFI boundary must never panic and must never dereference an
+/// inconsistent pointer/length pair: a NULL pointer with a non-zero length,
+/// or a non-NULL pointer with a zero length, is treated as already-released
+/// and cleared defensively instead of asserting or constructing a fat
+/// pointer from invalid parts.
 pub(crate) fn free_buffer(ptr_field: &mut *mut u8, len_field: &mut usize) {
     if (*ptr_field).is_null() {
+        // NULL pointer: nothing to release.  A stray non-zero length is
+        // inconsistent with the "no buffer" state; clear it defensively
+        // rather than asserting (assertions on the C ABI boundary would
+        // panic the process in debug builds).
+        if *len_field != 0 {
+            *len_field = 0;
+        }
         return;
     }
 
-    let raw = ptr::slice_from_raw_parts_mut(*ptr_field, *len_field);
+    if *len_field == 0 {
+        // Non-NULL pointer with a zero length cannot be reconstructed into
+        // a valid boxed slice; clear the pointer defensively instead of
+        // dereferencing invalid parts.
+        *ptr_field = ptr::null_mut();
+        return;
+    }
+
+    // SAFETY: `ptr_field` is non-NULL and `len_field` is non-zero here, so
+    // the pair matches a buffer previously obtained via
+    // `leak_boxed_slice_to_raw` / `as_mut_ptr` + `mem::forget`, and
+    // `len_field` is the original buffer length.
+    let data = unsafe { NonNull::new_unchecked(*ptr_field) };
+    let raw = ptr::slice_from_raw_parts_mut(data.as_ptr(), *len_field);
     // SAFETY: `raw` is a reconstructed fat-pointer from the thin pointer that
     // was originally obtained via `leak_boxed_slice_to_raw` / `as_mut_ptr`
     // + `mem::forget`, and `len_field` is the original buffer length.
@@ -112,12 +139,57 @@ pub(crate) fn free_buffer(ptr_field: &mut *mut u8, len_field: &mut usize) {
 
 #[cfg(test)]
 mod tests {
+    use super::free_buffer;
     use super::leak_boxed_slice_to_raw;
 
     #[test]
     fn leak_boxed_slice_to_raw_returns_null_for_empty_slice() {
         let (ptr, len) = leak_boxed_slice_to_raw(Vec::new().into_boxed_slice());
 
+        assert!(ptr.is_null());
+        assert_eq!(len, 0);
+    }
+
+    #[test]
+    fn free_buffer_null_pointer_with_stray_length_is_cleared() {
+        // NULL pointer + non-zero length is an inconsistent pair; free_buffer
+        // must not panic and must clear the length defensively.
+        let mut ptr: *mut u8 = std::ptr::null_mut();
+        let mut len: usize = 42;
+        free_buffer(&mut ptr, &mut len);
+        assert!(ptr.is_null());
+        assert_eq!(len, 0);
+    }
+
+    #[test]
+    fn free_buffer_non_null_pointer_with_zero_length_is_cleared() {
+        // Non-NULL pointer + zero length cannot be reconstructed into a boxed
+        // slice; free_buffer must not dereference it and must clear the
+        // pointer defensively.
+        let mut byte = 0u8;
+        let mut ptr: *mut u8 = &mut byte;
+        let mut len: usize = 0;
+        free_buffer(&mut ptr, &mut len);
+        assert!(ptr.is_null());
+        assert_eq!(len, 0);
+    }
+
+    #[test]
+    fn free_buffer_null_pointer_zero_length_is_noop() {
+        let mut ptr: *mut u8 = std::ptr::null_mut();
+        let mut len: usize = 0;
+        free_buffer(&mut ptr, &mut len);
+        assert!(ptr.is_null());
+        assert_eq!(len, 0);
+    }
+
+    #[test]
+    fn free_buffer_valid_pair_frees_and_resets() {
+        // A valid (non-NULL, non-zero) pair is freed and both fields reset.
+        let (mut ptr, mut len) = leak_boxed_slice_to_raw(vec![1u8, 2, 3].into_boxed_slice());
+        assert!(!ptr.is_null());
+        assert_eq!(len, 3);
+        free_buffer(&mut ptr, &mut len);
         assert!(ptr.is_null());
         assert_eq!(len, 0);
     }

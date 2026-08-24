@@ -2,8 +2,8 @@
  * Test: streaming_replay_overflow_security
  *
  * Security test validating that the streaming path correctly handles
- * replay buffer overflow when the precommit buffer limit
- * (markdown_stream_precommit_buffer) is exceeded.
+ * replay buffer overflow when the bounded streaming replay buffer
+ * is exceeded.
  *
  * Validates:
  *   - REPLAY_OVERFLOW event fires when buffer capacity is exceeded
@@ -271,7 +271,7 @@ test_overflow_fires_on_exceed_capacity(void)
  *
  * Scenario: A single chunk larger than the entire buffer capacity
  *           is fed. This simulates a large upstream response body
- *           hitting a small precommit_buffer setting.
+ *           hitting a small streaming_buffer setting.
  *
  * Validates: oversized body / replay overflow handling, Rule 38
  * ================================================================ */
@@ -316,7 +316,7 @@ test_overflow_single_large_chunk(void)
  *
  * Case A: within_resource_limits=1 -> FULL_BUFFER_FALLBACK
  * Case B: within_resource_limits=0, on_error=pass -> PASSTHROUGH
- * Case C: within_resource_limits=0, on_error=reject -> REJECT_502
+ * Case C: within_resource_limits=0, on_error=reject -> REJECT_STATUS
  *
  * Validates: fail-open/fail-closed policy preservation, oversized body / replay overflow handling
  * ================================================================ */
@@ -380,8 +380,8 @@ test_decision_engine_overflow_exceeded_limits_pass(void)
         decision.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
         "transitions to PASSTHROUGH");
     TEST_ASSERT(
-        decision.action == NGX_HTTP_MD_ACTION_REJECT_502,
-        "action is REJECT_502 (fail-open cannot replay)");
+        decision.action == NGX_HTTP_MD_ACTION_REJECT_STATUS,
+        "action is REJECT_STATUS (fail-open cannot replay)");
     TEST_ASSERT(
         decision.reason
             == NGX_HTTP_MD_REASON_RESOURCE_LIMIT_EXCEEDED,
@@ -389,7 +389,7 @@ test_decision_engine_overflow_exceeded_limits_pass(void)
 
     TEST_PASS(
         "Overflow + exceeded limits + pass = "
-        "PASSTHROUGH/REJECT_502");
+        "PASSTHROUGH/REJECT_STATUS");
 }
 
 
@@ -401,7 +401,7 @@ test_decision_engine_overflow_exceeded_limits_reject(void)
 
     TEST_SUBSECTION(
         "Decision engine: overflow + exceeded limits + "
-        "on_error=reject -> REJECT_502");
+        "on_error=reject -> REJECT_STATUS");
 
     memset(&dctx, 0, sizeof(dctx));
     dctx.current_state = NGX_HTTP_MD_STATE_PRE_COMMIT;
@@ -417,15 +417,15 @@ test_decision_engine_overflow_exceeded_limits_reject(void)
         decision.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
         "transitions to PASSTHROUGH");
     TEST_ASSERT(
-        decision.action == NGX_HTTP_MD_ACTION_REJECT_502,
-        "action is REJECT_502");
+        decision.action == NGX_HTTP_MD_ACTION_REJECT_STATUS,
+        "action is REJECT_STATUS");
     TEST_ASSERT(
         decision.reason
             == NGX_HTTP_MD_REASON_RESOURCE_LIMIT_EXCEEDED,
         "reason is RESOURCE_LIMIT_EXCEEDED");
 
     TEST_PASS(
-        "Overflow + exceeded limits + reject = REJECT_502");
+        "Overflow + exceeded limits + reject = REJECT_STATUS");
 }
 
 
@@ -611,20 +611,20 @@ test_incremental_overflow_boundary(void)
  * Security Test: Overflow with on_error=reject (fail-closed)
  *
  * Scenario: When resource limits are exceeded AND on_error=reject,
- *           the decision engine should still produce REJECT_502.
+ *           the decision engine should still produce REJECT_STATUS.
  *           This verifies fail-closed semantics per fail-open/fail-closed policy preservation.
  *
- * Validates: reject policy produces 502 (fail-closed)
+ * Validates: reject policy produces REJECT_STATUS (fail-closed)
  * ================================================================ */
 
 static void
-test_overflow_reject_policy_produces_502(void)
+test_overflow_reject_policy_produces_reject_status(void)
 {
     ngx_http_markdown_stream_ctx_t  dctx;
     ngx_http_markdown_decision_t    decision;
 
     TEST_SUBSECTION(
-        "Overflow + on_error=reject -> 502 (fail-closed)");
+        "Overflow + reject policy -> REJECT_STATUS (fail-closed)");
 
     memset(&dctx, 0, sizeof(dctx));
     dctx.current_state = NGX_HTTP_MD_STATE_PRE_COMMIT;
@@ -640,10 +640,10 @@ test_overflow_reject_policy_produces_502(void)
         decision.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
         "reject policy: transitions to PASSTHROUGH");
     TEST_ASSERT(
-        decision.action == NGX_HTTP_MD_ACTION_REJECT_502,
-        "reject policy: action is REJECT_502");
+        decision.action == NGX_HTTP_MD_ACTION_REJECT_STATUS,
+        "reject policy: action is REJECT_STATUS");
 
-    TEST_PASS("Overflow + reject policy = 502 (fail-closed)");
+    TEST_PASS("Overflow + reject policy = REJECT_STATUS (fail-closed)");
 }
 
 
@@ -667,7 +667,7 @@ main(void)
     test_decision_engine_overflow_within_limits();
     test_decision_engine_overflow_exceeded_limits_pass();
     test_decision_engine_overflow_exceeded_limits_reject();
-    test_overflow_reject_policy_produces_502();
+    test_overflow_reject_policy_produces_reject_status();
 
     /* State handling after overflow */
     test_replay_unavailable_can_still_commit();

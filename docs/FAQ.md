@@ -19,7 +19,7 @@ NGINX Markdown for Agents is an NGINX filter module that converts HTML responses
 
 ### How does it compare to Cloudflare's Markdown for Agents?
 
-This project is inspired by Cloudflare's announcement but provides a self-hostable solution:
+This project draws inspiration from Cloudflare's announcement but provides a self-hostable solution:
 - **Self-hosted**: Run on your own infrastructure
 - **Open source**: Full control and customization
 - **NGINX integration**: Works with existing NGINX deployments
@@ -32,20 +32,20 @@ This project is inspired by Cloudflare's announcement but provides a self-hostab
 ### What are the system requirements?
 
 - **NGINX**: 1.24.0 or higher
-- **Rust**: 1.97.0 or higher (for source builds only)
+- **Rust**: 1.97.1 or higher (for source builds only; MSRV 1.97)
 - **Operating System**: macOS or Linux (x86_64 or aarch64)
 - **Memory**: Minimum 512MB RAM per worker (more for large documents)
 
-If your distro ships an older NGINX (for example 1.22.x or earlier), upgrade NGINX first or maintain a custom build for that version.
+Your distro may ship an older NGINX, such as 1.22.x or earlier. Upgrade NGINX to 1.24.0 or higher first. Custom source builds below 1.24.0 are not supported.
 
 ### Do I need to rebuild NGINX?
 
 Not always.
 
-- If you use one of the supported official NGINX builds and a matching release artifact exists, you can install the published dynamic module without rebuilding NGINX.
-- If you use a custom NGINX build, or there is no exact version match for your runtime, compile the module against your NGINX source tree.
+- If you use one of the supported official NGINX builds and a matching release artifact exists, you can install the published dynamic module. You do not need to rebuild NGINX. Check the release assets for your version.
+- Use a custom NGINX build or a runtime without an exact version match? Compile the module against the exact NGINX source tree that produced the running binary, using the same `./configure` options (module paths, feature flags) as that build. A matching-version source tree is not enough: the module ABI depends on the exact source revision and configure options, not just the version string. This applies to custom builds of NGINX 1.24.0 or higher.
 
-The module can be integrated as either:
+You can integrate the module as either:
 - **Dynamic module** (recommended): Load with `load_module`
 - **Static module**: Compile it into the NGINX binary
 
@@ -53,27 +53,27 @@ See [Installation Guide](guides/INSTALLATION.md) for details.
 
 ### Can I use pre-compiled binaries?
 
-Yes, for selected Linux targets, pre-compiled dynamic module binaries are published and can be installed with `tools/install.sh`.
+Yes, for selected Linux targets, the project publishes pre-compiled dynamic module binaries. You can install them with `tools/install.sh`.
 
 However, NGINX dynamic modules are version-specific:
 - The binary must match your `nginx -v` version exactly
-- Release assets may be grouped by major.minor for readability, but you must still use the exact patch version
+- Release assets may group by major.minor for readability, but you must still use the exact patch version
 - If your version is not published yet, build from source or switch to one of the available pre-built versions
 
 ### Does it work with Docker?
 
-Yes. The usual pattern is to add the published dynamic module or a source build step to your image, then load it from `nginx.conf`.
+Yes. The usual pattern is to add the published dynamic module or a source build step to your image. Then load it from `nginx.conf`.
 
 This repository now ships an official-image source-build template:
 - `examples/docker/Dockerfile.official-nginx-source-build`
 
-It is designed for the common official tags:
+It targets the common official tags:
 - `nginx:mainline`
 - `nginx:mainline-alpine`
 - `nginx:stable`
 - `nginx:stable-alpine`
 
-The Dockerfile clones this repository in the build stage, compiles the module there, and then copies the built module into a clean official `nginx` runtime image.
+The Dockerfile clones this repository in the build stage and compiles the module there. It then copies the built module into a clean official `nginx` runtime image. The build stage keeps the repository isolated from the runtime image. This produces a self-contained image.
 
 See [Installation Guide](guides/INSTALLATION.md) for build and verification commands.
 
@@ -106,7 +106,7 @@ location /api/ {
 
 ### What happens if conversion fails?
 
-By default, the module uses a fail-open strategy (`markdown_error_policy pass;`), so the original eligible HTML response is returned. If you want strict behavior instead, `markdown_error_policy fail_closed;` makes failures fail-closed.
+By default, the module uses a fail-open strategy (`markdown_error_policy pass;`). It returns the original eligible HTML response. If you want strict behavior instead, `markdown_error_policy fail_closed;` makes failures fail-closed.
 
 For the canonical directive behavior, see [Configuration Guide](guides/CONFIGURATION.md). For the exact runtime branches, see [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md).
 
@@ -115,7 +115,7 @@ For the canonical directive behavior, see [Configuration Guide](guides/CONFIGURA
 Use these directives:
 
 ```nginx
-markdown_limits memory=10m timeout=5s;
+markdown_limits conversion_memory=10m conversion_timeout=5s parser_timeout=5s;
 ```
 
 For defaults, examples, and tradeoffs, see [Configuration Guide](guides/CONFIGURATION.md) and [Configuration to Behavior Map](architecture/CONFIG_BEHAVIOR_MAP.md).
@@ -133,12 +133,12 @@ There is no single fixed overhead number that applies to every deployment. Perfo
 - enabled features such as token estimation or YAML front matter
 - system resources, cache behavior, and concurrency
 
-The current design buffers the full eligible response before conversion, so large HTML bodies are the main driver of latency and memory use. Use your own workload to establish baselines, then tune limits and rollout scope accordingly.
+The full-buffer path buffers the eligible response before conversion. Large HTML bodies are the main driver of latency and memory use. Use your own workload to establish baselines, then tune limits and rollout scope accordingly.
 
 ### How can I improve performance?
 
 1. **Enable caching**: Cache converted responses
-2. **Reduce limits**: Lower `markdown_limits memory=...` and `markdown_limits timeout=...`
+2. **Reduce limits**: Lower `markdown_limits conversion_memory=...` and `markdown_limits conversion_timeout=...`
 3. **Disable optional features**: Turn off token estimation and front matter if not needed
 4. **Use CommonMark**: Faster than GFM flavor
 
@@ -146,13 +146,16 @@ See [Performance Tuning](guides/OPERATIONS.md#performance-tuning) for details.
 
 ### Does it support streaming?
 
-Yes. `markdown_streaming auto` is the default processing-path policy. It uses
-bounded-memory incremental conversion for eligible large or chunked responses
-and retains full-buffer conversion for small responses and hard-blocked cases.
-Use `markdown_streaming off` to require full-buffer processing or
+Yes, the current `markdown_streaming auto` policy can select the bounded
+streaming engine for eligible large or chunked responses and retains
+full-buffer conversion for small responses and hard-blocked cases. Use
+`markdown_streaming off` to require full-buffer processing or
 `markdown_streaming force` to prefer streaming for every eligible response.
+This is distinct from the legacy Rust `incremental` API: that API still
+receives the complete NGINX-side buffer and accumulates bytes in Rust, so it is
+not true per-upstream-chunk streaming.
 
-See [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md) and [ADR-0002](architecture/ADR/0002-full-buffering-approach.md) for the reasoning behind this design.
+See [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md) and [ADR-0007](architecture/ADR/0007-streaming-default.md) for the reasoning behind this design.
 
 ---
 
@@ -187,7 +190,7 @@ location / {
 }
 ```
 
-If you want the simplest first rollout, you can temporarily disable upstream compression with `proxy_set_header Accept-Encoding "";`. Once the path is verified, the module can also handle upstream `gzip`, `br`, and `deflate` responses directly.
+If you want the simplest first rollout, you can temporarily disable upstream compression with `proxy_set_header Accept-Encoding "";`. Once you verify the path, the module can also handle upstream `gzip`, `br`, and `deflate` responses directly. Start with the disabled-compression setup, then enable compression handling. Verify the passthrough path first.
 
 ### Does it work with CDNs?
 
@@ -198,7 +201,7 @@ Yes, but you may need to:
 
 ### What about compressed responses?
 
-The module automatically detects and decompresses supported upstream compressed content (`gzip`, `br`, `deflate`) as part of the conversion path via the `markdown_auto_decompress` directive (default: on). The decompression budget is independently controlled by `markdown_decompress_max_size` (default: same as `markdown_limits memory=<size>`).
+The module automatically detects and decompresses supported upstream compressed content (`gzip`, `br`, `deflate`). This happens as part of the conversion path via the `markdown_auto_decompress` directive (default: on). The decompression budget comes from `markdown_limits decompressed_size=<size>` and `decompression_ratio=<N>`. The module applies these limits to prevent zip-bomb amplification. This covers all three common encodings.
 
 **Recommended decompression strategies** (in order of preference):
 
@@ -214,17 +217,17 @@ The module automatically detects and decompresses supported upstream compressed 
    proxy_set_header Accept-Encoding gzip;  # only request gzip
    markdown_filter on;
    ```
-   The `gunzip` filter runs in the NGINX filter chain before the markdown module. Only supports gzip; does not handle `deflate` or `br`.
+   The `gunzip` filter runs in the NGINX filter chain before the markdown module. It only supports gzip. It does not handle `deflate` or `br`.
 
 3. **Module's built-in `auto_decompress`** (gzip + deflate + brotli):
    ```nginx
    markdown_filter on;
    markdown_auto_decompress on;           # default
-   markdown_decompress_max_size 20m;      # independent budget
+   markdown_limits decompressed_size=20m decompression_ratio=100;
    ```
    Fallback for cases where upstream forces compression and you cannot or do not want to modify proxy configuration. Handles all three formats. Slightly higher overhead than `gunzip` because it operates inside the module's conversion path.
 
-**When to prefer `gunzip` over built-in decompression**: If you only need gzip support and `gunzip` is already compiled into your NGINX build, prefer `gunzip on` + `markdown_auto_decompress off` for lower per-request overhead. The built-in decompression exists primarily for brotli and for zero-config deployments where operators do not want to manage filter chain ordering.
+**When to prefer `gunzip` over built-in decompression**: If you only need gzip support and `gunzip` is already compiled into your NGINX build, prefer `gunzip on` + `markdown_auto_decompress off`. It gives lower per-request overhead. The built-in decompression exists primarily for brotli. It also helps zero-config deployments where operators do not want to manage filter chain ordering. The built-in path adds overhead because it runs inside the module.
 
 For operational guidance, see [Operations Guide](guides/OPERATIONS.md).
 
@@ -243,9 +246,9 @@ Common causes:
    - Prefer `$uri` over `$request_uri` for extension checks (query strings can break matches)
    - If map includes `text/*`, enable `markdown_accept wildcard;`
 4. **Response not eligible**: Must be 200 status with `text/html` content type
-5. **Size limit exceeded**: Response larger than `markdown_limits memory=...`
+5. **Size limit exceeded**: Response larger than `markdown_limits conversion_memory=...`
 
-If you need to trace the decision path rather than just the checklist, use [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md) and [Configuration to Behavior Map](architecture/CONFIG_BEHAVIOR_MAP.md).
+If you need to trace the decision path rather than just the checklist, use [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md). The [Configuration to Behavior Map](architecture/CONFIG_BEHAVIOR_MAP.md) also helps.
 
 ### Why is conversion failing?
 
@@ -269,7 +272,7 @@ Common issues:
 
 2. **Check metrics**:
    ```bash
-   curl -H "Accept: text/plain" http://localhost/markdown-metrics
+   curl -H "Accept: text/plain; version=0.0.4" http://localhost/markdown-metrics
    ```
 
 3. **Test with curl**:
@@ -302,7 +305,7 @@ Yes, the module includes multiple security protections:
 
 ### Does it expose sensitive information?
 
-No, the module only converts HTML to Markdown. It doesn't add or expose information not already in the HTML response.
+No, the module only converts HTML to Markdown. It does not expose information that is not already present in the HTML response. The module changes response headers as part of conversion, including setting `Content-Type` to `text/markdown`, updating `ETag`, and adding `Cache-Control: private` for authenticated responses. These header changes reflect the converted content, not new information.
 
 ### Should I convert authenticated requests?
 
@@ -315,7 +318,7 @@ See [Configuration Guide](guides/CONFIGURATION.md) for the canonical directive s
 
 ### How do I secure the metrics endpoint?
 
-The handler already enforces localhost-only access. In practice, you should still keep explicit NGINX `allow`/`deny` rules on the metrics location to further restrict it and to make the intended policy obvious in configuration:
+The handler already enforces localhost-only access. In practice, you should still keep explicit NGINX `allow`/`deny` rules on the metrics location. This further restricts access and makes the intended policy obvious in configuration:
 
 ```nginx
 location /markdown-metrics {
@@ -332,9 +335,9 @@ For response formats, metric fields, and monitoring usage, see [Configuration Gu
 
 ## Features
 
-### What Markdown flavor is supported?
+### Which Markdown flavor does the module support?
 
-Two flavors are supported:
+The module supports two flavors:
 - **CommonMark** (default): Standard Markdown specification
 - **GFM** (GitHub Flavored Markdown): Includes tables, strikethrough, task lists
 
@@ -395,15 +398,17 @@ Use the repository's issue tracker. Include:
 Open a feature request in the issue tracker with:
 - Use case description
 - Expected behavior
-- Why it's valuable
+- Why this is valuable
 
 ### Where is the source code?
 
-The project is organized as:
+The project organizes itself as:
 - `components/rust-converter/` - Rust conversion library
 - `components/nginx-module/` - NGINX C module
 - `docs/` - Documentation
 - `tests/` - Test suites
+
+The layout separates the Rust conversion engine from the NGINX integration layer.
 
 ---
 
@@ -494,7 +499,7 @@ Yes. Keep the copyright notice and license text in source and binary redistribut
 
 ### Where should I look for future direction?
 
-Use the roadmap section in [README](../README.md#roadmap) for broad project direction, and check the issue tracker for current feature requests and discussion.
+Use the roadmap section in [README](../README.md#roadmap) for broad project direction. Check the issue tracker for current feature requests and discussion.
 
 ### Can I sponsor development?
 
@@ -502,13 +507,14 @@ Check the repository for sponsorship information (if available).
 
 ---
 
-*Last updated: July 13, 2026*
+*Last updated: August 18, 2026*
 
 
 ## Document Updates
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-18 | Hermes | Require exact NGINX source tree + matching configure options for custom source builds |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.7.0 | 2026-05-19 | Kang | Added decompression budget guidance, v0.7.0 error codes and directives |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |

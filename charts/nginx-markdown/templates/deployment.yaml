@@ -11,10 +11,16 @@ spec:
       {{- include "nginx-markdown.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      {{- with .Values.podAnnotations }}
       annotations:
+        {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
+        {{- if .Values.markdown.enabled }}
+        # Config changes must roll the pods; without a checksum annotation,
+        # helm upgrade updates the ConfigMap but leaves the running Pod on
+        # the old rendered nginx.conf.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- end }}
       labels:
         {{- include "nginx-markdown.selectorLabels" . | nindent 8 }}
     spec:
@@ -29,7 +35,9 @@ spec:
         - name: {{ .Chart.Name }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          {{- $imageRepo := required "image.repository must be set explicitly (no default runtime image)" .Values.image.repository }}
+          {{- $imageTag := required "image.tag must be set explicitly (no default runtime image)" (.Values.image.tag | default "") }}
+          image: "{{ $imageRepo }}:{{ $imageTag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           volumeMounts:
             - name: nginx-config
@@ -62,6 +70,49 @@ spec:
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+        {{- if and .Values.markdown.enabled .Values.metrics.enabled .Values.metrics.sidecar.enabled }}
+        - name: metrics-sidecar
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- $sidecarImageRepo := required "metrics.sidecar.image.repository must be set when the metrics sidecar is enabled" .Values.metrics.sidecar.image.repository }}
+          {{- $sidecarImageDigest := .Values.metrics.sidecar.image.digest | default "" }}
+          {{- $sidecarImageTag := .Values.metrics.sidecar.image.tag | default "" }}
+          {{- if and (eq $sidecarImageDigest "") (eq $sidecarImageTag "") }}
+          {{- fail "metrics.sidecar.image.digest or metrics.sidecar.image.tag must be set when the metrics sidecar is enabled" }}
+          {{- end }}
+          {{- if $sidecarImageDigest }}
+          image: "{{ $sidecarImageRepo }}@{{ $sidecarImageDigest }}"
+          {{- else }}
+          image: "{{ $sidecarImageRepo }}:{{ $sidecarImageTag }}"
+          {{- end }}
+          imagePullPolicy: {{ .Values.metrics.sidecar.image.pullPolicy }}
+          volumeMounts:
+            - name: metrics-sidecar-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: metrics-sidecar.conf
+            - name: metrics-sidecar-run
+              mountPath: /var/run
+            - name: nginx-tmp
+              mountPath: /tmp
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: metrics-sidecar-cache
+              mountPath: /var/cache/nginx/metrics-sidecar
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metrics.sidecar.port }}
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.metrics.sidecar.resources | nindent 12 }}
+        {{- end }}
       volumes:
         - name: nginx-config
           configMap:
@@ -70,8 +121,21 @@ spec:
           emptyDir: {}
         - name: nginx-run
           emptyDir: {}
+        {{- if and .Values.markdown.enabled .Values.metrics.enabled .Values.metrics.sidecar.enabled }}
+        - name: metrics-sidecar-run
+          emptyDir: {}
+        {{- end }}
         - name: nginx-tmp
           emptyDir: {}
+        {{- if and .Values.markdown.enabled .Values.metrics.enabled .Values.metrics.sidecar.enabled }}
+        - name: metrics-sidecar-config
+          configMap:
+            name: {{ include "nginx-markdown.fullname" . }}-config
+        {{- end }}
+        {{- if and .Values.markdown.enabled .Values.metrics.enabled .Values.metrics.sidecar.enabled }}
+        - name: metrics-sidecar-cache
+          emptyDir: {}
+        {{- end }}
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

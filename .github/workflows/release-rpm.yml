@@ -22,8 +22,8 @@ on:
 permissions: {}
 
 env:
-  RUST_TOOLCHAIN: 1.97.0
-  RUST_FEATURES: streaming,incremental
+  RUST_TOOLCHAIN: 1.97.1
+  RUST_FEATURES: streaming,incremental,prune_noise_regions
 
 jobs:
   build-rpm:
@@ -206,19 +206,13 @@ jobs:
       - name: Build RPM package
         env:
           PKG_VERSION: ${{ inputs.version }}
+          NGINX_VERSION: ${{ steps.nginx_version.outputs.version }}
         run: |
           . "$HOME/.cargo/env"
-          NGINX_VERSION="${{ steps.nginx_version.outputs.version }}"
-          NGINX_MAJOR="$(printf '%s\n' "${NGINX_VERSION}" | cut -d. -f1)"
-          NGINX_MINOR="$(printf '%s\n' "${NGINX_VERSION}" | cut -d. -f2)"
-          NGINX_VERSION_FLOOR="${NGINX_MAJOR}.${NGINX_MINOR}.0"
-          NGINX_VERSION_CEIL="${NGINX_MAJOR}.$((NGINX_MINOR + 1)).0"
           rpmbuild -bb \
             --define "_topdir $HOME/rpmbuild" \
             --define "version ${PKG_VERSION}" \
             --define "nginx_version ${NGINX_VERSION}" \
-            --define "nginx_version_floor ${NGINX_VERSION_FLOOR}" \
-            --define "nginx_version_ceil ${NGINX_VERSION_CEIL}" \
             ~/rpmbuild/SPECS/nginx-module-markdown.spec
 
       - name: Collect RPM artifacts

@@ -1,6 +1,6 @@
 # HTML to Markdown Test Corpus
 
-This directory contains a comprehensive test corpus for validating HTML-to-Markdown conversion across diverse real-world scenarios. The corpus is organized by category to facilitate targeted testing.
+This directory contains a comprehensive test corpus for validating HTML-to-Markdown conversion across diverse real-world scenarios. The corpus groups content by category to facilitate targeted testing.
 
 ## Directory Structure
 
@@ -11,6 +11,7 @@ tests/corpus/
 ├── malformed/       # Invalid HTML to test error handling
 ├── edge-cases/      # Boundary conditions and unusual inputs
 ├── encoding/        # Character encoding test cases
+├── streaming/       # Streaming-specific edge cases and flush-boundary fixtures
 └── README.md        # This file
 ```
 
@@ -82,6 +83,20 @@ Character encoding test cases to verify correct handling of various encodings.
 | `mixed-entities.html` | Mix of entities and Unicode | Decode entities, preserve Unicode |
 | `special-chars.html` | Markdown special characters in content | Escape properly in Markdown output |
 | `rtl-text.html` | Right-to-left text (Arabic, Hebrew) | Preserve RTL text correctly |
+
+### 6. Streaming (`streaming/`)
+
+Streaming-specific fixtures that exercise flush-point and chunk-boundary
+edges, charset mismatches under streaming, and high-risk table structures
+for streaming parity testing. Each fixture has a matching `.meta.json` file
+with the following schema fields:
+
+| Field | Description |
+|-------|-------------|
+| `streaming_notes` | Object containing streaming parity metadata |
+| `streaming_notes.expected_fallback` | Whether streaming is expected to fall back to full-buffer |
+| `streaming_notes.known_diff_ids` | Known parity diff identifiers for this fixture |
+| `streaming_notes.high_risk_structures` | List of HTML structures that are high-risk for streaming |
 
 ## Usage
 
@@ -158,17 +173,18 @@ When adding new test cases:
 
 ## Maintenance
 
-This corpus should be updated when:
+Update this corpus when:
 
-- New HTML patterns are encountered in production
-- Conversion bugs are discovered and fixed
-- New features are added (e.g., new element handlers)
-- Edge cases are identified through testing
+- you encounter new HTML patterns in production
+- you discover and fix conversion bugs
+- you add new features (for example, new element handlers)
+- you identify edge cases through testing
 
 
 ## Document Updates
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
+| 0.9.2 | 2026-08-08 | Kang | Fixed Document Updates row order (time descending) |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

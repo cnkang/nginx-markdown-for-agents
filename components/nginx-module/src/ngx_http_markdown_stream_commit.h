@@ -57,8 +57,12 @@
  *   Phase 2: infallible mutations (Content-Type, Content-Length,
  *     Content-Encoding).  These always succeed.
  *
- * On success, transitions stream_sm.state to COMMITTED and sets
- * stream_sm.headers_committed = 1.
+ * On success, applies the header mutations and eagerly sets headers_committed
+ * and the committed stream state. If ngx_http_next_header_filter returns
+ * NGX_AGAIN, the streaming caller publishes the commit latches and committed
+ * state and treats the headers as accepted (canonical NGINX model — the
+ * header chain is never re-invoked, so no rollback/retry of the header
+ * transaction is performed).
  *
  * Parameters:
  *   r    - current HTTP request

@@ -5,7 +5,7 @@ Checks schema, package integrity, SHA256SUMS inclusion, and absence of
 placeholder values.
 
 Usage:
-    validate-release-manifest.py -m MANIFEST -d ARTIFACT_DIR [--sha256sums SHA256SUMS] [--version VERSION]
+    validate-release-manifest.py -m MANIFEST -d ARTIFACT_DIR [--sha256sums SHA256SUMS] [--version VERSION] [--require-bootstrap-assets]
 
 Exit codes:
     0  All validations passed
@@ -27,6 +27,14 @@ PLACEHOLDER_PATTERNS = [
     re.compile(r"TODO", re.IGNORECASE),
     re.compile(r"FIXME", re.IGNORECASE),
 ]
+
+SEMVER_TAG_RE = re.compile(
+    r"v?(?:0|[1-9][0-9]*)\."
+    r"(?:0|[1-9][0-9]*)\."
+    r"(?:0|[1-9][0-9]*)"
+    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+)
 
 
 def sha256_file(path: Path) -> str:
@@ -83,6 +91,7 @@ def validate_manifest(
     artifact_dir: Path,
     sha256sums_path: Path | None,
     expected_version: str | None,
+    require_bootstrap_assets: bool = False,
 ) -> list[str]:
     errors: list[str] = []
 
@@ -149,14 +158,26 @@ def validate_manifest(
                 check_no_placeholders(git["tag"], "git.tag", errors)
 
     # packages
+    manifest_filenames: set[str] = set()
     packages = manifest.get("packages", [])
     if not isinstance(packages, list) or len(packages) == 0:
         errors.append("packages must be a non-empty list")
     else:
-        manifest_filenames = set()
         for i, pkg in enumerate(packages):
             prefix = f"packages[{i}]"
-            for key in ("filename", "format", "version", "sha256"):
+            # dynamic-module tarballs carry nginx_version/libc/arch instead of
+            # a project version (their name encodes the NGINX version, not the
+            # release version).  Require the version key for deb/rpm only, and
+            # the full identity set for dynamic-module entries.
+            if pkg.get("format") in ("deb", "rpm"):
+                required_keys = ("filename", "format", "version", "sha256")
+            elif pkg.get("format") == "dynamic-module":
+                required_keys = (
+                    "filename", "format", "nginx_version", "libc", "arch", "sha256",
+                )
+            else:
+                required_keys = ("filename", "format", "sha256")
+            for key in required_keys:
                 if key not in pkg:
                     errors.append(f"{prefix}: missing {key}")
 
@@ -186,7 +207,7 @@ def validate_manifest(
                             f"manifest={pkg['sha256']}, actual={actual_sha}"
                         )
 
-            if "format" in pkg and pkg["format"] not in ("deb", "rpm"):
+            if "format" in pkg and pkg["format"] not in ("deb", "rpm", "dynamic-module"):
                 errors.append(f"{prefix}: unexpected format: {pkg['format']}")
 
             if "sha256" in pkg:
@@ -293,6 +314,21 @@ def validate_manifest(
         allowed_sha256_names = set(manifest_filenames)
         allowed_sha256_names.add("release-manifest.json")
 
+        bootstrap_filenames: set[str] = set()
+        if is_tag_release and isinstance(git, dict):
+            tag = git.get("tag", "")
+            if isinstance(tag, str) and SEMVER_TAG_RE.fullmatch(tag):
+                bootstrap_filenames = {
+                    f"nginx-markdown-for-agents-installer-{tag}.sh",
+                    "nginx-markdown-for-agents-release.asc",
+                }
+            else:
+                errors.append(
+                    "git.tag must be a semantic release tag to validate bootstrap assets"
+                )
+
+        allowed_sha256_names.update(bootstrap_filenames)
+
         for pkg in packages:
             if "filename" not in pkg:
                 continue
@@ -310,8 +346,29 @@ def validate_manifest(
         for fname in sorted(sha256_entries):
             if fname not in allowed_sha256_names:
                 errors.append(f"Unexpected file in SHA256SUMS: {fname}")
+
+        for fname in sorted(bootstrap_filenames):
+            fpath = artifact_dir / fname
+            sums_sha = sha256_entries.get(fname)
+            if sums_sha is None:
+                if require_bootstrap_assets:
+                    errors.append(f"Bootstrap asset {fname} not found in SHA256SUMS")
+                continue
+            if not fpath.is_file():
+                errors.append(f"Bootstrap asset {fname} listed in SHA256SUMS but not found in artifacts")
+                continue
+            actual_sha = sha256_file(fpath)
+            if sums_sha != actual_sha:
+                errors.append(
+                    f"SHA256SUMS digest mismatch for bootstrap asset {fname}: "
+                    f"sha256sums={sums_sha}, actual={actual_sha}"
+                )
     elif sha256sums_path:
         errors.append(f"SHA256SUMS file not found: {sha256sums_path}")
+    elif require_bootstrap_assets and is_tag_release:
+        errors.append(
+            "SHA256SUMS is required when bootstrap assets are explicitly required"
+        )
 
     # Check packages are sorted deterministically
     if packages:
@@ -328,13 +385,24 @@ def main() -> None:
     parser.add_argument("-d", "--artifact-dir", required=True, help="Artifact directory")
     parser.add_argument("--sha256sums", default=None, help="Path to SHA256SUMS file")
     parser.add_argument("--version", default=None, help="Expected version")
+    parser.add_argument(
+        "--require-bootstrap-assets",
+        action="store_true",
+        help="Require the installer and release-signature bootstrap assets",
+    )
     args = parser.parse_args()
 
     manifest_path = Path(args.manifest)
     artifact_dir = Path(args.artifact_dir)
     sha256sums_path = Path(args.sha256sums) if args.sha256sums else None
 
-    errors = validate_manifest(manifest_path, artifact_dir, sha256sums_path, args.version)
+    errors = validate_manifest(
+        manifest_path,
+        artifact_dir,
+        sha256sums_path,
+        args.version,
+        args.require_bootstrap_assets,
+    )
 
     if errors:
         print("VALIDATION FAILED:", file=sys.stderr)

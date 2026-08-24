@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-Reason-code validator for v0.7.0 release gates.
+Reason-code validator for v0.7.0 release gates. 由 0.7.0 引入，被 0.8.0+ 门禁复用
 
 Validates that all new v0.7.0 reason codes are properly defined and aligned
 across four surfaces:
 
-1. Rust registry — The legacy v0.7.0 reason code maps to a current
-   ReasonCode variant/string/metric family in
-   components/rust-converter/src/decision/reason_code.rs
+1. Rust projection — The legacy v0.7.0 reason code maps to a current
+   ReasonCode variant/string/metric family in the generated
+   components/rust-converter/src/decision/reason_code.rs projection
+   of components/rust-converter/reason_registry.toml
 2. C define/constant — The reason code has a corresponding ERROR_* define
    in the C header (markdown_converter.h)
 3. Documentation — The reason code is documented in
@@ -88,7 +89,7 @@ FILTER_MODULE_H = (
 )
 
 # Reason code definitions: each entry specifies what to look for in each surface.
-# - rust_variant: the enum variant name in reason_code.rs
+# - rust_variant: the enum variant name in the generated reason_code.rs
 # - rust_as_str: the current lowercase string returned by as_str()
 # - c_define: the ERROR_* define name in the C header (None if no separate define)
 # - doc_pattern: text pattern to find in DECISION_CHAIN.md
@@ -220,7 +221,9 @@ class ValidationResult:
 def read_safe(path: Path) -> str:
     """Read file content safely, returning empty string if missing."""
     resolved = path.resolve()
-    if not str(resolved).startswith(str(PROJECT_ROOT)):
+    try:
+        resolved.relative_to(PROJECT_ROOT.resolve())
+    except ValueError:
         return ""
     return resolved.read_text(encoding="utf-8") if resolved.is_file() else ""
 
@@ -239,7 +242,7 @@ def check_rust_enum(
     else:
         result.fail(
             check_id,
-            f"enum variant '{variant}' NOT found in reason_code.rs",
+            f"enum variant '{variant}' NOT found in generated reason_code.rs",
         )
 
 
@@ -256,7 +259,7 @@ def check_rust_as_str(
     else:
         result.fail(
             check_id,
-            f"string \"{as_str}\" NOT found in reason_code.rs as_str()",
+            f"string \"{as_str}\" NOT found in generated reason_code.rs as_str()",
         )
 
 
@@ -282,7 +285,7 @@ def check_rust_metric_key(
         result.fail(
             check_id,
             f"metric_key() mapping '{variant} => \"{metric}\"' "
-            "NOT found in reason_code.rs",
+            "NOT found in generated reason_code.rs",
         )
 
 
@@ -410,7 +413,7 @@ def validate_all(result: ValidationResult) -> None:
     if not rust_src:
         result.fail(
             "prereq:reason_code.rs",
-            "Rust reason_code.rs not found — cannot validate",
+            "generated Rust reason_code.rs projection not found — cannot validate",
         )
         return
 
@@ -447,7 +450,7 @@ def print_report(result: ValidationResult) -> None:
     print("=" * 70)
     print()
     print("Surfaces validated:")
-    print("  1. Rust enum (reason_code.rs)")
+    print("  1. Generated Rust projection (reason_code.rs)")
     print("  2. C define (markdown_converter.h)")
     print("  3. Documentation (DECISION_CHAIN.md)")
     print("  4. Metrics (prometheus_impl.h + filter_module.h)")

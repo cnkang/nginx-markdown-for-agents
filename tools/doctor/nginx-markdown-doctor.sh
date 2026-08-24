@@ -16,7 +16,7 @@ set -euo pipefail
 # Constants
 ##############################################################################
 
-readonly DOCTOR_VERSION="0.9.1"
+readonly DOCTOR_VERSION="0.9.2"
 readonly SCHEMA_VERSION=1
 readonly MODULE_FILENAME="ngx_http_markdown_filter_module.so"
 
@@ -309,7 +309,7 @@ check_config_valid() {
         return
     }
 
-    # ponytail: cleanup helper called at every return path — RETURN trap
+    # cleanup helper called at every return path — RETURN trap
     # leaks to caller on bash 3.2 (macOS default), so use explicit helper.
     _check_config_valid_cleanup() { rm -f "$tmp_conf"; }
 
@@ -511,7 +511,159 @@ check_rust_linkage() {
     return 0
 }
 
-# Check 7: OS/arch/libc detection
+# Check 7: Rust toolchain version
+# The repository pins an exact compiler toolchain (rust-toolchain.toml
+# channel 1.97.1) and separately declares the MSRV floor (Cargo.toml
+# rust-version 1.97). This check verifies the active rustc satisfies the
+# MSRV and that a repository checkout pins the exact contract toolchain.
+check_rust_toolchain() {
+    local msrv_floor="1.97"          # Cargo.toml rust-version (MSRV floor)
+    local expected_msrv="1.97.1"     # rust-toolchain.toml channel (exact pin)
+
+    if ! command -v rustc >/dev/null 2>&1; then
+        emit_check "rust_toolchain" "skip" "rustc not available (install Rust via rustup)" \
+            '{"rustc_version":null,"msrv":"'"$msrv_floor"'","msrv_ok":null,"repository_checkout":false,"symlink_chain_bounded":null,"pinned_channel":null,"pinned_channel_expected":"'"$expected_msrv"'"}'
+        return 0
+    fi
+
+    local rustc_version
+    rustc_version=$(rustc --version 2>/dev/null | awk '{print $2}' || true)
+
+    local msrv_ok="false"
+    if [[ -z "$rustc_version" ]]; then
+        # An unreadable version is a warning, not a fail: the verdict is
+        # "cannot verify MSRV", matching the below-MSRV branch severity so
+        # an unreadable rustc does not block a healthy toolchain report.
+        emit_check "rust_toolchain" "warn" \
+            "rustc version could not be determined; MSRV verification skipped" \
+            '{"rustc_version":null,"msrv":"'"$msrv_floor"'","msrv_ok":null,"repository_checkout":false,"symlink_chain_bounded":null,"pinned_channel":null,"pinned_channel_expected":"'"$expected_msrv"'"}'
+        return 0
+    fi
+    local min="$msrv_floor"
+    local ver_major ver_minor
+    ver_major=$(printf '%s\n' "$rustc_version" | cut -d. -f1)
+    ver_minor=$(printf '%s\n' "$rustc_version" | cut -d. -f2)
+    if [[ -n "$ver_major" && -n "$ver_minor" ]] \
+        && (( ver_major > ${min%.*} )) 2>/dev/null; then
+        msrv_ok="true"
+    elif [[ -n "$ver_major" && -n "$ver_minor" ]] \
+        && (( ver_major == ${min%.*} )) 2>/dev/null \
+        && (( ver_minor >= ${min#*.} )) 2>/dev/null; then
+        msrv_ok="true"
+    fi
+
+    # Resolve symlinked installations before looking for repository metadata.
+    # A packaged or copied doctor script must not accidentally inspect the
+    # caller's current directory and report a repository toolchain as active.
+    local doctor_source="${BASH_SOURCE[0]:-}"
+    local doctor_dir doctor_link symlink_hops=0
+    local max_symlink_hops=40
+    while [[ -n "$doctor_source" && -L "$doctor_source" ]]; do
+        symlink_hops=$((symlink_hops + 1))
+        if (( symlink_hops > max_symlink_hops )); then
+            emit_check "rust_toolchain" "fail" \
+                "doctor script symlink chain exceeds ${max_symlink_hops} hops" \
+                '{"rustc_version":"'"$(json_escape "$rustc_version")"'","msrv":"'"$msrv_floor"'","msrv_ok":null,"repository_checkout":false,"symlink_chain_bounded":false,"pinned_channel":null,"pinned_channel_expected":"'"$expected_msrv"'"}'
+            return 0
+        fi
+        doctor_dir=$(cd -P "$(dirname "$doctor_source")" \
+            && pwd 2>/dev/null || printf '')
+        doctor_link=$(readlink "$doctor_source" 2>/dev/null || printf '')
+        if [[ -z "$doctor_dir" || -z "$doctor_link" ]]; then
+            doctor_source=""
+            break
+        fi
+        if [[ "$doctor_link" == /* ]]; then
+            doctor_source="$doctor_link"
+        else
+            doctor_source="$doctor_dir/$doctor_link"
+        fi
+    done
+
+    local doctor_root=""
+    if [[ -n "$doctor_source" ]]; then
+        doctor_root=$(cd -P "$(dirname "$doctor_source")/../.." \
+            && pwd 2>/dev/null || printf '')
+    fi
+
+    local checkout_root=""
+    if [[ -n "$doctor_root" ]] && command -v git >/dev/null 2>&1; then
+        checkout_root=$(git -C "$doctor_root" rev-parse --show-toplevel \
+            2>/dev/null || printf '')
+    fi
+
+    # Escape before any branch so every emit_check JSON payload below uses
+    # initialized values even with set -u (the checkout-unavailable branch
+    # emits JSON that references these variables).  toolchain_file is
+    # declared here (default empty) and filled below only when the
+    # repository checkout is available; the escaped value stays "" on the
+    # checkout-unavailable branch.
+    local toolchain_file=""
+    local toolchain_file_exists="false"
+    local escaped_rustc_version escaped_expected_msrv escaped_msrv_floor escaped_toolchain_file
+    escaped_rustc_version=$(json_escape "$rustc_version")
+    escaped_expected_msrv=$(json_escape "$expected_msrv")
+    escaped_msrv_floor=$(json_escape "$msrv_floor")
+    escaped_toolchain_file=$(json_escape "$toolchain_file")
+
+    if [[ -z "$doctor_root" || "$checkout_root" != "$doctor_root" ]]; then
+        # The MSRV verdict still applies without a checkout; only the
+        # pinned-channel validation needs repository metadata.
+        if [[ "$msrv_ok" == "true" ]]; then
+            emit_check "rust_toolchain" "warn" \
+                "rustc ${rustc_version} meets MSRV ${msrv_floor}; repository checkout unavailable, pinned-channel check skipped" \
+                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_msrv_floor"'","msrv_ok":true,"repository_checkout":false,"symlink_chain_bounded":null,"pinned_channel":null,"pinned_channel_expected":"'"$escaped_expected_msrv"'"}'
+        else
+            emit_check "rust_toolchain" "warn" \
+                "rustc ${rustc_version} below MSRV ${msrv_floor}; repository checkout unavailable, pinned-channel check skipped" \
+                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_msrv_floor"'","msrv_ok":false,"repository_checkout":false,"symlink_chain_bounded":null,"pinned_channel":null,"pinned_channel_expected":"'"$escaped_expected_msrv"'"}'
+        fi
+        return 0
+    fi
+
+    local pinned_ok="false"
+    if [[ -n "$doctor_root" && -f "$doctor_root/rust-toolchain.toml" ]]; then
+        toolchain_file_exists="true"
+        toolchain_file=$(grep -E '^channel[[:space:]]*=' "$doctor_root/rust-toolchain.toml" \
+            | head -1 | sed 's/^channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/' || true)
+    fi
+    escaped_toolchain_file=$(json_escape "$toolchain_file")
+
+    if [[ -n "$toolchain_file" && "$toolchain_file" == "$expected_msrv" ]]; then
+        pinned_ok="true"
+    fi
+
+    if [[ "$msrv_ok" == "true" ]]; then
+        if [[ "$toolchain_file_exists" != "true" ]]; then
+            emit_check "rust_toolchain" "warn" \
+                "rustc ${rustc_version} meets MSRV but rust-toolchain.toml is missing" \
+                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_msrv_floor"'","msrv_ok":true,"repository_checkout":true,"symlink_chain_bounded":true,"pinned_channel":null,"pinned_channel_expected":"'"$escaped_expected_msrv"'"}' \
+                "Add rust-toolchain.toml with channel = \"${expected_msrv}\" for reproducible release builds"
+        elif [[ -z "$toolchain_file" ]]; then
+            emit_check "rust_toolchain" "warn" \
+                "rustc ${rustc_version} meets MSRV but rust-toolchain.toml has no channel" \
+                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_msrv_floor"'","msrv_ok":true,"repository_checkout":true,"symlink_chain_bounded":true,"pinned_channel":null,"pinned_channel_expected":"'"$escaped_expected_msrv"'"}' \
+                "Set channel = \"${expected_msrv}\" in rust-toolchain.toml"
+        elif [[ "$pinned_ok" == "true" ]]; then
+            emit_check "rust_toolchain" "pass" \
+                "rustc ${rustc_version} meets MSRV; repository pins exact toolchain ${toolchain_file}" \
+                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_msrv_floor"'","msrv_ok":true,"repository_checkout":true,"symlink_chain_bounded":true,"pinned_channel":"'"$escaped_toolchain_file"'","pinned_channel_expected":"'"$escaped_expected_msrv"'"}'
+        else
+            emit_check "rust_toolchain" "warn" \
+                "rustc ${rustc_version} meets MSRV but rust-toolchain.toml is not pinned to ${expected_msrv}" \
+                '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_msrv_floor"'","msrv_ok":true,"repository_checkout":true,"symlink_chain_bounded":true,"pinned_channel":"'"$escaped_toolchain_file"'","pinned_channel_expected":"'"$escaped_expected_msrv"'"}' \
+                "Set channel = \"${expected_msrv}\" in rust-toolchain.toml for reproducible release builds"
+        fi
+    else
+        emit_check "rust_toolchain" "warn" \
+            "rustc ${rustc_version:-unknown} is below the MSRV floor ${msrv_floor}" \
+            '{"rustc_version":"'"$escaped_rustc_version"'","msrv":"'"$escaped_msrv_floor"'","msrv_ok":false,"repository_checkout":true,"symlink_chain_bounded":true,"pinned_channel":null,"pinned_channel_expected":"'"$escaped_expected_msrv"'"}' \
+            "Install Rust ${msrv_floor} or newer (rustup toolchain install ${expected_msrv})"
+    fi
+    return 0
+}
+
+# Check 8: OS/arch/libc detection
 check_os_arch() {
     # Detect OS
     local os_name
@@ -791,6 +943,7 @@ main() {
     check_configure_args
     check_module_signature
     check_rust_linkage
+    check_rust_toolchain
     check_os_arch
     check_package_type
     recommend_artifact

@@ -46,7 +46,7 @@ Python tooling, and `shellcheck` on shell scripts.
 - Shell: static analysis via shellcheck (not cognitive complexity)
 
 **What it does NOT check:**
-- Shell cognitive complexity (no reliable tool; shellcheck covers static issues)
+- Shell cognitive complexity (no reliable tool, shellcheck covers static issues)
 - Test fixture files (excluded from scan paths)
 - Generated code, vendored code, build artifacts
 
@@ -61,17 +61,14 @@ Python tooling, and `shellcheck` on shell scripts.
 | Shell | shellcheck | — | — | — | — |
 
 **C thresholds rationale:** NGINX glue layers have inherent complexity from
-lifecycle management, error branches, macros, and state machines. The goal is
-to prevent further growth, not zero out all complex functions. CCN 25 and
+lifecycle management, error branches, macros, and state machines. CCN 25 and
 length 180 are generous enough to accommodate legitimate NGINX patterns while
-flagging genuinely overgrown functions.
+still requiring every overgrown function to refactor before delivery.
 
-**Baseline strategy (Scheme B):** A checked-in baseline
-(`tools/complexity/baseline.json`) records all current violations at the target
-thresholds. New violations not in the baseline fail the check. Existing
-baseline violations that worsen (higher CCN, longer length, more params, higher
-cognitive complexity) produce warnings. This prevents new complexity growth
-without requiring immediate cleanup of all historical complex functions.
+Every violation is blocking. The harness has no baseline exception list,
+suppression mechanism, or threshold waiver. If a function exceeds a threshold,
+extract helpers, simplify the control flow, or redesign the boundary until
+the team removes the reported violation.
 
 **When to run:**
 - Before committing changes to C, Rust, Python, or shell code
@@ -88,20 +85,14 @@ brew install shellcheck   # macOS
 apt install shellcheck    # Debian/Ubuntu
 ```
 
-**Handling false positives:**
-- If a function is flagged but the complexity is legitimate (e.g., a large
-  static lookup table with low actual branching), add it to the baseline with
-  a `note` field explaining why.
-- Do not suppress warnings by raising thresholds globally — use the baseline.
+**Handling flagged functions:**
+- When a legitimate-looking lookup table or NGINX lifecycle function exceeds a
+  configured threshold, the module team must decompose it.
+- Do not suppress warnings or raise thresholds to accommodate a violation.
+- Existing violations are subject to the same blocking rule as new violations,
+  the current tree must be clean before delivery.
 
-**Handling existing complex functions:**
-- Existing violations are recorded in the baseline. They do not block the check.
-- When modifying an existing complex function, do not increase its complexity
-  metrics. If the function must grow, update the baseline entry.
-- Over time, as complex functions are refactored or replaced, remove them from
-  the baseline.
-
-**Shell note:** Shell scripts are checked with `shellcheck` for static issues
+**Shell note:** Shell scripts get checked with `shellcheck` for static issues
 and maintainability. Cognitive Complexity is not a hard metric for shell
 scripts — there is no reliable tool, and shell scripts in this project are
 primarily orchestration glue, not core logic.
@@ -110,3 +101,18 @@ Verification:
 - `make complexity-check`
 - `PYTHONPATH=. python3 tools/harness/detect_python_complexity.py`
 - `python3 -m pytest tools/harness/tests/test_detect_python_complexity.py -q --tb=short`
+
+**lizard/SonarCloud threshold mapping (2026-08-21):** the local gate
+(lizard CCN, `make complexity-check`) and SonarCloud use different
+metrics.  Lizard counts cyclomatic complexity per function.  SonarCloud
+additionally reports cognitive complexity and code smells with its own
+per-language thresholds.  The 0.9.2 pre-freeze window remediated several
+SonarCloud complexity findings (`e3cbf06b`, `c8c93300`, `8fbf2e7e`,
+`0e32598a`) that the local gate had passed, because nested control flow
+raises cognitive complexity faster than cyclomatic complexity.  The team
+accepts this divergence: SonarCloud cognitive complexity is not locally
+reproducible, and forcing numeric parity would either duplicate Sonar or
+weaken the local gate.  Practical contract: keep local gates clean at
+write time.  Treat SonarCloud complexity findings that arrive later as
+triage items under Rule 21 (fix by extracting helpers, not by
+suppression), and fold any recurring shape back into this rule.

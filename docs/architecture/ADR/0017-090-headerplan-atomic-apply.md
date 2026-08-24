@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (0.9.0 contract freeze — Wave 1)
+Accepted (0.9.0 contract freeze — initial contract phase)
 
 ## Context
 
@@ -10,12 +10,12 @@ Accepted (0.9.0 contract freeze — Wave 1)
 operations and rollback support. However, several response-header mutations still
 happen **outside** HeaderPlan (in-place on `r->headers_out`), and the existing
 apply path interleaves allocation with mutation. Because NGINX pool allocation
-**cannot be rolled back**, an allocation failure mid-apply can leave headers
+**cannot roll back**, an allocation failure mid-apply can leave headers
 partially mutated — a correctness and fail-open hazard (AGENTS.md Rule 39).
 
-The current scattered-mutation map and the documented full-response-synthesis
-exceptions are recorded in the local 0.9.0 working inventory; this ADR freezes
-the resulting contract.
+The local 0.9.0 working inventory records exceptions from the current
+scattered-mutation map and the documented full-response-synthesis contract.
+This ADR freezes the resulting contract.
 
 ## Decision
 
@@ -40,39 +40,70 @@ succeeds.**
   `content_length` header entry (`hash = 0`, Rule 40).
 - Set `Content-Type`: update `content_type`, `content_type_len`,
   `content_type_lowcase` (NULL), and `charset` (clear) together.
-- Delete `ETag`: clear `etag` pointer + `hash = 0`.
-- `Vary: Accept`: dedup (no duplicate append).
 - `status`, `last_modified_time` handled in commit.
 - Multi-step modification is atomic: abort on first prepare failure, no partial
   apply (Rule 39).
 
+ETag, `Vary: Accept`, token, and authentication-header operations are **not**
+handled in the HeaderPlan commit. They are C-side post-plan operations (see
+the atomic scope boundary below). This keeps them consistent with the
+rationale: ETag set/clear and Vary add execute in C after the plan commits.
+The HeaderPlan atomicity invariant therefore applies **only to the core
+wire-critical fields Content-Type, Content-Encoding, and Content-Length**;
+ETag, Vary, token, and authentication-header operations are explicitly
+exempt via the atomic-scope exception below.
+
 ### Streaming vs full-buffer header matrix
 
-- **Streaming**: deletes/omits `Content-Length`; generates **no** ordinary ETag
-  (headers commit before the transformed body is known); `If-None-Match` not
-  supported; `If-Modified-Since` uses preserved `Last-Modified`.
+- **Streaming**: deletes/omits `Content-Length`, generates **no** ordinary ETag
+  (headers commit before the transformed body is known), `If-None-Match` not
+  supported, `If-Modified-Since` uses preserved `Last-Modified`.
 - **Full-buffer**: when `markdown_cache_validation full` and a transformed
   representation is computable, generates a transformed ETag.
 - HEAD / 304 / no-body / error-status paths follow a documented matrix.
 
-### Documented exception table (NOT in-place mutation → bypass allowed)
+### Documented exceptions (NOT in-place mutation → bypass allowed)
 
-These synthesize a **complete** response (no upstream response to mutate) and are
-permitted exceptions, each justified and listed:
+Two categories of exceptions exist and remain distinct. Do not conflate
+them.
+
+**Category 1 — Full-response synthesis (no upstream response to mutate):**
+These paths build a complete response from scratch. There is no upstream
+`headers_out` to mutate, so HeaderPlan does not apply. Each exception carries a justification. The table below lists each one:
 
 | Path | Justification |
 |------|---------------|
 | Metrics endpoint (`metrics_impl.h`) | full-response synthesis (subrequest) |
 | Diagnostics endpoint (`diagnostics.c`) | full-response synthesis (subrequest) |
-| Stream error response (`stream_error.c`) | full-response synthesis (error path) |
 
-Any **new** exception requires ADR justification and an entry here. New in-place
-`headers_out` mutation outside HeaderPlan is forbidden.
+**Post-commit terminal exception (separate category):**
+`stream_postcommit.c` does not synthesize a full response and is therefore
+not a Category 1 exception. It is a distinct post-commit terminal category:
+after headers are already committed, the streaming post-commit error path
+may send a terminal closing chain (empty `last_buf` or safe-finish closing
+bytes) over the already-committed response. It MUST NOT synthesize a new
+error body, MUST NOT replay the original content, MUST NOT replace the
+status, and MUST NOT call `ngx_http_send_header()` a second time.
+Pre-commit errors never enter this path — they follow
+`markdown_error_policy` instead.
+
+**Category 2 — Post-plan mutation of an upstream response:**
+These operations mutate headers on an existing upstream response after the
+HeaderPlan commit. They are not full-response synthesis. They execute after
+the core plan commits and fall within the atomic scope boundary below
+(pre-send best-effort with hard abort):
+
+- ETag set/clear
+- `Vary: Accept` add
+- `X-Markdown-Tokens` header
+- Auth `Cache-Control` modify
+
+Any **new** exception requires ADR justification and an entry here. No other code may mutate `headers_out` in place outside HeaderPlan **for core fields** (Content-Type, Content-Encoding, Content-Length). The post-plan operations listed above (ETag, Vary, X-Markdown-Tokens, Auth Cache-Control) are explicitly exempt from the HeaderPlan atomicity invariant. They execute after the plan commits under the pre-send best-effort boundary.
 
 ### Post-commit error boundary
 
 Once commit succeeds and headers are sent, a streaming post-commit error
-**cannot** be treated as pre-commit: it does not follow `markdown_error_policy`
+**cannot** count as pre-commit: it does not follow `markdown_error_policy`
 pass/fail_closed/status selection. Allowed: stop output, close the downstream
 connection, log reason code `streaming_mid_flight_error` (ADR-0018), emit
 metrics. Forbidden: pass original content, return 200 with truncated body, or
@@ -89,8 +120,8 @@ directly affect wire-level correctness:
 
 The following **post-plan operations** execute after the plan commits
 successfully. They are **pre-send best-effort with hard abort**: a failure in
-any of them returns `NGX_ERROR` before `ngx_http_send_header()` is called, so
-no partially-mutated headers reach the wire. However, they are not covered by
+any of them returns `NGX_ERROR` before the module calls `ngx_http_send_header()`, so
+no partially-mutated headers reach the wire. However, they fall outside
 the plan's rollback guarantee — a failure here leaves the already-committed
 core mutations in place (which is safe: Content-Type/Content-Encoding/old
 Content-Length are already correct, and the request will error out before
@@ -105,35 +136,43 @@ headers are sent).
 | `Accept-Ranges` removal | Scalar assignment — cannot fail |
 | Auth `Cache-Control` modify | `NGX_ERROR` — abort before send |
 
-**Rationale**: Expanding the plan to cover these operations would require
-adding ETag set/clear, Vary add, and token header to the Rust
+**Rationale**: The atomicity invariant above applies only to core in-place
+mutations covered by HeaderPlan (Content-Type, Content-Encoding, and
+Content-Length). Expanding the plan to cover these post-plan operations would
+require adding ETag set/clear, Vary add, and token header to the Rust
 `markdown_build_header_plan` FFI, increasing the FFI surface and coupling Rust
 to NGINX-specific list-push semantics. The current design keeps Rust
 plan-building pure (core wire-critical mutations only) and handles
-NGINX-lifecycle-specific header operations in C post-plan. This is a pragmatic
-0.9.0 contract; if future requirements demand full atomicity for these
-operations, they should be migrated into the Rust plan with corresponding FFI
+NGINX-lifecycle-specific header operations (ETag, Vary, token, and
+authentication headers) in C post-plan. This is a pragmatic
+0.9.0 contract, if future requirements demand full atomicity for these
+operations, they should migrate into the Rust plan with corresponding FFI
 expansion.
 
 ## Consequences
 
 ### Positive
 
-- No partial header mutation; commit is allocation-free and cannot half-apply.
-- All `Content-Type`/`Content-Length`/`ETag`/`Vary` edge cases handled in one
-  atomic place.
+- No partial mutation occurs within the HeaderPlan-covered fields. The commit
+  is allocation-free and cannot half-apply.
+- Content-Type, Content-Encoding, and Content-Length edge cases handled in
+  one atomic place. ETag and Vary remain explicit post-plan operations under
+  the scope boundary above.
+- A post-plan failure can leave the core mutations applied, but it occurs
+  before `ngx_http_send_header()` and therefore cannot expose those partial
+  headers on the wire.
 - Honest streaming post-commit semantics (no false 502/rewrite promises).
 
 ### Negative
 
 - Prepare must over-allocate worst-case header entries up front.
-- Existing scattered mutations must be migrated into HeaderPlan.
+- The implementation must migrate existing scattered mutations into HeaderPlan.
 - Fault-injection test surface grows.
 
 ## Alternatives Considered
 
 - **Allocate-during-commit with rollback**: rejected — NGINX pool allocations are
-  not reversible; rollback of allocation is impossible.
+  not reversible, rollback of allocation is impossible.
 - **Leave scattered mutations as-is**: rejected — they are the partial-mutation
   hazard this ADR closes.
 
@@ -156,5 +195,7 @@ Kang
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-20 | Hermes | Scope HeaderPlan atomicity invariant to core fields (Content-Type/Content-Encoding/Content-Length); move stream_postcommit into a distinct post-commit terminal exception category |
+| 0.9.2 | 2026-08-19 | Hermes | Clarify stream_postcommit exception: post-commit terminal closing only, never a synthesized error body, replay, status replacement, or second send_header |
 | 0.9.0 | 2026-07-02 | Kang | Documented atomic scope boundary: core plan vs post-plan best-effort with hard abort |
 | 0.9.0 | 2026-06-30 | Kang | Initial ADR — prepare/commit split, special-field atomicity, exception table, post-commit boundary |

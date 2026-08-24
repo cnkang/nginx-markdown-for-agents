@@ -1,10 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
-# Native-only E2E validation for large bodies when markdown_limits memory allows them.
+# Native-only E2E validation for large bodies when markdown_limits
+# conversion_memory allows them.
 # Covers:
 #  - 100MB valid HTML conversion path (best-effort success path)
-#  - 1GB allowed-size path with deterministic conversion failure + fail-open replay
+#  - 1GB allowed-size GET path with deterministic conversion failure +
+#    fail-open replay
 #
 # Why the 1GB file is intentionally invalid UTF-8:
 # - It still forces full buffering (max_size allows it)
@@ -16,8 +18,8 @@ NGINX_VERSION="${NGINX_VERSION:-1.28.2}"
 PORT="${PORT:-18093}"
 KEEP_ARTIFACTS=0
 RUN_1G_GET="${RUN_1G_GET:-1}"
-MARKDOWN_MAX_SIZE="${MARKDOWN_MAX_SIZE:-1536m}"
-MARKDOWN_PARSER_BUDGET="${MARKDOWN_PARSER_BUDGET:-1024m}"
+MARKDOWN_MAX_SIZE="${MARKDOWN_MAX_SIZE:-1g}"
+MARKDOWN_PARSER_MEMORY="${MARKDOWN_PARSER_MEMORY:-1024m}"
 ACCEPT_MARKDOWN_HEADER='Accept: text/markdown'
 NGINX_BIN="${NGINX_BIN:-}"
 
@@ -39,18 +41,20 @@ usage() {
 Usage: $(basename "$0") [--keep-artifacts] [--nginx-version VERSION] [--port PORT] [--skip-1g-get] [--markdown-max-size SIZE]
 
 Build local NGINX with the markdown module and validate very large bodies when
-markdown_limits memory allows them (native-only on Apple Silicon).
+markdown_limits conversion_memory allows them (native-only on Apple Silicon).
 
 Checks:
   1) 100MB valid HTML converts successfully to Markdown (GET, HEAD)
-  2) 1GB HTML is allowed by size and reaches conversion; conversion fails fast due
-     to invalid UTF-8, then fail-open returns the full original body (GET, HEAD)
+  2) 1GB HTML GET is allowed by size and reaches conversion; conversion fails
+     fast due to invalid UTF-8, then fail-open returns the full original body.
+     HEAD validates the planned Markdown representation only because HEAD does
+     not execute GET body conversion.
 
 Notes:
   - This script auto-reexecs under native arm64 on Apple Silicon if launched under Rosetta.
   - 1GB GET can be skipped with --skip-1g-get.
   - Set NGINX_BIN to reuse an existing module-enabled nginx binary and skip rebuilding.
-  - MARKDOWN_PARSER_BUDGET defaults to 1024m so the 100MB conversion fixture is
+  - MARKDOWN_PARSER_MEMORY defaults to 1024m so the 100MB conversion fixture is
     not rejected by the independent parser-memory safety limit.
 EOF
   return 0
@@ -208,8 +212,8 @@ http {
             markdown_accept wildcard;
             markdown_streaming off;
             markdown_cache_validation full;
-            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=600s;
-            markdown_parser_budget ${MARKDOWN_PARSER_BUDGET};
+            markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}
+                conversion_timeout=600s parser_memory=${MARKDOWN_PARSER_MEMORY};
             markdown_error_policy pass;
             markdown_log_verbosity info;
         }
@@ -263,29 +267,6 @@ check_get_markdown() {
   return 0
 }
 
-check_head_failopen_passthrough() {
-  local name="$1" expected_bytes="$2"
-  local hdr="${RAW_DIR}/${name}.head.hdr"
-  local code
-
-  code="$(curl -sS -I -D "${hdr}" -o /dev/null -H "${ACCEPT_MARKDOWN_HEADER}" \
-    --max-time 180 "http://127.0.0.1:${PORT}/allow/${name}.html" -w '%{http_code}')"
-  [[ "${code}" == "200" ]] || { echo "${name}: expected HEAD 200, got ${code}" >&2; exit 1; }
-
-  grep -qi '^Content-Type: text/html' "${hdr}" || {
-    echo "${name}: expected pass-through Content-Type text/html on HEAD" >&2
-    exit 1
-  }
-
-  local cl
-  cl="$(awk 'BEGIN{IGNORECASE=1} /^Content-Length:/ {gsub(/\r/, ""); print $2; exit}' "${hdr}")"
-  [[ "${cl}" == "${expected_bytes}" ]] || {
-    echo "${name}: Content-Length mismatch (expected ${expected_bytes}, got ${cl:-missing})" >&2
-    exit 1
-  }
-  return 0
-}
-
 check_get_failopen_passthrough() {
   local name="$1" expected_bytes="$2" timeout_s="$3"
   local hdr="${RAW_DIR}/${name}.get.hdr"
@@ -317,7 +298,7 @@ check_head_markdown "convert-100m"
 check_get_markdown "convert-100m" 600
 
 echo "==> 1GB fail-open replay validation (max_size allowed)"
-check_head_failopen_passthrough "failopen-1g-invalid" "1073741824"
+check_head_markdown "failopen-1g-invalid"
 if [[ "${RUN_1G_GET}" == "1" ]]; then
   check_get_failopen_passthrough "failopen-1g-invalid" "1073741824" 300
 else
@@ -325,10 +306,14 @@ else
 fi
 
 echo "==> Log sanity checks"
-grep -q 'conversion failed' "${RUNTIME}/logs/error.log" || {
-  echo "Expected conversion failure log for failopen-1g-invalid not found" >&2
-  exit 1
-}
+if [[ "${RUN_1G_GET}" == "1" ]]; then
+  grep -q 'conversion failed' "${RUNTIME}/logs/error.log" || {
+    echo "Expected conversion failure log for failopen-1g-invalid not found" >&2
+    exit 1
+  }
+else
+  echo "==> Skipping 1GB conversion log check (--skip-1g-get)"
+fi
 if grep -q 'response size exceeds limit' "${RUNTIME}/logs/error.log"; then
   echo "Unexpected size-limit bypass log found in allowed-size scenario" >&2
   exit 1
@@ -337,8 +322,8 @@ fi
 echo "Allowed-size huge-body summary:"
 echo "  nginx_version=${NGINX_VERSION}"
 echo "  arch=$(uname -m)"
-echo "  markdown_limits memory=${MARKDOWN_MAX_SIZE}"
-echo "  markdown_parser_budget=${MARKDOWN_PARSER_BUDGET}"
+echo "  markdown_limits conversion_memory=${MARKDOWN_MAX_SIZE}"
+echo "  markdown_limits parser_memory=${MARKDOWN_PARSER_MEMORY}"
 echo "  convert_100m=$(cat "${RAW_DIR}/convert-100m.get.metrics")"
 if [[ -f "${RAW_DIR}/failopen-1g-invalid.get.metrics" ]]; then
   echo "  failopen_1g=$(cat "${RAW_DIR}/failopen-1g-invalid.get.metrics")"

@@ -82,11 +82,11 @@ test_json_perf_renderer_emits_all_fields(void)
     memset(&perf, 0, sizeof(perf));
     perf.backpressure_total = 7;
     perf.backpressure_resume_total = 3;
+    perf.backpressure_resume_failure_total = 6;
     perf.pending_output_high_watermark_bytes = 65536;
     perf.decompression_streaming_total = 12;
     perf.decompression_fullbuffer_total = 8;
     perf.decompression_budget_exceeded_total = 2;
-    perf.zero_copy_output_total = 50;
     perf.copied_output_total = 30;
 
     p = ngx_http_markdown_metrics_write_json_perf(
@@ -102,6 +102,9 @@ test_json_perf_renderer_emits_all_fields(void)
     TEST_ASSERT(contains((char *) buf, "\"backpressure_resume_total\": 3"),
         "JSON has backpressure_resume_total");
     TEST_ASSERT(contains((char *) buf,
+        "\"backpressure_resume_failure_total\": 6"),
+        "JSON has backpressure_resume_failure_total");
+    TEST_ASSERT(contains((char *) buf,
         "\"pending_output_high_watermark_bytes\": 65536"),
         "JSON has pending_output_high_watermark_bytes");
     TEST_ASSERT(contains((char *) buf,
@@ -113,8 +116,6 @@ test_json_perf_renderer_emits_all_fields(void)
     TEST_ASSERT(contains((char *) buf,
         "\"decompression_budget_exceeded_total\": 2"),
         "JSON has decompression_budget_exceeded_total");
-    TEST_ASSERT(contains((char *) buf, "\"zero_copy_output_total\": 50"),
-        "JSON has zero_copy_output_total");
     TEST_ASSERT(contains((char *) buf, "\"copied_output_total\": 30"),
         "JSON has copied_output_total");
 

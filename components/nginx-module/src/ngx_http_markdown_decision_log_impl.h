@@ -104,7 +104,7 @@ ngx_http_markdown_reason_is_exact(const ngx_str_t *reason_code,
  *     "decompression_error", "decompression_budget_exceeded",
  *     "decompression_format_error", "decompression_truncated_input",
  *     "decompression_io_error", "timeout", "budget_exceeded",
- *     "replay_error", "overload", "invalid_dynconf",
+ *     "replay_error", "invalid_dynconf",
  *     "degraded_snapshot", "header_plan_apply_error",
  *     "streaming_mid_flight_error" (schema v1 error codes)
  *   - Legacy: "ELIGIBLE_FAILED" prefix, "FAIL_" prefix
@@ -114,7 +114,7 @@ ngx_http_markdown_reason_is_exact(const ngx_str_t *reason_code,
  *   - "STREAMING_FALLBACK_" prefix (streaming degraded to fallback path)
  *
  * All other codes (skipped_*, converted, disabled, not_eligible,
- * ENGINE_*, STREAMING_CONVERT, STREAMING_SHADOW, STREAMING_SKIP_*)
+ * ENGINE_*, STREAMING_CONVERT, STREAMING_SKIP_*)
  * are non-failure outcomes.
  *
  * Parameters:
@@ -139,12 +139,12 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
         ngx_http_markdown_literal("timeout"),
         ngx_http_markdown_literal("budget_exceeded"),
         ngx_http_markdown_literal("replay_error"),
-        /* Indices 20-24: reserved for future reason codes (not yet production-used) */
-        ngx_http_markdown_literal("overload"),
+        /* Production failure outcomes for reason codes 21-26 */
         ngx_http_markdown_literal("invalid_dynconf"),
         ngx_http_markdown_literal("degraded_snapshot"),
         ngx_http_markdown_literal("header_plan_apply_error"),
-        ngx_http_markdown_literal("streaming_mid_flight_error")
+        ngx_http_markdown_literal("streaming_mid_flight_error"),
+        ngx_http_markdown_literal("encoding_header_invalid")
     };
 
     if (reason_code == NULL || reason_code->len == 0) {

@@ -20,6 +20,44 @@
 
 #include "ngx_http_markdown_exports.h"
 
+#ifndef NGX_HTTP_MARKDOWN_AUTH_CACHE_CONTROL_HELPER_DEFINED
+#define NGX_HTTP_MARKDOWN_AUTH_CACHE_CONTROL_HELPER_DEFINED 1
+
+/*
+ * Keep the standalone header harness and production translation units on
+ * the same final-header authentication decision.  Production includes this
+ * file after filter_module.h, which supplies the identical helper first;
+ * the guard prevents a duplicate static definition there.  Standalone
+ * harnesses compile with the auth policy disabled and therefore need no
+ * auth-function declarations.
+ */
+static ngx_int_t
+ngx_http_markdown_auth_cache_control_required(
+    const ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
+    ngx_flag_t *required)
+{
+    if (required == NULL) {
+        return NGX_ERROR;
+    }
+
+#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
+    if (r == NULL) {
+        return NGX_ERROR;
+    }
+
+    *required = (conf != NULL
+                 && ngx_http_markdown_is_authenticated(r, conf));
+#else
+    (void) r;
+    (void) conf;
+    *required = 0;
+#endif
+
+    return NGX_OK;
+}
+
+#endif /* NGX_HTTP_MARKDOWN_AUTH_CACHE_CONTROL_HELPER_DEFINED */
+
 /*
  * Include the header plan header for the atomic apply function.
  * In standalone test mode, the test harness provides its own stub.
@@ -43,6 +81,7 @@ static u_char ngx_http_markdown_hdr_etag[] = "ETag";
 static u_char ngx_http_markdown_hdr_content_encoding[] = "Content-Encoding";
 static u_char ngx_http_markdown_hdr_accept_ranges[] = "Accept-Ranges";
 static u_char ngx_http_markdown_hdr_token_count[] = "X-Markdown-Tokens";
+static u_char ngx_http_markdown_hdr_last_modified[] = "Last-Modified";
 u_char ngx_http_markdown_content_type[] = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL;
 static u_char ngx_http_markdown_vary_suffix[] = ", Accept";
 
@@ -118,6 +157,9 @@ ngx_http_markdown_find_header_in_part(ngx_list_part_t *part,
         ngx_uint_t i;
 
         headers = part->elts;
+        if (part->nelts != 0 && headers == NULL) {
+            return NULL;
+        }
         i = 0;
         while (i < part->nelts) {
             if (headers[i].hash == 0) {
@@ -193,6 +235,9 @@ ngx_http_markdown_invalidate_headers_in_part(const ngx_http_request_t *r,
         ngx_uint_t i;
 
         headers = part->elts;
+        if (part->nelts != 0 && headers == NULL) {
+            return;
+        }
         i = 0;
         while (i < part->nelts) {
             if (headers[i].hash == 0) {
@@ -250,6 +295,47 @@ ngx_http_markdown_invalidate_headers(ngx_http_request_t *r,
 }
 
 /*
+ * Invalidate every entry in r->headers_out.trailers.
+ *
+ * The response trailer list is a second, independent ngx_list_t
+ * (headers_out.trailers) that HTTP/2/3 and chunked encodings emit
+ * WITHOUT requiring an HTTP/1.1 `Trailer` declaration header.  After an
+ * HTML->Markdown representation change, upstream trailers (Content-Digest,
+ * Repr-Digest, Digest, Content-MD5, X-Markdown-Tokens, ...) describe the
+ * source HTML body and must not be propagated; invalidating the `Trailer`
+ * declaration header alone is insufficient (HTTP/2/3 do not depend on it).
+ *
+ * The output filters (ngx_http_chunked_filter_module,
+ * ngx_http_v2_filter_module) skip entries whose hash == 0, so marking
+ * every entry hash=0 fully suppresses the trailer block.
+ *
+ * r - current HTTP request
+ */
+void
+ngx_http_markdown_clear_trailers(ngx_http_request_t *r)
+{
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *elts;
+
+    part = &r->headers_out.trailers.part;
+
+    while (part != NULL) {
+        elts = part->elts;
+        if (part->nelts != 0 && elts == NULL) {
+            return;
+        }
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            elts[i].hash = 0;
+        }
+        part = part->next;
+    }
+
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "markdown: cleared upstream response trailers "
+                   "(representation change)");
+}
+
+/*
  * Check whether a comma-separated header value contains a specific token.
  *
  * Parses the value as a comma-delimited list, trims whitespace from
@@ -276,7 +362,10 @@ ngx_http_markdown_contains_csv_token(const ngx_str_t *value,
         size_t start;
         size_t end;
 
-        while (i < value->len && (value->data[i] == ' ' || value->data[i] == ',')) {
+        while (i < value->len
+               && (value->data[i] == ' ' || value->data[i] == '\t'
+                   || value->data[i] == ','))
+        {
             i++;
         }
 
@@ -286,7 +375,10 @@ ngx_http_markdown_contains_csv_token(const ngx_str_t *value,
         }
         end = i;
 
-        while (end > start && value->data[end - 1] == ' ') {
+        while (end > start
+               && (value->data[end - 1] == ' '
+                   || value->data[end - 1] == '\t'))
+        {
             end--;
         }
 
@@ -442,52 +534,6 @@ ngx_http_markdown_set_etag(ngx_http_request_t *r, const u_char *etag, size_t eta
 }
 
 /*
- * Add the X-Markdown-Tokens response header with the estimated token count.
- *
- * Skips header creation when token_count is 0. Formats the count
- * as a decimal string using NGX_HTTP_MARKDOWN_SPRINTF_TOKEN.
- *
- * r           - current HTTP request
- * token_count - estimated token count to emit
- *
- * Returns:
- *   NGX_OK    on success or when token_count is 0
- *   NGX_ERROR on allocation failure
- */
-static ngx_int_t
-ngx_http_markdown_add_token_header(ngx_http_request_t *r, uint32_t token_count)
-{
-    ngx_table_elt_t *h;
-    const u_char *p;
-
-    if (token_count == 0) {
-        return NGX_OK;
-    }
-
-    h = ngx_list_push(&r->headers_out.headers);
-    if (h == NULL) {
-        return NGX_ERROR;
-    }
-
-    h->hash = 1;
-    h->key.data = ngx_http_markdown_hdr_token_count;
-    h->key.len = sizeof(ngx_http_markdown_hdr_token_count) - 1;
-
-    h->value.data = ngx_pnalloc(r->pool, NGX_INT32_LEN);
-    if (h->value.data == NULL) {
-        return NGX_ERROR;
-    }
-
-    p = NGX_HTTP_MARKDOWN_SPRINTF_TOKEN(h->value.data, token_count);
-    h->value.len = p - h->value.data;
-
-    NGX_HTTP_MARKDOWN_LOG_DEBUG1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                                 "markdown: added X-Markdown-Tokens: %ui", token_count);
-
-    return NGX_OK;
-}
-
-/*
  * Remove the Content-Encoding response header.
  *
  * Clears r->headers_out.content_encoding and invalidates the
@@ -497,7 +543,7 @@ ngx_http_markdown_add_token_header(ngx_http_request_t *r, uint32_t token_count)
  *
  * r - current HTTP request
  */
-void
+ngx_int_t
 ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r)
 {
     r->headers_out.content_encoding = NULL;
@@ -507,112 +553,604 @@ ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r)
                                          sizeof(ngx_http_markdown_hdr_content_encoding) - 1,
                                          0,
                                          "markdown: removed Content-Encoding header");
+    return NGX_OK;
 }
 
 /*
- * Remove the Accept-Ranges response header.
+ * Apply the Markdown representation Content-Type to a response.
  *
- * Clears r->allow_ranges and r->headers_out.accept_ranges,
- * then invalidates the first Accept-Ranges entry in the output
- * header list. Prevents clients from requesting byte ranges on
- * the converted Markdown response.
+ * NGINX can carry Content-Type both as the dedicated
+ * r->headers_out.content_type field and as ordinary entries in the
+ * headers_out.headers list (e.g. when upstream or an earlier filter
+ * pushed one explicitly).  If a stale list entry survives a
+ * representation change, the response emits two Content-Type headers.
+ * Every representation-change path (fullcov HeaderPlan, stream commit,
+ * 304, HEAD) must therefore delete all list entries before pointing
+ * the dedicated field at the Markdown media type.
+ *
+ * Also clears the lowercased/hash cache of the upstream media type:
+ * the header filter matches against content_type_lowcase/hash, so a
+ * stale text/html cache would let downstream matching (e.g. gzip or
+ * SSI) treat the Markdown response as HTML.
+ *
+ * Infallible: list invalidation and pointer/scalar assignment only.
  *
  * r - current HTTP request
  */
-static void
-ngx_http_markdown_remove_accept_ranges(ngx_http_request_t *r)
+void
+ngx_http_markdown_set_representation_content_type(ngx_http_request_t *r)
 {
-    r->allow_ranges = 0;
-    r->headers_out.accept_ranges = NULL;
+    static u_char  hdr_content_type[] = "Content-Type";
 
     ngx_http_markdown_invalidate_headers(r,
-                                         ngx_http_markdown_hdr_accept_ranges,
-                                         sizeof(ngx_http_markdown_hdr_accept_ranges) - 1,
-                                         1,
-                                         "markdown: removed Accept-Ranges header");
+                                         hdr_content_type,
+                                         sizeof(hdr_content_type) - 1,
+                                         0,
+                                         "markdown: removed stale Content-Type header");
+
+    /* Point at the Markdown media type a GET conversion would select,
+     * using the shared writable array so all paths reference the same
+     * storage.  NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN is defined by
+     * ngx_http_markdown_filter_module.h, which every production TU
+     * includes before this header. */
+    r->headers_out.content_type.data = ngx_http_markdown_content_type;
+    r->headers_out.content_type.len = sizeof(NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL) - 1;
+    r->headers_out.content_type_len = sizeof(NGX_HTTP_MARKDOWN_CONTENT_TYPE_LITERAL) - 1;
+    r->headers_out.charset.len = 0;
+    r->headers_out.charset.data = NULL;
+    r->headers_out.content_type_lowcase = NULL;
+    r->headers_out.content_type_hash = 0;
 }
 
 /*
- * Update all response headers for a completed full-buffer conversion.
+ * Full-coverage HeaderPlan prepare/commit for full-buffer conversion.
  *
- * Sets Content-Type to text/markdown; charset=utf-8, adds Vary: Accept,
- * replaces Content-Length with the Markdown body length, sets or clears
- * the ETag based on configuration, adds X-Markdown-Tokens if enabled,
- * removes Content-Encoding and Accept-Ranges, and adjusts Cache-Control
- * for authenticated content when auth cache control is enabled.
+ * 0.9.2 two-phase protocol (Requirement 9, Properties 14–15):
  *
- * Atomic plan application with post-plan Content-Length:
+ *   PREPARE PHASE — performs ALL fallible operations:
+ *     - Rust FFI plan build and atomic apply (Content-Type delete-all,
+ *       Content-Encoding delete-all, Content-Length delete-all, ETag
+ *       placeholder)
+ *     - ETag header allocation and value copy
+ *     - Vary: Accept lookup, dedup, and append allocation
+ *     - X-Markdown-Tokens header allocation and value formatting
+ *     - Cache-Control in-place value rewrite (auth) with allocation
+ *     A bounded transaction snapshot is taken before the first operation.
+ *     Helpers may use inert list slots or legacy in-place auth rewrites
+ *     during prepare, but ANY failure restores the snapshot exactly.
+ *     Rust-owned plan resources are freed and `header_plan_apply_error` is
+ *     logged.
  *
- *   The header plan (built by Rust) is applied via the two-phase
- *   prepare/commit model in ngx_http_markdown_apply_header_plan().
- *   The prepare phase allocates and validates all operations; on any
- *   failure the plan is aborted before commit — r->headers_out is
- *   unchanged (aborted SET_NEW slots stay inert, hash==0).  The plan
- *   includes:
+ *   COMMIT PHASE — pointer/scalar assignment only, zero allocations,
+ *     unconditional success after successful prepare:
+ *     - Content-Type dedicated field assignment
+ *     - ETag header entry populated from pre-allocated memory
+ *     - Vary header entry populated or value pointer swapped
+ *     - Content-Length numeric field set
+ *     - X-Markdown-Tokens entry populated from pre-allocated memory
+ *     - Accept-Ranges invalidation (hash=0, pointer clear)
+ *     - Content-Encoding pointer clear
  *
- *   - Content-Type (set to text/markdown; charset=utf-8)
- *   - Content-Encoding (delete-all)
- *   - Content-Length (delete-all — invalidates stale originals)
- *   - ETag (set-etag-placeholder, if configured)
+ *   Cache-Control rewrites (value rewrite/append) are applied in-place
+ *   during the PREPARE phase; the commit phase never touches them.
  *
- *   After successful plan commit, the C side sets:
+ *   Nothing occurs between commit and ngx_http_send_header.
  *
- *   - Content-Length (new value from result->markdown_len)
- *   - X-Markdown-Tokens (if enabled)
- *   - Accept-Ranges (delete)
- *   - Cache-Control (auth modification, if applicable)
- *
- *   This is safe because the plan already committed — if prepare
- *   had failed, we would not reach the post-plan operations.
- *   The post-plan Content-Length set is guaranteed to execute only
- *   after successful plan application.
- *
- *   Atomicity scope: the *plan* operations are atomic (prepare-all
- *   or abort-all with no mutation).  The post-plan operations (ETag,
- *   Vary, Content-Length, token header, Accept-Ranges removal,
- *   Cache-Control) are NOT covered by the prepare/commit guarantee;
- *   if one of them fails, earlier post-plan mutations remain.  This
- *   is safe in practice because the sole caller
- *   (ngx_http_markdown_execute_conversion) treats any NGX_ERROR from
- *   this function as a hard failure and returns BEFORE forwarding the
- *   response headers downstream — so a partially-mutated header set
- *   is never delivered to the client.  Do NOT call this function from
- *   a path that may forward headers after a non-NGX_OK return.
+ * Exception inventory (<5 entries):
+ *   - Metrics endpoint (full response synthesis)
+ *   - Diagnostics endpoint (full response synthesis)
+ *   No postcommit HeaderPlan exception — postcommit body errors do NOT
+ *   produce new status/header modifications.
  *
  * r      - current HTTP request
  * result - completed MarkdownResult from the Rust converter
  * conf   - location configuration
  *
  * Returns:
- *   NGX_OK    on success
- *   NGX_ERROR on NULL arguments, atomic plan failure, or a post-plan
- *             operation failure (caller must discard the response, not
- *             forward partially-mutated headers)
+ *   NGX_OK    on success (all headers committed)
+ *   NGX_ERROR on prepare failure (headers restored, plan freed,
+ *             header_plan_apply_error logged)
  */
+
+/*
+ * Bounded transaction snapshot for full-buffer header preparation.
+ *
+ * The individual header helpers have their own prepare/commit behavior, but
+ * the full-buffer path combines several helpers and the authentication
+ * policy still has legacy in-place rewrites.  Snapshot all existing header
+ * entries and dedicated response fields before the first helper so any
+ * prepare failure can restore the exact pre-conversion representation.
+ * Newly pushed list slots are made unreachable by restoring the saved list
+ * metadata, including the original last part's next pointer.  The snapshot
+ * is bounded to keep request-path allocation explicit and predictable.
+ */
+#define NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_MAX_ENTRIES  1024
+
+typedef struct {
+    ngx_table_elt_t   saved;
+} ngx_http_markdown_header_snapshot_entry_t;
+
+typedef struct {
+    ngx_http_headers_out_t  headers_out;
+    unsigned int            allow_ranges;
+    ngx_http_markdown_header_snapshot_entry_t  *entries;
+    ngx_uint_t              entry_count;
+    ngx_list_part_t        *original_last;
+    ngx_uint_t              original_last_nelts;
+    ngx_list_part_t        *original_last_next;
+} ngx_http_markdown_header_snapshot_t;
+
+
+static ngx_int_t
+ngx_http_markdown_header_snapshot_prepare(
+    ngx_http_request_t *r,
+    ngx_http_markdown_header_snapshot_t *snapshot)
+{
+    ngx_list_part_t  *part;
+    const ngx_table_elt_t  *headers;
+    ngx_uint_t        count;
+
+    memset(snapshot, 0, sizeof(*snapshot));
+    snapshot->headers_out = r->headers_out;
+    snapshot->allow_ranges = r->allow_ranges ? 1U : 0U;
+    snapshot->original_last = r->headers_out.headers.last;
+    if (snapshot->original_last != NULL) {
+        snapshot->original_last_nelts = snapshot->original_last->nelts;
+        snapshot->original_last_next = snapshot->original_last->next;
+    }
+
+    count = 0;
+    for (part = &r->headers_out.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        if (part->nelts > NGX_HTTP_MARKDOWN_HEADER_SNAPSHOT_MAX_ENTRIES
+            - count)
+        {
+            return NGX_ERROR;
+        }
+        count += part->nelts;
+    }
+
+    snapshot->entry_count = count;
+    if (count == 0) {
+        return NGX_OK;
+    }
+
+    snapshot->entries = ngx_pnalloc(r->pool,
+        (size_t) count * sizeof(ngx_http_markdown_header_snapshot_entry_t));
+    if (snapshot->entries == NULL) {
+        return NGX_ERROR;
+    }
+
+    count = 0;
+    for (part = &r->headers_out.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        if (part->nelts > 0 && part->elts == NULL) {
+            return NGX_ERROR;
+        }
+
+        headers = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            snapshot->entries[count].saved = headers[i];
+            count++;
+        }
+    }
+
+    return NGX_OK;
+}
+
+
+static void
+ngx_http_markdown_header_snapshot_restore(
+    ngx_http_request_t *r,
+    const ngx_http_markdown_header_snapshot_t *snapshot)
+{
+    if (snapshot == NULL) {
+        return;
+    }
+
+    if (snapshot->original_last != NULL) {
+        snapshot->original_last->nelts = snapshot->original_last_nelts;
+        snapshot->original_last->next = snapshot->original_last_next;
+    }
+
+    r->headers_out = snapshot->headers_out;
+    r->allow_ranges = snapshot->allow_ranges;
+
+    /*
+     * Re-walk the live list after restoring its metadata.  NGINX normally
+     * appends a new part without moving existing elements, but a compatible
+     * list implementation may relocate a part while pushing.  Ordinal
+     * restoration avoids writing through snapshot-time element pointers and
+     * also leaves a truncated/malformed list fail-closed.
+     */
+    {
+        ngx_table_elt_t  *headers;
+        ngx_uint_t        restored;
+
+        restored = 0;
+        for (ngx_list_part_t *part = &r->headers_out.headers.part;
+             part != NULL && restored < snapshot->entry_count;
+             part = part->next)
+        {
+            if (part->nelts > snapshot->entry_count - restored
+                || (part->nelts != 0 && part->elts == NULL))
+            {
+                return;
+            }
+
+            headers = part->elts;
+            for (ngx_uint_t i = 0; i < part->nelts; i++) {
+                headers[i] = snapshot->entries[restored].saved;
+                restored++;
+            }
+        }
+    }
+}
+
+
+/*
+ * Prepared state for the full-coverage commit phase.
+ * All memory referenced here is allocated from r->pool during prepare.
+ * The commit phase consumes these fields via assignment only.
+ */
+typedef struct {
+    /* ETag: pre-allocated header slot and value copy */
+    ngx_flag_t          has_etag;
+    ngx_table_elt_t    *etag_header;       /* pushed inert slot or NULL */
+    u_char             *etag_value_data;    /* pool copy of ETag bytes */
+    size_t              etag_value_len;
+
+    /* Vary: Accept */
+    ngx_flag_t          vary_needs_new;     /* no existing Vary: push new */
+    ngx_flag_t          vary_needs_append;  /* existing Vary: append Accept */
+    ngx_flag_t          vary_already_has;   /* existing Vary already has Accept */
+    ngx_table_elt_t    *vary_header;        /* new slot or existing entry */
+    u_char             *vary_value_data;    /* pool copy of new/appended value */
+    size_t              vary_value_len;
+
+    /* X-Markdown-Tokens */
+    ngx_flag_t          has_token_header;
+    ngx_table_elt_t    *token_header;       /* pushed inert slot */
+    u_char             *token_value_data;   /* pool-formatted decimal */
+    size_t              token_value_len;
+
+} ngx_http_markdown_fullcov_prepared_t;
+
+
+/*
+ * Prepare ETag: invalidate stale entries, push inert slot, copy value.
+ *
+ * Returns NGX_OK on success (or no-op when ETag not needed),
+ * NGX_ERROR on allocation failure.
+ */
+static ngx_int_t
+ngx_http_markdown_fullcov_prepare_etag(ngx_http_request_t *r,
+    const struct MarkdownResult *result,
+    const ngx_http_markdown_conf_t *conf,
+    ngx_http_markdown_fullcov_prepared_t *prep)
+{
+    ngx_table_elt_t  *h;
+
+    ngx_http_markdown_invalidate_headers(r,
+        ngx_http_markdown_hdr_etag,
+        sizeof(ngx_http_markdown_hdr_etag) - 1,
+        0, NULL);
+    r->headers_out.etag = NULL;
+
+    if (!conf->policy.generate_etag
+        || result->etag == NULL
+        || result->etag_len == 0)
+    {
+        return NGX_OK;
+    }
+
+    h = ngx_list_push(&r->headers_out.headers);
+    if (h == NULL) {
+        return NGX_ERROR;
+    }
+
+    /* Inert until commit (Rule 40: hash==0 filtered everywhere) */
+    h->hash = 0;
+    h->key.data = NULL;
+    h->key.len = 0;
+    h->value.data = NULL;
+    h->value.len = 0;
+
+    prep->etag_value_data = ngx_pnalloc(r->pool, result->etag_len);
+    if (prep->etag_value_data == NULL) {
+        return NGX_ERROR;
+    }
+
+    ngx_memcpy(prep->etag_value_data, result->etag, result->etag_len);
+    prep->etag_value_len = result->etag_len;
+    prep->etag_header = h;
+    prep->has_etag = 1;
+
+    return NGX_OK;
+}
+
+
+/*
+ * Prepare Vary: Accept — lookup, dedup, push inert slot or allocate
+ * appended value.
+ *
+ * Returns NGX_OK on success, NGX_ERROR on allocation/overflow failure.
+ */
+static ngx_int_t
+ngx_http_markdown_fullcov_prepare_vary(ngx_http_request_t *r,
+    ngx_http_markdown_fullcov_prepared_t *prep)
+{
+    ngx_table_elt_t  *vary;
+    ngx_table_elt_t  *h;
+    u_char           *p;
+    size_t            len;
+
+    vary = ngx_http_markdown_find_header(r,
+        ngx_http_markdown_hdr_vary,
+        sizeof(ngx_http_markdown_hdr_vary) - 1);
+
+    if (vary == NULL) {
+        h = ngx_list_push(&r->headers_out.headers);
+        if (h == NULL) {
+            return NGX_ERROR;
+        }
+
+        h->hash = 0;
+        h->key.data = NULL;
+        h->key.len = 0;
+        h->value.data = NULL;
+        h->value.len = 0;
+
+        prep->vary_needs_new = 1;
+        prep->vary_header = h;
+        prep->vary_value_data = ngx_http_markdown_hdr_accept;
+        prep->vary_value_len = sizeof(ngx_http_markdown_hdr_accept) - 1;
+        return NGX_OK;
+    }
+
+    if (ngx_http_markdown_contains_csv_token(&vary->value,
+            ngx_http_markdown_hdr_accept,
+            sizeof(ngx_http_markdown_hdr_accept) - 1))
+    {
+        prep->vary_already_has = 1;
+        prep->vary_header = vary;
+        return NGX_OK;
+    }
+
+    /* Append ", Accept" to existing value */
+    if (vary->value.len
+        > ((size_t) -1) - (sizeof(ngx_http_markdown_vary_suffix) - 1))
+    {
+        return NGX_ERROR;
+    }
+
+    len = vary->value.len + sizeof(ngx_http_markdown_vary_suffix) - 1;
+    p = ngx_pnalloc(r->pool, len);
+    if (p == NULL) {
+        return NGX_ERROR;
+    }
+
+    ngx_memcpy(p, vary->value.data, vary->value.len);
+    ngx_memcpy(p + vary->value.len,
+        ngx_http_markdown_vary_suffix,
+        sizeof(ngx_http_markdown_vary_suffix) - 1);
+
+    prep->vary_needs_append = 1;
+    prep->vary_header = vary;
+    prep->vary_value_data = p;
+    prep->vary_value_len = len;
+
+    return NGX_OK;
+}
+
+
+/*
+ * Prepare X-Markdown-Tokens: push inert slot, format decimal value.
+ *
+ * Returns NGX_OK on success (or no-op when tokens disabled/zero),
+ * NGX_ERROR on allocation failure.
+ */
+static ngx_int_t
+ngx_http_markdown_fullcov_prepare_token(ngx_http_request_t *r,
+    const struct MarkdownResult *result,
+    const ngx_http_markdown_conf_t *conf,
+    ngx_http_markdown_fullcov_prepared_t *prep)
+{
+    ngx_table_elt_t  *h;
+    u_char           *p;
+
+    if (!conf->token_estimate || result->token_estimate == 0) {
+        return NGX_OK;
+    }
+
+    h = ngx_list_push(&r->headers_out.headers);
+    if (h == NULL) {
+        return NGX_ERROR;
+    }
+
+    h->hash = 0;
+    h->key.data = NULL;
+    h->key.len = 0;
+    h->value.data = NULL;
+    h->value.len = 0;
+
+    p = ngx_pnalloc(r->pool, NGX_INT32_LEN);
+    if (p == NULL) {
+        return NGX_ERROR;
+    }
+
+    prep->token_value_data = p;
+    prep->token_value_len = (size_t)
+        (NGX_HTTP_MARKDOWN_SPRINTF_TOKEN(p, result->token_estimate) - p);
+    prep->token_header = h;
+    prep->has_token_header = 1;
+
+    return NGX_OK;
+}
+
+
+/*
+ * Commit all prepared header mutations (infallible, zero allocations).
+ */
+static void
+ngx_http_markdown_fullcov_commit(ngx_http_request_t *r,
+    const struct MarkdownResult *result,
+    const ngx_http_markdown_fullcov_prepared_t *prep)
+{
+    /* C0: Invalidate upstream representation-integrity metadata BEFORE the
+     * module pushes its own values to make the mutation contract uniform across paths. The 4 digest headers and any
+     * upstream X-Markdown-Tokens describe the source HTML body; leaving
+     * them on a converted response would make integrity-checking clients
+     * validate the wrong bytes.  Streaming (stream_commit.c) and 304
+     * (conditional.c) already strip these; this closes the full-buffer
+     * and incremental paths so the mutation contract is uniform. */
+    static u_char  hdr_content_md5[] = "Content-MD5";
+    static u_char  hdr_digest[] = "Digest";
+    static u_char  hdr_content_digest[] = "Content-Digest";
+    static u_char  hdr_repr_digest[] = "Repr-Digest";
+    static u_char  hdr_token_count[] = "X-Markdown-Tokens";
+    static u_char  hdr_trailer[] = "Trailer";
+
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_content_md5, sizeof(hdr_content_md5) - 1, 0, NULL);
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_digest, sizeof(hdr_digest) - 1, 0, NULL);
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_content_digest, sizeof(hdr_content_digest) - 1, 0, NULL);
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_repr_digest, sizeof(hdr_repr_digest) - 1, 0, NULL);
+    /* X-Markdown-Tokens: invalidate the upstream (HTML) value.  If the
+     * module's own token header is enabled (C5), the inert slot replaces
+     * it with the Markdown value; otherwise the upstream value stays
+     * invalidated. */
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_token_count, sizeof(hdr_token_count) - 1, 0, NULL);
+    /* Upstream trailers describe the HTML body (digests, token counts).
+     * The converted response replaces the body, so the Trailer declaration
+     * header must not be forwarded. */
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_trailer, sizeof(hdr_trailer) - 1, 0, NULL);
+    /* Clear the actual trailer entries too: headers_out.trailers is an
+     * independent list that HTTP/2/3 and chunked encodings emit without
+     * an HTTP/1.1 Trailer declaration.  Suppress them so the Markdown
+     * response never propagates source-HTML representation trailers. */
+    ngx_http_markdown_clear_trailers(r);
+
+    /* C1: Content-Type dedicated field */
+    r->headers_out.content_type.data = ngx_http_markdown_content_type;
+    r->headers_out.content_type.len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
+    r->headers_out.content_type_len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
+    r->headers_out.charset.len = 0;
+    r->headers_out.charset.data = NULL;
+    r->headers_out.content_encoding = NULL;
+    /* Clear the lowercased/hash cache of the upstream media type: the
+     * header filter matches against content_type_lowcase/hash, so a
+     * stale text/html cache would let downstream matching (e.g. gzip
+     * or SSI) treat the Markdown response as HTML. */
+    r->headers_out.content_type_lowcase = NULL;
+    r->headers_out.content_type_hash = 0;
+
+    /* C2: ETag — populate the pre-allocated inert slot */
+    if (prep->has_etag) {
+        prep->etag_header->key.data = ngx_http_markdown_hdr_etag;
+        prep->etag_header->key.len = sizeof(ngx_http_markdown_hdr_etag) - 1;
+        prep->etag_header->value.data = prep->etag_value_data;
+        prep->etag_header->value.len = prep->etag_value_len;
+        prep->etag_header->hash = 1;
+        r->headers_out.etag = prep->etag_header;
+    }
+
+    /* C3: Vary: Accept — populate new slot or swap value pointer */
+    if (prep->vary_needs_new) {
+        prep->vary_header->key.data = ngx_http_markdown_hdr_vary;
+        prep->vary_header->key.len = sizeof(ngx_http_markdown_hdr_vary) - 1;
+        prep->vary_header->value.data = prep->vary_value_data;
+        prep->vary_header->value.len = prep->vary_value_len;
+        prep->vary_header->hash = 1;
+    } else if (prep->vary_needs_append) {
+        prep->vary_header->value.data = prep->vary_value_data;
+        prep->vary_header->value.len = prep->vary_value_len;
+    }
+
+    /* C4: Content-Length — scalar assignment */
+    ngx_http_clear_content_length(r);
+    r->headers_out.content_length_n = result->markdown_len;
+
+    /* C5: X-Markdown-Tokens — populate the pre-allocated inert slot */
+    if (prep->has_token_header) {
+        prep->token_header->key.data = ngx_http_markdown_hdr_token_count;
+        prep->token_header->key.len =
+            sizeof(ngx_http_markdown_hdr_token_count) - 1;
+        prep->token_header->value.data = prep->token_value_data;
+        prep->token_header->value.len = prep->token_value_len;
+        prep->token_header->hash = 1;
+    }
+
+    /* C6: Accept-Ranges removal — scalar assignment */
+    r->allow_ranges = 0;
+    r->headers_out.accept_ranges = NULL;
+    /* Invalidate every matching list entry (stop_after_first=0), matching
+     * the ETag invalidation path: a duplicate upstream Accept-Ranges must
+     * not survive in the headers list. */
+    ngx_http_markdown_invalidate_headers(r,
+        ngx_http_markdown_hdr_accept_ranges,
+        sizeof(ngx_http_markdown_hdr_accept_ranges) - 1,
+        0, NULL);
+
+    /* C7: Last-Modified removal — the converted representation's weak
+     * validator must not describe the source HTML mtime (decision G).
+     * ETag (Markdown-derived, strong) is the sole validator for converted
+     * responses; the 304 path must not restore the source mtime either.
+     * Clear the typed pointer too: the header filter synthesizes
+     * Last-Modified whenever last_modified_time != -1 AND
+     * last_modified == NULL is false, so both fields must be reset. */
+    r->headers_out.last_modified_time = (time_t) -1;
+    r->headers_out.last_modified = NULL;
+    ngx_http_markdown_invalidate_headers(r,
+        ngx_http_markdown_hdr_last_modified,
+        sizeof(ngx_http_markdown_hdr_last_modified) - 1,
+        0, NULL);
+}
+
+
 ngx_int_t
 ngx_http_markdown_update_headers(ngx_http_request_t *r,
                                  const struct MarkdownResult *result,
                                  const ngx_http_markdown_conf_t *conf)
 {
-    ngx_int_t              rc;
-    struct FFIHeaderPlan   plan;
+    ngx_int_t                              rc;
+    ngx_flag_t                             auth_cache_control_required;
+    struct FFIHeaderPlan                   plan;
+    ngx_http_markdown_fullcov_prepared_t   prep;
+    ngx_http_markdown_header_snapshot_t    snapshot;
+
+    auth_cache_control_required = 0;
 
     if (r == NULL || result == NULL || conf == NULL) {
         return NGX_ERROR;
     }
 
-    /*
-     * Build header plan from Rust FFI.
-     *
-     * The plan covers the CORE wire-critical mutations:
-     * Content-Type (set), Content-Encoding (delete-all),
-     * Content-Length (delete-all), and ETag (set-etag-placeholder or omit).
-     *
-     * Post-plan operations (ETag set/clear, Vary: Accept, Content-Length
-     * set, X-Markdown-Tokens, Accept-Ranges, auth Cache-Control) are
-     * pre-send best-effort with hard abort — see ADR-0017 "Atomic scope
-     * boundary" for the rationale and failure handling contract.
-     */
+    if (ngx_http_markdown_header_snapshot_prepare(r, &snapshot)
+        != NGX_OK)
+    {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "markdown: header_plan_apply_error: "
+            "header snapshot prepare failed");
+        return NGX_ERROR;
+    }
+
+    memset(&prep, 0, sizeof(ngx_http_markdown_fullcov_prepared_t));
+
+    /* ================================================================
+     * PREPARE PHASE: all fallible operations, no r->headers_out mutation
+     * (except inert hash==0 pushes which are observably no-op).
+     * ================================================================ */
+
+    /* P1: FFI plan (Content-Type/Encoding/Length delete-all, ETag placeholder) */
     markdown_header_plan_init(&plan);
     markdown_build_header_plan(
         ngx_http_markdown_content_type,
@@ -622,119 +1160,194 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
          && result->etag_len > 0) ? 1 : 0,
         &plan);
 
-    /*
-     * Apply the plan atomically.  On prepare failure, the plan is
-     * aborted before commit — r->headers_out is unchanged.  The plan
-     * is freed by ngx_http_markdown_apply_header_plan() in both
-     * success and failure paths.
-     */
     rc = ngx_http_markdown_apply_header_plan(r, &plan);
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-            "markdown: header plan prepare aborted; "
-            "no mutations applied");
+            "markdown: header_plan_apply_error: "
+            "FFI plan prepare aborted");
+        ngx_http_markdown_header_snapshot_restore(r, &snapshot);
         return NGX_ERROR;
     }
 
-    r->headers_out.content_encoding = NULL;
-
-    /*
-     * Post-plan operations.  These execute only after the atomic
-     * plan has committed successfully.
-     *
-     * Content-Type: the plan only invalidates any stale Content-Type
-     * list entry; it never writes one (NGINX emits Content-Type from
-     * the dedicated r->headers_out.content_type field, so a list entry
-     * would duplicate the header on the wire).  Set the dedicated field
-     * here to the well-known Markdown content type.
-     */
-    r->headers_out.content_type.data = ngx_http_markdown_content_type;
-    r->headers_out.content_type.len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
-    r->headers_out.content_type_len = NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
-    r->headers_out.charset.len = 0;
-    r->headers_out.charset.data = NULL;
-
-    /*
-     * ETag: if the plan included a SetEtagPlaceholder entry, the
-     * atomic applier treated it as a generic SET with empty value.
-     * Apply the real ETag value now.
-     */
-    if (conf->policy.generate_etag
-        && result->etag != NULL
-        && result->etag_len > 0)
-    {
-        rc = ngx_http_markdown_set_etag(r,
-            result->etag, result->etag_len);
-        if (rc != NGX_OK) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                "markdown: failed to set ETag "
-                "after plan commit");
-            return NGX_ERROR;
-        }
-    } else {
-        rc = ngx_http_markdown_set_etag(r, NULL, 0);
-        if (rc != NGX_OK) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                "markdown: failed to clear ETag "
-                "after plan commit");
-            return NGX_ERROR;
-        }
-    }
-
-    /*
-     * Add Vary: Accept header.  This is a post-plan operation
-     * because it uses ngx_list_push which is NGINX-specific
-     * and not part of the Rust plan.
-     */
-    rc = ngx_http_markdown_add_vary_accept(r);
+    /* P2: ETag */
+    rc = ngx_http_markdown_fullcov_prepare_etag(r, result, conf, &prep);
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-            "markdown: failed to add Vary header");
+            "markdown: header_plan_apply_error: "
+            "ETag prepare failed");
+        ngx_http_markdown_header_snapshot_restore(r, &snapshot);
         return NGX_ERROR;
     }
 
-    /*
-     * Set the new Content-Length.  The plan deleted the stale
-     * original; now we set the correct post-conversion value.
-     * This is guaranteed to execute only after successful plan
-     * application.
-     */
-    ngx_http_clear_content_length(r);
-    r->headers_out.content_length_n = result->markdown_len;
+    /* P3: Vary: Accept */
+    rc = ngx_http_markdown_fullcov_prepare_vary(r, &prep);
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "markdown: header_plan_apply_error: "
+            "Vary prepare failed");
+        ngx_http_markdown_header_snapshot_restore(r, &snapshot);
+        return NGX_ERROR;
+    }
+
+    /* P4: X-Markdown-Tokens */
+    rc = ngx_http_markdown_fullcov_prepare_token(r, result, conf, &prep);
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "markdown: header_plan_apply_error: "
+            "token header prepare failed");
+        ngx_http_markdown_header_snapshot_restore(r, &snapshot);
+        return NGX_ERROR;
+    }
+
+    /* P5: Cache-Control auth modification */
+    rc = ngx_http_markdown_auth_cache_control_required(
+        r, conf, &auth_cache_control_required);
+#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
+    if (rc == NGX_OK && auth_cache_control_required) {
+        rc = ngx_http_markdown_modify_cache_control_for_auth(r);
+    }
+#endif
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "markdown: header_plan_apply_error: "
+            "Cache-Control auth modification failed");
+        ngx_http_markdown_header_snapshot_restore(r, &snapshot);
+        return NGX_ERROR;
+    }
+
+    /* ================================================================
+     * COMMIT PHASE: pointer/scalar assignment only, zero allocations,
+     * unconditional success after successful prepare.
+     * Nothing occurs between this commit and ngx_http_send_header.
+     * ================================================================ */
+    ngx_http_markdown_fullcov_commit(r, result, &prep);
 
     NGX_HTTP_MARKDOWN_LOG_DEBUG1(NGX_LOG_DEBUG_HTTP,
         r->connection->log, 0,
-        "markdown: set Content-Length: %uz",
+        "markdown: headers committed (full-coverage); "
+        "Content-Length: %uz",
         result->markdown_len);
 
-    if (conf->token_estimate && result->token_estimate > 0) {
-        rc = ngx_http_markdown_add_token_header(r,
-            result->token_estimate);
-        if (rc != NGX_OK) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                "markdown: failed to add "
-                "X-Markdown-Tokens header");
-            return NGX_ERROR;
-        }
+    return NGX_OK;
+}
+
+/*
+ * Rewrite response headers for a HEAD request so they describe the
+ * Markdown representation that a GET with the same Accept header would
+ * select (HTTP semantics: HEAD carries the same headers as GET, no body).
+ *
+ * The upstream HEAD response carries no body, so no body-derived field
+ * (Content-Length, ETag) can be computed.  Those fields are removed
+ * rather than fabricated: a fabricated Content-Length or empty-input
+ * ETag would contradict the GET representation of the same URL.  The
+ * header set still describes the Markdown representation (Content-Type,
+ * Vary: Accept) and strips all source-HTML representation metadata.
+ *
+ * Replaces the former Decision E fail-open behavior (superseded
+ * 2026-08-19): the body filter previously forwarded the upstream HTML
+ * headers unchanged for header-only HEAD requests, which contradicted
+ * the Rust-side HTTP representation contract (scenario_07_head_fullbuffer,
+ * scenario_08_head_streaming).
+ *
+ * r - current HTTP request
+ *
+ * Returns:
+ *   NGX_OK    on success
+ *   NGX_ERROR on allocation failure (Vary append)
+ */
+ngx_int_t
+ngx_http_markdown_head_representation_headers(ngx_http_request_t *r)
+{
+    static u_char  hdr_content_md5[] = "Content-MD5";
+    static u_char  hdr_digest[] = "Digest";
+    static u_char  hdr_content_digest[] = "Content-Digest";
+    static u_char  hdr_repr_digest[] = "Repr-Digest";
+    static u_char  hdr_token_count[] = "X-Markdown-Tokens";
+    static u_char  hdr_trailer[] = "Trailer";
+    static u_char  hdr_content_length[] = "Content-Length";
+    static u_char  hdr_etag[] = "ETag";
+    ngx_http_markdown_header_snapshot_t  snapshot;
+    ngx_int_t                             rc;
+
+    if (r == NULL) {
+        return NGX_ERROR;
     }
 
-    ngx_http_markdown_remove_accept_ranges(r);
-
-#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
-    if (ngx_http_markdown_is_authenticated(r, conf)) {
-        rc = ngx_http_markdown_modify_cache_control_for_auth(r);
-        if (rc != NGX_OK) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                "markdown: failed to modify "
-                "Cache-Control for authenticated "
-                "content");
-            return NGX_ERROR;
-        }
+    if (ngx_http_markdown_header_snapshot_prepare(r, &snapshot) != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown: HEAD header snapshot prepare failed");
+        return NGX_ERROR;
     }
-#endif
 
-    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-        "markdown: headers updated successfully");
+    /* The HEAD response describes the Markdown representation: strip
+     * source-HTML representation-integrity metadata (digests, token
+     * counts, Trailer declaration) exactly like the conversion commit
+     * paths (fullcov / streaming / 304) so the header contract is
+     * uniform across paths. */
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_content_md5, sizeof(hdr_content_md5) - 1, 0, NULL);
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_digest, sizeof(hdr_digest) - 1, 0, NULL);
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_content_digest, sizeof(hdr_content_digest) - 1, 0, NULL);
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_repr_digest, sizeof(hdr_repr_digest) - 1, 0, NULL);
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_token_count, sizeof(hdr_token_count) - 1, 0, NULL);
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_trailer, sizeof(hdr_trailer) - 1, 0, NULL);
+    /* Content-Type / Content-Encoding: the Markdown representation
+     * replaces the upstream HTML one.  Apply both through the shared
+     * representation helpers so stale header-list entries are deleted
+     * together with the dedicated fields (a surviving list entry would
+     * emit a second Content-Type or a phantom Content-Encoding). */
+    ngx_http_markdown_set_representation_content_type(r);
+    ngx_http_markdown_remove_content_encoding(r);
+
+    /* Content-Length / ETag: body-derived fields are unknowable for a
+     * HEAD response (no body was converted); remove rather than
+     * fabricate, per the representation contract. */
+    ngx_http_clear_content_length(r);
+    r->headers_out.content_length_n = -1;
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_content_length, sizeof(hdr_content_length) - 1, 0, NULL);
+    r->headers_out.etag = NULL;
+    ngx_http_markdown_invalidate_headers(r,
+        hdr_etag, sizeof(hdr_etag) - 1, 0, NULL);
+
+    /* Last-Modified: the weak validator must not reference the source
+     * HTML mtime (Decision G applies to HEAD representation headers).
+     * Mirror completeness: reset the numeric mirror, the typed pointer
+     * (the header filter synthesizes Last-Modified whenever
+     * last_modified_time != -1 AND last_modified == NULL is false), and
+     * invalidate ALL duplicate list entries — the 304 and stream-commit
+     * paths already maintain this exact invariant. */
+    r->headers_out.last_modified_time = (time_t) -1;
+    r->headers_out.last_modified = NULL;
+    ngx_http_markdown_invalidate_headers(r,
+        ngx_http_markdown_hdr_last_modified,
+        sizeof(ngx_http_markdown_hdr_last_modified) - 1, 0, NULL);
+
+    /* Accept-Ranges: byte ranges apply to the HTML representation;
+     * the Markdown representation does not support them. */
+    r->allow_ranges = 0;
+    r->headers_out.accept_ranges = NULL;
+    ngx_http_markdown_invalidate_headers(r,
+        ngx_http_markdown_hdr_accept_ranges,
+        sizeof(ngx_http_markdown_hdr_accept_ranges) - 1, 0, NULL);
+
+    /* Vary: Accept — the representation varies by Accept negotiation. */
+    rc = ngx_http_markdown_add_vary_accept(r);
+    if (rc != NGX_OK) {
+        ngx_http_markdown_header_snapshot_restore(r, &snapshot);
+        return rc;
+    }
+
+    /* This is the first non-fallible operation after all header preparation
+     * has succeeded.  HEAD has no converted body, so it must not forward
+     * upstream trailer entries either.  HTTP/2/3 can emit them without a
+     * Trailer declaration. */
+    ngx_http_markdown_clear_trailers(r);
 
     return NGX_OK;
 }

@@ -1,6 +1,6 @@
 # Definition of Done Template — 0.4.0 Release
 
-Every 0.4.0 sub-spec must satisfy this six-checkpoint DoD before declaring completion. The template is defined by the release gates spec (Requirements 5.1, 5.2, 5.3) and enforced during the Go/No-Go review.
+Every 0.4.0 sub-spec must satisfy this six-checkpoint DoD before declaring completion. The release gates spec (Requirements 5.1, 5.2, 5.3) defines the template, and the Go/No-Go review enforces it.
 
 ## Checkpoints
 
@@ -35,9 +35,9 @@ Each sub-spec records its evaluation as a Markdown table in its completion artif
 1. Copy the DoD Evaluation table above into your sub-spec's completion artifact.
 2. Evaluate each checkpoint against the verification method in the Checkpoints table.
 3. Replace `✅/❌` with the actual status. Use ✅ only when the verification method is fully satisfied.
-4. Replace the bracketed placeholder in the Evidence column with a concrete reference (CI run number, test file path, doc path, PR link, or review reference).
-5. If a checkpoint cannot be satisfied, record ❌ with a brief explanation in the Evidence column and escalate to the Go/No-Go review with a documented exception.
-6. The completed DoD evaluation is required before the sub-spec can be considered complete (Requirement 5.2). The evaluation is archived as part of the 0.4.0 release record (Requirement 5.3).
+4. Replace the bracketed placeholder in the Evidence column with a concrete reference. Use a CI run number, test file path, doc path, PR link, or review reference.
+5. If a checkpoint cannot pass, record ❌ with a brief explanation in the Evidence column. Escalate to the Go/No-Go review with a documented exception.
+6. The sub-spec is complete **only when all six checkpoints pass** (Requirement 5.2). A single ❌ means the sub-spec is not complete: the owner either fixes the gap and re-evaluates, or escalates the exception to the Go/No-Go review, which decides whether the release accepts the documented exception. The team archives the evaluation as part of the 0.4.0 release record (Requirement 5.3).
 
 ## Document Updates
 

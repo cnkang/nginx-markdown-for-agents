@@ -10,7 +10,7 @@ All 0.4.0 sub-specs must follow these conventions for any new operator-facing su
 |--------------------------|---------------------------|---------------------------|------------------------------------------------------------------------|
 | NGINX directives         | `markdown_`               | lowercase + underscores   | `^markdown_[a-z][a-z0-9_]*$`                                          |
 | Prometheus metrics       | `nginx_markdown_`         | snake_case                | `^nginx_markdown_([a-z][a-z0-9_]*_seconds_(bucket\|sum\|count)\|(?!.*_(bucket\|sum\|count)$)[a-z][a-z0-9_]*(_total\|_bytes\|_seconds\|_info)?)$`  |
-| Decision reason codes    | —                         | uppercase snake_case      | `^[A-Z][A-Z0-9_]*$`                                                   |
+| Decision reason codes    | —                         | lowercase snake_case      | `^[a-z][a-z0-9_]*$`                                                   |
 | Benchmark report fields  | —                         | lowercase kebab-case JSON | `^[a-z][a-z0-9-]*$`                                                   |
 | C macro constants        | `NGX_HTTP_MARKDOWN_`      | uppercase + underscores   | `^NGX_HTTP_MARKDOWN_[A-Z][A-Z0-9_]*$`                                 |
 
@@ -62,15 +62,27 @@ New directives introduced in 0.4.0 must follow the same `markdown_` prefix and l
 
 ### Defined metrics
 
+The authoritative metric families are the twelve-family v1 freeze defined in
+`schemas/metrics-v1.registry.json` (0.9.2). Legacy families such as
+`nginx_markdown_conversions_total`, `nginx_markdown_failures_total`, and
+`nginx_markdown_failopen_total` no longer exist. The v1 renderer partitions
+conversion outcomes into `nginx_markdown_requests_total{outcome=...}` and
+`nginx_markdown_conversion_deliveries_total`.
+
 | Metric name                                       | Type      | Labels          |
 |---------------------------------------------------|-----------|-----------------|
-| `nginx_markdown_conversions_total`                | counter   | —               |
-| `nginx_markdown_conversions_bypassed_total`       | counter   | —               |
-| `nginx_markdown_conversion_latency_bucket_total` | counter   | `le`            |
+| `nginx_markdown_requests_total`                   | counter   | `outcome`,`reason`,`stage` |
+| `nginx_markdown_conversion_attempts_total`        | counter   | `engine`        |
+| `nginx_markdown_conversion_deliveries_total`      | counter   | `engine`        |
+| `nginx_markdown_conversion_duration_seconds`      | histogram | `engine`        |
 | `nginx_markdown_input_bytes_total`                | counter   | —               |
 | `nginx_markdown_output_bytes_total`               | counter   | —               |
-| `nginx_markdown_failures_total`                   | counter   | `reason`        |
-| `nginx_markdown_decompressions_total`             | counter   | `format`        |
+| `nginx_markdown_inflight_requests`                | gauge     | —               |
+| `nginx_markdown_streaming_peak_memory_bytes`      | gauge     | —               |
+| `nginx_markdown_streaming_events_total`            | counter   | `reason`,`transition` |
+| `nginx_markdown_decompression_events_total`       | counter   | `encoding`,`outcome`,`reason` |
+| `nginx_markdown_dynconf_reloads_total`            | counter   | `outcome`,`reason` |
+| `nginx_markdown_build_info`                       | gauge     | `features`,`nginx_version`,`version` |
 
 ### Label cardinality rules
 
@@ -82,29 +94,46 @@ Labels must be low-cardinality.
 | `stage`        |                                                         |
 | `format`       |                                                         |
 | `le`           |                                                         |
+| `engine`       |                                                         |
+| `encoding`     |                                                         |
+| `outcome`      |                                                         |
+| `transition`   |                                                         |
+| `features`     |                                                         |
+| `nginx_version`|                                                         |
+| `version`      |                                                         |
+
+The v1 registry (`schemas/metrics-v1.registry.json`) is the authoritative
+label contract. This table mirrors it for operator reference.
 
 ---
 
 ## 3. Decision Reason Codes
 
-Reason codes are emitted in both decision-log `reason=` fields and Prometheus
-metric label values, and must be consistent across both surfaces. Two tiers:
+The module emits reason codes in both decision-log `reason=` fields and
+Prometheus metric label values. Values in these two operator-visible tiers must
+match exactly and use lowercase `snake_case`. Streaming lifecycle constants
+are internal transition names, not a second operator-visible reason taxonomy:
 
 - **Decision-chain reason codes** — lowercase snake_case. Returned by
   `ngx_http_markdown_get_reason_code_str()` (resolved from the Rust
   `ReasonCode` registry). Examples: `not_eligible`, `skipped_accept`,
   `skipped_conditional`, `disabled`, `converted`, `failed_open`, `failed_closed`,
   `bypass_no_transform`.
-- **Streaming engine reason codes** — uppercase snake_case. Examples:
+- **Streaming engine internal transition names** — uppercase snake_case. Examples:
   `ENGINE_STREAMING`, `STREAMING_CONVERT`, `STREAMING_FALLBACK_PREBUFFER`,
   `STREAMING_FAIL_POSTCOMMIT`, `STREAMING_SKIP_UNSUPPORTED`,
   `STREAMING_BUDGET_EXCEEDED`, `STREAMING_PRECOMMIT_FAILOPEN`,
   `STREAMING_PRECOMMIT_REJECT`, `STREAMING_SHADOW`.
 
-The authoritative reason-code list is
-`components/rust-converter/src/decision/reason_code.rs` (decision-chain) plus
-the streaming accessors in
-`components/nginx-module/src/ngx_http_markdown_reason.c`.
+The generator creates the authoritative operator-visible reason-code list from
+`components/rust-converter/reason_registry.toml`. The Rust `ReasonCode` registry
+is authoritative for **both** the decision-log `reason=` codes and the
+Prometheus `reason` label values. They must match exactly and use lowercase
+`snake_case`. Uppercase streaming lifecycle transition names cannot appear as
+`reason` values. Keep them internal or expose them only through a separate
+transition metric (see the metrics registry).
+Streaming accessors may retain internal uppercase transition labels only where
+the metrics registry explicitly defines them.
 
 ### Decision-chain reason code table (lowercase)
 

@@ -1,6 +1,6 @@
 ---
 domain: ci-gating
-rules: [13, 54]
+rules: [13, 54, 66]
 paths:
   - ".github/workflows/**"
   - "Makefile"
@@ -20,9 +20,24 @@ Required:
 - Update workflow path filters whenever checks depend on new file paths.
 - Baseline/bootstrap modes must not upload/compare artifacts incorrectly.
 - Remove redundant CI steps that can desynchronize behavior or waste runtime.
+- **Workflow env-var liveness (2026-08-21, `609fff74`)**: every workflow
+  run block must define each `$VAR` it references in scope — the same
+  step's `env:`, the job's `env:`, the workflow's `env:`, an earlier
+  `GITHUB_ENV` export in the same job, or a shell assignment inside the
+  run block itself.  Shell assignments and `GITHUB_ENV` exports must
+  appear BEFORE the variable's first reference within the same run block.
+  The detector rejects a use-before-assignment case such as reading
+  `MATRIX_ARCH` above the line that assigns it.  A step-local `env:` entry is invisible
+  to later steps; `MATRIX_ARCH` was read as empty by the glibc tarball step and
+  always took the unsupported-architecture branch.  Empty collections
+  that drive matrix expansion must fail the prepare step explicitly
+  (`deb19efd`) rather than silently producing zero jobs.
+  Verification: `PYTHONPATH=. python3 tools/harness/detect_workflow_env_liveness.py`
+  — blocking harness gate, also wired as a pre-commit hook for workflow
+  changes.
 - **Supply chain hardening (GitHub Actions)**:
-  - All third-party GitHub Actions must be pinned to immutable commit SHA
-    references, not mutable version tags (`v4`, `v1`, etc.).  Include a
+  - All third-party GitHub Actions must pin to immutable commit SHA
+    references, not mutable version tags (`v4`, `v1`, and so on).  Include a
     version comment for human readability:
     ```yaml
     uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29  # v4.1.6
@@ -33,16 +48,17 @@ Required:
     not exempt — pin them to SHA as well.
   - Workflow changes must pass `actionlint` and the focused supplemental
     static security gate in `security-static.yml`. CodeQL remains the primary
-    C/C++ and Rust SAST workflow; supplemental Semgrep rules should cover
+    C/C++ and Rust SAST workflow. Supplemental Semgrep rules should cover
     workflow/script/release/config risks, not duplicate CodeQL language scans.
 - **Supply chain hardening (binary downloads)**:
-  - Downloaded binaries and source tarballs in CI workflows and Dockerfiles
-    must be verified against a known-good checksum (SHA256 minimum).
+  - CI workflows and Dockerfiles must verify downloaded binaries and source
+    tarballs against a known-good checksum (SHA256 minimum). The harness must
+    check that each download path contains this verification.
   - Maintain checksums in a version-controlled file (for example
     `packaging/checksums.sha256`) and reference it in download scripts.
   - Forbid the `curl URL | sudo tar` pattern.  Use download→verify→extract
     as separate steps.
-  - When a new version of an external dependency is adopted, update the
+  - When a new version of an external dependency arrives, update the
     checksum file in the same change set.
   - Artifact-producing builder images must use repository-reviewed
     multi-architecture manifest digests. Keep a readable tag before
@@ -52,26 +68,26 @@ Required:
     resolve the fetched object to a commit, compare exact equality, and only
     then execute repository build logic. A mutable ref may be a reachability
     hint, never the authorized identity.
-  - **Verified toolchain installers**: When a release workflow installs
-    Rust toolchain via `rustup`, it must use a verified installer script
-    (for example `tools/install-verified-rustup.sh`) that validates the
-    downloaded `rustup-init` checksum before execution.  The installer
-    must be invoked with an explicit `bash` invocation (not `sh`) to
-    ensure bash-only syntax is supported.  Release-gate validators must
-    verify the installer script exists and is referenced in the workflow.
+  - **Verified toolchain installers**: When a release workflow installs the
+    Rust toolchain via `rustup`, the workflow must use a verified installer
+    script (for example `packaging/scripts/install-verified-rustup.sh`) that
+    validates the downloaded `rustup-init` checksum before execution. Release
+    workflows must invoke the script with an explicit `bash` invocation (not
+    `sh`) to ensure bash-only syntax works. Release-gate validators must verify
+    that the installer script exists and appears in the workflow.
 - **Validator/gate regex synchronization**:
   - When refactoring C struct layout (flat fields → nested sub-structs,
     field renames), update all validator scripts and release-gate regex
     patterns that reference the old field paths in the same change set.
-  - `make release-gates-check` must catch regex/pattern drift; if it does
-    not, the gate validator itself has a bug.
+  - `make release-gates-check` must catch regex/pattern drift. If it does not,
+    the gate validator itself has a bug.
 - **Release/package chain invariants**:
   - Use exactly one canonical dynamic module filename across NGINX build
     outputs, nFPM config, Debian/RPM specs, load-module snippets, install
     docs, smoke tests, and install-layout gates.  If the addon output changes,
     update all of those surfaces and the validator in the same change set.
     Package-format-specific module directories must match the target
-    nginx.org package `--modules-path`; for example RPM packages must not
+    nginx.org package `--modules-path`, for example RPM packages must not
     install under a DEB-only module directory when nginx.org RPMs load modules
     from `/usr/lib64/nginx/modules`.
   - Every NGINX source version requested by release workflows or release
@@ -92,8 +108,8 @@ Required:
     compiler version.
   - Every workflow capable of producing release package artifacts must apply
     the same Rust release build invariants: `--locked`, intended feature set,
-    explicit target triple, and the matching target output directory.  If a
-    workflow is retained only as a compatibility path, mark it as non-canonical
+    explicit target triple, and the matching target output directory. If a
+    workflow stays only as a compatibility path, mark it as non-canonical
     and validate that status in the release gate.
   - Standalone package workflows must use the same package name and install
     layout as the canonical nFPM path.  If a workflow packages a prebuilt
@@ -103,7 +119,7 @@ Required:
     run the install-layout gate against its output.
   - Package dependency constraints must be satisfiable by the target distro
     package manager.  If the distro package appends a release suffix or epoch,
-    do not exact-match only the upstream NGINX source version; use a
+    Do not exact-match only the upstream NGINX source version. Use a
     distro-resolvable package EVR or a non-exact floor plus ABI smoke coverage.
     Prebuilt dynamic-module packages must constrain the supported NGINX minor
     ABI range with both a floor and an exclusive next-minor ceiling unless a
@@ -119,54 +135,54 @@ Required:
     every interpreter named by those scripts' shebangs before the first
     execution, or invoke only scripts valid for the base image's guaranteed
     shell.  Minimal base images such as Alpine must not assume
-    `/usr/bin/env bash` exists unless `bash` is installed in the same image
-    stage before the script runs.
+    `/usr/bin/env bash` exists unless the image build installs `bash` in the
+    same image stage before the script runs.
   - Package smoke tests for architecture-specific artifacts must run on a
     matching runner architecture or an explicit emulation path.
   - Container-job package smoke images must contain prerequisites needed before
     the first workflow step, including `tar` or `git` for `actions/checkout`.
-    Minimal images that lack checkout prerequisites must be exercised through a
-    host-checkout plus `docker run` smoke pattern instead of as the job
-    container.
+    When a minimal image lacks checkout prerequisites, the release job must use
+    a host-checkout plus `docker run` smoke pattern instead of using the image
+    as the job container.
   - Tag release gates in GitHub Actions must run only repository-owned
     validators and artifacts available in a clean CI checkout.  Legacy or
     local-spec validators that require user-local Kiro/spec directories must not
-    run in tag release CI unless those inputs are checked into the repository or
+    run in tag release CI unless the repository checks in those inputs or
     explicitly downloaded first.
   - Custom gates that reimplement platform gating semantics must match the
     platform's documented success criteria exactly.  A tag gate evaluating
     GitHub required status checks must accept every conclusion GitHub counts
     as satisfying (`success`, `skipped`, `neutral`) and keep rejecting all
-    others; required contexts may come from both the Checks API and the
-    Commit Status API, so both sources must be evaluated before declaring a
+    others. Required contexts may come from both the Checks API and the Commit
+    Status API, so the gate must evaluate both sources before declaring a
     context missing.
   - When consuming structured API requirements, preserve every constraint
     field, not just the primary identifier.  A ruleset required check carries
     an optional `integration_id` pinning the GitHub App that must produce the
-    result; dropping it makes the custom gate strictly more permissive than
+    result. If the gate drops it, the custom gate becomes more permissive than
     the ruleset it enforces.
-  - A newly added gate or validator test file must be wired into a blocking
-    CI job and into the workflow's change-detection path filter in the same
-    changeset.  A test that exists in the repository but never runs in CI is
+  - The change must wire every newly added gate or validator test file into a
+    blocking CI job and the workflow's change-detection path filter in the same
+    changeset. A test that exists in the repository but never runs in CI is
     not a gate; the critical tag logic must not execute for the first time
     at tag creation.
   - Release evidence that aggregates measurements from multiple runs must
     validate every component's provenance environment against the declared
     comparison environment.  Top-level environment claims (platform, load
-    generator, runtime version) do not imply component-level consistency; a
-    component measured in a diverging environment must be split into
-    environment-truthful evidence or the gate must fail closed instead of
-    comparing across environments.
+    generator, runtime version) do not imply component-level consistency. The
+    release process must split a component measured in a diverging environment
+    into environment-truthful evidence, or the gate must fail closed instead
+    of comparing across environments.
   - When a newer release gate reuses prior-version validators, any assertion
-    about the active project version, package version, or release line must be
-    parameterized by the caller.  A prior-version validator may keep its
+    about the active project version, package version, or release line must
+    take the version from the caller.  A prior-version validator may keep its
     standalone default, but it must not hard-fail a newer release gate solely
     because `Cargo.toml`, package metadata, or chart metadata has advanced to
     the newer release version.
   - Workflows, release gates, and documentation renderers that consume
     `tools/release-matrix.json` must use the repository's current checked-in
     schema.  If the matrix schema changes, update all active consumers in the
-    same change set; a release workflow must not keep reading stale aliases
+    same change set. A release workflow must not keep reading stale aliases
     such as `matrix`, `nginx`, `os_type`, or `support_tier: full` after the
     source of truth has moved to `entries`, `nginx_version`, `libc`, and
     `support_tier: supported`.
@@ -180,7 +196,8 @@ Required:
   - Package maintainer scripts must accept the lifecycle arguments passed by
     each target package manager.  Advisory post-install scripts must recognize
     RPM numeric `%post` arguments and must not make an otherwise successful
-    install fail only because an unfamiliar lifecycle argument was observed.
+    install fail only because the script received an unfamiliar lifecycle
+    argument.
   - Public install docs must match the currently published package channel.
     Bare APT/YUM repository install commands are forbidden until the repository
     URL, signing key, and release workflow are real and validated.  If only
@@ -191,13 +208,13 @@ Required:
     writable runtime/temp mounts in the rendered pod spec.
   - Helm charts that support optional dynamic modules must keep default renders
     compatible with stock images, must fail clearly when module-specific
-    directive families are enabled without an explicit in-image module path
+    operators enable directive families without an explicit in-image module path
     (including metrics directives), and must not create implicit `hostPath`
     mounts from module path values.  Custom volumes must be explicit opt-in
     values such as `extraVolumes` and `extraVolumeMounts`.
   - Local K8s smoke tests must use an explicit kind kube-context for every
     Helm/kubectl operation.  If a test deploys a stock NGINX image without the
-    module, it must disable module-specific directives; if it reuses a
+    module, it must disable module-specific directives. If it reuses a
     pre-existing cluster, it must not delete that cluster during cleanup.
     Runtime assertions must count structured pod fields with one item per line,
     not by grepping collapsed one-line jsonpath output.
@@ -215,10 +232,10 @@ Required:
       commit before hashing or publishing it. A URL plus a computed checksum
       does not by itself prove which commit supplied the downloaded bytes.
     - In the Homebrew formula, the `version` stanza must appear before the
-      `sha256` stanza.  `brew audit --strict` requires this ordering; a
-      formula with `sha256` before `version` fails the audit even if both
+      `sha256` stanza. `brew audit --strict` requires this ordering. A formula
+      with `sha256` before `version` fails the audit even if both
       values are correct.
-    - The formula's NGINX dependency version must be derived from package
+    - The formula's NGINX dependency version must derive from package
       metadata (for example `nginx --version` output or the dependency
       formula's `version`), not hardcoded to a specific upstream version.
       Hardcoded versions drift when the NGINX formula updates.
@@ -234,7 +251,7 @@ Required:
       by the formula's dependency, not against a separately-specified NGINX
       source tree.  Building against a different version produces a module
       binary with ABI mismatch.
-    - When `cbindgen` is required for a source-build formula, the formula
+    - When a source-build formula requires `cbindgen`, the formula
       must install `cbindgen` as a build dependency before the build step.
       A missing `cbindgen` causes the Rust converter to fail generating C
       headers, breaking the source build.
@@ -255,7 +272,24 @@ Verification:
 Historical issues: `f303ec3f`, `ee7c9d22`.
 
 Required:
-- When validating filenames from a release manifest against an artifact directory, resolve paths and verify containment before accessing. Use `Path.relative_to()` or `startswith` on resolved paths to reject filenames that escape the artifact directory.
+- When validating filenames from a release manifest against an artifact directory, resolve paths and verify containment before accessing. Use `Path.relative_to()` (not `startswith`) on resolved paths to reject filenames that escape the artifact directory.
 
 Verification:
 - `grep -rn 'relative_to\|startswith.*resolve' packaging/scripts/validate-release-manifest.py` — verify path traversal guards exist.
+
+---
+
+### Rule 66 — local GCC parity gate for C test/module changes
+
+- C module and C unit-test changes must pass the unit suite under real GCC
+  before push.  Local `gcc` on macOS is an Apple clang alias, which masks two
+  CI-only failure classes: GCC `-Werror` hard errors on
+  incompatible-pointer-types (clang only warns) and uninitialized-stack
+  crashes that reproduce only at GCC `-O0` (clang and `-O2` pass by chance).
+- The gate runs the same unit suite in an Ubuntu container with GCC:
+  `make test-c-unit-gcc`.  Clean container artifacts afterwards
+  (`make clean` in `components/nginx-module/tests`), because Linux ELF
+  binaries cannot execute on macOS.
+- This gate is additive to the local clang run (`make test-nginx-unit`) and
+  does not replace it; both must pass before push when the change touches C.
+- Verification: `make test-c-unit-gcc` exits 0 (requires Docker).

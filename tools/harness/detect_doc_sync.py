@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-detect_doc_sync.py — Documentation Synchronization Detection (Rule 9, 10)
+detect_doc_sync.py — Documentation Synchronization Detection (Rule 9, 49)
 
 Rule 9 (docs-tooling): Documentation must reflect the actual implementation.
-Rule 10 (docs-tooling): API documentation must be kept in sync with the API.
+Rule 49 (docs-tooling): THIRD-PARTY-NOTICES must stay in sync with resolved
+  dependency versions.
 
 This detector blocks when it finds documentation drift. It is intentionally
 conservative to avoid false positives.
@@ -37,19 +38,23 @@ from lib.path_validation import validate_read_path
 DIRECTIVES_PATH = Path(
     "components/nginx-module/src/ngx_http_markdown_config_directives_impl.h"
 )
+DIRECTIVE_NAMES_PATH = Path(
+    "components/nginx-module/src/ngx_http_markdown_directive_names.h"
+)
 HANDLERS_PATH = Path(
     "components/nginx-module/src/ngx_http_markdown_config_handlers_impl.h"
 )
 CHART_TEMPLATE_PATH = Path("charts/nginx-markdown/templates/configmap.yaml")
 CHART_VALUES_PATH = Path("charts/nginx-markdown/values.yaml")
 CONFIGURATION_GUIDE_PATH = Path("docs/guides/CONFIGURATION.md")
+MIGRATION_GUIDE_PATH = Path("docs/guides/MIGRATION-0.9.2.md")
 PUBLIC_INVENTORY_PATH = Path("docs/architecture/PUBLIC_SURFACE_INVENTORY.md")
 STREAMING_TROUBLESHOOTING_PATH = Path(
     "docs/guides/streaming-troubleshooting.md"
 )
 PROFILE_INVENTORY_PATH = Path("docs/architecture/profile-inventory.md")
 PROMETHEUS_RENDERER_PATH = Path(
-    "components/nginx-module/src/ngx_http_markdown_prometheus_impl.h"
+    "components/nginx-module/src/ngx_http_markdown_metrics_v1_renderer.h"
 )
 PROMETHEUS_GUIDE_PATH = Path("docs/guides/prometheus-metrics.md")
 PRODUCTION_SYMBOL_SURFACES = (
@@ -121,7 +126,7 @@ def check_readme_mentions_key_features(project_root: Path) -> List[str]:
         key_directives = [
             'markdown_filter',
             'markdown_limits',
-            'markdown_profile',
+            'markdown_streaming',
         ]
         warnings.extend(
             f"{readme_name}: Key directive '{directive}' not mentioned"
@@ -178,6 +183,17 @@ def _read_required(
         return None
 
 
+def _read_optional(project_root: Path, relative_path: Path) -> str | None:
+    """Read a worktree file, returning None when absent or unreadable.
+
+    Used for drift-guard inputs whose absence is not a contract violation."""
+    path = project_root / relative_path
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
 def _extract_directive_entry(content: str, directive: str) -> str | None:
     """Extract one ngx_command_t initializer from the directive table."""
     pattern = re.compile(
@@ -189,34 +205,59 @@ def _extract_directive_entry(content: str, directive: str) -> str | None:
     return match[1] if match is not None else None
 
 
+def _expand_directive_macros(content: str) -> tuple[str, list[str]]:
+    """Expand canonical directive-name macros before table inspection.
+
+    Returns ``(expanded, errors)``: a directive-name macro used in a
+    table entry but never #defined is reported as an error instead of
+    being silently treated as its own literal directive string.
+    """
+    definitions = dict(
+        re.findall(
+            r"^#define\s+(NGX_HTTP_MARKDOWN_DIRECTIVE_[A-Z0-9_]+)"
+            r"\s+(?:\\\s*)?\"([^\"]+)\"",
+            content,
+            flags=re.MULTILINE,
+        )
+    )
+    errors: list[str] = []
+
+    def _substitute(match: re.Match[str]) -> str:
+        macro = match[1]
+        defined = definitions.get(macro)
+        if defined is None:
+            errors.append(
+                f"directive-name macro {macro!r} used in ngx_string() "
+                "is not #defined"
+            )
+        return f'ngx_string("{defined if defined is not None else macro}")'
+
+    return (
+        re.sub(
+            r"ngx_string\((NGX_HTTP_MARKDOWN_DIRECTIVE_[A-Z0-9_]+)\)",
+            _substitute,
+            content,
+        ),
+        errors,
+    )
+
+
 def _check_directive_table(content: str) -> List[str]:
-    """Validate active and reject-only streaming directive registrations."""
+    """Validate active streaming directive registration."""
     errors: List[str] = []
     active = _extract_directive_entry(content, "markdown_streaming")
-    removed = _extract_directive_entry(content, "markdown_streaming_engine")
     if active is None or "ngx_http_markdown_streaming," not in active:
         errors.append(
             f"{DIRECTIVES_PATH}: markdown_streaming must use the active "
             "ngx_http_markdown_streaming handler"
         )
-    if removed is None:
+    # markdown_streaming_engine reject-only stub has been removed in 0.9.2;
+    # NGINX's built-in "unknown directive" error is sufficient.
+    removed = _extract_directive_entry(content, "markdown_streaming_engine")
+    if removed is not None:
         errors.append(
-            f"{DIRECTIVES_PATH}: markdown_streaming_engine must remain registered "
-            "as a reject-only migration stub"
-        )
-        return errors
-    if "ngx_http_markdown_reject_streaming_engine," not in removed:
-        errors.append(
-            f"{DIRECTIVES_PATH}: markdown_streaming_engine must bind only to "
-            "ngx_http_markdown_reject_streaming_engine"
-        )
-    forbidden_slots = ("ngx_conf_set_enum_slot", "offsetof(")
-    if any(token in removed for token in forbidden_slots) or not re.search(
-        r"\n[ \t]*0,[ \t]*\n[ \t]*NULL[ \t]*$", removed
-    ):
-        errors.append(
-            f"{DIRECTIVES_PATH}: reject-only markdown_streaming_engine must not "
-            "bind an enum table or configuration slot"
+            f"{DIRECTIVES_PATH}: markdown_streaming_engine reject-only stub "
+            "must be removed (0.9.2 surface reset)"
         )
     return errors
 
@@ -339,20 +380,20 @@ def _check_chart_contract(template: str, values: str) -> List[str]:
 
 
 def _check_migration_table(content: str) -> List[str]:
-    """Require the exact legacy-to-policy migration mappings in active docs."""
+    """Require the frozen explicit replacement surface in active docs."""
     normalized = content.replace("`", "")
     errors: List[str] = []
-    for legacy, replacement in (("off", "off"), ("auto", "auto"), ("on", "force")):
-        mapping_present = any(
-            f"markdown_streaming_engine {legacy};" in line
-            and f"markdown_streaming {replacement};" in line
-            for line in normalized.splitlines()
-        )
-        if not mapping_present:
-            errors.append(
-                f"{CONFIGURATION_GUIDE_PATH}: missing exact migration mapping "
-                f"markdown_streaming_engine {legacy} -> markdown_streaming {replacement}"
-            )
+    required_fragments = (
+        "markdown_streaming off | auto | force",
+        "markdown_limits conversion_memory=",
+        "markdown_limits streaming_buffer=",
+    )
+    errors.extend(
+        f"{CONFIGURATION_GUIDE_PATH}: missing frozen explicit contract fragment "
+        f"{fragment}"
+        for fragment in required_fragments
+        if fragment not in normalized
+    )
     return errors
 
 
@@ -399,6 +440,70 @@ def _check_public_inventory(directives: str, inventory: str) -> List[str]:
     return errors
 
 
+def _migration_removed_table_rows(migration: str) -> set[tuple[str, str]]:
+    """Parse the \"| Removed Directive | Replacement |\" markdown table into
+    (directive, replacement) rows.  The header line anchors the section; a
+    non-table line ends it.  The header is matched case-insensitively so
+    reworded or capitalized headings still anchor the table."""
+    rows: set[tuple[str, str]] = set()
+    in_table = False
+    for line in migration.splitlines():
+        stripped = line.strip()
+        if stripped.lower().startswith("| removed directive"):
+            in_table = True
+            continue
+        if not in_table:
+            continue
+        if stripped.startswith(("|---", "|--")):
+            continue
+        if not stripped.startswith("|"):
+            in_table = False
+            continue
+        cells = [c.strip() for c in stripped.strip("|").split("|")]
+        if len(cells) >= 2:
+            directive = cells[0].strip("`").strip()
+            replacement = cells[1].strip()
+            rows.add((directive, replacement))
+    return rows
+
+
+def _check_migration_removed_table(directives: str, migration: str) -> List[str]:
+    """Require every reject-only directive to appear as a ROW in the 0.9.2
+    migration removed-directive table with a non-empty replacement (the reject-only test list and the migration replacement guide must not drift).  A prose mention elsewhere in the document does NOT satisfy
+    the check — the table row is what operators follow."""
+    errors: List[str] = []
+    _, rejected = _directive_registry(directives)
+    table_rows = _migration_removed_table_rows(migration)
+    for name in rejected:
+        row = next((r for r in table_rows if r[0] == name), None)
+        if row is None:
+            errors.append(
+                f"MIGRATION-0.9.2.md: removed directive {name} is missing "
+                "from the migration Removed Directive table"
+            )
+        elif not row[1]:
+            errors.append(
+                f"MIGRATION-0.9.2.md: removed directive {name} has an empty "
+                "replacement cell in the migration table"
+            )
+    return errors
+
+
+def _check_migration_removed_table_contract(
+    project_root: Path, directives: str | None
+) -> List[str]:
+    """Read the migration guide and run the removed-table consistency check.
+
+    Extracted so check_public_config_contract stays under the complexity
+    threshold.  The guide is read softly: contexts without the migration
+    document (test fixtures, older checkouts) skip the check instead of
+    failing, since it is a drift guard, not a hard contract surface."""
+    migration = _read_optional(project_root, MIGRATION_GUIDE_PATH)
+    if directives is None or migration is None:
+        return []
+    return _check_migration_removed_table(directives, migration)
+
+
 def _check_otel_reject_docs(directives: str, guide: str) -> List[str]:
     """Require every reject-only OTel control to be documented as rejected."""
     errors: List[str] = []
@@ -431,7 +536,6 @@ def _check_observability_examples(troubleshooting: str) -> List[str]:
         '"ttfb_last_seconds"': "diagnostics ttfb_last_seconds field",
         '"peak_memory_last_bytes"': "diagnostics peak_memory_last_bytes field",
         "nginx_markdown_streaming_choice_total": "retired streaming metric name",
-        "nginx_markdown_conversion_duration_seconds": "retired latency metric name",
     }
     errors: List[str] = [
         f"{STREAMING_TROUBLESHOOTING_PATH}: forbidden {label} is present"
@@ -461,20 +565,77 @@ def _check_active_directive_inventory(
     return errors
 
 
+def _normalize_histogram_suffix(name: str, raw_families: set[str]) -> str:
+    """Map one family name to its canonical base name.
+
+    Histogram suffix families (`_bucket`, `_sum`, `_count`) normalize to
+    the shared base name, but only when the `_bucket` family is actually
+    present (a plain metric whose name ends in `_sum`/`_count` is kept
+    verbatim unless the matching bucket family exists).
+    """
+    base = name
+    for suffix in ("_bucket", "_sum", "_count"):
+        if (
+            name.endswith(suffix)
+            and len(name) > len(suffix)
+            and (
+                suffix == "_bucket"
+                or name[: -len(suffix)] + "_bucket" in raw_families
+            )
+        ):
+            base = name[: -len(suffix)]
+            break
+    return base
+
+
 def _check_prometheus_catalog(renderer: str, guide: str) -> List[str]:
     """Require every production renderer family to appear in the guide."""
-    families = sorted(set(re.findall(r"nginx_markdown_[a-z0-9_]+", renderer)))
+    raw_families = set(re.findall(r"nginx_markdown_[a-z0-9_]+\b", renderer))
+    families = {_normalize_histogram_suffix(n, raw_families) for n in raw_families}
     return [
         f"{PROMETHEUS_GUIDE_PATH}: production metric family {name} is missing"
-        for name in families
+        for name in sorted(families)
         if f"`{name}`" not in guide
     ]
 
 
-def check_public_config_contract(project_root: Path) -> List[str]:
-    """Validate the frozen v0.9.1 operator-facing configuration contract."""
-    errors: List[str] = []
+def _check_retired_metrics(project_root: Path) -> List[str]:
+    """Reject retired metrics outside documented migration references."""
+    errors = _scan_for_pattern(
+        project_root,
+        (Path("docs/guides"), Path("docs/features"), Path("docs/architecture")),
+        re.compile(
+            r"nginx_markdown_streaming_choice_total|"
+            r"nginx_markdown_failures_total\{reason=\\?\""
+            r"(?:memory_budget_exceeded|ffi_panic)\\?\"\}"
+        ),
+        "retired production metric name or failure label",
+    )
+    migration_pattern = re.compile(r"MIGRATION-\d")
+    return [
+        error
+        for error in errors
+        if not migration_pattern.search(Path(error.split(":")[0]).name)
+    ]
+
+
+def _read_directive_source(project_root: Path, errors: List[str]) -> str | None:
+    """Read the command table and expand its shared name inventory."""
     directives = _read_required(project_root, DIRECTIVES_PATH, errors)
+    directive_names = _read_required(project_root, DIRECTIVE_NAMES_PATH, errors)
+    if directives is None or directive_names is None:
+        return None
+    expanded, macro_errors = _expand_directive_macros(
+        f"{directives}\n{directive_names}"
+    )
+    errors.extend(macro_errors)
+    return expanded
+
+
+def check_public_config_contract(project_root: Path) -> List[str]:
+    """Validate the frozen v0.9.2 operator-facing configuration contract."""
+    errors: List[str] = []
+    directives = _read_directive_source(project_root, errors)
     handlers = _read_required(project_root, HANDLERS_PATH, errors)
     chart_template = _read_required(project_root, CHART_TEMPLATE_PATH, errors)
     chart_values = _read_required(project_root, CHART_VALUES_PATH, errors)
@@ -499,6 +660,7 @@ def check_public_config_contract(project_root: Path) -> List[str]:
         errors.extend(_check_public_inventory(directives, inventory))
     if directives is not None and guide is not None:
         errors.extend(_check_otel_reject_docs(directives, guide))
+    errors.extend(_check_migration_removed_table_contract(project_root, directives))
     if troubleshooting is not None:
         errors.extend(_check_observability_examples(troubleshooting))
     if directives is not None and profile_inventory is not None:
@@ -522,19 +684,7 @@ def check_public_config_contract(project_root: Path) -> List[str]:
             "markdown_streaming_engine directive in an active config surface",
         )
     )
-    errors.extend(
-        _scan_for_pattern(
-            project_root,
-            (Path("docs/guides"), Path("docs/features"), Path("docs/architecture")),
-            re.compile(
-                r"nginx_markdown_streaming_choice_total|"
-                r"nginx_markdown_conversion_duration_seconds|"
-                r"nginx_markdown_failures_total\{reason=\\?\""
-                r"(?:memory_budget_exceeded|ffi_panic)\\?\"\}"
-            ),
-            "retired production metric name or failure label",
-        )
-    )
+    errors.extend(_check_retired_metrics(project_root))
     return errors
 
 

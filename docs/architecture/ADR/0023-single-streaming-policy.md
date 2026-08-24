@@ -30,8 +30,12 @@ selector:
 - `force` selects streaming for every eligible response after hard request,
   content-type, and cache-validation gates.
 
-`markdown_streaming_engine` remains only as a reject-only parser entry so
-`nginx -t` reports an exact migration:
+The 0.9.1 release made `markdown_streaming_engine` reject-only, so `nginx -t`
+reported an exact migration hint. The directive accepted `off`, `auto`, and
+`on` through 0.9.0. The 0.9.2 release removed the parser entry: the directive
+now fails `nginx -t` with the standard `unknown directive` error. It is not
+part of the 1.0 configuration surface. The migration table below documents
+the 0.9.1-era mapping:
 
 | Removed value | Replacement |
 |---------------|-------------|
@@ -39,11 +43,11 @@ selector:
 | `auto` | `markdown_streaming auto` |
 | `on` | `markdown_streaming force` |
 
-There is no compatibility alias. The redundant C, Rust decision, profile,
-dynconf, and FFI fields are removed in the same v0.9.1 baseline reset.
+There is no compatibility alias. The same v0.9.1 baseline reset removes the
+redundant C, Rust decision, profile, dynconf, and FFI fields.
 
-`markdown_flavor` supports only `commonmark` and `gfm`. The non-semantic `mdx`
-and `org-mode` values are rejected with an actionable message.
+`markdown_flavor` supports only `commonmark` and `gfm`. The module rejects the
+non-semantic `mdx` and `org-mode` values with an actionable message.
 
 ## Consequences
 
@@ -53,8 +57,8 @@ reload. Helm values move from `markdown.streaming.engine` to
 policy and one inheritance chain.
 
 Metrics such as `nginx_markdown_streaming_engine_choice_total` retain their
-names because they report the processing engine actually selected at runtime;
-they are not configuration selectors.
+names because they report the processing engine actually selected at runtime.
+They are not configuration selectors.
 
 Historical ADRs 0007 and 0013 remain accurate records of their release-time
 decisions. This ADR supersedes only their active directive recommendation.
@@ -87,4 +91,6 @@ Codex
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Hermes | Reconcile markdown_streaming_engine release history: accepted through 0.9.0, reject-only in 0.9.1, parser entry removed in 0.9.2 |
+| 0.9.2 | 2026-08-08 | Kang | Noted that 0.9.2 deleted the markdown_streaming_engine reject-only stub |
 | 0.9.1 | 2026-07-14 | Codex | Established one public streaming policy and removed non-semantic flavor selectors before v1.0 |

@@ -56,7 +56,7 @@ def _scan(files: dict[str, str], tmp_path: Path) -> tuple[list[Finding], list[Sc
 
 
 # ---------------------------------------------------------------------------
-# P1-7: nginx comment masking before brace parsing
+# nginx comment masking before brace parsing
 # ---------------------------------------------------------------------------
 
 class TestCommentMasking:
@@ -127,7 +127,7 @@ class TestCommentMasking:
 
 
 # ---------------------------------------------------------------------------
-# P1-8: parent location isolation from nested location directives
+# parent location isolation from nested location directives
 # ---------------------------------------------------------------------------
 
 class TestNestedLocationIsolation:
@@ -175,7 +175,7 @@ class TestNestedLocationIsolation:
 
 
 # ---------------------------------------------------------------------------
-# P1-9: fail-closed scan errors
+# fail-closed scan errors
 # ---------------------------------------------------------------------------
 
 class TestFailClosed:

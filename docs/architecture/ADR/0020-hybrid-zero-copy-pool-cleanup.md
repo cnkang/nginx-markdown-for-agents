@@ -2,11 +2,16 @@
 
 ## Status
 
-Accepted
+Superseded
+
+**Superseded by 0.9.2:** the 0.9.2 change removed the
+`markdown_streaming_zero_copy` directive and the entire zero-copy output
+path. The pool-copied path now delivers all converted output. This ADR
+records the historical 0.9.1 design only.
 
 ## Context
 
-0.9.1 introduces a zero-copy output path where `ngx_buf_t` references Rust-owned memory directly without intermediate pool-copy. The ownership lifecycle (Rust alloc → `as_mut_ptr` + `mem::forget` → buffer factory → `ngx_http_output_filter` → pool cleanup) must be safe across `NGX_AGAIN` backpressure, fail-open, and request pool destruction.
+0.9.1 introduces a zero-copy output path where `ngx_buf_t` references Rust-owned memory directly without intermediate pool-copy. The ownership lifecycle (Rust alloc → `as_mut_ptr` + `mem::forget` → buffer factory → `ngx_http_output_filter` → pool cleanup) must stay safe. This holds across `NGX_AGAIN` backpressure, fail-open, and request pool destruction. The lifecycle spans the full request path. Safety must hold at every transition.
 
 ## Decision
 
@@ -30,7 +35,7 @@ The feature is **Default OFF** (`markdown_streaming_zero_copy off`) — opt-in v
 - Reliance on pool cleanup as the primary safety net for Rust buffer lifetime increases complexity of the memory ownership state machine.
 
 ## Alternatives Considered
-- **Pure Rust-managed buffers**: Rejected because NGINX's output filter chain expects buffer ownership to be tied to the request pool for fail-safe cleanup.
+- **Pure Rust-managed buffers**: Rejected because NGINX's output filter chain expects buffer ownership to tie to the request pool for fail-safe cleanup.
 - **Slab allocator**: Considered but rejected for 0.9.1 to avoid introducing new global state and synchronization overhead.
 
 ## References

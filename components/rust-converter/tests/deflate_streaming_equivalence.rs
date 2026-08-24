@@ -2,21 +2,21 @@
 //!
 //! **Validates: Requirements 4.8, 4.9**
 //!
-//! Property 6: Raw Deflate Streaming Matches Full-Buffer Output
+//! Property 6: Zlib-Wrapped Deflate Streaming Matches Full-Buffer Output
 //!
-//! This property remains specific to raw deflate payloads; gzip member
+//! This property remains specific to zlib-wrapped deflate payloads; gzip member
 //! lifecycle and wrapper handling have dedicated production-path coverage.
-//! It verifies that decompressing raw deflate data via
+//! It verifies that decompressing zlib-wrapped deflate data via
 //! the full-buffer path (`decompress_bounded` with `Format::Deflate`) produces
 //! byte-identical output to incremental chunk-by-chunk decompression (the
 //! streaming decompression approach using `flate2::Decompress`).
 //!
 //! This confirms the equivalence guarantee required by the streaming
-//! decompression routing design: when raw deflate data is processed
+//! decompression routing design: when zlib-wrapped deflate data is processed
 //! incrementally (as it would be in the streaming path), the output matches
 //! the full-buffer decompression result exactly.
 
-use flate2::write::DeflateEncoder;
+use flate2::write::ZlibEncoder;
 use flate2::{Compression, Decompress, FlushDecompress, Status};
 use nginx_markdown_converter::decompress::{Format, decompress_bounded};
 use proptest::prelude::*;
@@ -26,14 +26,14 @@ use std::io::Write;
 // Helpers
 // ============================================================================
 
-/// Compress data using raw deflate (no gzip/zlib wrapper).
+/// Compress data using zlib-wrapped deflate.
 fn deflate_compress(data: &[u8]) -> Vec<u8> {
-    let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
     encoder.write_all(data).expect("deflate encode");
     encoder.finish().expect("deflate finish")
 }
 
-/// Decompress raw deflate data incrementally in chunks of `chunk_size`.
+/// Decompress zlib-wrapped deflate data incrementally in chunks of `chunk_size`.
 ///
 /// This simulates the streaming decompression path where compressed data
 /// arrives in arbitrary-sized chunks and is decompressed incrementally
@@ -46,7 +46,7 @@ fn decompress_deflate_streaming(
     budget: usize,
 ) -> Result<Vec<u8>, String> {
     let chunk_size = chunk_size.max(1); // ensure at least 1 byte per chunk
-    let mut decoder = Decompress::new(false); // false = raw deflate (no zlib header)
+    let mut decoder = Decompress::new(true); // true = zlib wrapper
     let mut output = Vec::new();
     let out_chunk = 8192.min(budget.saturating_add(1)).max(1);
     let mut buf = vec![0u8; out_chunk];
@@ -101,7 +101,8 @@ fn decompress_deflate_streaming(
 // ============================================================================
 
 /// Strategy that generates random byte payloads of varying sizes.
-/// These are the "original" data that will be compressed into raw deflate.
+/// These are the "original" data that will be compressed into zlib-wrapped
+/// deflate.
 fn arb_payload() -> impl Strategy<Value = Vec<u8>> {
     prop::collection::vec(any::<u8>(), 1..=4096)
 }
@@ -132,11 +133,11 @@ proptest! {
 
     /// **Validates: Requirements 4.8, 4.9**
     ///
-    /// Property 6: For any valid raw deflate payload, verify that incremental
+    /// Property 6: For any valid zlib-wrapped deflate payload, verify that incremental
     /// (streaming) decompression produces byte-identical output to full-buffer
     /// decompression via `decompress_bounded(_, Format::Deflate, _)`.
     ///
-    /// This confirms that when raw deflate data is processed chunk-by-chunk
+    /// This confirms that when zlib-wrapped deflate data is processed chunk-by-chunk
     /// (as it would be in the streaming decompression path), the result is
     /// identical to processing it in one shot (full-buffer path).
     #[test]
@@ -145,11 +146,11 @@ proptest! {
         chunk_size in arb_chunk_size(),
         budget in arb_budget(),
     ) {
-        // Compress the original payload into raw deflate
+        // Compress the original payload into zlib-wrapped deflate
         let compressed = deflate_compress(&payload);
 
         // Full-buffer path: decompress in one shot
-        let fullbuffer_result = decompress_bounded(&compressed, Format::Deflate, budget);
+        let fullbuffer_result = decompress_bounded(&compressed, Format::Deflate, budget, 0);
 
         // Streaming path: decompress in chunks
         let streaming_result = decompress_deflate_streaming(&compressed, chunk_size, budget);
@@ -246,7 +247,7 @@ proptest! {
         }
     }
 
-    /// Chunk-size independence: for any valid raw deflate payload, the
+    /// Chunk-size independence: for any valid zlib-wrapped deflate payload, the
     /// decompressed output is identical regardless of how the compressed
     /// data is chunked during streaming processing.
     #[test]

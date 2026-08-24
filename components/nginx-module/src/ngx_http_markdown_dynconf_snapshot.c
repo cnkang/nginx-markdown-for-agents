@@ -58,60 +58,6 @@ ngx_http_markdown_snapshot_flag(u_char *p, u_char *last,
 
 
 /*
- * Helper: append a size_t field as a numeric string.
- *
- * Parameters:
- *   p    - Current write position
- *   last - End of buffer
- *   key  - JSON key name
- *   val  - Size value in bytes
- *   trailing_comma - 1 to append comma, 0 for last field
- *
- * Returns:
- *   Updated write position
- */
-static u_char *
-ngx_http_markdown_snapshot_size(u_char *p, u_char *last,
-    const char *key, size_t val, ngx_uint_t trailing_comma)
-{
-    if (trailing_comma) {
-        p = ngx_slprintf(p, last, "    \"%s\": \"%uz\",\n", key, val);
-    } else {
-        p = ngx_slprintf(p, last, "    \"%s\": \"%uz\"\n", key, val);
-    }
-
-    return p;
-}
-
-
-/*
- * Helper: append a millisecond field as a numeric string.
- *
- * Parameters:
- *   p    - Current write position
- *   last - End of buffer
- *   key  - JSON key name
- *   val  - Millisecond value
- *   trailing_comma - 1 to append comma, 0 for last field
- *
- * Returns:
- *   Updated write position
- */
-static u_char *
-ngx_http_markdown_snapshot_msec(u_char *p, u_char *last,
-    const char *key, ngx_msec_t val, ngx_uint_t trailing_comma)
-{
-    if (trailing_comma) {
-        p = ngx_slprintf(p, last, "    \"%s\": \"%M\",\n", key, val);
-    } else {
-        p = ngx_slprintf(p, last, "    \"%s\": \"%M\"\n", key, val);
-    }
-
-    return p;
-}
-
-
-/*
  * Helper: append a string field as a quoted JSON value.
  *
  * Parameters:
@@ -224,23 +170,6 @@ ngx_http_markdown_cache_validation_str(ngx_uint_t conditional_requests)
 
 
 /*
- * Map metrics_format enum to string representation.
- */
-static const char *
-ngx_http_markdown_metrics_format_str(ngx_uint_t val)
-{
-    switch (val) {
-    case NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO:
-        return "auto";
-    case NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS:
-        return "prometheus";
-    default:
-        return "unknown";
-    }
-}
-
-
-/*
  * Map log_verbosity enum to string representation.
  */
 static const char *
@@ -291,15 +220,9 @@ ngx_http_markdown_streaming_policy_str(ngx_uint_t policy)
  * Reads all dynconf-relevant fields from the location config and
  * produces a JSON object fragment containing key-value pairs.
  *
- * The output contains active directive-shaped keys only.  Unified Config V2
- * limits are already represented by diagnostics.effective_config and are not
- * duplicated under removed directive names here:
- *   "config_snapshot": {
- *       "markdown_filter": "on",
- *       "markdown_streaming": "auto",
- *       "markdown_error_policy": "pass",
- *       ...
- *   }
+ * The output contains active directive-shaped keys only.  The caller embeds
+ * this fragment in the Diagnostics Schema v2 configuration.effective object;
+ * removed directive names and legacy diagnostics sections are not emitted.
  *
  * Parameters:
  *   pool    - Memory pool for buffer allocation
@@ -359,21 +282,9 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
         "markdown_accept",
         ngx_http_markdown_accept_policy_str(conf->accept_policy), 1);
 
-    /* markdown_buffer_chunked (on/off) */
-    p = ngx_http_markdown_snapshot_flag(p, last,
-        "markdown_buffer_chunked", conf->buffer_chunked, 1);
-
     /* markdown_auto_decompress (on/off) */
     p = ngx_http_markdown_snapshot_flag(p, last,
         "markdown_auto_decompress", conf->decompress.auto_decompress, 1);
-
-    /* markdown_parse_timeout */
-    p = ngx_http_markdown_snapshot_msec(p, last,
-        "markdown_parse_timeout", conf->decompress.parse_timeout, 1);
-
-    /* markdown_parser_budget */
-    p = ngx_http_markdown_snapshot_size(p, last,
-        "markdown_parser_budget", conf->decompress.parser_budget, 1);
 
     /* markdown_prune_noise (on/off) */
     p = ngx_http_markdown_snapshot_flag(p, last,
@@ -396,12 +307,6 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     p = ngx_http_markdown_snapshot_str(p, last,
         "markdown_cache_validation",
         ngx_http_markdown_cache_validation_str(conf->policy.conditional_requests),
-        1);
-
-    /* markdown_metrics_format */
-    p = ngx_http_markdown_snapshot_str(p, last,
-        "markdown_metrics_format",
-        ngx_http_markdown_metrics_format_str(conf->ops.metrics_format),
 #ifdef MARKDOWN_STREAMING_ENABLED
         1);
 #else
@@ -412,30 +317,7 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     /* markdown_streaming */
     p = ngx_http_markdown_snapshot_str(p, last,
         "markdown_streaming",
-        ngx_http_markdown_streaming_policy_str(conf->stream.policy), 1);
-
-    /* markdown_streaming_shadow (on/off) */
-    p = ngx_http_markdown_snapshot_flag(p, last,
-        "markdown_streaming_shadow", conf->stream.shadow, 1);
-
-    /* markdown_streaming_zero_copy (on/off) */
-    p = ngx_http_markdown_snapshot_flag(p, last,
-        "markdown_streaming_zero_copy", conf->stream.zero_copy, 1);
-
-    /* markdown_stream_threshold (v0.8.0 directive name) */
-    p = ngx_http_markdown_snapshot_size(p, last,
-        "markdown_stream_threshold",
-        conf->stream.threshold, 1);
-
-    /* markdown_stream_precommit_buffer */
-    p = ngx_http_markdown_snapshot_size(p, last,
-        "markdown_stream_precommit_buffer",
-        conf->stream.precommit_buffer, 1);
-
-    /* markdown_stream_flush_min */
-    p = ngx_http_markdown_snapshot_size(p, last,
-        "markdown_stream_flush_min",
-        conf->stream.flush_min, 0);
+        ngx_http_markdown_streaming_policy_str(conf->stream.policy), 0);
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
     /*

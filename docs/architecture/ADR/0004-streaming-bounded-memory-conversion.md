@@ -61,7 +61,7 @@ The budget covers only bounded state:
 - tag/context stack
 - output pending buffer
 
-If budget is exceeded, behavior follows configured fallback policy (see below).
+If the conversion exceeds the budget, behavior follows configured fallback policy (see below).
 
 ### 4) Controlled Fallback and Commit Semantics
 
@@ -81,7 +81,7 @@ This behavior is explicit and observable, not silent.
 ### 5) Conditional Request and ETag Policy
 
 - Streaming path supports incremental ETag hashing over emitted Markdown.
-- `if_modified_since_only` is supported in streaming mode.
+- Streaming mode supports `if_modified_since_only`.
 - `full_support` (Markdown-variant `If-None-Match` revalidation) remains full-buffer-only in the initial streaming rollout.
 
 ### 6) Rollout Strategy
@@ -108,7 +108,7 @@ Streaming ships behind feature flags and progressive rollout:
 1. **Higher implementation complexity** (new parser/emitter state machine, streaming decompression, and commit semantics).
 2. **Two active code paths** increase maintenance and testing cost.
 3. **Behavior differences** between full-buffer and streaming paths in edge cases until parity matures.
-4. **Fail-open expectations change post-commit** in streaming mode and must be documented clearly.
+4. **Fail-open expectations change post-commit** in streaming mode and the docs must state them clearly.
 
 ## Alternatives Considered
 
@@ -157,13 +157,14 @@ Streaming ships behind feature flags and progressive rollout:
 - high migration risk
 - no safe fallback during transition
 
-**Why not chosen:** Too much irreversible change at once; dual-engine rollout is safer.
+**Why not chosen:** Too much irreversible change at once. Dual-engine rollout is safer.
 
 ## Implementation Notes
 
 ### Proposed Configuration Surface (initial)
 
-The exact naming can be refined in implementation review, but behavior should include:
+Implementation review can refine the exact naming, but the behavior should
+include:
 
 1. streaming enable/disable switch (default off)
 2. per-request streaming memory budget
@@ -200,7 +201,7 @@ No silent fallback or silent truncation is acceptable.
 
 - [ADR-0001](0001-use-rust-for-conversion.md): keeps Rust as conversion core, extends implementation strategy.
 - [ADR-0002](0002-full-buffering-approach.md): keeps full-buffer path as stable default while adding an opt-in streaming path.
-- [ADR-0003](0003-inline-origin-near-conversion.md): preserves origin-near positioning; changes conversion mechanics, not deployment locus.
+- [ADR-0003](0003-inline-origin-near-conversion.md): preserves origin-near positioning. Changes conversion mechanics, not deployment locus.
 
 ## References
 

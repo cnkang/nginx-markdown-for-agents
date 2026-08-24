@@ -21,12 +21,16 @@ volumeMounts:
 
 ## Known Limitations
 
-1. **ABI binding**: The `.so` must be compiled against the exact NGINX
-   version inside the F5 Controller image.
+1. **ABI binding**: The `.so` must compile against the exact NGINX
+   version inside the F5 Controller image, using a compatible build
+   configuration (matching `configure` arguments). Use `--with-compat`
+   only when the target binary also enables it; otherwise the module
+   binary must be built with the same configure arguments as the
+   Controller's NGINX.
 2. **No custom image**: F5 does not support replacing the Controller
    image with a custom build in managed deployments.
 3. **Module updates**: Require rebuilding the `.so` when the Controller
-   image is upgraded.
+   image upgrades.
 
 ## Alternative: Sidecar Proxy
 

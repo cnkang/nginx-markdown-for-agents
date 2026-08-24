@@ -62,13 +62,21 @@ Rollback requires only an NGINX configuration edit and a graceful reload. Specif
 - No recompilation
 - No downtime
 
-The `nginx -s reload` command performs a graceful reload: NGINX re-reads the configuration, spawns new worker processes with the updated config, and drains existing connections on old workers. In-flight requests complete on the old configuration; new requests use the updated configuration immediately.
+The `nginx -s reload` command performs a graceful reload. NGINX re-reads the
+configuration and spawns new worker processes with the updated configuration.
+The new workers handle new connections (and new requests that arrive on them)
+using the updated configuration. Keep-alive connections already open before
+the reload can remain served by the old workers until
+they drain and close, so in-flight requests complete on the old configuration.
+Requests that arrive on those pre-existing keep-alive connections may
+therefore continue to use the previous configuration until the connection
+closes or the old worker exits.
 
 ---
 
 ## Rollback Methods
 
-Three methods are listed in order of speed. Pick the one that matches your situation.
+Three methods appear in order of speed. Pick the one that matches your situation.
 
 | Method | Speed | Scope | When to Use |
 |--------|-------|-------|-------------|
@@ -340,7 +348,9 @@ nginx -t && nginx -s reload
 
 #### Verify
 
-Follow the [Verification Steps](#verification-steps) section. The key signal is that `failed_closed` entries stop appearing in decision logs and are replaced by `failed_open` entries. Clients receive original HTML instead of 502 errors when conversion fails.
+Follow the [Verification Steps](#verification-steps) section. The key signal is that `failed_closed` entries stop appearing in decision logs. Do **not** require a `failed_open` log entry after rollback, and do not expect `failed_open` entries to replace `failed_closed` entries. Both are terminal outcomes of failed conversions, and after rollback to `pass` the module records `failed_open` only when a conversion actually fails. Verify that `failed_closed` entries stop appearing, then trigger a conversion failure. Confirm the client receives original HTML instead of a 502. Successful conversions produce no log entry, so expect none.
+
+**Drain before checking:** a graceful reload keeps existing workers alive until their keep-alive connections close. Requests on old workers still run the pre-rollback policy and can emit `failed_closed` entries after the reload. Wait for old workers to drain (typically until `worker_shutdown_timeout` expires or old worker PIDs disappear). Alternatively, scope the `failed_closed` check to traffic handled by newly loaded workers. Only then conclude the rollback took effect.
 
 ---
 
@@ -354,19 +364,25 @@ Conversion failure rate exceeds 5% of conversion attempts over any 1-hour window
 
 ```bash
 # Check failure count vs. total conversion attempts
-curl -s http://localhost/markdown-metrics | \
-  grep -E "conversions_(attempted|succeeded|failed)"
+curl -s -H "Accept: text/plain; version=0.0.4" http://localhost/markdown-metrics | \
+  grep -E "nginx_markdown_conversion_attempts_total|nginx_markdown_conversion_deliveries_total|nginx_markdown_requests_total"
 ```
 
-If `conversions_failed` is growing faster than expected relative to `conversions_attempted`, roll back.
+If the failed `nginx_markdown_requests_total{outcome=~"failed_.*"}` count grows
+faster than expected relative to `nginx_markdown_conversion_attempts_total`,
+roll back. Compare the two counters using PromQL rates (for example
+`rate(nginx_markdown_requests_total{outcome=~"failed_.*"}[5m])` against
+`rate(nginx_markdown_conversion_attempts_total[5m])`) or before-and-after
+counter deltas over the same window, rather than comparing instantaneous
+snapshots.
 
 ### Latency Exceeding Timeout
 
-Conversion latency approaches or exceeds the configured `markdown_limits timeout=`. Check the latency bucket distribution:
+Conversion latency approaches or exceeds the configured `markdown_limits conversion_timeout=`. Check the latency histogram buckets first. The histogram's finite buckets stop at 5 seconds. They are **insufficient for diagnosing timeouts above 5s**. Use the decision log (`category=timeout` entries) for those cases.
 
 ```bash
-curl -s http://localhost/markdown-metrics | \
-  grep "conversion_latency"
+curl -s -H "Accept: text/plain; version=0.0.4" http://localhost/markdown-metrics | \
+  grep "nginx_markdown_conversion_duration_seconds_bucket"
 ```
 
 If conversions are clustering in the highest latency buckets or you see timeout-related failures in logs, roll back.
@@ -386,11 +402,11 @@ curl -sD - -o /dev/null \
 # Expected: Content-Type: text/markdown; charset=utf-8
 ```
 
-If the Content-Type is wrong or the response body is unexpected, roll back.
+If the Content-Type is wrong or the response body looks unexpected, roll back.
 
 ### Operator Judgment
 
-Any observation checkpoint result that does not meet the "safe to continue" criteria documented in the [Rollout Cookbook](ROLLOUT_COOKBOOK.md#rollout-stages) is grounds for rollback. Trust your judgment — if something looks wrong, narrow scope first and investigate second.
+Any observation checkpoint result that does not meet the "safe to continue" criteria in the [Rollout Cookbook](ROLLOUT_COOKBOOK.md#rollout-stages) grounds for rollback. Trust your judgment — if something looks wrong, narrow scope first and investigate second.
 
 ---
 
@@ -444,7 +460,7 @@ curl -sD - \
 # Expected: Content-Type: text/html (not text/markdown)
 ```
 
-For Method C, send a request that you know triggers a conversion failure and verify the client receives HTML (not a 502):
+For Method C, send a request that you know triggers a conversion failure. Verify the client receives HTML (not a 502):
 
 ```bash
 curl -sD - -o /dev/null \
@@ -496,13 +512,15 @@ see the dedicated [Performance Rollout and Rollback Guide](performance-rollout-0
 
 | Optimization | Rollback |
 |--------------|----------|
-| Zero-copy streaming output | `markdown_streaming_zero_copy off` + reload |
-| Streaming decompression | Switch profile from `streaming_first` to `balanced` or set `markdown_auto_decompress off` + reload |
+| Streaming conversion | `markdown_streaming off` + reload |
+| Streaming decompression | `markdown_auto_decompress off` or `markdown_streaming off` + reload |
 | Full-buffer copy reduction | Code revert + binary rebuild (no config toggle — internal implementation detail) |
 
 All config-based rollbacks take effect for new requests immediately after
 `nginx -s reload`. In-flight requests complete with their existing
-configuration.
+configuration. Requests that arrive on keep-alive connections already open
+before the reload may continue on the old workers' configuration until those
+connections drain or close (see the reload semantics above).
 
 ---
 
@@ -510,6 +528,8 @@ configuration.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-15 | Kang | Reload semantics distinguish new workers from keep-alive connections; Accept header on metric curls |
+| 0.9.2 | 2026-08-15 | Hermes | Use current metric names in the pre-rollback metric check |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.9.1 | 2026-07-05 | Kiro | Added 0.9.1 performance optimization rollback cross-reference |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |

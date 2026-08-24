@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -295,6 +296,277 @@ def _check_manifest_structure(manifest: dict) -> CheckResult:
         )
 
     return _result("manifest-structure", PASS, "manifest schema looks complete")
+
+
+def _iter_manifest_commands(value: object):
+    """Yield command strings from nested manifest verification families."""
+    if isinstance(value, dict):
+        yield from _iter_manifest_dict_commands(value)
+    elif isinstance(value, list):
+        yield from _iter_manifest_list_commands(value)
+
+
+def _iter_manifest_dict_commands(value: dict):
+    """Yield commands and nested values from one manifest mapping."""
+    commands = value.get("commands")
+    if isinstance(commands, list):
+        for command in commands:
+            if isinstance(command, str) and command.strip():
+                yield command
+    for key, child in value.items():
+        if key != "commands":
+            yield from _iter_manifest_commands(child)
+
+
+def _iter_manifest_list_commands(value: list):
+    """Yield commands from one manifest list."""
+    for child in value:
+        yield from _iter_manifest_commands(child)
+
+
+def _make_targets(makefile: Path) -> tuple[set[str], str | None]:
+    """Return explicitly declared Make targets and an optional read error."""
+    try:
+        text = makefile.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return set(), f"{_display_path(makefile)} unreadable: {exc}"
+
+    targets: set[str] = set()
+    target_name_pattern = re.compile(r"[A-Za-z0-9_.%+-]+")
+    for line in text.splitlines():
+        # Recipe bodies and Make assignments are not target declarations.
+        if line.startswith("\t") or ":=" in line.split("#", 1)[0]:
+            continue
+        lhs = line.split("#", 1)[0].partition(":")[0].strip()
+        if not lhs:
+            continue
+        names = lhs.split()
+        if all(target_name_pattern.fullmatch(name) for name in names):
+            targets.update(names)
+    return targets, None
+
+
+def _manifest_path_candidate(token: str) -> Path | None:
+    """Return repo-owned command paths that should be checked for existence."""
+    token = token.strip()
+    if token.startswith("./"):
+        token = token[2:]
+    if not token or token.startswith("-") or token.startswith(("$", "${")):
+        return None
+    if token.startswith(
+        (
+            "tools/",
+            "packaging/",
+            "charts/",
+            ".github/workflows/",
+            "components/",
+            "docs/",
+            "tests/",
+            "examples/",
+            "schemas/",
+            "skills/",
+            "fuzz/",
+        )
+    ):
+        if any(char in token for char in ";&|<>*?"):
+            return None
+        if ".." in token.split("/"):
+            return None
+        return REPO_ROOT / token
+    return None
+
+
+def _missing_make_targets(command: str, tokens: list[str], targets: set[str]) -> list[str]:
+    """Return undeclared Make targets in one tokenized command."""
+    make_index = tokens.index("make")
+    after_make = tokens[make_index + 1 :]
+    # Honor a -f/--file selection; otherwise validate against the
+    # repository-root Makefile resolved by the caller.
+    effective_targets, file_error = _resolve_makefile_targets(after_make, targets)
+    if file_error:
+        return [file_error]
+    return _missing_make_target_arguments(command, after_make, effective_targets)
+
+
+def _missing_make_target_arguments(
+    command: str, candidates: list[str], targets: set[str]
+) -> list[str]:
+    """Return undeclared targets from the arguments after ``make``."""
+    missing: list[str] = []
+    skip_next = False
+    for index, candidate in enumerate(candidates):
+        if candidate in {"&&", "||", ";", "|", "&"}:
+            break
+        if skip_next:
+            skip_next = False
+            continue
+        action = _classify_make_argument(candidate, index, candidates)
+        if action == "value_flag":
+            skip_next = True
+        elif action == "target" and candidate not in targets:
+            missing.append(
+                f"{command!r}: Make target {candidate!r} is not declared"
+            )
+    return missing
+
+
+def _classify_make_argument(
+    candidate: str, index: int, candidates: list[str]
+) -> str:
+    """Classify a ``make`` argument after shell tokens are handled.
+
+    Returns one of ``"value_flag"`` (consume the next token as its value),
+    ``"option"`` (self-contained flag), ``"override"`` (VAR=value), or
+    ``"target"`` (a candidate Make target name).
+    """
+    if candidate in {"-C", "-f", "--file", "-I"}:
+        return "value_flag"
+    if candidate in {"-j", "--jobs"}:
+        # GNU make's job-count argument is optional: `-j` alone means
+        # unbounded jobs, so the next token is not necessarily a value.
+        # Only consume a following bare numeric job count so a target
+        # that directly follows `-j` is still validated.
+        if index + 1 < len(candidates) and candidates[index + 1].isdigit():
+            return "value_flag"
+        return "option"
+    if candidate.startswith(("-C", "-j", "--jobs=")):
+        return "option"
+    if "=" in candidate:
+        # VAR=value overrides are Make options, not target names.
+        return "override"
+    if candidate.startswith("-"):
+        return "option"
+    return "target"
+
+
+def _resolve_makefile_targets(after_make: list[str],
+                              targets: set[str]) -> tuple[set[str], str | None]:
+    """Resolve the effective Make targets, honoring a -f/--file selection.
+
+    Returns ``(targets, error)``: ``error`` is a non-empty string when the
+    selected Makefile cannot be parsed, else ``None``.
+    """
+    for i, flag in enumerate(after_make):
+        if flag in {"-f", "--file"} and i + 1 < len(after_make):
+            return _make_targets(REPO_ROOT / after_make[i + 1])
+        if flag == "-C" and i + 1 < len(after_make):
+            return _make_targets(REPO_ROOT / after_make[i + 1] / "Makefile")
+        if flag.startswith("-C") and len(flag) > 2:
+            return _make_targets(REPO_ROOT / flag[2:] / "Makefile")
+    return targets, None
+
+
+def _missing_command_paths(command: str, tokens: list[str], start: int) -> list[str]:
+    """Return missing repository-owned paths after a command token."""
+    missing: list[str] = []
+    for candidate in tokens[start:]:
+        if candidate.startswith("-"):
+            continue
+        # A pytest node id ("tests/foo.py::test_bar") carries a "::"
+        # suffix that is not a filesystem path; strip it before the
+        # repository-path check.
+        candidate = candidate.split("::", 1)[0]
+        path = _manifest_path_candidate(candidate)
+        if path is not None and not path.exists():
+            missing.append(
+                f"{command!r}: repository path {_display_path(path)!r} is missing"
+            )
+    return missing
+
+
+def _missing_interpreter_path(
+    command: str, tokens: list[str], index: int
+) -> list[str]:
+    """Return a missing path after a script interpreter token."""
+    if index + 1 >= len(tokens):
+        return []
+    path = _manifest_path_candidate(tokens[index + 1])
+    if path is None or path.exists():
+        return []
+    return [
+        f"{command!r}: repository path {_display_path(path)!r} is missing"
+    ]
+
+
+def _missing_plain_command_path(command: str, token: str) -> list[str]:
+    """Return a missing repository-owned path represented by one token."""
+    path = _manifest_path_candidate(token)
+    if path is None or path.exists():
+        return []
+    return [
+        f"{command!r}: repository path {_display_path(path)!r} is missing"
+    ]
+
+
+def _command_segments(tokens: list[str]) -> list[list[str]]:
+    """Split shell-like command tokens at the supported control operators."""
+    operators = {"&&", "||", ";", "|", "&"}
+    segments: list[list[str]] = []
+    segment: list[str] = []
+    for token in tokens:
+        if token in operators:
+            if segment:
+                segments.append(segment)
+            segment = []
+            continue
+        segment.append(token)
+    if segment:
+        segments.append(segment)
+    return segments
+
+
+def _missing_manifest_segment(
+    command: str, segment: list[str], targets: set[str]
+) -> list[str]:
+    """Return reachability findings for one shell command segment."""
+    missing: list[str] = []
+    for index, token in enumerate(segment):
+        if token == "make":
+            missing.extend(_missing_make_targets(command, segment, targets))
+            break
+        if token == "pytest":
+            missing.extend(_missing_command_paths(command, segment, index + 1))
+            break
+        if token in {"python", "python3", "bash", "sh"}:
+            missing.extend(_missing_interpreter_path(command, segment, index))
+            continue
+        missing.extend(_missing_plain_command_path(command, token))
+    return missing
+
+
+def _missing_one_manifest_command(
+    command: str, targets: set[str]
+) -> list[str]:
+    """Return reachability findings for every segment of one command."""
+    try:
+        tokens = shlex.split(command)
+    except ValueError as exc:
+        return [f"{command!r}: cannot parse command: {exc}"]
+
+    missing: list[str] = []
+    for segment in _command_segments(tokens):
+        missing.extend(_missing_manifest_segment(command, segment, targets))
+    return list(dict.fromkeys(missing))
+
+
+def _check_manifest_command_reachability(manifest: dict) -> CheckResult:
+    """Verify manifest Make targets, scripts, and workflow paths are reachable."""
+    commands = list(_iter_manifest_commands(manifest))
+    targets, makefile_error = _make_targets(REPO_ROOT / "Makefile")
+    missing: list[str] = []
+    if makefile_error and any("make" in command.split() for command in commands):
+        missing.append(makefile_error)
+    for command in commands:
+        missing.extend(_missing_one_manifest_command(command, targets))
+    if missing:
+        return _result(
+            "manifest-command-reachability", FAIL, "; ".join(dict.fromkeys(missing))
+        )
+    return _result(
+        "manifest-command-reachability",
+        PASS,
+        f"{len(commands)} manifest commands resolve to declared or present repository surfaces",
+    )
 
 
 def _check_truth_surfaces(manifest: dict) -> CheckResult:
@@ -1228,6 +1500,7 @@ def collect_results(full: bool = False) -> list[CheckResult]:
 
     return [
         manifest_structure,
+        _check_manifest_command_reachability(manifest),
         _check_truth_surfaces(manifest),
         _check_risk_pack_docs(manifest),
         _check_harness_docs(manifest),

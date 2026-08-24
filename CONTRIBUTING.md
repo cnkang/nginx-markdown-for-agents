@@ -29,7 +29,7 @@ This project follows a professional and respectful code of conduct. Please:
 
 Before contributing, ensure you have:
 
-- Rust 1.97.0 or higher
+- Rust 1.97.1 or higher
 - NGINX 1.24.0 or higher (source code for module development)
 - cbindgen for C header generation
 - Basic understanding of NGINX module development (for C contributions)
@@ -75,8 +75,8 @@ npx skills add . --full-depth --skill nginx-markdown-harness-maintenance -y
 npx skills ls
 ```
 
-Why `--full-depth`: this repository keeps skills under `skills/`, so recursive
-discovery is required.
+Why `--full-depth`: this repository keeps skills under `skills/`, so the
+installer must discover skills recursively.
 
 For full setup details (project/global/manual symlink options and verification),
 see [docs/guides/HARNESS_SKILL_SETUP.md](docs/guides/HARNESS_SKILL_SETUP.md).
@@ -206,7 +206,7 @@ Follow the Conventional Commits specification:
 - `feat`: New feature
 - `fix`: Bug fix
 - `docs`: Documentation changes
-- `style`: Code style changes (formatting, etc.)
+- `style`: Code style changes (formatting and similar adjustments)
 - `refactor`: Code refactoring
 - `test`: Adding or updating tests
 - `chore`: Maintenance tasks
@@ -289,17 +289,17 @@ Every pull request triggers path-filtered jobs:
 
 ### Performance Gating (`nightly-perf.yml` / `perf-smoke` in `ci.yml`)
 
-Performance is guarded at two levels:
+The project guards performance at two levels:
 
 1. **PR smoke gate** (`perf-smoke` job in `ci.yml`) — runs the `small` and `medium` benchmark tiers on every PR that touches Rust or perf-related files. The threshold engine compares measurements against platform baselines in `perf/baselines/` using thresholds defined in `perf/thresholds.json`. A regression beyond the configured threshold fails the check.
 
-2. **Nightly full suite** (`nightly-perf.yml`) — runs daily at 03:00 UTC. Executes all tiers (`small`, `medium`, `medium-front-matter`, `large-1m`) with 3 repeats each, computes medians, and runs the threshold engine. Supports a manual `bootstrap_baseline` mode to generate fresh baseline artifacts for a new platform. Measurement and verdict reports are uploaded as workflow artifacts.
+2. **Nightly full suite** (`nightly-perf.yml`) — runs daily at 03:00 UTC. Executes all tiers (`small`, `medium`, `medium-front-matter`, `large-1m`) with 3 repeats each, computes medians, and runs the threshold engine. Supports a manual `bootstrap_baseline` mode to generate fresh baseline artifacts for a new platform. The workflow uploads measurement and verdict reports as workflow artifacts.
 
 Key files:
 - `perf/baselines/<platform>.json` — committed baseline measurements per platform.
 - `perf/thresholds.json` — per-metric regression thresholds.
 - `perf/metrics-schema.json` — metric definitions.
-- `tools/perf/threshold_engine.py` — compares current vs. baseline and emits a verdict.
+- `tools/perf/threshold_engine.py` — compares current and baseline and emits a verdict.
 - `tools/perf/run_perf_baseline.sh` — benchmark runner script.
 
 ### Install Verification (`install-verify.yml`)
@@ -406,12 +406,12 @@ All contributions must include appropriate documentation:
 
 1. Maintainers will review your pull request
 2. Address any feedback or requested changes
-3. Once approved, your changes will be merged
+3. Once approved, maintainers merge your changes
 
 ### After Merge
 
-- Your contribution will be included in the next release
-- You'll be credited in the release notes
+- The next release includes your contribution
+- The release notes credit you
 - Thank you for contributing!
 
 ## Getting Help
@@ -425,7 +425,7 @@ If you need help:
 
 ## Recognition
 
-Contributors are recognized in:
+The project recognizes contributors in:
 
 - Release notes
 - CHANGELOG.md
@@ -437,6 +437,7 @@ Thank you for contributing to NGINX Markdown for Agents!
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-08 | Kang | STE-inspired writing-style cleanup (passive voice, Latin abbreviations) |
 | 0.9.1 | 2026-07-14 | Kang | Raised the final pre-1.0 Rust baseline to 1.97.0+ |
 | 0.8.3 | 2026-06-26 | Kang | Updated Rust version requirement to 1.91.0+ |
 | 0.6.3 | 2026-05-14 | Codex | Fix repository URL placeholder, update coverage tool to cargo llvm-cov |

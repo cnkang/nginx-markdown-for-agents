@@ -11,6 +11,10 @@
  * Task: 18.1 Implement If-None-Match handling with configurable behavior
  */
 
+#ifndef NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
+#define NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL 1
+#endif
+
 #include "ngx_http_markdown_filter_module.h"
 #include "markdown_converter.h"
 
@@ -104,6 +108,36 @@ ngx_http_markdown_find_response_header(ngx_http_request_t *r, u_char *name,
     }
 
     return NULL;
+}
+
+/*
+ * Invalidate every response header matching `name` (hash=0 per Rule 40).
+ * Iterates the full headers_out list chain (Rule 28).
+ */
+static void
+ngx_http_markdown_invalidate_response_header(ngx_http_request_t *r,
+    const u_char *name, size_t name_len)
+{
+    for (ngx_list_part_t *part = &r->headers_out.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        ngx_table_elt_t  *headers;
+
+        headers = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash == 0) {
+                continue;
+            }
+            if (headers[i].key.len == name_len
+                && ngx_strncasecmp(headers[i].key.data,
+                                   (u_char *) name, /* NOSONAR: c:S859; ngx_strncasecmp API takes non-const u_char* (Rule 24 NGINX API contract) */
+                                   name_len) == 0)
+            {
+                headers[i].hash = 0;
+            }
+        }
+    }
 }
 
 static ngx_int_t
@@ -579,12 +613,267 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
  * @return          NGX_DONE on success (request finalized), NGX_ERROR on failure,
  *                  or rc from ngx_http_send_header on partial failure
  */
+/*
+ * The 304 path has to preserve the same failure contract as the normal
+ * representation update.  The helpers below snapshot both outgoing lists and
+ * every dedicated field touched by ngx_http_markdown_send_304() before any
+ * mutation.  A failed ETag, Vary, or authenticated Cache-Control operation
+ * can therefore restore the exact upstream representation.
+ */
+#define NGX_HTTP_MARKDOWN_304_SNAPSHOT_MAX_ENTRIES  1024
+
+typedef struct {
+    ngx_table_elt_t  saved;
+} ngx_http_markdown_304_snapshot_entry_t;
+
+typedef struct {
+    ngx_http_markdown_304_snapshot_entry_t  *entries;
+    ngx_uint_t                              entry_count;
+    ngx_list_part_t                         *original_last;
+    ngx_uint_t                              original_last_nelts;
+    ngx_list_part_t                         *original_last_next;
+} ngx_http_markdown_304_list_snapshot_t;
+
+typedef struct {
+    ngx_uint_t                              status;
+    ngx_str_t                               status_line;
+    ngx_list_t                              headers;
+    ngx_list_t                              trailers;
+    ngx_str_t                               content_type;
+    u_char                                  *content_type_lowcase;
+    ngx_uint_t                              content_type_hash;
+    ngx_str_t                               charset;
+    size_t                                  content_type_len;
+    ngx_table_elt_t                         *content_length;
+    ngx_table_elt_t                         *content_encoding;
+    ngx_table_elt_t                         *etag;
+    ngx_table_elt_t                         *accept_ranges;
+    ngx_table_elt_t                         *last_modified;
+    off_t                                   content_length_n;
+    time_t                                  last_modified_time;
+    unsigned                                allow_ranges;
+    ngx_http_markdown_304_list_snapshot_t  headers_snapshot;
+    ngx_http_markdown_304_list_snapshot_t  trailers_snapshot;
+} ngx_http_markdown_304_snapshot_t;
+
+static ngx_int_t
+ngx_http_markdown_304_snapshot_list(ngx_pool_t *pool, ngx_list_t *list,
+    ngx_http_markdown_304_list_snapshot_t *snapshot)
+{
+    ngx_list_part_t          *part;
+    const ngx_table_elt_t    *entries;
+    ngx_uint_t                count;
+
+    if (list == NULL || snapshot == NULL) {
+        return NGX_ERROR;
+    }
+
+    memset(snapshot, 0, sizeof(*snapshot));
+    snapshot->original_last = list->last;
+    if (snapshot->original_last != NULL) {
+        snapshot->original_last_nelts = snapshot->original_last->nelts;
+        snapshot->original_last_next = snapshot->original_last->next;
+    }
+
+    count = 0;
+    for (part = &list->part; part != NULL; part = part->next) {
+        if (part->nelts > NGX_HTTP_MARKDOWN_304_SNAPSHOT_MAX_ENTRIES
+            - count)
+        {
+            return NGX_ERROR;
+        }
+        count += part->nelts;
+    }
+
+    snapshot->entry_count = count;
+    if (count == 0) {
+        return NGX_OK;
+    }
+
+    if ((size_t) count
+        > ((size_t) -1) / sizeof(ngx_http_markdown_304_snapshot_entry_t))
+    {
+        return NGX_ERROR;
+    }
+
+    snapshot->entries = ngx_pnalloc(pool,
+        (size_t) count * sizeof(ngx_http_markdown_304_snapshot_entry_t));
+    if (snapshot->entries == NULL) {
+        return NGX_ERROR;
+    }
+
+    count = 0;
+    for (part = &list->part; part != NULL; part = part->next) {
+        if (part->nelts > 0 && part->elts == NULL) {
+            return NGX_ERROR;
+        }
+
+        entries = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            snapshot->entries[count].saved = entries[i];
+            count++;
+        }
+    }
+
+    return NGX_OK;
+}
+
+static void
+ngx_http_markdown_304_restore_list(ngx_list_t *list,
+    const ngx_http_markdown_304_list_snapshot_t *snapshot)
+{
+    ngx_table_elt_t  *entries;
+    ngx_uint_t        restored;
+
+    if (list == NULL || snapshot == NULL) {
+        return;
+    }
+
+    list->last = snapshot->original_last;
+    if (snapshot->original_last != NULL) {
+        snapshot->original_last->nelts = snapshot->original_last_nelts;
+        snapshot->original_last->next = snapshot->original_last_next;
+    }
+
+    if (snapshot->entry_count == 0 || snapshot->entries == NULL) {
+        return;
+    }
+
+    restored = 0;
+    for (ngx_list_part_t *part = &list->part;
+         part != NULL && restored < snapshot->entry_count;
+         part = part->next)
+    {
+        if (part->nelts > snapshot->entry_count - restored
+            || (part->nelts != 0 && part->elts == NULL))
+        {
+            return;
+        }
+
+        entries = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            entries[i] = snapshot->entries[restored].saved;
+            restored++;
+        }
+    }
+}
+
+static ngx_int_t
+ngx_http_markdown_304_snapshot_prepare(ngx_http_request_t *r,
+    ngx_http_markdown_304_snapshot_t *snapshot)
+{
+    if (r == NULL || snapshot == NULL) {
+        return NGX_ERROR;
+    }
+
+    memset(snapshot, 0, sizeof(*snapshot));
+    snapshot->status = r->headers_out.status;
+    snapshot->status_line = r->headers_out.status_line;
+    snapshot->headers = r->headers_out.headers;
+    snapshot->trailers = r->headers_out.trailers;
+    snapshot->content_type = r->headers_out.content_type;
+    snapshot->content_type_lowcase = r->headers_out.content_type_lowcase;
+    snapshot->content_type_hash = r->headers_out.content_type_hash;
+    snapshot->charset = r->headers_out.charset;
+    snapshot->content_type_len = r->headers_out.content_type_len;
+    snapshot->content_length = r->headers_out.content_length;
+    snapshot->content_encoding = r->headers_out.content_encoding;
+    snapshot->etag = r->headers_out.etag;
+    snapshot->accept_ranges = r->headers_out.accept_ranges;
+    snapshot->last_modified = r->headers_out.last_modified;
+    snapshot->content_length_n = r->headers_out.content_length_n;
+    snapshot->last_modified_time = r->headers_out.last_modified_time;
+    snapshot->allow_ranges = r->allow_ranges;
+
+    if (ngx_http_markdown_304_snapshot_list(r->pool,
+            &r->headers_out.headers, &snapshot->headers_snapshot)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    if (ngx_http_markdown_304_snapshot_list(r->pool,
+            &r->headers_out.trailers, &snapshot->trailers_snapshot)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    return NGX_OK;
+}
+
+static void
+ngx_http_markdown_304_snapshot_restore(ngx_http_request_t *r,
+    const ngx_http_markdown_304_snapshot_t *snapshot)
+{
+    if (r == NULL || snapshot == NULL) {
+        return;
+    }
+
+    r->headers_out.status = snapshot->status;
+    r->headers_out.status_line = snapshot->status_line;
+    r->headers_out.headers = snapshot->headers;
+    r->headers_out.trailers = snapshot->trailers;
+    r->headers_out.content_type = snapshot->content_type;
+    r->headers_out.content_type_lowcase = snapshot->content_type_lowcase;
+    r->headers_out.content_type_hash = snapshot->content_type_hash;
+    r->headers_out.charset = snapshot->charset;
+    r->headers_out.content_type_len = snapshot->content_type_len;
+    r->headers_out.content_length = snapshot->content_length;
+    r->headers_out.content_encoding = snapshot->content_encoding;
+    r->headers_out.etag = snapshot->etag;
+    r->headers_out.accept_ranges = snapshot->accept_ranges;
+    r->headers_out.last_modified = snapshot->last_modified;
+    r->headers_out.content_length_n = snapshot->content_length_n;
+    r->headers_out.last_modified_time = snapshot->last_modified_time;
+    r->allow_ranges = snapshot->allow_ranges;
+
+    ngx_http_markdown_304_restore_list(&r->headers_out.headers,
+        &snapshot->headers_snapshot);
+    ngx_http_markdown_304_restore_list(&r->headers_out.trailers,
+        &snapshot->trailers_snapshot);
+}
+
 ngx_int_t
 ngx_http_markdown_send_304(ngx_http_request_t *r,
                            const struct MarkdownResult *result)
 {
-    ngx_table_elt_t  *h;
-    ngx_int_t         rc;
+    ngx_table_elt_t                    *h;
+    ngx_int_t                           rc;
+    ngx_flag_t                          auth_cache_control_required;
+    const ngx_http_markdown_conf_t     *conf = NULL;
+    ngx_http_markdown_304_snapshot_t    snapshot;
+
+    auth_cache_control_required = 0;
+
+    if (r == NULL) {
+        return NGX_ERROR;
+    }
+
+    if (ngx_http_markdown_304_snapshot_prepare(r, &snapshot) != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown: 304 header snapshot prepare failed");
+        return NGX_ERROR;
+    }
+
+    /*
+     * Conditional responses take a separate path from the normal header
+     * plan.  Apply the same authenticated-response cache policy before any
+     * 304 headers are sent, so a conditional hit cannot retain a shared
+     * cache directive from the source response.
+     */
+    conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
+    rc = ngx_http_markdown_auth_cache_control_required(
+        r, conf, &auth_cache_control_required);
+    if (rc == NGX_OK && auth_cache_control_required) {
+        rc = ngx_http_markdown_modify_cache_control_for_auth(r);
+    }
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown: 304 auth Cache-Control update failed");
+        ngx_http_markdown_304_snapshot_restore(r, &snapshot);
+        return NGX_ERROR;
+    }
 
     r->headers_out.status = NGX_HTTP_NOT_MODIFIED;
     r->headers_out.status_line.len = 0;
@@ -592,9 +881,59 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
     ngx_http_clear_content_length(r);
     r->headers_out.content_length_n = -1;
 
+    /* The 304 describes the transformed Markdown representation: clear
+     * Accept-Ranges (byte ranges apply to the HTML representation) and
+     * any representation digests of the upstream HTML body. */
+    r->allow_ranges = 0;
+    r->headers_out.accept_ranges = NULL;
+    ngx_http_markdown_invalidate_response_header(
+        r, (const u_char *) "Accept-Ranges", sizeof("Accept-Ranges") - 1);
+    r->headers_out.content_encoding = NULL;
+    ngx_http_markdown_invalidate_response_header(
+        r, (const u_char *) "Content-Encoding", sizeof("Content-Encoding") - 1);
+    ngx_http_markdown_invalidate_response_header(
+        r, (const u_char *) "Content-MD5", sizeof("Content-MD5") - 1);
+    ngx_http_markdown_invalidate_response_header(
+        r, (const u_char *) "Digest", sizeof("Digest") - 1);
+    ngx_http_markdown_invalidate_response_header(
+        r, (const u_char *) "Content-Digest", sizeof("Content-Digest") - 1);
+    ngx_http_markdown_invalidate_response_header(
+        r, (const u_char *) "Repr-Digest", sizeof("Repr-Digest") - 1);
+    /* The upstream X-Markdown-Tokens counts HTML tokens; invalidate it so
+     * the 304 must not describe the source representation. */
+    ngx_http_markdown_invalidate_response_header(
+        r, (const u_char *) "X-Markdown-Tokens", sizeof("X-Markdown-Tokens") - 1);
+    /* Upstream trailers describe the HTML body; a 304 of the Markdown
+     * representation must not declare them. */
+    ngx_http_markdown_invalidate_response_header(
+        r, (const u_char *) "Trailer", sizeof("Trailer") - 1);
+    /* Clear the actual trailer entries too: headers_out.trailers is an
+     * independent list emitted by HTTP/2/3 and chunked encodings without
+     * an HTTP/1.1 Trailer declaration.  Suppress source-HTML trailers. */
+    ngx_http_markdown_clear_trailers(r);
+
+    /* Decision G: the 304 describes the Markdown representation; the weak
+     * validator must not reference the source HTML mtime.  ETag is the
+     * sole validator for converted responses.  Clear the typed pointer
+     * too: the header filter synthesizes Last-Modified whenever
+     * last_modified_time != -1 AND last_modified == NULL is false, so
+     * both fields must be reset to guarantee no stale mtime is emitted. */
+    r->headers_out.last_modified_time = (time_t) -1;
+    r->headers_out.last_modified = NULL;
+    ngx_http_markdown_invalidate_response_header(
+        r, (const u_char *) "Last-Modified", sizeof("Last-Modified") - 1);
+
+    /* The 304 describes the Markdown representation: apply the
+     * Markdown Content-Type through the shared representation helper,
+     * which deletes stale header-list entries before pointing the
+     * dedicated field at the shared writable array (a surviving list
+     * entry would emit a second Content-Type). */
+    ngx_http_markdown_set_representation_content_type(r);
+
     if (result != NULL && result->etag != NULL && result->etag_len > 0) {
         rc = ngx_http_markdown_set_etag(r, result->etag, result->etag_len);
         if (rc != NGX_OK) {
+            ngx_http_markdown_304_snapshot_restore(r, &snapshot);
             return NGX_ERROR;
         }
 
@@ -605,6 +944,7 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
 
     h = ngx_list_push(&r->headers_out.headers);
     if (h == NULL) {
+        ngx_http_markdown_304_snapshot_restore(r, &snapshot);
         return NGX_ERROR;
     }
 

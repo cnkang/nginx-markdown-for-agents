@@ -30,6 +30,7 @@
 //! Validates: NFR-03.1, NFR-03.2, NFR-03.3, NFR-03.4
 
 use html5ever::Attribute;
+use std::borrow::Cow;
 use std::cell::Ref;
 
 /// Maximum allowed nesting depth for HTML elements
@@ -71,6 +72,27 @@ const FORM_ELEMENTS: &[&str] = &[
     "optgroup", // Group label for options
     "datalist", // Suggestion list
     "output",   // Calculation result text
+];
+
+/// HTML attributes whose values can navigate to or load a URL.
+///
+/// Keep this list shared by both attribute decision paths. Checking only
+/// `href` and `src` leaves less common but still active attributes such as
+/// `formaction`, `ping`, and `poster` outside the URL policy.
+pub(crate) const URL_ATTRIBUTES: &[&str] = &[
+    "href",
+    "src",
+    "action",
+    "formaction",
+    "longdesc",
+    "dynsrc",
+    "lowsrc",
+    "manifest",
+    "poster",
+    "cite",
+    "ping",
+    "data",
+    "codebase",
 ];
 
 /// Known event handler attributes (reference list for documentation/auditing).
@@ -129,6 +151,79 @@ const DANGEROUS_URL_SCHEMES: &[&str] = &[
     "file:",       // Local file access (SSRF)
     "about:",      // Browser internal URLs
 ];
+
+/// Escape untrusted text before emitting it as ordinary Markdown content.
+///
+/// Ordinary text is not a Markdown label, so it can contain syntax that
+/// changes the document structure or introduces raw HTML. Escape inline
+/// delimiters and link/HTML brackets unconditionally. Block markers are
+/// escaped only at the beginning of a line so prose such as `a-b` remains
+/// readable while `- item`, `# heading`, and `1. item` stay text.
+///
+/// Stateful context used while escaping ordinary Markdown text fragments.
+///
+/// Streaming tokenizers can split one logical text node across arbitrary
+/// chunks. Keeping the line-prefix state across those fragments prevents a
+/// punctuation character in the middle of a source line from being treated
+/// as a block marker merely because it arrived in a new chunk.  The same
+/// state protects line-leading GFM table bars and setext underline markers.
+#[derive(Clone, Copy)]
+pub(crate) struct MarkdownTextEscapeState {
+    line_prefix: bool,
+    indent: usize,
+    ordered_digits: bool,
+}
+
+impl Default for MarkdownTextEscapeState {
+    fn default() -> Self {
+        Self {
+            line_prefix: true,
+            indent: 0,
+            ordered_digits: false,
+        }
+    }
+}
+
+impl MarkdownTextEscapeState {
+    pub(crate) fn advance(&mut self, ch: char) {
+        if ch == '\n' {
+            self.line_prefix = true;
+            self.indent = 0;
+            self.ordered_digits = false;
+        } else if self.line_prefix && ch == ' ' && self.indent < 4 {
+            self.indent += 1;
+        } else if self.line_prefix && ch.is_ascii_digit() {
+            self.ordered_digits = true;
+        } else {
+            self.line_prefix = false;
+            self.ordered_digits = false;
+        }
+    }
+}
+
+/// Escape ordinary Markdown text while preserving state across fragments.
+pub(crate) fn escape_markdown_text_with_state(
+    s: &str,
+    state: &mut MarkdownTextEscapeState,
+) -> String {
+    let mut out = String::with_capacity(s.len().saturating_add(8));
+
+    for ch in s.chars() {
+        let block_marker = state.line_prefix
+            && state.indent <= 3
+            && (matches!(ch, '#' | '>' | '+' | '-' | '!' | '|' | '=')
+                || (matches!(ch, '.' | ')') && state.ordered_digits));
+        let inline_delimiter = matches!(ch, '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '~');
+
+        if block_marker || inline_delimiter {
+            out.push('\\');
+        }
+        out.push(ch);
+        state.advance(ch);
+    }
+
+    out
+}
 
 /// Action to take when sanitizing an element
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -235,10 +330,10 @@ impl SecurityValidator {
     /// assert!(!validator.is_event_handler("href"));
     /// ```
     pub fn is_event_handler(&self, attr_name: &str) -> bool {
-        // Prefix-based detection following OWASP / DOMPurify conventions.
-        // The HTML spec reserves the "on*" attribute namespace exclusively
-        // for event handlers — no legitimate attribute starts with "on"
-        // without being an event handler.
+        // The frozen safety contract treats every non-empty `on*` attribute as
+        // an event handler. Keep the length guard so the bare `on` token is not
+        // stripped accidentally; the prefix rule catches future event names
+        // without maintaining an incomplete allowlist.
         attr_name.starts_with("on") && attr_name.len() > 2
     }
 
@@ -264,47 +359,12 @@ impl SecurityValidator {
     /// assert!(!validator.is_dangerous_url("/relative/path"));
     /// ```
     pub fn is_dangerous_url(&self, url: &str) -> bool {
-        let trimmed = url.trim();
-        if trimmed.chars().any(|ch| ch == '\0' || ch.is_control()) {
-            return true;
-        }
-        if Self::contains_percent_encoded_control(trimmed) {
-            return true;
-        }
-
-        let url_lower = trimmed.to_ascii_lowercase();
-        DANGEROUS_URL_SCHEMES
-            .iter()
-            .any(|scheme| url_lower.starts_with(scheme))
+        is_dangerous_url_value(url)
     }
 
+    #[cfg(test)]
     fn contains_percent_encoded_control(url: &str) -> bool {
-        let bytes = url.as_bytes();
-        for window in bytes.windows(3) {
-            if window[0] != b'%' {
-                continue;
-            }
-            let Some(high) = Self::hex_value(window[1]) else {
-                continue;
-            };
-            let Some(low) = Self::hex_value(window[2]) else {
-                continue;
-            };
-            let value = (high << 4) | low;
-            if value < 0x20 || value == 0x7f {
-                return true;
-            }
-        }
-        false
-    }
-
-    fn hex_value(byte: u8) -> Option<u8> {
-        match byte {
-            b'0'..=b'9' => Some(byte - b'0'),
-            b'a'..=b'f' => Some(byte - b'a' + 10),
-            b'A'..=b'F' => Some(byte - b'A' + 10),
-            _ => None,
-        }
+        contains_percent_encoded_control(url)
     }
 
     /// Check if attributes contain event handlers or dangerous URLs
@@ -330,8 +390,8 @@ impl SecurityValidator {
                 return SanitizeAction::StripAttributes;
             }
 
-            // Check for dangerous URLs in href and src attributes
-            if (attr_name == "href" || attr_name == "src") && self.is_dangerous_url(&attr.value) {
+            // Check every URL-bearing attribute for dangerous schemes.
+            if URL_ATTRIBUTES.contains(&attr_name) && self.is_dangerous_url(&attr.value) {
                 return SanitizeAction::StripUrl;
             }
         }
@@ -421,8 +481,8 @@ impl SecurityValidator {
                 to_remove.push(attr_name.to_string());
             }
 
-            // Remove dangerous URLs
-            if (attr_name == "href" || attr_name == "src") && self.is_dangerous_url(&attr.value) {
+            // Remove dangerous URLs from every URL-bearing attribute.
+            if URL_ATTRIBUTES.contains(&attr_name) && self.is_dangerous_url(&attr.value) {
                 to_remove.push(attr_name.to_string());
             }
         }
@@ -757,6 +817,60 @@ pub fn validate_link_url(url: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// Apply the URL scheme policy shared by full-buffer and streaming paths.
+///
+/// URL schemes are ASCII by definition. Rejecting a non-ASCII scheme prefix
+/// prevents Unicode confusables or replacement characters from being treated
+/// as an unvalidated scheme after a lossy decode. Raw overlong UTF-8 cannot
+/// become a Rust `str`; the FFI/parser boundary rejects malformed UTF-8 before
+/// this helper is reached.
+pub(crate) fn is_dangerous_url_value(url: &str) -> bool {
+    let trimmed = url.trim();
+    if trimmed.chars().any(|ch| ch == '\0' || ch.is_control()) {
+        return true;
+    }
+    if contains_percent_encoded_control(trimmed) {
+        return true;
+    }
+    /* A colon is a scheme separator only when it precedes any '/', '?',
+     * or '#' delimiter: colons inside relative paths or query strings
+     * (e.g. "/docs/fa:q" or "?x=a:b") must not be treated as a scheme
+     * separator. */
+    let scheme_zone_end = trimmed.find(['/', '?', '#']).unwrap_or(trimmed.len());
+    if let Some(colon) = trimmed[..scheme_zone_end].find(':') {
+        let scheme = &trimmed[..colon];
+        if !scheme.is_empty() && scheme.bytes().any(|byte| byte >= 0x80) {
+            return true;
+        }
+    }
+
+    let url_lower = trimmed.to_ascii_lowercase();
+    DANGEROUS_URL_SCHEMES
+        .iter()
+        .any(|scheme| url_lower.starts_with(scheme))
+}
+
+fn contains_percent_encoded_control(url: &str) -> bool {
+    url.as_bytes().windows(3).any(|window| {
+        window[0] == b'%'
+            && hex_value(window[1])
+                .zip(hex_value(window[2]))
+                .is_some_and(|(high, low)| {
+                    let value = (high << 4) | low;
+                    value < 0x20 || value == 0x7f
+                })
+    })
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
 /// Parse X-Forwarded-Host and X-Forwarded-Proto headers to
 /// construct an effective base URL.
 ///
@@ -813,17 +927,29 @@ pub fn parse_forwarded_headers(
 /// Escape a string for safe use as a Markdown link label.
 ///
 /// Per CommonMark §4.7, link labels may contain backslash escapes.
-/// Escape: `[`, `]`, `\`. Newlines are replaced with spaces to prevent
-/// injection via line breaks within link labels.
+/// Escape Markdown inline delimiters (`*`, `_`, `` ` ``, `~`), brackets,
+/// backslashes, and angle brackets. Newlines are replaced with spaces to
+/// prevent injection via line breaks within link labels.
 ///
 /// This is the single canonical label-escaping implementation; the streaming
 /// emitter and the full-buffer traversal both delegate here so the escaping
 /// rule cannot drift between emission sites (AGENTS.md Rule 27).
-pub fn escape_link_label(s: &str) -> String {
+pub fn escape_link_label<'a>(s: &'a str) -> Cow<'a, str> {
+    let first_escape = s.char_indices().find(|(_, ch)| {
+        matches!(
+            ch,
+            '[' | ']' | '\\' | '<' | '>' | '*' | '_' | '`' | '~' | '\n' | '\r'
+        )
+    });
+    let Some((first_index, _)) = first_escape else {
+        return Cow::Borrowed(s);
+    };
+
     let mut out = String::with_capacity(s.len() + 8);
-    for ch in s.chars() {
+    out.push_str(&s[..first_index]);
+    for ch in s[first_index..].chars() {
         match ch {
-            '[' | ']' | '\\' => {
+            '[' | ']' | '\\' | '<' | '>' | '*' | '_' | '`' | '~' => {
                 out.push('\\');
                 out.push(ch);
             }
@@ -831,7 +957,13 @@ pub fn escape_link_label(s: &str) -> String {
             _ => out.push(ch),
         }
     }
-    out
+    Cow::Owned(out)
+}
+
+/// Escape ordinary Markdown text using a fresh line-prefix state.
+pub fn escape_markdown_text(s: &str) -> String {
+    let mut state = MarkdownTextEscapeState::default();
+    escape_markdown_text_with_state(s, &mut state)
 }
 
 #[cfg(test)]
@@ -1019,7 +1151,59 @@ mod url_validation_tests {
     #[test]
     fn test_escape_link_label() {
         assert_eq!(escape_link_label("foo [bar] baz"), r"foo \[bar\] baz");
+        assert_eq!(escape_link_label("<tag>"), r"\<tag\>");
+        assert_eq!(
+            escape_link_label("*bold* _italic_ `code` ~strike~"),
+            r"\*bold\* \_italic\_ \`code\` \~strike\~"
+        );
         assert_eq!(escape_link_label("a\nb"), "a b");
         assert_eq!(escape_link_label("a\rb"), "a b");
+    }
+
+    #[test]
+    fn url_attribute_policy_covers_navigation_and_embedded_attributes() {
+        for attribute in [
+            "href",
+            "src",
+            "action",
+            "formaction",
+            "longdesc",
+            "dynsrc",
+            "lowsrc",
+            "manifest",
+            "poster",
+            "cite",
+            "ping",
+            "data",
+            "codebase",
+        ] {
+            assert!(URL_ATTRIBUTES.contains(&attribute));
+        }
+    }
+
+    #[test]
+    fn test_escape_markdown_text_blocks_active_syntax() {
+        assert_eq!(
+            escape_markdown_text(r"[link](javascript:alert(1)) <tag> *em* `code`"),
+            r"\[link\](javascript:alert(1)) \<tag\> \*em\* \`code\`"
+        );
+        assert_eq!(
+            escape_markdown_text("- item\n# heading\n1. item"),
+            "\\- item\n\\# heading\n1\\. item"
+        );
+        assert_eq!(escape_markdown_text("a-b"), "a-b");
+    }
+
+    #[test]
+    fn test_escape_markdown_text_blocks_table_and_setext_markers() {
+        assert_eq!(escape_markdown_text("| cell |"), r"\| cell |");
+        assert_eq!(escape_markdown_text("heading\n===="), "heading\n\\====");
+
+        let mut state = MarkdownTextEscapeState::default();
+        assert_eq!(
+            escape_markdown_text_with_state("heading\n=", &mut state),
+            "heading\n\\="
+        );
+        assert_eq!(escape_markdown_text_with_state("===", &mut state), "===");
     }
 }

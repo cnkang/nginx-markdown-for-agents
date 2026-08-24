@@ -3,6 +3,53 @@
 from tools.release.gates import validate_release_gates_090 as validator
 
 
+def _write_reason_count_fixture(tmp_path, *, c_count=27, declared_count=None):
+    """Create the generated Rust/C reason-count boundary used by the gate."""
+    declared_count = c_count if declared_count is None else declared_count
+    rust_path = (
+        tmp_path
+        / "components/rust-converter/src/decision/reason_code.rs"
+    )
+    c_path = tmp_path / "components/nginx-module/src/markdown_reason_meta.h"
+    rust_path.parent.mkdir(parents=True)
+    c_path.parent.mkdir(parents=True)
+    rust_path.write_text(
+        "pub const REASON_CODE_COUNT: usize = 27;\n", encoding="utf-8"
+    )
+    entries = "\n".join(
+        f"#define MARKDOWN_REASON_CODE_CODE_{index} {index}"
+        for index in range(c_count)
+    )
+    c_path.write_text(
+        f"#define MARKDOWN_REASON_META_COUNT {declared_count}\n{entries}\n",
+        encoding="utf-8",
+    )
+
+
+def test_reason_code_count_accepts_generated_c_metadata(tmp_path):
+    """The legacy gate must read the generated C reason projection."""
+    _write_reason_count_fixture(tmp_path)
+
+    result = validator.check_reason_code_count(tmp_path)
+
+    assert result == {
+        "name": "reason_code_count",
+        "status": "pass",
+        "details": {"count": 27},
+    }
+
+
+def test_reason_code_count_rejects_generated_c_metadata_drift(tmp_path):
+    """A generated C count mismatch must fail the legacy regression gate."""
+    _write_reason_count_fixture(tmp_path, c_count=26, declared_count=27)
+
+    result = validator.check_reason_code_count(tmp_path)
+
+    assert result["name"] == "reason_code_count"
+    assert result["status"] == "fail"
+    assert "declared=27, entries=26" in result["message"]
+
+
 def test_production_examples_reject_default_gzip_type_redeclaration(tmp_path):
     """NGINX warns when gzip_types redundantly lists its text/html default."""
     examples = tmp_path / "examples/production"
@@ -22,14 +69,14 @@ def test_production_examples_reject_default_gzip_type_redeclaration(tmp_path):
 
 def test_diagnostics_schema_gate_rejects_docs_only_contract(tmp_path):
     """Documentation cannot substitute for the production C emission."""
-    docs = tmp_path / "docs/architecture/observability-schema-v1.md"
+    docs = tmp_path / "docs/architecture/observability-schema-v2.md"
     renderer = (
         tmp_path
         / "components/nginx-module/src/ngx_http_markdown_diagnostics.c"
     )
     docs.parent.mkdir(parents=True)
     renderer.parent.mkdir(parents=True)
-    docs.write_text("`schema_version` is the integer `1`.\n")
+    docs.write_text("`schema_version`: integer constant `1`.\n")
     renderer.write_text(
         r'p = ngx_slprintf(p, last, "  \"schema_version\": 2,\n");'
         "\n"
@@ -37,9 +84,58 @@ def test_diagnostics_schema_gate_rejects_docs_only_contract(tmp_path):
 
     result = validator.check_diagnostics_schema_version(tmp_path)
 
-    assert result["name"] == "diagnostics_schema_v1"
+    assert result["name"] == "diagnostics_schema_v2"
     assert result["status"] == "fail"
     assert "production C renderer" in result["message"]
+
+
+def test_diagnostics_schema_gate_finds_schema_key_after_other_json_keys(tmp_path):
+    """The schema marker may occur anywhere in the emitted JSON object."""
+    docs = tmp_path / "docs/architecture/observability-schema-v2.md"
+    renderer = (
+        tmp_path
+        / "components/nginx-module/src/ngx_http_markdown_diagnostics.c"
+    )
+    docs.parent.mkdir(parents=True)
+    renderer.parent.mkdir(parents=True)
+    docs.write_text("`schema_version`: integer constant `1`.\n")
+    renderer.write_text(
+        r'p = ngx_slprintf(p, last, "{\"product_version\":\"0.9.2\",'
+        r'\"schema_version\":1}");' + "\n"
+    )
+
+    result = validator.check_diagnostics_schema_version(tmp_path)
+
+    assert result == {
+        "name": "diagnostics_schema_v2",
+        "status": "pass",
+    }
+
+
+def test_diagnostics_schema_gate_accepts_active_v2_contract(tmp_path):
+    """The historical gate must accept the active 0.9.2 schema version."""
+    docs = tmp_path / "docs/architecture/observability-schema-v2.md"
+    renderer = (
+        tmp_path
+        / "components/nginx-module/src/ngx_http_markdown_diagnostics.c"
+    )
+    docs.parent.mkdir(parents=True)
+    renderer.parent.mkdir(parents=True)
+    docs.write_text(
+        "The 0.9.0 contract documented `schema_version 1`.\n"
+        "`schema_version`: integer constant `2`.\n"
+    )
+    renderer.write_text(
+        r'p = ngx_slprintf(p, last, "{\"schema_version\":2,\"product_version\":\"0.9.2\"}");'
+        "\n"
+    )
+
+    result = validator.check_diagnostics_schema_version(tmp_path)
+
+    assert result == {
+        "name": "diagnostics_schema_v2",
+        "status": "pass",
+    }
 
 
 def test_no_stale_symbols_gate_passes_without_diagnostics(monkeypatch, tmp_path):
@@ -78,3 +174,49 @@ def test_no_stale_symbols_gate_reports_tail_of_stdout_and_stderr(
     assert result["message"] == "\n".join(
         ["finding-4", "finding-5", "finding-6", "finding-7", "read-error"]
     )
+
+
+def test_inflight_guard_accepts_effective_error_status(tmp_path):
+    """The 0.9.2 runtime policy must satisfy the legacy regression gate."""
+    inflight = (
+        tmp_path
+        / "components/nginx-module/src/ngx_http_markdown_inflight_impl.h"
+    )
+    request_impl = (
+        tmp_path
+        / "components/nginx-module/src/ngx_http_markdown_request_impl.h"
+    )
+    inflight.parent.mkdir(parents=True)
+    request_impl.parent.mkdir(parents=True, exist_ok=True)
+    inflight.write_text("/* inflight guard */\n")
+    request_impl.write_text(
+        "return ngx_http_markdown_effective_error_status("
+        "ctx->effective_conf, conf);\n"
+    )
+
+    result = validator.check_inflight_guard(tmp_path)
+
+    assert result == {"name": "inflight_guard", "status": "pass"}
+
+
+def test_removed_directive_gate_expands_canonical_name_macros(tmp_path):
+    """Removed-directive checks must inspect macro-backed command entries."""
+    directives = tmp_path / "components/nginx-module/src"
+    directives.mkdir(parents=True)
+    (directives / "ngx_http_markdown_config_directives_impl.h").write_text(
+        "static ngx_command_t ngx_http_markdown_filter_commands[] = {\n"
+        "    ngx_string(NGX_HTTP_MARKDOWN_DIRECTIVE_REMOVED),\n"
+        "};\n"
+    )
+    (directives / "ngx_http_markdown_directive_names.h").write_text(
+        '#define NGX_HTTP_MARKDOWN_DIRECTIVE_REMOVED \\\n'
+        '    "markdown_max_size"\n'
+    )
+    migration = tmp_path / "docs/guides/MIGRATION-0.9.md"
+    migration.parent.mkdir(parents=True)
+    migration.write_text("markdown_memory_budget\n")
+
+    result = validator.check_config_v2_removed_directives(tmp_path)
+
+    assert result["status"] == "fail"
+    assert "markdown_max_size" in result["message"]

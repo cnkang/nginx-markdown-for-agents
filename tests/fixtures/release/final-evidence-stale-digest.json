@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "candidate_sha": "0000000000000000000000000000000000000000",
+  "evidence_schema_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "observation_schema_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "generated_at": "2026-08-05T14:00:00Z",
+  "entries": [
+    {
+      "domain": "coverage",
+      "blocking": true,
+      "status": "pass",
+      "artifact_ref": "artifacts/release/0.9.2/unit-test-report.json"
+    },
+    {
+      "domain": "fuzz",
+      "blocking": true,
+      "status": "pass",
+      "artifact_ref": "artifacts/release/0.9.2/fuzz-qualification-record.json"
+    },
+    {
+      "domain": "soak",
+      "blocking": true,
+      "status": "pass",
+      "artifact_ref": "artifacts/release/0.9.2/soak-qualification-record.json"
+    }
+  ],
+  "run_status": "pass"
+}

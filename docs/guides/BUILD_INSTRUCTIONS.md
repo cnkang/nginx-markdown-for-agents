@@ -17,7 +17,7 @@ The top-level `Makefile` currently targets macOS on:
 - Apple Silicon (`arm64` -> `aarch64-apple-darwin`)
 - Intel (`x86_64` -> `x86_64-apple-darwin`)
 
-The build target is selected automatically from `uname -m`.
+The build script selects the target automatically from `uname -m`.
 
 ## Prerequisites
 
@@ -42,7 +42,7 @@ rustup target add x86_64-apple-darwin
 
 **2. cbindgen**
 
-`cbindgen` is required to generate the C header used by the NGINX module.
+The build requires `cbindgen` to generate the C header used by the NGINX module.
 
 ```bash
 cargo install cbindgen --version 0.29.2 --locked
@@ -88,6 +88,16 @@ Available targets include:
 - `make sonar-compile-db` - Generate `compile_commands.json` for SonarQube C/C++ analysis (local + CI)
 - `make clean` - Clean Rust and selected NGINX module test artifacts
 
+CI generates release and performance evidence under `artifacts/`. Git ignores
+this directory except for the six frozen 0.9.2 contract artifacts that release
+gates require checked in (`artifacts/release/0.9.2/{reason-registry-report,generated-reason-artifacts,official-build-feature-manifest,metrics-registry,diagnostics-field-contract,dynconf-precedence-report}.json` —
+see the `artifacts/*` whitelist in `.gitignore`). Commit only these six files.
+All other generated evidence and any local copies must never enter the
+repository. CI validates generated evidence against checked-in source and
+schema before upload. The canonical module
+benchmark environment stays tracked as source configuration in
+`release/performance/canonical-environment.json`.
+
 ## SonarQube C/C++ Compilation Database
 
 If SonarQube for VS Code shows:
@@ -108,12 +118,12 @@ This command:
 - builds the module with a compiler wrapper
 - writes `compile_commands.json` to the repository root
 
-After generation, reload VS Code (or run the SonarQube embedded action to switch compilation database) and ensure the active database is:
+After generation, reload VS Code (or run the SonarQube embedded action) to switch compilation databases. Ensure the active database is:
 
 - `<workspace>/compile_commands.json`
 
 Do not commit `compile_commands.json`.
-It is a generated build artifact and is ignored by git.
+It is a generated build artifact and git ignores it.
 
 ### CI-based SonarCloud analysis
 
@@ -131,7 +141,7 @@ Required repository secret:
 
 - `SONAR_TOKEN`
 
-If `SONAR_TOKEN` is not set (for example fork PRs), the Sonar job is skipped.
+If `SONAR_TOKEN` is not set (for example fork PRs), the Sonar job skips.
 
 Optional script flags:
 
@@ -327,5 +337,7 @@ After building successfully:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.2 | 2026-08-24 | Kang | Clarified that only the six frozen contract artifacts may be committed under artifacts/release/0.9.2 |
+| 0.9.2 | 2026-08-15 | Hermes | State explicitly that Git ignores generated evidence under artifacts/ |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

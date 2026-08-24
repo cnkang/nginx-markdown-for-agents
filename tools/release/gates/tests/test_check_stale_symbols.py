@@ -21,6 +21,40 @@ def test_stale_symbol_check_ignores_whitelisted_migration_docs(tmp_path):
     assert stderr == ""
 
 
+def test_stale_symbol_check_ignores_breaking_changes_guide(tmp_path):
+    """The versioned breaking-changes guide is migration history, not live config."""
+    repo = tmp_path
+    (repo / "docs/guides").mkdir(parents=True)
+    (repo / "docs/guides/0.9.2-breaking-changes.md").write_text(
+        "markdown_timeout\n"
+    )
+    subprocess.run(_git_cmd() + ["init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(_git_cmd() + ["add", "."], cwd=repo, check=True)
+
+    exit_code, stdout, stderr = check_stale_symbols.run_stale_symbol_check(repo)
+
+    assert exit_code == 0
+    assert stdout == "No stale pre-0.9.0 symbols found."
+    assert stderr == ""
+
+
+def test_stale_symbol_check_ignores_public_surface_inventory(tmp_path):
+    """The inventory may list retired directives as explicit migration data."""
+    repo = tmp_path
+    (repo / "docs/harness").mkdir(parents=True)
+    (repo / "docs/harness/public-surface-inventory.json").write_text(
+        '{"reject_only_directives": [{"name": "markdown_timeout"}]}\n'
+    )
+    subprocess.run(_git_cmd() + ["init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(_git_cmd() + ["add", "."], cwd=repo, check=True)
+
+    exit_code, stdout, stderr = check_stale_symbols.run_stale_symbol_check(repo)
+
+    assert exit_code == 0
+    assert stdout == "No stale pre-0.9.0 symbols found."
+    assert stderr == ""
+
+
 def test_stale_symbol_check_fails_on_non_whitelisted_guide(tmp_path):
     """Non-whitelisted guide docs with stale symbols should fail."""
     repo = tmp_path
@@ -40,8 +74,8 @@ def test_stale_symbol_check_fails_on_non_whitelisted_guide(tmp_path):
 def test_stale_symbol_check_fails_on_release_surface_leak(tmp_path):
     """Stale 0.8 symbols in checked 0.9 release surfaces should fail."""
     repo = tmp_path
-    (repo / "docs/release").mkdir(parents=True)
-    (repo / "docs/release/current.md").write_text("markdown_timeout\n")
+    (repo / "docs/releases").mkdir(parents=True)
+    (repo / "docs/releases/current-0.9.md").write_text("markdown_timeout\n")
     subprocess.run(_git_cmd() + ["init"], cwd=repo, check=True, capture_output=True)
     subprocess.run(_git_cmd() + ["add", "."], cwd=repo, check=True)
 
@@ -49,7 +83,7 @@ def test_stale_symbol_check_fails_on_release_surface_leak(tmp_path):
 
     assert exit_code == 1
     assert "STALE SYMBOLS DETECTED" in stdout
-    assert "docs/release/current.md:1:markdown_timeout" in stdout
+    assert "docs/releases/current-0.9.md:1:markdown_timeout" in stdout
     assert stderr == ""
 
 

@@ -30,8 +30,7 @@
 //! base URL decision (`markdown_decide_base_url`), bounded decompression
 //! (`markdown_decompress_bounded`, `markdown_decompress_free`,
 //! `markdown_decomp_result_init`), conflict detection/release
-//! (`markdown_detect_conflicts`, `markdown_free_conflicts`), option/result
-//! init helpers (`markdown_options_init`), and
+//! option/result init helpers (`markdown_options_init`), and
 //! error classification (`markdown_classify_error_code`).  Incremental
 //! and streaming FFI exports live in `ffi/incremental.rs` and
 //! `ffi/streaming.rs`.  The table below lists the primary entry points;
@@ -61,15 +60,16 @@ use super::abi::{
     TRUSTED_PROXIES_PUSH_OK,
 };
 use super::abi::{
-    DECOMP_CATEGORY_INVALID_ARGS, DECOMP_CATEGORY_IO_ERROR, ERROR_INTERNAL, FFIAcceptResult,
-    FFIDecompResult, FFIEligibilityInput, FFIHeaderEntry, FFIHeaderPlan, FFIHeaderPlanHandle,
-    FFIStr, MARKDOWN_ABI_VERSION, MarkdownConverterHandle, MarkdownOptions, MarkdownResult,
-    NEGOTIATE_REASON_CONVERT, NEGOTIATE_REASON_EXPLICIT_REJECT, NEGOTIATE_REASON_LOWER_Q,
+    DECOMP_CATEGORY_BUDGET_EXCEEDED, DECOMP_CATEGORY_FORMAT_ERROR, DECOMP_CATEGORY_INVALID_ARGS,
+    DECOMP_CATEGORY_IO_ERROR, DECOMP_CATEGORY_RATIO_EXCEEDED, DECOMP_CATEGORY_TRUNCATED_INPUT,
+    ENCODING_CHAIN_DEPTH_EXCEEDED, ENCODING_CHAIN_INVALID_ARGS, ENCODING_CHAIN_MALFORMED,
+    ENCODING_CHAIN_UNKNOWN_TOKEN, ENCODING_CHAIN_VALID, ERROR_INTERNAL, FFIAcceptResult,
+    FFIChainDecodeResult, FFIDecompResult, FFIEligibilityInput, FFIEncodingChainResult,
+    FFIHeaderEntry, FFIHeaderPlan, FFIHeaderPlanHandle, FFIStr, MARKDOWN_ABI_VERSION,
+    MARKDOWN_HEADER_HASH, MARKDOWN_LAYOUT_FINGERPRINT, MARKDOWN_SYMBOL_SET_HASH,
+    MarkdownConverterHandle, MarkdownOptions, MarkdownResult, NEGOTIATE_REASON_CONVERT,
+    NEGOTIATE_REASON_EXPLICIT_REJECT, NEGOTIATE_REASON_INTERNAL_ERROR, NEGOTIATE_REASON_LOWER_Q,
     NEGOTIATE_REASON_MALFORMED, NEGOTIATE_REASON_NO_ACCEPT,
-};
-use super::abi::{
-    FFI_CONFIG_NOT_SET_U8, FFI_CONFIG_NOT_SET_U32, FFI_CONFIG_NOT_SET_U64, FFIConflict,
-    FFIConflictLevel, FFIConflictList, FFIEffectiveConfig, FFIExplicitConfig,
 };
 use super::abi::{FFIConditionalDecision, FFIConditionalInput};
 use super::convert::convert_inner;
@@ -79,15 +79,12 @@ use crate::decision::conditional::{
     CacheValidation, ConditionalInput, ConditionalOutcome, decide_conditional,
 };
 use crate::decision::eligibility::{Eligibility, EligibilityInput, decide_eligibility};
-use crate::decision::streaming::StreamingPolicy;
 use crate::forwarded::{BaseUrlInput, BaseUrlReason, BaseUrlSource, decide_base_url, parse_cidr};
 
 #[cfg(test)]
 thread_local! {
     static TEST_PANIC_TAG: std::cell::Cell<Option<&'static str>> =
         const { std::cell::Cell::new(None) };
-    static TEST_CONFLICT_MESSAGES_LIVE: std::cell::Cell<usize> =
-        const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -107,39 +104,10 @@ fn test_should_panic(tag: &'static str) -> bool {
     })
 }
 
-#[cfg(test)]
-fn test_conflict_message_created() {
-    TEST_CONFLICT_MESSAGES_LIVE.with(|live| live.set(live.get() + 1));
-}
-
-#[cfg(test)]
-fn test_conflict_message_dropped() {
-    TEST_CONFLICT_MESSAGES_LIVE.with(|live| live.set(live.get() - 1));
-}
-
-#[cfg(test)]
-fn test_conflict_messages_live() -> usize {
-    TEST_CONFLICT_MESSAGES_LIVE.with(std::cell::Cell::get)
-}
-
 struct HeaderPlanOwned {
     entries: Vec<FFIHeaderEntry>,
     key_storage: Vec<Box<[u8]>>,
     value_storage: Vec<Box<[u8]>>,
-}
-
-struct PendingConflictMessage {
-    level: FFIConflictLevel,
-    bytes: Option<Box<[u8]>>,
-}
-
-impl Drop for PendingConflictMessage {
-    fn drop(&mut self) {
-        #[cfg(test)]
-        if self.bytes.is_some() {
-            test_conflict_message_dropped();
-        }
-    }
 }
 
 /// Return the bundled Rust/C boundary version.
@@ -151,6 +119,34 @@ impl Drop for PendingConflictMessage {
 #[unsafe(no_mangle)]
 pub extern "C" fn markdown_abi_version() -> u32 {
     MARKDOWN_ABI_VERSION
+}
+
+/// Return the generated-header identity hash.
+///
+/// This accessor is intentionally trivial and panic-free. Part of the
+/// 4-tuple ABI handshake: (numeric_abi_version, header_hash,
+/// symbol_set_hash, layout_fingerprint).
+#[unsafe(no_mangle)]
+pub extern "C" fn markdown_abi_header_hash() -> u64 {
+    MARKDOWN_HEADER_HASH
+}
+
+/// Return the exported-symbol-set hash.
+///
+/// This accessor is intentionally trivial and panic-free. Part of the
+/// 4-tuple ABI handshake.
+#[unsafe(no_mangle)]
+pub extern "C" fn markdown_abi_symbol_set_hash() -> u64 {
+    MARKDOWN_SYMBOL_SET_HASH
+}
+
+/// Return the ABI struct layout fingerprint.
+///
+/// This accessor is intentionally trivial and panic-free. Part of the
+/// 4-tuple ABI handshake.
+#[unsafe(no_mangle)]
+pub extern "C" fn markdown_abi_layout_fingerprint() -> u64 {
+    MARKDOWN_LAYOUT_FINGERPRINT
 }
 
 /// Allocate a new converter handle for use across multiple FFI calls.
@@ -209,6 +205,7 @@ pub unsafe extern "C" fn markdown_convert(
         // SAFETY: Pointers originate from the C caller who upholds the FFI
         // contract documented in this function's # Safety section.
         let handle_ref = unsafe { required_ref(handle.cast_const(), "Converter handle") }?;
+        handle_ref.assert_thread_owner();
         let options_ref = unsafe { required_ref(options, "Options") }?;
         let html_slice = unsafe { required_bytes(html, html_len, "HTML") }?;
         convert_inner(handle_ref, html_slice, options_ref)
@@ -268,6 +265,7 @@ pub unsafe extern "C" fn markdown_converter_free(handle: *mut MarkdownConverterH
 
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
         // SAFETY: `handle` was validated as non-NULL above and originated from `Box::into_raw`.
+        unsafe { (&*handle).assert_thread_owner() };
         unsafe { drop(Box::from_raw(handle)) };
     }));
 }
@@ -307,7 +305,7 @@ pub unsafe extern "C" fn markdown_negotiate_accept(
 
     // Defense-in-depth: negotiate() operates on borrowed &str and is panic-free
     // by design, but a panic must never unwind into C. On panic we default to
-    // "do not convert" with MALFORMED reason (safe fail-open outcome).
+    // "do not convert" with a distinct internal-error reason.
     let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
         let header_str = if accept_header.is_null() || accept_header_len == 0 {
             ""
@@ -346,7 +344,7 @@ pub unsafe extern "C" fn markdown_negotiate_accept(
 
     if outcome.is_err() {
         result_ref.should_convert = 0;
-        result_ref.reason = NEGOTIATE_REASON_MALFORMED;
+        result_ref.reason = NEGOTIATE_REASON_INTERNAL_ERROR;
     }
 }
 
@@ -773,13 +771,27 @@ pub unsafe extern "C" fn markdown_decide_base_url(
         let inp = unsafe { &*input };
 
         let source_ip = unsafe { optional_str(inp.source_ip, inp.source_ip_len) }.unwrap_or("");
-        let forwarded = unsafe { optional_str(inp.forwarded, inp.forwarded_len) };
+        let forwarded = unsafe { optional_str_present(inp.forwarded, inp.forwarded_len) }.ok()?;
+        // Auxiliary forwarded fields tolerate malformed UTF-8: an invalid
+        // x_forwarded_* / host value is treated as absent so a single bad
+        // header cannot abort the whole decision.  `forwarded` and
+        // `direct_scheme` remain fail-closed above because they carry the
+        // trusted-proxy precedence contract.
+        let x_forwarded_for =
+            unsafe { optional_str_present(inp.x_forwarded_for, inp.x_forwarded_for_len) }
+                .unwrap_or(None);
         let x_forwarded_proto =
-            unsafe { optional_str(inp.x_forwarded_proto, inp.x_forwarded_proto_len) };
+            unsafe { optional_str_present(inp.x_forwarded_proto, inp.x_forwarded_proto_len) }
+                .unwrap_or(None);
         let x_forwarded_host =
-            unsafe { optional_str(inp.x_forwarded_host, inp.x_forwarded_host_len) };
-        let host = unsafe { optional_str(inp.host, inp.host_len) };
-        let direct_scheme = unsafe { optional_str(inp.direct_scheme, inp.direct_scheme_len) };
+            unsafe { optional_str_present(inp.x_forwarded_host, inp.x_forwarded_host_len) }
+                .unwrap_or(None);
+        let x_forwarded_port =
+            unsafe { optional_str_present(inp.x_forwarded_port, inp.x_forwarded_port_len) }
+                .unwrap_or(None);
+        let host = unsafe { optional_str_present(inp.host, inp.host_len) }.unwrap_or(None);
+        let direct_scheme =
+            unsafe { optional_str_present(inp.direct_scheme, inp.direct_scheme_len) }.ok()?;
 
         let cidrs: &[crate::forwarded::Cidr] = if inp.trusted.is_null() {
             &[]
@@ -793,8 +805,10 @@ pub unsafe extern "C" fn markdown_decide_base_url(
             is_unix_socket: inp.is_unix_socket != 0,
             trusted_configured: inp.trusted_configured != 0,
             forwarded,
+            x_forwarded_for,
             x_forwarded_proto,
             x_forwarded_host,
+            x_forwarded_port,
             host,
             direct_scheme,
         };
@@ -878,6 +892,23 @@ unsafe fn optional_str<'a>(ptr: *const u8, len: usize) -> Option<&'a str> {
     std::str::from_utf8(unsafe { std::slice::from_raw_parts(ptr, len) }).ok()
 }
 
+/// Convert a C pointer + length pair while preserving a present empty value.
+///
+/// This variant distinguishes a NULL pointer (absent field) from a non-NULL
+/// zero-length pointer (present but empty field), as required by the trusted
+/// proxy header precedence contract.
+unsafe fn optional_str_present<'a>(ptr: *const u8, len: usize) -> Result<Option<&'a str>, ()> {
+    if ptr.is_null() {
+        return Ok(None);
+    }
+    if len == 0 {
+        return Ok(Some(""));
+    }
+    std::str::from_utf8(unsafe { std::slice::from_raw_parts(ptr, len) })
+        .map(Some)
+        .map_err(|_| ())
+}
+
 /// Initialize a `MarkdownOptions` struct with sensible defaults.
 ///
 /// C callers **MUST** use this function instead of `memset(&opts, 0, sizeof(opts))`
@@ -897,8 +928,6 @@ unsafe fn optional_str<'a>(ptr: *const u8, len: usize) -> Option<&'a str> {
 /// - `streaming_budget`: 0 (use engine default)
 /// - `prune_noise`: 0 (disabled)
 /// - `memory_budget`: 0 (use per-engine defaults)
-/// - `llm_provider`: 0 (default)
-/// - `chars_per_token_fixed`: 0 (use default ratio)
 /// - `parse_timeout_ms`: 0 (fall back to `timeout_ms`)
 /// - `parser_memory_budget`: 0 (no per-handle limit; use engine default)
 /// - `flush_threshold`: 0 (use default streaming flush threshold)
@@ -953,6 +982,25 @@ pub unsafe extern "C" fn markdown_header_plan_init(result: *mut FFIHeaderPlan) {
     unsafe { ptr::write(result, std::mem::zeroed()) };
 }
 
+/// Zero-initialize an `FFIBaseUrlInput` snapshot.
+///
+/// The input contains only borrowed pointers and lengths.  Initializing it
+/// through this helper makes the NULL/zero pairing explicit before callers
+/// fill selected request-header fields and prevents stale stack bytes from
+/// crossing the FFI boundary.
+///
+/// # Safety
+///
+/// The caller must ensure that `result` points to writable storage for an
+/// `FFIBaseUrlInput`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_base_url_input_init(result: *mut FFIBaseUrlInput) {
+    if result.is_null() {
+        return;
+    }
+    unsafe { ptr::write(result, std::mem::zeroed()) };
+}
+
 /// Perform bounded decompression of compressed input data.
 ///
 /// Decompresses the input using the specified format (gzip, deflate, or brotli)
@@ -966,7 +1014,7 @@ pub unsafe extern "C" fn markdown_header_plan_init(result: *mut FFIHeaderPlan) {
 /// # Format Codes
 ///
 /// - `0` = gzip (RFC 1952)
-/// - `1` = deflate (RFC 1951)
+/// - `1` = zlib-wrapped deflate (RFC 1950 carrying RFC 1951 data)
 /// - `2` = brotli (RFC 7932)
 ///
 /// # Return Value
@@ -993,16 +1041,20 @@ pub unsafe extern "C" fn markdown_decompress_bounded(
     input_len: usize,
     format: u8,
     budget: usize,
+    ratio: u64,
     result: *mut FFIDecompResult,
 ) -> u32 {
     if result.is_null() {
         return DECOMP_CATEGORY_INVALID_ARGS;
     }
 
+    // Zero-initialize the caller-provided storage before touching it (the
+    // same pattern as markdown_parse_encoding_chain and the other FFI entry
+    // points).  Callers that reuse a result structure must release a
+    // previous output with markdown_decompress_free first; freeing the
+    // previous output here would read potentially uninitialized fields.
+    unsafe { ptr::write(result, std::mem::zeroed()) };
     let result_ref = unsafe { &mut *result };
-    // Initialize result to safe defaults
-    result_ref.output = ptr::null_mut();
-    result_ref.output_len = 0;
     result_ref.error_category = 0;
 
     // Validate format
@@ -1036,7 +1088,7 @@ pub unsafe extern "C" fn markdown_decompress_bounded(
     // return Err on bad input, a panic here would unwind into C (UB). On
     // panic we report a generic io_error category and emit no output.
     let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        crate::decompress::decompress_bounded(input_slice, fmt, budget)
+        crate::decompress::decompress_bounded(input_slice, fmt, budget, ratio)
     }));
     match outcome {
         Ok(Ok(decomp_result)) => {
@@ -1120,261 +1172,379 @@ pub unsafe extern "C" fn markdown_decomp_result_init(result: *mut FFIDecompResul
     unsafe { ptr::write(result, std::mem::zeroed()) };
 }
 
-// ─── Profile conflict detection FFI (spec 50, 0.9.0) ─────────────────────────
+// ─── Content-Encoding chain FFI ─────────────────────────────────────────────
 
-/// Detect configuration conflicts between a profile, explicit directives, and
-/// the effective configuration.
+/// Parse a concatenated Content-Encoding header value into an encoding chain.
 ///
-/// This is the primary FFI entry point for `nginx -t` validation. The C side
-/// calls this after computing the effective config via its own merge logic,
-/// passing the profile selector, the explicitly-set directive flags, and the
-/// fully-resolved effective config.
+/// The C caller concatenates repeated Content-Encoding header fields in
+/// received field order before calling; this function applies the full
+/// comma-separated grammar of Requirement 12.1.
 ///
-/// Returns an [`FFIConflictList`] that the caller must free with
-/// [`markdown_free_conflicts`]. If no conflicts are detected, the returned
-/// list has `count == 0` and `conflicts == NULL` (Rule 53).
+/// On success (`ENCODING_CHAIN_VALID`), the result carries the non-identity
+/// decoder list in application order (identity tokens removed after
+/// validation) plus an identity-presence flag for audit purposes.
 ///
-/// On NULL input pointers or on a caught panic, returns an empty conflict list
-/// (the safe fail-open outcome: no spurious errors reported).
+/// On `ENCODING_CHAIN_MALFORMED` the C caller must emit the canonical
+/// `ENCODING_HEADER_INVALID` reason (`stage=decompression`,
+/// `error_origin=format`) during outer precommit routing, start no decoder,
+/// and mutate no response header. `ENCODING_CHAIN_UNKNOWN_TOKEN` and
+/// `ENCODING_CHAIN_DEPTH_EXCEEDED` are parser classifications routed by
+/// the C precommit router through the configured error policy (reject or
+/// fail-open), like the malformed case, using the decompression-format
+/// reason code.
+///
+/// # Return Value
+///
+/// Returns one of the `ENCODING_CHAIN_*` classification constants, or
+/// `ENCODING_CHAIN_INVALID_ARGS` (4) when a NULL pointer is paired with a
+/// non-zero length.
 ///
 /// # Safety
 ///
 /// The caller must ensure that:
-/// - `profile` is a valid `FFIProfile` discriminant (0–3)
-/// - `explicit` is NULL or points to a readable `FFIExplicitConfig`
-/// - `effective` is NULL or points to a readable `FFIEffectiveConfig`
+/// - `value` points to at least `value_len` readable bytes; NULL with
+///   non-zero length returns `ENCODING_CHAIN_INVALID_ARGS`
+/// - `result` points to writable storage for an `FFIEncodingChainResult`
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn markdown_detect_conflicts(
-    profile: u8,
-    explicit: *const FFIExplicitConfig,
-    effective: *const FFIEffectiveConfig,
-) -> FFIConflictList {
-    let empty_list = || FFIConflictList {
-        conflicts: ptr::null_mut(),
-        count: 0,
+pub unsafe extern "C" fn markdown_parse_encoding_chain(
+    value: *const u8,
+    value_len: usize,
+    result: *mut FFIEncodingChainResult,
+) -> u8 {
+    if result.is_null() {
+        return ENCODING_CHAIN_INVALID_ARGS;
+    }
+    // Initialize the caller-provided output storage before creating a
+    // mutable reference (same pattern as markdown_build_header_plan and
+    // the other FFI export entry points).
+    unsafe { ptr::write(result, std::mem::zeroed()) };
+    let result_ref = unsafe { &mut *result };
+    reset_encoding_chain_result(result_ref);
+
+    let value_slice = match unsafe { encoding_chain_value_slice(value, value_len) } {
+        Ok(value_slice) => value_slice,
+        Err(code) => {
+            result_ref.classification = code;
+            return code;
+        }
     };
 
-    // NULL input validation (Rule 46)
-    if explicit.is_null() || effective.is_null() {
-        return empty_list();
+    if value_slice.is_empty() {
+        /* The C caller invokes this only for a present field.  A present
+         * empty field is malformed grammar; an absent field never crosses
+         * this boundary because the C collector returns NGX_DECLINED. */
+        result_ref.classification = ENCODING_CHAIN_MALFORMED;
+        return ENCODING_CHAIN_MALFORMED;
     }
 
     let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        // Convert FFIProfile discriminant to Option<Profile>
-        let rust_profile = match profile {
-            1 => Some(crate::config::profile::Profile::StrictCache),
-            2 => Some(crate::config::profile::Profile::Balanced),
-            3 => Some(crate::config::profile::Profile::StreamingFirst),
-            _ => None, // 0 (None) or unknown
-        };
-
-        // SAFETY: validated non-NULL above.
-        let ffi_explicit = unsafe { &*explicit };
-        let ffi_effective = unsafe { &*effective };
-
-        // Convert FFIExplicitConfig → ExplicitConfig
-        use crate::config::merge::ExplicitConfig;
-        use crate::config::profile::{AcceptMode, ErrorPolicy};
-
-        let rust_explicit = ExplicitConfig {
-            accept: if ffi_explicit.accept == FFI_CONFIG_NOT_SET_U8 {
-                None
-            } else {
-                Some(AcceptMode::from_u8(ffi_explicit.accept))
-            },
-            cache_validation: if ffi_explicit.cache_validation == FFI_CONFIG_NOT_SET_U8 {
-                None
-            } else {
-                Some(CacheValidation::from_u8(ffi_explicit.cache_validation))
-            },
-            streaming: if ffi_explicit.streaming == FFI_CONFIG_NOT_SET_U8 {
-                None
-            } else {
-                Some(StreamingPolicy::from_u8(ffi_explicit.streaming))
-            },
-            limits_memory_bytes: if ffi_explicit.limits_memory_bytes == FFI_CONFIG_NOT_SET_U64 {
-                None
-            } else {
-                Some(ffi_explicit.limits_memory_bytes)
-            },
-            limits_timeout_ms: if ffi_explicit.limits_timeout_ms == FFI_CONFIG_NOT_SET_U64 {
-                None
-            } else {
-                Some(ffi_explicit.limits_timeout_ms)
-            },
-            limits_streaming_buffer_bytes: if ffi_explicit.limits_streaming_buffer_bytes
-                == FFI_CONFIG_NOT_SET_U64
-            {
-                None
-            } else {
-                Some(ffi_explicit.limits_streaming_buffer_bytes)
-            },
-            limits_max_inflight: if ffi_explicit.limits_max_inflight == FFI_CONFIG_NOT_SET_U32 {
-                None
-            } else {
-                Some(ffi_explicit.limits_max_inflight)
-            },
-            error_policy: if ffi_explicit.error_policy == FFI_CONFIG_NOT_SET_U8 {
-                None
-            } else {
-                Some(ErrorPolicy::from_u8(ffi_explicit.error_policy))
-            },
-            diagnostics: if ffi_explicit.diagnostics == FFI_CONFIG_NOT_SET_U8 {
-                None
-            } else {
-                Some(ffi_explicit.diagnostics != 0)
-            },
-        };
-
-        // Convert FFIEffectiveConfig → EffectiveConfig
-        use crate::config::merge::EffectiveConfig;
-
-        let rust_effective = EffectiveConfig {
-            accept: AcceptMode::from_u8(ffi_effective.accept),
-            cache_validation: CacheValidation::from_u8(ffi_effective.cache_validation),
-            streaming: StreamingPolicy::from_u8(ffi_effective.streaming),
-            limits_memory_bytes: ffi_effective.limits_memory_bytes,
-            limits_timeout_ms: ffi_effective.limits_timeout_ms,
-            limits_streaming_buffer_bytes: ffi_effective.limits_streaming_buffer_bytes,
-            limits_max_inflight: ffi_effective.limits_max_inflight,
-            error_policy: ErrorPolicy::from_u8(ffi_effective.error_policy),
-            diagnostics: ffi_effective.diagnostics != 0,
-        };
-
-        // Run conflict detection
-        let conflicts = crate::config::conflict::detect_conflicts(
-            rust_profile,
-            &rust_explicit,
-            &rust_effective,
-        );
-
-        if conflicts.is_empty() {
-            return empty_list();
-        }
-
-        // Convert Vec<Conflict> → FFIConflictList
-        let count = conflicts.len();
-
-        // Keep every message under Rust ownership until the message array and
-        // FFI array are both complete. A panic during either allocation phase
-        // therefore drops all pending boxes instead of leaking buffers.
-        let mut pending = Vec::with_capacity(count);
-        for conflict in &conflicts {
-            let level = match conflict.level {
-                crate::config::conflict::ConflictLevel::Error => FFIConflictLevel::Error,
-                crate::config::conflict::ConflictLevel::Warning => FFIConflictLevel::Warning,
-            };
-            pending.push(PendingConflictMessage {
-                level,
-                bytes: Some(conflict.message.as_bytes().to_vec().into_boxed_slice()),
-            });
-            #[cfg(test)]
-            test_conflict_message_created();
-            #[cfg(test)]
-            if test_should_panic("detect_conflicts_after_message") {
-                panic!("test-injected panic while conflict messages remain guarded");
-            }
-        }
-
-        let ffi_conflicts = pending
-            .iter()
-            .map(|message| {
-                let bytes = message.bytes.as_deref().unwrap_or_default();
-                FFIConflict {
-                    level: message.level,
-                    message: if bytes.is_empty() {
-                        ptr::null()
-                    } else {
-                        bytes.as_ptr()
-                    },
-                    message_len: bytes.len(),
-                }
-            })
-            .collect::<Vec<_>>();
-        let mut boxed_conflicts = ffi_conflicts.into_boxed_slice();
-        let conflicts_ptr = boxed_conflicts.as_mut_ptr();
-
-        // No allocation or fallible conversion remains beyond this point.
-        // Transfer the message backing stores and then the FFI array together.
-        for message in &mut pending {
-            if let Some(bytes) = message.bytes.take() {
-                if bytes.is_empty() {
-                    drop(bytes);
-                    #[cfg(test)]
-                    test_conflict_message_dropped();
-                } else {
-                    std::mem::forget(bytes);
-                }
-            }
-        }
-        std::mem::forget(boxed_conflicts);
-
-        FFIConflictList {
-            conflicts: conflicts_ptr,
-            count,
-        }
+        crate::encoding::parse_encoding_chain(value_slice)
     }));
 
-    outcome.unwrap_or_else(|_| empty_list())
+    match outcome {
+        Ok(Ok(layers)) => {
+            write_encoding_chain_layers(result_ref, &layers);
+            ENCODING_CHAIN_VALID
+        }
+        Ok(Err(error)) => {
+            let code = encoding_chain_error_code(error);
+            result_ref.classification = code;
+            code
+        }
+        Err(_) => {
+            /* Caught panic: fail closed as malformed; no decoder starts. */
+            result_ref.classification = ENCODING_CHAIN_MALFORMED;
+            ENCODING_CHAIN_MALFORMED
+        }
+    }
 }
 
-/// Free a conflict list returned by `markdown_detect_conflicts`.
-///
-/// Releases all heap-allocated message buffers and the conflict array itself.
-/// Calling with a zeroed/empty list (`count == 0`, `conflicts == NULL`) is a
-/// safe no-op.
+fn reset_encoding_chain_result(result: &mut FFIEncodingChainResult) {
+    result.classification = ENCODING_CHAIN_VALID;
+    result.layer_count = 0;
+    result.layers = [0u8; 3];
+    result.identity_present = 0;
+}
+
+unsafe fn encoding_chain_value_slice<'a>(
+    value: *const u8,
+    value_len: usize,
+) -> Result<&'a [u8], u8> {
+    if value.is_null() {
+        if value_len != 0 {
+            return Err(ENCODING_CHAIN_INVALID_ARGS);
+        }
+        return Ok(&[]);
+    }
+    if value_len == 0 {
+        return Ok(&[]);
+    }
+    // SAFETY: The FFI caller provides a readable region of value_len bytes.
+    Ok(unsafe { std::slice::from_raw_parts(value, value_len) })
+}
+
+fn write_encoding_chain_layers(
+    result: &mut FFIEncodingChainResult,
+    layers: &[crate::encoding::Encoding],
+) {
+    let mut non_identity = 0u32;
+    for encoding in layers {
+        if *encoding == crate::encoding::Encoding::Identity {
+            result.identity_present = 1;
+        } else {
+            if non_identity < crate::encoding::MAX_DECODER_DEPTH as u32 {
+                result.layers[non_identity as usize] = encoding_to_u8(*encoding);
+            }
+            non_identity += 1;
+        }
+    }
+    // Clamp to the fixed FFI array capacity so C callers never read beyond
+    // the last element.
+    result.layer_count = non_identity.min(crate::encoding::MAX_DECODER_DEPTH as u32);
+}
+
+fn encoding_chain_error_code(error: crate::encoding::ChainParseError) -> u8 {
+    match error {
+        crate::encoding::ChainParseError::Malformed => ENCODING_CHAIN_MALFORMED,
+        crate::encoding::ChainParseError::UnknownToken => ENCODING_CHAIN_UNKNOWN_TOKEN,
+        crate::encoding::ChainParseError::DepthExceeded => ENCODING_CHAIN_DEPTH_EXCEEDED,
+    }
+}
+
+/// Map an `Encoding` variant to its FFI layer code.
+fn encoding_to_u8(enc: crate::encoding::Encoding) -> u8 {
+    match enc {
+        crate::encoding::Encoding::Gzip => 0,
+        crate::encoding::Encoding::Deflate => 1,
+        crate::encoding::Encoding::Br => 2,
+        crate::encoding::Encoding::Identity => 3,
+    }
+}
+
+/// Zero-initialize an `FFIChainDecodeResult` struct.
 ///
 /// # Safety
 ///
-/// The caller must ensure that `list` points to a valid `FFIConflictList`
-/// previously returned by `markdown_detect_conflicts`, or is a zeroed struct.
-/// The list must not be used after this call.
+/// The caller must ensure that `result` points to writable storage for an
+/// `FFIChainDecodeResult`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn markdown_free_conflicts(list: *mut FFIConflictList) {
-    if list.is_null() {
+pub unsafe extern "C" fn markdown_chain_decode_result_init(result: *mut FFIChainDecodeResult) {
+    if result.is_null() {
         return;
     }
+    unsafe { ptr::write(result, std::mem::zeroed()) };
+}
 
-    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        // SAFETY: validated non-NULL above.
-        let list_ref = unsafe { &mut *list };
+/// Decode a multi-layer Content-Encoding chain in reverse application order.
+///
+/// `layers` must be a `layer_count`-element array of format codes
+/// (0=gzip, 1=deflate, 2=br) in application order as returned by
+/// [`markdown_parse_encoding_chain`]; identity tokens must already be
+/// removed. The cumulative output budget (`max_output` = configured
+/// `decompressed_size`) applies across every non-identity intermediate
+/// output; the per-layer expansion ratio (`ratio` = configured
+/// `decompression_ratio`) applies to every non-empty compressed layer.
+///
+/// An identity-only chain (`layer_count == 0`) is a successful no-op:
+/// the output is a copy of the input (decode(identity, input) == input),
+/// allocated by Rust and released with `markdown_chain_decode_free`.
+///
+/// **Empty-input contract (empty-input):** an empty wire body (`input_len == 0`)
+/// is a legal empty payload regardless of the declared chain — the call
+/// succeeds with an empty output (NULL pointer, zero length) instead of
+/// classifying the empty input as truncation. This intentionally differs
+/// from the single-format decompressors, which classify an empty compressed
+/// input as `DECOMP_CATEGORY_TRUNCATED_INPUT`; the chain decoder treats a
+/// zero-byte body as "no content" per HTTP semantics. Callers that need
+/// strict single-format truncation semantics must use the single-format
+/// entry points directly.
+///
+/// # Return Value
+///
+/// Returns the error category:
+/// - `0` on success (output is valid decoded data, free with
+///   `markdown_chain_decode_free`)
+/// - `101` = budget exceeded (`DECOMP_CATEGORY_BUDGET_EXCEEDED`)
+/// - `106` = ratio exceeded (`DECOMP_CATEGORY_RATIO_EXCEEDED`)
+/// - `102` = format error (`DECOMP_CATEGORY_FORMAT_ERROR`)
+/// - `103` = truncated input (`DECOMP_CATEGORY_TRUNCATED_INPUT`)
+/// - `104` = I/O error (`DECOMP_CATEGORY_IO_ERROR`)
+/// - `105` = invalid arguments (`DECOMP_CATEGORY_INVALID_ARGS`)
+///
+/// # Safety
+///
+/// The caller must ensure that:
+/// - `input` points to at least `input_len` readable bytes (NULL with
+///   non-zero length returns `DECOMP_CATEGORY_INVALID_ARGS`)
+/// - `layers` is NULL when `layer_count == 0`, otherwise points to at least
+///   `layer_count` readable bytes
+/// - `result` points to writable storage for an `FFIChainDecodeResult`
+///   previously initialized via `markdown_chain_decode_result_init`
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_decode_encoding_chain(
+    input: *const u8,
+    input_len: usize,
+    layers: *const u8,
+    layer_count: u32,
+    max_output: usize,
+    ratio: u64,
+    result: *mut FFIChainDecodeResult,
+) -> u32 {
+    if result.is_null() {
+        return DECOMP_CATEGORY_INVALID_ARGS;
+    }
+    // Zero-initialize the caller-provided storage before touching it (the
+    // same pattern as markdown_parse_encoding_chain and the other FFI entry
+    // points). Callers that reuse a result structure
+    // must release a previous output with markdown_chain_decode_free first.
+    unsafe { ptr::write(result, std::mem::zeroed()) };
+    let result_ref = unsafe { &mut *result };
+    reset_chain_decode_result(result_ref);
 
-        if list_ref.conflicts.is_null() || list_ref.count == 0 {
-            list_ref.conflicts = ptr::null_mut();
-            list_ref.count = 0;
-            return;
+    let input_slice = match unsafe { chain_decode_input_slice(input, input_len) } {
+        Ok(input_slice) => input_slice,
+        Err(code) => return set_chain_decode_error(result_ref, code),
+    };
+
+    if layer_count == 0 {
+        /* Identity-only chain: a successful no-op decode returns the input
+         * unchanged (decode(identity, input) == input).
+         * Clone the input into a Rust-allocated output buffer so the FFI
+         * ownership contract holds — callers release the output with
+         * markdown_chain_decode_free, so returning the input pointer itself
+         * would be double-freed.  The clone is still bounded by the
+         * decompressed-size budget: an identity-only chain must not bypass
+         * the max_output ceiling. */
+        if input_slice.len() > max_output {
+            return set_chain_decode_error(result_ref, DECOMP_CATEGORY_BUDGET_EXCEEDED);
         }
+        store_chain_decode_output(result_ref, input_slice.to_vec());
+        return 0;
+    }
+    if layers.is_null() {
+        return set_chain_decode_error(result_ref, DECOMP_CATEGORY_INVALID_ARGS);
+    }
+    if layer_count > crate::encoding::MAX_DECODER_DEPTH as u32 {
+        return set_chain_decode_error(result_ref, DECOMP_CATEGORY_INVALID_ARGS);
+    }
 
-        // Free each message buffer
-        let conflicts_slice =
-            unsafe { std::slice::from_raw_parts_mut(list_ref.conflicts, list_ref.count) };
-        for conflict in conflicts_slice.iter() {
-            if !conflict.message.is_null() && conflict.message_len > 0 {
-                // Reconstruct the Box<[u8]> from the raw parts and drop it
-                let msg_slice = unsafe {
-                    std::slice::from_raw_parts_mut(
-                        conflict.message as *mut u8,
-                        conflict.message_len,
-                    )
-                };
-                unsafe { drop(Box::from_raw(msg_slice)) };
-                #[cfg(test)]
-                test_conflict_message_dropped();
-            }
+    let layer_vec = match unsafe { decode_layer_codes(layers, layer_count) } {
+        Ok(layer_vec) => layer_vec,
+        Err(code) => return set_chain_decode_error(result_ref, code),
+    };
+
+    let limits = crate::encoding::DecodeLimits { max_output, ratio };
+
+    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        crate::encoding::decode_chain(input_slice, &layer_vec, limits)
+    }));
+
+    match outcome {
+        Ok(Ok(decoded)) => {
+            store_chain_decode_output(result_ref, decoded);
+            0
         }
+        Ok(Err(e)) => set_chain_decode_error(result_ref, chain_decode_error_code(e)),
+        Err(_) => set_chain_decode_error(result_ref, DECOMP_CATEGORY_IO_ERROR),
+    }
+}
 
-        // Free the conflicts array itself
-        let boxed = unsafe {
-            Box::from_raw(std::ptr::slice_from_raw_parts_mut(
-                list_ref.conflicts,
-                list_ref.count,
-            ))
+fn reset_chain_decode_result(result: &mut FFIChainDecodeResult) {
+    result.output = ptr::null_mut();
+    result.output_len = 0;
+    result.error_category = 0;
+}
+
+fn set_chain_decode_error(result: &mut FFIChainDecodeResult, code: u32) -> u32 {
+    result.error_category = code;
+    code
+}
+
+unsafe fn chain_decode_input_slice<'a>(
+    input: *const u8,
+    input_len: usize,
+) -> Result<&'a [u8], u32> {
+    if input.is_null() {
+        if input_len != 0 {
+            return Err(DECOMP_CATEGORY_INVALID_ARGS);
+        }
+        return Ok(&[]);
+    }
+    if input_len == 0 {
+        return Ok(&[]);
+    }
+    // SAFETY: The FFI caller provides a readable region of input_len bytes.
+    Ok(unsafe { std::slice::from_raw_parts(input, input_len) })
+}
+
+unsafe fn decode_layer_codes(
+    layers: *const u8,
+    layer_count: u32,
+) -> Result<Vec<crate::encoding::Encoding>, u32> {
+    let mut layer_vec = Vec::with_capacity(layer_count as usize);
+    for index in 0..layer_count as usize {
+        // SAFETY: The caller validated a non-NULL array with layer_count bytes.
+        let code = unsafe { *layers.add(index) };
+        let encoding = match code {
+            0 => crate::encoding::Encoding::Gzip,
+            1 => crate::encoding::Encoding::Deflate,
+            2 => crate::encoding::Encoding::Br,
+            _ => return Err(DECOMP_CATEGORY_INVALID_ARGS),
         };
-        drop(boxed);
+        layer_vec.push(encoding);
+    }
+    Ok(layer_vec)
+}
 
-        // Reset to safe state
-        list_ref.conflicts = ptr::null_mut();
-        list_ref.count = 0;
+fn store_chain_decode_output(result: &mut FFIChainDecodeResult, decoded: Vec<u8>) {
+    let mut boxed = decoded.into_boxed_slice();
+    result.output_len = boxed.len();
+    if boxed.is_empty() {
+        result.output = ptr::null_mut();
+        return;
+    }
+    let output = boxed.as_mut_ptr();
+    std::mem::forget(boxed);
+    result.output = output;
+}
+
+fn chain_decode_error_code(error: crate::encoding::ChainDecodeError) -> u32 {
+    match error {
+        crate::encoding::ChainDecodeError::BudgetExceeded => DECOMP_CATEGORY_BUDGET_EXCEEDED,
+        crate::encoding::ChainDecodeError::RatioExceeded => DECOMP_CATEGORY_RATIO_EXCEEDED,
+        crate::encoding::ChainDecodeError::FormatError(_) => DECOMP_CATEGORY_FORMAT_ERROR,
+        crate::encoding::ChainDecodeError::TruncatedInput(_) => DECOMP_CATEGORY_TRUNCATED_INPUT,
+        crate::encoding::ChainDecodeError::IoError(_) => DECOMP_CATEGORY_IO_ERROR,
+    }
+}
+
+/// Release the output buffer from a successful `markdown_decode_encoding_chain`
+/// call.
+///
+/// After calling this function, the `result` struct is reset to a safe zero
+/// state. Calling this on a result with a NULL output pointer is a no-op.
+///
+/// # Safety
+///
+/// The caller must ensure that:
+/// - `result` either is NULL or points to a valid `FFIChainDecodeResult`
+///   previously populated by `markdown_decode_encoding_chain`
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_chain_decode_free(result: *mut FFIChainDecodeResult) {
+    if result.is_null() {
+        return;
+    }
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        // SAFETY: `result` was validated as non-NULL above.
+        let result_ref = unsafe { &mut *result };
+        if !result_ref.output.is_null() && result_ref.output_len > 0 {
+            let slice =
+                unsafe { std::slice::from_raw_parts_mut(result_ref.output, result_ref.output_len) };
+            unsafe { drop(Box::from_raw(slice)) };
+        }
+        result_ref.output = ptr::null_mut();
+        result_ref.output_len = 0;
+        result_ref.error_category = 0;
     }));
 }
 
@@ -1411,6 +1581,24 @@ mod tests {
     }
 
     #[test]
+    fn abi_header_hash_matches_constant() {
+        assert_eq!(markdown_abi_header_hash(), MARKDOWN_HEADER_HASH);
+    }
+
+    #[test]
+    fn abi_symbol_set_hash_matches_constant() {
+        assert_eq!(markdown_abi_symbol_set_hash(), MARKDOWN_SYMBOL_SET_HASH);
+    }
+
+    #[test]
+    fn abi_layout_fingerprint_matches_constant() {
+        assert_eq!(
+            markdown_abi_layout_fingerprint(),
+            MARKDOWN_LAYOUT_FINGERPRINT
+        );
+    }
+
+    #[test]
     fn options_init_sets_defaults() {
         let mut opts: MarkdownOptions = unsafe { std::mem::zeroed() };
         unsafe { markdown_options_init(&mut opts) };
@@ -1430,8 +1618,6 @@ mod tests {
         assert!(opts.prune_protection_selectors.is_null());
         assert_eq!(opts.prune_protection_selector_len, 0);
         assert_eq!(opts.memory_budget, 0);
-        assert_eq!(opts.llm_provider, 0);
-        assert_eq!(opts.chars_per_token_fixed, 0);
         assert_eq!(opts.parse_timeout_ms, 0);
         assert_eq!(opts.parser_memory_budget, 0);
 
@@ -1551,10 +1737,14 @@ mod tests {
             trusted: ptr::null(),
             forwarded: ptr::null(),
             forwarded_len: 0,
+            x_forwarded_for: ptr::null(),
+            x_forwarded_for_len: 0,
             x_forwarded_proto: ptr::null(),
             x_forwarded_proto_len: 0,
             x_forwarded_host: ptr::null(),
             x_forwarded_host_len: 0,
+            x_forwarded_port: ptr::null(),
+            x_forwarded_port_len: 0,
             host: ptr::null(),
             host_len: 0,
             is_unix_socket: 0,
@@ -1578,6 +1768,70 @@ mod tests {
         assert_eq!(decision.base_url_len, 0);
         assert_eq!(decision.reason, BaseUrlReason::FallbackToDefault.as_u8());
         assert_eq!(decision.source, BaseUrlSource::Default.as_u8());
+    }
+
+    #[test]
+    fn decide_base_url_invalid_utf8_aux_fields_are_absent() {
+        // Auxiliary forwarded fields (x_forwarded_*, host) tolerate invalid
+        // UTF-8 by treating the malformed value as absent; the decision must
+        // still complete (fail-soft).
+        let mut buf = [0u8; 64];
+        let mut decision = empty_decision();
+        let invalid: &[u8] = &[0xff, 0xfe, 0x80];
+        let mut input = empty_base_url_input();
+        input.x_forwarded_for = invalid.as_ptr();
+        input.x_forwarded_for_len = invalid.len();
+        input.x_forwarded_proto = invalid.as_ptr();
+        input.x_forwarded_proto_len = invalid.len();
+        input.x_forwarded_host = invalid.as_ptr();
+        input.x_forwarded_host_len = invalid.len();
+        input.x_forwarded_port = invalid.as_ptr();
+        input.x_forwarded_port_len = invalid.len();
+        input.host = invalid.as_ptr();
+        input.host_len = invalid.len();
+
+        let rc =
+            unsafe { markdown_decide_base_url(&input, buf.as_mut_ptr(), buf.len(), &mut decision) };
+        assert_eq!(rc, DECIDE_BASE_URL_OK);
+        // Fail-soft: the decision completes with the safe default instead of
+        // aborting, and no auxiliary header value leaked into the URL.
+        use crate::forwarded::{BaseUrlReason, BaseUrlSource};
+        assert_eq!(decision.reason, BaseUrlReason::FallbackToDefault.as_u8());
+        assert_eq!(decision.source, BaseUrlSource::Default.as_u8());
+    }
+
+    #[test]
+    fn decide_base_url_invalid_utf8_forwarded_is_fail_closed() {
+        // The `forwarded` field carries the trusted-proxy precedence
+        // contract: malformed UTF-8 there must abort the decision.
+        let mut buf = [0u8; 64];
+        let mut decision = empty_decision();
+        let invalid: &[u8] = &[0xff, 0xfe, 0x80];
+        let mut input = empty_base_url_input();
+        input.forwarded = invalid.as_ptr();
+        input.forwarded_len = invalid.len();
+
+        let rc =
+            unsafe { markdown_decide_base_url(&input, buf.as_mut_ptr(), buf.len(), &mut decision) };
+        assert_eq!(rc, DECIDE_BASE_URL_INVALID);
+        assert_safe_base_url_default(&decision);
+    }
+
+    #[test]
+    fn decide_base_url_invalid_utf8_direct_scheme_is_fail_closed() {
+        // direct_scheme is part of the trusted-proxy contract and must stay
+        // fail-closed on malformed UTF-8.
+        let mut buf = [0u8; 64];
+        let mut decision = empty_decision();
+        let invalid: &[u8] = &[0xff, 0xfe, 0x80];
+        let mut input = empty_base_url_input();
+        input.direct_scheme = invalid.as_ptr();
+        input.direct_scheme_len = invalid.len();
+
+        let rc =
+            unsafe { markdown_decide_base_url(&input, buf.as_mut_ptr(), buf.len(), &mut decision) };
+        assert_eq!(rc, DECIDE_BASE_URL_INVALID);
+        assert_safe_base_url_default(&decision);
     }
 
     #[test]
@@ -1633,23 +1887,45 @@ mod tests {
     }
 
     #[test]
+    fn decide_base_url_invalid_utf8_optional_field_fails_closed() {
+        let invalid_forwarded = [0xff];
+        let mut input = empty_base_url_input();
+        input.forwarded = invalid_forwarded.as_ptr();
+        input.forwarded_len = invalid_forwarded.len();
+
+        let mut buf = [0u8; 64];
+        let mut decision = empty_decision();
+        let rc =
+            unsafe { markdown_decide_base_url(&input, buf.as_mut_ptr(), buf.len(), &mut decision) };
+
+        assert_eq!(rc, DECIDE_BASE_URL_INVALID);
+        assert_safe_base_url_default(&decision);
+    }
+
+    #[test]
     fn decide_base_url_trusted_uses_forwarded() {
         let handle = markdown_trusted_proxies_new();
         assert_eq!(push_cidr(handle, "10.0.0.0/8"), TRUSTED_PROXIES_PUSH_OK);
 
         let src = b"10.1.2.3";
+        let xff = b"203.0.113.9";
         let xfh = b"api.example.com";
         let xfp = b"https";
+        let xfport = b"443";
         let host = b"origin.example.com";
         let mut input = empty_base_url_input();
         input.source_ip = src.as_ptr();
         input.source_ip_len = src.len();
         input.trusted = handle;
         input.trusted_configured = 1;
+        input.x_forwarded_for = xff.as_ptr();
+        input.x_forwarded_for_len = xff.len();
         input.x_forwarded_host = xfh.as_ptr();
         input.x_forwarded_host_len = xfh.len();
         input.x_forwarded_proto = xfp.as_ptr();
         input.x_forwarded_proto_len = xfp.len();
+        input.x_forwarded_port = xfport.as_ptr();
+        input.x_forwarded_port_len = xfport.len();
         input.host = host.as_ptr();
         input.host_len = host.len();
 
@@ -1659,11 +1935,47 @@ mod tests {
             unsafe { markdown_decide_base_url(&input, buf.as_mut_ptr(), buf.len(), &mut decision) };
         assert_eq!(rc, DECIDE_BASE_URL_OK);
         let url = std::str::from_utf8(&buf[..decision.base_url_len]).unwrap();
-        assert_eq!(url, "https://api.example.com");
+        assert_eq!(url, "https://api.example.com:443");
         // BaseUrlReason::ForwardedHeaderTrusted == 0
         assert_eq!(decision.reason, 0);
         // BaseUrlSource::XForwarded == 1
         assert_eq!(decision.source, 1);
+
+        unsafe { markdown_trusted_proxies_free(handle) };
+    }
+
+    #[test]
+    fn decide_base_url_empty_forwarded_blocks_xff_fallback() {
+        use crate::forwarded::{BaseUrlReason, BaseUrlSource};
+
+        let handle = markdown_trusted_proxies_new();
+        assert_eq!(push_cidr(handle, "10.0.0.0/8"), TRUSTED_PROXIES_PUSH_OK);
+
+        let src = b"10.1.2.3";
+        let empty_forwarded = b"";
+        let xff = b"203.0.113.9";
+        let host = b"origin.example.com";
+        let mut input = empty_base_url_input();
+        input.source_ip = src.as_ptr();
+        input.source_ip_len = src.len();
+        input.trusted = handle;
+        input.trusted_configured = 1;
+        input.forwarded = empty_forwarded.as_ptr();
+        input.forwarded_len = empty_forwarded.len();
+        input.x_forwarded_for = xff.as_ptr();
+        input.x_forwarded_for_len = xff.len();
+        input.host = host.as_ptr();
+        input.host_len = host.len();
+
+        let mut buf = [0u8; 128];
+        let mut decision = empty_decision();
+        let rc =
+            unsafe { markdown_decide_base_url(&input, buf.as_mut_ptr(), buf.len(), &mut decision) };
+        assert_eq!(rc, DECIDE_BASE_URL_OK);
+        let url = std::str::from_utf8(&buf[..decision.base_url_len]).unwrap();
+        assert_eq!(url, "http://origin.example.com");
+        assert_eq!(decision.reason, BaseUrlReason::ForwardedMalformed.as_u8());
+        assert_eq!(decision.source, BaseUrlSource::Host.as_u8());
 
         unsafe { markdown_trusted_proxies_free(handle) };
     }
@@ -1730,44 +2042,6 @@ mod tests {
     }
 
     #[test]
-    fn detect_conflicts_panic_releases_pending_messages() {
-        let explicit = FFIExplicitConfig {
-            accept: FFI_CONFIG_NOT_SET_U8,
-            cache_validation: 2,
-            streaming: 0,
-            limits_memory_bytes: FFI_CONFIG_NOT_SET_U64,
-            limits_timeout_ms: FFI_CONFIG_NOT_SET_U64,
-            limits_streaming_buffer_bytes: FFI_CONFIG_NOT_SET_U64,
-            limits_max_inflight: FFI_CONFIG_NOT_SET_U32,
-            error_policy: FFI_CONFIG_NOT_SET_U8,
-            diagnostics: FFI_CONFIG_NOT_SET_U8,
-        };
-        let effective = FFIEffectiveConfig {
-            accept: 0,
-            cache_validation: 2,
-            streaming: 0,
-            limits_memory_bytes: 0,
-            limits_timeout_ms: 0,
-            limits_streaming_buffer_bytes: 0,
-            limits_max_inflight: 0,
-            error_policy: 0,
-            diagnostics: 0,
-        };
-
-        assert_eq!(test_conflict_messages_live(), 0);
-        set_test_panic(Some("detect_conflicts_after_message"));
-        let list = unsafe { markdown_detect_conflicts(3, &explicit, &effective) };
-
-        assert!(list.conflicts.is_null());
-        assert_eq!(list.count, 0);
-        assert_eq!(
-            test_conflict_messages_live(),
-            0,
-            "message ownership must remain guarded until the full list is ready"
-        );
-    }
-
-    #[test]
     fn decompress_bounded_gzip_success() {
         use flate2::Compression;
         use flate2::write::GzEncoder;
@@ -1785,6 +2059,7 @@ mod tests {
                 compressed.len(),
                 0, // gzip
                 1024,
+                0, // ratio disabled
                 &mut result,
             )
         };
@@ -1821,7 +2096,14 @@ mod tests {
 
         let mut result: FFIDecompResult = unsafe { std::mem::zeroed() };
         let rc = unsafe {
-            markdown_decompress_bounded(compressed.as_ptr(), compressed.len(), 0, 1024, &mut result)
+            markdown_decompress_bounded(
+                compressed.as_ptr(),
+                compressed.len(),
+                0,
+                1024,
+                0,
+                &mut result,
+            )
         };
 
         assert_eq!(rc, 0, "Expected success (0), got {rc}");
@@ -1856,6 +2138,7 @@ mod tests {
                 compressed.len(),
                 0, // gzip
                 1024,
+                0, // ratio disabled
                 &mut result,
             )
         };
@@ -1879,7 +2162,7 @@ mod tests {
         use flate2::write::GzEncoder;
         use std::io::Write;
 
-        let original = vec![b'X'; 10_000];
+        let original = vec![88u8; 10_000]; /* 'X' byte value */
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(&original).unwrap();
         let compressed = encoder.finish().unwrap();
@@ -1891,6 +2174,7 @@ mod tests {
                 compressed.len(),
                 0,   // gzip
                 100, // budget too small
+                0,   // ratio disabled
                 &mut result,
             )
         };
@@ -1898,6 +2182,87 @@ mod tests {
         assert_eq!(result.error_category, 101);
         assert!(result.output.is_null());
         assert_eq!(result.output_len, 0);
+    }
+
+    #[test]
+    fn chain_decode_identity_only_returns_input_copy() {
+        /* decode(identity, input) == input at the FFI
+         * boundary.  layer_count == 0 must clone the input into the output
+         * buffer (released via markdown_chain_decode_free). */
+        let input = b"abc";
+        let mut result: FFIChainDecodeResult = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            markdown_decode_encoding_chain(
+                input.as_ptr(),
+                input.len(),
+                std::ptr::null(), // layers: NULL when layer_count == 0
+                0,
+                1024, // max_output
+                10,   // ratio
+                &mut result,
+            )
+        };
+        assert_eq!(rc, 0, "Expected success (0), got {rc}");
+        assert_eq!(result.error_category, 0);
+        assert_eq!(result.output_len, input.len());
+        assert!(!result.output.is_null());
+        let output = unsafe { std::slice::from_raw_parts(result.output, result.output_len) };
+        assert_eq!(output, input);
+
+        unsafe { markdown_chain_decode_free(&mut result) };
+        assert!(result.output.is_null());
+        assert_eq!(result.output_len, 0);
+    }
+
+    #[test]
+    fn chain_decode_identity_only_empty_input() {
+        /* Empty identity-only input: successful no-op with an empty output
+         * (NULL pointer, zero length — the FFI empty-buffer convention). */
+        let mut result: FFIChainDecodeResult = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            markdown_decode_encoding_chain(
+                std::ptr::null(),
+                0,
+                std::ptr::null(),
+                0,
+                1024,
+                10,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, 0, "Expected success (0), got {rc}");
+        assert_eq!(result.error_category, 0);
+        assert!(result.output.is_null());
+        assert_eq!(result.output_len, 0);
+    }
+
+    #[test]
+    fn chain_decode_does_not_read_uninitialized_result() {
+        /* The entry point zero-initializes the
+         * result storage before touching it, so a caller that fails to
+         * initialize the result cannot trigger a free of garbage pointers
+         * (the previous free_buffer-on-possibly-uninitialized-fields
+         * pattern). */
+        let input = b"payload";
+        let mut result: std::mem::MaybeUninit<FFIChainDecodeResult> =
+            std::mem::MaybeUninit::uninit();
+        let rc = unsafe {
+            markdown_decode_encoding_chain(
+                input.as_ptr(),
+                input.len(),
+                std::ptr::null(),
+                0,
+                1024,
+                10,
+                result.as_mut_ptr(),
+            )
+        };
+        assert_eq!(rc, 0, "Expected success (0), got {rc}");
+        let mut result = unsafe { result.assume_init() };
+        assert_eq!(result.output_len, input.len());
+        let output = unsafe { std::slice::from_raw_parts(result.output, result.output_len) };
+        assert_eq!(output, input);
+        unsafe { markdown_chain_decode_free(&mut result) };
     }
 
     #[test]
@@ -1910,6 +2275,7 @@ mod tests {
                 data.len(),
                 99, // invalid format
                 1024,
+                0, // ratio disabled
                 &mut result,
             )
         };
@@ -1924,7 +2290,7 @@ mod tests {
     fn decompress_bounded_null_result_returns_invalid_args() {
         let data = b"some data";
         let rc = unsafe {
-            markdown_decompress_bounded(data.as_ptr(), data.len(), 0, 1024, std::ptr::null_mut())
+            markdown_decompress_bounded(data.as_ptr(), data.len(), 0, 1024, 0, std::ptr::null_mut())
         };
         assert_eq!(rc, 105);
     }
@@ -1932,7 +2298,8 @@ mod tests {
     #[test]
     fn decompress_bounded_empty_input_returns_truncated() {
         let mut result: FFIDecompResult = unsafe { std::mem::zeroed() };
-        let rc = unsafe { markdown_decompress_bounded(std::ptr::null(), 0, 0, 1024, &mut result) };
+        let rc =
+            unsafe { markdown_decompress_bounded(std::ptr::null(), 0, 0, 1024, 0, &mut result) };
         assert_eq!(
             rc, 103,
             "Expected truncated_input (103) for empty input, got {rc}"
@@ -1943,7 +2310,8 @@ mod tests {
     #[test]
     fn decompress_bounded_null_with_nonzero_len_returns_invalid_args() {
         let mut result: FFIDecompResult = unsafe { std::mem::zeroed() };
-        let rc = unsafe { markdown_decompress_bounded(std::ptr::null(), 10, 0, 1024, &mut result) };
+        let rc =
+            unsafe { markdown_decompress_bounded(std::ptr::null(), 10, 0, 1024, 0, &mut result) };
         assert_eq!(
             rc, 105,
             "Expected invalid_args (105) for NULL input with non-zero length, got {rc}"
@@ -2190,5 +2558,273 @@ mod tests {
         assert_eq!(out.outcome, 0); /* not_modified */
         assert_eq!(out.reason, 2); /* conditional_ims_evaluated */
         assert_eq!(out.evaluated_header, 2); /* if_modified_since */
+    }
+
+    #[test]
+    fn parse_encoding_chain_valid_chain() {
+        let value = b"gzip, deflate, BR";
+        let mut result: FFIEncodingChainResult = unsafe { std::mem::zeroed() };
+        let classification =
+            unsafe { markdown_parse_encoding_chain(value.as_ptr(), value.len(), &mut result) };
+        assert_eq!(classification, ENCODING_CHAIN_VALID);
+        assert_eq!(result.classification, ENCODING_CHAIN_VALID);
+        assert_eq!(result.layer_count, 3);
+        assert_eq!(result.layers, [0, 1, 2]); /* gzip, deflate, br */
+        assert_eq!(result.identity_present, 0);
+    }
+
+    #[test]
+    fn parse_encoding_chain_identity_removed() {
+        let value = b"identity, gzip, identity";
+        let mut result: FFIEncodingChainResult = unsafe { std::mem::zeroed() };
+        let classification =
+            unsafe { markdown_parse_encoding_chain(value.as_ptr(), value.len(), &mut result) };
+        assert_eq!(classification, ENCODING_CHAIN_VALID);
+        assert_eq!(result.layer_count, 1);
+        assert_eq!(result.layers, [0, 0, 0]);
+        assert_eq!(result.identity_present, 1);
+    }
+
+    #[test]
+    fn parse_encoding_chain_identity_only() {
+        let value = b"identity";
+        let mut result: FFIEncodingChainResult = unsafe { std::mem::zeroed() };
+        let classification =
+            unsafe { markdown_parse_encoding_chain(value.as_ptr(), value.len(), &mut result) };
+        assert_eq!(classification, ENCODING_CHAIN_VALID);
+        assert_eq!(result.layer_count, 0);
+        assert_eq!(result.identity_present, 1);
+    }
+
+    #[test]
+    fn parse_encoding_chain_malformed() {
+        let mut overlong = b"g".repeat(129);
+        overlong.push(112); /* 'p' — no byte-char literal: lizard parser */
+        let cases: Vec<&[u8]> = vec![
+            b",gzip".as_slice(),
+            b"gzip,".as_slice(),
+            b"gzip,,deflate".as_slice(),
+            b"\"gzip\"".as_slice(),
+            b"gzip;q=1".as_slice(),
+            b"gzip\n".as_slice(),
+            overlong.as_slice(),
+        ];
+        for value in cases {
+            let mut result: FFIEncodingChainResult = unsafe { std::mem::zeroed() };
+            let classification =
+                unsafe { markdown_parse_encoding_chain(value.as_ptr(), value.len(), &mut result) };
+            assert_eq!(
+                classification,
+                ENCODING_CHAIN_MALFORMED,
+                "value {:?} must be malformed",
+                String::from_utf8_lossy(value)
+            );
+            assert_eq!(result.layer_count, 0);
+        }
+    }
+
+    #[test]
+    fn parse_encoding_chain_unknown_token() {
+        let value = b"gzip, zstd";
+        let mut result: FFIEncodingChainResult = unsafe { std::mem::zeroed() };
+        let classification =
+            unsafe { markdown_parse_encoding_chain(value.as_ptr(), value.len(), &mut result) };
+        assert_eq!(classification, ENCODING_CHAIN_UNKNOWN_TOKEN);
+    }
+
+    #[test]
+    fn parse_encoding_chain_depth_exceeded() {
+        let value = b"gzip, deflate, br, gzip";
+        let mut result: FFIEncodingChainResult = unsafe { std::mem::zeroed() };
+        let classification =
+            unsafe { markdown_parse_encoding_chain(value.as_ptr(), value.len(), &mut result) };
+        assert_eq!(classification, ENCODING_CHAIN_DEPTH_EXCEEDED);
+    }
+
+    #[test]
+    fn parse_encoding_chain_null_inputs() {
+        let mut result: FFIEncodingChainResult = unsafe { std::mem::zeroed() };
+        let classification = unsafe { markdown_parse_encoding_chain(ptr::null(), 5, &mut result) };
+        assert_eq!(classification, ENCODING_CHAIN_INVALID_ARGS);
+        assert_eq!(result.classification, ENCODING_CHAIN_INVALID_ARGS);
+        /* NULL with zero length represents a present empty field here. */
+        let classification = unsafe { markdown_parse_encoding_chain(ptr::null(), 0, &mut result) };
+        assert_eq!(classification, ENCODING_CHAIN_MALFORMED);
+        assert_eq!(result.classification, ENCODING_CHAIN_MALFORMED);
+    }
+
+    #[test]
+    fn parse_encoding_chain_null_result_is_invalid_args() {
+        let value = b"gzip";
+        let classification =
+            unsafe { markdown_parse_encoding_chain(value.as_ptr(), value.len(), ptr::null_mut()) };
+        assert_eq!(classification, ENCODING_CHAIN_INVALID_ARGS);
+    }
+
+    fn gzip_bytes(data: &[u8]) -> Vec<u8> {
+        use flate2::Compression;
+        use flate2::write::GzEncoder;
+        use std::io::Write;
+
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(data).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    fn deflate_bytes(data: &[u8]) -> Vec<u8> {
+        use flate2::Compression;
+        use flate2::write::ZlibEncoder;
+        use std::io::Write;
+
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(data).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    #[test]
+    fn decode_encoding_chain_two_layers() {
+        let original = b"<html><body>FFI chain decode</body></html>";
+        /* Application order [gzip, deflate]: wire = deflate(gzip(content)). */
+        let inner = gzip_bytes(original);
+        let wire = deflate_bytes(&inner);
+        let layers = [0u8, 1u8]; /* gzip, deflate */
+        let mut result: FFIChainDecodeResult = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            markdown_decode_encoding_chain(
+                wire.as_ptr(),
+                wire.len(),
+                layers.as_ptr(),
+                2,
+                10 * 1024 * 1024,
+                100,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, 0, "Expected success (0), got {rc}");
+        assert_eq!(result.error_category, 0);
+        assert_eq!(result.output_len, original.len());
+        let output = unsafe { std::slice::from_raw_parts(result.output, result.output_len) };
+        assert_eq!(output, original);
+        unsafe { markdown_chain_decode_free(&mut result) };
+        assert!(result.output.is_null());
+    }
+
+    #[test]
+    fn decode_encoding_chain_budget_exceeded() {
+        let original = vec![88u8; 200_000]; /* 'X' — no byte-char literal */
+        let inner = gzip_bytes(&original);
+        let wire = deflate_bytes(&inner);
+        let layers = [0u8, 1u8];
+        let mut result: FFIChainDecodeResult = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            markdown_decode_encoding_chain(
+                wire.as_ptr(),
+                wire.len(),
+                layers.as_ptr(),
+                2,
+                100_000,
+                10_000,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, 101); /* DECOMP_CATEGORY_BUDGET_EXCEEDED */
+        assert_eq!(result.error_category, 101);
+        assert!(result.output.is_null());
+        assert_eq!(result.output_len, 0);
+    }
+
+    #[test]
+    fn decode_encoding_chain_ratio_exceeded() {
+        let original = vec![0u8; 1_000_000];
+        let wire = gzip_bytes(&original);
+        let layers = [0u8];
+        let mut result: FFIChainDecodeResult = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            markdown_decode_encoding_chain(
+                wire.as_ptr(),
+                wire.len(),
+                layers.as_ptr(),
+                1,
+                10 * 1024 * 1024,
+                10,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, 106); /* DECOMP_CATEGORY_RATIO_EXCEEDED */
+        assert_eq!(result.error_category, 106);
+    }
+
+    #[test]
+    fn decode_encoding_chain_zero_layers_is_empty() {
+        let mut result: FFIChainDecodeResult = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            markdown_decode_encoding_chain(ptr::null(), 0, ptr::null(), 0, 1024, 100, &mut result)
+        };
+        assert_eq!(rc, 0);
+        assert!(result.output.is_null());
+        assert_eq!(result.output_len, 0);
+    }
+
+    #[test]
+    fn decode_encoding_chain_zero_layers_still_validates_input_pointer() {
+        let mut result: FFIChainDecodeResult = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            markdown_decode_encoding_chain(ptr::null(), 1, ptr::null(), 0, 1024, 100, &mut result)
+        };
+        assert_eq!(rc, DECOMP_CATEGORY_INVALID_ARGS);
+        assert_eq!(result.error_category, DECOMP_CATEGORY_INVALID_ARGS);
+    }
+
+    #[test]
+    fn decode_encoding_chain_invalid_args() {
+        let layers = [0u8];
+        let mut result: FFIChainDecodeResult = unsafe { std::mem::zeroed() };
+        /* NULL layers with non-zero count. */
+        let rc = unsafe {
+            markdown_decode_encoding_chain(ptr::null(), 0, ptr::null(), 1, 1024, 100, &mut result)
+        };
+        assert_eq!(rc, 105); /* DECOMP_CATEGORY_INVALID_ARGS */
+        /* Unknown layer code. */
+        let bad = [9u8];
+        let rc = unsafe {
+            markdown_decode_encoding_chain(ptr::null(), 0, bad.as_ptr(), 1, 1024, 100, &mut result)
+        };
+        assert_eq!(rc, 105);
+        /* Depth overflow. */
+        let four = [0u8, 0, 0, 0];
+        let rc = unsafe {
+            markdown_decode_encoding_chain(ptr::null(), 0, four.as_ptr(), 4, 1024, 100, &mut result)
+        };
+        assert_eq!(rc, 105);
+        /* NULL result pointer. */
+        let rc = unsafe {
+            markdown_decode_encoding_chain(
+                ptr::null(),
+                0,
+                layers.as_ptr(),
+                1,
+                1024,
+                100,
+                ptr::null_mut(),
+            )
+        };
+        assert_eq!(rc, 105);
+    }
+
+    #[test]
+    fn chain_decode_result_init_zeroes() {
+        let mut result: FFIChainDecodeResult = unsafe { std::mem::zeroed() };
+        result.output = ptr::null_mut();
+        result.output_len = 7;
+        result.error_category = 99;
+        unsafe { markdown_chain_decode_result_init(&mut result) };
+        assert!(result.output.is_null());
+        assert_eq!(result.output_len, 0);
+        assert_eq!(result.error_category, 0);
+    }
+
+    #[test]
+    fn chain_decode_free_null_safe() {
+        unsafe { markdown_chain_decode_free(ptr::null_mut()) };
     }
 }

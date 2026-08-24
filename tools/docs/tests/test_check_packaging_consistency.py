@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from check_packaging_consistency import (
     ARTIFACT_RE,
     ARTIFACT_TEMPLATE_RE,
+    _target_arch,
     _extract_curl_hosts,
     _extract_curl_paths,
     _extract_nginx_code_blocks,
@@ -25,6 +26,21 @@ from check_packaging_consistency import (
     _extract_verification_curls,
     _parse_matrix_table,
 )
+
+
+@pytest.mark.parametrize(
+    ("target", "expected"),
+    [
+        ("x86_64-unknown-linux-gnu", "x86_64"),
+        ("aarch64-unknown-linux-musl", "aarch64"),
+        ("amd64", "x86_64"),
+        ("arm64", "aarch64"),
+        ("any", "any"),
+    ],
+)
+def test_target_arch_normalizes_rust_triples(target, expected):
+    """Compatibility rows must compare architecture, not the full target triple."""
+    assert _target_arch(target) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +109,7 @@ class TestExtractVerificationCurls:
 
     def test_ignores_download_curl(self):
         """Verify curl commands piping to shell (download scripts) are ignored."""
-        text = "curl -sSL https://raw.githubusercontent.com/.../install.sh | sudo bash\n"
+        text = "curl -fsSLo installer.sh https://github.com/.../releases/download/v0.9.2/nginx-markdown-for-agents-installer-v0.9.2.sh\n"
         assert _extract_verification_curls(text) == []
 
     def test_ignores_metrics_curl(self):

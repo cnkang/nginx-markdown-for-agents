@@ -14,7 +14,6 @@ packaging/
 │       ├── postinstall.sh     #   Runs after package installation
 │       └── preremove.sh       #   Runs before package removal
 ├── scripts/
-│   ├── build-deb.sh           # DEB build helper
 │   ├── generate-checksums.sh  # SHA256SUMS generation
 │   ├── gpg-sign-checksums.sh  # GPG detached signature for SHA256SUMS
 │   ├── smoke-test-basic.sh    # Basic installation + module load test
@@ -35,7 +34,7 @@ The configuration uses template variables injected by the CI matrix:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `PKG_VERSION` | Project version (from tag or workflow input) | `0.9.1` |
+| `PKG_VERSION` | Project version (from tag or workflow input) | `0.9.2` |
 | `NGINX_VERSION` | Target NGINX version from build matrix | `1.26.3` |
 | `NFPM_ARCH` | Target architecture | `amd64`, `arm64` |
 
@@ -43,7 +42,7 @@ The configuration uses template variables injected by the CI matrix:
 
 ```bash
 # Set required environment variables
-export PKG_VERSION="0.9.1"
+export PKG_VERSION="0.9.2"
 export NGINX_VERSION="1.26.3"
 export NFPM_ARCH="amd64"
 
@@ -56,10 +55,10 @@ nfpm package --packager rpm --target "dist/nginx-module-markdown-for-agents-${PK
 
 ### Extending the Configuration
 
-The nFPM config consumes the installation layout from 0.7.0 release package naming and layout. To add new
+The nFPM config consumes the installation layout from the current release line package naming and layout. To add new
 files to the package, append entries to the `contents` list in `nfpm.yaml`.
-No structural changes are needed when the build matrix is extended — the
-environment variables handle parameterization.
+Extending the build matrix requires no structural changes. The environment
+variables handle parameterization.
 
 ## Smoke Test Scripts
 
@@ -72,8 +71,8 @@ Validates that a package installs correctly and the module loads in NGINX.
 packaging/scripts/smoke-test-basic.sh PACKAGE_FILE NGINX_VERSION
 
 # Examples
-packaging/scripts/smoke-test-basic.sh dist/nginx-module-markdown-for-agents_0.8.3_nginx-1.26.3_amd64.deb 1.26.3
-packaging/scripts/smoke-test-basic.sh dist/nginx-module-markdown-for-agents-0.8.3-nginx1.26.3-1.x86_64.rpm 1.26.3
+packaging/scripts/smoke-test-basic.sh dist/nginx-module-markdown-for-agents_0.9.2_nginx-1.26.3_amd64.deb 1.26.3
+packaging/scripts/smoke-test-basic.sh dist/nginx-module-markdown-for-agents-0.9.2-nginx1.26.3-1.x86_64.rpm 1.26.3
 ```
 
 The script:
@@ -109,7 +108,7 @@ Outputs (to stderr):
 
 ## Integrity Verification
 
-Release artifacts include a `SHA256SUMS` file and (when GPG signing is enabled)
+Release artifacts include a `SHA256SUMS` file and (when you enable GPG signing)
 a `SHA256SUMS.asc` detached signature.
 
 ### Verifying Checksums
@@ -124,7 +123,7 @@ Every line should report `OK`. Any mismatch indicates a corrupted or tampered fi
 
 ### Verifying GPG Signature
 
-When GPG signing is enabled, verify the signature on `SHA256SUMS`:
+When you enable GPG signing, verify the signature on `SHA256SUMS`:
 
 ```bash
 # Import the project's public signing key (one-time)
@@ -135,16 +134,18 @@ gpg --verify SHA256SUMS.asc SHA256SUMS
 ```
 
 Expected output includes `Good signature from ...` and the key fingerprint.
-
-**Public key fingerprint:**
-
-```
-[FINGERPRINT TO BE ADDED WHEN GPG SIGNING IS ENABLED]
-```
-
-The signing key will be published to the project's GitHub Releases page and
-the repository wiki once GPG signing is activated. Until then, only SHA256SUMS
-checksum verification is available.
+Compare the fingerprint with the value published through an **independently
+authenticated trusted channel** (for example the project's release
+announcement or key-management documentation), not only with the value
+printed in this repository — a repository value alone does not establish
+identity. The signing subkey fingerprint is
+`15C792438EAA762B421E60D21E8D41E7D19A8A75` (primary key
+`7A3743687FEEE0313128355038724643EA12C02A`). Confirm it with
+`gpg --show-keys nginx-markdown-for-agents-release.asc` before trusting the
+signature. `SHA256SUMS` detects accidental corruption during transfer and
+storage, but it is not a tamper-proof security boundary by itself — a
+malicious actor who can replace packages can also replace the checksums file.
+Always verify the release signature and confirm the fingerprint first.
 
 ### Generating Checksums (CI / Maintainers)
 
@@ -161,13 +162,13 @@ packaging/scripts/gpg-sign-checksums.sh -f dist/SHA256SUMS
 ### Adding a New NGINX Version
 
 1. Edit `packaging/matrix.yaml` — append the version to `nginx_versions`
-2. No workflow or nFPM config changes needed; the matrix drives everything
+2. No workflow or nFPM config changes needed. The matrix drives everything
 
 ### Adding a New Platform
 
 1. Add an entry under `smoke_test_containers` in `matrix.yaml`
 2. Update the workflow matrix include/exclude rules if the new platform
-   requires special handling (e.g., different repo URL)
+   requires special handling (for example, a different repo URL)
 
 ### Enabling GPG Signing
 
