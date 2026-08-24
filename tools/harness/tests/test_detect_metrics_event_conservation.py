@@ -109,5 +109,6 @@ def test_comment_blanking_preserves_newline_structure() -> None:
     assert blanked.splitlines()[0].startswith("before ")
     assert blanked.splitlines()[1].endswith(" after")
     assert blanked.splitlines()[-1] == "end"
-    assert "first" not in blanked and "second" not in blanked
+    assert "first" not in blanked
+    assert "second" not in blanked
     assert "line comment" not in blanked
