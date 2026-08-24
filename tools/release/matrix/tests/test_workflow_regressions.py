@@ -125,14 +125,25 @@ def test_non_streaming_verifier_changes_trigger_runtime_regressions() -> None:
     assert "tools/ci/verify_non_streaming_nginx_module.sh" in filters["e2e"]
 
 
-def test_release_packages_tag_gate_requires_main_ancestry() -> None:
-    """Release tags must be contained in the protected branch history."""
+def test_release_packages_tag_gate_requires_exact_approved_candidate() -> None:
+    """Release tags must match an independently approved protected candidate."""
+    workflow = _workflow_data("release-packages.yml")
     workflow_text = _workflow_text("release-packages.yml")
+    release_gate = workflow["jobs"]["release-gate"]
+    verify_step = _step_by_name(release_gate["steps"], "Verify tag SHA is main CI-approved")
 
+    assert release_gate["environment"] == "release-signing"
     assert 'compare/${TAG_SHA}...${DEFAULT_BRANCH}' in workflow_text
     assert 'branch_relation="$(gh api ' in workflow_text
     assert 'ahead|identical)' in workflow_text
-    assert '[[ "${TAG_SHA}" != "${approved_sha}" ]]' not in workflow_text
+    assert verify_step["env"]["APPROVED_CANDIDATE_SHA"] == (
+        "${{ secrets.RELEASE_APPROVED_CANDIDATE_SHA }}"
+    )
+    assert verify_step["env"]["REF_TYPE"] == "${{ github.ref_type }}"
+    assert verify_step["env"]["REF_NAME"] == "${{ github.ref_name }}"
+    assert '[[ -z "${APPROVED_CANDIDATE_SHA}"' in verify_step["run"]
+    assert '"${TAG_SHA}" != "${APPROVED_CANDIDATE_SHA}"' in verify_step["run"]
+    assert "verify_tag_candidate.py" in verify_step["run"]
 
 
 def test_release_packages_routes_matrix_values_through_step_environment() -> None:
